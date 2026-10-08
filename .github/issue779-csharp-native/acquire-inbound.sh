@@ -4,9 +4,9 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=31c9ff5c8782102e0917e0c992bbdecc35e115d0
-readonly PARENT=27747517454fdaeb11215ec72f989b4b3f309919
-readonly SOURCE_MAP=542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b
+readonly SOURCE=25e449cef5169c47177d19ca813c79acaab265a0
+readonly PARENT=079d1932211efbce2689adf107ac0cb3b3c3e372
+readonly SOURCE_MAP=14317d882d163ba07c6003a65b40a5255674b09b0ec017c5cdb033e6c91d0422
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
 output=; work=; success=0
@@ -28,10 +28,10 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 7311f2cb2ccf5c0239f601da771e29579248597d40cd55f12d79349fcf3eaa29 &&
-   ${v[fixture-sha256]} == 0ba9c549551400b0d17afad32eb50deb3a51c1a96c01549cb37a909809dabe1a &&
+[[ ${v[transport-sha256]} == 8c0397350f5fdd9f4b54ac6264683788a1ff70b8167678f3fb085b1b0be7d04a &&
+   ${v[fixture-sha256]} == 5395acc960e7e38287a54db5631b9069c00140dcc65f0ba6eeee0d9103be16a3 &&
    ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
-   ${v[source-review-sha256]} == 658e80e2ef8a8154d533129b9720cb974a5e5c379200c220960f40b726e1b409 ]] || fail frozen-input-pins
+   ${v[source-review-sha256]} == 8b28356825bd141de4cd9aaf1d11ebb566c0435540c80f9c29fa9588c22e6eaa ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -104,7 +104,7 @@ bounded /usr/bin/jq -e --arg source "$SOURCE" --arg parent "$PARENT" --arg map "
  (.linux_pipe_regression.trx_sha256|type=="string" and test("^[0-9a-f]{64}$")) and
  .linux_pipe_regression.unprivileged_library_behavior_only==true and .linux_pipe_regression.root_factory_exercised==false and
  .linux_pipe_regression.native_acceptance==false and .linux_pipe_regression.runtime_basis=="selected SDK dotnet host" and
- (.commands|length)==41 and (.commands|map(.ordinal))==[range(0;41)] and
+ (.commands|length)==43 and (.commands|map(.ordinal))==[range(0;43)] and
  all(.commands[]; .exit==0 and .failure==null and .waited==true and .group_absent==true and .timed_out==false and .forced_cleanup==false and (.logs|length)==2) and
  all(["source_before","source_after_assets","source_after_build","source_final"][];
   $r[.].head==$source and $r[.].count==2821 and $r[.].physical_sha256_modes==true and

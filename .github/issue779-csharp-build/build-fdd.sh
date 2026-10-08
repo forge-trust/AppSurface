@@ -18,14 +18,14 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
-PARENT = 'd5c8fe20dbef4903c3d438a31e2c092f8cd17eac'
-HARNESS_PARENT = '27747517454fdaeb11215ec72f989b4b3f309919'
-TREE = '86511ebe01184d4f62b9155a31ff6f256b526f33'
-CAPTURE_SHA = '0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b'
-CAPTURE_PROJECTION_SHA = '214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40'
-UBUNTU_PREREQUISITE_SHA = 'd30b00d9d56843e61260fe7b4c2cfadf26a2cad9dff64cf3ec395359bb08fde2'
-NATIVE_RUNNER_SHA = 'f2d77bc94f0bb662552d915812cbe0b980f75b57486b5a279f3ac28144f8f120'
+HEAD = '25e449cef5169c47177d19ca813c79acaab265a0'
+PARENT = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
+HARNESS_PARENT = '079d1932211efbce2689adf107ac0cb3b3c3e372'
+TREE = 'd8b6a93a440aafd638dd4023bbde8636c3d0fb6a'
+CAPTURE_SHA = '8c38614458315c44e61cca049ffcbb0423d785acd59a9f956969bb7d77eba8bc'
+CAPTURE_PROJECTION_SHA = '770bf5a9191a2308759bda9e99ac917b731fdc223043049848393a66019ca115'
+UBUNTU_PREREQUISITE_SHA = '33bdcfad759243b032222da583f085d7ab9577ea9525f362714048fdb639e7d6'
+NATIVE_RUNNER_SHA = 'a7f850fdad53a53c72ad0594e487f7a5bc1063837d84c9b29c96e13587c77511'
 SDK = '10.0.401'
 COUNT = 2821
 FILE_CAP = 256 * 1024 * 1024
@@ -646,7 +646,21 @@ def main():
     RESULT['environment_names_set'] = sorted(k for k in ENV if k in ('GIT_OPTIONAL_LOCKS', 'DOTNET_CLI_DO_NOT_USE_MSBUILD_SERVER', 'MSBUILDDISABLENODEREUSE', 'DOTNET_NOLOGO', 'DOTNET_CLI_TELEMETRY_OPTOUT'))
     PHASE = 'source'
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
-    require(run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode() == HARNESS_PARENT, 'normal-harness-child')
+    source_merge = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
+    require(re.fullmatch('[0-9a-f]{40}', source_merge) is not None, 'normal-harness-child')
+    require(run(['git', 'show', '-s', '--format=%P', source_merge], HARN).strip().decode() == HARNESS_PARENT + ' ' + HEAD, 'ordered-source-merge')
+    source_delta = {
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs': 'M',
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs': 'M',
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs': 'M',
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs': 'M',
+        'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md': 'M',
+    }
+    source_status = dict((name, status) for status, name in
+                        (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, source_merge], HARN).decode().splitlines()))
+    require(source_status == source_delta, 'exact-source-merge-delta')
+    RESULT['harness_source_merge'] = source_merge
+    RESULT['harness_source_merge_parents'] = [HARNESS_PARENT, HEAD]
     run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
     RESULT['harness_parent'] = HARNESS_PARENT
     RESULT['harness_commit'] = harness_head

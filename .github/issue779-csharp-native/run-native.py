@@ -17,20 +17,20 @@ import uuid
 
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
-SOURCE = '31c9ff5c8782102e0917e0c992bbdecc35e115d0'
-PARENT = '27747517454fdaeb11215ec72f989b4b3f309919'
-SOURCE_MAP = '542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b'
+SOURCE = '25e449cef5169c47177d19ca813c79acaab265a0'
+PARENT = '079d1932211efbce2689adf107ac0cb3b3c3e372'
+SOURCE_MAP = '14317d882d163ba07c6003a65b40a5255674b09b0ec017c5cdb033e6c91d0422'
 PINS = {
     'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
     'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': '7311f2cb2ccf5c0239f601da771e29579248597d40cd55f12d79349fcf3eaa29',
-    'checkpoint-n01-n02-v5.sh': '0ba9c549551400b0d17afad32eb50deb3a51c1a96c01549cb37a909809dabe1a',
+    'prepare-root-inputs-v2.sh': '8c0397350f5fdd9f4b54ac6264683788a1ff70b8167678f3fb085b1b0be7d04a',
+    'checkpoint-n01-n02-v5.sh': '5395acc960e7e38287a54db5631b9069c00140dcc65f0ba6eeee0d9103be16a3',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
-    'source-review.json': '658e80e2ef8a8154d533129b9720cb974a5e5c379200c220960f40b726e1b409',
-    'acquire-inbound.sh': 'f25bea60a3af16dd2d6c811585a5c2d4a6944f0c25edfa7f310c95470623db87',
+    'source-review.json': '8b28356825bd141de4cd9aaf1d11ebb566c0435540c80f9c29fa9588c22e6eaa',
+    'acquire-inbound.sh': '46d09344f8e378d653590735647858e3d4d313bd737160fd4df870a240bd4013',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -188,7 +188,7 @@ def validate_build(receipt, maps):
             and receipt['exit'] == 0 and receipt.get('failure') is None and receipt['diagnostics'] == []
             and receipt['source_commit'] == SOURCE and receipt['harness_parent'] == PARENT
             and receipt['native_execution'] is False and receipt['checkpoint_pass'] is False, 'build-terminal')
-    require(len(receipt['commands']) == 41 and [row['ordinal'] for row in receipt['commands']] == list(range(41)), 'build-commands')
+    require(len(receipt['commands']) == 43 and [row['ordinal'] for row in receipt['commands']] == list(range(43)), 'build-commands')
     pipe = receipt.get('linux_pipe_regression')
     require(type(pipe) is dict and set(pipe) == {'method', 'counters', 'trx_sha256', 'unprivileged_library_behavior_only', 'root_factory_exercised', 'native_acceptance', 'runtime_basis'}, 'pipe-regression-schema')
     require(pipe['method'] == 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'

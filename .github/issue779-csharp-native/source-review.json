@@ -97,53 +97,25 @@
     "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
     "source_ready_sha256": "471e7c08f14862314b4f0687de33ed64bd64e4c4d20430f822fee4acd01d6ea4"
   },
-  "capture_projection_sha256": "214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40",
-  "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
-  "composition_review_pending_at_preparation": true,
-  "control_first_fault_diagnostic": {
-    "actual_native_inner_server_cause": "pending diagnostic run",
-    "changed_paths": 5,
-    "compiler_diagnostics": 0,
-    "local_core_passed": 1038,
-    "local_diagnostic_class_passed": 37,
-    "native_execution": false,
-    "parent": "d5c8fe20dbef4903c3d438a31e2c092f8cd17eac",
-    "peer_review_sha256": "9a7dd277e65aba493219d05f810ad046b4e4ad0be287f006e2b65b76f0afcafe",
-    "readme_doc_only_after_validation": true,
-    "schema": "evidence-native-observation-failure-v3",
-    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
-    "source_sha256_modes": {
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs": {
-        "mode": "0644",
-        "sha256": "813e9f42b58ce4594e10f046fd3d71b6259afe47e50d11b5baf59e1de60128fc"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs": {
-        "mode": "0644",
-        "sha256": "faa4b5f9402b75eab04ad8030c4706cebfba7ce7feaf182e2d660d6ff21068ba"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": {
-        "mode": "0644",
-        "sha256": "a57e34a1c235dd8e024e267c57afb1a7d6bcacc6a54e1f49e086b07c07547335"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": {
-        "mode": "0644",
-        "sha256": "3ea280f4a77c0317c4fccc55fe0e475ee079f9259eceb874774eaeaa5349e705"
-      },
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
-        "mode": "0644",
-        "sha256": "78f0745832056780a9566d9d48ac213bd9f1b5c2256e2b3434e2c8159b1a5f46"
-      }
-    },
-    "trx_sha256": "8eab8d78f680abddcf7c5aaf31326fc89e7296f5d7e0ca7d2fceea4ef17268b3",
-    "validation_receipt_sha256": "12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11"
+  "attempt24_listener_accept_failure": {
+    "closed_phase": "Accept",
+    "diagnostic_code": "ASEVD402",
+    "facts_reported_by_main": true,
+    "n01_accepted": false,
+    "n03_negative_observed": true,
+    "native_acceptance": false,
+    "root_cause": "unmeasured",
+    "run_id": 37746326245,
+    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0"
   },
+  "capture_projection_sha256": "770bf5a9191a2308759bda9e99ac917b731fdc223043049848393a66019ca115",
+  "capture_receipt_sha256": "8c38614458315c44e61cca049ffcbb0423d785acd59a9f956969bb7d77eba8bc",
+  "composition_review_pending_at_preparation": true,
   "current_full_suite_executed": true,
   "current_publication_promotion": {
-    "native_execution": false,
-    "parent": "66a9b1d2102e63501ca42eb5f1475a008c1e51e1",
-    "reviewed_source_composition_sha256": "455ddfd333a12efb14ea4fee4872540ea5fd023292f59d993e2c35db6c29c86e",
-    "scope": "Source31c9, N03v4 and all16 requirements unchanged; this promotes reviewed source-execution gates only",
-    "status": "source preparation independently reviewed; historical binding",
+    "independent_reviews_clear": false,
+    "native_acceptance": false,
+    "status": "PENDING fresh composition review",
     "trusted_enabled": false
   },
   "historical_baseline": {
@@ -152,6 +124,49 @@
     "local_validation_receipt_sha256": "a155936c8c9eebc31892b38b5c3ccaf76e95a57f0d1af8bcd24e009353600bfd",
     "source_commit": "2993dcfaac1b9b6dfb8adf057191f837876f01fe",
     "source_review_sha256": "18a2f6f9bdb51b3ca2dc5506dd96d5ef28676bac99c9c02d1a8e061ecfa626cf",
+    "status": "HISTORICAL"
+  },
+  "historical_control_first_fault_candidate": {
+    "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
+    "record": {
+      "actual_native_inner_server_cause": "pending diagnostic run",
+      "changed_paths": 5,
+      "compiler_diagnostics": 0,
+      "local_core_passed": 1038,
+      "local_diagnostic_class_passed": 37,
+      "native_execution": false,
+      "parent": "d5c8fe20dbef4903c3d438a31e2c092f8cd17eac",
+      "peer_review_sha256": "9a7dd277e65aba493219d05f810ad046b4e4ad0be287f006e2b65b76f0afcafe",
+      "readme_doc_only_after_validation": true,
+      "schema": "evidence-native-observation-failure-v3",
+      "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+      "source_sha256_modes": {
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs": {
+          "mode": "0644",
+          "sha256": "813e9f42b58ce4594e10f046fd3d71b6259afe47e50d11b5baf59e1de60128fc"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs": {
+          "mode": "0644",
+          "sha256": "faa4b5f9402b75eab04ad8030c4706cebfba7ce7feaf182e2d660d6ff21068ba"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": {
+          "mode": "0644",
+          "sha256": "a57e34a1c235dd8e024e267c57afb1a7d6bcacc6a54e1f49e086b07c07547335"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": {
+          "mode": "0644",
+          "sha256": "3ea280f4a77c0317c4fccc55fe0e475ee079f9259eceb874774eaeaa5349e705"
+        },
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
+          "mode": "0644",
+          "sha256": "78f0745832056780a9566d9d48ac213bd9f1b5c2256e2b3434e2c8159b1a5f46"
+        }
+      },
+      "trx_sha256": "8eab8d78f680abddcf7c5aaf31326fc89e7296f5d7e0ca7d2fceea4ef17268b3",
+      "validation_receipt_sha256": "12ff97e34dc282fc1dc6b995646b37f37e81de76ab22a935fd4bda439fe17a11"
+    },
+    "source_commit": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+    "source_review_sha256": "658e80e2ef8a8154d533129b9720cb974a5e5c379200c220960f40b726e1b409",
     "status": "HISTORICAL"
   },
   "historical_optional_diff_candidate": {
@@ -250,19 +265,61 @@
     "source_review_sha256": "d5684ca322312399925d397ba5b3a94ddba47e12a060ecc35782edd488e9665b",
     "status": "HISTORICAL"
   },
+  "listener_checkpoint_diagnostic": {
+    "changed_paths": 5,
+    "command_exits": [
+      0,
+      0
+    ],
+    "compiler_diagnostics": 0,
+    "elapsed_seconds": 3.878273749985965,
+    "first_failed_compile_receipt_preserved": true,
+    "local_core_passed": 1041,
+    "local_diagnostic_class_passed": 40,
+    "native_execution": false,
+    "new_data_cases": 3,
+    "parent": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+    "peer_review_sha256": "eb2c411a73de86e8654fabc88694c3de21ce82f89e322660e200d58ec9dd6c9c",
+    "scope": "Closed listener checkpoint data only; not an actual native listener test.",
+    "source": "25e449cef5169c47177d19ca813c79acaab265a0",
+    "source_sha256_modes": {
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs": {
+        "mode": "0644",
+        "sha256": "6114c25fcb257ec61be1f28a4a8a658ea89cb59166f530c6ccba2a4a824edb5e"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs": {
+        "mode": "0644",
+        "sha256": "a74c5877ef3d59b8c7f422fd0c30365a8f13acc8e448d2c42a49701ffa685818"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs": {
+        "mode": "0644",
+        "sha256": "0f78d85973d900157ca6a056f99d42404711524f0955bfe809237ccd1f7854a2"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": {
+        "mode": "0644",
+        "sha256": "ce1b22ef6b217623c0697e9cc2ceb3f7e89bb5a9ed10eaafcb4974d4031f68b3"
+      },
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": {
+        "mode": "0644",
+        "sha256": "ad77584f2de8cb8becc6cbe25bdde142f59dce8cf00e8b9d3cb92677ba4989bc"
+      }
+    },
+    "trx_sha256": "6539b604633ca525121fb64b2894a8af7cad124b704f557e2cfb863bd1ed16ae",
+    "validation_receipt_sha256": "b4f3843ed94bc0ed52c354fd302941ff66fc12f14ae09f9aae9ef91393dfbab7"
+  },
   "n03_preparation": {
-    "current_N01_result": "attempt18 source d5c8: ServerRun/Admission/ASEVD410, cause ambiguous; current31c9 pending",
+    "current_N01_result": "Run37746326245: Accept/ASEVD402; N01 unaccepted",
     "fixed_names": [
       "_apt",
       "nobody",
       "nogroup"
     ],
-    "harness_parent_status": "normal merge7101 of historicalf582 and source31c9; new child pending",
+    "harness_parent_status": "Source-only bindings; ordered source merge required before preparation",
     "independent_reviews_clear": true,
     "native_acceptance": false,
     "proof_registry": false,
     "required_primary_gid": 65534,
-    "source_binding_status": "Intentionally rebound31c9 after reviewed diagnostic-only five-file fork",
+    "source_binding_status": "Intentional source-pin-only rebind to 25e449cef5169c47177d19ca813c79acaab265a0",
     "startup_budget_semantics": "A single captured cutoff=min(original work_end, inherited uptime+15); dynamic private startup scope caps shared left/remaining/try_bounded/bounded and all nested synchronous calls. Cleanup ignores startup scope and uses original hard_end. Work resumes only after actual owned worker exit, authenticated peer/EOF and broker continuity.",
     "startup_lower_seconds": 15,
     "uid_selection": "actual bounded root getent distinct nonzero uint32, no fixed UID",
@@ -336,7 +393,7 @@
     "status": "HISTORICAL",
     "validation_receipt_sha256": "e778a36dce64edad99de739153d24b1d10fd2023e8ecaf80223f4ebe8f65f364"
   },
-  "parent_commit": "d5c8fe20dbef4903c3d438a31e2c092f8cd17eac",
+  "parent_commit": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
   "phase_diagnostic": {
     "command_exits": [
       0,
@@ -511,13 +568,13 @@
     "validation_receipt_sha256": "406e046ab439a3dc5ac43ef7e5699ed3a977eef6f7d6a0f062543dd0b2873ae4"
   },
   "production_registry_enabled": false,
-  "projection_receipt_sha256": "60d11509e59821ad9f1759988b801d1a0b19e07a75ca607f8a4e58b2fe0dd518",
+  "projection_receipt_sha256": "b08423132219c656c3da53692190c77db629715d0baaec8b452e41b93ecaa232",
   "root_trust_issuer": false,
   "schema": "issue779-reviewed-csharp-candidate-v1",
-  "source_commit": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+  "source_commit": "25e449cef5169c47177d19ca813c79acaab265a0",
   "source_count": 2821,
-  "source_map_sha256": "542983137c1f8fb9c1a4ba68a93a722c9403788c16d3768f21d099253ad5bc4b",
-  "source_tree": "86511ebe01184d4f62b9155a31ff6f256b526f33",
+  "source_map_sha256": "14317d882d163ba07c6003a65b40a5255674b09b0ec017c5cdb033e6c91d0422",
+  "source_tree": "d8b6a93a440aafd638dd4023bbde8636c3d0fb6a",
   "startup_limit_diagnostic": {
     "additional_fixed_retention_names": [
       "logs/n02.file-limit",
