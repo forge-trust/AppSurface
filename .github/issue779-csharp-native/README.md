@@ -1,79 +1,40 @@
-## HISTORICAL common-core composition
+# Private N07 C# Linux control
 
-## HISTORICAL prior ordinary composition
+The captured AppSurface executable uses `evidence supervise` and `evidence worker`.
+The C# supervisor owns the listener, worker unit, output pumps, original deadline,
+stop and join operations. The fixture and Python scripts here only package and
+observe this explicit CI control; they issue no application admission or proof.
 
-## HISTORICAL listener-close composition (source a353)
+N07 substitutes the named output parent after genuine READY and before allocation.
+The original worker must emit its allocation failure. The original root tasks,
+processes and output pumps must settle before the private failure projection is
+retained. A signalled worker, missing fault frame, incomplete join or stale parent
+is a failed control. Quarantined accounts and artifacts remain quarantined.
 
-## HISTORICAL exit/accept composition (source77e1)
+## Inputs and ordering
 
-## HISTORICAL process-node inspection composition (source df028)
+[`capture-receipt.json`](../issue779-csharp-build/capture-receipt.json) binds the
+complete 2,836-file executable source map. [`source-review.json`](source-review.json)
+records local source validation and the independent reviews. Source preparation
+keeps review gates closed until the complete composition has been reviewed.
 
-## HISTORICAL reviewed process-recheck composition (source75)
+The helper source in [`n07-helper-source`](n07-helper-source/README.md) builds
+separately with [`build-n07-helper.sh`](build-n07-helper.sh). Its locked FDD build
+is a prerequisite. The root fixture checks the real helper image, original
+process identity, capabilities, clock, pidfd and parent handles before mutation.
+Review of that qualification procedure is distinct from its actual Linux outcome.
 
-## HISTORICAL reviewed listener composition (source25)
+The alias-function qualification checks three positive and nine negative filesystem
+pairs against the donor. It grants no N07 worker-control credit. The original job,
+build, fixture, helper and final publication deadlines retain their existing bounds.
 
-# C# control-fault and N03 validation candidate
+## Retention and limitations
 
-Source `31c9ff5c8782102e0917e0c992bbdecc35e115d0` has2821 files. This private validation child has the single normal harness parent `079d1932211efbce2689adf107ac0cb3b3c3e372` and retains the five reviewed diagnostic changes. Local [supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) tests passed1038/1038, including37 diagnostic cases. [Source review](source-review.json) binds the receipts and current six-field v3 negative diagnostic. The actual Linux inner ServerRun cause remains pending.
+[`run-native.py`](run-native.py) verifies command exits, joined process groups,
+source and build maps, then the fixed private receipt. [`retain-native.sh`](retain-native.sh)
+copies only bounded root-owned evidence. A written JSON receipt cannot turn a
+nonzero command, late publication or failed physical cleanup into a pass.
 
-The [nonroot broker procedure](n03-procedure.proposed.sh) uses a sealed [managed peer fixture](Program.cs) for validation; product supervisor and worker use the same CLI. The helper has no Evidence dependencies. Fixed `_apt`/`nobody`/`nogroup` names require observed distinct nonzero UIDs/shared primaryGID65534; no UID100 assumption. Independent v4 review and two actual data-only procedure controls passed. Startup commands consume the minimum captured15-second/original-job remainder, and cleanup retains original600/30-second fixture bounds. Missing actual live-worker sampling is inconclusive. Helper Linux publishing/execution and N03 qualification remain pending.
-
-This composition changes source/parent/capture references and resulting SHA pins from reviewedv4, plus this status record. The Linux pipe test remains one unprivileged library case; it grants no root-factory or admission claim. The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) requires all16 native controls and actual consumers. Production catalogue and proof registry remain closed.
-
-Status: original composition and execution promotion independently reviewed; subsequent retention correction review pending. Historical419e publication matched no run because the previous branch trigger and proposal flags were retained. That publication defect was corrected in66a9. Attempt20 run37736419284 built successfully but root command exited1; upload rejected a nested NuGet cache colon path. Current retention selects fixed helper receipts/maps/logs; the native inner cause remains unknown pending retained evidence. No native acceptance or Trusted enablement.
-
-The handoff consumers also restore the previously reviewed41-command and exact Linux pipe-regression checks. Current builder includes two pipe-validation commands; stale39-command consumers rejected such a receipt. This is a source-backed handoff correction, while attempt20 inner failure was not retained. No command, runtime limit or native acceptance gate is bypassed.
-
-Attempt21 retained an N03 harness FD-inspection failure and an EXIT-trap scope error before N01. The private correction binds inspection to the shell that opened the descriptor and preserves its cleanup state through EXIT. Source31c9, unit policy, deadlines and all16 acceptance requirements remain unchanged. No native acceptance is inferred from source review or local compilation.
-
-Attempt22 built successfully but the acquisition script retained a stale parent and rejected the receipt before native dispatch. This correction binds the builder, acquisition, runner and workflow to the same actual parent. A data-only regression checks every individual stale binding and the actual acquisition predicate against the retained receipt. Historical run records stay historical; N01 and all16 native controls remain unqualified.
-
-Attempt23 passed acquisition and dispatched the private checkpoint, then retained a nested tree-audit FD failure before N01. Shared scratch descriptor checks now use the holder shell captured once at audit entry. N03 cleanup drops an unused read descriptor reference. The original14 parser tests are unchanged; Linux additionally runs4 FD/scope controls. LocalmacOS2 portable branch controls passed and2 real Linux FD comparisons are deferred; the initial scheduling-model test failure remains retained. No control success or product acceptance is inferred.
-
-## Listener checkpoint source preparation
-
-Current source `25e449cef5169c47177d19ca813c79acaab265a0` is a five-file diagnostic-only child of `31c9ff5c8782102e0917e0c992bbdecc35e115d0`, with2821 captured files. The pinned retry validation recorded1041 passing core controls, including40 closed diagnostic data cases and3 new cases; the first failed compile receipt remains historical. These are local source tests, not native acceptance. Main recorded run37746326245 at the Accept/ASEVD402 boundary, with N03 denial observed and N01 unaccepted; the inner cause is unmeasured. All16 native acceptance requirements and the production proof registry remain pending/closed.
-
-The four operational parent pins are `079d1932211efbce2689adf107ac0cb3b3c3e372`. The preparer checks the prior full capture, creates a normal ordered merge with parents[operational parent,current source], checks the exact five M paths and new full capture, then installs reviewed inputs in a sole child. The builder validates both topology layers and records the actual merge commit separately from the pinned operational base. No merge is created by this composer. All workflow promotion flags and the independent composition review gate are false until main reviews and supplies executable parent bindings. Fixture, N03 procedure, parser, runtime policies, deadlines and cleanup semantics change only in source/hash bindings. The builder topology guard is an intentional additional change required by the ordered source merge; it is not certified as a pin-only inverse. Its two added logged queries make43 build command records. Acquisition requires exactly43 commands with ordinals0..42; run-native.validate_build requires the same count and sequence. These two paired count predicates are intentional functional deltas, and the former41-command contract is retired for this composition. No command success, process join, deadline or identity predicate is changed. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) for the acceptance requirements.
-
-## Process recheck candidate
-
-Source `75f8164274e362fbf17847331e44d1d01843c1e5` is a five-file child of `25e449cef5169c47177d19ca813c79acaab265a0`;2821 full source SHA/modes are captured. Main records1051 local core source tests passing; this is not native acceptance. Previous listener records remain historical. The four operational previous-harness constants are `844bb8fa1d0da659cce62d940344c87db69ab905`. The preparer validates the prior full25 source, creates ordered merge[844,new source], validates exactly the five M paths and current full capture, then makes the installation child. Receipt parent is the actual merge, distinct from harness_previous. The existing43-command checks and exact clone/merge022 umask are retained, not reapplied; no new logged topology calls are added. The sole source-delta guard change replaces the former server path with LinuxProcessIdentity.cs. All promotion flags and independent review are false. The current native run supplies no acceptance claim here. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
-
-## Process-node inspection diagnostic candidate
-
-Source `df028a57d06687768137d910318703496ab864db` is an exact four-file child of `75f8164274e362fbf17847331e44d1d01843c1e5`;2821 source SHA/modes are captured. Main supplies the actual local core/diagnostic counts and receipt pins; no native acceptance is inferred. Listener is unchanged. All four operational previous-harness constants are `12cc85baaaca3caf8069a2e395fd9374da2cea76`. The preparer validates full prior75 source, then normal ordered merge[12cc,new source] and exactly four source M paths, followed by a sole installation child. Actual merge/head are established only during later preparation. The43-command checks and clone/merge022 behavior are retained; no extra Git query is added. Removing Listener from the three source-delta guards is an explicit structural change. Every promotion/review flag remains false pending exact fresh review. Historical observations remain labeled historical. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
-
-## Exit/accept admission correction candidate
-
-Source `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` is an exact five-file child of `df028a57d06687768137d910318703496ab864db` with full2821 captured SHA/modes. Current local core1078/ownership38/diagnostics66 and11 new data controls are bound to final supplied receipt/TRX/peer pins. These are portable source tests; no Linux/root authority or native acceptance is established. All16 native controls remain pending. All four operational parent pins are `97c083c266e2844755f3f4eff0dd7d44c9214457`, distinct from historical merge042a0bb. Preparation performs normal ordered merge[97c,new source], verifies five source M paths, and creates a sole installation child. The43-command checks, clone/merge022, private077 operations, and120/90-second supervisor bounds are unchanged. All eight workflow promotion flags are false until fresh review. The fixed source-delta guards are intentionally changed to five paths. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
-
-## Listener-close diagnostic candidate
-
-Source `a353970c67b7b2e02acaa248348dbff69efd3648` is an exact five-file diagnostic child of `77e1e1fbb83357df92e15fc6213d8a6dfa369fd8` with full2821 captured SHA/modes. Actual local counts, TRX and source-peer pins come only from the final SHA-bound packet; prior1078/Ownership38/Diagnostics66 are historical. No first cause, cancellation or connection-aborted disposal behavior is inferred from attempt28 ListenerClose/Admission/ASEVD402 with null operation. All four operational parent pins are `8eef98c502ad35ace08b36e77db2494580da38d5`. Preparation normally merges[8eef,new source] and creates a sole installation child. All limits,43 checks, clone/merge022 and other077 commands,19 inputs/40 edges, parser/N03 logic and original deadlines remain inherited. All eight promotion flags are false pending fresh exact-file review; all16 native controls and registry remain unaccepted. See the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
-
-## Owned-socket custody candidate
-
-Source `806301fd259197f7d448157795259489ac01d9f1` is a six-modified/two-added child of `a353970c67b7b2e02acaa248348dbff69efd3648` with2823 SHA/mode-pinned files. Current counts, endpoint/diagnostic cases, TRX and peer pins come only from final actual receipts; prior1094/Diagnostics82/Ownership38 remain historical. The pure endpoint wrapper and optional custody diagnostics do not establish a native cause, acceptance, or permission to skip named custody checks. Operational parent is `4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe`; preparation creates normal ordered merge then a sole installation child on retry-17. All43 command checks, original deadlines, clone/merge022/private077, audit/SDK/runtime/caps and19 inputs/40 pins are retained. Eight promotion flags are false until independent generated-file review; all16 native controls and Trusted/registry remain unaccepted.
-
-## Current ordinary negative-kernel data core (review pending)
-
-Source `a358d47ef36939718536b13c27b038faf307299b` is the three-modified/two-added child of `806301fd259197f7d448157795259489ac01d9f1`; count derives from the full pinned capture. The detached DTO does not change normal Run, issue authority, or include variant emitters. Local1170/96 diagnostics/24 endpoint/38 ownership and38 new data cases are receipt-bound. Previous owned-socket records are historical; N01-N03 must be rechecked on this ordinary image. Operational parent `ca3b3b99e32c2c22a1420b357203e8f40f57415a`; intended ordered merge then sole installation child on retry19. All43 commands, original deadlines, clone/merge022/private077, SDK/runtime/audit/caps,19 inputs/40 pins stay fixed. Eight promotion flags and independent composition review are false; no native qualification is added. Drivers are materialized as source only, with unchanged nonmain function ASTs. Independent generated composition/driver review and explicit authorization remain required before preparation/publication.
-
-This packet is the common ordinary-core baseline for subsequent fixed N05/N06 integration. No separate ordinary CI run is proposed here; any combined candidate must recheck genuine ordinary N01-N03 where practical. Existing source reviews and local cases are not native credit.
-
-## Fixed N05 preparation (review pending)
-
-Final image 5214a278cf710bfcf3ebca9f9ea4db557ee2adbb; immediate parent 55079eb96608246c6c396b1ae7b01c01cfbf7ba8; count 2828. Immediate3M/2M, common1M3A/1M2A and operational4M5A/4M4A are distinct. Targeted22 only; prior full1190 historical; no full1192 claim. Fixed reviewed fixture bytes occupy existing checkpoint-n01-n02-v5.sh path. Negative-only credit; N02/N03 are prerequisites, no N01 pass is asserted. All native/Trust/registry claims remain pending; budgets/caps/clocks unchanged. Independent review and eight workflow flags remain false.
-
-## Prepared audit-cache retry for N05
-
-Direct installation child of `5beb94a919eec7d372f63d050577328bcf455c9f`; no source merge, reset or rebase. The source stays `5214a278cf710bfcf3ebca9f9ea4db557ee2adbb` with 2828 files. Historical first-variant composition and earlier native records above retain their original scope.
-
-The [actual cache peer review](/private/tmp/issue779-csharp-negative-slot-audit-cache-review-v1/readonly-review.json) (`844ba062b79cc673d07f24a46687c2bba914013c544f980af16ef519d3d8a635`) records clear source review and 12/12 data controls under the [retained validation](/private/tmp/issue779-csharp-negative-slot-audit-cache-v1/validation-attempt-1/receipt.json). These controls establish no Linux negative-case acceptance or measured timing improvement. The preceding attempt failed before case launch; this preparation grants no credit. The 570-second work / 30-second cleanup, 240-second root runtime and >246/>245 launch predicates remain unchanged.
-
-The fresh retry composition review and explicit driver gates must pass before any private Git preparation or ordinary same-branch publication.
-
-## Current ordinary OS batch retry
-
-This isolated child of 9ac59b49d435758e34d8d1a893a68244fa96d230 keeps the identical C# source and all original bounds. The complete ordinary OS files and ancestors receive fresh before/after metadata and full byte hashes in batches. Alias walks and ELF/dependency checks remain unchanged. Source review is recorded separately; performance and this negative control require a genuine Linux run. Historical failed setup runs remain failures.
+Local validation across two attempts passed 34 distinct tests; it was not a fresh
+34-test suite. This package has not yet executed N07 on Linux. The production
+catalogue, shared-consumer acceptance and Trusted proof registry remain closed.

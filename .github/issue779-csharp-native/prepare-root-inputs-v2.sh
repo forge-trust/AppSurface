@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 # V2 batched preparation source only. Operator verifies this file BEFORE starting the interpreter.
 set -euo pipefail
+readonly N07_INTEGRATION_REVIEW_CLEAR=1
+((N07_INTEGRATION_REVIEW_CLEAR==1)) || { printf "ROOT_TRANSPORT_REJECTED:n07-integration-pending\n" >&2; exit 1; }
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192
@@ -17,7 +19,7 @@ while (($#)); do
 done
 for key in "${!values[@]}"; do
  case "$key" in
- mode|reviewed-script-sha256|generation|deadline-monotonic-ms|source-commit|source-root|source-map|source-map-sha256|source-nodes|source-nodes-sha256|tool-root|tool-map|tool-map-sha256|tool-nodes|tool-nodes-sha256|runtime-root|runtime-map|runtime-map-sha256|runtime-nodes|runtime-nodes-sha256|source-review|source-review-sha256|build-receipt|build-receipt-sha256|fixture|fixture-sha256|os-audit-script|os-audit-script-sha256|helper-root|helper-map|helper-map-sha256|helper-nodes|helper-nodes-sha256|helper-build-receipt|helper-build-receipt-sha256|helper-entry-sha256) ;;
+ mode|reviewed-script-sha256|generation|deadline-monotonic-ms|source-commit|source-root|source-map|source-map-sha256|source-nodes|source-nodes-sha256|tool-root|tool-map|tool-map-sha256|tool-nodes|tool-nodes-sha256|runtime-root|runtime-map|runtime-map-sha256|runtime-nodes|runtime-nodes-sha256|source-review|source-review-sha256|build-receipt|build-receipt-sha256|fixture|fixture-sha256|os-audit-script|os-audit-script-sha256|helper-root|helper-map|helper-map-sha256|helper-nodes|helper-nodes-sha256|helper-build-receipt|helper-build-receipt-sha256|helper-entry-sha256|n07helper-root|n07helper-map|n07helper-map-sha256|n07helper-nodes|n07helper-nodes-sha256|n07helper-build-receipt|n07helper-build-receipt-sha256|n07helper-entry-sha256|n07-parser|n07-parser-sha256|n07-live-parser|n07-live-parser-sha256) ;;
  *) fail unknown-option ;;
  esac
 done
@@ -27,13 +29,15 @@ fi
 readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 ((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail n03-review-pending
 [[ $EUID == 0 && $OSTYPE == linux* ]] || fail trusted-linux-root-required
-for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit source-root source-map source-map-sha256 source-nodes source-nodes-sha256 tool-root tool-map tool-map-sha256 tool-nodes tool-nodes-sha256 runtime-root runtime-map runtime-map-sha256 runtime-nodes runtime-nodes-sha256 source-review source-review-sha256 build-receipt build-receipt-sha256 fixture fixture-sha256 os-audit-script os-audit-script-sha256 helper-root helper-map helper-map-sha256 helper-nodes helper-nodes-sha256 helper-build-receipt helper-build-receipt-sha256 helper-entry-sha256; do
+for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit source-root source-map source-map-sha256 source-nodes source-nodes-sha256 tool-root tool-map tool-map-sha256 tool-nodes tool-nodes-sha256 runtime-root runtime-map runtime-map-sha256 runtime-nodes runtime-nodes-sha256 source-review source-review-sha256 build-receipt build-receipt-sha256 fixture fixture-sha256 os-audit-script os-audit-script-sha256 helper-root helper-map helper-map-sha256 helper-nodes helper-nodes-sha256 helper-build-receipt helper-build-receipt-sha256 helper-entry-sha256 n07helper-root n07helper-map n07helper-map-sha256 n07helper-nodes n07helper-nodes-sha256 n07helper-build-receipt n07helper-build-receipt-sha256 n07helper-entry-sha256 n07-parser n07-parser-sha256 n07-live-parser n07-live-parser-sha256; do
  [[ -n ${values[$key]-} ]] || fail missing-input
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 5214a278cf710bfcf3ebca9f9ea4db557ee2adbb ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == 5c193e1865757770acce676b2c7d5371d2f9d73b419129fd4c2618e5e1411e86 && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == e011aa1b5384d4116dfdcb93d6253a589e564d7a ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == 891185eec903a766e5449d2c5443c25c548d5693215ec86c6b5ed4a5c693b226 && ${values[os-audit-script-sha256]} == 6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08 ]] || fail reviewed-source-pin
+[[ ${values[n07-parser-sha256]} == 96d01d088300aeffb5fa7eab7387c3b4be319d249e796edcb189aceb441548e7 ]] || fail n07-parser-pin
+[[ ${values[n07-live-parser-sha256]} == ff957a62af596c9ae2278685a756493c709f3906bf9194d13a2946109cb792b1 ]] || fail n07-parser-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -84,21 +88,21 @@ pin() {
  [[ $before == "$after" && ${h:0:64} == "$expected" ]] || fail file-pin-changed
 }
 absolute "${BASH_SOURCE[0]}"; pin "${BASH_SOURCE[0]}" "${values[reviewed-script-sha256]}" 131072
-for kind in source tool runtime helper; do
+for kind in source tool runtime helper n07helper; do
  roots[$kind]=${values[$kind-root]}; maps[$kind]=${values[$kind-map]}; nodes[$kind]=${values[$kind-nodes]}
  map_shas[$kind]=${values[$kind-map-sha256]}; node_shas[$kind]=${values[$kind-nodes-sha256]}
  ancestors "${roots[$kind]}"; pin "${maps[$kind]}" "${map_shas[$kind]}" "$MAP_CAP"; pin "${nodes[$kind]}" "${node_shas[$kind]}" "$NODES_CAP"
 done
-for a in source tool runtime helper; do for b in source tool runtime helper; do
+for a in source tool runtime helper n07helper; do for b in source tool runtime helper n07helper; do
  [[ $a == "$b" ]] && continue
  [[ ${roots[$a]} != "${roots[$b]}" && ${roots[$a]} != "${roots[$b]}/"* ]] || fail overlapping-inputs
 done; done
-for spec in source-review:65536 build-receipt:1048576 helper-build-receipt:1048576 fixture:131072 os-audit-script:131072; do
+for spec in source-review:65536 build-receipt:1048576 helper-build-receipt:1048576 n07helper-build-receipt:1048576 fixture:131072 os-audit-script:131072 n07-parser:65536 n07-live-parser:65536; do
  key=${spec%:*}; pin "${values[$key]}" "${values[$key-sha256]}" "${spec#*:}"
 done
 output=/var/lib/appsurface-evidence-input-${values[generation]}
 ancestors /var/lib; [[ ! -e $output && ! -L $output ]] || fail reused-destination
-for kind in source tool runtime helper; do
+for kind in source tool runtime helper n07helper; do
  [[ $output != "${roots[$kind]}" && $output != "${roots[$kind]}/"* && ${roots[$kind]} != "$output/"* ]] || fail destination-overlap
 done
 # Failure keeps partial root-only paths. There is deliberately no recursive delete or success cleanup.
@@ -120,6 +124,19 @@ on_exit() {
      if ((now<hard_end)); then
       left=$((hard_end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
       /usr/bin/timeout --signal=KILL "$seconds" /usr/bin/chmod 0700 -- "$helper_container" >/dev/null 2>&1 || :
+     fi
+    fi
+   fi
+  fi
+  if [[ -n ${n07_helper_pin-} ]]; then
+   now=$(mono_ms) || now=$hard_end
+   if ((now<hard_end)); then
+    left=$((hard_end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+    if [[ $(/usr/bin/timeout --signal=KILL "$seconds" /usr/bin/stat -c '%d:%i:%u:%g' -- "$n07_helper_container" 2>/dev/null) == "$n07_helper_pin" ]]; then
+     now=$(mono_ms) || now=$hard_end
+     if ((now<hard_end)); then
+      left=$((hard_end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+      /usr/bin/timeout --signal=KILL "$seconds" /usr/bin/chmod 0700 -- "$n07_helper_container" >/dev/null 2>&1 || :
      fi
     fi
    fi
@@ -183,11 +200,11 @@ bounded /usr/bin/jq -acS . "${values[helper-build-receipt]}" >"$work/helper-cano
 bounded /usr/bin/cmp -- "${values[helper-build-receipt]}" "$work/helper-canonical.json"
 bounded /usr/bin/jq -e --arg map "${values[helper-map-sha256]}" --arg nodes "${values[helper-nodes-sha256]}" --arg entry "${values[helper-entry-sha256]}" '.helper_tsv_sha256==$map and .helper_nodes_sha256==$nodes and .helper_entry_sha256==$entry' "${values[helper-build-receipt]}" >/dev/null
 
-for kind in source tool runtime helper; do
+for kind in source tool runtime helper n07helper; do
  copy_pinned "${maps[$kind]}" "$work/$kind.tsv" "${map_shas[$kind]}" "$MAP_CAP" 0600
  copy_pinned "${nodes[$kind]}" "$work/$kind-nodes.json" "${node_shas[$kind]}" "$NODES_CAP" 0600
  maps[$kind]=$work/$kind.tsv; nodes[$kind]=$work/$kind-nodes.json
- bounded /usr/bin/jq -e --arg name "$(if [[ $kind == helper ]]; then printf tool; else printf %s "$kind"; fi)" '
+ bounded /usr/bin/jq -e --arg name "$(if [[ $kind == helper || $kind == n07helper ]]; then printf tool; else printf %s "$kind"; fi)" '
   def hash: type=="string" and test("^[0-9a-f]{64}$");
   def mode: type=="string" and test("^0[0-7]{3}$");
   def rel:
@@ -206,7 +223,7 @@ for kind in source tool runtime helper; do
    (.key|rel) and (.value|type=="object" and keys==["bytes","mode","sha256"] and
     (.mode|mode) and (.sha256|hash) and
     (.bytes|type=="number" and floor==. and .>=0 and .<=268435456))) and
-  (if $name=="source" then (.files|length)==2828 and
+  (if $name=="source" then (.files|length)==0 and
     all(.files[]; .mode=="0644" or .mode=="0755") else true end)
  ' "${nodes[$kind]}" >"$work/$kind-schema.log"
  bounded /usr/bin/jq -r '.files|to_entries|sort_by(.key)[]|[.value.mode,.value.sha256,.key]|@tsv' "${nodes[$kind]}" >"$work/$kind-derived.tsv"
@@ -269,8 +286,22 @@ verify_snapshot_and_hash() {
 }
 
 bounded /usr/bin/jq -e --slurpfile receipt "${values[helper-build-receipt]}" --arg entry "${values[helper-entry-sha256]}" '.files["NativePeerBroker.dll"].sha256==$entry and (.files|length)==$receipt[0].helper_files and (.directories|length)==$receipt[0].helper_directories and ([.files[].bytes]|add)==$receipt[0].helper_bytes and all(.directories[];.mode=="0555") and all(.files[];.mode=="0444" or .mode=="0555")' "${nodes[helper]}" >/dev/null
+pin "${values[n07helper-build-receipt]}" "${values[n07helper-build-receipt-sha256]}" "$CONTROL_CAP"
+bounded /usr/bin/jq -e 'def integer: type=="number" and floor==. and .>=0;
+def digest: type=="string" and test("^[0-9a-f]{64}$");
+keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n07-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
+.recipe_sha256=="421567477242d33e3368d8797e0ec3da00d02093be05ed6cc2c7a26a3ea2c462" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
+.source_pins=={"Program.cs":"059246aa8acb0feb5c1172990661fc83cd1631f07ff34a1bfe8de736414a4a5d","PossibleStopRegistration.cs":"3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af","N07CoordinatorData.cs":"6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d","NativeRootCoordinator.csproj":"9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+(.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
+(.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
+(.commands|type=="array" and length==3) and all(.commands[]; keys==["error","exit","forced_cleanup","group_absent","log","log_bytes","waited"] and .exit==0 and .waited==true and .group_absent==true and .forced_cleanup==false and .error==false and (.log_bytes|integer) and .log_bytes<=8388608) and
+(.commands|map(.log))==["build-00.log","build-01.log","build-02.log"]' "${values[n07helper-build-receipt]}" >/dev/null
+bounded /usr/bin/jq -acS . "${values[n07helper-build-receipt]}" >"$work/n07helper-canonical.json"
+bounded /usr/bin/cmp -- "${values[n07helper-build-receipt]}" "$work/n07helper-canonical.json"
+bounded /usr/bin/jq -e --arg map "${values[n07helper-map-sha256]}" --arg nodes "${values[n07helper-nodes-sha256]}" --arg entry "${values[n07helper-entry-sha256]}" '.helper_tsv_sha256==$map and .helper_nodes_sha256==$nodes and .helper_entry_sha256==$entry' "${values[n07helper-build-receipt]}" >/dev/null
+bounded /usr/bin/jq -e --slurpfile receipt "${values[n07helper-build-receipt]}" --arg entry "${values[n07helper-entry-sha256]}" '.files["NativeRootCoordinator.dll"].sha256==$entry and (.files|length)==$receipt[0].helper_files and (.directories|length)==$receipt[0].helper_directories and ([.files[].bytes]|add)==$receipt[0].helper_bytes and all(.directories[];.mode=="0555") and all(.files[];.mode=="0444" or .mode=="0555")' "${nodes[n07helper]}" >/dev/null
 phase=inbound-validation
-for kind in source tool runtime helper; do
+for kind in source tool runtime helper n07helper; do
  verify_snapshot_and_hash "$kind" "${roots[$kind]}" input input-initial
 done
 phase=copy
@@ -281,8 +312,16 @@ helper_container=$helper_parent/${values[generation]}
 [[ ! -e $helper_container && ! -L $helper_container ]] || fail helper-reused
 bounded /usr/bin/mkdir -m 0700 -- "$helper_container"
 helper_pin=$(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$helper_container")
-for kind in source tool runtime helper; do
+n07_helper_parent=/var/lib/appsurface-evidence-n07-helpers
+if [[ ! -e $n07_helper_parent ]]; then bounded /usr/bin/mkdir -m 0711 -- "$n07_helper_parent"; fi
+ancestors "$n07_helper_parent"; [[ $(bounded /usr/bin/stat -c '%u:%g:%a' -- "$n07_helper_parent") == 0:0:711 ]] || fail helper-parent
+n07_helper_container=$n07_helper_parent/${values[generation]}
+[[ ! -e $n07_helper_container && ! -L $n07_helper_container ]] || fail helper-reused
+bounded /usr/bin/mkdir -m 0700 -- "$n07_helper_container"
+n07_helper_pin=$(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$n07_helper_container")
+for kind in source tool runtime helper n07helper; do
  destination=$output/$kind; [[ $kind != helper ]] || destination=$helper_container/bundle
+ [[ $kind != n07helper ]] || destination=$n07_helper_container/bundle
  [[ ! -e $destination && ! -L $destination ]] || fail tree-copy-collision
  # No link following, no caller filter, no omission: complete tree, including empty dirs.
  bounded /usr/bin/cp --recursive --no-dereference --preserve=mode,timestamps -- "${roots[$kind]}" "$destination"
@@ -303,13 +342,17 @@ copy_pinned "${values[build-receipt]}" "$work/build-receipt.json" "${values[buil
 copy_pinned "${values[helper-build-receipt]}" "$work/helper-build-receipt.json" "${values[helper-build-receipt-sha256]}" "$CONTROL_CAP" 0600
 copy_pinned "${values[fixture]}" "$output/reviewed/checkpoint-n01-n02-v5.sh" "${values[fixture-sha256]}" 131072 0444
 copy_pinned "${values[os-audit-script]}" "$output/reviewed/prepare-os-audit-v2.py" "${values[os-audit-script-sha256]}" 131072 0444
+copy_pinned "${values[n07-parser]}" "$output/reviewed/n07-record-data.py" "${values[n07-parser-sha256]}" 65536 0444
+copy_pinned "${values[n07-live-parser]}" "$output/reviewed/n07-helper-live.py" "${values[n07-live-parser-sha256]}" 65536 0444
 bounded /usr/bin/chmod 0555 -- "$output/reviewed"
+copy_pinned "${values[n07helper-build-receipt]}" "$work/n07-helper-build-receipt.json" "${values[n07helper-build-receipt-sha256]}" "$CONTROL_CAP" 0600
 phase=final
-for kind in source tool runtime helper; do
+for kind in source tool runtime helper n07helper; do
  verify_snapshot_and_hash "$kind" "${roots[$kind]}" input input-final
  bounded /usr/bin/cmp -- "$work/$kind-input-initial-before.txt" "$work/$kind-input-final-after.txt"
  # No later process may modify sealed destination trees under the root-private generation.
  destination=$output/$kind; [[ $kind != helper ]] || destination=$helper_container/bundle
+ [[ $kind != n07helper ]] || destination=$n07_helper_container/bundle
  snapshot "$destination" "$work/$kind-destination-final.txt"
  bounded /usr/bin/cmp -- "$work/$kind-sealed-final-after.txt" "$work/$kind-destination-final.txt"
  pin "${values[$kind-map]}" "${map_shas[$kind]}" "$MAP_CAP"
@@ -326,6 +369,8 @@ bounded /usr/bin/jq -n --arg generation "${values[generation]}" --arg source "${
 bounded /usr/bin/sync -f -- "$work/transport-receipt.json"
 check; [[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$output") == "$root_pin" ]] || fail output-root-substitution
 [[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$helper_container") == "$helper_pin" ]] || fail helper-container-changed
+[[ $(bounded /usr/bin/stat -c '%d:%i:%u:%g' -- "$n07_helper_container") == "$n07_helper_pin" ]] || fail n07-helper-container-changed
+bounded /usr/bin/chmod 0711 -- "$n07_helper_container"
 bounded /usr/bin/chmod 0711 -- "$helper_container"
 bounded /usr/bin/chmod 0711 -- "$output"
 check

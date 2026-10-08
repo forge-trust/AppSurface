@@ -1,0 +1,9 @@
+def integer: type=="number" and floor==. and .>=0;
+def digest: type=="string" and test("^[0-9a-f]{64}$");
+keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n07-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
+.recipe_sha256=="421567477242d33e3368d8797e0ec3da00d02093be05ed6cc2c7a26a3ea2c462" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
+.source_pins=={"Program.cs":"059246aa8acb0feb5c1172990661fc83cd1631f07ff34a1bfe8de736414a4a5d","PossibleStopRegistration.cs":"3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af","N07CoordinatorData.cs":"6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d","NativeRootCoordinator.csproj":"9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+(.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
+(.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
+(.commands|type=="array" and length==3) and all(.commands[]; keys==["error","exit","forced_cleanup","group_absent","log","log_bytes","waited"] and .exit==0 and .waited==true and .group_absent==true and .forced_cleanup==false and .error==false and (.log_bytes|integer) and .log_bytes<=8388608) and
+(.commands|map(.log))==["build-00.log","build-01.log","build-02.log"]
