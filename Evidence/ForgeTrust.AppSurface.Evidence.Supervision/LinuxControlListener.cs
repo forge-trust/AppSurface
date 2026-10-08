@@ -347,7 +347,9 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         stage = LinuxControlFailureStage.ListenerOwnerIdentity;
         _owner.RequireControlIdentity(default);
         stage = LinuxControlFailureStage.ListenerWorkerIdentity;
-        worker.Recheck(default);
+        try { worker.Recheck(default); }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(stage, null, error, worker.FirstFailure); throw; }
         stage = LinuxControlFailureStage.ListenerOwnerIdentity;
         _owner.RequireControlIdentity(default);
         stage = LinuxControlFailureStage.ListenerCancellation;
