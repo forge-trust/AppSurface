@@ -4,7 +4,7 @@ This private workflow builds the ordinary CLI and investigates a fixture limit b
 
 ## Binding and baseline
 
-Product source remains 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent 2993dcfaac1b9b6dfb8adf057191f837876f01fe. This harness is a direct child of 18ab1ad31eec2a304c9121b33375d14a08e5deed. All 2,819 source hashes/modes, source tree and historical 997 local tests plus separate 28 focused STOP/WAIT tests remain bound by [source-review.json](source-review.json). The SDK remains 10.0.401; the execution runtime is the pinned Ubuntu 10.0.12 packages. Every ELF/dependency remains subject to [the OS audit](prepare-os-audit-v2.py).
+Product source remains 5d1036b7035a7d9e980cdab5afc88879fca5048c, direct parent 2993dcfaac1b9b6dfb8adf057191f837876f01fe. This harness is a direct child of 37b04e5ea28bdf8c6e566b588bd97d09695bec39. All 2,819 source hashes/modes, source tree and historical 997 local tests plus separate 28 focused STOP/WAIT tests remain bound by [source-review.json](source-review.json). The SDK remains 10.0.401; the execution runtime is the pinned Ubuntu 10.0.12 packages. Every ELF/dependency remains subject to [the OS audit](prepare-os-audit-v2.py).
 
 ## Diagnostic contract
 
@@ -18,7 +18,7 @@ The final result is the closed issue779-n02-startup-limit-diagnostic-v1 shape. I
 
 [The dispatcher](run-native.py) retains the reviewed FIFO capture with separate 8 MiB writers, exclusive root-private files, both PID joins and the original deadline. [The retainer](retain-native.sh) adds only the fifteen fixed diagnostic names listed in the source review; no discovery, authority or original-result override is added. Every retained source remains root 0600/single-link/no-follow; fixed canonical USTAR and 32 MiB total bounds remain. Externally verified hashes precede interpreter use.
 
-Nine pure jq/static controls passed; they establish no native result. No worker security policy, cap, timer, production catalogue or acceptance registry is changed. Root-owned validation-tool settlement cannot establish C# supervisor/worker settlement. At source preparation, the workflow has seven false promotion flags. Main may promote exactly those flags only after independent composition review; the diagnostic remains nonzero.
+Nine pure jq/static controls passed; they establish no native result. No worker security policy, cap, timer, production catalogue or acceptance registry is changed. Root-owned validation-tool settlement cannot establish C# supervisor/worker settlement. The initial diagnostic preparation had seven false promotion flags. Main may promote exactly those flags only after independent composition review; the diagnostic remains nonzero.
 
 ## Provenance regression
 
@@ -29,3 +29,7 @@ The builder now names both required hashes as compilation-bound constants and us
 ## Private batched input audit
 
 The prior attempt exhausted the original fixture deadline before N02. This candidate batches full input checks, preserves the early named-root identity and all file/node/depth envelopes, and separately tests the actual parser on unprivileged Linux data before root dispatch. The diagnostic retains 600 seconds and cleanup30 and always rejects; it cannot establish N01/N02 acceptance. The C# product source is unchanged.
+
+## Transport guard correction after attempt 12
+
+The digest-verified run 37704476269 rejected at `reviewed-source-pin` before OS auditing or either startup comparison. The root transport still required the older fixture and auditor hashes. This private-only correction updates exactly those two pins and their dependent acquisition, runner, Ubuntu prerequisite, builder and workflow hashes. The new harness is one ordinary child of `37b04e5ea28bdf8c6e566b588bd97d09695bec39`. Product source, batched tree audit, startup cases, original deadlines, unit policy and retention remain byte-identical. No startup cause or native success was measured by this failed run. The missing two root-transport edges are now explicit in the pin inventory.

@@ -1,7 +1,7 @@
 name: C# N02 startup file-limit diagnostic
 on:
   push:
-    branches: [codex/issue779-csharp-linux-native-20261007-retry-11]
+    branches: [codex/issue779-csharp-linux-native-20261008-retry-12]
 permissions:
   contents: read
 concurrency:
@@ -15,11 +15,11 @@ jobs:
       # Promotion requires frozen source reviews and a complete native handoff.
       # Promote only after full source composition review; no native passing claim.
       UBUNTU_RUNTIME_REVIEWED: 'true'
-      UBUNTU_RUNTIME_SCRIPT_SHA256: a9d4e2e9b36400f0702ca07b027c40b0dedfab3e3746b9f61718ae85ee7c8d4f
+      UBUNTU_RUNTIME_SCRIPT_SHA256: c4f896d35eaa2301d2dfcfb495e665507d9e5616edf81545fe225562bbef56bf
       BUILD_REVIEWED: 'true'
-      BUILD_SCRIPT_SHA256: e4df48a21d9de84959cf78d56879e9beab8666f656e495bfd2721e07a76d924c
+      BUILD_SCRIPT_SHA256: 4fcba17b126b85fbcd217d951abc9b940f9e3e072166993a0b3621c95f051ad9
       ROOT_TRANSPORT_REVIEWED: 'true'
-      ROOT_TRANSPORT_SHA256: b181c7672fa3dbe9351fee15dcbf85b7ff99808d09077c8338bf4981c782ec6b
+      ROOT_TRANSPORT_SHA256: 36a93eb3cecc3c829c537d247b7193dd473f168e50fedda77ad9bc890d419e13
       FIXTURE_REVIEWED: 'true'
       FIXTURE_SHA256: 43c5c837cb152b284ac1bc23f58fbb36479a1e51539552ea4d9db952fd261cb0
       OS_AUDIT_REVIEWED: 'true'
@@ -27,13 +27,13 @@ jobs:
       SOURCE_REVIEW_SHA256: ee6fa029cf2873a18b849f6e5590f3dd792ee71fa88f3409100ff802df3b4ca0
       NATIVE_HANDOFF_REVIEWED: 'true'
       NATIVE_HANDOFF_IMPLEMENTED: 'true'
-      ACQUISITION_SHA256: 849c6d0e9f6f0bf2b985a924f1f5c5b046799105170d55302fdd055f2e7f2f06
+      ACQUISITION_SHA256: 48199ba2153718ef9f192aecabf5968d0d113c3e823c4194442d0e9b177780e5
       RETENTION_SHA256: a6bc3da869386b440d0b8a2ad93eb3cb888a4e48aabe52febf6a609b33d45331
-      ORCHESTRATOR_SHA256: f6b1faca6791cee26ce1d24af4b2111e57620734efcfa36213887131cc809ee0
+      ORCHESTRATOR_SHA256: 4670f0c69890f905c1269b53b277b8249ebfa3d7a4048f656228ce52b89602d9
       CAPTURE_RECEIPT_SHA256: 51afcbd61af3c2319e814beee18e88714e589cb26132d755371248d045cfd64d
       BATCH_PARSER_TEST_SHA256: aa0be812dc09f8c9c24874849b342809212faa9a6988030e5750daac627feca3
       SOURCE_COMMIT: 5d1036b7035a7d9e980cdab5afc88879fca5048c
-      HARNESS_PARENT: ed8dfcc228a59d4e6c058c3659fb1f0bf9d221f9
+      HARNESS_PARENT: 37b04e5ea28bdf8c6e566b588bd97d09695bec39
     steps:
       - name: Reject unreviewed or incomplete proposal before build
         shell: bash
