@@ -108,4 +108,37 @@ public sealed class N05JoinedWorkerOutputTests
         Assert.Throws<OperationCanceledException>(() => N05JoinedWorkerOutput.Parse(joined, stop.Token));
         Assert.Throws<OperationCanceledException>(() => N05JoinedWorkerOutput.Serialize(new(17, 1), stop.Token));
     }
+    /// <summary>Round-trips complete actual collector bytes without granting native provenance.</summary>
+    [Fact]
+    public async Task PrivateStreamsContainExactFullFailureBytesOnly()
+    {
+        var receipt = await Joined(Complete());
+        using var document = JsonDocument.Parse(N05JoinedWorkerOutput.SerializePrivateStreams(receipt));
+        var root = document.RootElement;
+        Assert.Equal(6, root.EnumerateObject().Count());
+        Assert.Equal("issue779-n05-joined-worker-raw-v1", root.GetProperty("schema").GetString());
+        Assert.Empty(Convert.FromBase64String(root.GetProperty("stdout_base64").GetString()!));
+        Assert.Equal(receipt.Stderr.Prefix.ToArray(), Convert.FromBase64String(root.GetProperty("stderr_base64").GetString()!));
+        Assert.Equal(receipt.Stderr.ReceivedBytes, root.GetProperty("stderr_bytes").GetInt64());
+        Assert.False(root.GetProperty("native_authority").GetBoolean());
+        Assert.InRange(Encoding.UTF8.GetByteCount(N05JoinedWorkerOutput.SerializePrivateStreams(receipt)) + 1, 1, 4096);
+    }
+
+    /// <summary>Incomplete or unexpected real collected streams cannot become private evidence; original cancellation propagates.</summary>
+    [Fact]
+    public async Task PrivateStreamsRejectUnjoinedOutputAndOriginalCancellation()
+    {
+        var receipt = await Joined(Complete());
+        Assert.Throws<InvalidOperationException>(() => N05JoinedWorkerOutput.SerializePrivateStreams(receipt with
+        { Stderr = receipt.Stderr with { EndOfStream = false } }));
+        var noisy = await Joined(Complete(), "private-canary");
+        var error = Assert.Throws<InvalidOperationException>(() => N05JoinedWorkerOutput.SerializePrivateStreams(noisy));
+        Assert.DoesNotContain("private-canary", error.Message);
+        Assert.Null(error.InnerException);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var cancelled = Assert.Throws<OperationCanceledException>(() => N05JoinedWorkerOutput.SerializePrivateStreams(receipt, cancellation.Token));
+        Assert.Equal(cancellation.Token, cancelled.CancellationToken);
+    }
+
 }

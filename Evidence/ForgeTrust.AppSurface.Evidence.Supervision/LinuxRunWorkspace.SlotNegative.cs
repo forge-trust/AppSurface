@@ -235,6 +235,10 @@ internal sealed partial class LinuxRunWorkspace
                     Console.Error.WriteLine(Encoding.UTF8.GetString(kernel.Bytes));
                     Console.Error.Flush();
                     Recheck(token, InspectionPurpose.Control);
+                    var privateStreams = N05JoinedWorkerOutput.SerializePrivateStreams(worker.Output, token);
+                    Console.Error.WriteLine(privateStreams);
+                    Console.Error.Flush();
+                    Recheck(token, InspectionPurpose.Control);
                 }
                 catch { _workspace._quarantined = true; throw; }
             }

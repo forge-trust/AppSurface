@@ -100,6 +100,31 @@ internal static class N05JoinedWorkerOutput
         return line;
     }
 
+    /// <summary>Encodes the complete joined fixed-case streams for private fixture rehashing only.</summary>
+    /// <param name="output">Original root-held joined bytes in production; detached data grants no ownership.</param>
+    /// <param name="token">Original teardown token; no deadline or output allowance is renewed.</param>
+    /// <returns>One fixed at-most-4096-byte line including its later LF. Decode only into root-private files.</returns>
+    /// <remarks>
+    /// Parse first requires the actual two EOFs, full retention, zero stdout and the exact bounded failure pair.
+    /// Native callers require original ownership and unchanged-object checks before and after publication.
+    /// Base64 is private raw evidence, never a safe public diagnostic or a qualification/custody capability.
+    /// </remarks>
+    internal static string SerializePrivateStreams(SupervisionOutputReceipt? output, CancellationToken token = default)
+    {
+        _ = Parse(output, token);
+        var line = JsonSerializer.Serialize(new
+        {
+            schema = "issue779-n05-joined-worker-raw-v1",
+            stdout_base64 = Convert.ToBase64String(output!.Stdout.Prefix.AsSpan()),
+            stderr_base64 = Convert.ToBase64String(output.Stderr.Prefix.AsSpan()),
+            stdout_bytes = output.Stdout.ReceivedBytes, stderr_bytes = output.Stderr.ReceivedBytes,
+            native_authority = false,
+        });
+        if (StrictUtf8.GetByteCount(line) + 1 > 4096) throw Rejected();
+        token.ThrowIfCancellationRequested();
+        return line;
+    }
+
     private static void RequireString(JsonElement root, string name, string expected)
     {
         var field = root.GetProperty(name);
