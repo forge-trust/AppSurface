@@ -1164,3 +1164,53 @@ preserve unknown replacement state/accounts. A stalled/fast-exited helper, missi
 observation, expired budget, failed close or absent join is failure/inconclusive, never an
 N04 pass. Full image capture, compiler/formatter/tests, peer review, helper implementation,
 fixture composition and actual native validation remain pending.
+
+## Fixed private N04 genuine-peer probe image
+
+This subsequent source-only image is based on checkpoint commit
+`6a766e3471b8a6ea56a15e3e972bf8840289049b`. Its fixed changes live in the
+[string-control CLI wrapper](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs),
+[protected worker requests](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs),
+and [root composition](LinuxEmptyObservationExecution.cs). There is no public, request,
+environment or callback case selector. The explicit-request CLI overload and ordinary
+execution body are unchanged. This image is solely a negative peer probe; it cannot run a
+successful Observation or enroll a producer, prove eligibility or issue an admission.
+
+After the original authenticated Connect/READY, the string-role wrapper calls the real
+`WaitForOwnedExitAsync` with its original caller token before creating `EvidenceWorkerExecution`,
+admission or output. The genuine request reconnects and compares the actual SO_PEERCRED PID
+with the original READY broker PID. Only that mismatch branch additionally requires positive
+peer PID and actual UID0/GID0, then receives exactly one byte under the same request token.
+Only zero-byte EOF completes the hold; an application byte rejects immediately. EOF still
+throws the unchanged ASEVD402 and never reaches `ExchangeAsync`, request serialization or
+sending. An unexpected accepted wait reply instead throws fixed ASEVD410. This lets the
+existing ordinary worker error boundary report the actual peer-pin rejection before the
+ordinary lifecycle's FailFast path is created; it is not a production cleanup change.
+
+`RequestAsync` creates no new deadline. The supplied original I/O token and the original
+external/root-owner containment bound this hold; the completed Connect handshake timer is
+not a subsequent request timer. The separately reviewed fixed root coordinator must sample
+the same live worker after accepting it, recheck PID/starttime/UID4/GID4/image/cgroup and
+SO_PEERCRED, then call `Shutdown(Send)` before awaiting worker EOF. It sends zero application
+bytes. Missing shutdown, cancellation, expiry, nonroot peer or any mismatched identity remains
+failure. The coordinator and fixture are separate pending integrations and are not modified
+or qualified by this image.
+
+Only on an already failed root run, after the original server task and `StopAndJoinAsync`
+have joined, root calls the existing
+[`CaptureNegativeObservation`](LinuxWorkerProcess.cs) before custody/account close. The
+original reference-equality, server I/O/ledger/local-owner joins, natural terminal task,
+committed authentic READY, two complete pumps, undiscarded full output and fresh selected
+empty-group guards remain mandatory. [`LinuxNegativeKernelObservation`](LinuxNegativeKernelObservation.cs)
+returns at most4096 JSON bytes; this image writes those exact bytes plus one LF to actual
+root stderr using the original cleanup token. Publication is diagnostic only; capture or
+write failure preserves the failed outcome and all later cleanup attempts still run. There
+is no fabricated fallback when a guard fails and no raw worker text in this frame.
+
+The later original custody/name checks must still reject the intentional replacement and
+preserve quarantined paths/accounts; the frame is neither positive custody nor N04 acceptance.
+An external verifier still needs exact image/descriptor bindings, the coordinator's live
+original-worker and zero-send facts, actual terminal code/status, original natural monitor,
+pump hashes/EOFs and fresh group facts under original clocks. No compiler, formatter, tests,
+helper execution or native validation was performed for this source packet. Previous
+checkpoint validation records describe their earlier frozen image only.

@@ -30,12 +30,20 @@ internal sealed record EvidenceAllocationFailureDiagnostic(EvidenceAllocationPha
 /// <remarks>The production Trusted proof allowlist is empty until full consumer acceptance; this entry cannot bypass it.</remarks>
 internal static class EvidenceProtectedCliExecution
 {
-    /// <summary>Uses only the authenticated descriptor to select the worker mode and inputs.</summary>
+    /// <summary>Runs the fixed private N04 peer probe after the actual authenticated READY connection.</summary>
+    /// <remarks>
+    /// This source-owned image performs the genuine wait request before creating a lifecycle, admission or
+    /// output allocator. A changed broker rejects before request serialization and reaches the ordinary
+    /// worker error boundary without the lifecycle's FailFast cleanup. The caller token is unchanged.
+    /// An unexpected accepted reply rejects with ASEVD410. No runtime selector or execution grant exists;
+    /// the explicit-request overload and the ordinary execution implementation remain unchanged.
+    /// </remarks>
     internal static async Task<EvidenceManifest> RunAsync(string controlChannel, CancellationToken cancellationToken,
         Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
-        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken, diagnosticSink).ConfigureAwait(false);
+        await worker.WaitForOwnedExitAsync(cancellationToken).ConfigureAwait(false);
+        throw new EvidenceAdmissionException("ASEVD410", "The fixed N04 peer probe unexpectedly accepted a protected wait reply.");
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>

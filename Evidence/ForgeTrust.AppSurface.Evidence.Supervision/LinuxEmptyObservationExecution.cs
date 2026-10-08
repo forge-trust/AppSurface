@@ -129,6 +129,26 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            // Fixed private N04 image: copy facts only from the original joined holders, before
+            // substituted-path custody can reject. This record cannot turn the failed run positive.
+            if ((failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null && serverTask is not null)
+                try
+                {
+                    var observation = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
+                    var bytes = observation.Bytes;
+                    if (bytes.Length is 0 or > LinuxNegativeKernelObservation.MaximumJsonBytes) throw Rejected();
+                    cleanupToken.ThrowIfCancellationRequested();
+                    using (var stderr = Console.OpenStandardError())
+                    {
+                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
+                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    }
+                    cleanupToken.ThrowIfCancellationRequested();
+                    owner.RequireControlIdentity(cleanupToken);
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try

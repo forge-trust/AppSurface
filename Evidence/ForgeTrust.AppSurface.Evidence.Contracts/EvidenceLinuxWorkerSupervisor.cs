@@ -326,7 +326,20 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         await socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), cancellationToken).ConfigureAwait(false);
         if (RequireRootPeer(socket) != _brokerPid)
+        {
+            // Fixed private N04 image: the actual root replacement must finish its live peer sample
+            // and shut down its write side before this original rejection closes the worker socket.
+            // Reuse the original I/O token; neither application bytes nor request JSON are sent.
+            uint length = 12;
+            if (GetPeerCredentials(socket.SafeHandle, 1, 17, out var replacement, ref length) != 0
+                || length != 12 || replacement.Pid <= 0 || replacement.Pid == _brokerPid
+                || replacement.Uid != 0 || replacement.Gid != 0)
+                throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+            var oneByte = new byte[1];
+            if (await socket.ReceiveAsync(oneByte.AsMemory(), SocketFlags.None, cancellationToken).ConfigureAwait(false) != 0)
+                throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
             throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+        }
         return await ExchangeAsync(socket, request, cancellationToken).ConfigureAwait(false);
     }
 
