@@ -1087,3 +1087,80 @@ Schema `issue779-negative-kernel-observation-v1` has twelve fixed root members: 
 `CreateDetached` is an intentional pure metadata seam, covered by [LinuxNegativeKernelObservationTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs). Constructing matching data or JSON does not authenticate a kernel observation, callback, peer, process, root owner, custody, lease, qualification or acceptance. The fixed `joins`/READY labels describe the production projection's checked provenance; detached test calls cannot establish it. Both native authority and acceptance remain false. Original cancellation propagates with its original token before encoding; no allowance resets. Malformed data yields only a fixed ASEVD410 without input or inner exception.
 
 This preparation defines38 new pure cases and runs none. Variant emitters and private fixtures are deliberately unwired: main must source-bind complete rebuilt N05/N06 images and wire bounded root-private observations only at their existing guarded postjoin points. Actual409 allocation output, unchanged occupied/symlink nodes and sentinel bytes, original root410, expected terminal status, quarantine/NSS disposition, genuine positive prerequisites and authenticated canonical retention remain separate checks. If existing ownership or terminal guards cannot pass, retain failure and the missing fact; never weaken those guards or treat copied observation fields as authority. No native N05/N06 or all-sixteen-control acceptance is claimed here.
+# Fixed private N04 READY checkpoint image (source preparation only)
+
+This private fork adds [`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) to the
+genuine [`LinuxEmptyObservationControlServer`](LinuxEmptyObservationControlServer.cs).
+It is a compile-time fixed image. There is no public, CLI, environment, request, callback,
+caller PID or Boolean activation selector. The ordinary production registry, eligibility,
+proof and custody APIs are unchanged. Parent-reported CI31 N01/N02/N03 results are separate
+from this source preparation; no N04 helper or native N04 execution has occurred here.
+
+## API, ordering and retained I/O
+
+`Create(input, owner, accounts, workspace, listener, worker, token)` accepts the exact original
+native holders and runs the existing `worker.RequireServerOwner`/`RequireWorker` guards.
+Acquisition happens inside the already registered original server run, so a failure before
+`RunAsync` starts cannot leave a new checkpoint listener. Its root-only fixed path is
+`/run/appsurface-evidence-n04-<owner.RunId:N>/checkpoint.sock`, outside the production
+workspace. `/`, `/run`, the fresh root0:0 directory0700 and socket0600 are retained and
+checked by descriptor and current name. Every leaf uses openat2 no-link/beneath/no-XDEV
+resolution; `/run` retains the original mount-capable ancestor resolution. Socket nlink1,
+zero length, exact UID/GID/mode and inode/metadata are mandatory. Collisions reject without
+adoption or unlink. [`LinuxOwnedUnixEndPoint`](LinuxOwnedUnixEndPoint.cs) leaves name lifetime
+with this owner; closure retains the root-private namespace for quarantine.
+
+`ReserveNextAcceptBeforeHandlerDispatch()` runs before the first handler dispatch is released.
+`BeforeNextAcceptAsync(originalToken)` waits before the next listener `RegisterAccept`,
+including its synchronous worker/path checks. It also observes the original worker monitor
+task; worker termination or cancellation rejects rather than reopening admission. This gate
+is separate from EXIT intent and `CloseAcceptAdmissionAsync`; the original EXIT barrier is
+not repurposed or weakened.
+
+After genuine `CreateReadyData`, `ReadyPreparedAsync(originalRequestToken)` accepts exactly
+one separate UNIX peer with actual SO_PEERCRED positive PID distinct from this root process,
+UID0/GID0. The same socket and kernel peer PID remain pinned for both exchanges. The server
+sends ASCII `N04 READY_PREPARED <owner.RunId:N>\n` and requires the exact fixed
+`N04 RELEASE_READY <owner.RunId:N>\n` response. The retained worker may be stopped by the
+separately authenticated root coordinator: the unchanged process live-state guard already
+accepts `T` and `t`. No stopped-state exception was added.
+
+Only after the original READY response write, accepted connection release, owner checks and
+`CompleteWrite(true)` does `ReadyCommittedAsync(originalRequestToken)` send
+`N04 READY_COMMITTED <owner.RunId:N>\n`. The reply-order semaphore stays held throughout;
+ordinary STOP/WAIT is never used for this pre-ACK rendezvous. The coordinator must wait for
+this commit notification before intentionally replacing the production socket name. Next
+accept remains blocked through the genuine client's fresh peer check. Original accepted-peer,
+process, socket name, owner and cgroup guards remain mandatory; intentional substitution must
+eventually fail and preserve quarantine/accounts. Notifications are data, not readiness
+capabilities, worker exit proofs or acceptance receipts.
+
+Each exchange is created behind an asynchronous dispatch gate, retained before that gate
+opens, and awaited as the original actual task. The original request token and independent
+root/owner deadline bound every native read/write; no new timer or allowance exists.
+`CloseAndJoinAsync()` shares one registered close, cancels and independently closes both
+actual sockets, joins every original exchange even after another close fails, then closes
+all retained descriptors. It rejects same-exchange reentry and runs in the outer server drain
+before handler joins; no handler joins itself. The outer run also repeats the shared close
+for failures before the accept loop. No cleanup deletes or adopts a substituted path.
+
+## Data controls and pending native prerequisites
+
+[`LinuxN04CheckpointOrderTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04CheckpointOrderTests.cs)
+contains eleven defined, unexecuted portable controls for reservation, replay, commitment,
+original-token cancellation, fault stickiness and real original-task barriers/joins. The
+detached `LinuxN04CheckpointOrder` owns no filesystem, process, listener or admission.
+These controls cannot establish N04 or physical native settlement.
+
+The independently prepared root helper/fixture still must authenticate its interpreter/image,
+actual original root/worker PID, starttime, UID4/GID4, image/argv and generated unit/cgroup;
+retain pidfds across STOP/CONT; recheck the same identities; and bind the intentional root
+replacement while leaving every production guard intact. The replacement must capture the
+same actual worker's SO_PEERCRED PID/UID/GID and zero request bytes/EOF, with genuine client
+PID-mismatch evidence before serialization. No pre-sent data frame or UID0 peer alone supplies
+those facts. It must use the unchanged request/root and external fixture bounds, join its
+original operations and the original worker/group/pumps, retain exact private results, and
+preserve unknown replacement state/accounts. A stalled/fast-exited helper, missing peer
+observation, expired budget, failed close or absent join is failure/inconclusive, never an
+N04 pass. Full image capture, compiler/formatter/tests, peer review, helper implementation,
+fixture composition and actual native validation remain pending.

@@ -20,6 +20,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly EvidenceProtectedLaunchInput _input;
     private readonly LinuxRunAccounts _accounts;
     private readonly LinuxRunWorkspace _workspace;
+    private LinuxN04CheckpointOwner? _n04;
     private readonly SupervisionWorkRegistry _ledger = new();
     private readonly SupervisionControlSequence _sequence;
     private readonly SupervisionSingleAttempt _run = new();
@@ -149,10 +150,20 @@ internal sealed class LinuxEmptyObservationControlServer
     private async Task RunOwnedAsync(Task dispatch, CancellationToken token)
     {
         await dispatch.ConfigureAwait(false);
-        try { await RunCoreAsync(token).ConfigureAwait(false); }
+        try
+        {
+            // Fixed private N04 image: acquisition belongs to the already registered original run.
+            // No caller/environment selector or detached checkpoint task exists.
+            _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+            await RunCoreAsync(token).ConfigureAwait(false);
+        }
         finally
         {
             var closed = true;
+            if (_n04 is not null)
+                try { await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error))
+                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
             try { _replyOrder.Dispose(); }
             catch (Exception error) when (Recoverable(error))
             { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); }
@@ -200,6 +211,9 @@ internal sealed class LinuxEmptyObservationControlServer
                         .WaitAsync(requests.Token).ConfigureAwait(false);
                     continue;
                 }
+                // This pause occurs before RegisterAccept's synchronous worker/name checks.
+                // It is separate from the irreversible EXIT admission-close barrier.
+                await _n04!.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
                 stage = LinuxControlFailureStage.Accept;
                 SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
                 lock (_executionGate)
@@ -221,6 +235,7 @@ internal sealed class LinuxEmptyObservationControlServer
                 lock (_executionGate)
                 {
                     if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
+                    _n04!.ReserveNextAcceptBeforeHandlerDispatch();
                     var control = _ledger.BeginControl();
                     stage = LinuxControlFailureStage.HandlerDispatch;
                     handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
@@ -240,6 +255,10 @@ internal sealed class LinuxEmptyObservationControlServer
             stage = LinuxControlFailureStage.AcceptCancel;
             try { accepts.Cancel(); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+            // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
+            try { await _n04!.CloseAndJoinAsync().ConfigureAwait(false); }
+            catch (Exception error) when (Recoverable(error))
+            { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
             // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
             // closes all results first to interrupt their original I/O, as before.
             var exitIntent = _exitIntent.Task.IsCompleted;
@@ -358,6 +377,7 @@ internal sealed class LinuxEmptyObservationControlServer
                     claim = _sequence.ClaimReady();
                     stage = LinuxControlFailureStage.ReadyData;
                     response = _worker.CreateReadyData(io.Token).ReadyBytes;
+                    await _n04!.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
                     break;
                 case EvidenceStopControlRequest:
                     stage = LinuxControlFailureStage.CleanupBound;
@@ -405,10 +425,13 @@ internal sealed class LinuxEmptyObservationControlServer
             {
                 stage = LinuxControlFailureStage.ReplyCommit;
                 _sequence.CompleteWrite(claim, true);
-                if (claim.Operation == EvidenceControlOperation.Ready)
+                var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
+                if (readyCommitted)
                     Interlocked.Exchange(ref _negativeReadyCommitted, 1);
                 committedExit = claim.Operation == EvidenceControlOperation.Exit;
                 claim = null;
+                if (readyCommitted)
+                    await _n04!.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
             }
         }
         catch (Exception error) when (Recoverable(error))
