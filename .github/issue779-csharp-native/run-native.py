@@ -17,20 +17,20 @@ import uuid
 
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
-SOURCE = 'a353970c67b7b2e02acaa248348dbff69efd3648'
-PARENT = '8eef98c502ad35ace08b36e77db2494580da38d5'
-SOURCE_MAP = '37442ad61b4280d8069e90701da561eb844d4fd94ae3a88017aa80aa33c641cc'
+SOURCE = '806301fd259197f7d448157795259489ac01d9f1'
+PARENT = '4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe'
+SOURCE_MAP = '3609d645da23c550e88fadb7f8df8175206c5fd4af02bc73341a2ec87b7fb009'
 PINS = {
     'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
     'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': '3f5519982287ea3248d1deef86cb0c13c6d38e5c544b4a1b8042ecad13d52acc',
-    'checkpoint-n01-n02-v5.sh': 'd33e633904a32c0f4a9a7bda5a8aab133444746cad66b81d70e80893411e857d',
+    'prepare-root-inputs-v2.sh': '0f214f68198b1e84047258b7d0cf8658af4db420c436646aa17fc064e2d760c8',
+    'checkpoint-n01-n02-v5.sh': 'd94f221faa7d1a89bbb9d1f66ab78431a1b2b98c6d676c1b29888e822ee6673f',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
-    'source-review.json': '4e79ac1eeae8087dcda6650a4a3c6b30098579261a34f2113d327167dd137800',
-    'acquire-inbound.sh': '9e6f5a5807d67fe42a8503d8d9643d6b33383292ccb72312b953ae92c2c57499',
+    'source-review.json': '671ab29e1ca020291182e4125c5ad050622f7ca89712b37254bf9317e8980268',
+    'acquire-inbound.sh': '47c6223ca999b3b598c28e58b86b3c9b82251b725b3a4d03e67b173f4e0b700c',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -203,7 +203,7 @@ def validate_build(receipt, maps):
                 and row['forced_cleanup'] is False, 'build-command-terminal')
     for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
         fact = receipt[phase]
-        require(fact['head'] == SOURCE and fact['count'] == 2821 and fact['source_map_sha256'] == SOURCE_MAP
+        require(fact['head'] == SOURCE and fact['count'] == 2823 and fact['source_map_sha256'] == SOURCE_MAP
                 and all(fact[name] is True for name in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')), 'build-source')
     require(set(receipt['artifacts']) == {'source', 'tool', 'runtime'}, 'build-map-set')
     for name, fact in receipt['artifacts'].items():
@@ -215,7 +215,7 @@ def validate_build(receipt, maps):
                 'node-schema')
         require(len(nodes['files']) == fact['file_count'] and len(nodes['files']) + len(nodes['directories']) == fact['node_count']
                 and sum(row['bytes'] for row in nodes['files'].values()) == fact['total_bytes'], 'node-counts')
-    require(receipt['artifacts']['source']['file_count'] == 2821, 'source-count')
+    require(receipt['artifacts']['source']['file_count'] == 2823, 'source-count')
 
 
 def absent(pid):
