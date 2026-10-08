@@ -29,7 +29,7 @@ public sealed class EvidenceNativeObservationFailureTests
         Assert.Null(EvidenceNativeObservationFailure.FilterCode(code));
 
     [Fact]
-    public void EveryClosedPhaseProducesExactlyFourBoundedFields()
+    public void EveryClosedPhaseProducesExactlyFiveBoundedFields()
     {
         foreach (var phase in Enum.GetValues<EvidenceNativeObservationPhase>())
         {
@@ -38,9 +38,9 @@ public sealed class EvidenceNativeObservationFailureTests
             Assert.True(Encoding.UTF8.GetByteCount(json) <= 1024);
             Assert.DoesNotContain("private-canary", json);
             using var parsed = JsonDocument.Parse(json);
-            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code" },
+            Assert.Equal(new[] { "schema", "phase", "error_kind", "diagnostic_code", "account_failure" },
                 parsed.RootElement.EnumerateObject().Select(p => p.Name).ToArray());
-            Assert.Equal("evidence-native-observation-failure-v1", parsed.RootElement.GetProperty("schema").GetString());
+            Assert.Equal("evidence-native-observation-failure-v2", parsed.RootElement.GetProperty("schema").GetString());
             Assert.Equal(phase.ToString(), parsed.RootElement.GetProperty("phase").GetString());
             Assert.Equal("Io", parsed.RootElement.GetProperty("error_kind").GetString());
             Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("diagnostic_code").ValueKind);
@@ -168,6 +168,101 @@ public sealed class EvidenceNativeObservationFailureTests
         var first = latch.First;
         Parallel.For(0, 32, _ => latch.Capture(EvidenceNativeObservationPhase.WorkerJoin, new Exception("later")));
         Assert.Same(first, latch.First);
+    }
+
+    [Fact]
+    public void FirstUtilityCauseSurvivesRollbackFailureAndFixedAccountWrapper()
+    {
+        var latch = new LinuxAccountFailureLatch();
+        latch.Capture(LinuxAccountPreparationStage.UtilityExecute, LinuxAccountUtilityStage.TerminalCheck,
+            LinuxRunAccountOperation.CreateUser, new IOException("first-canary"), 1, 17);
+        var first = latch.First;
+        latch.Capture(LinuxAccountPreparationStage.CleanupUtility, LinuxAccountUtilityStage.Stop,
+            LinuxRunAccountOperation.DeleteUser, new TimeoutException("rollback-canary"));
+        Assert.Same(first, latch.First);
+        var error = new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed, latch.First);
+        Assert.Equal(LinuxRunAccountFailure.CleanupFailed, error.Failure);
+        Assert.Null(error.InnerException);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate, error);
+        Assert.Same(first, root.AccountFailure);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, first!.ErrorKind);
+        Assert.Equal(17, first.ExecMainStatus);
+        Assert.DoesNotContain("canary", root.ToJson());
+    }
+
+    [Fact]
+    public void AccountCancellationRetainsOriginalTokenAndOnlyClosedData()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var first = LinuxAccountFailure.Capture(LinuxAccountPreparationStage.NamesAbsent,
+            LinuxAccountUtilityStage.Unknown, null, new OperationCanceledException(cancellation.Token));
+        var error = new LinuxRunAccountCancelledException(cancellation.Token, first);
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.IsAssignableFrom<OperationCanceledException>(error);
+        Assert.Null(error.InnerException);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate, error);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, root.ErrorKind);
+        Assert.Same(first, root.AccountFailure);
+    }
+
+    [Fact]
+    public void UnknownAccountEnumsNumbersAndCanaryInnerErrorsCannotEscape()
+    {
+        var data = LinuxAccountFailure.Capture((LinuxAccountPreparationStage)int.MaxValue,
+            (LinuxAccountUtilityStage)int.MaxValue, (LinuxRunAccountOperation)int.MaxValue,
+            new CanaryException("secret-ASEVD410", new IOException("inner-canary")),
+            int.MaxValue, -1, (LinuxSystemdStartError)int.MaxValue);
+        Assert.Equal(LinuxAccountPreparationStage.Unknown, data.PreparationStage);
+        Assert.Equal(LinuxAccountUtilityStage.Unknown, data.UtilityStage);
+        Assert.Null(data.Operation);
+        Assert.Null(data.ExecMainCode);
+        Assert.Null(data.ExecMainStatus);
+        Assert.Null(data.DBusCategory);
+        Assert.Null(data.DiagnosticCode);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unknown, data.ErrorKind);
+        Assert.DoesNotContain("canary", data.ToJson());
+        Assert.DoesNotContain("secret", data.ToJson());
+        Assert.Null(EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate,
+            new CanaryException("unknown", new LinuxRunAccountException(LinuxRunAccountFailure.NssFailed))).AccountFailure);
+    }
+
+    [Fact]
+    public void NestedAccountSchemaIsClosedBoundedAndDoesNotManufactureSamples()
+    {
+        foreach (var preparation in Enum.GetValues<LinuxAccountPreparationStage>())
+        foreach (var utility in Enum.GetValues<LinuxAccountUtilityStage>())
+        {
+            var data = LinuxAccountFailure.Capture(preparation, utility, LinuxRunAccountOperation.CreateResultsGroup,
+                new LinuxRunAccountException(LinuxRunAccountFailure.IdentityMismatch));
+            var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate,
+                new LinuxRunAccountException(LinuxRunAccountFailure.OperationFailed, data));
+            var json = root.ToJson();
+            Assert.True(Encoding.UTF8.GetByteCount(json) + 1 <= 1024);
+            using var parsed = JsonDocument.Parse(json);
+            var nested = parsed.RootElement.GetProperty("account_failure");
+            Assert.Equal(new[] { "preparation_stage", "utility_stage", "operation", "error_kind", "diagnostic_code",
+                "account_code", "exec_main_code", "exec_main_status", "dbus_category" },
+                nested.EnumerateObject().Select(p => p.Name).ToArray());
+            Assert.Equal(JsonValueKind.Null, nested.GetProperty("exec_main_code").ValueKind);
+            Assert.Equal(JsonValueKind.Null, nested.GetProperty("exec_main_status").ValueKind);
+            Assert.Equal("IdentityMismatch", nested.GetProperty("account_code").GetString());
+        }
+    }
+
+    [Fact]
+    public void AUtilityFirstProjectionIsNotReclassifiedByTheOuterNormalized410()
+    {
+        var first = LinuxAccountFailure.Capture(LinuxAccountPreparationStage.UtilityExecute,
+            LinuxAccountUtilityStage.Start, LinuxRunAccountOperation.CreateUser, new IOException("first"),
+            dbus: LinuxSystemdStartError.AccessDenied);
+        var latch = new LinuxAccountFailureLatch();
+        latch.Capture(LinuxAccountPreparationStage.UtilityExecute, LinuxAccountUtilityStage.Unknown,
+            LinuxRunAccountOperation.CreateUser, new LinuxRunAccountException(LinuxRunAccountFailure.OperationFailed), first: first);
+        Assert.Same(first, latch.First);
+        Assert.Equal(LinuxAccountUtilityStage.Start, latch.First!.UtilityStage);
+        Assert.Equal(LinuxSystemdStartError.AccessDenied, latch.First.DBusCategory);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, latch.First.ErrorKind);
     }
 
     private sealed class CanaryException(string message, Exception inner) : Exception(message, inner);

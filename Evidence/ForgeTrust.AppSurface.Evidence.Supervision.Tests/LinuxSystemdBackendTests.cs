@@ -173,4 +173,28 @@ public sealed class LinuxSystemdBackendTests
             ["User"] = "65010", ["Group"] = "65011", ["Type"] = "exec", ["KillMode"] = "control-group",
             ["RemainAfterExit"] = false, ["RuntimeMaxUSec"] = 10_000_000ul, ["TimeoutStopUSec"] = 2_000_000ul,
         });
+    [Fact]
+    public void StartErrorMappingUsesOnlyExactClosedNamesWithoutMessages()
+    {
+        (string Name, LinuxSystemdStartError Category)[] rows =
+        [
+            ("org.freedesktop.DBus.Error.AccessDenied", LinuxSystemdStartError.AccessDenied),
+            ("org.freedesktop.DBus.Error.InvalidArgs", LinuxSystemdStartError.InvalidArgs),
+            ("org.freedesktop.DBus.Error.NoReply", LinuxSystemdStartError.NoReply),
+            ("org.freedesktop.DBus.Error.ServiceUnknown", LinuxSystemdStartError.ServiceUnknown),
+            ("org.freedesktop.DBus.Error.UnknownMethod", LinuxSystemdStartError.UnknownMethod),
+            ("org.freedesktop.systemd1.UnitExists", LinuxSystemdStartError.UnitExists),
+            ("org.freedesktop.systemd1.LoadFailed", LinuxSystemdStartError.LoadFailed),
+            ("org.freedesktop.systemd1.NoSuchUnit", LinuxSystemdStartError.NoSuchUnit),
+        ];
+        foreach (var row in rows)
+        {
+            var reply = new DBusErrorReplyException(row.Name, "private-canary-message");
+            Assert.Equal(row.Category, LinuxSystemdBackend.ClassifyStartError(reply.ErrorName));
+        }
+        foreach (var name in new[] { null, "", "private-canary", "org.freedesktop.DBus.Error.AccessDenied\n",
+            "org.freedesktop.dbus.Error.AccessDenied", "org.freedesktop.systemd1.NewUnknownError" })
+            Assert.Equal(LinuxSystemdStartError.Other, LinuxSystemdBackend.ClassifyStartError(name));
+    }
+
 }
