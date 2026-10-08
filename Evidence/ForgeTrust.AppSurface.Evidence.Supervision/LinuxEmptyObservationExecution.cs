@@ -50,7 +50,10 @@ internal static class LinuxEmptyObservationExecution
         {
             try { failures.Capture(phase, error,
                 phase is EvidenceNativeObservationPhase.ServerRun or EvidenceNativeObservationPhase.ServerCompletion
-                    ? server?.FirstFailure : null); }
+                    ? server?.FirstFailure : null,
+                phase is EvidenceNativeObservationPhase.Custody or EvidenceNativeObservationPhase.CleanupCustody
+                    or EvidenceNativeObservationPhase.FileVerification or EvidenceNativeObservationPhase.AccountsClose
+                    ? workspace?.FirstCustodyFailure : null); }
             catch (Exception) { } // Diagnostic capture cannot replace the actual execution/cleanup error.
         }
         var failed = false;
