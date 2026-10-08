@@ -39,6 +39,9 @@ TOOLS = {
 }
 TOOLS["bash"] = ("/usr/bin/bash",)
 TOOLS["env"] = ("/usr/bin/env",)
+# Fixed negative-test parser interpreter; no caller executable or module path.
+TOOLS["python3.12"] = ("/usr/bin/python3.12",)
+PYTHON_STDLIB_ROOT = "/usr/lib/python3.12"
 TOOLS["ldconfig"] = ("/usr/sbin/ldconfig.real", "/sbin/ldconfig.real")
 
 
@@ -504,9 +507,75 @@ class Audit:
         if not stat.S_ISDIR(info.st_mode):
             reject("runpath-directory")
 
+    def require_fixed_python_bootstrap(self):
+        """Reject alternate archive/virtual-environment bootstrap before parser execution.
+
+        All parent directories are actual root-owned non-writable OS directories.
+        The fixture repeats these fixed absence checks immediately before invoking
+        the interpreter with -I -S -B. No caller package path is introduced.
+        """
+        for path in ("/usr/lib/python312.zip", "/usr/bin/pyvenv.cfg", "/usr/pyvenv.cfg"):
+            self.check()
+            self.resolve_directory(os.path.dirname(path))
+            if os.path.lexists(path):
+                reject("python-alternate-bootstrap")
+        self.check()
+
+    def pin_python_standard_library(self):
+        """Pin the complete fixed OS stdlib, including existing bytecode and native modules.
+
+        This is private native-test parser custody data. It grants no worker or
+        result authority. Root-owned non-writable directories are mandatory;
+        file aliases use the existing recorded OS-only link rule. No directory
+        alias, exclusion, caller path or package discovery is accepted. The
+        original audit deadline and node/file/byte limits cover both passes.
+        """
+        root = PYTHON_STDLIB_ROOT
+        canonical_path(root)
+        entries, hashes, native, pending = {}, {}, [], [root]
+        total = 0
+        while pending:
+            self.check()
+            path = pending.pop()
+            info = self.sample(path)
+            if path in entries or len(entries) >= MAX_TREE_NODES:
+                reject("python-stdlib-node-bound")
+            entries[path] = identity(info)
+            if stat.S_ISDIR(info.st_mode):
+                self.resolve_directory(path)
+                names = []
+                with os.scandir(path) as scan:
+                    for item in scan:
+                        self.check()
+                        canonical_path(item.path)
+                        if len(names) + len(entries) + len(pending) >= MAX_TREE_NODES:
+                            reject("python-stdlib-node-bound")
+                        names.append(item.path)
+                if identity(os.lstat(path)) != identity(info):
+                    reject("python-stdlib-directory-changed")
+                pending.extend(sorted(names, reverse=True))
+            elif stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+                resolved, _ = self.resolve_os(path)
+                actual = self.sample(resolved)
+                total += actual.st_size
+                if total > MAX_TREE_BYTES:
+                    reject("python-stdlib-byte-bound")
+                digest, prefix = self.pin_os(path)
+                hashes[path] = (digest, resolved)
+                if prefix.startswith(b"\x7fELF"):
+                    native.append(resolved)
+            else:
+                reject("python-stdlib-node-kind")
+        self.check()
+        if not hashes:
+            reject("python-stdlib-empty")
+        return (entries, hashes), sorted(set(native))
+
     def build(self, runtime, tool, include_tool, helper):
         self.roots = (runtime, tool, helper)
-        pending = list(self.commands.values())
+        self.require_fixed_python_bootstrap()
+        python_before, python_native = self.pin_python_standard_library()
+        pending = list(self.commands.values()) + python_native
         for root in self.roots:
             entries, hashes = self.inventory(root)
             self.trees[root] = (entries, hashes)
@@ -526,6 +595,9 @@ class Audit:
             if row["interpreter"]:
                 pending.append(row["interpreter"])
         # Recompute complete node/file/hash sets, not merely already-selected ELF files.
+        self.require_fixed_python_bootstrap()
+        if self.pin_python_standard_library()[0] != python_before:
+            reject("python-stdlib-before-after")
         for root in self.roots:
             if self.inventory(root) != self.trees[root]:
                 reject("deployment-before-after")

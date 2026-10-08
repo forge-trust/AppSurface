@@ -32,8 +32,8 @@ for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 806301fd259197f7d448157795259489ac01d9f1 ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == d94f221faa7d1a89bbb9d1f66ab78431a1b2b98c6d676c1b29888e822ee6673f && ${values[os-audit-script-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == 38b4904e30200e0c3b7bf41bab271494404facb72b7867f4172cf77e31b1294b && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -206,7 +206,7 @@ for kind in source tool runtime helper; do
    (.key|rel) and (.value|type=="object" and keys==["bytes","mode","sha256"] and
     (.mode|mode) and (.sha256|hash) and
     (.bytes|type=="number" and floor==. and .>=0 and .<=268435456))) and
-  (if $name=="source" then (.files|length)==2823 and
+  (if $name=="source" then (.files|length)==2827 and
     all(.files[]; .mode=="0644" or .mode=="0755") else true end)
  ' "${nodes[$kind]}" >"$work/$kind-schema.log"
  bounded /usr/bin/jq -r '.files|to_entries|sort_by(.key)[]|[.value.mode,.value.sha256,.key]|@tsv' "${nodes[$kind]}" >"$work/$kind-derived.tsv"

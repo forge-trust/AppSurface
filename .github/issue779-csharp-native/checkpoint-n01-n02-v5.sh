@@ -4,6 +4,12 @@ set -euo pipefail
 export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 readonly FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
+readonly NEGATIVE_CASE=N06 NEGATIVE_SOURCE_COUNT=2827
+readonly NEGATIVE_CORE_BASE=a358d47ef36939718536b13c27b038faf307299b
+readonly NEGATIVE_SOURCE_REVISION=5b2a125b0d5bc72d10b11aeea62176d4a0ac2fec NEGATIVE_SOURCE_CAPTURE_CLEAR=1
+readonly NEGATIVE_FIXTURE_REVIEW_CLEAR=1 NEGATIVE_RAW_STREAM_PRODUCER_CLEAR=1
+readonly NEGATIVE_PYTHON_TRUST_CLEAR=1 NEGATIVE_ROOT_TERMINAL_CLEAR=1
+readonly NEGATIVE_KERNEL_PARSER_SHA256=90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab
 readonly MAX_MANIFEST_BYTES=8388608 MAX_ROWS=32768 MAX_NODES=65536
 readonly MAX_INPUT_FILE_BYTES=2147483648 MAX_INPUT_TREE_BYTES=4294967296
 readonly MAX_NODE_JSON_BYTES=4194304 CORE_FILE_BYTES=268435456 CORE_TREE_BYTES=1073741824 CORE_NODES=8192
@@ -30,6 +36,8 @@ done
 if [[ $mode == prepare-only && -z $source_root ]]; then
  printf '%s\n' 'PREPARATION_ONLY:NO_INPUTS_VERIFIED:N01_NOT_RUN:N02_NOT_RUN'; exit 0
 fi
+((NEGATIVE_SOURCE_CAPTURE_CLEAR==1 && NEGATIVE_FIXTURE_REVIEW_CLEAR==1)) || fail negative-source-and-review-pending
+[[ $NEGATIVE_SOURCE_REVISION =~ ^[0-9a-f]{40}$ && $source_revision == "$NEGATIVE_SOURCE_REVISION" ]] || fail negative-source-pin
 ((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail N03-integration-review-pending
 [[ $OSTYPE == linux* ]] || fail Linux-x64
 for t in dd sha256sum stat find timeout head jq readelf awk sort cmp cp chmod chown install systemd-run systemctl getent setpriv strace date sleep od tr cut cat grep wc readlink uname setsid ps bash mv; do command -v "$t" >/dev/null || fail missing-trusted-tool; done
@@ -469,12 +477,13 @@ for key in source_root source_manifest source_manifest_sha256 source_nodes sourc
 [[ $n02_uid =~ ^[0-9]+$ && $n02_gid =~ ^[0-9]+$ ]] && ((n02_uid>0 && n02_gid>0 && n02_uid<4294967295 && n02_gid<4294967295)) || fail unprivileged-selection
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
- --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
+ --arg approved "$NEGATIVE_SOURCE_REVISION" --argjson source_count "$NEGATIVE_SOURCE_COUNT" --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-csharp-fdd-build-v5" and .exit==0 and
- .source_commit==$source and $source=="806301fd259197f7d448157795259489ac01d9f1" and
+ .source_commit==$source and $source==$approved and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
+ .source_before.count==$source_count and .source_after_assets.count==$source_count and .source_after_build.count==$source_count and .source_final.count==$source_count and .artifacts.source.file_count==$source_count and
  .artifacts.source.tsv_sha256==$st and .artifacts.tool.tsv_sha256==$pt and .artifacts.runtime.tsv_sha256==$rt
 ' "$build_receipt" >/dev/null || fail build-node-receipt-binding
 diagnostic_stage=source-input
@@ -628,12 +637,12 @@ cleanup() {
  left >/dev/null || bad=1
  if ((original!=0 || bad!=0 || success!=1)); then printf '%s\n' 'NATIVE_FIXTURE_FAILED:PATHS_AND_ACCOUNTS_PRESERVED'; exit 1; fi
  # Publication happens ONLY after joins/group checks and final original deadline check.
- try_bounded jq -jcS -n --arg g "$G" --arg source "$source_revision" --arg base "$base_revision" --arg policy "$policy_sha" --arg owner "$owner" --arg worker "$worker" --argjson n01 "$n01" --argjson n02 "$n02" --argjson n03 "$n03_exit" --arg n03sha "$n03_result_sha256" '{schema:"issue779-native-n01-n02-n03-fixture-v1",generation:$g,source_revision:$source,base_revision:$base,policy_sha256:$policy,owner_unit:$owner,worker_unit:$worker,n01_exit:$n01,n02_exit:$n02,n03_exit:$n03,n03_result_sha256:$n03sha,native_controls_executed:["N02","N03","N01"],file_inspection:"raw-bytes-sha-json-facts-only",canonical_verification:"actual-csharp-RootCustody",owned_process_groups_joined:true,trusted_enabled:false,remaining_thirteen_controls:"pending"}' >"$private/fixture-result.pending" || status=1
+ try_bounded jq -jcS -n --arg g "$G" --arg source "$source_revision" --arg base "$base_revision" --arg case "$NEGATIVE_CASE" --argjson root_exit "$negative_launch" --arg policy "$policy_sha" '{schema:"issue779-negative-slot-fixture-v1",generation:$g,source_revision:$source,base_revision:$base,control:$case,root_launch_join_status:$root_exit,root_stdout_bytes:0,worker_terminal_from_original_monitor:true,original_csharp_joins_required:true,account_disposition:"preserved-quarantined",native_acceptance:false,observation_only:true,policy_sha256:$policy,other_controls:"not-qualified-by-this-fixture"}' >"$private/fixture-result.pending" || status=1
  left >/dev/null || status=1
  ((status==0)) || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:PUBLICATION'; exit 1; }
  try_bounded mv -T -- "$private/fixture-result.pending" "$private/fixture-result.json" || exit 1
  left >/dev/null || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:LATE_PUBLICATION'; exit 1; }
- printf '%s\n' 'N01_N02_N03_TERMINAL:ONLY_ACTUAL_THREE_CASES'
+ printf '%s\n' 'NEGATIVE_SLOT_OBSERVATION_TERMINAL:NOT_ACCEPTANCE'
  left >/dev/null || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:LATE_TERMINAL_OUTPUT'; exit 1; }
  exit 0
 }
@@ -711,7 +720,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == 806301fd259197f7d448157795259489ac01d9f1 ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == "$NEGATIVE_SOURCE_REVISION" ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
@@ -949,93 +958,529 @@ diagnostic_stage=n01
 launched=1
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence supervise --request "$request" >"$log/n01.stdout" 2>"$log/n01.stderr") & launch_pid=$!
 pin_owned_pg "$launch_pid"
-# Observer is its own retained process group. It can only inspect this generated worker/path tuple.
-(ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" bash -c '
- set -euo pipefail; export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
- end=$1; worker=$2; host=$3; managed=$4; control=$5; account=$6; sample=$7
- now() { local u x; IFS=" " read -r u x </proc/uptime; printf "%s" "${u%%.*}"; }
- left() { local n; n=$(now); ((n<end)) || return 124; printf "%s" "$((end-n))"; }
- run() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
- start() { local text tail; text=$(run cat "/proc/$1/stat"); [[ ${text%% *} == "$1" ]]; tail=${text##*) }; read -r -a f <<<"$tail"; [[ ${f[19]:-} =~ ^[1-9][0-9]*$ ]]; printf "%s" "${f[19]}"; }
- host_pin=$(run stat -c "%d:%i:%s:%f" "$host"); host_hash=$(run sha256sum "$host"); host_hash=${host_hash:0:64}
- while left >/dev/null; do
-  code=0; facts=$(run systemctl show "$worker" -p LoadState -p MainPID) || code=$?
-  ((${#facts}<=4096)) || exit 1
-  pid=; load=; seen_pid=0; seen_load=0
-  while IFS="=" read -r key value; do
-   case "$key" in MainPID) ((seen_pid==0)) || exit 1; seen_pid=1; pid=$value ;; LoadState) ((seen_load==0)) || exit 1; seen_load=1; load=$value ;; *) exit 1 ;; esac
-  done <<<"$facts"
-  [[ $seen_pid == 1 && $seen_load == 1 && $pid =~ ^[0-9]+$ ]] || exit 1
-  if ((code!=0)); then [[ $code == 1 && $load == not-found && $pid == 0 ]] || exit 1; fi
-  if [[ $load == not-found && $pid == 0 ]]; then run sleep .02; continue; fi
-  [[ $code == 0 && $load == loaded ]] || exit 1
-  if [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/status ]]; then
-   s1=$(start "$pid") || exit 1
-   uid1=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
-   gid1=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
-   cg1=$(run cat "/proc/$pid/cgroup")
-   exe1=$(run readlink "/proc/$pid/exe") || exit 1
-   if [[ $exe1 != "$host" ]]; then
-    # env -i and the exec transition are pending, NEVER positive observations.
-    [[ $exe1 == /usr/bin/env ]] || exit 1; run sleep .02; continue
-   fi
-   [[ $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
-   image=$(run sha256sum "/proc/$pid/exe"); [[ ${image:0:64} == "$host_hash" ]] || exit 1
-   argv_file=${sample%.json}.argv
-   run head -c 16385 "/proc/$pid/cmdline" >"$argv_file"
-   size=$(run stat -c %s "$argv_file"); ((size>0 && size<=16384)) || exit 1
-   args=(); while IFS= read -r -d "" a; do args+=("$a"); ((${#args[@]}<=6)) || exit 1; done <"$argv_file"
-   [[ ${#args[@]} == 6 && ${args[0]} == "$host" && ${args[1]} == "$managed" && ${args[2]} == evidence && ${args[3]} == worker && ${args[4]} == --control && ${args[5]} == "$control" ]] || exit 1
-   uid2=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
-   gid2=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
-   cg2=$(run cat "/proc/$pid/cgroup"); exe2=$(run readlink "/proc/$pid/exe"); s2=$(start "$pid")
-   [[ $s1 == "$s2" && $uid1 == "$uid2" && $gid1 == "$gid2" && $cg1 == "$cg2" && $cg1 == "0::/system.slice/$worker" && $exe2 == "$host" && $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
-   IFS=: read -r -a us <<<"$uid1"; IFS=: read -r -a gs <<<"$gid1"
-   [[ ${#us[@]} == 4 && ${#gs[@]} == 4 ]] || exit 1
-   for v in "${us[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${us[0]}" ]] || exit 1; done
-   for v in "${gs[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${gs[0]}" ]] || exit 1; done
-   pw=$(run getent passwd "$account"); gr=$(run getent group "$account")
-   IFS=: read -r pn px pu rest <<<"$pw"; IFS=: read -r gn gx gg rest <<<"$gr"
-   [[ $pn == "$account" && $gn == "$account" && $pu == "${us[0]}" && $gg == "${gs[0]}" ]] || exit 1
-   run jq -jcS -n --argjson pid "$pid" --arg uid "$uid1" --arg gid "$gid1" --arg cg "$cg1" --arg ticks "$s1" '\''{pid:$pid,uid4:$uid,gid4:$gid,cgroup:$cg,start_time_ticks:$ticks,post_exec_image_pinned:true,exact_worker_arguments:true,ready_protocol_observed:false}'\'' >"$sample"
-   left >/dev/null; exit 0
-  fi
-  run sleep .02
- done; exit 1
-' -- "$work_end" "$worker" "$host" "$managed" "/run/appsurface-evidence-$G/worker/broker/control.sock" "${names[0]}" "$private/worker-live.json" >"$log/observer.stdout" 2>"$log/observer.stderr") & observer_pid=$!
-pin_owned_pg "$observer_pid"
-set +e; join_owned launch_pid; n01=$?; set -e
-if ((n01 != 0)); then
- printf 'FIXTURE_N01_LAUNCH_JOIN_STATUS:%d\n' "$n01" >&2
- fail N01-launch-outcome
-fi
-set +e; join_owned observer_pid; observed=$?; set -e
-# The join retires every fully settled registration; failed exits stay failed.
-[[ $n01 == 0 && $observed == 0 && -s $private/worker-live.json ]] || fail N01-outcome
-[[ $(bounded stat -c %s "$log/n01.stdout") -le 4096 && ! -s $log/n01.stderr ]] || fail N01-console-bound
-bounded jq -e 'keys==["ClaimKind","CleanupCompleted","Eligibility","ExecutionVerdict","Mode"] and .Mode=="Observation" and .ClaimKind=="ObservationOnly" and .Eligibility=="Informational" and .ExecutionVerdict=="Passed" and .CleanupCompleted==true' "$log/n01.stdout" >/dev/null || fail N01-summary
-absent_accounts
-workspace=/run/appsurface-evidence-$G; slot=$workspace/output/evidence
-[[ -d $slot && ! -L $slot && -z $(bounded find -P "$workspace/raw-results" -mindepth 1 -print -quit) ]] || fail final-workspace
-[[ $(bounded find -P "$slot" -mindepth 1 -maxdepth 1 -printf x | wc -c) == 3 ]] || fail final-file-set
-for name in evidence-plan.json evidence-manifest.json evidence-summary.json; do
- p=$slot/$name; absolute "$p"
- [[ -f $p && $(bounded stat -c '%u:%g:%a:%h' "$p") == 0:0:400:1 && $(bounded stat -c %s "$p") -le 20971520 ]] || fail final-file-custody
- h=$(bounded sha256sum "$p"); h=${h:0:64}
- bounded cp -- "$p" "$private/raw-$name"; bounded chmod 600 "$private/raw-$name"
- pin_file "$private/raw-$name" "$h" 20971520; pin_file "$p" "$h" 20971520
- bounded jq -e 'type=="object"' "$private/raw-$name" >/dev/null || fail final-JSON-inspection
- printf '%s  %s\n' "$h" "$name" >>"$private/final-files.sha256"
+
+# Fixed negative case: no caller case, PID, UID/GID, path or environment selector.
+set +e; join_owned launch_pid; negative_launch=$?; set -e
+[[ $negative_launch == 1 && -z $launch_pid && ! -s $log/n01.stdout ]] || fail negative-root-outcome
+[[ $(bounded stat -c '%u:%g:%a:%h' "$log/n01.stderr") == 0:0:600:1 ]] || fail negative-root-stream-owner
+[[ $(bounded stat -c %s "$log/n01.stderr") -le 14336 ]] || fail negative-root-stream-bound
+workspace=/run/appsurface-evidence-$G
+[[ -d $workspace && ! -L $workspace && $(bounded stat -c '%u:%a' "$workspace") == 0:750 ]] || fail negative-generation
+# The immutable holder currently emits hash/count JSON only. Independent raw stream retention is missing.
+# This fixed gate remains false until separately reviewed original-holder producer integration exists.
+((NEGATIVE_RAW_STREAM_PRODUCER_CLEAR==1 && NEGATIVE_PYTHON_TRUST_CLEAR==1 && NEGATIVE_ROOT_TERMINAL_CLEAR==1)) || fail negative-prerequisite-pending
+for alternate_python_path in /usr/lib/python312.zip /usr/bin/pyvenv.cfg /usr/pyvenv.cfg; do
+ [[ ! -e $alternate_python_path && ! -L $alternate_python_path ]] || fail negative-python-alternate-prefix
 done
-bounded jq -e '.Mode=="Observation" and .ClaimKind=="ObservationOnly" and .Eligibility=="Informational" and .ExecutionVerdict=="Passed" and .Metrics.CleanupCompleted==true and (.ResourceResults|length)==0 and (.ProducerResults|length)==0' "$private/raw-evidence-manifest.json" >/dev/null || fail manifest-result
-# Raw bytes/hash/JSON facts are inspection ONLY. Actual C# RootCustody owns canonical verification.
-bounded jq -e --arg source "$source_revision" '
- keys==["asevd402_observed","broker_exit","broker_pid","control","descriptor_supplied","kernel_peer_bound_to_owned_worker","native_acceptance","owned_process_groups_joined","ready_request_observed","request_bytes","schema","sent_bytes","source_commit","status","stream_custody","systemd_worker_authority","worker_exit","worker_pid","worker_stdout_bytes"] and
- .schema=="issue779-n03-peer-observation-v1" and .source_commit==$source and .control=="N03" and .status=="observed" and
- .worker_exit==1 and .broker_exit==0 and .worker_stdout_bytes==0 and .asevd402_observed==true and
- .kernel_peer_bound_to_owned_worker==true and .request_bytes==0 and .sent_bytes==0 and .ready_request_observed==false and .descriptor_supplied==false and .owned_process_groups_joined==true and
- .native_acceptance==false and .systemd_worker_authority==false and .stream_custody=="private-files-after-original-process-reap" and
- ([.worker_pid,.broker_pid]|all(.[]; type=="number" and floor==. and .>0 and .<=2147483647)) and .worker_pid!=.broker_pid
- ' "$log/n03/result.json" >/dev/null || fail N03-final-packet
-[[ $(bounded sha256sum "$log/n03/result.json") == "$n03_result_sha256  $log/n03/result.json" ]] || fail N03-result-changed
-remaining >/dev/null; success=1
+# Existing OS audit schema must contain this fixed interpreter and COMPLETE fixed stdlib graph.
+# Current donor producer does not populate it; promotion remains false until that source-owned gap is reviewed.
+bounded jq -e 'any(.files[];.path=="/usr/bin/python3.12") and any(.elf[];.path=="/usr/bin/python3.12")' "$os_audit" >/dev/null || fail negative-python-audit-pending
+ancestor /usr/lib/python3.12
+# Exact complete audited membership is rechecked before and after individual pins.
+negative_stdlib_exact() {
+ [[ -n $1 && ${#1} -le 1048576 && ${#2} -le 1048576 && $1 == "$2" ]]
+}
+negative_stdlib_inventory() {
+ ancestor /usr/lib/python3.12
+ [[ $(bounded find -P /usr/lib/python3.12 ! -type d ! -type f ! -type l -print -quit) == '' ]] || fail negative-stdlib-special-node
+ [[ $(bounded find -P /usr/lib/python3.12 \( ! -uid 0 -o ! -gid 0 -o \( ! -type l -a -perm /022 \) \) -print -quit) == '' ]] || fail negative-stdlib-mutable
+ bounded /usr/bin/bash -o pipefail -c '/usr/bin/find -P /usr/lib/python3.12 \( -type f -o -type l \) -print | LC_ALL=C /usr/bin/sort | /usr/bin/head -c 1048577'
+}
+stdlib_expected=$(bounded jq -er '[.files[]|select(.path|startswith("/usr/lib/python3.12/"))|.path]|sort|if length>0 then join("\n") else error("empty-fixed-stdlib") end' "$os_audit")
+stdlib_files=$(negative_stdlib_inventory)
+negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib-membership
+# Literal file aliases use the exact recorded root-owned chain; directory aliases reject.
+while IFS= read -r python_file; do
+ [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
+ python_hash=$(bounded jq -er --arg p "$python_file" '[.files[]|select(.path==$p)] as $rows | if ($rows|length)==1 then $rows[0].sha256 else error("missing-fixed-pin") end' "$os_audit")
+ verify_os_path "$python_file" "$python_hash"
+ if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
+  python_resolved=$python_file
+  if [[ $(bounded jq -r --arg p "$python_file" '[.aliases[]|select(.literal==$p)]|length' "$os_audit") == 1 ]]; then
+   python_alias=$(bounded jq -c --arg p "$python_file" ' .aliases[]|select(.literal==$p)' "$os_audit")
+   python_resolved=$(alias_walk "$python_alias")
+  fi
+  bounded jq -e --arg p "$python_resolved" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail negative-stdlib-elf-unreviewed
+ fi
+done <<<"$stdlib_files"
+stdlib_after=$(negative_stdlib_inventory)
+negative_stdlib_exact "$stdlib_expected" "$stdlib_after" || fail negative-stdlib-membership-after
+pin_file "$os_audit" "$os_audit_sha256" 1048576
+remaining >/dev/null
+bounded /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.12 -I -S -B - "$private" "$workspace" "$G" "$policy_sha" <<'NEGATIVE_PY'
+
+import hashlib,json,os,re,stat,sys
+CASE = 'N06'
+private,workspace,generation,policy_hash=sys.argv[1:]
+MAX_ROOT_STDERR=14336
+def require(v):
+    if not v: raise ValueError('negative-fixture-data-rejected')
+def pairs(items):
+    result={}; seen=set()
+    for k,v in items:
+        require(k.casefold() not in seen); seen.add(k.casefold()); result[k]=v
+    return result
+def decode(b):
+    return json.loads(b.decode('utf-8'),object_pairs_hook=pairs,parse_constant=lambda _:require(False))
+def fingerprint(s):
+    return (s.st_dev,s.st_ino,s.st_mode,s.st_nlink,s.st_uid,s.st_gid,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def parents(path):
+    require(path.startswith('/') and not path.endswith('/') and '//' not in path)
+    parts=path.split('/')[1:]; require(all(x and x not in ('.','..') for x in parts))
+    current=''
+    for part in parts[:-1]:
+        current+='/'+part; s=os.lstat(current)
+        require(stat.S_ISDIR(s.st_mode) and not stat.S_ISLNK(s.st_mode))
+def read_private(path,limit,uid=0,gid=0,mode=0o600):
+    parents(path); named=os.lstat(path)
+    require(stat.S_ISREG(named.st_mode) and named.st_nlink==1 and named.st_uid==uid
+            and named.st_gid==gid and stat.S_IMODE(named.st_mode)==mode and named.st_size<=limit)
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+    try:
+        before=os.fstat(fd); require(fingerprint(before)==fingerprint(named))
+        data=b''
+        while len(data)<=limit:
+            block=os.read(fd,min(65536,limit+1-len(data)))
+            if not block: break
+            data+=block
+        require(len(data)<=limit and len(data)==before.st_size)
+        require(fingerprint(os.fstat(fd))==fingerprint(before)
+                and fingerprint(os.lstat(path))==fingerprint(before))
+        return data
+    finally: os.close(fd)
+def save(name,data):
+    require('/' not in name and name not in ('.','..'))
+    p=private+'/'+name; require(not os.path.lexists(p))
+    fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+    try:
+        s=os.fstat(fd); require(stat.S_ISREG(s.st_mode) and s.st_nlink==1 and s.st_uid==s.st_gid==0)
+        offset=0
+        while offset<len(data):
+            n=os.write(fd,data[offset:]); require(n>0); offset+=n
+        os.fsync(fd); require(os.fstat(fd).st_size==len(data))
+    finally: os.close(fd)
+    require(read_private(p,len(data))==data)
+def ident(path,value,kind):
+    require(type(value) is dict and set(value)=={'device_major','device_minor','inode','uid','gid','mode','links','length'})
+    require(all(type(v) is int and v>=0 for v in value.values()))
+    parents(path); s=os.lstat(path)
+    require((kind=='d' and stat.S_ISDIR(s.st_mode)) or (kind=='f' and stat.S_ISREG(s.st_mode))
+            or (kind=='l' and stat.S_ISLNK(s.st_mode)))
+    measured={'device_major':os.major(s.st_dev),'device_minor':os.minor(s.st_dev),'inode':s.st_ino,
+              'uid':s.st_uid,'gid':s.st_gid,'mode':s.st_mode,'links':s.st_nlink,'length':s.st_size}
+    require(measured==value); return s
+"""Closed fixture data checks only. Never authenticate native actors or grant acceptance."""
+import base64
+import hashlib
+import io
+import json
+import re
+import tarfile
+
+# Replaced by the renderer from the exact frozen a358 C# enum declarations.
+ENUMS = {'EvidenceControlOperation': ['Ready', 'Stop', 'Wait', 'Exit', 'Run', 'Artifacts', 'Artifact', 'ApplicationStart', 'ResourceWait'], 'EvidenceNativeObservationErrorKind': ['Unknown', 'Admission', 'Accounts', 'OutputPipe', 'ControlLine', 'Cancelled', 'Timeout', 'Io', 'AccessDenied', 'Unsupported', 'Disposed', 'Argument', 'InvalidData', 'InvalidOperation'], 'EvidenceNativeObservationPhase': ['Unknown', 'CallerCancellation', 'ProtectedInput', 'JobDeadline', 'BackendConnect', 'OwnerActivation', 'Plan', 'AccountCreate', 'WorkspaceCreate', 'ListenerBind', 'WorkerCreate', 'WorkerStart', 'ServerCreate', 'ServerLifetime', 'ServerRun', 'ServerCompletion', 'WorkerExit', 'WorkerStop', 'WorkerCompletion', 'BeginTeardown', 'Custody', 'FileVerification', 'CleanupBegin', 'ServerCancel', 'ListenerClose', 'ServerJoin', 'WorkerJoin', 'CleanupCustody', 'AccountsClose', 'WorkerClose', 'CustodyClose', 'WorkspaceClose', 'OwnerFinalCheck', 'ServerLifetimeClose', 'JobClose', 'OwnerClose', 'InputClose', 'BackendClose', 'FinalDeadline', 'ResultCheck'], 'LinuxAccountPreparationStage': ['Unknown', 'NamesAbsent', 'ReserveUtility', 'UtilityCreate', 'UtilityExecute', 'IdentityRead', 'OwnershipVerify', 'CleanupCheck', 'CleanupNameCheck', 'CleanupUtility', 'FinalNamesAbsent', 'FinalOwnershipCheck'], 'LinuxAccountUtilityStage': ['Unknown', 'OwnerCheck', 'Pipes', 'BackendConnect', 'Recipe', 'Start', 'CloseWrites', 'UnitRead', 'TerminalCheck', 'ObservationDelay', 'BeginTeardown', 'Stop', 'GroupRead', 'OutputJoin', 'PipeDispose', 'BackendDispose', 'PhysicalSettlement', 'FinalOwnerCheck'], 'LinuxControlFailureStage': ['Unknown', 'PeerCheck', 'WorkerExitTask', 'RequestLifetime', 'AcceptLoop', 'HandlerJoin', 'CapacityWait', 'Accept', 'AcceptJoin', 'ControlRegistration', 'HandlerDispatch', 'RequestRead', 'RequestClassify', 'CleanupRegistration', 'Stop', 'WaitJoin', 'ReplyGate', 'ReadyAuthorization', 'ReadyClaim', 'ReadyData', 'ResponseData', 'WaitClaim', 'ExitClaim', 'ResponseWrite', 'ConnectionRelease', 'PostWriteCheck', 'ReplyCommit', 'HandlerFailureCommit', 'ReplyGateRelease', 'ControlRelease', 'CleanupRegistrationClose', 'ExitCommit', 'AcceptCancel', 'ListenerClose', 'PendingAcceptJoin', 'HandlersJoin', 'DescendantsStop', 'ControlsJoin', 'FinalCancellation', 'CleanupBound', 'OwnerCheck', 'ProtocolIncomplete', 'WorkerTerminalTaskCompleted', 'ReplyGateClose', 'ListenerState', 'ListenerCancellation', 'ListenerWorkspace', 'ListenerParent', 'ListenerSocketMetadata', 'ListenerSocketName', 'ListenerEndpoint', 'ListenerWorkerSelection', 'ListenerOwnerIdentity', 'ListenerWorkerIdentity', 'ListenerDescriptor', 'ListenerNativeAccept', 'ListenerAcceptedPeer', 'ProcessState', 'ProcessSelection', 'ProcessExpectedSample', 'ProcessExpectedPid', 'ProcessExpectedStartTime', 'ProcessExpectedLiveState', 'ProcessExpectedUid', 'ProcessExpectedGid', 'ProcessExpectedCgroup', 'ProcessInitialContinuity', 'ProcessRepeatedContinuity', 'ProcessReadContinuity', 'ProcessRetainedProcRoot', 'ProcessRetainedProcess', 'ProcessRetainedStatus', 'ProcessRetainedStat', 'ProcessRetainedCgroup', 'ProcessNamedProcRoot', 'ProcessNamedProcess', 'ProcessNamedStatus', 'ProcessNamedStat', 'ProcessNamedCgroup', 'ProcessFirstStatRead', 'ProcessFirstStatParse', 'ProcessStatusRead', 'ProcessStatusParse', 'ProcessCgroupRead', 'ProcessCgroupParse', 'ProcessLastStatRead', 'ProcessLastStatParse', 'ProcessFileSystemInspect', 'ProcessFileSystemType', 'ProcessDirectoryStat', 'ProcessDirectoryInode', 'ProcessDirectoryType', 'ProcessRetainedProcessDeviceMajor', 'ProcessRetainedProcessDeviceMinor', 'ProcessRetainedProcessInode', 'ProcessRetainedProcessUid', 'ProcessRetainedProcessGid', 'ProcessRetainedProcessMode', 'ProcessRetainedProcessMetadata', 'ListenerAdmissionDrain', 'ListenerSocketClose', 'ListenerNamedSocketClose', 'ListenerParentClose', 'ListenerNativeAcceptOperationAborted', 'ListenerNativeAcceptInterrupted', 'ListenerNativeAcceptConnectionAborted', 'ListenerNativeAcceptSocketOther', 'ListenerAcceptedClose'], 'LinuxCustodyNodeKind': ['Generation', 'Control', 'Broker', 'Output', 'RawResults', 'Slot', 'Descriptor', 'Socket', 'Plan', 'Manifest', 'Summary'], 'LinuxCustodyOperation': ['Unknown', 'Platform', 'Settlement', 'AccountOwner', 'NodeSelection', 'Open', 'RetainedStat', 'AncestorPolicy', 'OriginalPolicy', 'BaselineComparison', 'NamedOpen', 'NamedStat', 'NamedComparison', 'InventoryRead', 'InventoryDecode', 'InventoryPolicy', 'InventoryComparison', 'HashRead', 'HashEof', 'HashFinalize', 'HashComparison', 'Chown', 'Chmod', 'TerminalPolicy', 'OriginalOwnerClose', 'FileRead', 'FileVerification', 'AccountRelease', 'RootRecheck', 'Cancellation', 'HolderState', 'OwnerIdentity'], 'LinuxRunAccountFailure': ['InvalidData', 'IdentityMismatch', 'NssFailed', 'UnsupportedPlatform', 'OperationFailed', 'CleanupFailed'], 'LinuxRunAccountOperation': ['CreateUser', 'CreateResultsGroup', 'DeleteUser', 'DeleteGroup'], 'LinuxSystemdStartError': ['Other', 'AccessDenied', 'InvalidArgs', 'NoReply', 'ServiceUnknown', 'UnknownMethod', 'UnitExists', 'LoadFailed', 'NoSuchUnit'], 'SupervisionCustodyFailure': ['None', 'Cancelled', 'SettlementValidationFailed', 'PreflightFailed', 'MutationFailed', 'LocalCloseFailed', 'FinalNativeRecheckFailed']}
+CODES = frozenset(('ASEVD402','ASEVD404','ASEVD407','ASEVD409','ASEVD410','ASEVD420','ASEVD421'))
+ROOT_TERMINAL = b'ASEVD410: The protected empty Observation execution or final cleanup could not be established. Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.\n'
+WORKER_TERMINAL = b'ASEVD409: Fresh output allocation or activation failed. Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.\n'
+NEGATIVE_CAPS = {
+    'negative-setup.json':1024, 'negative-post-join.json':1024,
+    'negative-worker-projection.json':1024, 'negative-kernel-observation.json':4097,
+    'negative-worker-raw.json':4097, 'negative-root-failure.json':1024,
+    'negative-root-terminal.txt':1024, 'negative-descriptor.json':65536,
+    'negative-account-ids.tsv':128,
+    'n05-worker.stdout':0, 'n05-worker.stderr':2048,
+    'n06-worker.stdout':0, 'n06-worker.stderr':2048,
+}
+
+def require_data(value):
+    if not value: raise ValueError('negative-fixture-data-rejected')
+
+def unique_pairs(items):
+    result={}; folded=set()
+    for key,value in items:
+        require_data(key.casefold() not in folded)
+        folded.add(key.casefold()); result[key]=value
+    return result
+
+def decode_data(raw):
+    return json.loads(raw.decode('utf-8'),object_pairs_hook=unique_pairs,
+                      parse_constant=lambda _:require_data(False))
+
+def exact_object(value,keys):
+    require_data(type(value) is dict and set(value)==set(keys))
+
+def enum_data(value,name,nullable=False):
+    require_data(value is None and nullable or type(value) is str and value in ENUMS[name])
+
+def code_data(value):
+    require_data(value is None or type(value) is str and value in CODES)
+
+def family(value):
+    enum_data(value['error_kind'],'EvidenceNativeObservationErrorKind')
+    code_data(value['diagnostic_code'])
+
+def validate_failure(value):
+    """Exact v4 serializer member sets and finite values, including null projections."""
+    exact_object(value,('schema','phase','error_kind','diagnostic_code','account_failure','control_failure','custody_failure'))
+    require_data(value['schema']=='evidence-native-observation-failure-v4')
+    enum_data(value['phase'],'EvidenceNativeObservationPhase'); family(value)
+    account=value['account_failure']
+    if account is not None:
+        exact_object(account,('preparation_stage','utility_stage','operation','error_kind','diagnostic_code','account_code','exec_main_code','exec_main_status','dbus_category'))
+        enum_data(account['preparation_stage'],'LinuxAccountPreparationStage')
+        enum_data(account['utility_stage'],'LinuxAccountUtilityStage')
+        enum_data(account['operation'],'LinuxRunAccountOperation',True);family(account)
+        enum_data(account['account_code'],'LinuxRunAccountFailure',True)
+        enum_data(account['dbus_category'],'LinuxSystemdStartError',True)
+        code,status=account['exec_main_code'],account['exec_main_status']
+        require_data(code is None and status is None or type(code) is int and 1<=code<=6 and type(status) is int and 0<=status<=255)
+    control=value['control_failure']
+    if control is not None:
+        require_data(value['phase'] in ('ServerRun','ServerCompletion'))
+        exact_object(control,('stage','operation','error_kind','diagnostic_code'))
+        enum_data(control['stage'],'LinuxControlFailureStage')
+        enum_data(control['operation'],'EvidenceControlOperation',True);family(control)
+    custody=value['custody_failure']
+    if custody is not None:
+        require_data(value['phase'] in ('Custody','CleanupCustody','FileVerification','AccountsClose'))
+        exact_object(custody,('procedure','node_kind','operation','error_kind','diagnostic_code'))
+        enum_data(custody['procedure'],'SupervisionCustodyFailure')
+        enum_data(custody['node_kind'],'LinuxCustodyNodeKind',True)
+        enum_data(custody['operation'],'LinuxCustodyOperation');family(custody)
+    return value
+
+def validate_fixture_frames(raw,case):
+    """Seven exact LF frames, real producer raw bytes; returns detached data only."""
+    require_data(case in ('N05','N06') and type(raw) is bytes and 0<len(raw)<=14336)
+    require_data(raw.endswith(b'\n') and b'\r' not in raw)
+    lines=raw.splitlines(keepends=True)
+    require_data(len(lines)==7 and all(x.endswith(b'\n') for x in lines))
+    require_data(all(0<len(x)<=n for x,n in zip(lines,(1024,1024,1024,4097,4097,1024,1024))))
+    require_data(lines[6]==ROOT_TERMINAL)
+    setup,after,projection,kernel,worker,failure=[decode_data(x) for x in lines[:6]]
+    schema='issue779-n05-slot-inspection-v1' if case=='N05' else 'issue779-n06-symlink-inspection-v1'
+    keys=('schema','phase','parent','slot','sentinel','sha256') if case=='N05' else ('schema','phase','parent','target','link','target_sha256','sentinel','sha256')
+    exact_object(setup,keys);exact_object(after,keys)
+    require_data(setup['schema']==after['schema']==schema and setup['phase']=='setup' and after['phase']=='post_join')
+    require_data({k:v for k,v in setup.items() if k!='phase'}=={k:v for k,v in after.items() if k!='phase'})
+    exact_object(projection,('schema','origin','allocation','terminal_diagnostic','stdout_bytes','stderr_bytes','native_authority'))
+    require_data(projection['schema']=='issue779-'+case.lower()+'-joined-worker-output-v1'
+                 and projection['origin']=='joined-worker-output' and projection['terminal_diagnostic']=='ASEVD409'
+                 and type(projection['stdout_bytes']) is int and projection['stdout_bytes']==0
+                 and type(projection['stderr_bytes']) is int and 0<projection['stderr_bytes']<=2048
+                 and projection['native_authority'] is False)
+    alloc=projection['allocation'];exact_object(alloc,('schema','phase','operation','stageOutcome','terminalCode','errorClass','nativeErrno'))
+    require_data(alloc['schema']=='evidence-allocation-failure-v1' and alloc['phase']=='Allocation'
+                 and alloc['operation']=='CreateSlot' and alloc['stageOutcome']=='Failed'
+                 and alloc['terminalCode']=='StageFailed' and alloc['errorClass']=='Io'
+                 and (alloc['nativeErrno'] is None or type(alloc['nativeErrno']) is int and 1<=alloc['nativeErrno']<=4095))
+    exact_object(worker,('schema','stdout_base64','stderr_base64','stdout_bytes','stderr_bytes','native_authority'))
+    require_data(worker['schema']=='issue779-'+case.lower()+'-joined-worker-raw-v1' and worker['native_authority'] is False
+                 and worker['stdout_base64']=='' and type(worker['stdout_bytes']) is int and worker['stdout_bytes']==0
+                 and type(worker['stderr_bytes']) is int and 0<worker['stderr_bytes']<=2048
+                 and type(worker['stderr_base64']) is str)
+    stdout=base64.b64decode(worker['stdout_base64'],validate=True)
+    stderr=base64.b64decode(worker['stderr_base64'],validate=True)
+    require_data(base64.b64encode(stdout).decode('ascii')==worker['stdout_base64']
+                 and base64.b64encode(stderr).decode('ascii')==worker['stderr_base64']
+                 and stdout==b'' and len(stderr)==worker['stderr_bytes']==projection['stderr_bytes'])
+    worker_lines=stderr.splitlines(keepends=True)
+    require_data(len(worker_lines)==2 and worker_lines[1]==WORKER_TERMINAL and decode_data(worker_lines[0])==alloc)
+    validate_failure(failure)
+    return {'lines':lines,'kernel':kernel,'stdout':stdout,'stderr':stderr,'failure':failure}
+
+def inspect_retention(data,allowed):
+    """Canonical bounded USTAR whitelist inspection only, not a native result verifier."""
+    require_data(type(data) is bytes and 0<len(data)<=33619968)
+    names=[];total=0;values={};entries=[]
+    with tarfile.open(fileobj=io.BytesIO(data),mode='r:') as archive:
+        for member in archive:
+            require_data(member.name in allowed and member.name not in names and member.isfile()
+                         and member.mode==0o600 and member.uid==member.gid==member.mtime==0
+                         and not member.linkname and not member.pax_headers and not member.uname and not member.gname
+                         and 0<=member.size<=NEGATIVE_CAPS.get(member.name,8388608))
+            names.append(member.name);total+=member.size;require_data(total<=33554432+4096 and len(names)<=len(allowed))
+            stream=archive.extractfile(member);require_data(stream is not None)
+            with stream: content=stream.read(member.size+1)
+            require_data(len(content)==member.size);values[member.name]=content;entries.append((member.name,content))
+    require_data(names==sorted(names) and 'retention-selection.json' in values)
+    selection=decode_data(values['retention-selection.json'])
+    exact_object(selection,('schema','selection_status','data_file_count','data_bytes','missing_fixed_file_count'))
+    require_data(selection['schema']=='issue779-native-retention-selection-v1'
+                 and selection['selection_status'] in ('parent-absent','parent-empty','one-namespace')
+                 and type(selection['data_file_count']) is int and selection['data_file_count']==len(names)-1
+                 and type(selection['data_bytes']) is int and selection['data_bytes']==total-len(values['retention-selection.json'])
+                 and type(selection['missing_fixed_file_count']) is int and selection['missing_fixed_file_count']>=0)
+    canonical=io.BytesIO()
+    with tarfile.open(fileobj=canonical,mode='w:',format=tarfile.USTAR_FORMAT) as rebuilt:
+        for name,content in entries:
+            info=tarfile.TarInfo(name);info.size=len(content);info.mode=0o600;info.uid=info.gid=info.mtime=0
+            rebuilt.addfile(info,io.BytesIO(content))
+    require_data(canonical.getvalue()==data)
+    return values
+
+"""Strict detached negative-record consistency checks; no OS access or native authority."""
+import json
+import re
+
+MAX_JSON_BYTES = 4096
+MAX_STREAM_BYTES = 1024 * 1024
+MAX_RECEIVED_LIMIT = 16 * 1024 * 1024
+UINT32_MAX = (1 << 32) - 1
+UINT64_MAX = (1 << 64) - 1
+TOP = frozenset(('schema', 'generation', 'worker_unit', 'process', 'ready', 'terminal',
+                 'cgroup', 'pumps', 'joins', 'observation_only', 'native_authority', 'native_acceptance'))
+
+
+class KernelRecordRejected(ValueError):
+    """Closed data rejection, deliberately retaining no supplied values or cause text."""
+
+
+def _reject():
+    raise KernelRecordRejected('negative-kernel-data-rejected')
+
+
+def _require(value):
+    if not value:
+        _reject()
+
+
+def _uint(value, low, high):
+    _require(type(value) is int and low <= value <= high)
+
+
+def _digest(value):
+    _require(type(value) is str and re.fullmatch('[0-9a-f]{64}', value) is not None)
+
+
+def _object(value, keys):
+    _require(type(value) is dict and set(value) == set(keys))
+
+
+def _pairs(pairs):
+    result = {}
+    folded = set()
+    for key, value in pairs:
+        canonical = key.casefold()
+        _require(canonical not in folded)
+        folded.add(canonical)
+        result[key] = value
+    return result
+
+
+def _stream(value, expected_sha256, expected_bytes):
+    _object(value, ('received_bytes', 'retained_bytes', 'discarded_bytes', 'eof', 'failure', 'sha256'))
+    for key in ('received_bytes', 'retained_bytes'):
+        _uint(value[key], 0, MAX_STREAM_BYTES)
+        _require(value[key] == expected_bytes)
+    _uint(value['discarded_bytes'], 0, 0)
+    _require(value['eof'] is True and value['failure'] == 'None')
+    _digest(value['sha256'])
+    _require(value['sha256'] == expected_sha256)
+
+
+def check_kernel_record(raw, *, expected_generation, expected_uid, expected_gid,
+                        expected_pid, expected_starttime_ticks, expected_descriptor_sha256,
+                        expected_stdout_sha256, expected_stdout_bytes,
+                        expected_stderr_sha256, expected_stderr_bytes):
+    """Return True for detached data consistency only; never issue admission or acceptance.
+
+    ``raw`` is exactly a JSON object of at most 4096 UTF-8 bytes, optionally followed
+    by one LF. Expected values are caller data, not authenticated identities. The
+    original source-built holder and root-private stream capture must independently
+    establish provenance. No path, command, timer, descriptor or mutable lease is
+    consumed or created. Every rejection has one fixed message and no chained cause.
+    Both stream hashes/counts must come from full captured bytes outside this parser.
+    The negative-case terminal is fixed CLD_EXITED(1), status 1; zero and signals reject.
+    """
+    try:
+        _require(type(raw) is bytes and 0 < len(raw) <= MAX_JSON_BYTES + 1)
+        body = raw[:-1] if raw.endswith(b'\n') else raw
+        _require(0 < len(body) <= MAX_JSON_BYTES and body.startswith(b'{') and body.endswith(b'}'))
+        _require(type(expected_generation) is str
+                 and re.fullmatch('[0-9a-f]{32}', expected_generation) is not None
+                 and expected_generation != '0' * 32)
+        _uint(expected_uid, 1, UINT32_MAX - 1)
+        _uint(expected_gid, 1, UINT32_MAX - 1)
+        _uint(expected_pid, 1, (1 << 31) - 1)
+        _uint(expected_starttime_ticks, 1, UINT64_MAX)
+        for value in (expected_descriptor_sha256, expected_stdout_sha256, expected_stderr_sha256):
+            _digest(value)
+        _uint(expected_stdout_bytes, 0, MAX_STREAM_BYTES)
+        _uint(expected_stderr_bytes, 0, MAX_STREAM_BYTES)
+        value = json.loads(body.decode('utf-8', errors='strict'), object_pairs_hook=_pairs,
+                           parse_constant=lambda _: _reject())
+        _object(value, TOP)
+        _require(value['schema'] == 'issue779-negative-kernel-observation-v1')
+        _require(value['generation'] == expected_generation)
+        unit = 'appsurface-evidence-worker-' + expected_generation + '.service'
+        group = '/system.slice/' + unit
+        _require(value['worker_unit'] == unit)
+        process = value['process']
+        _object(process, ('pid', 'starttime_ticks', 'uid4', 'gid4', 'control_group'))
+        _uint(process['pid'], 1, (1 << 31) - 1)
+        _uint(process['starttime_ticks'], 1, UINT64_MAX)
+        _require(process['pid'] == expected_pid and process['starttime_ticks'] == expected_starttime_ticks)
+        for name, expected in (('uid4', expected_uid), ('gid4', expected_gid)):
+            ids = process[name]
+            _require(type(ids) is list and len(ids) == 4)
+            for identity in ids:
+                _uint(identity, 1, UINT32_MAX - 1)
+                _require(identity == expected)
+        _require(process['control_group'] == group)
+        ready = value['ready']
+        _object(ready, ('committed', 'descriptor_sha256'))
+        _require(ready['committed'] is True)
+        _digest(ready['descriptor_sha256'])
+        _require(ready['descriptor_sha256'] == expected_descriptor_sha256)
+        terminal = value['terminal']
+        _object(terminal, ('exec_main_pid', 'exec_main_code', 'exec_main_status', 'active_state', 'sub_state'))
+        _uint(terminal['exec_main_pid'], 1, (1 << 31) - 1)
+        _uint(terminal['exec_main_code'], 1, 1)
+        _uint(terminal['exec_main_status'], 1, 1)
+        _require(terminal['exec_main_pid'] == expected_pid)
+        _require((terminal['active_state'], terminal['sub_state']) in
+                 (('active', 'exited'), ('inactive', 'dead'), ('failed', 'failed')))
+        cg = value['cgroup']
+        _object(cg, ('exists', 'populated', 'frozen', 'device_major', 'device_minor', 'inode'))
+        _require(type(cg['exists']) is bool)
+        if cg['exists']:
+            _require(cg['populated'] is False and cg['frozen'] is False)
+            _uint(cg['device_major'], 0, UINT32_MAX)
+            _uint(cg['device_minor'], 0, UINT32_MAX)
+            _uint(cg['inode'], 1, UINT64_MAX)
+        else:
+            _require(all(cg[k] is None for k in ('populated', 'frozen', 'device_major', 'device_minor', 'inode')))
+        pumps = value['pumps']
+        _object(pumps, ('stdout', 'stderr', 'received_bytes', 'received_byte_limit', 'failure', 'discarded_bytes'))
+        _stream(pumps['stdout'], expected_stdout_sha256, expected_stdout_bytes)
+        _stream(pumps['stderr'], expected_stderr_sha256, expected_stderr_bytes)
+        _uint(pumps['received_bytes'], 0, MAX_RECEIVED_LIMIT)
+        _uint(pumps['received_byte_limit'], 1, MAX_RECEIVED_LIMIT)
+        _uint(pumps['discarded_bytes'], 0, 0)
+        _require(pumps['received_bytes'] == expected_stdout_bytes + expected_stderr_bytes
+                 and pumps['received_bytes'] <= pumps['received_byte_limit'] and pumps['failure'] == 'None')
+        _object(value['joins'], ('startup', 'pending_stop', 'monitor', 'server', 'pumps'))
+        _require(all(x is True for x in value['joins'].values()))
+        _require(value['observation_only'] is True and value['native_authority'] is False
+                 and value['native_acceptance'] is False)
+        return True
+    except (ValueError, TypeError, KeyError, OverflowError, RecursionError, UnicodeError):
+        raise KernelRecordRejected('negative-kernel-data-rejected') from None
+
+def body():
+    require(re.fullmatch('[0-9a-f]{32}',generation) is not None)
+    p=os.lstat(private); require(stat.S_ISDIR(p.st_mode) and p.st_uid==p.st_gid==0 and stat.S_IMODE(p.st_mode)==0o700)
+    raw=read_private(private+'/logs/n01.stderr',MAX_ROOT_STDERR)
+    require(read_private(private+'/logs/n01.stdout',0)==b'')
+    checked_frames=validate_fixture_frames(raw,CASE)
+    require(raw.endswith(b'\n')); lines=raw.splitlines(keepends=True)
+    require(len(lines)==7 and all(x.endswith(b'\n') and b'\r' not in x for x in lines))
+    require(all(len(x)<=limit for x,limit in zip(lines,(1024,1024,1024,4097,4097,1024,1024))))
+    setup,after,projection,kernel,raw_worker,failure=[decode(x) for x in lines[:6]]
+    schema='issue779-n05-slot-inspection-v1' if CASE=='N05' else 'issue779-n06-symlink-inspection-v1'
+    keys={'schema','phase','parent','slot','sentinel','sha256'} if CASE=='N05' else {'schema','phase','parent','target','link','target_sha256','sentinel','sha256'}
+    require(set(setup)==keys and set(after)==keys and setup['schema']==after['schema']==schema
+            and setup['phase']=='setup' and after['phase']=='post_join')
+    require({k:v for k,v in setup.items() if k!='phase'}=={k:v for k,v in after.items() if k!='phase'})
+    require(set(projection)=={'schema','origin','allocation','terminal_diagnostic','stdout_bytes','stderr_bytes','native_authority'})
+    require(projection['schema']=='issue779-'+CASE.lower()+'-joined-worker-output-v1'
+            and projection['origin']=='joined-worker-output' and projection['terminal_diagnostic']=='ASEVD409'
+            and type(projection['stdout_bytes']) is int and projection['stdout_bytes']==0
+            and type(projection['stderr_bytes']) is int and 0<projection['stderr_bytes']<=2048
+            and projection['native_authority'] is False)
+    alloc=projection['allocation']; require(set(alloc)=={'schema','phase','operation','stageOutcome','terminalCode','errorClass','nativeErrno'})
+    require(alloc['schema']=='evidence-allocation-failure-v1' and alloc['phase']=='Allocation'
+            and alloc['operation']=='CreateSlot' and alloc['stageOutcome']=='Failed'
+            and alloc['terminalCode']=='StageFailed' and alloc['errorClass']=='Io'
+            and (alloc['nativeErrno'] is None or type(alloc['nativeErrno']) is int and 1<=alloc['nativeErrno']<=4095))
+    validate_failure(failure)
+    require(lines[6]==ROOT_TERMINAL)
+    descriptor_path=workspace+'/worker/worker-control.json'
+    # Header supplies worker GID only as comparison data; final read authenticates the actual closed leaf.
+    ds=os.lstat(descriptor_path); require(ds.st_gid>0)
+    descriptor_bytes=read_private(descriptor_path,65536,0,ds.st_gid,0o440)
+    descriptor=decode(descriptor_bytes)
+    require(descriptor['schema']=='evidence-worker-linux-v1' and descriptor['unit']=='appsurface-evidence-worker-'+generation+'.service'
+            and descriptor['run_id']=='csharp/'+generation and descriptor['output_parent']==workspace+'/output'
+            and descriptor['descriptor_path']==descriptor_path and descriptor['policy_sha256']==policy_hash)
+    uid=descriptor['worker_uid']; gid=descriptor['worker_gid']
+    require(type(uid) is int and type(gid) is int and 0<uid<4294967295 and 0<gid<4294967295 and gid==ds.st_gid)
+    for key in ('subject_uid','subject_gid','worker_pid'):
+        require(type(descriptor[key]) is int and 0<descriptor[key]<4294967295)
+    parent=workspace+'/output'; ident(parent,after['parent'],'d')
+    require(after['parent']['uid']==uid and after['parent']['gid']==gid and after['parent']['mode']==0o40700)
+    if CASE=='N05':
+        slot=parent+'/evidence'; ident(slot,after['slot'],'d')
+        require(after['slot']['uid']==uid and after['slot']['gid']==gid and after['slot']['mode']==0o40700 and after['slot']['links']==2)
+        require(sorted(os.listdir(parent))==['evidence'] and sorted(os.listdir(slot))==['occupied-sentinel'])
+        sentinel=slot+'/occupied-sentinel'; expected=b'issue779-n05-occupied-slot-v1\n'
+    else:
+        target=parent+'/symlink-target'; link=parent+'/evidence'
+        ident(target,after['target'],'d'); before=ident(link,after['link'],'l')
+        require(after['target']['uid']==uid and after['target']['gid']==gid and after['target']['mode']==0o40700
+                and after['target']['links']==2 and after['link']['uid']==uid and after['link']['gid']==gid
+                and after['link']['mode']==0o120777 and after['link']['links']==1)
+        require(os.readlink(link)=='symlink-target' and fingerprint(os.lstat(link))==fingerprint(before))
+        require(after['target_sha256']==hashlib.sha256(b'symlink-target').hexdigest())
+        require(sorted(os.listdir(parent))==['evidence','symlink-target'] and sorted(os.listdir(target))==['target-sentinel'])
+        sentinel=target+'/target-sentinel'; expected=b'issue779-n06-symlink-target-v1\n'
+    ident(sentinel,after['sentinel'],'f')
+    full=read_private(sentinel,len(expected),uid,gid,0o600)
+    require(full==expected and after['sha256']==hashlib.sha256(full).hexdigest())
+    raw_dir=os.lstat(workspace+'/raw-results')
+    require(stat.S_ISDIR(raw_dir.st_mode) and raw_dir.st_uid==descriptor['subject_uid'] and raw_dir.st_gid>0
+            and stat.S_IMODE(raw_dir.st_mode)==0o710 and os.listdir(workspace+'/raw-results')==[])
+    # Pending source-bound producer publishes its ACTUAL original immutable full pair, never fabricated bytes.
+    import base64
+    require(set(raw_worker)=={'schema','stdout_base64','stderr_base64','stdout_bytes','stderr_bytes','native_authority'})
+    require(raw_worker['schema']=='issue779-'+CASE.lower()+'-joined-worker-raw-v1' and raw_worker['native_authority'] is False)
+    require(raw_worker['stdout_base64']=='' and type(raw_worker['stdout_bytes']) is int and raw_worker['stdout_bytes']==0)
+    require(type(raw_worker['stderr_bytes']) is int and 0<raw_worker['stderr_bytes']<=2048 and type(raw_worker['stderr_base64']) is str)
+    stdout=base64.b64decode(raw_worker['stdout_base64'],validate=True)
+    stderr=base64.b64decode(raw_worker['stderr_base64'],validate=True)
+    require(base64.b64encode(stdout).decode('ascii')==raw_worker['stdout_base64'] and base64.b64encode(stderr).decode('ascii')==raw_worker['stderr_base64'])
+    require(len(stderr)==raw_worker['stderr_bytes'])
+    require(stdout==b'' and len(stderr)==projection['stderr_bytes'])
+    expected_alloc=decode(stderr.splitlines(keepends=True)[0]); require(expected_alloc==alloc)
+    worker_terminal=b'ASEVD409: Fresh output allocation or activation failed. Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.\n'
+    require(len(stderr.splitlines(keepends=True))==2 and stderr.splitlines(keepends=True)[1]==worker_terminal)
+    require(type(kernel['process']['starttime_ticks']) is int)
+    check_kernel_record(lines[3],expected_generation=generation,expected_uid=uid,expected_gid=gid,
+        expected_pid=descriptor['worker_pid'],expected_starttime_ticks=kernel['process']['starttime_ticks'],
+        expected_descriptor_sha256=hashlib.sha256(descriptor_bytes).hexdigest(),
+        expected_stdout_sha256=hashlib.sha256(stdout).hexdigest(),expected_stdout_bytes=len(stdout),
+        expected_stderr_sha256=hashlib.sha256(stderr).hexdigest(),expected_stderr_bytes=len(stderr))
+    for name,data in zip(('negative-setup.json','negative-post-join.json','negative-worker-projection.json',
+                          'negative-kernel-observation.json','negative-worker-raw.json','negative-root-failure.json','negative-root-terminal.txt'),lines):
+        save(name,data)
+    save(CASE.lower()+'-worker.stdout',stdout)
+    save(CASE.lower()+'-worker.stderr',stderr)
+    save('negative-descriptor.json',descriptor_bytes)
+    save('negative-account-ids.tsv',('\t'.join(str(x) for x in (uid,gid,descriptor['subject_uid'],descriptor['subject_gid'],raw_dir.st_gid))+'\n').encode('ascii'))
+try: body()
+except Exception:
+    print('NEGATIVE_RECORDS_REJECTED',file=sys.stderr); sys.exit(1)
+
+NEGATIVE_PY
+# Forward AND reverse immutable NSS facts must still exist. Quarantine is expected, never absence.
+[[ $(bounded stat -c '%u:%g:%a:%h' "$private/negative-account-ids.tsv") == 0:0:600:1 ]] || fail negative-account-data
+IFS=$'\t' read -r wu wg su sg rg extra <"$private/negative-account-ids.tsv"
+[[ -z ${extra:-} ]] || fail negative-account-data
+for value in "$wu" "$wg" "$su" "$sg" "$rg"; do [[ $value =~ ^[1-9][0-9]*$ ]] && ((value<4294967295)) || fail negative-account-id; done
+for index in 0 1; do
+ n=${names[$index]}; uid=$wu; gid=$wg; ((index==0)) || { uid=$su; gid=$sg; }
+ forward=$(bounded getent passwd "$n"); reverse=$(bounded getent passwd "$uid")
+ [[ $forward == "$reverse" && $forward != *$'\n'* ]] || fail negative-user-NSS
+ IFS=: read -r pn px pu pg rest <<<"$forward"
+ [[ $pn == "$n" && $pu == "$uid" && $pg == "$gid" ]] || fail negative-user-identity
+done
+for index in 0 1 2; do
+ n=${names[$index]}; gid=$wg; ((index!=1)) || gid=$sg; ((index!=2)) || gid=$rg
+ forward=$(bounded getent group "$n"); reverse=$(bounded getent group "$gid")
+ [[ $forward == "$reverse" && $forward != *$'\n'* ]] || fail negative-group-NSS
+ IFS=: read -r gn gx gg members extra <<<"$forward"
+ [[ $gn == "$n" && $gg == "$gid" && -z $members && -z ${extra:-} ]] || fail negative-group-identity
+done
+# Original process-group cleanup and deadlines still run through the original EXIT trap.
+remaining >/dev/null; n01=$negative_launch; success=1
