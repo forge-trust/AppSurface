@@ -72,6 +72,18 @@
     "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
     "source_ready_sha256": "140953ee7a9d69e5323845ffee7feb25fd5357260f1a0130778ddafc785ead3c"
   },
+  "attempt22_acquisition_parent_failure": {
+    "actual_build_parent": "06a4a1c16e556d8f6b71a96509fef53d2201b2e0",
+    "build_receipt_sha256": "281ad44962218015dd97b59a7435572866a4bbb7c76053db4a2aafa231e9d138",
+    "correction": "Bind all four operational harness-parent constants to the intended normal parent.",
+    "head": "8e0ba4273a39d6a8a487767344ad0aef5e9741dd",
+    "n01_executed": false,
+    "native_acceptance": false,
+    "native_dispatched": false,
+    "obsolete_acquisition_parent": "66a9b1d2102e63501ca42eb5f1475a008c1e51e1",
+    "run": 37740286537,
+    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0"
+  },
   "capture_projection_sha256": "214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40",
   "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
   "composition_review_pending_at_preparation": true,
