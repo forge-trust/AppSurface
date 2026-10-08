@@ -214,6 +214,53 @@ public sealed class EvidenceEmptyObservationPlanTests
         Reject(() => EvidenceEmptyObservationPlan.FromInput(null!, CancellationToken.None));
     }
 
+    [Fact]
+    public void AbsentOptionalDiffResolvesTheSameValidNoDiffPlan()
+    {
+        var bytes = EvidenceCanonicalJson.Serialize(Policy());
+        var request = Request();
+        var optional = EvidenceEmptyObservationPlan.AsOptionalDiff(null);
+        Assert.False(optional.HasValue);
+
+        var actual = Resolve(request, bytes, optional);
+        var expected = Resolve(request, bytes);
+        Assert.Equal("empty", actual.Profile.Id);
+        Assert.Equal(expected.PlanDigest, actual.PlanDigest);
+        Assert.Equal(expected.PolicyDigest, actual.PolicyDigest);
+        Assert.Equal(expected.DiffDigest, actual.DiffDigest);
+    }
+
+    [Fact]
+    public void PresentEmptyOptionalDiffRemainsPresentAndRejectsBothRequestShapes()
+    {
+        var bytes = EvidenceCanonicalJson.Serialize(Policy());
+        var empty = Array.Empty<byte>();
+        var optional = EvidenceEmptyObservationPlan.AsOptionalDiff(empty);
+        Assert.True(optional.HasValue);
+        Assert.True(optional.GetValueOrDefault().IsEmpty);
+
+        Reject(() => Resolve(Request(), bytes, optional));
+        Reject(() => Resolve(Request(diff: empty), bytes, optional));
+    }
+
+    [Fact]
+    public void PresentOptionalDiffUsesTheDeclaredBytesAndUnchangedPlanDigests()
+    {
+        var bytes = EvidenceCanonicalJson.Serialize(Policy());
+        var diff = Diff("docs/B.md");
+        var request = Request(diff: diff);
+        var optional = EvidenceEmptyObservationPlan.AsOptionalDiff(diff);
+        Assert.True(optional.HasValue);
+        Assert.Equal(diff, optional.GetValueOrDefault().ToArray());
+
+        var actual = Resolve(request, bytes, optional);
+        var expected = Resolve(request, bytes, diff);
+        Assert.Equal(new[] { "docs/A.md", "docs/B.md" }, actual.ChangedPaths.Select(path => path.Path));
+        Assert.Equal(expected.PlanDigest, actual.PlanDigest);
+        Assert.Equal(expected.PolicyDigest, actual.PolicyDigest);
+        Assert.Equal(expected.DiffDigest, actual.DiffDigest);
+    }
+
     private static EvidencePolicy Policy() => new("sample", "1", "conservative",
     [
         new("empty", EvidenceProfileScope.Targeted, [], [], []),
