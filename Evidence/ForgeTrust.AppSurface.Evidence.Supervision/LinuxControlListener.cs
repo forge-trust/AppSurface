@@ -66,6 +66,8 @@ internal static class LinuxControlListenerPolicy
 /// fallback. The socket is listening only after all root:worker 0660 and retained-name checks succeed. Linux x64
 /// openat2/statx/fchmodat2 support is mandatory. The initial root socket may have restrictive umask permissions;
 /// creation grants no listening access before sealing. Worker permissions and unit grants are unchanged.
+/// <see cref="LinuxOwnedUnixEndPoint"/> preserves workspace ownership of the named socket across Socket disposal;
+/// standard UNIX serialization remains unchanged, and custody still reopens and compares the retained inode.
 ///
 /// Bind before worker launch; capture the actual worker PID/kernel tuple, publish the descriptor, then accept.
 /// The same retained worker identity is pinned for every connection; process continuity and actual SO_PEERCRED
@@ -181,7 +183,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
                 new("broker", "worker", 0, accounts.WorkerGid, 0x1c8));
             socket = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
             workspace.RequireOwnedBy(owner, accounts, token);
-            socket.Bind(new UnixDomainSocketEndPoint(workspace.ControlSocket));
+            socket.Bind(new LinuxOwnedUnixEndPoint(workspace.ControlSocket));
             named = OpenAt2(Fd(parent), LinuxControlListenerPolicy.SocketName, PathFlags, 0, ChildResolution);
             var created = LinuxProtectedMetadata.From(StatFd(named));
             LinuxControlListenerPolicy.RequireCreated(created);
