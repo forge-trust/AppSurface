@@ -226,7 +226,7 @@ internal sealed class LinuxEmptyObservationControlServer
                 if (exitIntent) await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
                 else await _listener.DisposeAsync().ConfigureAwait(false);
             }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
             if (pending is not null)
             {
                 stage = LinuxControlFailureStage.PendingAcceptJoin;
@@ -240,7 +240,7 @@ internal sealed class LinuxEmptyObservationControlServer
             {
                 stage = LinuxControlFailureStage.ListenerClose;
                 try { await _listener.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
             }
             stage = LinuxControlFailureStage.DescendantsStop;
             try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
@@ -388,7 +388,8 @@ internal sealed class LinuxEmptyObservationControlServer
         }
         catch (Exception error) when (Recoverable(error))
         {
-            _failures.Capture(stage, operation, error);
+            _failures.Capture(stage, operation, error,
+                stage == LinuxControlFailureStage.ListenerClose ? _listener.FirstFailure : null);
             if (claim is not null)
             {
                 try { _sequence.CompleteWrite(claim, false); }
@@ -416,7 +417,11 @@ internal sealed class LinuxEmptyObservationControlServer
         }
         }
         catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(stage, operation, error); throw; }
+        {
+            _failures.Capture(stage, operation, error,
+                stage == LinuxControlFailureStage.ListenerClose ? _listener.FirstFailure : null);
+            throw;
+        }
     }
 
     private Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)

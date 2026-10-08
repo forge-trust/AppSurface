@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
@@ -469,6 +470,24 @@ internal enum LinuxControlFailureStage
     ProcessRetainedProcessMode,
     /// <summary>Original complete retained PID-directory metadata equality guard.</summary>
     ProcessRetainedProcessMetadata,
+    /// <summary>Original listener admission drain failure, before fixed rejection wrapping.</summary>
+    ListenerAdmissionDrain,
+    /// <summary>Actual listening socket disposal failure; no successful close is inferred.</summary>
+    ListenerSocketClose,
+    /// <summary>Actual retained named-socket handle disposal failure.</summary>
+    ListenerNamedSocketClose,
+    /// <summary>Actual retained listener-parent handle disposal failure.</summary>
+    ListenerParentClose,
+    /// <summary>Unexpected native accept SocketException with the closed OperationAborted category.</summary>
+    ListenerNativeAcceptOperationAborted,
+    /// <summary>Unexpected native accept SocketException with the closed Interrupted category.</summary>
+    ListenerNativeAcceptInterrupted,
+    /// <summary>Unexpected native accept SocketException with the closed ConnectionAborted category.</summary>
+    ListenerNativeAcceptConnectionAborted,
+    /// <summary>Unexpected native accept SocketException outside the three named categories.</summary>
+    ListenerNativeAcceptSocketOther,
+    /// <summary>Actual retained accepted-connection disposal failure before original rethrow.</summary>
+    ListenerAcceptedClose,
 }
 
 /// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>
@@ -494,6 +513,20 @@ internal sealed class LinuxControlFailure
             operation is { } value && Enum.IsDefined(value) ? value : null,
             projected.ErrorKind, projected.DiagnosticCode);
     }
+    /// <summary>Projects a socket-error enum into four fixed native-accept diagnostic stages.</summary>
+    /// <param name="error">Already observed socket-error data; invalid or other values use SocketOther.</param>
+    /// <returns>A finite diagnostic stage, without retaining a number or authenticating any resource.</returns>
+    /// <remarks>
+    /// This helper never classifies intentional shutdown. The native adapter's existing exception filters
+    /// run first; only an unexpected SocketException from the actual accept reaches this projection.
+    /// </remarks>
+    internal static LinuxControlFailureStage NativeAcceptStage(SocketError error) => error switch
+    {
+        SocketError.OperationAborted => LinuxControlFailureStage.ListenerNativeAcceptOperationAborted,
+        SocketError.Interrupted => LinuxControlFailureStage.ListenerNativeAcceptInterrupted,
+        SocketError.ConnectionAborted => LinuxControlFailureStage.ListenerNativeAcceptConnectionAborted,
+        _ => LinuxControlFailureStage.ListenerNativeAcceptSocketOther,
+    };
     /// <summary>Serializes exactly four finite fields; this issues no authority or completion receipt.</summary>
     internal string ToJson() => "{\"stage\":\"" + Stage + "\",\"operation\":"
         + (Operation is { } operation ? "\"" + operation + "\"" : "null")

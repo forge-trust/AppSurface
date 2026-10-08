@@ -116,7 +116,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         _owner = owner; _accounts = accounts; _workspace = workspace;
         _socket = socket; _parent = parent; _namedSocket = namedSocket;
         _parentMetadata = parentMetadata; _socketMetadata = socketMetadata;
-        _accepts = new(AcceptActualAsync, CloseSocket, static connection => connection.DisposeAsync());
+        _accepts = new(AcceptActualAsync, CloseSocket, CloseAcceptedAsync);
     }
 
     /// <summary>Gets the fixed bound path as data; it cannot create another listener or authenticate a peer.</summary>
@@ -284,7 +284,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         try { await drain.ConfigureAwait(false); }
         catch (Exception error) when (Recoverable(error))
         {
-            lock (_gate) { _failures.Capture(LinuxControlFailureStage.ListenerState, null, error); Fail(); }
+            lock (_gate) { _failures.Capture(LinuxControlFailureStage.ListenerAdmissionDrain, null, error); Fail(); }
             throw LinuxControlListenerPolicy.Invalid();
         }
         lock (_gate) if (_failed || _accepts.Failed) throw LinuxControlListenerPolicy.Invalid();
@@ -359,6 +359,8 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         }
         catch (Exception error) when (Recoverable(error))
         {
+            if (stage == LinuxControlFailureStage.ListenerNativeAccept && error is SocketException socketError)
+                stage = LinuxControlFailure.NativeAcceptStage(socketError.SocketErrorCode);
             lock (_gate) { _failures.Capture(stage, null, error); Fail(); }
             throw LinuxControlListenerPolicy.Invalid();
         }
@@ -423,11 +425,14 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     {
         var failed = false;
         try { await drain.ConfigureAwait(false); }
-        catch (Exception error) when (Recoverable(error)) { failed = true; }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(LinuxControlFailureStage.ListenerAdmissionDrain, null, error); failed = true; }
         try { _namedSocket.Dispose(); }
-        catch (Exception error) when (Recoverable(error)) { failed = true; }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(LinuxControlFailureStage.ListenerNamedSocketClose, null, error); failed = true; }
         try { _parent.Dispose(); }
-        catch (Exception error) when (Recoverable(error)) { failed = true; }
+        catch (Exception error) when (Recoverable(error))
+        { _failures.Capture(LinuxControlFailureStage.ListenerParentClose, null, error); failed = true; }
         lock (_gate) failed |= _failed || _accepts.Failed;
         if (failed)
         {
@@ -443,7 +448,24 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         {
             try { _socket.Dispose(); }
             catch (Exception error) when (Recoverable(error))
-            { lock (_gate) Fail(); throw LinuxControlListenerPolicy.Invalid(); }
+            {
+                lock (_gate) { _failures.Capture(LinuxControlFailureStage.ListenerSocketClose, null, error); Fail(); }
+                throw LinuxControlListenerPolicy.Invalid();
+            }
+        }
+    }
+
+    /// <summary>Joins the original accepted-connection close and records its first failure before rethrowing.</summary>
+    /// <param name="connection">Actual connection already retained by the accept owner.</param>
+    /// <returns>The original close's joined outcome, without an extra dispatch or cancellation token.</returns>
+    /// <remarks>The portable owner still registers this callback before invocation and owns sticky close failure.</remarks>
+    private async ValueTask CloseAcceptedAsync(LinuxControlConnection connection)
+    {
+        try { await connection.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception error) when (Recoverable(error))
+        {
+            _failures.Capture(LinuxControlFailureStage.ListenerAcceptedClose, null, error);
+            throw;
         }
     }
 

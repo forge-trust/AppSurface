@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -7,6 +8,109 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Pure diagnostic projection/latching controls; none acquires a native owner or proves root execution.</summary>
 public sealed class EvidenceNativeObservationFailureTests
 {
+    [Theory]
+    [InlineData((int)SocketError.OperationAborted, (int)LinuxControlFailureStage.ListenerNativeAcceptOperationAborted)]
+    [InlineData((int)SocketError.Interrupted, (int)LinuxControlFailureStage.ListenerNativeAcceptInterrupted)]
+    [InlineData((int)SocketError.ConnectionAborted, (int)LinuxControlFailureStage.ListenerNativeAcceptConnectionAborted)]
+    [InlineData((int)SocketError.ConnectionReset, (int)LinuxControlFailureStage.ListenerNativeAcceptSocketOther)]
+    public void NativeAcceptSocketErrorsProjectOnlyFiniteStages(int error, int expected)
+    {
+        var stage = LinuxControlFailure.NativeAcceptStage((SocketError)error);
+        Assert.Equal((LinuxControlFailureStage)expected, stage);
+        var detail = LinuxControlFailure.Capture(stage, null, new SocketException(error));
+        Assert.Equal(stage, detail.Stage);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Unknown, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+        Assert.Null(detail.Operation);
+    }
+
+    [Theory]
+    [InlineData((int)LinuxControlFailureStage.ListenerAdmissionDrain)]
+    [InlineData((int)LinuxControlFailureStage.ListenerSocketClose)]
+    [InlineData((int)LinuxControlFailureStage.ListenerNamedSocketClose)]
+    [InlineData((int)LinuxControlFailureStage.ListenerParentClose)]
+    [InlineData((int)LinuxControlFailureStage.ListenerNativeAcceptOperationAborted)]
+    [InlineData((int)LinuxControlFailureStage.ListenerNativeAcceptInterrupted)]
+    [InlineData((int)LinuxControlFailureStage.ListenerNativeAcceptConnectionAborted)]
+    [InlineData((int)LinuxControlFailureStage.ListenerNativeAcceptSocketOther)]
+    [InlineData((int)LinuxControlFailureStage.ListenerAcceptedClose)]
+    public void ListenerClosureStagesKeepFourFieldsAndBoundedCanarySafeRootData(int stage)
+    {
+        var detail = LinuxControlFailure.Capture((LinuxControlFailureStage)stage, null,
+            new IOException("/private/canary/ASEVD402", new InvalidOperationException("inner-canary")));
+        Assert.Equal((LinuxControlFailureStage)stage, detail.Stage);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, detail.ErrorKind);
+        Assert.Null(detail.DiagnosticCode);
+        using var parsed = JsonDocument.Parse(detail.ToJson());
+        Assert.Equal(new[] { "stage", "operation", "error_kind", "diagnostic_code" },
+            parsed.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("operation").ValueKind);
+        Assert.Equal(JsonValueKind.Null, parsed.RootElement.GetProperty("diagnostic_code").ValueKind);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun,
+            new InvalidOperationException("outer-canary"), detail);
+        Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+        Assert.DoesNotContain("canary", root.ToJson());
+        Assert.DoesNotContain("/private/", root.ToJson());
+    }
+
+    [Fact]
+    public void UnknownSocketErrorValuesClampWithoutBecomingShutdownOrRawNumbers()
+    {
+        foreach (var error in new[] { -1, int.MaxValue })
+        {
+            var stage = LinuxControlFailure.NativeAcceptStage((SocketError)error);
+            Assert.Equal(LinuxControlFailureStage.ListenerNativeAcceptSocketOther, stage);
+            var detail = LinuxControlFailure.Capture(stage, (EvidenceControlOperation)(-1),
+                new InvalidOperationException("ASEVD402-private-canary"));
+            Assert.Null(detail.Operation);
+            Assert.Null(detail.DiagnosticCode);
+            Assert.DoesNotContain("canary", detail.ToJson());
+            Assert.DoesNotContain(error.ToString(System.Globalization.CultureInfo.InvariantCulture), detail.ToJson());
+        }
+    }
+
+    [Fact]
+    public void PreciseListenerFaultSurvivesAdmissionAndRootClosureWrappers()
+    {
+        var listener = new LinuxControlFailureLatch();
+        var original = new SocketException((int)SocketError.ConnectionAborted);
+        listener.Capture(LinuxControlFailure.NativeAcceptStage(original.SocketErrorCode), null, original);
+        var first = listener.First;
+        var wrapped = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxControlListenerPolicy.RequireSealed(default, 123));
+        listener.Capture(LinuxControlFailureStage.ListenerAdmissionDrain, null, wrapped);
+        Assert.Same(first, listener.First);
+        var server = new LinuxControlFailureLatch();
+        server.Capture(LinuxControlFailureStage.ListenerClose, EvidenceControlOperation.Exit, wrapped, listener.First);
+        Assert.Same(first, server.First);
+        var attempt = new SupervisionSingleAttempt(); attempt.Claim();
+        var outerError = Assert.Throws<EvidenceAdmissionException>(attempt.Claim);
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun, outerError, server.First);
+        Assert.Equal("ASEVD410", root.DiagnosticCode);
+        Assert.Equal(LinuxControlFailureStage.ListenerNativeAcceptConnectionAborted, root.ControlFailure!.Stage);
+        Assert.Null(root.ControlFailure.Operation);
+        Assert.Null(root.ControlFailure.DiagnosticCode);
+        Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+    }
+
+    [Fact]
+    public void EarlierServerFaultStillWinsAgainstListenerClosureAndConcurrentLaterFailures()
+    {
+        var server = new LinuxControlFailureLatch();
+        server.Capture(LinuxControlFailureStage.ResponseWrite, EvidenceControlOperation.Ready,
+            new IOException("first-canary"));
+        var first = server.First;
+        var listener = new LinuxControlFailureLatch();
+        listener.Capture(LinuxControlFailureStage.ListenerSocketClose, null,
+            new InvalidOperationException("later-canary"));
+        Parallel.For(0, 16, _ => server.Capture(LinuxControlFailureStage.ListenerClose, null,
+            new IOException("wrapper-canary"), listener.First));
+        Assert.Same(first, server.First);
+        Assert.Equal(LinuxControlFailureStage.ResponseWrite, server.First!.Stage);
+        Assert.Equal(EvidenceControlOperation.Ready, server.First.Operation);
+        Assert.DoesNotContain("canary", server.First.ToJson());
+    }
+
     [Theory]
     [InlineData(-1, 0x9fa0, (int)LinuxControlFailureStage.ProcessFileSystemInspect)]
     [InlineData(1, 0x9fa0, (int)LinuxControlFailureStage.ProcessFileSystemInspect)]

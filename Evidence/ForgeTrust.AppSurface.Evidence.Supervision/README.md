@@ -1024,3 +1024,41 @@ PID-directory UID mismatch: numeric UID values and its temporal relation to EXIT
 `SupervisionAcceptOwnership<T>.RegisterAccept` and `RegisterAdmissionClose` return portable procedure handles with the original `Task` and a one-time `Dispatch` operation. Registration does not invoke the supplied native callback. The enclosing listener can therefore combine its existing worker precheck with reservation atomically, release its gate and the server execution gate, and then dispatch. Closing admission joins a reserved accept even if its caller has not dispatched yet; forgetting to dispatch leaves that original work owned and cannot establish successful cleanup. Repeated closure reservations share the original completion, and a redundant dispatch gate cannot release the first reservation. These internal handles provide bookkeeping only and cannot construct a Linux listener, process identity or protected admission.
 
 The [control server](LinuxEmptyObservationControlServer.cs) reserves the actual accept under its execution gate and dispatches afterward. The [listener](LinuxControlListener.cs) reserves the pending operation under the same gate as its worker prechecks, and reserves admission closure before releasing that gate. Existing callbacks, endpoint/name checks, peer authentication and sticky failures remain required. Three additional [portable ownership controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptOwnershipTests.cs) exercise the registration/closure gap, callback dispatch outside an enclosing gate, and repeated closure while an original accept remains reserved. They supply no Linux execution or physical-exit evidence.
+
+### Listener closure first-fault diagnostics
+
+Attempt28 retained the closed `ServerRun / ListenerClose / Admission / ASEVD402` control record with
+no operation, wrapped by root `ASEVD410`. It did not retain the original socket error, failed native
+close operation or exact admission-drain cause. This is a measured checkpoint, not a diagnosis of
+`ConnectionAborted`, process identity change or successful EXIT.
+
+The [listener](LinuxControlListener.cs) captures listening-socket, retained named-socket and parent-handle
+disposal failures before their original failure handling. Its instance accepted-connection close wrapper
+awaits the original `DisposeAsync()` ValueTask, captures `ListenerAcceptedClose` on failure and rethrows
+the same exception. The portable owner still reserves the original callback and joins its outcome;
+no extra dispatch, token or close attempt is introduced. Admission-drain wrapping retains an earlier
+listener record. Existing closure catches in the [server](LinuxEmptyObservationControlServer.cs) now
+forward that actual `FirstFailure` through the existing [first-fault latch](EvidenceNativeObservationFailure.cs).
+An already latched server fault still wins. All original closes, failure flags, quarantine, task joins,
+exception filters, cancellation tokens, deadlines and peer/name/process checks remain required.
+
+`LinuxControlFailure.NativeAcceptStage(SocketError)` maps unexpected native accept errors to exactly
+`ListenerNativeAcceptOperationAborted`, `ListenerNativeAcceptInterrupted`,
+`ListenerNativeAcceptConnectionAborted` or `ListenerNativeAcceptSocketOther`. Invalid enum data also uses
+`SocketOther`. This pure internal projection is called only after the existing intentional-shutdown
+filters, only for a `SocketException` at the actual native accept checkpoint. It does not classify shutdown,
+change exception families, suppress rejection or retain a numeric error. All nine added stages use the
+existing four-field control object, six-field v3 root envelope and 1KiB bound; no raw exception, message,
+path, process ID or socket-error number is published.
+
+The [pinned .NET 10.0.12 accept source](https://github.com/dotnet/runtime/blob/4271d88e0aebf3d04f188f1334c2220d80555ef6/src/libraries/System.Net.Sockets/src/System/Net/Sockets/Socket.Tasks.cs#L1351-L1375)
+throws cancellation for abort errors only when the original token is canceled; otherwise it constructs
+a `SocketException`. The existing owned-close adapter already recognizes `OperationAborted` and
+`Interrupted`. `ConnectionAborted` remains an unexpected sticky failure and a source-supported hypothesis,
+not attempt28's measured cause. No shutdown filter is widened by this diagnostic change.
+
+Sixteen new pure cases in [EvidenceNativeObservationFailureTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/EvidenceNativeObservationFailureTests.cs)
+cover all four socket categories, all nine stage projections, invalid enum/canary rejection, precise
+listener-to-server/root wrapping and concurrent server-first precedence. They are defined and unexecuted
+at this source freeze. Native socket disposal behavior and N01–N16 acceptance still require separate
+actual Linux evidence; this source preparation issues no capability, lease, proof or successful-close fact.
