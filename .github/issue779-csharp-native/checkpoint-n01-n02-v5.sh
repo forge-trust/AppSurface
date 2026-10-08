@@ -709,15 +709,16 @@ n03_validate_event_data() {
 }
 n03_run() (
  set -euo pipefail; umask 077
+ n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
  [[ $# == 11 && $EUID == 0 && $source_revision == 31c9ff5c8782102e0917e0c992bbdecc35e115d0 ]] || fail N03-input
- local helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
- local broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
- local n03_broker_pid= n03_worker_pid= release_fd= read_fd= dir_fd= socket_pin= first_failure= result_status=rejected
- local n03_startup_active=0
- local broker_exit= worker_exit=0 sampled_pid= sampled_start= broker_actual_pid= trace_peer_seen=0 observed=0
- local broker_pw worker_pw group_row bu bg wu wg gu gid peer_pid candidate broker_ready peer_ready eof_ready
- local parent=/run/appsurface-evidence-n03-peers n03dir n03log sock before_dir after_dir current_cgroup
- declare -A owned_start=()
+ helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
+ broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
+ n03_broker_pid= n03_worker_pid= release_fd= read_fd= dir_fd= socket_pin= first_failure= result_status=rejected
+ n03_startup_active=0
+ broker_exit= worker_exit=0 sampled_pid= sampled_start= broker_actual_pid= trace_peer_seen=0 observed=0
+ broker_pw= worker_pw= group_row= bu= bg= wu= wg= gu= gid= peer_pid= candidate= broker_ready= peer_ready= eof_ready=
+ parent=/run/appsurface-evidence-n03-peers n03dir= n03log= sock= before_dir= after_dir= current_cgroup=
+ declare -gA owned_start=()
  n03dir=$parent/$G; n03log=$log/n03; sock=$n03dir/broker/control.sock
  n03_cleanup() {
   local original=$? bad=0 s name code=0
@@ -732,7 +733,7 @@ n03_run() (
   done
   if [[ -n $read_fd ]]; then exec {read_fd}<&- || bad=1; fi
   if [[ -n $dir_fd ]]; then
-   s=$(try_bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$BASHPID/fd/$dir_fd") || bad=1
+   s=$(try_bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$n03_fd_owner_pid/fd/$dir_fd") || bad=1
    [[ $s == "$before_dir" ]] || bad=1; exec {dir_fd}<&- || bad=1
   fi
   left >/dev/null || bad=1
@@ -754,7 +755,7 @@ n03_run() (
  [[ $startup_kib =~ ^[1-9][0-9]*$ ]] && ((startup_kib<=262144)) || fail N03-file-limit
  # No expiry is created here. The helper uses work_end*1000, exactly the inherited uptime domain.
  remaining >/dev/null; ((hard_end-work_end==30 && hard_end-fixture_start==600)) || fail N03-clock-binding
- local n03_startup_end; n03_startup_end=$(monotonic) || fail N03-clock-binding
+ n03_startup_end=; n03_startup_end=$(monotonic) || fail N03-clock-binding
  n03_startup_end=$((n03_startup_end+15)); ((n03_startup_end<=work_end)) || n03_startup_end=$work_end
  n03_startup_check() { local now; now=$(monotonic) || fail N03-clock-binding; ((now<n03_startup_end && now<work_end)) || fail N03-startup-bound; }
  n03_startup_active=1; n03_startup_check
@@ -769,10 +770,10 @@ n03_run() (
  [[ $bu != "$wu" && $bg == 65534 && $wg == 65534 && $gid == 65534 ]] || fail N03-NSS-relationship
  # Separate complete bundle. Root transport seals it; this procedure never copies into product/tool.
  ancestor "$helper_root"; [[ $helper_generation =~ ^[0-9a-f]{32}$ && $helper_root == /var/lib/appsurface-evidence-n03-helpers/$helper_generation/bundle ]] || fail N03-helper-namespace
- local hentry=$helper_root/NativePeerBroker.dll
+ hentry=$helper_root/NativePeerBroker.dll
  verify_tree "$helper_root" "$helper_map" "$helper_map_sha" "$helper_nodes" "$helper_nodes_sha" tool 1 0
  pin_file "$hentry" "$helper_entry_sha" "$CORE_FILE_BYTES"
- local p=$helper_root perms
+ p=$helper_root perms=
  while :; do
   perms=$(bounded stat -c %a -- "$p"); (((8#$perms & 0001)!=0)) || fail N03-helper-not-searchable
   [[ $p == / ]] && break; p=${p%/*}; [[ -n $p ]] || p=/
@@ -785,11 +786,11 @@ n03_run() (
  bounded install -d -o 0 -g 0 -m 700 "$n03log"
  exec {dir_fd}<"$n03dir/broker"
  before_dir=$(bounded stat -c '%d:%i:%u:%g:%a' "$n03dir/broker")
- [[ $(bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$BASHPID/fd/$dir_fd") == "$before_dir" ]] || fail N03-retained-parent
+ [[ $(bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$n03_fd_owner_pid/fd/$dir_fd") == "$before_dir" ]] || fail N03-retained-parent
  current_cgroup=$(bounded cat /proc/self/cgroup)
  [[ $current_cgroup =~ ^0::/system.slice/issue779-native-tool-[0-9a-f]{32}-[0-9]+\.service$ ]] || fail N03-root-containment
  # Actual ELF/loader/entry/root before-interpreter audit belongs to reviewed root caller, not this JSON.
- local fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
+ fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
  [[ $(bounded getent passwd "$broker_name") == "$broker_pw" && $(bounded getent passwd "$worker_name") == "$worker_pw" && $(bounded getent group "$shared_name") == "$group_row" ]] || fail N03-NSS-drift
  n03_startup_check
  exec {release_fd}> >(
@@ -858,7 +859,7 @@ n03_run() (
   remaining >/dev/null
  }
  # Broker image has execed through env/setpriv in the original registered session.
- local broker_parent; broker_parent=$(bounded awk '$1=="PPid:"{print $2}' "/proc/$broker_actual_pid/status")
+ broker_parent=; broker_parent=$(bounded awk '$1=="PPid:"{print $2}' "/proc/$broker_actual_pid/status")
  [[ $broker_parent == "$BASHPID" ]] || fail N03-broker-parent
  n03_sample "$broker_actual_pid" "$bu" "$hentry" "$n03log/broker-live.json" "$broker_parent" || fail N03-broker-live
  [[ $(bounded jq -r .start_ticks "$n03log/broker-live.json") == "$(bounded jq -r .broker_start_ticks <<<"$broker_ready")" ]] || fail N03-broker-start
@@ -874,7 +875,7 @@ n03_run() (
  while kill -0 "$n03_worker_pid" 2>/dev/null; do
   n03_startup_check; remaining >/dev/null
   if [[ -r /proc/$n03_worker_pid/task/$n03_worker_pid/children ]]; then
-   local children; IFS= read -r children <"/proc/$n03_worker_pid/task/$n03_worker_pid/children" || :
+   children=; IFS= read -r children <"/proc/$n03_worker_pid/task/$n03_worker_pid/children" || :
    read -r candidate extra <<<"$children"
    if [[ $candidate =~ ^[1-9][0-9]*$ && -z ${extra:-} ]]; then
     if n03_sample "$candidate" "$wu" "$managed" "$n03log/worker-live.json" "$n03_worker_pid"; then
@@ -891,11 +892,11 @@ n03_run() (
  bounded grep -q '^ASEVD402:' "$n03log/worker.stderr" || fail N03-worker-diagnostic
  [[ $(bounded stat -c %s "$n03log/worker.stderr") -le 1024 ]] || fail N03-worker-stderr-bound
  bounded grep -Eq "getsockopt\\([0-9]+, SOL_SOCKET, SO_PEERCRED, \\{pid=$broker_actual_pid, uid=$bu, gid=$gid\\}, \\[12\\]\\) += 0" "$n03log/worker.trace.$sampled_pid" || fail N03-inconclusive-peer-trace
- local exec_line; exec_line=$(bounded grep -F "execve(\"$host\", [\"$host\", \"$managed\", \"evidence\", \"worker\", \"--control\", \"$sock\"]," "$n03log/worker.trace.$sampled_pid")
+ exec_line=; exec_line=$(bounded grep -F "execve(\"$host\", [\"$host\", \"$managed\", \"evidence\", \"worker\", \"--control\", \"$sock\"]," "$n03log/worker.trace.$sampled_pid")
  [[ $exec_line != *$'\n'* && $exec_line == *' = 0' ]] || fail N03-inconclusive-exec-trace
  trace_peer_seen=1
  bounded cp --no-dereference -- "$n03log/worker.trace.$sampled_pid" "$n03log/worker-peer.trace"
- local t1 t2; t1=$(bounded sha256sum "$n03log/worker-peer.trace"); t2=$(bounded sha256sum "$n03log/worker.trace.$sampled_pid"); [[ ${t1:0:64} == "${t2:0:64}" ]] || fail N03-trace-copy
+ t1= t2=; t1=$(bounded sha256sum "$n03log/worker-peer.trace"); t2=$(bounded sha256sum "$n03log/worker.trace.$sampled_pid"); [[ ${t1:0:64} == "${t2:0:64}" ]] || fail N03-trace-copy
  [[ $(bounded stat -c %s "$n03log/worker.trace.$sampled_pid") -le 1048576 ]] || fail N03-trace-bound
  # Closed exact four lines; extra event/keys/bytes are rejected. Helper exit is not authority.
  while :; do

@@ -61,6 +61,17 @@
     "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
     "source_backed_handoff_correction": "restore prior reviewed41-command and exactpipe-regression checks in Python/jq validators; actualcurrent inner failure unmeasured withoutartifact"
   },
+  "attempt21_fixture_failure": {
+    "artifact_sha256": "f213e153f1d439fc3ce6bc8ecc9d785f4ec059d330b6f7893b7150f097db0ce7",
+    "correction": "Retain the actual FD owner PID and preserve per-subshell cleanup state.",
+    "diagnosis_sha256": "a8c72840060409837fac4be05c2a5e963289fb6df9b52dbb45851d72265af62a",
+    "head": "06a4a1c16e556d8f6b71a96509fef53d2201b2e0",
+    "n01_executed": false,
+    "native_acceptance": false,
+    "run": 37737773169,
+    "source": "31c9ff5c8782102e0917e0c992bbdecc35e115d0",
+    "source_ready_sha256": "140953ee7a9d69e5323845ffee7feb25fd5357260f1a0130778ddafc785ead3c"
+  },
   "capture_projection_sha256": "214997205813e52f622388e1311e2293c1bdb302731c1389035c8c89f0e99e40",
   "capture_receipt_sha256": "0283ec6b71e46f2888444f4d3efb85ba1cc21771bed41b61d0b91c96b0f0ea7b",
   "composition_review_pending_at_preparation": true,
