@@ -1,6 +1,6 @@
 {
   "capture_receipt_sha256": "8bc8f5a31f3952f0858212a5203572b377f58264dbd0c3d1b066739b05bb791b",
-  "composition_review_pending_at_preparation": true,
+  "composition_review_pending_at_preparation": false,
   "historical_source_review_sha256": "5b6f8d53c4b973975bd2e1727e5a60909e8e3427068a3e44495cb18406ece8e8",
   "local_validation_counter_correction_sha256": "8799270f9f33fe14b5a08bfbf32e2276b942435a69919bd002148cd0f916201c",
   "local_validation_passed": 87,
@@ -11,6 +11,24 @@
   ],
   "parent_commit": "6a766e3471b8a6ea56a15e3e972bf8840289049b",
   "production_registry_enabled": false,
+  "qualified_alias_retry_preparation": {
+    "alias_port_peer": {
+      "path": "/private/tmp/issue779-csharp-n04-n07-alias-port-source-peer-v1/review.json",
+      "sha256": "f378553571f9971aff0f4cc8755e1cc756b861289985d1f62d609b2a3a588faf"
+    },
+    "candidate_linux_qualification": {
+      "receipt_path": "/private/tmp/issue779-csharp-n04-alias-port-artifact-analysis-v1/selected/qualification.json",
+      "receipt_sha256": "4495dc5bf40998b890fca5c10bf8286ea89449ddbc07ea70be8496df548f7d5c",
+      "review_path": "/private/tmp/issue779-csharp-n04-qualified-alias-retry-composition-v2/main-authenticated-qualification-review.json",
+      "review_sha256": "7ea187529e5456114c0a00f8fdb49d61f2b9e4dd7e47d8b51834b45008b5342d"
+    },
+    "execution_ready": true,
+    "fixed_fixture_sha256": "4b6bb40550acc29370e0e6e72889e3868ae283e3ca062d81f1e8aa733043736f",
+    "harness_parent": "03b6c18a71601875ba2b361e76ec0406f5c933f9",
+    "native_acceptance": false,
+    "prior_failure_scope": "prelaunch native-life guard; no current retry execution",
+    "schema": "issue779-n04-qualified-alias-retry-metadata-v1"
+  },
   "root_trust_issuer": false,
   "runtime_receipts": null,
   "schema": "issue779-reviewed-csharp-candidate-v1",

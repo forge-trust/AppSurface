@@ -61,3 +61,8 @@ incomplete records remain failures. No other control is credited by this fixture
 Local helper builds and detached data tests do not establish Linux runtime behavior.
 This private candidate remains unpublished until independent final composition and
 installation-driver review. All native outputs are unknown at source preparation.
+
+
+## Qualified alias retry preparation (pending)
+
+This fresh direct-child retry preserves source 5b5a/full2827 and the original helper. The fixed N04 alias declaration candidate is 130543 bytes; only immutable declarations are cached, every physical check remains fresh. The 23 removed comments are presentation only. Prior failure was prelaunch at the unchanged native-life guard; stage cost is not measured here. Candidate-specific actual Linux qualification, fresh composition review, and explicit promotion are pending. No native credit is supplied by this preparation.
