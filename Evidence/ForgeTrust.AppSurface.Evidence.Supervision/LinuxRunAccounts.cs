@@ -26,11 +26,24 @@ internal enum LinuxRunAccountFailure
 internal sealed class LinuxRunAccountException : Exception
 {
     /// <summary>Creates a closed account failure.</summary>
-    internal LinuxRunAccountException(LinuxRunAccountFailure failure)
-        : base("Protected run account preparation was rejected.") => Failure = failure;
+    internal LinuxRunAccountException(LinuxRunAccountFailure failure, LinuxAccountFailure? firstFailure = null)
+        : base("Protected run account preparation was rejected.")
+    { Failure = failure; FirstFailure = firstFailure; }
 
     /// <summary>Gets the closed failure classification.</summary>
     internal LinuxRunAccountFailure Failure { get; }
+    /// <summary>Gets detached first-fault data captured before rollback, never the original error or account owner.</summary>
+    internal LinuxAccountFailure? FirstFailure { get; }
+}
+
+/// <summary>Negative account cancellation carrying closed data while preserving original caller-token semantics.</summary>
+internal sealed class LinuxRunAccountCancelledException : OperationCanceledException
+{
+    /// <summary>Creates cancellation with the original token and no raw error or inner exception.</summary>
+    internal LinuxRunAccountCancelledException(CancellationToken token, LinuxAccountFailure? firstFailure) : base(token) =>
+        FirstFailure = firstFailure;
+    /// <summary>Gets detached pre-rollback data; cancellation supplies no account ownership.</summary>
+    internal LinuxAccountFailure? FirstFailure { get; }
 }
 
 /// <summary>Generated private account names; these are command data, never identity ownership or admission.</summary>
@@ -241,6 +254,7 @@ internal sealed class LinuxRunAccounts
     private readonly LinuxRunAccountNames _names;
     private readonly LinuxRunAccountReservations _reservations;
     private readonly List<LinuxAccountUtility> _utilities = [];
+    private readonly LinuxAccountFailureLatch _failures = new();
     private LinuxWorkerProcess? _workerCustodyPending;
     private LinuxRunWorkspace? _workspaceCustodyPending;
     private LinuxRunAccountSnapshot? _identities;
@@ -354,27 +368,33 @@ internal sealed class LinuxRunAccounts
 
     private async Task<LinuxRunAccounts> CreateCoreAsync(CancellationToken token)
     {
+        var stage = LinuxAccountPreparationStage.NamesAbsent;
         try
         {
             await LinuxRunAccountNss.RequireNamesAbsentAsync(_owner, token).ConfigureAwait(false);
             for (var i = 0; i < 3; i++)
             {
+                stage = LinuxAccountPreparationStage.ReserveUtility;
                 _owner.RequireActive(token);
                 var command = _reservations.ReserveNext(); // Including implicit group, before any start I/O.
+                stage = LinuxAccountPreparationStage.UtilityExecute;
                 await RunUtilityAsync(command, cleanup: false, token).ConfigureAwait(false);
             }
+            stage = LinuxAccountPreparationStage.IdentityRead;
             _identities = await LinuxRunAccountNss.ReadAsync(_owner, token).ConfigureAwait(false);
+            stage = LinuxAccountPreparationStage.OwnershipVerify;
             RequireOwnedBy(_owner, token);
             return this;
         }
-        catch (Exception)
+        catch (Exception error)
         {
+            _failures.Capture(stage, LinuxAccountUtilityStage.Unknown, null, error);
             _reservations.MarkFailed();
             try { await CloseAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { lock (_gate) _quarantined = true; }
-            if (IsQuarantined) throw new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed);
-            if (token.IsCancellationRequested) throw new OperationCanceledException(token);
-            throw Failed();
+            if (IsQuarantined) throw new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed, _failures.First);
+            if (token.IsCancellationRequested) throw new LinuxRunAccountCancelledException(token, _failures.First);
+            throw new LinuxRunAccountException(LinuxRunAccountFailure.OperationFailed, _failures.First);
         }
     }
 
@@ -420,6 +440,7 @@ internal sealed class LinuxRunAccounts
     {
         await dispatch.ConfigureAwait(false);
         var failed = false;
+        var stage = LinuxAccountPreparationStage.CleanupCheck;
         try
         {
             _owner.BeginRootTeardown();
@@ -431,6 +452,7 @@ internal sealed class LinuxRunAccounts
             {
                 try
                 {
+                    stage = LinuxAccountPreparationStage.CleanupNameCheck;
                     _owner.RequireCleanup(deadline.Token);
                     RequireCustody(custody, deadline.Token);
                     // userdel may already remove its private group. Only actual absence allows skipping,
@@ -440,18 +462,22 @@ internal sealed class LinuxRunAccounts
                         await RunUtilityAsync(command, cleanup: true, deadline.Token).ConfigureAwait(false);
                     RequireCustody(custody, deadline.Token);
                 }
-                catch (Exception) { failed = true; }
+                catch (Exception error)
+                { _failures.Capture(stage, LinuxAccountUtilityStage.Unknown, command.Operation, error); failed = true; }
                 if (_utilities.Any(static utility => !utility.PhysicallySettled)) throw Failed();
             }
+            stage = LinuxAccountPreparationStage.FinalNamesAbsent;
             await LinuxRunAccountNss.RequireNamesAbsentAfterCleanupAsync(_owner, deadline.Token).ConfigureAwait(false);
+            stage = LinuxAccountPreparationStage.FinalOwnershipCheck;
             RequireCustody(custody, deadline.Token);
             _owner.RequireCleanup(deadline.Token);
         }
-        catch (Exception) { failed = true; }
+        catch (Exception error)
+        { _failures.Capture(stage, LinuxAccountUtilityStage.Unknown, null, error); failed = true; }
         if (failed)
         {
             lock (_gate) _quarantined = true;
-            throw new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed);
+            throw new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed, _failures.First);
         }
     }
 
@@ -471,9 +497,20 @@ internal sealed class LinuxRunAccounts
 
     private async Task RunUtilityAsync(LinuxRunAccountCommand command, bool cleanup, CancellationToken token)
     {
-        var utility = LinuxAccountUtility.Create(_owner, command, cleanup);
-        _utilities.Add(utility); // Retain before the execution attempt can dispatch or be accepted.
-        await utility.ExecuteAsync(token).ConfigureAwait(false);
+        LinuxAccountUtility? utility = null;
+        try
+        {
+            utility = LinuxAccountUtility.Create(_owner, command, cleanup);
+            _utilities.Add(utility); // Retain before the execution attempt can dispatch or be accepted.
+            await utility.ExecuteAsync(token).ConfigureAwait(false);
+        }
+        catch (Exception error)
+        {
+            _failures.Capture(utility is null ? LinuxAccountPreparationStage.UtilityCreate
+                : cleanup ? LinuxAccountPreparationStage.CleanupUtility : LinuxAccountPreparationStage.UtilityExecute,
+                LinuxAccountUtilityStage.Unknown, command.Operation, error, first: utility?.FirstFailure);
+            throw;
+        }
     }
 
     private static LinuxRunAccountException Failed() => new(LinuxRunAccountFailure.OperationFailed);

@@ -726,11 +726,11 @@ projection; later account, FD, backend or final-deadline failures cannot overwri
 startup failure. Capture is best effort and cannot replace the original execution/cleanup outcome.
 No operation order, token, clock, gate, authority check, work grant or join is changed.
 
-The reserved supervisor entry emits one stderr JSON line with exactly four fields, followed by the
+The reserved supervisor entry emits one stderr JSON line with exactly five fields, followed by the
 unchanged fixed ASEVD410 admission message and numeric exit1:
 
 ```json
-{"schema":"evidence-native-observation-failure-v1","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410"}
+{"schema":"evidence-native-observation-failure-v2","phase":"WorkerStart","error_kind":"Admission","diagnostic_code":"ASEVD410","account_failure":null}
 ```
 
 The example is shape documentation, not measured attempt14 cause. `phase` and `error_kind` are the
@@ -741,6 +741,55 @@ pipe and control-line classes have finite family labels; unrecognized exceptions
 No arbitrary type name, message, stack, path, inner error or caller content survives the projection.
 `ToJson()` returns no LF; the entry writes the LF. All possible packets are below1024 UTF-8 bytes.
 The JSON is additional failure evidence, not a replacement for the original numeric process outcome.
+
+
+#### Account first-fault detail (v2)
+
+The nullable `account_failure` field is populated only by the negative account lifecycle exceptions in
+[`LinuxRunAccounts`](LinuxRunAccounts.cs). Other failures, unknown exception types, `Exception.Data`,
+inner errors and canaries cannot supply it. The nested object has exactly nine fields:
+`preparation_stage`, `utility_stage`, `operation`, `error_kind`, `diagnostic_code`, `account_code`,
+`exec_main_code`, `exec_main_status`, `dbus_category`. Enum names are finite, invalid enum data becomes
+`Unknown` or null, and numeric fields are nullable. It contains no account/unit name, path, raw error,
+message, stack, NSS contents, output or native owner. The whole v2 JSON plus LF remains at most 1 KiB.
+The version change is intentional: consumers expecting exactly four v1 fields must update their closed
+schema before collecting v2, rather than silently ignore an unknown property.
+
+[`LinuxAccountUtility.FirstFailure`](LinuxAccountUtility.cs) captures the first actual execution or
+cleanup exception before boolean normalization and before whole-run teardown. Actual failed output or
+physical-join predicates retain only their existing fixed rejection. The outer account owner retains
+that detached projection before marking reservations failed and starting reverse cleanup. A later
+rollback failure still selects the existing `CleanupFailed` outcome and quarantine, but cannot replace
+the earlier preparation fault. If cleanup alone first fails, its actual cleanup stage is retained.
+`LinuxRunAccountException.Failure` remains the outer operation outcome; nested `account_code` describes
+an original caught account exception, when one exists. Neither value proves account deletion or absence.
+A diagnostic capture failure is best effort and never changes flags, guards, task joins or the original
+operation exception. Creation cancellation remains an `OperationCanceledException` with the original
+caller token, carried by an internal negative subtype so its closed data can survive rollback; no raw
+inner exception is retained. Quarantine still takes precedence when cleanup cannot safely settle.
+
+`ObserveTerminalData` copies code/status only after an actual `ReadUnitAsync` result for the selected
+loaded unit: MainPID zero, ExecMainPID positive, initialized code, and active/exited, inactive/dead or
+failed/failed state. Missing, foreign, running, uninitialized or invalid numeric rows remain null;
+zero is never invented. A reported status of zero is retained only with an initialized observed code.
+The existing `HasFinished` policy still rejects nonzero/signal failures. Diagnostic numbers neither
+prove success nor replace independent stops, original-start join, kernel-group checks or pump EOF.
+
+[`LinuxSystemdBackend.FirstStartFailure`](LinuxSystemdBackend.Start.cs) retains a first closed projection
+before the existing dispatch catch disposes and emits fixed ASEVD410. Only an actual pinned Tmds
+`DBusErrorReplyException.ErrorName` selects an allowlisted category; all unknown names become `Other`.
+Non-D-Bus faults have null `dbus_category`. The utility reads only its same retained starting backend.
+`ErrorMessage`, messages and inner exceptions are never read. Error replies erased elsewhere (including
+connection acquisition, stop or pending-start normalization) cannot be reconstructed from text; their
+existing closed error/stage is the honest boundary. This diagnostic does not repair account policy or
+establish the cause of the earlier `AccountCreate/Accounts/null` native failure.
+
+New regression intentions cover first fault versus rollback outcome, original cancellation tokens,
+closed schema/canaries, terminal versus uninitialized numeric samples and exact error-name mapping.
+These are detached data controls: no root accounts, live NSS, supervisor or native capability is faked.
+They are source-defined and unexecuted at this handoff; main owns compiler/formatter/tests and subsequent
+native diagnosis. Account command grammar, permissions, limits, unit properties, clocks, cleanup ordering
+and authority remain unchanged.
 
 `EvidenceNativeObservationException` is internal and negative-only because the existing admission
 exception is sealed. It carries the closed packet and exactly the old fixed ASEVD410 text, without a

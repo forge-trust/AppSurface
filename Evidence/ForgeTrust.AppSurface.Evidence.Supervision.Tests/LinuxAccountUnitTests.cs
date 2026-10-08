@@ -176,6 +176,82 @@ public sealed class LinuxAccountUnitTests
         Assert.Throws<ArgumentNullException>(() => LinuxAccountUtility.Create(null!, command, cleanup: false));
     }
 
+    [Fact]
+    public void OnlyActualSelectedInitializedTerminalDataHasDiagnosticNumbers()
+    {
+        using var stdout = Output(71);
+        using var stderr = Output(72);
+        var recipe = Recipe(stdout, stderr);
+        var terminal = Terminal(recipe) with { ExecMainStatus = 17 };
+        Assert.Equal(((int?)1, (int?)17), LinuxAccountUtility.ObserveTerminalData(terminal, recipe.Unit));
+        Assert.Equal(((int?)1, (int?)0), LinuxAccountUtility.ObserveTerminalData(Terminal(recipe), recipe.Unit));
+        Assert.Equal(((int?)2, (int?)9), LinuxAccountUtility.ObserveTerminalData(
+            terminal with { ActiveState = "failed", SubState = "failed", ExecMainCode = 2, ExecMainStatus = 9 }, recipe.Unit));
+        foreach (var bad in new[] { terminal with { MainPid = 100 }, terminal with { ExecMainPid = 0 },
+            terminal with { ExecMainCode = 0 }, terminal with { ActiveState = "activating", SubState = "start" },
+            terminal with { Id = "foreign.service" }, terminal with { LoadState = "not-found" },
+            terminal with { ExecMainCode = 7 }, terminal with { ExecMainStatus = -1 }, terminal with { ExecMainStatus = 256 } })
+            Assert.Equal(((int?)null, (int?)null), LinuxAccountUtility.ObserveTerminalData(bad, recipe.Unit));
+        Assert.Equal(((int?)null, (int?)null), LinuxAccountUtility.ObserveTerminalData(null, recipe.Unit));
+        // Diagnostic copying cannot relax the existing nonzero-result rejection.
+        AssertClosed(() => recipe.HasFinished(terminal));
+    }
+
+    [Fact]
+    public void MissingOrUninitializedNumericDataNeverBecomesZeroTerminalEvidence()
+    {
+        foreach (var pair in new (int? Code, int? Status)[] { (null, null), (0, 0), (1, null), (null, 0), (1, 256), (7, 0) })
+        {
+            var data = LinuxAccountFailure.Capture(LinuxAccountPreparationStage.UtilityExecute,
+                LinuxAccountUtilityStage.UnitRead, LinuxRunAccountOperation.CreateUser,
+                new IOException("canary"), pair.Code, pair.Status);
+            Assert.Null(data.ExecMainCode);
+            Assert.Null(data.ExecMainStatus);
+            Assert.DoesNotContain("canary", data.ToJson());
+        }
+    }
+
+    [Fact]
+    public void ObservedCallerCancellationStaysFirstWhenTeardownThenFails()
+    {
+        using var caller = new CancellationTokenSource();
+        var failures = new LinuxAccountFailureLatch();
+        caller.Cancel();
+        LinuxAccountUtility.CaptureCallerCancellationBeforeTeardown(failures, cleanup: false,
+            LinuxRunAccountOperation.CreateUser, caller.Token, observedCode: 1, observedStatus: 0);
+        var cancellation = failures.First;
+        Assert.NotNull(cancellation);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Cancelled, cancellation.ErrorKind);
+        Assert.Equal(LinuxAccountPreparationStage.UtilityExecute, cancellation.PreparationStage);
+        Assert.Equal(LinuxAccountUtilityStage.BeginTeardown, cancellation.UtilityStage);
+        Assert.Equal(LinuxRunAccountOperation.CreateUser, cancellation.Operation);
+        Assert.Equal(1, cancellation.ExecMainCode);
+        Assert.Equal(0, cancellation.ExecMainStatus);
+        failures.Capture(LinuxAccountPreparationStage.UtilityExecute, LinuxAccountUtilityStage.Stop,
+            LinuxRunAccountOperation.CreateUser, new IOException("cleanup-canary"));
+        Assert.Same(cancellation, failures.First);
+        Assert.DoesNotContain("cleanup-canary", failures.First!.ToJson());
+
+        // Without an observed cancellation, the actual subsequent cleanup fault remains first.
+        var notCancelled = new LinuxAccountFailureLatch();
+        LinuxAccountUtility.CaptureCallerCancellationBeforeTeardown(notCancelled, cleanup: false,
+            LinuxRunAccountOperation.CreateUser, CancellationToken.None);
+        Assert.Null(notCancelled.First);
+        notCancelled.Capture(LinuxAccountPreparationStage.UtilityExecute, LinuxAccountUtilityStage.Stop,
+            LinuxRunAccountOperation.CreateUser, new IOException("cleanup-canary"));
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, notCancelled.First!.ErrorKind);
+        Assert.Equal(LinuxAccountUtilityStage.Stop, notCancelled.First.UtilityStage);
+
+        // A fault already captured during execution is not replaced by later caller cancellation.
+        var alreadyFailed = new LinuxAccountFailureLatch();
+        alreadyFailed.Capture(LinuxAccountPreparationStage.UtilityExecute, LinuxAccountUtilityStage.Start,
+            LinuxRunAccountOperation.CreateUser, new IOException("execution-canary"));
+        var execution = alreadyFailed.First;
+        LinuxAccountUtility.CaptureCallerCancellationBeforeTeardown(alreadyFailed, cleanup: true,
+            LinuxRunAccountOperation.CreateUser, caller.Token);
+        Assert.Same(execution, alreadyFailed.First);
+    }
+
     private static SafeFileHandle Output(int fd) => new((nint)fd, ownsHandle: false);
 
     private static LinuxAccountUnit Recipe(SafeFileHandle stdout, SafeFileHandle stderr,

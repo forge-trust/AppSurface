@@ -2,8 +2,65 @@ using Tmds.DBus.Protocol;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
+/// <summary>Closed categories of an actual D-Bus error reply; no raw name/message or authority is retained.</summary>
+internal enum LinuxSystemdStartError
+{
+    /// <summary>Unrecognized error name, including aliases and caller canaries.</summary>
+    Other,
+    /// <summary>The bus rejected access.</summary>
+    AccessDenied,
+    /// <summary>The bus rejected arguments.</summary>
+    InvalidArgs,
+    /// <summary>The bus did not receive a reply.</summary>
+    NoReply,
+    /// <summary>The selected service was unavailable.</summary>
+    ServiceUnknown,
+    /// <summary>The method was unknown.</summary>
+    UnknownMethod,
+    /// <summary>The selected unit already existed.</summary>
+    UnitExists,
+    /// <summary>The selected unit could not load.</summary>
+    LoadFailed,
+    /// <summary>The selected unit was absent.</summary>
+    NoSuchUnit,
+}
+
+/// <summary>Detached first start fault, not a D-Bus reply, pending-start outcome or kernel fact.</summary>
+/// <param name="ErrorKind">Closed actual exception family; no exception object is retained.</param>
+/// <param name="DBusCategory">Closed category only for an actual D-Bus error reply, otherwise null.</param>
+internal sealed record LinuxSystemdStartFailure(EvidenceNativeObservationErrorKind ErrorKind,
+    LinuxSystemdStartError? DBusCategory);
+
 internal sealed partial class LinuxSystemdBackend
 {
+    private LinuxSystemdStartFailure? _firstStartFailure;
+    /// <summary>Gets only the first actual start exception's closed projection, including after transport disposal.</summary>
+    internal LinuxSystemdStartFailure? FirstStartFailure => Volatile.Read(ref _firstStartFailure);
+
+    /// <summary>Maps exact error-name data only; unknown names become Other and no raw string is stored.</summary>
+    internal static LinuxSystemdStartError ClassifyStartError(string? name) => name switch
+    {
+        "org.freedesktop.DBus.Error.AccessDenied" => LinuxSystemdStartError.AccessDenied,
+        "org.freedesktop.DBus.Error.InvalidArgs" => LinuxSystemdStartError.InvalidArgs,
+        "org.freedesktop.DBus.Error.NoReply" => LinuxSystemdStartError.NoReply,
+        "org.freedesktop.DBus.Error.ServiceUnknown" => LinuxSystemdStartError.ServiceUnknown,
+        "org.freedesktop.DBus.Error.UnknownMethod" => LinuxSystemdStartError.UnknownMethod,
+        "org.freedesktop.systemd1.UnitExists" => LinuxSystemdStartError.UnitExists,
+        "org.freedesktop.systemd1.LoadFailed" => LinuxSystemdStartError.LoadFailed,
+        "org.freedesktop.systemd1.NoSuchUnit" => LinuxSystemdStartError.NoSuchUnit,
+        _ => LinuxSystemdStartError.Other,
+    };
+
+    private void CaptureStartFailure(Exception error)
+    {
+        try
+        {
+            Interlocked.CompareExchange(ref _firstStartFailure, new(
+                EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate, error).ErrorKind,
+                error is DBusErrorReplyException reply ? ClassifyStartError(reply.ErrorName) : null), null);
+        }
+        catch (Exception) { /* Data capture never replaces the existing dispatch/cleanup failure. */ }
+    }
     /// <summary>Serializes and requests one fixed transient worker unit; returns only its job object path.</summary>
     /// <param name="worker">Protected-owner-selected recipe; construction alone creates no authority.</param>
     /// <param name="token">Original run deadline/cancellation, not a renewed dispatch budget.</param>
@@ -52,8 +109,8 @@ internal sealed partial class LinuxSystemdBackend
                 return path;
             }), Dispose, token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception) { Dispose(); throw InvalidControl(); }
+        catch (OperationCanceledException error) { CaptureStartFailure(error); throw; }
+        catch (Exception error) { CaptureStartFailure(error); Dispose(); throw InvalidControl(); }
     }
 
     private MessageBuffer OwnedStartRequest(LinuxUnitName unit, IReadOnlyList<string> arguments,

@@ -120,12 +120,160 @@ internal enum EvidenceNativeObservationErrorKind
     InvalidOperation,
 }
 
-/// <summary>Detached four-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
+/// <summary>Closed account preparation and deletion checkpoints; values grant no account ownership.</summary>
+internal enum LinuxAccountPreparationStage
+{
+    /// <summary>Unrecognized stage data.</summary>
+    Unknown,
+    /// <summary>Initial live NSS absence check.</summary>
+    NamesAbsent,
+    /// <summary>Owner check and pending-name reservation.</summary>
+    ReserveUtility,
+    /// <summary>Actual utility holder acquisition.</summary>
+    UtilityCreate,
+    /// <summary>Owned forward utility execution.</summary>
+    UtilityExecute,
+    /// <summary>Final forward/reverse NSS identity read.</summary>
+    IdentityRead,
+    /// <summary>Live created-holder verification.</summary>
+    OwnershipVerify,
+    /// <summary>Cleanup owner, custody and pending-utility checks.</summary>
+    CleanupCheck,
+    /// <summary>Live deletion identity/absence check.</summary>
+    CleanupNameCheck,
+    /// <summary>Owned reverse utility execution.</summary>
+    CleanupUtility,
+    /// <summary>Final all-names-absent check.</summary>
+    FinalNamesAbsent,
+    /// <summary>Final cleanup custody/owner verification.</summary>
+    FinalOwnershipCheck,
+}
+
+/// <summary>Closed phases of one actual account utility; values are diagnostic data only.</summary>
+internal enum LinuxAccountUtilityStage
+{
+    /// <summary>No utility phase or unrecognized phase data.</summary>
+    Unknown,
+    /// <summary>Original owner and remaining-budget checks.</summary>
+    OwnerCheck,
+    /// <summary>Output pipe creation and pump registration.</summary>
+    Pipes,
+    /// <summary>Actual system-bus connection.</summary>
+    BackendConnect,
+    /// <summary>Fixed unit recipe construction.</summary>
+    Recipe,
+    /// <summary>Original pending start and FD transfer.</summary>
+    Start,
+    /// <summary>Closure of local write copies.</summary>
+    CloseWrites,
+    /// <summary>Actual typed unit read.</summary>
+    UnitRead,
+    /// <summary>Existing terminal policy predicate.</summary>
+    TerminalCheck,
+    /// <summary>Existing bounded observation delay.</summary>
+    ObservationDelay,
+    /// <summary>Whole-run teardown reservation after failure.</summary>
+    BeginTeardown,
+    /// <summary>Independent stop, original start join and second stop.</summary>
+    Stop,
+    /// <summary>Actual kernel group inspection.</summary>
+    GroupRead,
+    /// <summary>Original output pump join and receipt checks.</summary>
+    OutputJoin,
+    /// <summary>Actual pipe disposal.</summary>
+    PipeDispose,
+    /// <summary>Actual starting-backend disposal.</summary>
+    BackendDispose,
+    /// <summary>Final physical-settlement owner check.</summary>
+    PhysicalSettlement,
+    /// <summary>Final original caller/owner check.</summary>
+    FinalOwnerCheck,
+}
+
+/// <summary>Immutable bounded first account fault; no names, paths, outputs or exception objects survive.</summary>
+internal sealed class LinuxAccountFailure
+{
+    private LinuxAccountFailure(LinuxAccountPreparationStage preparation, LinuxAccountUtilityStage utility,
+        LinuxRunAccountOperation? operation, EvidenceNativeObservationErrorKind kind, string? code,
+        LinuxRunAccountFailure? accountCode, int? execCode, int? execStatus, LinuxSystemdStartError? dbus)
+    {
+        PreparationStage = preparation; UtilityStage = utility; Operation = operation; ErrorKind = kind;
+        DiagnosticCode = code; AccountCode = accountCode; ExecMainCode = execCode; ExecMainStatus = execStatus;
+        DBusCategory = dbus;
+    }
+
+    /// <summary>Gets the closed account checkpoint.</summary>
+    internal LinuxAccountPreparationStage PreparationStage { get; }
+    /// <summary>Gets the closed utility checkpoint, or Unknown when no utility was executing.</summary>
+    internal LinuxAccountUtilityStage UtilityStage { get; }
+    /// <summary>Gets the actual command operation, or null for nonutility/invalid operation data.</summary>
+    internal LinuxRunAccountOperation? Operation { get; }
+    /// <summary>Gets the original error family without retaining the exception.</summary>
+    internal EvidenceNativeObservationErrorKind ErrorKind { get; }
+    /// <summary>Gets only an existing allowlisted admission code.</summary>
+    internal string? DiagnosticCode { get; }
+    /// <summary>Gets an actual closed account error code, or null.</summary>
+    internal LinuxRunAccountFailure? AccountCode { get; }
+    /// <summary>Gets a bounded actual typed unit code; null means no sample or invalid numeric data.</summary>
+    internal int? ExecMainCode { get; }
+    /// <summary>Gets a bounded actual typed unit status; null means no sample or invalid numeric data.</summary>
+    internal int? ExecMainStatus { get; }
+    /// <summary>Gets the same backend's actual closed D-Bus start-error category, never its raw name/message.</summary>
+    internal LinuxSystemdStartError? DBusCategory { get; }
+
+    /// <summary>Projects detached data only; supplied samples and enums cannot issue native ownership.</summary>
+    /// <remarks>Native callers supply numbers only after ReadUnitAsync returned. Inner errors/messages are ignored.</remarks>
+    internal static LinuxAccountFailure Capture(LinuxAccountPreparationStage preparation,
+        LinuxAccountUtilityStage utility, LinuxRunAccountOperation? operation, Exception? error,
+        int? execCode = null, int? execStatus = null, LinuxSystemdStartError? dbus = null)
+    {
+        var projected = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.AccountCreate, error);
+        return new(Enum.IsDefined(preparation) ? preparation : LinuxAccountPreparationStage.Unknown,
+            Enum.IsDefined(utility) ? utility : LinuxAccountUtilityStage.Unknown,
+            operation is { } op && Enum.IsDefined(op) ? op : null, projected.ErrorKind, projected.DiagnosticCode,
+            error is LinuxRunAccountException account && Enum.IsDefined(account.Failure) ? account.Failure : null,
+            execCode is >= 1 and <= 6 && execStatus is >= 0 and <= 255 ? execCode : null,
+            execCode is >= 1 and <= 6 && execStatus is >= 0 and <= 255 ? execStatus : null,
+            dbus is { } category && Enum.IsDefined(category) ? category : null);
+    }
+
+    /// <summary>Serializes exactly nine closed fields without native reads, raw error text or completion claims.</summary>
+    internal string ToJson() => "{\"preparation_stage\":\"" + PreparationStage + "\",\"utility_stage\":\"" + UtilityStage
+        + "\",\"operation\":" + Text(Operation) + ",\"error_kind\":\"" + ErrorKind
+        + "\",\"diagnostic_code\":" + Text(DiagnosticCode) + ",\"account_code\":" + Text(AccountCode)
+        + ",\"exec_main_code\":" + Number(ExecMainCode) + ",\"exec_main_status\":" + Number(ExecMainStatus)
+        + ",\"dbus_category\":" + Text(DBusCategory) + "}";
+
+    private static string Text(object? value) => value is null ? "null" : "\"" + value + "\"";
+    private static string Number(int? value) => value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null";
+}
+
+/// <summary>Best-effort first account-fault latch; later rollback faults never replace an earlier projection.</summary>
+internal sealed class LinuxAccountFailureLatch
+{
+    private LinuxAccountFailure? _first;
+    /// <summary>Gets detached first-fault data; absence establishes no success.</summary>
+    internal LinuxAccountFailure? First => Volatile.Read(ref _first);
+    /// <summary>Retains only a closed projection. Diagnostic allocation/capture failure cannot change lifecycle outcomes.</summary>
+    internal void Capture(LinuxAccountPreparationStage preparation, LinuxAccountUtilityStage utility,
+        LinuxRunAccountOperation? operation, Exception? error, int? code = null, int? status = null,
+        LinuxSystemdStartError? dbus = null, LinuxAccountFailure? first = null)
+    {
+        try
+        {
+            if (First is null) Interlocked.CompareExchange(ref _first,
+                first ?? LinuxAccountFailure.Capture(preparation, utility, operation, error, code, status, dbus), null);
+        }
+        catch (Exception) { /* Diagnostic capture must never replace the original operation. */ }
+    }
+}
+
+/// <summary>Detached five-field diagnostic data; construction issues no execution, admission or cleanup authority.</summary>
 internal sealed class EvidenceNativeObservationFailure
 {
     private EvidenceNativeObservationFailure(EvidenceNativeObservationPhase phase,
-        EvidenceNativeObservationErrorKind kind, string? code)
-    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; }
+        EvidenceNativeObservationErrorKind kind, string? code, LinuxAccountFailure? account)
+    { Phase = phase; ErrorKind = kind; DiagnosticCode = code; AccountFailure = account; }
 
     /// <summary>Gets the validated closed checkpoint.</summary>
     internal EvidenceNativeObservationPhase Phase { get; }
@@ -133,6 +281,8 @@ internal sealed class EvidenceNativeObservationFailure
     internal EvidenceNativeObservationErrorKind ErrorKind { get; }
     /// <summary>Gets an allowlisted admission code, or null. Messages are never searched for codes.</summary>
     internal string? DiagnosticCode { get; }
+    /// <summary>Gets closed first account-fault data only from an actual account lifecycle exception.</summary>
+    internal LinuxAccountFailure? AccountFailure { get; }
 
     /// <summary>Projects only an actual exception's family and allowlisted admission code, without retaining it.</summary>
     internal static EvidenceNativeObservationFailure Capture(EvidenceNativeObservationPhase phase, Exception? error)
@@ -156,18 +306,25 @@ internal sealed class EvidenceNativeObservationFailure
             _ => EvidenceNativeObservationErrorKind.Unknown,
         };
         string? code = error is EvidenceAdmissionException admission ? admission.Code : null;
-        return new(phase, kind, FilterCode(code));
+        var accountFailure = error switch
+        {
+            LinuxRunAccountException account => account.FirstFailure,
+            LinuxRunAccountCancelledException cancelled => cancelled.FirstFailure,
+            _ => null,
+        };
+        return new(phase, kind, FilterCode(code), accountFailure);
     }
 
     /// <summary>Filters detached code data; this never creates an admission exception or execution authority.</summary>
     internal static string? FilterCode(string? code) => code is "ASEVD402" or "ASEVD404" or "ASEVD407"
         or "ASEVD409" or "ASEVD410" or "ASEVD420" or "ASEVD421" ? code : null;
 
-    /// <summary>Returns exactly four JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
+    /// <summary>Returns exactly five JSON fields, without LF; all values are closed and the packet is below 1 KiB.</summary>
     /// <remarks>This data serialization never reads native state, inspects inner errors or changes a failure outcome.</remarks>
-    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v1\",\"phase\":\"" + Phase
+    internal string ToJson() => "{\"schema\":\"evidence-native-observation-failure-v2\",\"phase\":\"" + Phase
         + "\",\"error_kind\":\"" + ErrorKind + "\",\"diagnostic_code\":"
-        + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"") + "}";
+        + (DiagnosticCode is null ? "null" : "\"" + DiagnosticCode + "\"")
+        + ",\"account_failure\":" + (AccountFailure?.ToJson() ?? "null") + "}";
 }
 
 /// <summary>Sticky first-failure data latch. Later cleanup cannot replace an earlier execution fault.</summary>
