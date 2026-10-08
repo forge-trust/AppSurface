@@ -43,6 +43,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxUnitProperties? _failedSettlementUnit;
     private LinuxCgroupSample? _failedSettlementGroup;
     private bool _failedSettlementGroupAfterPumps;
+    private LinuxN07FailureSettlement? _failureSettlement;
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
     private readonly SupervisionDescendantObservation _descendant = new();
     private LinuxN12LeaderExitObservation? _leaderExitObservation;
@@ -92,6 +93,34 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// </remarks>
     internal byte[] CaptureJoinedOutputDiagnostic(Guid generation) =>
         LinuxJoinedWorkerOutputDiagnostic.EncodeDetached(generation, _lifetime.StopJoined ? _output : null);
+
+    /// <summary>Returns data observed by the original stderr pump for the selected private N07 image.</summary>
+    internal Task<byte[]> N07Precleanup(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace)
+    {
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !_lifetime.StartJoined || _pipes is null) throw LinuxSystemdBackend.InvalidControl();
+        return _pipes.N07Precleanup;
+    }
+
+    /// <summary>Projects the original failed N07 cleanup only after its native worker and server tasks join.</summary>
+    /// <remarks>The snapshot is diagnostic data; it cannot establish successful custody or EXIT.</remarks>
+    internal (LinuxN07FailureSettlement Settlement, string ReadyDescriptorSha256) CaptureFailureSettlement(
+        EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner, LinuxRunAccounts accounts,
+        LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !_lifetime.StopJoined || Volatile.Read(ref _failed) == 0 || _pipes?.N07ObservationFailed != false)
+            throw LinuxSystemdBackend.InvalidControl();
+        owner.RequireCleanupLaunchInput(input, token);
+        var ready = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
+        var data = Volatile.Read(ref _failureSettlement) ?? throw LinuxSystemdBackend.InvalidControl();
+        owner.RequireCleanupLaunchInput(input, token);
+        return (data, ready);
+    }
 
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
@@ -651,6 +680,21 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Even a failed inspection must attempt the original connection close, after all real task joins.
         try { _backend?.Dispose(); }
         catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
+        try
+        {
+            if (EvidenceNativeQualification.ParentReplacementEnabled
+                && (failed || Volatile.Read(ref _failed) != 0) && monitorJoined && _exit is { IsCompleted: true }
+                && _worker is not null && _failedSettlementUnit is not null && _failedSettlementGroup is not null
+                && _output is not null)
+            {
+                var pending = _pending.Snapshot;
+                var data = LinuxN07FailureSettlement.CreateDetached(_owner.RunId, _worker.SampledFacts,
+                    _failedSettlementUnit, _failedSettlementGroup, _output, _exit.Status,
+                    _lifetime.StartJoined, pending.StopJoined, unitJoined, groupJoined, pipesClosed);
+                Interlocked.CompareExchange(ref _failureSettlement, data, null);
+            }
+        }
+        catch (Exception) { } // Diagnostic construction cannot replace the original failed cleanup.
         if (failed)
         {
             Interlocked.Exchange(ref _physicallySettled, 0);

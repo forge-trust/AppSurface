@@ -44,14 +44,20 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     private readonly SafeFileHandle _stdoutWrite;
     private readonly SafeFileHandle _stderrWrite;
     private readonly SupervisionOutputPipeOwnership _ownership;
+    private readonly SupervisionN07PrecleanupObservation? _n07;
 
     private LinuxOutputPipes(FileStream stdout, FileStream stderr,
         SafeFileHandle stdoutWrite, SafeFileHandle stderrWrite)
     {
         _stdoutWrite = stdoutWrite;
         _stderrWrite = stderrWrite;
-        _ownership = new(stdout, stderr, stdoutWrite, stderrWrite);
+        _n07 = EvidenceNativeQualification.ParentReplacementEnabled ? new() : null;
+        _ownership = new(stdout, stderr, stdoutWrite, stderrWrite, _n07);
     }
+
+    /// <summary>Gets the fixed observation from the original stderr pump, when the private N07 image is selected.</summary>
+    internal Task<byte[]> N07Precleanup => _n07?.Task ?? Task.FromResult(Array.Empty<byte>());
+    internal bool N07ObservationFailed => _n07?.Failed ?? true;
 
     /// <summary>Gets the borrowed stdout write handle for typed D-Bus WriteVariantHandle serialization.</summary>
     /// <remarks>Do not dispose, retarget or use after CloseWriteCopies; the actual start operation must join first.</remarks>
@@ -209,9 +215,10 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
     private bool _disposing;
     private bool _writesClosed;
     private bool _writeCloseFailed;
+    private readonly SupervisionN07PrecleanupObservation? _n07;
 
     /// <summary>Takes ownership of two distinct readable streams and two distinct local write closers.</summary>
-    internal SupervisionOutputPipeOwnership(Stream stdout, Stream stderr, IDisposable stdoutWrite, IDisposable stderrWrite)
+    internal SupervisionOutputPipeOwnership(Stream stdout, Stream stderr, IDisposable stdoutWrite, IDisposable stderrWrite, SupervisionN07PrecleanupObservation? n07 = null)
     {
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(stderr);
@@ -225,6 +232,7 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
         _stderr = stderr;
         _stdoutWrite = stdoutWrite;
         _stderrWrite = stderrWrite;
+        _n07 = n07;
     }
 
     /// <summary>Registers one collector before pump dispatch; invalid limit data does not consume the attempt.</summary>
@@ -237,6 +245,7 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
         var collector = new SupervisionOutputCollector(receivedByteLimit, prefixByteLimit);
         if (cancellationPhase is not null) collector.ObserveCancellation(cancellationPhase);
         if (descendant is not null) collector.ObserveDescendant(descendant);
+        if (_n07 is not null) collector.ObserveN07(_n07);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<SupervisionOutputReceipt> task;
         lock (_sync)

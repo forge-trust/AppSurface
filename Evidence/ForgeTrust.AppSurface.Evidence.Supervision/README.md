@@ -1433,3 +1433,18 @@ After the original server and worker tasks join, the N09 cleanup path rechecks t
 `LinuxCancellationProjectionFailure.EncodeDetached(Guid, LinuxCancellationProjectionStage, Exception)` produces eight fixed JSON fields under `issue779-cancellation-projection-failure-v1`. It permits at most 1 KiB plus one LF, contains a closed stage/error family and a filtered diagnostic code, and excludes exception text, inner errors, paths and raw streams. Missing generation/error or unknown enum values reject. Detached tests verify data encoding only. The composition emits it only from the existing compile-selected cancellation failure catch using the original cleanup token and owner checks. It adds no OS read, stop, task, allowance, custody capability or positive result.
 
 The checkpoint is assigned before each original operation. It identifies the failed operation, not an inner syscall or the earliest concurrent failure. Failed diagnostic output cannot replace the original failure. The existing large-record attempt flag remains authoritative after any partial large write; this small additional record cannot authorize a second large export. Successful cancellation projections emit no new record. The fixed fixture still requires original kernel, signal, stream, custody and account cleanup evidence before a negative control qualifies.
+
+
+## N07 parent replacement observation (private source integration)
+
+The fixed private N07 build selection is `ParentReplacementEnabled`. When selected, the control server
+attaches its checkpoint to the original authenticated admission sequence, and the stderr observer shares
+the existing paired output collector. It creates no additional reader or worker. Allocation-fault reporting
+remains inside the original tracked admission callback and preserves the original allocation exception.
+
+The server closes and joins the checkpoint with its existing admission handlers. Failure settlement is
+constructed only from the original final unit/group reads and joined monitor/output tasks; emission does not
+clear failure or establish successful custody. With ordinary `None`, the N07 checkpoint is not created,
+its pump observer is absent, and the allocation-fault writer is not used. The shared N07 selector and its
+complete compile/test/native qualification remain pending integration review; this source merge is not
+a native acceptance claim.

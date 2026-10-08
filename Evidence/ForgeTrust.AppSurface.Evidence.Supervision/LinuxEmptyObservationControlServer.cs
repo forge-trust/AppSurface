@@ -25,6 +25,9 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly LinuxRunAccounts _accounts;
     private readonly LinuxRunWorkspace _workspace;
     private LinuxN04CheckpointOwner? _n04;
+    private LinuxN07CheckpointOwner? _n07;
+    private int _n07OriginalTasksCompleted;
+    private int _n07LocalCloseAttemptCompleted;
     private readonly SupervisionWorkRegistry _ledger = new();
     private readonly SupervisionControlSequence _sequence;
     private readonly SupervisionSingleAttempt _run = new();
@@ -266,6 +269,28 @@ internal sealed class LinuxEmptyObservationControlServer
         return _listener.RequireCustodySocket(_owner, _accounts, _workspace, token);
     }
 
+    internal string RequireN07FailedReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !ReferenceEquals(worker, _worker)) throw Rejected();
+        owner.RequireCleanupLaunchInput(input, token);
+        lock (_executionGate)
+            if (_execution?.IsCompleted != true || Volatile.Read(ref _n07OriginalTasksCompleted) != 1
+                || Volatile.Read(ref _n07LocalCloseAttemptCompleted) != 1 || _n07?.JoinedAttempt != true
+                || Volatile.Read(ref _negativeReadyCommitted) != 1 || _ledger.ActiveControls != 0) throw Rejected();
+        var descriptor = _workspace.DescriptorSha256 ?? throw Rejected();
+        owner.RequireCleanupLaunchInput(input, token);
+        return descriptor;
+    }
+
+    internal TaskStatus N07ExecutionStatus
+    {
+        get { lock (_executionGate) return _execution is { IsCompleted: true } task ? task.Status : throw Rejected(); }
+    }
+
     /// <summary>Requires the original successful server task and all committed protocol steps before final-file claims.</summary>
     /// <remarks>Physical custody after a failed protocol remains possible, but cannot pass this success guard.</remarks>
     internal void RequireSuccessfulCompletion(CancellationToken token)
@@ -286,6 +311,8 @@ internal sealed class LinuxEmptyObservationControlServer
             // No caller/environment selector or detached checkpoint task exists.
             if (EvidenceNativeQualification.PeerReplacementEnabled)
                 _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+            if (EvidenceNativeQualification.ParentReplacementEnabled)
+                _n07 = LinuxN07CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
             await RunCoreAsync(token).ConfigureAwait(false);
         }
         finally
@@ -295,6 +322,11 @@ internal sealed class LinuxEmptyObservationControlServer
                 try { await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+            if (_n07 is not null)
+                try { await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error))
+                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+            Interlocked.Exchange(ref _n07LocalCloseAttemptCompleted, 1);
             try { _replyOrder.Dispose(); }
             catch (Exception error) when (Recoverable(error))
             { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); }
@@ -352,6 +384,7 @@ internal sealed class LinuxEmptyObservationControlServer
                 // This pause occurs before RegisterAccept's synchronous worker/name checks.
                 // It is separate from the irreversible EXIT admission-close barrier.
                 if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                if (_n07 is not null) await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
                 stage = LinuxControlFailureStage.Accept;
                 SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
                 lock (_executionGate)
@@ -375,6 +408,7 @@ internal sealed class LinuxEmptyObservationControlServer
                 {
                     if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
                     _n04?.ReserveNextAcceptBeforeHandlerDispatch();
+                    _n07?.ReserveNextAcceptBeforeHandlerDispatch();
                     var control = _ledger.BeginControl();
                     stage = LinuxControlFailureStage.HandlerDispatch;
                     handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
@@ -402,6 +436,9 @@ internal sealed class LinuxEmptyObservationControlServer
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
             // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
             try { if (_n04 is not null) await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
+            catch (Exception error) when (Recoverable(error))
+            { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            try { if (_n07 is not null) await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
             catch (Exception error) when (Recoverable(error))
             { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
             // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
@@ -435,6 +472,9 @@ internal sealed class LinuxEmptyObservationControlServer
             stage = LinuxControlFailureStage.ControlsJoin;
             try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            if (_n07 is not null && (pending is null || pending.IsCompleted)
+                && handlers.All(task => task.IsCompleted) && _ledger.ActiveControls == 0)
+                Interlocked.Exchange(ref _n07OriginalTasksCompleted, 1);
             if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
                 Interlocked.Exchange(ref _ioJoined, 1);
         }
@@ -585,6 +625,7 @@ internal sealed class LinuxEmptyObservationControlServer
                     stage = LinuxControlFailureStage.ReadyData;
                     response = _worker.CreateReadyData(io.Token).ReadyBytes;
                     if (_n04 is not null) await _n04.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+                    if (_n07 is not null) await _n07.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
                     break;
                 case EvidenceStopControlRequest:
                     stage = LinuxControlFailureStage.CleanupBound;
@@ -657,6 +698,8 @@ internal sealed class LinuxEmptyObservationControlServer
                 claim = null;
                 if (readyCommitted && _n04 is not null)
                     await _n04.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
+                if (readyCommitted && _n07 is not null)
+                    await _n07.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
             }
         }
         catch (Exception error) when (Recoverable(error))

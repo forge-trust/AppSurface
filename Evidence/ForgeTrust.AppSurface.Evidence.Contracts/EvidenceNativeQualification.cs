@@ -8,6 +8,8 @@ internal enum EvidenceNativeQualificationKind
     None,
     /// <summary>Private original-root-peer replacement checkpoint N04.</summary>
     PeerReplacement,
+    /// <summary>Private N07 original parent-identity substitution rendezvous.</summary>
+    ParentIdentitySubstitution,
     /// <summary>Private original caller cancellation checkpoint N08, before allocation.</summary>
     CancellationBeforeAllocation,
     /// <summary>Private original caller cancellation checkpoint N09, after allocation and before activation.</summary>
@@ -29,14 +31,14 @@ internal enum EvidenceNativeQualificationKind
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
 /// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
-/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
+/// EVIDENCE_PRIVATE_N07, EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
 /// selecting a checkpoint grants no admission or accepted consumer proof.
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
-#if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N16))
+#if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N07 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N16))
 #error A private qualification image must select exactly one checkpoint.
 #endif
 
@@ -47,6 +49,8 @@ internal static class EvidenceNativeQualification
         {
 #if EVIDENCE_PRIVATE_N04
             return EvidenceNativeQualificationKind.PeerReplacement;
+#elif EVIDENCE_PRIVATE_N07
+            return EvidenceNativeQualificationKind.ParentIdentitySubstitution;
 #elif EVIDENCE_PRIVATE_N08
             return EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
@@ -71,6 +75,10 @@ internal static class EvidenceNativeQualification
 
     /// <summary>Gets whether this image owns the private root-peer replacement rendezvous.</summary>
     internal static bool PeerReplacementEnabled => Current == EvidenceNativeQualificationKind.PeerReplacement;
+
+    /// <summary>Gets whether this private image owns the fixed N07 parent-substitution rendezvous.</summary>
+    /// <remarks>Ordinary builds perform no N07 rendezvous or allocation-fault transfer.</remarks>
+    internal static bool ParentReplacementEnabled => Current == EvidenceNativeQualificationKind.ParentIdentitySubstitution;
 
     /// <summary>Gets whether this image owns the private caller cancellation barrier and signal.</summary>
     internal static bool CancellationEnabled => Current is EvidenceNativeQualificationKind.CancellationBeforeAllocation

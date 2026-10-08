@@ -131,6 +131,7 @@ internal static class EvidenceProtectedCliExecution
                 throw new EvidenceAdmissionException("ASEVD421", "The protected allocation reserve is exhausted.");
             var phase = EvidenceAllocationPhase.None;
             var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            EvidenceN07PrecleanupFault? precleanupFault = EvidenceNativeQualification.ParentReplacementEnabled ? new() : null;
             if (cancellationCheckpoint is not null) privateError = Console.OpenStandardError();
             var allocated = await execution.ExecuteAsync(EvidenceRunStage.Admission, stage!.Duration,
                 async token =>
@@ -141,8 +142,22 @@ internal static class EvidenceProtectedCliExecution
                             privateError!, token, callerCancellation).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     phase = EvidenceAllocationPhase.Allocation;
-                    var allocatedRoot = EvidenceLinuxArtifactRoot.Allocate(descriptor.OutputParent, descriptor.OutputParentIdentity,
-                        descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid, out operation);
+                    EvidenceLinuxArtifactRoot allocatedRoot;
+                    try
+                    {
+                        allocatedRoot = EvidenceLinuxArtifactRoot.Allocate(descriptor.OutputParent, descriptor.OutputParentIdentity,
+                            descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid, out operation);
+                    }
+                    catch (Exception error)
+                    {
+                        if (precleanupFault is not null)
+                        {
+                            precleanupFault.Capture(operation, error);
+                            try { await precleanupFault.WriteBeforeRethrowAsync(token).ConfigureAwait(false); }
+                            catch (Exception) { }
+                        }
+                        throw;
+                    }
                     root = allocatedRoot; // Retain ownership even if cancellation wins before the callback returns.
                     phase = EvidenceAllocationPhase.BeforeActivation;
                     if (cancellationCheckpoint is not null)

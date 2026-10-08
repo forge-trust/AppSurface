@@ -150,6 +150,16 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            if (EvidenceNativeQualification.ParentReplacementEnabled && failed && !cleanupFailed
+                && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    var evidence = worker.CaptureFailureSettlement(input, owner, accounts, workspace, server, cleanupToken);
+                    await LinuxN07FailureEmitter.WriteAsync(evidence.Settlement, evidence.ReadyDescriptorSha256,
+                        server.N07ExecutionStatus, cleanupToken).ConfigureAwait(false);
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #if EVIDENCE_PRIVATE_N10
             // Emit only after the original worker lifetime returned from its joined two-stop/finalization path.
             // The record retains sticky cancellation and reports its physical-settlement projection verbatim.

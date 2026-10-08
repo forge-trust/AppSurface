@@ -39,6 +39,8 @@ public sealed class EvidenceNativeQualificationTests
     {
 #if EVIDENCE_PRIVATE_N04
         var expected = EvidenceNativeQualificationKind.PeerReplacement;
+#elif EVIDENCE_PRIVATE_N07
+        var expected = EvidenceNativeQualificationKind.ParentIdentitySubstitution;
 #elif EVIDENCE_PRIVATE_N08
         var expected = EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
@@ -61,6 +63,8 @@ public sealed class EvidenceNativeQualificationTests
         Assert.Equal(expected, EvidenceNativeQualification.Current);
         Assert.Equal(expected == EvidenceNativeQualificationKind.PeerReplacement,
             EvidenceNativeQualification.PeerReplacementEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.ParentIdentitySubstitution,
+            EvidenceNativeQualification.ParentReplacementEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.LeaderExitWithDescendant,
             EvidenceNativeQualification.DescendantEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.PendingStartRace,

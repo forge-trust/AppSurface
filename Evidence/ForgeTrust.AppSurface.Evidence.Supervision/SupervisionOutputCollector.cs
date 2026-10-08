@@ -75,12 +75,16 @@ internal sealed class SupervisionOutputCollector
     private readonly int _prefixByteLimit;
     private SupervisionCancellationPhaseObservation? _cancellationPhase;
     private SupervisionDescendantObservation? _descendant;
+    private SupervisionN07PrecleanupObservation? _n07;
 
     /// <summary>Attaches fixed first-frame data before the original collector dispatch; no new reader.</summary>
     internal void ObserveCancellation(SupervisionCancellationPhaseObservation phase) => _cancellationPhase = phase;
 
     /// <summary>Attaches private descendant PID data before dispatch; it adds neither a pipe reader nor native authority.</summary>
     internal void ObserveDescendant(SupervisionDescendantObservation descendant) => _descendant = descendant;
+
+    /// <summary>Attaches selected N07 data before dispatch, using the original stderr read task.</summary>
+    internal void ObserveN07(SupervisionN07PrecleanupObservation observation) => _n07 = observation;
 
     /// <summary>Creates a collector whose protected limits may be lowered but never raised.</summary>
     /// <param name="receivedByteLimit">Positive shared limit, at most the Contracts 16 MiB maximum.</param>
@@ -127,8 +131,8 @@ internal sealed class SupervisionOutputCollector
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var state = new CollectionState(_receivedByteLimit, stop);
         // Independent dispatch also owns a Stream implementation that stalls before returning its ValueTask.
-        var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token, null, null), CancellationToken.None);
-        var stderrTask = Task.Run(() => PumpAsync(stderr, state, stop.Token, _cancellationPhase, _descendant), CancellationToken.None);
+        var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token, null, null, null), CancellationToken.None);
+        var stderrTask = Task.Run(() => PumpAsync(stderr, state, stop.Token, _cancellationPhase, _descendant, _n07), CancellationToken.None);
         await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
         if (cancellationToken.IsCancellationRequested)
         {
@@ -142,7 +146,7 @@ internal sealed class SupervisionOutputCollector
 
     private async Task<SupervisionOutputStreamReceipt> PumpAsync(
         Stream stream, CollectionState state, CancellationToken cancellationToken,
-        SupervisionCancellationPhaseObservation? phase, SupervisionDescendantObservation? descendant)
+        SupervisionCancellationPhaseObservation? phase, SupervisionDescendantObservation? descendant, SupervisionN07PrecleanupObservation? n07)
     {
         var buffer = new byte[ReadBufferBytes];
         using var prefix = new MemoryStream(_prefixByteLimit);
@@ -177,6 +181,7 @@ internal sealed class SupervisionOutputCollector
                 cancellationToken.ThrowIfCancellationRequested();
                 phase?.Feed(buffer.AsSpan(0, count)); // After original received-byte charge, no second read.
                 descendant?.Feed(buffer.AsSpan(0, count));
+                n07?.Feed(buffer.AsSpan(0, count));
                 var retain = Math.Min(count, _prefixByteLimit - (int)prefix.Length);
                 prefix.Write(buffer, 0, retain);
             }
@@ -194,6 +199,7 @@ internal sealed class SupervisionOutputCollector
 
         phase?.Complete();
         descendant?.Complete();
+        n07?.Complete(eof && failure == SupervisionOutputFailure.None);
         return new SupervisionOutputStreamReceipt(receivedBytes, ImmutableArray.CreateRange(prefix.ToArray()), eof, failure);
     }
 
