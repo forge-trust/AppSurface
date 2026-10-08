@@ -152,6 +152,42 @@ The Testing package preserves provider exceptions and problem codes. Consult the
 [Durable diagnostics catalog](../../troubleshooting/durable-diagnostics.md) for code-specific explanations; do not
 classify a failure or retry from exception text.
 
+## Execution checkpoints and timing observations
+
+`DurableExecutionCheckpointController` records payload-free observations for the seven bounded execution stages in
+`DurableExecutionCheckpointName`: before/after permit commit, before/after one-use invocation admission, before/after
+an adopter-owned provider call, and before completion persistence. Its `Observations` property returns a defensive,
+read-only copy. The history keeps at most 256 entries by default (configurable from 1 through 4,096); sequence numbers
+remain monotonic when old entries are evicted. The name-only `WaitForObservationAsync(name)` returns the first retained
+match and falls back to the latest value for that stage when no matching history entry remains. Use the cursor overload
+when waiting for a later retry: `WaitForObservationAsync(name, afterSequence, maximumWait, cancellationToken)` returns
+an observation whose sequence is strictly greater than the cursor. It searches retained history first and uses the
+latest-per-stage fallback only when that value is newer than the cursor. Because history is bounded, the cursor overload
+cannot recover the earliest later event once that event has been evicted; it returns the earliest qualifying retained
+event or the latest qualifying fallback. A supplied `TimeProvider` stamps observations only and does not control pause
+or observation-wait timeouts.
+
+Arm a single pause or exception with `PauseOnce(name)` or `ThrowOnce(name)`. The name-only wait uses the controller's
+configured maximum (five seconds by default, configurable up to five minutes). The cursor overload requires a
+non-negative `afterSequence` no greater than the current sequence and a positive `maximumWait` no greater than the
+controller's configured maximum. Both wait forms honor caller cancellation and throw `ObjectDisposedException` after
+disposal. A paused `ReachAsync` completes
+only after `Release(name)`, caller cancellation, `Cancel(name)`, the configured timeout, or disposal. `Release` and
+`Cancel` report whether an active/armed one-shot action was consumed. `ThrowOnce` produces a safe
+`DurableExecutionCheckpointException` with only the stage and positive attempt number; the next reach is unaffected.
+Only one action can be armed for a stage at once, and concurrent reaches consume it at most once. Dispose the controller
+after the controlled operation finishes; disposal cancels every active pause and rejects future arms/reaches.
+
+These controls help test ordering and bounded failure handling. A PostgreSQL provider must still perform its own
+authoritative admission checks, and only an adopter-owned fake executor can mark the exact boundary of its fake provider
+operation. Generic runtime instrumentation cannot infer that arbitrary application code called a provider. See the
+[execution-policy reference](../execution-policies-v1.md) for accepted timing semantics and the
+[PostgreSQL integration tests](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verification) for database proof.
+
+`DurableWorkExecutionObservation.Capture(snapshot)` copies Core's immutable policy, deadline, acceptance time, next
+eligibility, and admission-cutoff facts into a Testing-package observation. It is descriptive only and is not an
+invocation permit or a source of current time.
+
 ## Contract observations
 
 `DurableWorkDefinitionObservation.Capture` snapshots definition identity, codec metadata, classifications, retention

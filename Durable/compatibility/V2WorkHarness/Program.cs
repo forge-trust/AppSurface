@@ -13,17 +13,21 @@ using Npgsql;
 const string packageVersion = "0.2.0-preview.8";
 const string packageSha256 = "62a48f6b7ec299ad608f3714a49a39f18c5cb1fe45293d53915e5549422d311e";
 const string repositoryCommit = "b34970c87489a63b132531657c043e075b092e5e";
-const string workerId = "compatibility-v020-preview8-worker";
 
-if (args.Length != 3
+if (args.Length != 4
     || !Guid.TryParse(args[0], out var runtimeEpoch)
     || !Guid.TryParse(args[1], out var storeId)
-    || string.IsNullOrWhiteSpace(args[2]))
+    || string.IsNullOrWhiteSpace(args[2])
+    || string.IsNullOrWhiteSpace(args[3])
+    || args[3].Length > 24
+    || args[3].Any(static character => !char.IsAsciiLetterOrDigit(character) && character != '-'))
 {
-    throw new ArgumentException("Expected runtime epoch, store id, and exact runtime role arguments.");
+    throw new ArgumentException("Expected runtime epoch, store id, runtime role, and bounded alphanumeric host suffix.");
 }
 
 var runtimeRole = args[2];
+var hostSuffix = args[3];
+var workerId = $"compatibility-v020-preview8-{hostSuffix}";
 var dispatcherConnectionString = RequireEnvironment("APPSURFACE_POSTGRES_DISPATCHER_CONNECTION");
 var runtimeConnectionString = RequireEnvironment("APPSURFACE_POSTGRES_RUNTIME_CONNECTION");
 var packagePath = RequireEnvironment("APPSURFACE_DURABLE_V020_PACKAGE_PATH");
@@ -42,7 +46,9 @@ if (informationalVersion is null
 
 await using var dispatcherDataSource = NpgsqlDataSource.Create(dispatcherConnectionString);
 await using var runtimeDataSource = NpgsqlDataSource.Create(runtimeConnectionString);
-var registration = new V2WorkRegistration();
+// Give each old host a distinct registered contract so its single-item pass cannot race
+// another host's older candidate for this same test contract.
+var registration = new V2WorkRegistration(hostSuffix);
 var services = new ServiceCollection();
 services.AddSingleton<DurableWorkRegistration>(registration);
 services.AddAppSurfaceDurablePostgreSql(
@@ -77,11 +83,11 @@ Require(before.EpochCompatible, "Legacy health did not report epoch compatibilit
 Require(before.State == DurableRuntimeHealthState.NotStarted, $"Expected NotStarted health, observed {before.State}.");
 Require(before.LastHeartbeatAtUtc is null, "A never-started old worker unexpectedly had a heartbeat.");
 
-var scope = new DurableScopeId("v020-preview8-release-proof");
+var scope = new DurableScopeId($"v020-preview8-release-proof-{hostSuffix}");
 var acceptedResult = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
     scope,
-    new DurableCommandId("v020-preview8-command"),
-    "v020-preview8-idempotency",
+    new DurableCommandId($"v020-preview8-{hostSuffix}-command"),
+    $"v020-preview8-{hostSuffix}-idempotency",
     registration.WorkName,
     registration.WorkVersion,
     registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("release-proof")),
@@ -136,9 +142,14 @@ Require(
     afterMaintenance.LastSuccessfulSweepAtUtc > afterFirstPass.LastSuccessfulSweepAtUtc,
     "A second bounded pass did not advance the old worker successful-sweep timestamp.");
 
+await provider.GetRequiredService<IDurableRuntimeDrainControl>().BeginDrainAsync();
+var afterDrain = await health.GetAsync();
+Require(afterDrain.State == DurableRuntimeHealthState.Draining, $"Expected Draining after old-host shutdown, observed {afterDrain.State}.");
+
 Console.WriteLine(JsonSerializer.Serialize(new
 {
-    Phase = "previous-package-schema11-operational",
+    Phase = "previous-package-schema11-drained",
+    HostId = hostSuffix,
     PackageVersion = packageVersion,
     PackageSha256 = packageSha256,
     RepositoryCommit = repositoryCommit,
@@ -154,6 +165,7 @@ Console.WriteLine(JsonSerializer.Serialize(new
     InitialHealthState = before.State.ToString(),
     HealthyAfterWork = afterFirstPass.State.ToString(),
     HeartbeatMaintained = true,
+    DrainedBeforeSchemaUpgrade = afterDrain.State == DurableRuntimeHealthState.Draining,
     Work = new
     {
         ScopeId = scope.Value,
@@ -225,12 +237,12 @@ static void VerifyPackageArtifact(
     }
 }
 
-internal sealed class V2WorkRegistration() : DurableWorkRegistration(
-    "compatibility.v020-preview8-work",
+internal sealed class V2WorkRegistration(string hostSuffix) : DurableWorkRegistration(
+    $"compatibility.v020-preview8-work-{hostSuffix}",
     "v1",
     DurableProviderSafety.Idempotent,
-    new V2Codec("compatibility.v020-preview8-work"),
-    new V2Codec("compatibility.v020-preview8-result"))
+    new V2Codec($"compatibility.v020-preview8-work-{hostSuffix}"),
+    new V2Codec($"compatibility.v020-preview8-result-{hostSuffix}"))
 {
     private int _invocationCount;
 

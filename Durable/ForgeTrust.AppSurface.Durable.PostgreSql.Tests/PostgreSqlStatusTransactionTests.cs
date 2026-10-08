@@ -11,15 +11,16 @@ public sealed class PostgreSqlStatusTransactionTests
     [InlineData(true, "DELETE FROM appsurface_durable.store_metadata;", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "ALTER TABLE appsurface_durable.store_metadata DROP CONSTRAINT store_metadata_store_id_check; UPDATE appsurface_durable.store_metadata SET store_id = '00000000-0000-0000-0000-000000000000';", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "UPDATE appsurface_durable.store_metadata SET schema_version = 1;", DurableRuntimeSchemaCompatibility.Inconsistent)]
-    [InlineData(true, "UPDATE appsurface_durable.store_metadata SET minimum_reader_version = 12, maximum_reader_version = 12;", DurableRuntimeSchemaCompatibility.Inconsistent)]
+    [InlineData(true, "UPDATE appsurface_durable.store_metadata SET minimum_reader_version = 13, maximum_reader_version = 13;", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "UPDATE appsurface_durable.schema_migration SET name = 'renamed' WHERE version = 1;", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "UPDATE appsurface_durable.schema_migration SET sha256 = repeat('0', 64) WHERE version = 11;", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "DELETE FROM appsurface_durable.schema_migration WHERE version = 1;", DurableRuntimeSchemaCompatibility.Inconsistent)]
     [InlineData(true, "DELETE FROM appsurface_durable.schema_migration;", DurableRuntimeSchemaCompatibility.Inconsistent)]
-    [InlineData(true, "DELETE FROM appsurface_durable.schema_migration WHERE version = 11; UPDATE appsurface_durable.store_metadata SET schema_version = 10, minimum_reader_version = 10, maximum_reader_version = 10, minimum_writer_version = 10, maximum_writer_version = 10;", DurableRuntimeSchemaCompatibility.UpgradeRequired)]
+    [InlineData(true, "DELETE FROM appsurface_durable.schema_migration WHERE version >= 11; UPDATE appsurface_durable.store_metadata SET schema_version = 10, minimum_reader_version = 10, maximum_reader_version = 10, minimum_writer_version = 10, maximum_writer_version = 10;", DurableRuntimeSchemaCompatibility.UpgradeRequired, 10)]
+    [InlineData(true, "DELETE FROM appsurface_durable.schema_migration WHERE version = 12; UPDATE appsurface_durable.store_metadata SET schema_version = 11, minimum_reader_version = 11, maximum_reader_version = 11, minimum_writer_version = 11, maximum_writer_version = 11;", DurableRuntimeSchemaCompatibility.UpgradeRequired, 11)]
     [InlineData(true, "UPDATE appsurface_durable.store_metadata SET minimum_reader_version = 1, maximum_reader_version = 1, minimum_writer_version = 1, maximum_writer_version = 1;", DurableRuntimeSchemaCompatibility.StoreTooNew)]
     public async Task ReadStatusInTransactionAsync_PreservesEveryCompatibilityClassification(
-        bool install, string mutation, DurableRuntimeSchemaCompatibility expected)
+        bool install, string mutation, DurableRuntimeSchemaCompatibility expected, int expectedInstalledVersion = 0)
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         var manager = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
@@ -49,8 +50,8 @@ public sealed class PostgreSqlStatusTransactionTests
         Assert.Same(connection, transaction.Connection);
         if (expected == DurableRuntimeSchemaCompatibility.UpgradeRequired)
         {
-            Assert.Equal([11], snapshotStatus.PendingVersions);
-            Assert.Equal(10, snapshotStatus.InstalledVersion);
+            Assert.Equal(expectedInstalledVersion, snapshotStatus.InstalledVersion);
+            Assert.Equal(Enumerable.Range(expectedInstalledVersion + 1, 12 - expectedInstalledVersion), snapshotStatus.PendingVersions);
         }
         await transaction.CommitAsync();
         AssertStatusEqual(publicStatus, await manager.GetStatusAsync());
@@ -404,9 +405,10 @@ public sealed class PostgreSqlStatusTransactionTests
             """
             INSERT INTO appsurface_durable.schema_migration (version, name, sha256)
             SELECT version, 'fixture_' || version::text, repeat('a', 64)
-            FROM generate_series(12, @target_version) AS generated(version);
+            FROM generate_series(@first_future_version, @target_version) AS generated(version);
             """))
         {
+            insert.Parameters.AddWithValue("first_future_version", DurablePostgreSqlMigrationCatalog.RequiredVersion + 1);
             insert.Parameters.AddWithValue("target_version", targetVersion);
             await insert.ExecuteNonQueryAsync();
         }
@@ -415,9 +417,9 @@ public sealed class PostgreSqlStatusTransactionTests
             """
             UPDATE appsurface_durable.store_metadata
             SET schema_version = @target_version,
-                minimum_reader_version = 12,
+                minimum_reader_version = @target_version,
                 maximum_reader_version = @target_version,
-                minimum_writer_version = 12,
+                minimum_writer_version = @target_version,
                 maximum_writer_version = @target_version;
             """))
         {

@@ -47,7 +47,7 @@ public sealed class DurableDoctorIntegrationTests
         var families = new (string[] Ids, string Mutation)[]
         {
             (["D11", "D12"], "DROP SCHEMA appsurface_durable CASCADE"),
-            (["D13", "D14"], "DELETE FROM appsurface_durable.schema_migration WHERE version = 11; UPDATE appsurface_durable.store_metadata SET schema_version = 10, minimum_reader_version = 10, maximum_reader_version = 10, minimum_writer_version = 10, maximum_writer_version = 10 WHERE singleton"),
+            (["D13", "D14"], "DELETE FROM appsurface_durable.schema_migration WHERE version = 12; UPDATE appsurface_durable.store_metadata SET schema_version = 11, minimum_reader_version = 11, maximum_reader_version = 11, minimum_writer_version = 11, maximum_writer_version = 11 WHERE singleton"),
             (["D15", "D16"], "UPDATE appsurface_durable.store_metadata SET minimum_reader_version = 1, maximum_reader_version = 10, minimum_writer_version = 1, maximum_writer_version = 10 WHERE singleton"),
             (["D17", "D18"], "UPDATE appsurface_durable.schema_migration SET sha256 = repeat('f', 64) WHERE version = 11"),
         };
@@ -198,10 +198,10 @@ public sealed class DurableDoctorIntegrationTests
         epochTimer.Stop();
         var epochEnded = DateTimeOffset.UtcNow;
 
-        var history = await ReadMigrationElevenAsync(fixture);
+        var history = await ReadMigrationTwelveAsync(fixture);
         var schemaTimer = Stopwatch.StartNew();
         var schemaStarted = DateTimeOffset.UtcNow;
-        await fixture.MutateAsync("DELETE FROM appsurface_durable.schema_migration WHERE version = 11; UPDATE appsurface_durable.store_metadata SET schema_version = 10, minimum_reader_version = 10, maximum_reader_version = 10, minimum_writer_version = 10, maximum_writer_version = 10 WHERE singleton");
+        await fixture.MutateAsync("DELETE FROM appsurface_durable.schema_migration WHERE version = 12; UPDATE appsurface_durable.store_metadata SET schema_version = 11, minimum_reader_version = 11, maximum_reader_version = 11, minimum_writer_version = 11, maximum_writer_version = 11 WHERE singleton");
         var schemaDiagnosis = await RunTimedDoctorAsync(fixture, MatrixRow("D13"), "json");
         AssertCliMatrix(MatrixRow("D13"), schemaDiagnosis.Run, null, "json");
         var schemaStatus = await RunTimedAsync(
@@ -210,10 +210,10 @@ public sealed class DurableDoctorIntegrationTests
             configuredEpoch: fixture.RuntimeEpoch);
         Assert.Equal(0, schemaStatus.Run.ExitCode);
         Assert.Contains("Compatibility: UpgradeRequired", schemaStatus.Run.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("Installed: 10", schemaStatus.Run.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("Required: 11", schemaStatus.Run.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Installed: 11", schemaStatus.Run.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("Required: 12", schemaStatus.Run.StandardOutput, StringComparison.Ordinal);
         AssertSafeSinks(schemaStatus.Run, fixture.RuntimeConnectionString);
-        await RestoreMigrationElevenAsync(fixture, history);
+        await RestoreMigrationTwelveAsync(fixture, history);
         var schemaRecovery = await RunTimedDoctorAsync(fixture, MatrixRow("D01"), "json");
         AssertCliMatrix(MatrixRow("D01"), schemaRecovery.Run, null, "json");
         var schemaRecoveryText = await RunTimedDoctorAsync(fixture, MatrixRow("D01"), "text");
@@ -267,7 +267,7 @@ public sealed class DurableDoctorIntegrationTests
                         "Synthetic fixture changed active_runtime_epoch; same isolated store and configured environment were restored before the clean rerun.",
                         [epochDiagnosis], [epochRecovery, epochRecoveryText]),
                     Workflow("custom-environment-incompatible-schema", schemaStarted, schemaEnded, schemaTimer.Elapsed.TotalMilliseconds, fixture.StoreId,
-                        "Synthetic fixture removed only the schema-11 history row and lowered schema_version; the captured row and canonical metadata were restored on the same store. This is not a migration execution claim.",
+                        "Synthetic fixture removed only the schema-12 history row and lowered schema_version; the captured row and canonical metadata were restored on the same store. This is not a migration execution claim.",
                         [schemaDiagnosis, schemaStatus], [schemaRecovery, schemaRecoveryText]),
                 },
             };
@@ -376,18 +376,18 @@ public sealed class DurableDoctorIntegrationTests
     private static async Task ResetRuntimeFactsAsync(DurableDoctorFixture fixture) => await fixture.MutateAsync(
         $"DELETE FROM appsurface_durable.runtime_heartbeat; UPDATE appsurface_durable.store_metadata SET active_runtime_epoch = '{fixture.RuntimeEpoch:D}' WHERE singleton");
 
-    private static async Task<MigrationEleven> ReadMigrationElevenAsync(DurableDoctorFixture fixture)
+    private static async Task<MigrationTwelve> ReadMigrationTwelveAsync(DurableDoctorFixture fixture)
     {
         await using var connection = new NpgsqlConnection(fixture.AdministrativeConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(
-            "SELECT name, sha256, applied_at FROM appsurface_durable.schema_migration WHERE version = 11", connection);
+            "SELECT migration.name, migration.sha256, migration.applied_at, metadata.schema_version, metadata.minimum_reader_version, metadata.maximum_reader_version, metadata.minimum_writer_version, metadata.maximum_writer_version FROM appsurface_durable.schema_migration AS migration CROSS JOIN appsurface_durable.store_metadata AS metadata WHERE migration.version = 12 AND metadata.singleton", connection);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        return new MigrationEleven(reader.GetString(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2));
+        return new MigrationTwelve(reader.GetString(0), reader.GetString(1), reader.GetFieldValue<DateTimeOffset>(2), reader.GetInt32(3), reader.GetInt32(4), reader.GetInt32(5), reader.GetInt32(6), reader.GetInt32(7));
     }
 
-    private static async Task RestoreMigrationElevenAsync(DurableDoctorFixture fixture, MigrationEleven migration)
+    private static async Task RestoreMigrationTwelveAsync(DurableDoctorFixture fixture, MigrationTwelve migration)
     {
         await using var connection = new NpgsqlConnection(fixture.AdministrativeConnectionString);
         await connection.OpenAsync();
@@ -395,20 +395,25 @@ public sealed class DurableDoctorIntegrationTests
             WITH restored AS
             (
                 INSERT INTO appsurface_durable.schema_migration (version, name, sha256, applied_at)
-                VALUES (11, @name, @sha, @applied_at)
+                VALUES (12, @name, @sha, @applied_at)
                 RETURNING version
             )
             UPDATE appsurface_durable.store_metadata
-            SET schema_version = 11,
-                minimum_reader_version = 1,
-                maximum_reader_version = 11,
-                minimum_writer_version = 1,
-                maximum_writer_version = 11
+            SET schema_version = @installed_version,
+                minimum_reader_version = @minimum_reader,
+                maximum_reader_version = @maximum_reader,
+                minimum_writer_version = @minimum_writer,
+                maximum_writer_version = @maximum_writer
             WHERE singleton AND EXISTS (SELECT 1 FROM restored)
             """, connection);
         command.Parameters.AddWithValue("name", migration.Name);
         command.Parameters.AddWithValue("sha", migration.Sha256);
         command.Parameters.AddWithValue("applied_at", migration.AppliedAtUtc);
+        command.Parameters.AddWithValue("installed_version", migration.InstalledVersion);
+        command.Parameters.AddWithValue("minimum_reader", migration.MinimumReaderVersion);
+        command.Parameters.AddWithValue("maximum_reader", migration.MaximumReaderVersion);
+        command.Parameters.AddWithValue("minimum_writer", migration.MinimumWriterVersion);
+        command.Parameters.AddWithValue("maximum_writer", migration.MaximumWriterVersion);
         Assert.Equal(1, await command.ExecuteNonQueryAsync());
     }
 
@@ -836,7 +841,9 @@ public sealed class DurableDoctorIntegrationTests
 
     private sealed record LiveOutcome(DurableDoctorObservation? Observation, DurableDoctorResult Result);
 
-    private sealed record MigrationEleven(string Name, string Sha256, DateTimeOffset AppliedAtUtc);
+    private sealed record MigrationTwelve(
+        string Name, string Sha256, DateTimeOffset AppliedAtUtc, int InstalledVersion,
+        int MinimumReaderVersion, int MaximumReaderVersion, int MinimumWriterVersion, int MaximumWriterVersion);
 
     private sealed record TimedCliRun(
         DateTimeOffset StartedAtUtc,

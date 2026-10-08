@@ -20,6 +20,14 @@ The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md) SPI. Neither package
 depends on PostgreSQL.
 
+For fixed retry timing or an absolute execution deadline, read the canonical
+[execution-policy reference](../execution-policies-v1.md) before changing a Work version. Migration `0012` adds the
+opt-in columns and advances the reader/writer compatibility floor to schema 12; legacy rows remain on legacy timing.
+The ordered [migration checklist](../migrations/execution-policies-v1.md) requires a stop/drain, migration-owner apply,
+role/schema preflight, compatible package deployment, and a new immutable Work version. The runtime applies no DDL.
+The fresh-feed [packed-consumer gate](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/verify-packed-consumers.sh) includes the real PostgreSQL planned-policy proof
+and rejects skipped tests.
+
 ## Slice 7 discovery and reconciliation
 
 This provider is a public preview. Registration is passive: `AddAppSurfaceDurablePostgreSql` installs storage and runtime
@@ -31,8 +39,10 @@ applies DDL or advances migration history.
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
-`0010_runtime_health_observation.sql` and `0011_runtime_heartbeat_retention.sql`, followed by the matching released
-provider package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. The package recipe is
+`0010_runtime_health_observation.sql`, `0011_runtime_heartbeat_retention.sql`, and
+[`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql), followed by the matching released provider
+package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. Migration 0012 raises the reader/writer floor
+to schema 12 before any deadline-only or planned Work is accepted. The package recipe is
 byte-identical to the canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 source, as checked by packed-consumer verification. Prefer generating the Durable schema script offline, reviewing it,
 applying the forward-only migrations, running that package recipe with the complete reviewed manifest, and completing
@@ -122,7 +132,8 @@ expose SQL, exception text, credentials, role names, payload identifiers, scope 
 For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
 stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
 `runtime_due_dispatch_health(integer)` function. Repair owner drift with the #794 release's matching role recipe
-before migration if needed; do not use a current package recipe before migration 0011. Then apply migration
+before migration if needed; do not use the current package recipe before migration 0012 because it requires schema 12.
+For a schema-9 historical proof, use the matching historical recipe; apply migration
 `0010_runtime_health_observation` from schema 9 to 10 with that owner through the generated script or explicit CLI
 apply command, rerun the #794 release's matching role recipe
 for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
@@ -201,8 +212,13 @@ epoch from committing new durable state after rotation.
 Runtime roles never own schema or apply DDL. Apply the ordered migrations in numeric order:
 `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, `0004_schedule_protocol.sql`,
 `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, `0007_flow_retention.sql`,
-`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, `0010_runtime_health_observation.sql`, and
-`0011_runtime_heartbeat_retention.sql`.
+`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, `0010_runtime_health_observation.sql`,
+`0011_runtime_heartbeat_retention.sql`, and `0012_work_execution_policy.sql`.
+
+Before accepting deadline-only or planned Work, stop every connected package below the schema-12 reader/writer floor.
+Schema 12 leaves legacy rows and their v1 fingerprints unchanged; it adds persisted execution-policy facts for new
+opt-in Work. Use the [execution-policy migration checklist](../migrations/execution-policies-v1.md) to order the
+forward-only apply, package deployment, preflight, and new Work version.
 
 `0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
 discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index and
@@ -256,7 +272,9 @@ dispatcher connections can use the new relations. Migration 0010 also verifies t
 owned by the configured migration principal. If that preflight exposes historical owner drift, use the
 [schema-10 single-pair role recipe](https://github.com/forge-trust/AppSurface/blob/e0618ac8/Durable/configure-postgresql-roles.sql)
 once as a repair before retrying migration 0010, then run it again after the migration for normal reconciliation.
-The current packaged recipe requires migration 0011 first.
+The current packaged recipe requires all migrations through `0012_work_execution_policy.sql` first; its grants include
+the authoritative execution clock and planned-offset validator introduced in schema 12. See the
+[execution-policy migration checklist](../migrations/execution-policies-v1.md) for the coordinated host upgrade.
 
 ## Run a worker host
 
@@ -352,12 +370,13 @@ not ready, including `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Una
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0011_runtime_heartbeat_retention.sql` with the migration owner, then use the matching released provider package's
+For a cold path, stop new submissions and drain and stop every producer, reader, dispatcher, operator tool, runtime,
+and scheduled activator that cannot read/write schema 12. Follow the [execution-policy migration checklist](../migrations/execution-policies-v1.md#adoption-and-rollback).
+Apply every pending forward-only migration through `0012_work_execution_policy.sql` with the migration owner, then use the matching released provider package's
 `contentFiles/any/any/configure-postgresql-roles.sql` with the complete reviewed manifest. Verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
-back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
-credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
-restore the broad grant as a rollback shortcut.
+back a migration. After migration `0012`, recovery and application rollback require schema-12-compatible packages;
+keep every pre-floor package stopped. A pre-`0009` worker also loses raw `dispatch` access when the role recipe runs.
+Do not restore the broad grant as a rollback shortcut.
 
 ### Role recipe contract
 
@@ -416,11 +435,13 @@ Use a separate store or a separately designed PostgreSQL partition when independ
 separate failure domain is required. The three operational choices and their costs are summarized in the
 [adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
 
-With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. Preflight consumes
-that complete reviewed set and checks every runtime, policy target, and function grantee; omission or an unexpected
-target fails closed. The [local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
-illustrates one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or
-public package proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+The historical schema-11 recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current
+recipe also requires schema 12 for execution-policy functions; apply migration `0012` before using it, and use the
+matching historical package recipe when reconciling an older schema. Preflight consumes the complete reviewed set and
+checks every runtime, policy target, and function grantee; omission or an unexpected target fails closed. The
+[local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough) illustrates
+one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or public package
+proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 is satisfied by actual matching artifacts and the deployment's continuous guard.
 
 Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,

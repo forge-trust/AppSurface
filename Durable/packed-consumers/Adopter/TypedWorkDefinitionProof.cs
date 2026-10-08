@@ -131,8 +131,196 @@ internal static class TypedWorkDefinitionProof
         maximumLeaseLifetime: TimeSpan.FromMinutes(5),
         backoffAlgorithm: "exponential-v1");
 
+    // docs:snippet durable-execution-policy-chooser:start
+    internal static void VerifyExecutionPolicyChooser()
+    {
+        var scope = new DurableScopeId("execution-policy-proof-scope");
+        var command = new DurableCommandId("execution-policy-proof-command");
+        var input = new LedgerWork("entry-1");
+        var legacy = ReconciledDefinition.CreateRequest(
+            scope, command, "legacy-key", input, retryPolicy: ExplicitRetry);
+        if (legacy.ExecutionPolicy.AttemptPlan is not null
+            || legacy.ExecutionDeadline is not null
+            || legacy.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v1")
+        {
+            throw new InvalidOperationException("Legacy request construction changed its policy or fingerprint schema.");
+        }
+
+        var deadline = new DurableExecutionDeadline(
+            new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var deadlineOnly = DurableWorkRequest.CreateWithExecutionPolicy(
+            scope,
+            command,
+            "deadline-only-key",
+            OrdinaryDefinition.WorkName,
+            "v2",
+            OrdinaryDefinition.WorkCodec.Encode(new InvoiceWork("invoice-1002")),
+            OrdinaryDefinition.ProviderSafety,
+            DurableWorkExecutionPolicy.FromRetryPolicy(ExplicitRetry),
+            deadline);
+        if (deadlineOnly.ExecutionPolicy.AttemptPlan is not null
+            || deadlineOnly.ExecutionDeadline != deadline
+            || deadlineOnly.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2")
+        {
+            throw new InvalidOperationException("Deadline-only construction must retain legacy backoff with the opt-in fingerprint.");
+        }
+
+        var retry = new DurableWorkRetryPolicy(
+            maximumAttempts: 5,
+            maximumElapsedTime: TimeSpan.FromHours(4),
+            initialRetryDelay: TimeSpan.FromMinutes(5),
+            maximumRetryDelay: TimeSpan.FromHours(1),
+            leaseDuration: TimeSpan.FromMinutes(1),
+            renewalCadence: TimeSpan.FromSeconds(15),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(10),
+            backoffAlgorithm: "exponential-v1");
+        var plan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20),
+             TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
+            TimeSpan.FromMinutes(240));
+        var policy = DurableWorkExecutionPolicy.ForAttemptPlan(retry, plan);
+        var definition = DurableWork.DefineWithExecutionPolicy<LedgerWork, LedgerResult>(
+            "examples.ledger.reconcile", "v2",
+            TypedWorkCodecs.LedgerWorkCodec, TypedWorkCodecs.LedgerResultCodec,
+            DurableProviderSafety.ReconcileBeforeRetry, policy);
+        var services = new ServiceCollection();
+        services.AddDurableWork(definition.ExecutedBy<LedgerExecutor>()
+            .ReconciledBy<LedgerReconciler>());
+        var request = definition.CreateRequestWithExecutionPolicy(
+            scope, command, "ledger-reconcile-v2", input,
+            executionDeadline: deadline);
+        using var provider = services.BuildServiceProvider();
+        var registration = provider.GetRequiredService<IDurableWorkRegistry>()
+            .GetRequired(definition.WorkName, definition.WorkVersion);
+        if (!request.ExecutionPolicy.Equals(policy)
+            || request.ExecutionDeadline != deadline
+            || request.DueAtUtc is not null
+            || request.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2"
+            || !registration.DefaultExecutionPolicy.Equals(policy))
+        {
+            throw new InvalidOperationException("Planned Work must preserve its named policy through request and registration.");
+        }
+
+    }
+    // docs:snippet durable-execution-policy-chooser:end
+
+    // docs:snippet durable-execution-policy-timing-proof:start
+    internal static void VerifyExecutionPolicyTimingProof()
+    {
+        var acceptedAt = new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var plan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20),
+             TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
+            TimeSpan.FromMinutes(240));
+        var expectedOffsets = new[]
+        {
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(20),
+            TimeSpan.FromMinutes(60),
+            TimeSpan.FromMinutes(180),
+        };
+        var expectedAttemptNumbers = new[] { 1, 2, 3, 4, 5 };
+        var expectedEligibility = new[]
+        {
+            acceptedAt,
+            acceptedAt.AddMinutes(5),
+            acceptedAt.AddMinutes(20),
+            acceptedAt.AddMinutes(60),
+            acceptedAt.AddMinutes(180),
+        };
+        var exclusiveCutoff = acceptedAt.Add(plan.MaximumCircuitDuration);
+        if (!plan.ElapsedOffsets.SequenceEqual(expectedOffsets)
+            || plan.MaximumCircuitDuration != TimeSpan.FromMinutes(240)
+            || plan.ElapsedOffsets[^1] >= plan.MaximumCircuitDuration)
+        {
+            throw new InvalidOperationException("The fixed five-slot plan must keep every slot before its exclusive circuit cutoff.");
+        }
+
+        for (var slot = 0; slot < expectedOffsets.Length; slot++)
+        {
+            var eligibility = acceptedAt.Add(plan.ElapsedOffsets[slot]);
+            if (eligibility != expectedEligibility[slot]
+                || expectedAttemptNumbers[slot] != slot + 1
+                || eligibility >= exclusiveCutoff)
+            {
+                throw new InvalidOperationException("Zero-based offsets must map to one-based attempts at fixed acceptance-relative times.");
+            }
+        }
+
+        // Schedule arithmetic only: these observations do not simulate database claims or provider I/O.
+        var callerCommitAt = acceptedAt.AddMinutes(25);
+        var delayedFirstClaimAt = acceptedAt.AddMinutes(30);
+        var downtimeRecoveryAt = acceptedAt.AddMinutes(90);
+        var nextSlotAfterSafeAttemptOne = expectedEligibility[1];
+        var overdueSlotsAfterDowntime = expectedEligibility.Count(time => time < downtimeRecoveryAt);
+        if (!(acceptedAt < callerCommitAt && callerCommitAt < delayedFirstClaimAt)
+            || nextSlotAfterSafeAttemptOne != acceptedAt.AddMinutes(5)
+            || nextSlotAfterSafeAttemptOne >= delayedFirstClaimAt
+            || overdueSlotsAfterDowntime != 4
+            || expectedEligibility[4] <= downtimeRecoveryAt)
+        {
+            throw new InvalidOperationException("Late commit and downtime must not rebase or skip fixed slots; only safe sequential retries advance them.");
+        }
+    }
+    // docs:snippet durable-execution-policy-timing-proof:end
+
+    // docs:snippet durable-execution-policy-one-slot:start
+    internal static void VerifyOneSlotPolicyValidation()
+    {
+        static DurableWorkRetryPolicy CreateRetryPolicy(int maximumAttempts) => new(
+            maximumAttempts: maximumAttempts,
+            maximumElapsedTime: TimeSpan.FromHours(1),
+            initialRetryDelay: TimeSpan.FromMinutes(1),
+            maximumRetryDelay: TimeSpan.FromMinutes(1),
+            leaseDuration: TimeSpan.FromMinutes(1),
+            renewalCadence: TimeSpan.FromSeconds(15),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(5),
+            backoffAlgorithm: "exponential-v1");
+
+        var oneSlotPlan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero],
+            TimeSpan.FromMinutes(30));
+        var oneAttemptPolicy = DurableWorkExecutionPolicy.ForAttemptPlan(
+            CreateRetryPolicy(maximumAttempts: 1),
+            oneSlotPlan);
+        var acceptedPlan = oneAttemptPolicy.AttemptPlan;
+        if (oneAttemptPolicy.RetryPolicy.MaximumAttempts != 1
+            || acceptedPlan is null
+            || acceptedPlan.ElapsedOffsets.Count != 1
+            || acceptedPlan.ElapsedOffsets[0] != TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("A one-slot plan permits exactly one execution and no planned retry.");
+        }
+
+        var retryCountMismatchRejected = false;
+        try
+        {
+            _ = DurableWorkExecutionPolicy.ForAttemptPlan(
+                CreateRetryPolicy(maximumAttempts: 2),
+                oneSlotPlan);
+        }
+        catch (ArgumentException)
+        {
+            retryCountMismatchRejected = true;
+        }
+
+        if (!retryCountMismatchRejected)
+        {
+            throw new InvalidOperationException("A one-slot plan must reject a retry policy that permits another attempt.");
+        }
+    }
+    // docs:snippet durable-execution-policy-one-slot:end
+
     internal static void Run()
     {
+        VerifyExecutionPolicyChooser();
+        VerifyExecutionPolicyTimingProof();
+        VerifyOneSlotPolicyValidation();
+
         var services = new ServiceCollection();
         new AppSurfaceDurableModule().ConfigureServices(
             new StartupContext([], new PassiveHostModule()),

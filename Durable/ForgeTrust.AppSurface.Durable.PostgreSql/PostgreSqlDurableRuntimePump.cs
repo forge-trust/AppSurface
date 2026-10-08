@@ -31,6 +31,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private readonly ILogger<PostgreSqlDurableRuntimePump> _logger;
     private readonly PostgreSqlDurablePassExecutor _passExecutor;
     private readonly PostgreSqlDurableHeartbeatMaintenance? _heartbeatMaintenance;
+    private readonly TimeProvider _timeProvider;
+    private readonly PostgreSqlDurableExecutionCheckpointHook _executionCheckpoints;
     private readonly bool _requiresExternalSchemaPrecheck;
     private readonly DurableRuntimeTurnScheduler _turnScheduler = new();
     private readonly SemaphoreSlim _passGate = new(1, 1);
@@ -60,7 +62,9 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             executionBoundary,
             admission,
             NullLogger<PostgreSqlDurableRuntimePump>.Instance,
-            passExecutor: null)
+            passExecutor: null,
+            timeProvider: null,
+            executionCheckpoints: null)
     {
     }
 
@@ -81,7 +85,9 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         DurableRuntimeAdmissionGate admission,
         ILogger<PostgreSqlDurableRuntimePump> logger,
         PostgreSqlDurablePassExecutor? passExecutor,
-        PostgreSqlDurableHeartbeatMaintenance? heartbeatMaintenance = null)
+        PostgreSqlDurableHeartbeatMaintenance? heartbeatMaintenance = null,
+        TimeProvider? timeProvider = null,
+        PostgreSqlDurableExecutionCheckpointHook? executionCheckpoints = null)
     {
         _registration = registration ?? throw new ArgumentNullException(nameof(registration));
         _schemaManager = schemaManager ?? throw new ArgumentNullException(nameof(schemaManager));
@@ -97,6 +103,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _passExecutor = passExecutor ?? RunPassAsync;
         _heartbeatMaintenance = heartbeatMaintenance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _executionCheckpoints = executionCheckpoints ?? PostgreSqlDurableExecutionCheckpointHook.NoOp;
         _requiresExternalSchemaPrecheck = schemaManager is not PostgreSqlDurableRuntimeSchemaManager;
     }
 
@@ -492,6 +500,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         DurableEncodedWorkExit? exit = null;
         Exception? failure = null;
         var currentClaim = claim;
+        var hasExecutionSnapshot = claim.Execution is not null;
         await using (var scope = _scopeFactory.CreateAsyncScope())
         {
             DurablePreparedWorkInvocation invocation;
@@ -512,6 +521,14 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             }
 
             DurableWorkState? prePermitTransition = null;
+            if (hasExecutionSnapshot)
+            {
+                await _executionCheckpoints.ReachAsync(
+                    PostgreSqlDurableExecutionCheckpointName.BeforePermit,
+                    currentClaim.AttemptNumber,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             var permit = await _workStore.TryAcquireEffectPermitAsync(
                 currentClaim,
                 cancellationToken,
@@ -543,8 +560,46 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             currentClaim = permit.Claim;
             try
             {
-                (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(invocation, currentClaim, cancellationToken)
-                    .ConfigureAwait(false);
+                if (hasExecutionSnapshot)
+                {
+                    await _executionCheckpoints.ReachAsync(
+                        PostgreSqlDurableExecutionCheckpointName.AfterPermitCommit,
+                        currentClaim.AttemptNumber,
+                        cancellationToken).ConfigureAwait(false);
+                    await _executionCheckpoints.ReachAsync(
+                        PostgreSqlDurableExecutionCheckpointName.BeforeInvocationAdmission,
+                        currentClaim.AttemptNumber,
+                        cancellationToken).ConfigureAwait(false);
+                    if (!await _workStore.TryAdmitInvocationAsync(permit, cancellationToken).ConfigureAwait(false))
+                    {
+                        counts.Deferred++;
+                        return TurnOutcome.Deferred;
+                    }
+
+                    await _executionCheckpoints.ReachAsync(
+                        PostgreSqlDurableExecutionCheckpointName.AfterInvocationAdmission,
+                        currentClaim.AttemptNumber,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (IsAdvisoryDeadlineReached(invocation, _timeProvider.GetUtcNow()))
+                    {
+                        failure = new OperationCanceledException("The opt-in Work deadline elapsed before invocation.");
+                    }
+                    else
+                    {
+                        (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(
+                            invocation,
+                            currentClaim,
+                            cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                else
+                {
+                    (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(
+                        invocation,
+                        currentClaim,
+                        cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
             {
@@ -572,13 +627,20 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         var running = _executionBoundary.InvokeExitAsync(invocation, executorStop.Token).AsTask();
         var current = claim;
         var heartbeatInterval = _registration.Options.HeartbeatStaleAfter / 3;
-        var nextHeartbeat = DateTimeOffset.UtcNow + heartbeatInterval;
-        var nextRenewal = DateTimeOffset.UtcNow + current.LeaseRenewalCadence;
+        var nextHeartbeat = _timeProvider.GetUtcNow() + heartbeatInterval;
+        var nextRenewal = NextRenewalAtUtc(current, _timeProvider.GetUtcNow());
+        var advisoryDeadline = invocation.Execution?.Deadline?.NotAfterUtc;
         try
         {
             while (!running.IsCompleted)
             {
-                var now = DateTimeOffset.UtcNow;
+                var now = _timeProvider.GetUtcNow();
+                if (advisoryDeadline is { } deadline && deadline <= now)
+                {
+                    await executorStop.CancelAsync().ConfigureAwait(false);
+                    break;
+                }
+
                 if (current.LeaseExpiresAtUtc <= now)
                 {
                     await executorStop.CancelAsync().ConfigureAwait(false);
@@ -586,11 +648,15 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                 }
 
                 var next = Min(current.LeaseExpiresAtUtc, Min(nextHeartbeat, nextRenewal));
+                if (advisoryDeadline is { } localDeadline)
+                {
+                    next = Min(next, localDeadline);
+                }
                 var delay = next - now;
                 if (delay > TimeSpan.Zero)
                 {
                     using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    var delayTask = Task.Delay(delay, waitCancellation.Token);
+                    var delayTask = Task.Delay(delay, _timeProvider, waitCancellation.Token);
                     if (await Task.WhenAny(running, delayTask).ConfigureAwait(false) == running)
                     {
                         await waitCancellation.CancelAsync().ConfigureAwait(false);
@@ -605,7 +671,13 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                     break;
                 }
 
-                now = DateTimeOffset.UtcNow;
+                now = _timeProvider.GetUtcNow();
+                if (advisoryDeadline is { } elapsedDeadline && elapsedDeadline <= now)
+                {
+                    await executorStop.CancelAsync().ConfigureAwait(false);
+                    break;
+                }
+
                 if (now >= nextHeartbeat)
                 {
                     await _runtimeHealth.RecordHeartbeatAsync(cancellationToken).ConfigureAwait(false);
@@ -622,7 +694,7 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                     }
 
                     current = renewed;
-                    nextRenewal = DateTimeOffset.UtcNow + current.LeaseRenewalCadence;
+                    nextRenewal = NextRenewalAtUtc(current, _timeProvider.GetUtcNow());
                     if (current.CancellationRequested)
                     {
                         await executorStop.CancelAsync().ConfigureAwait(false);
@@ -648,12 +720,25 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         }
     }
 
+    /// <summary>Schedules opt-in lease maintenance without adding beyond its current authoritative lease bound.</summary>
+    private static DateTimeOffset NextRenewalAtUtc(PostgreSqlDurableWorkClaim claim, DateTimeOffset nowUtc) =>
+        claim.Execution is null ? nowUtc + claim.LeaseRenewalCadence
+            : PostgreSqlDurableWorkStore.AddExecutionTimeCapped(nowUtc, claim.LeaseRenewalCadence, claim.LeaseExpiresAtUtc);
+
     private async ValueTask<TurnOutcome> CompleteAsync(
         PostgreSqlDurableWorkClaim claim,
         PostgreSqlWorkCompletion completion,
         Counts counts,
         CancellationToken cancellationToken)
     {
+        if (claim.Execution is not null)
+        {
+            await _executionCheckpoints.ReachAsync(
+                PostgreSqlDurableExecutionCheckpointName.BeforeCompletion,
+                claim.AttemptNumber,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var result = await _workStore.RecordCompletionAsync(claim, completion, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
         switch (result.Outcome)
@@ -799,6 +884,11 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private static DurableRuntimePumpResult EmptyResult() => new(0, 0, 0, 0, 0, false, null, TimeSpan.Zero);
 
     private static DateTimeOffset Min(DateTimeOffset left, DateTimeOffset right) => left < right ? left : right;
+
+    private static bool IsAdvisoryDeadlineReached(
+        DurablePreparedWorkInvocation invocation,
+        DateTimeOffset nowUtc) => invocation.Execution?.Deadline is { } deadline
+            && nowUtc >= deadline.NotAfterUtc;
 
     private sealed class Counts
     {
