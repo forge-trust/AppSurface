@@ -1,5 +1,6 @@
 """Linux-only unprivileged tests of the actual Bash parser; no root/native acceptance."""
 import argparse
+import re
 import hashlib
 import json
 import os
@@ -17,6 +18,29 @@ FIXTURE = None
 END = None
 BLOCK = None
 LEXICAL = None
+
+def select_batch_functions(text):
+    """Select only the pinned actual batch functions using unique closed function boundaries.
+
+    Comments are not source interfaces. Missing, duplicate, reversed or unexpected
+    declarations reject with fixed data; this selector never runs a Bash fixture.
+    The fixture SHA is checked by main before this selector receives its text.
+    """
+    start = "\nbatch_check_time() {\n"
+    end = "\nnormalize_os_target() {\n"
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise ValueError("parser-fixture-function-boundaries")
+    begin = text.index(start) + 1
+    finish = text.index(end)
+    if finish <= begin:
+        raise ValueError("parser-fixture-function-order")
+    block = text[begin:finish]
+    names = tuple(re.findall(r"^([a-z_][a-z_0-9]*)\(\) \{$", block, re.MULTILINE))
+    if names != ("batch_check_time", "batch_root_pin", "batch_create_scratch_leaf",
+                 "batch_scratch_pin", "batch_snapshot", "batch_parse_snapshot", "verify_tree"):
+        raise ValueError("parser-fixture-function-set")
+    return block
+
 
 def group_absent(pid):
     try:
@@ -329,6 +353,6 @@ if __name__ == "__main__":
     text = raw.decode()
     FIXTURE = text
     LEXICAL = text[text.index("lexical() {"):text.index("sha() {")]
-    BLOCK = text[text.index("batch_check_time() {"):text.index("# OS aliases ONLY:")]
+    BLOCK = select_batch_functions(text)
     END = time.monotonic()+45
     unittest.main(argv=[__file__, "NestedAuditFDControls", "-v"] if args.fd_scope_only else [__file__, "-v"])
