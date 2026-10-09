@@ -65,6 +65,40 @@ public sealed record DurableClaimedWork
         RuntimeEpoch = ProviderContractValidation.Require(runtimeEpoch, nameof(runtimeEpoch), 200);
     }
 
+    /// <summary>Creates a validated provider claim with the accepted execution timing snapshot.</summary>
+    /// <remarks>The snapshot is descriptive only; PostgreSQL must still admit invocation authoritatively.</remarks>
+    public static DurableClaimedWork CreateWithExecution(
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        string activityId,
+        string workName,
+        string workVersion,
+        DurableEncodedPayload payload,
+        DurableProviderSafety providerSafety,
+        int attemptNumber,
+        long leaseGeneration,
+        long scopeGeneration,
+        string runtimeEpoch,
+        DurableWorkExecutionSnapshot executionSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(executionSnapshot);
+        return new DurableClaimedWork(
+            scopeId,
+            workId,
+            activityId,
+            workName,
+            workVersion,
+            payload,
+            providerSafety,
+            attemptNumber,
+            leaseGeneration,
+            scopeGeneration,
+            runtimeEpoch)
+        {
+            Execution = executionSnapshot,
+        };
+    }
+
     /// <summary>Gets the trusted owning scope.</summary>
     public DurableScopeId ScopeId { get; }
     /// <summary>Gets the immutable work aggregate identifier.</summary>
@@ -88,20 +122,38 @@ public sealed record DurableClaimedWork
     /// <summary>Gets the out-of-band recovery epoch.</summary>
     public string RuntimeEpoch { get; }
 
+    /// <summary>Gets the accepted execution timing snapshot, or null for legacy execution.</summary>
+    /// <remarks>The value is an immutable timing witness, not invocation authority.</remarks>
+    public DurableWorkExecutionSnapshot? Execution { get; private init; }
+
     /// <summary>Creates the validated application execution context for this provider claim.</summary>
-    public DurableWorkExecutionContext ToExecutionContext() => new(
-        ScopeId,
-        WorkId,
-        WorkName,
-        WorkVersion,
-        Payload,
-        ProviderSafety,
-        DurableWorkerExecutionIdentity.Create(
+    public DurableWorkExecutionContext ToExecutionContext()
+    {
+        var identity = DurableWorkerExecutionIdentity.Create(
             ActivityId,
             AttemptNumber,
             LeaseGeneration,
             ScopeGeneration,
-            RuntimeEpoch));
+            RuntimeEpoch);
+        return Execution is { } execution
+            ? DurableWorkExecutionContext.CreateWithExecution(
+                ScopeId,
+                WorkId,
+                WorkName,
+                WorkVersion,
+                Payload,
+                ProviderSafety,
+                identity,
+                execution)
+            : new DurableWorkExecutionContext(
+                ScopeId,
+                WorkId,
+                WorkName,
+                WorkVersion,
+                Payload,
+                ProviderSafety,
+                identity);
+    }
 }
 
 /// <summary>
@@ -111,10 +163,17 @@ public sealed class DurablePreparedWorkInvocation
 {
     private readonly DurablePreparedWork _preparedWork;
 
-    internal DurablePreparedWorkInvocation(DurablePreparedWork preparedWork)
+    internal DurablePreparedWorkInvocation(
+        DurablePreparedWork preparedWork,
+        DurableWorkExecutionSnapshot? execution = null)
     {
         _preparedWork = preparedWork ?? throw new ArgumentNullException(nameof(preparedWork));
+        Execution = execution;
     }
+
+    /// <summary>Gets the accepted execution snapshot, or null for a legacy prepared invocation.</summary>
+    /// <remarks>The snapshot is descriptive and must not replace the provider's authoritative admission check.</remarks>
+    public DurableWorkExecutionSnapshot? Execution { get; }
 
     /// <summary>Invokes the prepared application executor and returns its encoded terminal result.</summary>
     public ValueTask<DurableEncodedPayload> InvokeAsync(CancellationToken cancellationToken = default) =>
@@ -149,7 +208,9 @@ public static class DurableProviderWorkAdapter
         ArgumentNullException.ThrowIfNull(registration);
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(claim);
-        return new DurablePreparedWorkInvocation(registration.Prepare(services, claim.ToExecutionContext()));
+        return new DurablePreparedWorkInvocation(
+            registration.Prepare(services, claim.ToExecutionContext()),
+            claim.Execution);
     }
 
     /// <summary>Runs the adopter-owned side-effect-free reconciler for a validated provider claim.</summary>

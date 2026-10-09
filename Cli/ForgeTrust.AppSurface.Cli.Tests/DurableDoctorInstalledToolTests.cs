@@ -696,7 +696,7 @@ public sealed class DurableDoctorInstalledToolTests
         var families = new (string[] MatrixIds, string Mutation)[]
         {
             (["D11", "D12"], "DROP SCHEMA appsurface_durable CASCADE"),
-            (["D13", "D14"], "DELETE FROM appsurface_durable.schema_migration WHERE version = 11; UPDATE appsurface_durable.store_metadata SET schema_version = 10, minimum_reader_version = 10, maximum_reader_version = 10, minimum_writer_version = 10, maximum_writer_version = 10 WHERE singleton"),
+            (["D13", "D14"], "DELETE FROM appsurface_durable.schema_migration WHERE version = 12; UPDATE appsurface_durable.store_metadata SET schema_version = 11, minimum_reader_version = 11, maximum_reader_version = 11, minimum_writer_version = 11, maximum_writer_version = 11 WHERE singleton"),
             (["D15", "D16"], "UPDATE appsurface_durable.store_metadata SET minimum_reader_version = 1, maximum_reader_version = 10, minimum_writer_version = 1, maximum_writer_version = 10 WHERE singleton"),
             (["D17", "D18"], "UPDATE appsurface_durable.schema_migration SET sha256 = repeat('f', 64) WHERE version = 11"),
         };

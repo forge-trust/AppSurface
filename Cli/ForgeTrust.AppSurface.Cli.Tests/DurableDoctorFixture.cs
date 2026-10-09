@@ -16,7 +16,7 @@ using Xunit.Sdk;
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
 /// <summary>
-/// Owns a disposable schema-11 store configured by the canonical Durable role recipe.
+/// Owns a disposable schema-12 store configured by the canonical Durable role recipe.
 /// </summary>
 /// <remarks>
 /// Catalog, service, command, and distribution proofs share this fixture so their observations use the same restricted

@@ -204,7 +204,11 @@ internal sealed class PostgreSqlActivationFixture : IAsyncDisposable
 
     private async Task StartHostAsync(Action<IServiceCollection>? configure, bool useKestrel)
     {
-        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development,
+            Args = ["--hostBuilder:reloadConfigOnChange=false"],
+        });
         if (useKestrel)
         {
             builder.WebHost.ConfigureKestrel(server => server.Listen(IPAddress.Loopback, 0));

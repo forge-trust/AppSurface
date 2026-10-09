@@ -382,11 +382,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
             (
                 Mutation: """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 12,
-                        minimum_reader_version = 12,
-                        maximum_reader_version = 12,
-                        minimum_writer_version = 12,
-                        maximum_writer_version = 12
+                    SET schema_version = 13,
+                        minimum_reader_version = 13,
+                        maximum_reader_version = 13,
+                        minimum_writer_version = 13,
+                        maximum_writer_version = 13
                     WHERE singleton;
                     """,
                 Expected: DurableRuntimeSchemaCompatibility.StoreTooNew),
@@ -402,11 +402,11 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 await using var restore = database.DataSource.CreateCommand(
                     """
                     UPDATE appsurface_durable.store_metadata
-                    SET schema_version = 11,
+                    SET schema_version = 12,
                         minimum_reader_version = 1,
-                        maximum_reader_version = 11,
+                        maximum_reader_version = 12,
                         minimum_writer_version = 1,
-                        maximum_writer_version = 11
+                        maximum_writer_version = 12
                     WHERE singleton;
                     """);
                 await restore.ExecuteNonQueryAsync();
@@ -3217,6 +3217,8 @@ public sealed class PostgreSqlDurableWorkStoreTests
                 result_contract_id, result_schema_version, result_codec_id, result_classification,
                 result_retention_policy_id, result_payload, result_sha256, terminal_code)
                 ON appsurface_durable.work TO "{runtimeRole}";
+            GRANT EXECUTE ON FUNCTION appsurface_durable.attempt_plan_offsets_are_valid(bigint[]) TO "{runtimeRole}";
+            GRANT EXECUTE ON FUNCTION appsurface_durable.work_execution_now() TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.work_history TO "{runtimeRole}";
             GRANT SELECT, INSERT ON appsurface_durable.effect_permit TO "{runtimeRole}";
             GRANT UPDATE (status, observed_at, details, runtime_epoch) ON appsurface_durable.effect_permit TO "{runtimeRole}";
