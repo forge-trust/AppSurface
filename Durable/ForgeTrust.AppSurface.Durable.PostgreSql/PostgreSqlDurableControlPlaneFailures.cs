@@ -67,6 +67,10 @@ internal readonly record struct PostgreSqlDurableFailureClassification(
     string? ProblemCode,
     PostgreSqlDurableUnavailableCause? UnavailableCause)
 {
+    /// <summary>Gets the canonical descriptor for a catalog-owned problem code, or null for unclassified failures.</summary>
+    internal DurableDiagnosticDescriptor? Diagnostic =>
+        PostgreSqlDurableFailureClassifier.DiagnosticFor(ProblemCode);
+
     /// <summary>Gets the propagate-by-default classification.</summary>
     internal static PostgreSqlDurableFailureClassification Propagate { get; } =
         new(PostgreSqlDurableFailureDisposition.Propagate, null, null);
@@ -85,6 +89,7 @@ internal readonly record struct PostgreSqlDurableFailureClassification(
 internal static class PostgreSqlDurableControlPlaneCommand
 {
     private static readonly ConditionalWeakTable<Exception, TimeoutEvidenceHolder> TimeoutEvidence = new();
+    private static readonly ConditionalWeakTable<Exception, CallerCancellationEvidenceHolder> CallerCancellationEvidence = new();
 
     /// <summary>Executes a non-query control-plane command.</summary>
     internal static ValueTask<int> ExecuteNonQueryAsync(
@@ -154,6 +159,19 @@ internal static class PostgreSqlDurableControlPlaneCommand
             : PostgreSqlDurableTimeoutEvidence.None;
     }
 
+    /// <summary>Reports whether the command's linked token propagated cancellation from this exact caller token.</summary>
+    /// <remarks>
+    /// This provenance does not replace the original exception or its token. A doctor-owned deadline can therefore
+    /// be recognized through the shared status reader while cancellation from an unrelated source still propagates.
+    /// </remarks>
+    internal static bool IsCancellationFrom(Exception exception, CancellationToken callerToken)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return callerToken.CanBeCanceled
+            && CallerCancellationEvidence.TryGetValue(exception, out var holder)
+            && holder.Token == callerToken;
+    }
+
     /// <summary>
     /// Records package-owned deadline evidence while retaining the original exception object.
     /// </summary>
@@ -207,9 +225,15 @@ internal static class PostgreSqlDurableControlPlaneCommand
         }
         catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
         {
+            if (cancellationToken.IsCancellationRequested
+                && exception is OperationCanceledException canceled
+                && canceled.CancellationToken == effectiveCancellation.Token)
+            {
+                CallerCancellationEvidence.AddOrUpdate(exception, new CallerCancellationEvidenceHolder(cancellationToken));
+            }
             if (providerDeadline.IsCancellationRequested
                 && !cancellationToken.IsCancellationRequested
-                && IsCancellationShaped(exception))
+                && IsCancellationShaped(exception, effectiveCancellation.Token))
             {
                 RecordTimeoutEvidence(
                     exception,
@@ -220,11 +244,11 @@ internal static class PostgreSqlDurableControlPlaneCommand
         }
     }
 
-    private static bool IsCancellationShaped(Exception exception)
+    private static bool IsCancellationShaped(Exception exception, CancellationToken effectiveToken)
     {
         for (Exception? current = exception; current is not null; current = current.InnerException)
         {
-            if (current is OperationCanceledException
+            if (current is OperationCanceledException canceled && canceled.CancellationToken == effectiveToken
                 || current is PostgresException { SqlState: PostgresErrorCodes.QueryCanceled })
             {
                 return true;
@@ -235,6 +259,7 @@ internal static class PostgreSqlDurableControlPlaneCommand
     }
 
     private sealed record TimeoutEvidenceHolder(PostgreSqlDurableTimeoutEvidence Value);
+    private sealed record CallerCancellationEvidenceHolder(CancellationToken Token);
 }
 
 /// <summary>Classifies only explicit, pre-execution PostgreSQL control-plane evidence.</summary>
@@ -256,9 +281,10 @@ internal static class PostgreSqlDurableFailureClassifier
 
         if (exception is DurableRuntimeSchemaException schemaException)
         {
+            var diagnostic = DiagnosticForSchema(schemaException.Status.Compatibility);
             return new PostgreSqlDurableFailureClassification(
                 PostgreSqlDurableFailureDisposition.Incompatible,
-                ProblemForSchema(schemaException.Status.Compatibility),
+                diagnostic.Code,
                 null);
         }
 
@@ -299,20 +325,45 @@ internal static class PostgreSqlDurableFailureClassifier
     }
 
     /// <summary>Maps a schema compatibility value to its stable public problem code.</summary>
-    internal static string ProblemForSchema(DurableRuntimeSchemaCompatibility compatibility) => compatibility switch
+    internal static string ProblemForSchema(DurableRuntimeSchemaCompatibility compatibility) =>
+        DiagnosticForSchema(compatibility).Code;
+
+    /// <summary>Gets the canonical descriptor for an existing schema-compatibility health/admission code.</summary>
+    internal static DurableDiagnosticDescriptor DiagnosticForSchema(DurableRuntimeSchemaCompatibility compatibility)
     {
-        DurableRuntimeSchemaCompatibility.Missing => DurableProblemCodes.SchemaMissing,
-        DurableRuntimeSchemaCompatibility.UpgradeRequired => DurableProblemCodes.SchemaUpgradeRequired,
-        DurableRuntimeSchemaCompatibility.StoreTooNew => DurableProblemCodes.SchemaVersionUnsupported,
-        _ => DurableProblemCodes.SchemaInconsistent,
-    };
+        var problemCode = compatibility switch
+        {
+            DurableRuntimeSchemaCompatibility.Missing => DurableProblemCodes.SchemaMissing,
+            DurableRuntimeSchemaCompatibility.UpgradeRequired => DurableProblemCodes.SchemaUpgradeRequired,
+            DurableRuntimeSchemaCompatibility.StoreTooNew => DurableProblemCodes.SchemaVersionUnsupported,
+            _ => DurableProblemCodes.SchemaInconsistent,
+        };
+        return RequireDiagnostic(problemCode);
+    }
+
+    /// <summary>Gets the canonical descriptor for a known code; unknown application codes remain unclassified.</summary>
+    internal static DurableDiagnosticDescriptor? DiagnosticFor(string? problemCode) =>
+        problemCode is not null && DurableDiagnosticCatalog.TryGet(problemCode, out var descriptor)
+            ? descriptor
+            : null;
+
+    /// <summary>Returns a known internal health/admission code through its canonical descriptor.</summary>
+    internal static string? CanonicalProblemCode(string? problemCode) =>
+        DiagnosticFor(problemCode)?.Code ?? problemCode;
 
     private static PostgreSqlDurableFailureClassification Unavailable(
-        PostgreSqlDurableUnavailableCause cause) =>
-        new(
+        PostgreSqlDurableUnavailableCause cause)
+    {
+        var diagnostic = RequireDiagnostic(DurableProblemCodes.StoreUnavailable);
+        return new PostgreSqlDurableFailureClassification(
             PostgreSqlDurableFailureDisposition.Unavailable,
-            DurableProblemCodes.StoreUnavailable,
+            diagnostic.Code,
             cause);
+    }
+
+    private static DurableDiagnosticDescriptor RequireDiagnostic(string problemCode) =>
+        DiagnosticFor(problemCode)
+        ?? throw new InvalidOperationException($"The PostgreSQL control-plane diagnostic code '{problemCode}' is not cataloged.");
 
     private static bool IsTransportSqlState(string sqlState) =>
         sqlState.StartsWith("08", StringComparison.Ordinal)

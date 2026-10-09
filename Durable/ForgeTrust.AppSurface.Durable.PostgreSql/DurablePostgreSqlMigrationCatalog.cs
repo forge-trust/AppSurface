@@ -27,6 +27,8 @@ internal static partial class DurablePostgreSqlMigrationCatalog
     private const int ExtendedMigrationCommandTimeoutSeconds = 330;
     private const int HeartbeatRetentionMigrationVersion = 11;
     private const int HeartbeatRetentionMigrationCommandTimeoutSeconds = 330;
+    private const int WorkExecutionPolicyMigrationVersion = 12;
+    private const int WorkExecutionPolicyMigrationCommandTimeoutSeconds = 330;
     private const string ResourceMarker = ".Migrations.";
     private static readonly IReadOnlyList<DurablePostgreSqlMigration> DefaultMigrations =
         LoadValidated(typeof(DurablePostgreSqlMigrationCatalog).Assembly);
@@ -82,6 +84,7 @@ internal static partial class DurablePostgreSqlMigrationCatalog
         {
             ExtendedDeadlineMigrationVersion => ExtendedMigrationCommandTimeoutSeconds,
             HeartbeatRetentionMigrationVersion => HeartbeatRetentionMigrationCommandTimeoutSeconds,
+            WorkExecutionPolicyMigrationVersion => WorkExecutionPolicyMigrationCommandTimeoutSeconds,
             _ => null,
         };
         return new DurablePostgreSqlMigration(

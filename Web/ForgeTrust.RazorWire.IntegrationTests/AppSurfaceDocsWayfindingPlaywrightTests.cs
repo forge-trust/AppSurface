@@ -724,9 +724,11 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await page.EvaluateAsync(
             """
             () => {
+              window.__rwDelayedScrollCompleted = false;
               window.setTimeout(() => {
                 const main = document.getElementById('main-content');
                 main?.scrollTo(0, main.scrollHeight);
+                window.__rwDelayedScrollCompleted = true;
               }, 60);
             }
             """);
@@ -741,6 +743,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         await page.WaitForFunctionAsync(
             """
             () => window.__rwFrameNavigationSentinel === 'alive'
+              && window.__rwDelayedScrollCompleted === true
               && window.location.pathname === '/docs/Namespaces/ForgeTrust.AppSurface.Aspire.html'
               && document.querySelector('#doc-content h1')?.textContent?.trim() === 'Aspire'
               && (document.getElementById('main-content')?.scrollTop ?? Number.MAX_SAFE_INTEGER) <= 8

@@ -165,6 +165,31 @@ public sealed class ExternalActivationServiceTests
     }
 
     [Fact]
+    public async Task Doctor_terminal_codes_do_not_become_provider_health_or_admission_diagnostics()
+    {
+        foreach (var code in new[] { DurableProblemCodes.DoctorCanceled, DurableProblemCodes.DoctorContractFailed })
+        {
+            foreach (var state in new[]
+                     {
+                         DurableRuntimeHealthState.NotStarted,
+                         DurableRuntimeHealthState.Stale,
+                         DurableRuntimeHealthState.Incompatible,
+                     })
+            {
+                var health = FixedHealth(ExternalActivationTestSupport.Health(state, code));
+                var admission = RefusingAdmission();
+
+                var result = await CreateService(health, admission).ActivateAsync(Request());
+
+                Assert.Equal(DurableExternalActivationOutcomeKind.ActivationFailed, result.Kind);
+                Assert.Equal(state, result.ObservedHealthState);
+                Assert.Equal(DurableProblemCodes.ExternalActivationFailed, result.ProblemCode);
+                Assert.Equal(0, admission.CallCount);
+            }
+        }
+    }
+
+    [Fact]
     public async Task Compatible_flag_failures_map_to_incompatible_and_contradictory_evidence_fails_closed()
     {
         var incompatible = new[]

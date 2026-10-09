@@ -43,12 +43,17 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
         {
             await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken)
                 .ConfigureAwait(false);
+            await LockScopeForInspectionAsync(connection, transaction, request.ScopeId, cancellationToken)
+                .ConfigureAwait(false);
             const string sql = """
                 SELECT work_id, activity_id, work_name, work_version, state, provider_safety, attempt_number, revision,
                        accepted_at, due_at, updated_at, terminal_code, cancellation_requested_at IS NOT NULL,
                        runtime_epoch <> @runtime_epoch
                          AND state NOT IN ('succeeded', 'succeeded_after_cancel_requested', 'failed', 'canceled_before_effect')
-                         AS requires_recovery_release
+                         AS requires_recovery_release,
+                       execution_policy_schema, attempt_plan_version, attempt_plan_offsets, maximum_circuit_microseconds,
+                       execution_not_after, maximum_attempts, maximum_elapsed, initial_retry_delay, maximum_retry_delay,
+                       lease_duration, lease_renewal_cadence, maximum_lease_lifetime, backoff_algorithm
                 FROM appsurface_durable.work
                 WHERE scope_id = @scope_id
                   AND (@continuation_token IS NULL OR work_id > @continuation_token)
@@ -61,7 +66,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                           runtime_epoch <> @runtime_epoch
                           AND state NOT IN ('succeeded', 'succeeded_after_cancel_requested', 'failed', 'canceled_before_effect')
                       )
-                  )
+                )
                 ORDER BY work_id
                 LIMIT @query_size;
                 """;
@@ -83,7 +88,7 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             {
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    items.Add(new DurableWorkListItem(
+                    var item = new DurableWorkListItem(
                         new DurableWorkId(reader.GetString(0)),
                         reader.GetString(1),
                         reader.GetString(2),
@@ -97,16 +102,27 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                         ReadUtc(reader, 10),
                         reader.IsDBNull(11) ? null : reader.GetString(11),
                         reader.GetBoolean(12),
-                        reader.GetBoolean(13)));
+                        reader.GetBoolean(13));
+                    // The extra pagination row is only a continuation witness. Decode timing facts for returned
+                    // items alone, matching the previous list contract when the witness has invalid policy data.
+                    var execution = items.Count < request.PageSize
+                        ? PostgreSqlDurableWorkStore.ReadInspectionExecutionSnapshot(
+                            reader, 14, item.AcceptedAtUtc, item.DueAtUtc, item.AttemptNumber)
+                        : null;
+                    items.Add(execution is null ? item : DurableWorkListItem.CreateWithExecution(
+                        item.WorkId, item.ActivityId, item.WorkName, item.WorkVersion, item.State, item.ProviderSafety,
+                        item.AttemptNumber, item.Revision, item.AcceptedAtUtc, item.DueAtUtc, item.UpdatedAtUtc,
+                        item.TerminalCode, item.CancellationRequested, item.RequiresRecoveryRelease, execution));
                 }
             }
 
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             var hasMore = items.Count > request.PageSize;
             if (hasMore)
             {
                 items.RemoveAt(items.Count - 1);
             }
+
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
             return DurableOperationResult<DurableWorkListResult>.Success(new DurableWorkListResult(
                 items,
@@ -131,11 +147,16 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
         {
             await SetScopeAsync(connection, transaction, request.ScopeId, cancellationToken)
                 .ConfigureAwait(false);
+            await LockScopeForInspectionAsync(connection, transaction, request.ScopeId, cancellationToken)
+                .ConfigureAwait(false);
             const string sql = """
                 SELECT activity_id, work_name, work_version, state, provider_safety, idempotency_key, attempt_number,
                        revision, accepted_at, due_at, updated_at, terminal_at, terminal_code, result_contract_id,
                        result_schema_version, result_classification, result_payload, result_sha256,
-                       result_retention_policy_id
+                       result_retention_policy_id,
+                       execution_policy_schema, attempt_plan_version, attempt_plan_offsets, maximum_circuit_microseconds,
+                       execution_not_after, maximum_attempts, maximum_elapsed, initial_retry_delay, maximum_retry_delay,
+                       lease_duration, lease_renewal_cadence, maximum_lease_lifetime, backoff_algorithm
                 FROM appsurface_durable.work
                 WHERE scope_id = @scope_id AND work_id = @work_id;
                 """;
@@ -174,7 +195,33 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
                 reader.IsDBNull(11) ? null : ReadUtc(reader, 11),
                 reader.IsDBNull(12) ? null : reader.GetString(12),
                 result);
+            // The Work projection and descriptive timing facts come from one statement snapshot. Inspection
+            // takes no Work, dispatch, or permit locks and never interprets these facts as invocation permission.
+            var execution = PostgreSqlDurableWorkStore.ReadInspectionExecutionSnapshot(
+                reader, 19, snapshot.AcceptedAtUtc, snapshot.DueAtUtc, snapshot.AttemptNumber);
             await reader.CloseAsync().ConfigureAwait(false);
+            if (execution is not null)
+            {
+                snapshot = DurableWorkSnapshot.CreateWithExecution(
+                    snapshot.ScopeId,
+                    snapshot.WorkId,
+                    snapshot.ActivityId,
+                    snapshot.WorkName,
+                    snapshot.WorkVersion,
+                    snapshot.State,
+                    snapshot.ProviderSafety,
+                    snapshot.ProviderKey,
+                    snapshot.AttemptNumber,
+                    snapshot.Revision,
+                    snapshot.AcceptedAtUtc,
+                    snapshot.DueAtUtc,
+                    snapshot.UpdatedAtUtc,
+                    snapshot.TerminalAtUtc,
+                    snapshot.TerminalCode,
+                    snapshot.Result,
+                    execution);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return DurableOperationResult<DurableWorkSnapshot>.Success(snapshot);
         }
@@ -352,6 +399,21 @@ internal sealed class PostgreSqlDurableControlClient : IDurableWorkControlClient
             transaction);
         command.Parameters.AddWithValue("scope_id", scopeId.Value);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async ValueTask LockScopeForInspectionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DurableScopeId scopeId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT generation FROM appsurface_durable.scope WHERE scope_id = @scope_id FOR SHARE;",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("scope_id", scopeId.Value);
+        // A missing Scope remains equivalent to an empty Work inventory, preserving the read API's legacy behavior.
+        _ = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async ValueTask TryRollbackAsync(NpgsqlTransaction transaction)

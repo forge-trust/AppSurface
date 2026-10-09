@@ -1,6 +1,6 @@
 # Adopt Durable operational assessments
 
-For schema-11 runtime heartbeat cleanup and its forward-only deployment procedure, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The schema 9→10 transcript below remains the historical runtime-health adoption proof.
+For the historical schema-11 runtime heartbeat cleanup rollout, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The current role recipe requires schema 12 and must not be run on an older store; use the recipe matching that historical package until the coordinated upgrade. The schema 9→10 transcript below remains the historical runtime-health adoption proof. For retry-policy choices, start with the [execution-policy guide](execution-policies-v1.md) and its [migration checklist](migrations/execution-policies-v1.md).
 
 This is the task guide for upgrading an existing PostgreSQL worker or external activator to the additive Durable
 operational-assessment contract. Start here if you need to decide whether activation is currently authorized, whether
@@ -238,8 +238,10 @@ direct Durable SQL access from its dispatcher, but it does not narrow the paired
 ## Migration and role reconciliation
 
 The following is the historical #794 schema-10 rollout sequence. The role recipe matching the #794 release was paired with
-migration 0010; the current packaged recipe also references the heartbeat-pruning function introduced by migration
-0011. For current package deployments, apply all migrations through 0011 before running the matching package recipe.
+migration 0010; the current packaged recipe references the heartbeat-pruning function introduced by migration 0011 and
+schema-12 execution-policy functions introduced by migration 0012. For current package deployments, apply all migrations
+through 0012 before running the matching package recipe. The current recipe cannot reconcile a schema-11-or-older store;
+use the matching historical package recipe until migration 0012 is applied.
 
 That historical #794 rollout was migration-first and forward-only:
 
@@ -266,7 +268,7 @@ That historical #794 rollout was migration-first and forward-only:
 6. Run schema `status` and `preflight`, verify the active epoch and StoreId, then smoke-test the old supported reader.
 7. Deploy the #794 binary, exercise health and both pump interfaces, and re-enable activation.
 
-For current package deployments, apply migration 0011 before running the matching released package's recipe with the
+For current package deployments, apply migration 0012 before running the matching released package's recipe with the
 complete reviewed version-1 `role_pairs_json` manifest. The #794 historical schema-10 reconciliation above is
 specific to that release and its single-pair recipe. The role recipe remains required after the applicable migration
 even when the function signature is unchanged. It must leave the
@@ -307,7 +309,9 @@ promise zero blocking. On any error keep Source closed and repair/roll forward w
 one-pair manifest, broad grant, or destructive schema rollback as recovery. Pair retirement and profile narrowing
 require a separately reviewed procedure.
 
-The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The CLI
+The historical schema-11 role recipe granted heartbeat pruning to every authorized runtime and no dispatcher. The
+current recipe retains that grant and additionally requires schema 12 for execution-policy functions; do not run it
+against a schema-11 store. The CLI
 preflight requires both `--role-pairs-file` and `--migration-owner-role`, including for one pair, and checks every
 manifest runtime against exact policy, ACL, role, function, and index evidence. The [complete-manifest walkthrough](../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
 shows a one-pair and full-plus-`work_only` invocation using explicit per-command environment-variable names. Keep
@@ -318,7 +322,7 @@ continuous deployment-owner guard, and matching StoreId/nonempty epoch. Local/so
 For the historical #794 rollout, run this sequence from the
 [schema-10 source snapshot](https://github.com/forge-trust/AppSurface/tree/e0618ac8), with
 `APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection. The current checkout's CLI applies
-through 0011 and does not produce this 9-to-10-only script.
+through 0012 and does not produce this 9-to-10-only script.
 
 ```console
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -332,7 +336,8 @@ $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
 # Review the generated file; for the historical #794 upgrade it must contain only migration 0010.
 
 # Historical #794 only: if the schema-9 function is not already owned by appsurface_durable_owner, run that
-# release's matching role recipe here before applying the migration. Never use the current recipe before 0011.
+# release's matching historical role recipe here before applying the migration. Never use the current recipe before
+# migration 0012; it cannot reconcile a schema-9 store.
 # Healthy installations skip this repair-only invocation.
 
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -400,7 +405,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 ```
 
 It creates a disposable loopback PostgreSQL 16.5 container, applies the current checked-in migrations through schema
-11 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
+12 using the explicit CLI path, runs the current canonical role recipe, initializes a development epoch, runs the real
 Work/Flow/Schedule example, resolves both pump interfaces to the same PostgreSQL singleton, calls authoritative
 admission directly, and checks that worker startup performs no DDL.
 

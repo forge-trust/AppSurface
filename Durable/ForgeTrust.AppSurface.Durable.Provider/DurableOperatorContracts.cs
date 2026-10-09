@@ -102,6 +102,49 @@ public sealed record DurableWorkSnapshot
         Result = result;
     }
 
+    /// <summary>Creates a Work inspection snapshot with its accepted execution timing witness.</summary>
+    public static DurableWorkSnapshot CreateWithExecution(
+        DurableScopeId scopeId,
+        DurableWorkId workId,
+        string activityId,
+        string workName,
+        string workVersion,
+        DurableWorkState state,
+        DurableProviderSafety providerSafety,
+        string providerKey,
+        int attemptNumber,
+        long revision,
+        DateTimeOffset acceptedAtUtc,
+        DateTimeOffset dueAtUtc,
+        DateTimeOffset updatedAtUtc,
+        DateTimeOffset? terminalAtUtc,
+        string? terminalCode,
+        DurableEncodedPayload? result,
+        DurableWorkExecutionSnapshot executionSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(executionSnapshot);
+        return new DurableWorkSnapshot(
+            scopeId,
+            workId,
+            activityId,
+            workName,
+            workVersion,
+            state,
+            providerSafety,
+            providerKey,
+            attemptNumber,
+            revision,
+            acceptedAtUtc,
+            dueAtUtc,
+            updatedAtUtc,
+            terminalAtUtc,
+            terminalCode,
+            result)
+        {
+            Execution = executionSnapshot,
+        };
+    }
+
     /// <summary>Gets the trusted owning scope.</summary>
     public DurableScopeId ScopeId { get; }
 
@@ -150,6 +193,9 @@ public sealed record DurableWorkSnapshot
     /// <summary>Gets the encoded terminal business result when work succeeded.</summary>
     /// <remarks>The original work payload and stale provider observations are intentionally not returned.</remarks>
     public DurableEncodedPayload? Result { get; }
+
+    /// <summary>Gets the accepted execution timing witness, or null for legacy Work.</summary>
+    public DurableWorkExecutionSnapshot? Execution { get; private init; }
 }
 
 /// <summary>
@@ -375,6 +421,45 @@ public sealed record DurableWorkListItem
         RequiresRecoveryRelease = requiresRecoveryRelease;
     }
 
+    /// <summary>Creates a Work inventory item with its accepted execution timing witness.</summary>
+    public static DurableWorkListItem CreateWithExecution(
+        DurableWorkId workId,
+        string activityId,
+        string workName,
+        string workVersion,
+        DurableWorkState state,
+        DurableProviderSafety providerSafety,
+        int attemptNumber,
+        long revision,
+        DateTimeOffset acceptedAtUtc,
+        DateTimeOffset dueAtUtc,
+        DateTimeOffset updatedAtUtc,
+        string? terminalCode,
+        bool cancellationRequested,
+        bool requiresRecoveryRelease,
+        DurableWorkExecutionSnapshot executionSnapshot)
+    {
+        ArgumentNullException.ThrowIfNull(executionSnapshot);
+        return new DurableWorkListItem(
+            workId,
+            activityId,
+            workName,
+            workVersion,
+            state,
+            providerSafety,
+            attemptNumber,
+            revision,
+            acceptedAtUtc,
+            dueAtUtc,
+            updatedAtUtc,
+            terminalCode,
+            cancellationRequested,
+            requiresRecoveryRelease)
+        {
+            Execution = executionSnapshot,
+        };
+    }
+
     /// <summary>Gets the opaque Work identity.</summary>
     public DurableWorkId WorkId { get; }
     /// <summary>Gets the immutable activity identity used for cross-surface correlation.</summary>
@@ -403,6 +488,9 @@ public sealed record DurableWorkListItem
     public bool CancellationRequested { get; }
     /// <summary>Gets whether this nonterminal Work row belongs to an older runtime epoch.</summary>
     public bool RequiresRecoveryRelease { get; }
+
+    /// <summary>Gets the accepted execution timing witness, or null for legacy Work.</summary>
+    public DurableWorkExecutionSnapshot? Execution { get; private init; }
 }
 
 /// <summary>Reports one bounded Work inventory page.</summary>

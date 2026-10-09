@@ -128,9 +128,17 @@ internal sealed class DurableExternalActivationInvocation(TimeProvider clock, Ti
         });
         if (result is not null)
         {
+            var diagnosticProblem = result.ProblemCode is { } problemCode
+                && DurableDiagnosticCatalog.TryGet(problemCode, out var descriptor)
+                    ? descriptor?.Problem
+                    : null;
             Attempt(() => logger.LogInformation(
-                "Durable activation phase {Phase} outcome {Outcome} observed state {HealthState} code {ProblemCode}.",
-                PhaseName, result.Kind.ToString(), result.ObservedHealthState?.ToString(), result.ProblemCode));
+                "Durable activation phase {Phase} outcome {Outcome} observed state {HealthState} code {ProblemCode} problem {DiagnosticProblem}.",
+                PhaseName,
+                result.Kind.ToString(),
+                result.ObservedHealthState?.ToString(),
+                result.ProblemCode,
+                diagnosticProblem));
         }
 
         Attempt(() => _activity?.Dispose());

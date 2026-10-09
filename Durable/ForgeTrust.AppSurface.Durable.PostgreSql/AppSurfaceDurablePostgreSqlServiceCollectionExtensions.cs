@@ -162,6 +162,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         });
         services.TryAddSingleton(static _ => new DurableRuntimeAdmissionGate());
         services.TryAddSingleton<IDurableRuntimeExecutionBoundary>(static _ => new UninstrumentedDurableRuntimeExecutionBoundary());
+        services.TryAddSingleton(static _ => PostgreSqlDurableExecutionCheckpointHook.NoOp);
         services.TryAddSingleton<PostgreSqlDurableRuntimeHealth>(static provider => new PostgreSqlDurableRuntimeHealth(
             provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>(),
             provider.GetRequiredService<IDurableRuntimeSchemaManager>(),
@@ -201,7 +202,9 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
             provider.GetService<ILogger<PostgreSqlDurableRuntimePump>>()
                 ?? NullLogger<PostgreSqlDurableRuntimePump>.Instance,
             passExecutor: null,
-            heartbeatMaintenance: provider.GetRequiredService<PostgreSqlDurableHeartbeatMaintenance>()));
+            heartbeatMaintenance: provider.GetRequiredService<PostgreSqlDurableHeartbeatMaintenance>(),
+            timeProvider: provider.GetRequiredService<TimeProvider>(),
+            executionCheckpoints: provider.GetRequiredService<PostgreSqlDurableExecutionCheckpointHook>()));
         services.TryAddSingleton<IDurableRuntimePump>(static provider =>
             provider.GetRequiredService<PostgreSqlDurableRuntimePump>());
         services.TryAddSingleton<IDurableRuntimePumpAdmission>(static provider =>

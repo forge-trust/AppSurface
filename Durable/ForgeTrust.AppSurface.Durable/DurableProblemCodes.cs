@@ -48,6 +48,10 @@ public static class DurableProblemCodes
     public const string OperatorCommandInProgress = "ASDUR118";
     /// <summary>The PostgreSQL worker host could not form an exact Work discovery contract snapshot.</summary>
     public const string WorkDiscoveryContractSelectionUnavailable = "ASDUR119";
+    /// <summary>No planned attempt remains, or the fixed attempt-plan circuit has closed.</summary>
+    public const string AttemptPlanExhausted = "ASDUR120";
+    /// <summary>The immutable absolute execution deadline has closed new admission.</summary>
+    public const string ExecutionDeadlineReached = "ASDUR121";
 
     /// <summary>The requested Flow definition or version is unavailable.</summary>
     public const string FlowDefinitionUnavailable = "ASDUR200";
@@ -106,4 +110,20 @@ public static class DurableProblemCodes
     public const string WorkerIdentityConflict = "ASDUR405";
     /// <summary>An unexpected nonfatal external activation orchestration or pump failure occurred.</summary>
     public const string ExternalActivationFailed = "ASDUR407";
+    /// <summary>The runtime observation requires a restricted runtime credential.</summary>
+    public const string RestrictedRuntimeCredentialRequired = "ASDUR408";
+    /// <summary>The heartbeat-retention capability is unavailable or does not meet its contract.</summary>
+    public const string HeartbeatRetentionUnavailable = "ASDUR409";
+    /// <summary>No retained heartbeat matches the selected worker identity.</summary>
+    public const string WorkerHeartbeatMissing = "ASDUR410";
+    /// <summary>The selected worker is draining and refusing new pump passes.</summary>
+    public const string WorkerDraining = "ASDUR411";
+    /// <summary>The selected worker heartbeat belongs to another runtime epoch.</summary>
+    public const string WorkerHeartbeatEpochMismatch = "ASDUR412";
+    /// <summary>The Durable runtime doctor input is invalid.</summary>
+    public const string DoctorInputInvalid = "ASDUR413";
+    /// <summary>The Durable runtime doctor was canceled by its caller.</summary>
+    public const string DoctorCanceled = "ASDUR414";
+    /// <summary>The Durable runtime doctor encountered an unexpected contract failure.</summary>
+    public const string DoctorContractFailed = "ASDUR415";
 }
