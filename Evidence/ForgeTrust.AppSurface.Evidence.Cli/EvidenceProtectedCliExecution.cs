@@ -32,10 +32,11 @@ internal static class EvidenceProtectedCliExecution
 {
     /// <summary>Uses only the authenticated descriptor to select the worker mode and inputs.</summary>
     internal static async Task<EvidenceManifest> RunAsync(string controlChannel, CancellationToken cancellationToken,
-        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null)
+        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null,
+        Action<EvidenceOriginalCancellationObservation>? cancellationSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
-        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken, diagnosticSink).ConfigureAwait(false);
+        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken, diagnosticSink, cancellationSink, new EvidenceOriginalCancellationCheckpoint()).ConfigureAwait(false);
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>
@@ -48,7 +49,9 @@ internal static class EvidenceProtectedCliExecution
     }
 
     private static async Task<EvidenceManifest> RunAsync(EvidenceLinuxWorkerSupervisor worker, EvidenceExecutionMode mode,
-        CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink)
+        CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink,
+        Action<EvidenceOriginalCancellationObservation>? cancellationSink = null,
+        EvidenceOriginalCancellationCheckpoint? cancellationCheckpoint = null)
     {
         var descriptor = worker.Descriptor;
         var clock = TimeProvider.System;
@@ -57,6 +60,7 @@ internal static class EvidenceProtectedCliExecution
             TimeSpan.FromSeconds(descriptor.CleanupSeconds), TimeSpan.FromSeconds(descriptor.StoppingSeconds),
             collectionReserve: collectionLimit);
         EvidenceLinuxArtifactRoot? root = null;
+        Stream? privateError = null;
         EvidenceAdmissionResult? admission = null;
         try
         {
@@ -97,27 +101,35 @@ internal static class EvidenceProtectedCliExecution
                 throw new EvidenceAdmissionException("ASEVD421", "The protected allocation reserve is exhausted.");
             var phase = EvidenceAllocationPhase.None;
             var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            if (cancellationCheckpoint is not null) privateError = Console.OpenStandardError();
             var allocated = await execution.ExecuteAsync(EvidenceRunStage.Admission, stage!.Duration,
-                token =>
+                async token =>
                 {
                     phase = EvidenceAllocationPhase.BeforeAllocation;
+                    if (cancellationCheckpoint is not null)
+                        await cancellationCheckpoint.WaitAtAsync(EvidenceOriginalCancellationPhase.BeforeAllocation,
+                            privateError!, token, callerCancellation).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     phase = EvidenceAllocationPhase.Allocation;
                     var allocatedRoot = EvidenceLinuxArtifactRoot.Allocate(descriptor.OutputParent, descriptor.OutputParentIdentity,
                         descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid, out operation);
                     root = allocatedRoot; // Retain ownership even if cancellation wins before the callback returns.
                     phase = EvidenceAllocationPhase.BeforeActivation;
+                    if (cancellationCheckpoint is not null)
+                        await cancellationCheckpoint.WaitAtAsync(EvidenceOriginalCancellationPhase.BeforeActivation,
+                            privateError!, token, callerCancellation).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     phase = EvidenceAllocationPhase.Activation;
                     admission.Activate(allocatedRoot.Identity.ToString());
                     phase = EvidenceAllocationPhase.Completed;
-                    return ValueTask.FromResult(allocatedRoot);
+                    return allocatedRoot;
                 }, callerCancellation).ConfigureAwait(false);
             budget.CompleteCurrentStage();
             if (allocated.Outcome != EvidenceWorkerStageOutcome.Passed)
             {
                 admission.LatchFailure();
                 ReportAllocationFailure(execution, allocated.Outcome, phase, operation, diagnosticSink);
+                cancellationCheckpoint?.ReportJoined(execution, cancellationSink);
                 throw new EvidenceAdmissionException("ASEVD409", "Fresh output allocation or activation failed.");
             }
 
@@ -221,6 +233,7 @@ internal static class EvidenceProtectedCliExecution
         {
             // Production FailFast never unwinds this finally; a live callback cannot race handle disposal.
             if (root is not null && execution.OwnWorkStopped) await root.DisposeAsync().ConfigureAwait(false);
+            if (execution.OwnWorkStopped) privateError?.Dispose(); // Never close a writer while its original callback remains live.
         }
     }
 

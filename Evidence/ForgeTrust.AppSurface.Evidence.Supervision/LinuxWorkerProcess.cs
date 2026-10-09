@@ -37,6 +37,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private TaskCompletionSource? _dispose;
     private LinuxUnitProperties? _naturalTerminal;
     private SupervisionOutputReceipt? _output;
+    private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
+
+    /// <summary>Gets only the original stderr-pump phase task; data creates no process authority.</summary>
+    internal Task CancellationPhaseObserved => _cancellationPhase.Observed;
     private int _dispatchAttempted;
     private int _failed;
     private int _physicallySettled;
@@ -179,6 +183,32 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _naturalTerminal, group, _output, descriptor, token);
     }
 
+    /// <summary>Copies the original kernel observation and complete charged streams for private cancellation retention.</summary>
+    /// <param name="input">Original reference-equal protected input.</param>
+    /// <param name="owner">Original authenticated root owner.</param>
+    /// <param name="accounts">Original retained account holder.</param>
+    /// <param name="workspace">Original retained workspace and descriptor.</param>
+    /// <param name="server">Original joined peer-authenticated server.</param>
+    /// <param name="token">Original cleanup token, without a reset deadline.</param>
+    /// <returns>Copied detached data; no identity, custody, account release or acceptance is granted.</returns>
+    /// <remarks>
+    /// CaptureNegativeObservation runs unchanged, including its one fresh selected-group sample, all
+    /// original startup/stop/server/monitor/pump joins, natural terminal and committed READY checks.
+    /// The receipt is assigned only by the original joined collector and remains immutable thereafter.
+    /// There is no second reader, supplied receipt, alternate path, native owner factory or new task.
+    /// Missing/incomplete/oversized data rejects; no guessed hash or truncated prefix can replace it.
+    /// </remarks>
+    internal (LinuxNegativeKernelObservation Kernel, byte[] JoinedStreams) CaptureCancellationJoinedObservation(
+        EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner, LinuxRunAccounts accounts,
+        LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        var kernel = CaptureNegativeObservation(input, owner, accounts, workspace, server, token);
+        var output = _output ?? throw LinuxSystemdBackend.InvalidControl();
+        var streams = LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached(owner.RunId, output, token);
+        owner.RequireControlIdentity(token);
+        return (kernel, streams);
+    }
+
     /// <summary>Reserves the entire one-attempt startup before any native pipe, connection or unit start.</summary>
     /// <remarks>
     /// Registers both pumps before dispatch, captures actual running unit and kernel identity, then seals
@@ -271,7 +301,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _outputDeadline = CancellationTokenSource.CreateLinkedTokenSource(_owner.TeardownCancellation);
             _outputDeadline.CancelAfter(_owner.Remaining);
             _pipes = LinuxOutputPipes.Create();
-            _ = _pipes.BeginCollectAsync(_outputDeadline.Token);
+            _ = _pipes.BeginCollectAsync(_outputDeadline.Token, cancellationPhase: _cancellationPhase);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(_jobDeadline.Token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                 TimeSpan.FromSeconds(_input.Request.StartSeconds).Ticks)));

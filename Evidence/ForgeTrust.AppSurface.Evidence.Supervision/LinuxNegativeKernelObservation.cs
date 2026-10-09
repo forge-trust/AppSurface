@@ -12,12 +12,19 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// metadata for pure tests: matching JSON cannot authenticate its producer or recreate a live owner.
 /// Fixture source/image binding, actual expected allocation failure, unchanged filesystem objects,
 /// quarantine/NSS disposition and independent positive prerequisites remain separate requirements.
-/// No method issues admission, custody, a lease, proof, eligibility or acceptance. No raw output is retained.
+/// No method issues admission, custody, a lease, proof, eligibility or acceptance. The kernel result retains
+/// no raw output; its separately named joined-stream codec exports copied data only to private failure retention.
 /// </remarks>
 internal sealed class LinuxNegativeKernelObservation
 {
     /// <summary>Maximum complete JSON bytes, before returning a copied result; a caller's LF is additional.</summary>
     internal const int MaximumJsonBytes = 4096;
+
+    /// <summary>Maximum complete original raw stdout/stderr pair permitted in the private cancellation export.</summary>
+    internal const int MaximumJoinedStreamBytes = 64 * 1024;
+
+    /// <summary>Maximum private joined-stream JSON line including the caller's single terminal LF.</summary>
+    internal const int MaximumJoinedStreamLineBytes = 96 * 1024;
     private readonly byte[] _bytes;
 
     private LinuxNegativeKernelObservation(byte[] bytes) => _bytes = bytes;
@@ -116,6 +123,64 @@ internal sealed class LinuxNegativeKernelObservation
             or InvalidOperationException or OverflowException or JsonException)
         { throw Rejected(); }
     }
+
+    /// <summary>Encodes a complete detached output pair as copied base64 data without reading any stream.</summary>
+    /// <param name="generation">Original generation in production; detached metadata establishes no owner.</param>
+    /// <param name="output">Original immutable joined receipt, or metadata for pure codec controls.</param>
+    /// <param name="token">Original cleanup token; no new allowance or cancellation source is created.</param>
+    /// <returns>One bounded private JSON object, without LF, granting no native authority or acceptance.</returns>
+    /// <exception cref="InvalidOperationException">Fixed rejection with no raw output or inner exception.</exception>
+    /// <exception cref="OperationCanceledException">Original cancellation, preserved before and after encoding.</exception>
+    /// <remarks>
+    /// Production calls only through the original worker holder after its unchanged negative-observation
+    /// guards. Both actual EOFs, no pump/shared failure, no discarded bytes and exact original shared
+    /// accounting are required. The 64 KiB limit is an additional export limit, never a raised pump quota.
+    /// Pure calls cannot prove joins, signal delivery, caller cancellation, process identity or custody.
+    /// Fixed fields and base64/hash alphabets alone use relaxed escaping to fit the 96 KiB line bound;
+    /// the result belongs only in root-private failure retention, never an HTML or public diagnostic flow.
+    /// </remarks>
+    internal static byte[] EncodeJoinedStreamsDetached(Guid generation, SupervisionOutputReceipt output,
+        CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        try
+        {
+            if (generation == Guid.Empty || output is null || output.Stdout is null || output.Stderr is null
+                || output.ReceivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+                throw Rejected();
+            RequireStream(output.Stdout);
+            RequireStream(output.Stderr);
+            var received = checked(output.Stdout.ReceivedBytes + output.Stderr.ReceivedBytes);
+            if (!output.Successful || output.DiscardedBytes != 0 || output.ReceivedBytes != received
+                || received is < 0 or > MaximumJoinedStreamBytes) throw Rejected();
+            token.ThrowIfCancellationRequested();
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schema = "issue779-cancellation-joined-streams-v1",
+                generation = generation.ToString("N"),
+                stdout = JoinedStream(output.Stdout), stderr = JoinedStream(output.Stderr),
+                received_bytes = received, received_byte_limit = output.ReceivedByteLimit,
+                observation_only = true, native_authority = false, native_acceptance = false,
+            }, new JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+            });
+            token.ThrowIfCancellationRequested();
+            if (bytes.Length is 0 or >= MaximumJoinedStreamLineBytes) throw Rejected();
+            return bytes;
+        }
+        catch (Exception error) when (error is ArgumentException or InvalidOperationException
+            or OverflowException or JsonException)
+        { throw Rejected(); }
+    }
+
+    private static object JoinedStream(SupervisionOutputStreamReceipt value) => new
+    {
+        received_bytes = value.ReceivedBytes, retained_bytes = value.Prefix.Length,
+        discarded_bytes = value.DiscardedBytes, eof = value.EndOfStream, failure = "None",
+        sha256 = Convert.ToHexStringLower(SHA256.HashData(value.Prefix.AsSpan())),
+        base64 = Convert.ToBase64String(value.Prefix.AsSpan()),
+    };
 
     private static uint[] Ids(LinuxProcessIds value) =>
         [value.Real, value.Effective, value.Saved, value.FileSystem];
