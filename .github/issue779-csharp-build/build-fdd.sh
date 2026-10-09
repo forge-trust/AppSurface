@@ -18,16 +18,16 @@ import tarfile
 import time
 import xml.etree.ElementTree as ET
 
-HEAD = '5214a278cf710bfcf3ebca9f9ea4db557ee2adbb'
-PARENT = '55079eb96608246c6c396b1ae7b01c01cfbf7ba8'
-HARNESS_PARENT = '9ac59b49d435758e34d8d1a893a68244fa96d230'
-TREE = 'e6f322983b431ca69bfe2dfbdd24857c1b4ab603'
-CAPTURE_SHA = 'aef1ff3abea337ed53611bc7b592aff518c54414d0e58694c23ab1f59488629c'
-CAPTURE_PROJECTION_SHA = '28a72da7bd4e4568b471e89bc3fa86041b876f7ee3c60fa7230eb80c20a39839'
-UBUNTU_PREREQUISITE_SHA = '6aae9f9713c4ce31704b237eb47bcafa2dd0a0367e7f7407cde590bb17aae320'
-NATIVE_RUNNER_SHA = '19d298740ca5776fdf870bbf480d79791a5d1f1daafae174918913c6001267fa'
+HEAD = 'e011aa1b5384d4116dfdcb93d6253a589e564d7a'
+PARENT = '5214a278cf710bfcf3ebca9f9ea4db557ee2adbb'
+HARNESS_PARENT = '01494c8d2da3e6728aef7442f4ed8495b77f5f42'
+TREE = 'f5baab1333320e5d48435ee47efcb303e7a6ad05'
+CAPTURE_SHA = '8dc806d6d12a72dc017205a5eae480e7eba51ac6dc01e803ff8f3463b7fec66c'
+CAPTURE_PROJECTION_SHA = '9025b36b83f8d4caf73c835f716b050dabc0ab4c962ba72b1e35be60c6f41c48'
+UBUNTU_PREREQUISITE_SHA = '05a3de30391700238e7ed4d76a5c31258e4daee1de07761e5a350e6b3f96b64d'
+NATIVE_RUNNER_SHA = '6bac6ccdda61123045466300c4276cbccdb8c6e6de349d30126f7366e77f17c0'
 SDK = '10.0.401'
-COUNT = 2828
+COUNT = 2836
 FILE_CAP = 256 * 1024 * 1024
 TREE_CAP = 1024 * 1024 * 1024
 NODE_CAP = 8192
@@ -648,13 +648,14 @@ def main():
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
     retry_parent = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
     require(retry_parent == HARNESS_PARENT, 'direct-retry-parent')
-    require(run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == '5beb94a919eec7d372f63d050577328bcf455c9f', 'published-parent-topology')
-    installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'M', '.github/issue779-csharp-native/README.md': 'M', '.github/issue779-csharp-native/acquire-inbound.sh': 'M', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'M', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'M', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'M', '.github/issue779-csharp-native/run-native.py': 'M', '.github/issue779-csharp-native/source-review.json': 'M', '.github/workflows/issue779-csharp-linux-native.yml': 'M'}
+    merge_parents = run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode().split()
+    require(merge_parents == ['396328b0691f942ace574356dcb6ff33859c2045', HEAD], 'published-parent-topology')
+    installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'M', '.github/issue779-csharp-build/capture-receipt.json': 'M', '.github/issue779-csharp-native/README.md': 'M', '.github/issue779-csharp-native/acquire-inbound.sh': 'M', '.github/issue779-csharp-native/build-n07-helper.sh': 'A', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'M', '.github/issue779-csharp-native/n07-archive-data.py': 'A', '.github/issue779-csharp-native/n07-helper-live.py': 'A', '.github/issue779-csharp-native/n07-helper-receipt-filter.jq': 'A', '.github/issue779-csharp-native/n07-helper-source/N07CoordinatorData.cs': 'A', '.github/issue779-csharp-native/n07-helper-source/NativeRootCoordinator.csproj': 'A', '.github/issue779-csharp-native/n07-helper-source/PossibleStopRegistration.cs': 'A', '.github/issue779-csharp-native/n07-helper-source/Program.cs': 'A', '.github/issue779-csharp-native/n07-helper-source/README.md': 'A', '.github/issue779-csharp-native/n07-helper-source/packages.lock.json': 'A', '.github/issue779-csharp-native/n07-record-data.py': 'A', '.github/issue779-csharp-native/prepare-os-audit-v2.py': 'M', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'M', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'M', '.github/issue779-csharp-native/retain-native.sh': 'M', '.github/issue779-csharp-native/run-native.py': 'M', '.github/issue779-csharp-native/source-review.json': 'M', '.github/issue779-csharp-native/test_n07_data.py': 'A', '.github/issue779-csharp-native/test_n07_handoff_data.py': 'A', '.github/issue779-csharp-native/test_n07_live_finalization.py': 'A', '.github/workflows/issue779-csharp-linux-native.yml': 'M'}
     installation_status = dict((name, status) for status, name in
                               (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, 'HEAD'], HARN).decode().splitlines()))
     require(installation_status == installation_delta, 'exact-retry-installation-delta')
     RESULT['harness_retry_parent'] = retry_parent
-    RESULT['harness_retry_parent_parent'] = '5beb94a919eec7d372f63d050577328bcf455c9f'
+    RESULT['harness_retry_parent_parents'] = merge_parents
     RESULT['harness_retry_installation_delta'] = installation_status
     run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
     RESULT['harness_parent'] = HARNESS_PARENT

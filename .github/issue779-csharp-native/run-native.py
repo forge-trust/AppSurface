@@ -15,25 +15,17 @@ import tarfile
 import time
 import uuid
 
-NEGATIVE_CASE = 'N05'
+NEGATIVE_CASE = 'N07'
+N07_INTEGRATION_REVIEW_CLEAR = True
+N07_SOURCE_REBIND_PENDING = False
+N07_NATIVE_HELPER_QUALIFICATION_PROCEDURE_REVIEW_CLEAR = True
+SOURCE_COUNT = 2836
 N03_INDEPENDENT_REVIEW_CLEAR = True
 N03_SOURCE_REBIND_PENDING = False
-SOURCE = '5214a278cf710bfcf3ebca9f9ea4db557ee2adbb'
-PARENT = '9ac59b49d435758e34d8d1a893a68244fa96d230'
-SOURCE_MAP = 'c98df9733cfa6f9f8b17a4463a7026ef3466a81df3c335f0bd0b1fec6914aa12'
-PINS = {
-    'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
-    'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
-    'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
-    'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
-
-    'prepare-root-inputs-v2.sh': '05d0e2d79cd77ad22215f54dc840abcfc04b2893a30763546b06f69d3ced2c4e',
-    'checkpoint-n01-n02-v5.sh': '5c193e1865757770acce676b2c7d5371d2f9d73b419129fd4c2618e5e1411e86',
-    'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
-    'source-review.json': '5b6f8d53c4b973975bd2e1727e5a60909e8e3427068a3e44495cb18406ece8e8',
-    'acquire-inbound.sh': '57ab1a6e25e05f07d437a729c37d12460b687dc60b1b3630ada661e5518a8c89',
-    'retain-native.sh': 'a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e',
-}
+SOURCE = 'e011aa1b5384d4116dfdcb93d6253a589e564d7a'
+PARENT = '01494c8d2da3e6728aef7442f4ed8495b77f5f42'
+SOURCE_MAP = '8eca59b5654987cd5e698ad83d03e5461c59a2f74574a28e99cb984928e5e6a3'
+PINS = {'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4', 'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a', 'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb', 'prepare-root-inputs-v2.sh': 'b6d5f81a438460d9cc97fa22c234f3ff2fe49c826e79d29304f23c775f57e1c9', 'checkpoint-n01-n02-v5.sh': '891185eec903a766e5449d2c5443c25c548d5693215ec86c6b5ed4a5c693b226', 'prepare-os-audit-v2.py': '6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08', 'source-review.json': '4c34ce80e83faa78c4ac5759957ce12a0eec3eaaae41d350fe97d1fa6b3dc0c4', 'acquire-inbound.sh': 'b95cb57783c18c560d95cdb3429dc735e51b169424477d9d43cff5998b80a4ac', 'retain-native.sh': '6d1abb54b5b6f518bda64de754a2b8ff5fdb7dd94124ddaadba75af27a904f01', 'build-n07-helper.sh': '421567477242d33e3368d8797e0ec3da00d02093be05ed6cc2c7a26a3ea2c462', 'n07-helper-receipt-filter.jq': '313c6bd4024ae6cb8731c050d4896dea4f8c15eac230924adc96474a855c0df1', 'n07-archive-data.py': 'a308b585d2ec031a5ff6e2f75a32f9d6d15ec65a60524421d74d380a3cfe77c9', 'n07-record-data.py': '96d01d088300aeffb5fa7eab7387c3b4be319d249e796edcb189aceb441548e7', 'n07-helper-live.py': 'ff957a62af596c9ae2278685a756493c709f3906bf9194d13a2946109cb792b1'}
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
 LOG_CAP = 40 * 1024 * 1024
@@ -204,7 +196,7 @@ def validate_build(receipt, maps):
                 and row['forced_cleanup'] is False, 'build-command-terminal')
     for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
         fact = receipt[phase]
-        require(fact['head'] == SOURCE and fact['count'] == 2828 and fact['source_map_sha256'] == SOURCE_MAP
+        require(fact['head'] == SOURCE and fact['count'] == SOURCE_COUNT and fact['source_map_sha256'] == SOURCE_MAP
                 and all(fact[name] is True for name in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')), 'build-source')
     require(set(receipt['artifacts']) == {'source', 'tool', 'runtime'}, 'build-map-set')
     for name, fact in receipt['artifacts'].items():
@@ -216,7 +208,7 @@ def validate_build(receipt, maps):
                 'node-schema')
         require(len(nodes['files']) == fact['file_count'] and len(nodes['files']) + len(nodes['directories']) == fact['node_count']
                 and sum(row['bytes'] for row in nodes['files'].values()) == fact['total_bytes'], 'node-counts')
-    require(receipt['artifacts']['source']['file_count'] == 2828, 'source-count')
+    require(receipt['artifacts']['source']['file_count'] == SOURCE_COUNT, 'source-count')
 
 
 def absent(pid):
@@ -587,7 +579,7 @@ set -euo pipefail
 /usr/bin/sha256sum -- "$path" | /usr/bin/cut -c1-64
 '''
 
-ARCHIVE_NAMES = {'logs/n02-higher.file-limit', 'logs/n03/worker.stderr', 'negative-setup.json', 'logs/n02.credentials.json', 'logs/n03/worker-live.json', 'logs/n02-higher.stderr', 'logs/n03/result.json', 'worker-live.json', 'logs/n03/broker.stderr', 'logs/n02.stderr', 'logs/n03/worker.stdout', 'fixture-stderr.log', 'negative-kernel-observation.json', 'n05-worker.stderr', 'logs/kill.log', 'final-files.sha256', 'fixture-result.json', 'logs/observer.stdout', 'negative-post-join.json', 'fixture-stdout.log', 'logs/n02-higher.credentials.json', 'logs/n03/broker-live.json.argv', 'logs/n03/worker-peer.trace', 'n02-startup-limit-diagnostic.pending', 'negative-root-terminal.txt', 'logs/n03/broker.events.jsonl', 'logs/n03/failure.json', 'raw-evidence-plan.json', 'logs/n02-higher.io.trace', 'logs/n02.stdout', 'n02-startup-limit-diagnostic.json', 'raw-evidence-manifest.json', 'n05-worker.stdout', 'negative-account-ids.tsv', 'logs/n03/broker-live.json', 'logs/n01.stderr', 'logs/n02.io.trace', 'logs/n02-higher.limits', 'logs/n02.facts.json', 'logs/n03/broker-live-after.json', 'negative-root-failure.json', 'logs/n02-higher.trace', 'raw-evidence-summary.json', 'request-policy.sha256', 'logs/n03/broker-live-after.json.argv', 'logs/n02-higher.facts.json', 'logs/n02.trace', 'logs/observer.stderr', 'logs/n03/worker-live.json.argv', 'logs/n02.file-limit', 'negative-descriptor.json', 'negative-worker-raw.json', 'negative-worker-projection.json', 'logs/n02-higher.stdout', 'n06-worker.stderr', 'logs/stop.log', 'retention-selection.json', 'logs/n01.stdout', 'n06-worker.stdout', 'logs/n02.limits'}
+ARCHIVE_NAMES = {'logs/n03/broker-live-after.json', 'n07-ordinary-failure.json', 'logs/n03/broker-live.json.argv', 'n07-worker.stderr', 'logs/n02-higher.credentials.json', 'n07-worker-unit.txt', 'n07-consistency.json', 'n07-account-ids.tsv', 'fixture-stderr.log', 'logs/n03/worker-live.json.argv', 'logs/n02.file-limit', 'n07-helper-result.json', 'logs/n03/worker-peer.trace', 'logs/n02.stderr', 'n07-descriptor.json', 'logs/n03/failure.json', 'logs/n02.limits', 'logs/n03/broker.events.jsonl', 'logs/n02-higher.stderr', 'n02-startup-limit-diagnostic.pending', 'logs/n02-higher.file-limit', 'n07-root-failure.json', 'retention-selection.json', 'worker-live.json', 'logs/n03/result.json', 'logs/n01.stdout', 'logs/n02.credentials.json', 'n07-helper-unit.txt', 'n02-startup-limit-diagnostic.json', 'logs/n03/broker-live-after.json.argv', 'logs/kill.log', 'logs/stop.log', 'raw-evidence-plan.json', 'logs/n02.facts.json', 'logs/n03/broker.stderr', 'logs/n02-higher.trace', 'logs/n02.stdout', 'logs/observer.stderr', 'n07-worker.stdout', 'fixture-stdout.log', 'logs/n02-higher.facts.json', 'n07-helper-live.json', 'logs/n07-helper.stderr', 'logs/n02-higher.io.trace', 'raw-evidence-manifest.json', 'logs/n03/worker-live.json', 'logs/n03/worker.stdout', 'fixture-result.json', 'final-files.sha256', 'raw-evidence-summary.json', 'logs/n02-higher.limits', 'logs/n02.io.trace', 'logs/observer.stdout', 'n07-precleanup-frame.json', 'logs/n03/worker.stderr', 'logs/n02-higher.stdout', 'n07-parent-postjoin.json', 'request-policy.sha256', 'n07-worker-raw.json', 'n07-root-terminal.txt', 'logs/n02.trace', 'logs/n01.stderr', 'logs/n07-helper.stdout', 'logs/n03/broker-live.json'}
 
 
 
@@ -892,6 +884,9 @@ def check_kernel_record(raw, *, expected_generation, expected_uid, expected_gid,
         raise KernelRecordRejected('negative-kernel-data-rejected') from None
 
 
+NEGATIVE_CAPS.update({'n07-worker-raw.json': 98304, 'n07-root-failure.json': 6145, 'n07-ordinary-failure.json': 1025, 'n07-root-terminal.txt': 1024, 'n07-descriptor.json': 65536, 'n07-account-ids.tsv': 128, 'n07-worker.stdout': 0, 'n07-worker.stderr': 65536, 'n07-precleanup-frame.json': 1025, 'n07-helper-result.json': 4096, 'n07-helper-live.json': 2048, 'n07-parent-postjoin.json': 4096, 'n07-consistency.json': 4096, 'logs/n07-helper.stdout': 4096, 'logs/n07-helper.stderr': 8388608, 'logs/n01.stderr': 114688, 'logs/n01.stdout': 0, 'n07-worker-unit.txt': 65536, 'n07-helper-unit.txt': 65536})
+
+
 def inspect_archive(data):
     """Inspect bounded root-retained canonical bytes; raw data remains private."""
     raw = inspect_retention(data, ARCHIVE_NAMES)
@@ -1032,18 +1027,51 @@ def validate_n03_archive(values):
     require(worker['uid4']!=broker['uid4'] and worker['gid4']==broker['gid4']=='65534:65534:65534:65534' and worker['cgroup']==broker['cgroup'], 'n03-selection-continuity')
 
 
+def validate_n07_helper_handoff(value, recipe):
+    fields = {'authority','commands','exit','helper_bytes','helper_directories','helper_entry_sha256','helper_files','helper_nodes_sha256','helper_root','helper_tsv_sha256','native_execution','recipe_sha256','runtime_required','schema','sdk_required','sdk_sha256','source_pins'}
+    require(set(value) == fields and value['schema'] == 'issue779-n07-helper-build-handoff-v1' and type(value['exit']) is int and value['exit'] == 0 and value['authority'] is False and value['native_execution'] is False and value['recipe_sha256'] == recipe and value['sdk_required'] == '10.0.401' and value['runtime_required'] == '10.0.12', 'helper-receipt-schema')
+    require(value['source_pins'] == {'N07CoordinatorData.cs': '6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d', 'NativeRootCoordinator.csproj': '9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1', 'PossibleStopRegistration.cs': '3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af', 'Program.cs': '059246aa8acb0feb5c1172990661fc83cd1631f07ff34a1bfe8de736414a4a5d', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb'}, 'helper-source-pins')
+    require(all(type(value[k]) is int and value[k]>0 for k in ('helper_files','helper_directories')) and value['helper_files']+value['helper_directories']<=8192 and type(value['helper_bytes']) is int and 0<=value['helper_bytes']<=1073741824, 'helper-bounds')
+    require(all(type(value[k]) is str and re.fullmatch('[0-9a-f]{64}',value[k]) for k in ('helper_tsv_sha256','helper_nodes_sha256','helper_entry_sha256','sdk_sha256')), 'helper-digests')
+    require(type(value['commands']) is list and len(value['commands'])==3, 'helper-command-count')
+    for i,row in enumerate(value['commands']):
+        require(set(row)=={'error','exit','forced_cleanup','group_absent','log','log_bytes','waited'} and type(row['exit']) is int and row['exit']==0 and row['waited'] is True and row['group_absent'] is True and row['forced_cleanup'] is False and row['error'] is False and row['log']=='build-%02d.log'%i and type(row['log_bytes']) is int and 0<=row['log_bytes']<=8388608, 'helper-command')
+
+
+def read_n07_helper_handoff(root, deadline):
+    require(not os.path.lexists(root / 'helper-build-receipt.pending.json') and not os.path.lexists(root / 'late-helper-publication-failure.json'), 'n07-helper-publication')
+    raw = read(root / 'helper-build-receipt.json', 1048576, deadline)
+    value = decode(raw)
+    validate_n07_helper_handoff(value, PINS['build-n07-helper.sh'])
+    require(value['helper_root'] == str(root / 'helper'), 'n07-helper-root-binding')
+    maps = (read(root / 'helper.tsv', 1048576, deadline), read(root / 'helper-nodes.json', 4194304, deadline))
+    require(sha(maps[0]) == value['helper_tsv_sha256'] and sha(maps[1]) == value['helper_nodes_sha256'], 'n07-helper-map-pins')
+    nodes = decode(maps[1])
+    require(set(nodes) == {'schema','root_name','files','directories'} and nodes['schema'] == 'issue779-build-node-inventory-v1' and nodes['root_name'] == 'tool', 'n07-helper-node-shape')
+    require(len(nodes['files']) == value['helper_files'] and len(nodes['directories']) == value['helper_directories'] and sum(v['bytes'] for v in nodes['files'].values()) == value['helper_bytes'] and nodes['files']['NativeRootCoordinator.dll']['sha256'] == value['helper_entry_sha256'], 'n07-helper-membership')
+    require(all(name in nodes['files'] for name in ('NativeRootCoordinator.deps.json','NativeRootCoordinator.runtimeconfig.json')), 'n07-helper-FDD')
+    for command in value['commands']:
+        log = read(root / command['log'], 8388608, deadline)
+        require(len(log) == command['log_bytes'] and re.search(rb'(?:warning|error) [A-Z]+[0-9]+', log) is None, 'n07-helper-log-diagnostic')
+    require(not os.path.lexists(root / 'late-helper-publication-failure.json'), 'n07-helper-late-after-read')
+    return raw, value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--workspace', required=True)
     parser.add_argument('--build-root', required=True)
     parser.add_argument('--helper-build-root', required=True)
+    parser.add_argument('--n07-helper-build-root', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--reviewed-script-sha256', required=True)
     args = parser.parse_args()
     job_end = int(os.environ['JOB_DEADLINE_MONOTONIC_NS']) / 1_000_000_000
     start = time.monotonic()
     final = min(job_end, start + 900)
+    require(N07_INTEGRATION_REVIEW_CLEAR and not N07_SOURCE_REBIND_PENDING
+            and N07_NATIVE_HELPER_QUALIFICATION_PROCEDURE_REVIEW_CLEAR, 'n07-source-review-or-native-helper-qualification-pending')
     require(N03_INDEPENDENT_REVIEW_CLEAR and not N03_SOURCE_REBIND_PENDING, 'n03-review-or-source-rebind-pending')
     require(args.execute and sys.platform == 'linux' and os.uname().machine == 'x86_64'
             and os.geteuid() > 0 and os.getegid() > 0 and final - start > 850, 'native-platform-or-job-budget')
@@ -1053,9 +1081,12 @@ def main():
     output.mkdir(mode=0o700)
     helper_build = Path(args.helper_build_root)
     require(helper_build.is_absolute() and helper_build not in (workspace, build, output), 'helper-build-root')
+    n07_build = Path(args.n07_helper_build_root)
+    require(n07_build.is_absolute() and n07_build not in (workspace, build, output, helper_build), 'n07-helper-build-root')
     runner = Runner(output, final)
     result = {'schema': 'issue779-csharp-n01-n02-run-v1', 'source_commit': SOURCE, 'exit': 1,
               'commands': runner.records, 'native_dispatched': False, 'native_case_receipt_verified': False,
+              'helper_native_qualification_observed': False,
               'trusted_enabled': False, 'remaining_fourteen_controls': 'pending'}
     generation = uuid.uuid4().hex
     root = Path('/var/lib/appsurface-evidence-input-' + generation)
@@ -1067,6 +1098,14 @@ def main():
         reviewed = workspace / '.github/issue779-csharp-native'
         for name, pin in PINS.items():
             require(re.fullmatch('[0-9a-f]{64}', pin) and sha(read(reviewed / name, 131072, final)) == pin, 'reviewed-pin')
+        import importlib.util
+        record_spec = importlib.util.spec_from_file_location('issue779_n07_records', reviewed / 'n07-record-data.py')
+        n07_records = importlib.util.module_from_spec(record_spec)
+        record_spec.loader.exec_module(n07_records)
+        archive_spec = importlib.util.spec_from_file_location('issue779_n07_archive', reviewed / 'n07-archive-data.py')
+        n07_archive = importlib.util.module_from_spec(archive_spec)
+        archive_spec.loader.exec_module(n07_archive)
+        require(time.monotonic() < final, 'n07-validator-load-deadline')
         raw = read(build / 'receipts/build-receipt.json', 1048576, final)
         receipt = decode(raw)
         require(not os.path.lexists(build / 'receipts/late-publication-failure.json'), 'late-build-publication')
@@ -1085,6 +1124,9 @@ def main():
         helper_nodes = decode(helper_maps[1])
         require(set(helper_nodes) == {'schema','root_name','files','directories'} and helper_nodes['schema'] == 'issue779-build-node-inventory-v1' and helper_nodes['root_name'] == 'tool', 'helper-node-schema')
         require(len(helper_nodes['files']) == helper['helper_files'] and len(helper_nodes['directories']) == helper['helper_directories'] and sum(v['bytes'] for v in helper_nodes['files'].values()) == helper['helper_bytes'] and helper_nodes['files']['NativePeerBroker.dll']['sha256'] == helper['helper_entry_sha256'], 'helper-membership-receipt')
+        n07_raw, n07 = read_n07_helper_handoff(n07_build, final)
+        result['n07_helper_build_receipt_sha256'] = sha(n07_raw)
+        n07_root = Path('/var/lib/appsurface-evidence-n07-helpers') / generation / 'bundle'
         result['helper_build_receipt_sha256'] = sha(helper_raw)
         helper_root = Path('/var/lib/appsurface-evidence-n03-helpers') / generation / 'bundle'
         runner.phase = 'root-bootstrap'
@@ -1098,7 +1140,9 @@ def main():
             '--build-root', str(build), '--reviewed-root', str(bootstrap), '--deadline-monotonic-ms', acquisition_ms,
             '--reviewed-script-sha256', PINS['acquire-inbound.sh'], '--transport-sha256', PINS['prepare-root-inputs-v2.sh'],
             '--fixture-sha256', PINS['checkpoint-n01-n02-v5.sh'], '--audit-sha256', PINS['prepare-os-audit-v2.py'],
-            '--source-review-sha256', PINS['source-review.json'], '--helper-build-root', str(helper_build), '--helper-build-receipt-sha256', sha(helper_raw)], acquisition_end)
+            '--source-review-sha256', PINS['source-review.json'], '--helper-build-root', str(helper_build), '--helper-build-receipt-sha256', sha(helper_raw), '--n07-helper-build-root', str(n07_build),
+            '--n07-helper-build-receipt-sha256', sha(n07_raw), '--n07-parser-sha256', PINS['n07-record-data.py'],
+            '--n07-live-parser-sha256', PINS['n07-helper-live.py']], acquisition_end)
         inbound = Path('/var/lib/appsurface-evidence-inbound-' + generation)
         transport = ['--execute', '--reviewed-script-sha256', PINS['prepare-root-inputs-v2.sh'], '--generation', generation,
                      '--deadline-monotonic-ms', acquisition_ms, '--source-commit', SOURCE]
@@ -1108,6 +1152,7 @@ def main():
                           '--' + name + '-map-sha256', fact['tsv_sha256'], '--' + name + '-nodes', str(inbound / 'control' / (name + '-nodes.json')),
                           '--' + name + '-nodes-sha256', fact['nodes_sha256']]
         transport += ['--helper-root', str(inbound / 'helper'), '--helper-map', str(inbound / 'control/helper.tsv'), '--helper-map-sha256', helper['helper_tsv_sha256'], '--helper-nodes', str(inbound / 'control/helper-nodes.json'), '--helper-nodes-sha256', helper['helper_nodes_sha256'], '--helper-build-receipt', str(inbound / 'control/helper-build-receipt.json'), '--helper-build-receipt-sha256', sha(helper_raw), '--helper-entry-sha256', helper['helper_entry_sha256']]
+        transport += ['--n07helper-root', str(inbound / 'n07helper'), '--n07helper-map', str(inbound / 'control/n07helper.tsv'), '--n07helper-map-sha256', n07['helper_tsv_sha256'], '--n07helper-nodes', str(inbound / 'control/n07helper-nodes.json'), '--n07helper-nodes-sha256', n07['helper_nodes_sha256'], '--n07helper-build-receipt', str(inbound / 'control/n07-helper-build-receipt.json'), '--n07helper-build-receipt-sha256', sha(n07_raw), '--n07helper-entry-sha256', n07['helper_entry_sha256'], '--n07-parser', str(inbound / 'scripts/n07-record-data.py'), '--n07-parser-sha256', PINS['n07-record-data.py'], '--n07-live-parser', str(inbound / 'scripts/n07-helper-live.py'), '--n07-live-parser-sha256', PINS['n07-helper-live.py']]
         transport += ['--source-review', str(inbound / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
                       '--build-receipt', str(inbound / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
                       '--fixture', str(inbound / 'scripts/checkpoint-n01-n02-v5.sh'), '--fixture-sha256', PINS['checkpoint-n01-n02-v5.sh'],
@@ -1120,7 +1165,7 @@ def main():
         audit_end = min(final - 5, time.monotonic() + 60)
         try:
             runner.run(['/usr/bin/python3', '-B', str(root / 'reviewed/prepare-os-audit-v2.py'), '--runtime-root', str(root / 'runtime'),
-                        '--tool-root', str(root / 'tool'), '--helper-root', str(helper_root), '--output', str(audit_dir / 'os-audit.json'),
+                        '--tool-root', str(root / 'tool'), '--helper-root', str(helper_root), '--n07-helper-root', str(n07_root), '--output', str(audit_dir / 'os-audit.json'),
                         '--deadline-monotonic', str(audit_end)], audit_end)
         except BaseException:
             try:
@@ -1143,6 +1188,7 @@ def main():
                         '--' + flag + '-manifest-sha256', fact['tsv_sha256'], '--' + flag + '-nodes', str(root / 'control' / (name + '-nodes.json')),
                         '--' + flag + '-nodes-sha256', fact['nodes_sha256']]
         fixture += ['--n03-helper-root', str(helper_root), '--n03-helper-map', str(root / 'control/helper.tsv'), '--n03-helper-map-sha256', helper['helper_tsv_sha256'], '--n03-helper-nodes', str(root / 'control/helper-nodes.json'), '--n03-helper-nodes-sha256', helper['helper_nodes_sha256'], '--n03-helper-entry-sha256', helper['helper_entry_sha256'], '--n03-helper-generation', generation]
+        fixture += ['--n07-helper-root', str(n07_root), '--n07-helper-map', str(root / 'control/n07helper.tsv'), '--n07-helper-map-sha256', n07['helper_tsv_sha256'], '--n07-helper-nodes', str(root / 'control/n07helper-nodes.json'), '--n07-helper-nodes-sha256', n07['helper_nodes_sha256'], '--n07-helper-entry-sha256', n07['helper_entry_sha256'], '--n07-parser', str(root / 'reviewed/n07-record-data.py'), '--n07-live-parser', str(root / 'reviewed/n07-helper-live.py')]
         fixture += ['--source-review', str(root / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
                     '--build-receipt', str(root / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
                     '--os-audit', str(root / 'control/os-audit.json'), '--os-audit-sha256', audit_hash,
@@ -1178,8 +1224,9 @@ def main():
                 result['retention_selection'] = values['retention-selection.json']
                 if not failure:
                     require(result.get('fixture_exit') == 0 and 'fixture-result.json' in values, 'successful-native-receipt-missing')
-                    validate_native_result(values['fixture-result.json'])
-                    validate_negative_archive(values)
+                    result['n07_detached_consistency'] = n07_archive.validate_n07_archive(values,
+                        records=n07_records, expected_source=SOURCE,
+                        expected_base='4dd992ec1bc2df8220c73149115c5b478edb0085')
                     result['native_case_receipt_verified'] = True
                     result['native_cases_passed'] = [NEGATIVE_CASE]
                 retained = True

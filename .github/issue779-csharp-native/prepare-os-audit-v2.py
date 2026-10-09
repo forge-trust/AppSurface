@@ -571,8 +571,8 @@ class Audit:
             reject("python-stdlib-empty")
         return (entries, hashes), sorted(set(native))
 
-    def build(self, runtime, tool, include_tool, helper):
-        self.roots = (runtime, tool, helper)
+    def build(self, runtime, tool, include_tool, helper, n07_helper):
+        self.roots = (runtime, tool, helper, n07_helper)
         self.require_fixed_python_bootstrap()
         python_before, python_native = self.pin_python_standard_library()
         pending = list(self.commands.values()) + python_native
@@ -580,7 +580,7 @@ class Audit:
             entries, hashes = self.inventory(root)
             self.trees[root] = (entries, hashes)
             for path, (_, prefix) in hashes.items():
-                if prefix.startswith(b"\x7fELF") and (root == runtime or root == helper or include_tool):
+                if prefix.startswith(b"\x7fELF") and (root == runtime or root == helper or root == n07_helper or include_tool):
                     pending.append(path)
         while pending:
             self.check()
@@ -712,6 +712,7 @@ def main():
     parser.add_argument("--runtime-root", required=True)
     parser.add_argument("--tool-root", required=True)
     parser.add_argument("--helper-root", required=True)
+    parser.add_argument("--n07-helper-root", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--deadline-monotonic", required=True, type=float)
     parser.add_argument("--include-tool-elf", action="store_true")
@@ -733,7 +734,12 @@ def main():
         helper = canonical_path(args.helper_root)
         if any(helper == r or helper.startswith(r + "/") or r.startswith(helper + "/") for r in (runtime, tool)):
             reject("helper-tree-overlap")
-        data = audit.build(runtime, tool, args.include_tool_elf, helper)
+        n07_helper = canonical_path(args.n07_helper_root)
+        if any(n07_helper == r or n07_helper.startswith(r + "/") or r.startswith(n07_helper + "/") for r in (runtime, tool, helper)):
+            reject("n07-helper-tree-overlap")
+        if any(output == r or output.startswith(r + "/") for r in (helper, n07_helper)):
+            reject("output-in-helper-input")
+        data = audit.build(runtime, tool, args.include_tool_elf, helper, n07_helper)
         publication_sha256 = hashlib.sha256(data).hexdigest()
         audit.publish(output, data)
         audit.check()
