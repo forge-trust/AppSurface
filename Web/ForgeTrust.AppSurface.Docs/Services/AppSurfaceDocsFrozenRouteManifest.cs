@@ -27,6 +27,9 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
 
     private readonly IReadOnlyDictionary<string, string> _canonicalRoutePathByAlias;
 
+    /// <summary>Gets canonical, source-shaped recovery and declared routes captured from verified bytes.</summary>
+    internal IReadOnlyList<string> PublicRoutePaths { get; private set; } = [];
+
     private AppSurfaceDocsFrozenRouteManifest(IReadOnlyDictionary<string, string> canonicalRoutePathByAlias)
     {
         _canonicalRoutePathByAlias = canonicalRoutePathByAlias;
@@ -146,7 +149,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     ignoredRouteCount);
             }
 
-            return aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
+            return CreateSnapshot(document, aliasMap);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or NotSupportedException)
         {
@@ -186,7 +189,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var aliasMap = ValidateDocument(document, strict: true, out _);
-            manifest = aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
+            manifest = CreateSnapshot(document, aliasMap);
             return true;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
@@ -392,6 +395,19 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         }
 
         return canonicalRouteByAlias;
+    }
+
+    /// <summary>Keeps complete route identities even for a valid manifest with no redirects.</summary>
+    private static AppSurfaceDocsFrozenRouteManifest CreateSnapshot(FrozenRouteManifestDocument document,
+        IReadOnlyDictionary<string, string> aliases)
+    {
+        return new AppSurfaceDocsFrozenRouteManifest(aliases)
+        {
+            PublicRoutePaths = (document.Entries ?? []).SelectMany(entry =>
+                new[] { entry.CanonicalRoutePath, entry.SourcePath }.Concat(entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? []))
+                .Where(path => path is not null && IsSafeRoutePath(NormalizeRoutePath(path)))
+                .Select(path => NormalizeRoutePath(path!)).ToArray()
+        };
     }
 
     private static string GetRoutePathPart(string routePath)

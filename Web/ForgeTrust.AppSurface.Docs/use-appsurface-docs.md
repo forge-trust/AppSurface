@@ -176,6 +176,200 @@ Static export remains one-product-at-a-time: export each Docs product from a hos
 point the named runtime at that product's catalog and trusted release root. A multi-instance host does not produce one
 combined static tree.
 
+### Configure and verify moving version aliases
+
+Use aliases for reader-friendly entry points that deliberately follow an exact published tree. They are maintainer-
+chosen pointers: `stable`, `preview`, and custom names have no inferred release status or promotion behavior. Each
+alias points directly to one exact public, verified version; there are no alias chains or fallback to another tree.
+`recommendedVersion` remains independent and continues to control the route-root alias. See the package's full
+[version-alias reference](./README.md#version-aliases), [diagnostic catalog](./README.md#alias-diagnostics), and
+[fixture README](../../docs/plans/issue-176-fixtures/README.md) for the public contract and recorded artifact evidence.
+
+#### Prepare the pinned acceptance fixture
+
+The checked-in fixture uses the real exact releases `0.1.0` and `0.2.0-preview.11`, with labels `stable`, `preview`,
+and custom `v1`. The catalog keeps `recommendedVersion` at `0.2.0-preview.11`; `stable` and `v1` target `0.1.0`.
+Catalog manifest pins are `e0cfc160ab116cf13a94b603c665b63115e5db7eece01dfc67634a8b9dfaa30a` and
+`5fbd511d7b66faf49bbadf76b6b412f9f4971671c15ac56b266fbb6eeb319bdd`. The archive byte SHA-256 values are
+`0155762af86eb3b42ac3349759c178b5ec8e209e60c3aa26ae37b62516665cc5` and
+`6940694384411d8f20591405a9f4c20d797bf1da414fc6a9ab6ac35494a2ea70` respectively. Download the two assets from the
+release links for [0.1.0](https://github.com/forge-trust/AppSurface/releases/download/v0.1.0/appsurface-docs-v0.1.0.tar.gz)
+and [0.2.0-preview.11](https://github.com/forge-trust/AppSurface/releases/download/v0.2.0-preview.11/appsurface-docs-v0.2.0-preview.11.tar.gz),
+check those archive hashes before extraction, reject absolute/parent-relative
+paths and non-regular entries (including links), and extract under one trusted root as
+`releases/0.1.0` and `releases/0.2.0-preview.11`. Keep catalog pins and covered bytes unchanged.
+
+The exact prerelease `search-index.json` is 8,741,119 bytes. The normal production rewritten-file limit is 4 MiB, so
+this acceptance host must explicitly use 16 MiB for both archive verification and serving. A larger per-file limit
+raises rewritten-response memory exposure; it does not impose a total-host memory bound. From the repository root,
+replace the trusted root below with your own extracted fixture location and use the catalog path shown:
+
+```sh
+issue176_catalog_path="$PWD/docs/plans/issue-176-fixtures/acceptance-catalog.json"
+issue176_fixture_root="/path/to/trusted/issue176-release-root"
+
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs verify-archive --catalog "$issue176_catalog_path" --trusted-release-root "$issue176_fixture_root" --max-rewritten-file-size-bytes 16777216 --version 0.1.0
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- docs verify-archive --catalog "$issue176_catalog_path" --trusted-release-root "$issue176_fixture_root" --max-rewritten-file-size-bytes 16777216 --version 0.2.0-preview.11
+```
+
+Both exact archive-verifier runs passed on 2026-10-07 with 403 and 892 covered files and the recorded manifest pins.
+That proves archive ingestion only; it does not prove alias routing. Run the host and reader checks below using a build
+that contains the alias implementation.
+
+The repository's default standalone host delegates registration and pipeline setup to the conventional
+`AppSurfaceDocsWebModule`; alias middleware is installed automatically when the namespace is active:
+
+<!-- appsurface:snippet id="docs-alias-default-standalone" file="Web/ForgeTrust.AppSurface.Docs.Standalone/Program.cs" marker="docs-alias-default-standalone" lang="csharp" -->
+```csharp
+using ForgeTrust.AppSurface.Docs.Standalone;
+
+await AppSurfaceDocsStandaloneHost.RunAsync(args);
+```
+<!-- /appsurface:snippet -->
+
+The standalone command below is the repository's ready-to-run default-host example. A custom host can provide the same
+values in `AppSurfaceDocs:Versioning`:
+
+```json
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "/path/to/docs/issue-176-fixtures/acceptance-catalog.json",
+      "TrustedReleaseRootPath": "/path/to/trusted/issue176-release-root",
+      "MaxRewrittenFileSizeBytes": 16777216
+    }
+  }
+}
+```
+
+#### Run the default standalone host
+
+The standalone host is the source-backed local proof seam. Its module installs default-host alias ownership
+automatically. Supply the catalog and trusted root explicitly, including the fixture's 16 MiB limit:
+
+```sh
+AppSurfaceDocs__Versioning__Enabled=true \
+AppSurfaceDocs__Versioning__CatalogPath="$issue176_catalog_path" \
+AppSurfaceDocs__Versioning__TrustedReleaseRootPath="$issue176_fixture_root" \
+AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes=16777216 \
+dotnet run --no-launch-profile --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://127.0.0.1:5180
+```
+
+Wait for the host's actual listening-ready log before issuing requests. With the fixture catalog, `/docs/versions`
+should show `stable → 0.1.0`, `preview → 0.2.0-preview.11`, and `v1 → 0.1.0` in authored order, while the independent
+recommendation remains the prerelease. `/docs/a/stable/agents` and `/docs/a/v1/agents` serve the stable `AGENTS.md`
+with exact canonical `/docs/v/0.1.0/agents`; `/docs/a/preview/agents` serves the prerelease page with canonical
+`/docs/v/0.2.0-preview.11/agents`. Alias navigation, assets, search results, and fragments remain rooted under the
+alias, and each alias's `search-index.json` includes the `AGENTS.md` result at its own `/agents` path.
+
+The stable request `/docs/a/stable/artifacts/issue-728-test-efficiency/candidate-inventory` must return owned `404`
+even though that page exists in the recommended prerelease tree. The same suffix under `preview` should serve the
+prerelease page with its exact canonical. Check an alias `HEAD` for GET-equivalent status/headers and no body, an
+unsupported method for `405` plus `Allow: GET, HEAD`, and `Cache-Control: no-store` on owned success, recovery,
+redirect, and host-auth responses. Healthy archive rows display their exact target and support/advisory badges; the
+moving-label section preserves alias catalog order and excludes hidden rows. Invalid, conflicting, or unavailable
+public definitions can appear only as non-link informational rows with safe names/copy, never hidden or unknown target
+identifiers. These expected reader assertions are the candidate acceptance contract; exact archive verification
+passing is not a substitute for running them against the implementation.
+
+With the host running, these read-only requests exercise the page, search, HEAD, and terminal missing-page paths:
+
+```sh
+curl -sS -D - http://127.0.0.1:5180/docs/a/stable/agents -o /dev/null
+curl -sS -D - -I http://127.0.0.1:5180/docs/a/preview/agents
+curl -sS -X POST -D - -o /dev/null http://127.0.0.1:5180/docs/a/stable/agents
+curl -sS http://127.0.0.1:5180/docs/a/stable/search-index.json | rg 'AGENTS.md|/docs/a/stable/agents'
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5180/docs/a/stable/artifacts/issue-728-test-efficiency/candidate-inventory
+```
+
+Inspect the returned page's `<link rel="canonical">` and Open Graph URL for the exact `/docs/v/{version}` target;
+the first command prints headers, not HTML. The POST should return `405` with `Allow: GET, HEAD`; the final request
+should print `404` even though the recommended preview contains the document.
+
+#### Named host registration and middleware order
+
+Default module hosts install the hook automatically. Named registrations must install it on the same application
+builder that maps/finalizes their handles. Put forwarded-path/`PathBase` setup first, then the alias hook, then routing,
+authentication, authorization, and endpoint mapping:
+
+<!-- appsurface:snippet id="docs-alias-named-host" file="Web/ForgeTrust.AppSurface.Docs.Tests/AppSurfaceDocsVersionAliasPublicApiConsumerTests.cs" marker="docs-alias-named-host" lang="csharp" -->
+```csharp
+private static WebApplication ConfigureNamedAliasHost(WebApplicationBuilder builder)
+{
+    var publicDocs = builder.Services.AddAppSurfaceDocs(
+        "public",
+        builder.Configuration.GetSection("AppSurfaceDocs:Public"));
+    builder.Services.AddAuthentication();
+    builder.Services.AddAuthorization();
+
+    var app = builder.Build();
+    app.UsePathBase("/products");
+    app.UseAppSurfaceDocsAliases();
+    app.UseRouting();
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    IEndpointRouteBuilder endpoints = app;
+    endpoints.MapRazorWire();
+    publicDocs.MapEndpoints(endpoints).AllowAnonymous();
+    endpoints.FinalizeAppSurfaceDocsInstances();
+
+    return app;
+}
+```
+<!-- /appsurface:snippet -->
+
+Calling the hook more than once on that builder is idempotent. If no named catalog has a nonempty alias declaration,
+the hook is optional. If a named alias namespace is active and its builder marker is missing, finalization fails with
+[`ASDOCSALIAS011`](./README.md#asdocsalias011). Do not place a writer before the hook or move it after `UseRouting`:
+the hook must claim raw received-path ownership before normalization/fallback while still selecting the real endpoint
+so normal host authorization runs. See [named-host routing details](./README.md#named-host-routing-hook).
+
+#### Retarget, rollback, and capacity evidence
+
+To prove retargeting, copy the fixture catalog to a temporary location, change only `stable.version` to
+`0.2.0-preview.11`, point a second host at that copy, and restart it. Stable content, alias-local search, and exact
+canonical metadata should move together; `preview`, `v1`, and both exact version routes should remain unchanged. Keep
+the checked-in fixture untouched. For rollout, upgrade every host first, verify exact archives, stage the verified
+trees and catalog atomically, inspect startup collision diagnostics, and smoke-test pages/search/canonicals/methods.
+Rollback by restoring the prior verified catalog and restarting. Draining a mixed-version fleet matters: owned
+responses send `no-store`, but that does not purge application caches or make old and new processes atomic. Confirm
+proxy/CDN handling independently. Removing aliases can restore legacy `/a` route behavior and must be intentional.
+
+For a local two-host retarget proof, copy the catalog and edit that copy only:
+
+```sh
+issue176_retarget_catalog="/private/tmp/issue176-retarget/acceptance-catalog.json"
+mkdir -p "$(dirname "$issue176_retarget_catalog")"
+cp "$issue176_catalog_path" "$issue176_retarget_catalog"
+# Edit only aliases[name=stable].version in this temporary copy to 0.2.0-preview.11.
+AppSurfaceDocs__Versioning__Enabled=true \
+AppSurfaceDocs__Versioning__CatalogPath="$issue176_retarget_catalog" \
+AppSurfaceDocs__Versioning__TrustedReleaseRootPath="$issue176_fixture_root" \
+AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes=16777216 \
+dotnet run --no-launch-profile --project Web/ForgeTrust.AppSurface.Docs.Standalone -- --urls http://127.0.0.1:5181
+```
+
+After the second host reports ready, repeat the page/search/canonical requests against port `5181`, then compare
+`/docs/a/preview/agents`, `/docs/a/v1/agents`, and `/docs/v/0.1.0/agents` on both hosts. Stop the temporary host and
+discard the temporary catalog to roll back the local proof. In production rollback, restore the prior verified
+catalog pointer and restart/drain every host.
+
+The parser inherits JSON maximum depth 64. There is no product alias-count, catalog-byte, or display-text ceiling;
+ordinary process-memory, filesystem, and rendered-response limits still apply. Catalog resolution and archive
+projection reuse one provider and frozen verified cache per physical target within an instance; those providers are
+disposed with the host, and trees are not reverified once per label. The 10,000- and
+20,000-label cases are observations, not capacity promises, supported maxima, thresholds, or SLOs. A warm human
+onboarding target of at most five minutes is unobserved; cold download/extraction/build time and automated runtime
+are separate, and no CI timing gate is added. No promotion CLI, automatic promotion, hot reload, cache-purge API, or
+telemetry is part of this workflow.
+
+If you record scale evidence, identify runtime/OS/build/fixture, alias and distinct-target/provider counts, and the
+warmup; measure startup resolution, archive projection, and rendering separately with elapsed time/allocation scope,
+response size, full row count/order, and selected first/middle/last labels. Measurements describe those runs only and
+must not become an implied ceiling or timing guarantee.
+
 ### Five-minute protected Markdown download
 
 Protected Markdown download is disabled by default. To enable the v1 browser attachment, the host must own and register a named ASP.NET Core reader policy; AppSurface Docs does not create identities, authentication handlers, or authorization policies.

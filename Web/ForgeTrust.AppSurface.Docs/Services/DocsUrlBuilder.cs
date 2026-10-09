@@ -335,6 +335,39 @@ public sealed class DocsUrlBuilder
         return BuildDocUrl(BuildVersionRootUrl(version), path);
     }
 
+    /// <summary>Builds the root URL for one named exact-version alias.</summary>
+    /// <param name="name">The alias label, normalized using the catalog's shared ASCII route-name grammar.</param>
+    /// <returns>The alias root under this route family, such as <c>/docs/a/stable</c>.</returns>
+    /// <exception cref="ArgumentNullException">The alias name is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The alias name is not a valid 1–64 character route label.</exception>
+    /// <remarks>
+    /// This method creates a URL only; it does not establish that a matching public alias is configured or available.
+    /// Alias names are lowercased invariantly and allow ASCII letters and digits at their edges, with dot, underscore,
+    /// and hyphen also allowed internally. Slashes, percent escapes, whitespace, and dot segments are rejected.
+    /// </remarks>
+    public string BuildAliasRootUrl(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!AppSurfaceDocsVersionAliasName.TryNormalize(name, out var normalizedName))
+        {
+            throw new ArgumentException("Alias names must be valid 1-64 character ASCII route labels.", nameof(name));
+        }
+
+        return JoinPath(JoinPath(_routeRootPath, "a"), Uri.EscapeDataString(normalizedName));
+    }
+
+    /// <summary>Builds an alias-local document URL.</summary>
+    /// <param name="name">The alias label validated by <see cref="BuildAliasRootUrl(string)"/>.</param>
+    /// <param name="path">The document path and optional fragment.</param>
+    /// <returns>The document URL rooted at the normalized alias route.</returns>
+    /// <exception cref="ArgumentNullException">The alias name is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The alias name is invalid.</exception>
+    /// <remarks>Path encoding follows <see cref="BuildVersionDocUrl(string, string)"/>.</remarks>
+    public string BuildAliasDocUrl(string name, string path)
+    {
+        return BuildDocUrl(BuildAliasRootUrl(name), path);
+    }
+
     /// <summary>
     /// Builds the browser-facing canonical href for an app-relative canonical route.
     /// </summary>

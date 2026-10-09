@@ -30,6 +30,120 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetCatalog_ShouldResolveAliasToVerifiedExactVersion_WithoutChangingLegacyCatalogApi()
+    {
+        var exactTree = CreateExactTree("alias-verified-target");
+        var catalogPath = WriteCatalog(new AppSurfaceDocsVersionCatalog
+        {
+            Versions =
+            [
+                new AppSurfaceDocsPublishedVersion
+                {
+                    Version = "1.2.0",
+                    ExactTreePath = Path.GetRelativePath(_tempDirectory, exactTree)
+                }
+            ],
+            Aliases =
+            [
+                new AppSurfaceDocsVersionAlias
+                {
+                    Name = " Stable ",
+                    Version = "1.2.0",
+                    Label = "Stable"
+                }
+            ]
+        });
+
+        var catalog = CreateCatalogService(catalogPath).GetCatalog();
+        var alias = Assert.Single(catalog.Aliases);
+
+        Assert.True(catalog.IsAliasNamespaceActive);
+        Assert.Equal("stable", alias.Name);
+        Assert.True(alias.IsAvailable);
+        Assert.Equal("1.2.0", alias.TargetVersion?.Version);
+        Assert.Same(Assert.Single(catalog.Versions), alias.TargetVersion);
+        Assert.Equal("/docs/a/stable", alias.RootUrl);
+
+        var legacy = new AppSurfaceDocsResolvedVersionCatalog(
+            AppSurfaceDocsResolvedVersionCatalogStatus.Resolved,
+            "catalog.json",
+            [],
+            null);
+        var (status, _, versions, recommended) = legacy;
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, status);
+        Assert.Empty(versions);
+        Assert.Null(recommended);
+        Assert.Empty(legacy.Aliases);
+        Assert.False(legacy.IsAliasNamespaceActive);
+        Assert.Empty(AppSurfaceDocsResolvedVersionCatalog.Disabled.Aliases);
+        Assert.False(AppSurfaceDocsResolvedVersionCatalog.Disabled.IsAliasNamespaceActive);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldKeepAliasDeclarationActive_WhenTrustedRootFails()
+    {
+        var catalogPath = WriteRawCatalogJson("""
+            { "aliases": [{ "name": "stable", "version": "1.2.0" }], "versions": [] }
+            """);
+
+        var catalog = CreateCatalogService(catalogPath, trustedReleaseRootPath: "missing-trusted-root").GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.True(catalog.IsAliasNamespaceActive);
+        var alias = Assert.Single(catalog.Aliases);
+        Assert.Equal("ASDOCSALIAS008", alias.DiagnosticCode);
+        Assert.Null(alias.TargetVersion);
+        Assert.Equal("stable", alias.Name);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldKeepHealthyRecommendation_WhenAliasCollectionIsMalformed()
+    {
+        const string exactVersion = "1.2.0";
+        var exactTree = CreateExactTree("malformed-alias-collection");
+        var manifestDigest = WriteReleaseManifest(exactTree);
+        var catalogPath = WriteRawCatalogJson(JsonSerializer.Serialize(new
+        {
+            recommendedVersion = exactVersion,
+            versions = new[]
+            {
+                new
+                {
+                    version = exactVersion,
+                    exactTreePath = Path.GetRelativePath(_tempDirectory, exactTree),
+                    releaseManifestSha256 = manifestDigest
+                }
+            },
+            aliases = new { malformed = true }
+        }));
+
+        var catalog = CreateCatalogService(catalogPath).GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalog.Status);
+        Assert.True(catalog.IsAliasNamespaceActive);
+        Assert.Empty(catalog.Aliases);
+        Assert.Equal(exactVersion, catalog.RecommendedVersion?.Version);
+        Assert.True(catalog.RecommendedVersion?.IsAvailable);
+    }
+
+    [Fact]
+    public void GetCatalog_ShouldRetainAliasOwnership_WhenVersionsCollectionIsInvalid()
+    {
+        var catalogPath = WriteRawCatalogJson("""
+            { "aliases": [{ "name": "stable", "version": "1.2.0" }], "versions": {} }
+            """);
+
+        var catalog = CreateCatalogService(catalogPath).GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.True(catalog.IsAliasNamespaceActive);
+        var alias = Assert.Single(catalog.Aliases);
+        Assert.Equal("stable", alias.Name);
+        Assert.Equal("ASDOCSALIAS008", alias.DiagnosticCode);
+        Assert.Null(alias.TargetVersion);
+    }
+
+    [Fact]
     public void Constructor_ShouldThrow_WhenDependenciesAreNull()
     {
         var environment = new TestWebHostEnvironment { ContentRootPath = _tempDirectory, WebRootPath = _tempDirectory };

@@ -486,6 +486,22 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
             {
                 runtimes = BuildRuntimes(endpoints.ServiceProvider);
                 ValidateRuntimeOwnership(runtimes.Values);
+                if (runtimes.Values.Any(runtime => runtime.VersionCatalogService.GetCatalog().IsAliasNamespaceActive)
+                    && !AppSurfaceDocsApplicationBuilderExtensions.IsInstalled(endpoints))
+                {
+                    var logger = endpoints.ServiceProvider.GetService<ILoggerFactory>()?.CreateLogger<AppSurfaceDocsInstanceRegistry>();
+                    foreach (var runtime in runtimes.Values.Where(runtime => runtime.VersionCatalogService.GetCatalog().IsAliasNamespaceActive))
+                    {
+                        logger?.LogError(
+                            "{AliasDiagnosticCode}: {AliasReason}. {AliasAction} InstanceName={InstanceName}. See {DocumentationReference}.",
+                            "ASDOCSALIAS011", "missing-pipeline-hook", "Install UseAppSurfaceDocsAliases on the mapping builder before routing/auth, then restart.",
+                            runtime.Name,
+                            "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#asdocsalias011");
+                    }
+                    throw new InvalidOperationException("ASDOCSALIAS011: Active named Docs aliases require UseAppSurfaceDocsAliases() "
+                        + "on this builder after PathBase and before UseRouting/authentication/authorization. "
+                        + "See https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#asdocsalias011. Restart after correcting the pipeline.");
+                }
                 foreach (var declaration in _declarations)
                 {
                     declaration.MarkFinalized(endpoints);
@@ -498,6 +514,7 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                 foreach (var declaration in _declarations)
                 {
                     var runtime = runtimes[declaration.Name];
+                    var priorSources = endpoints.DataSources.ToHashSet();
                     var group = endpoints.MapGroup(string.Empty);
                     var endpointMetadata = new AppSurfaceDocsEndpointMetadata(runtime.Name);
                     group.WithMetadata(endpointMetadata);
@@ -510,8 +527,19 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                         {
                             builder.WithMetadata(endpointMetadata);
                         });
+
+                    if (runtime.VersionCatalogService.GetCatalog().IsAliasNamespaceActive)
+                    {
+                        // Named mappings are complete at finalization. Freeze the real group-built endpoints once;
+                        // selecting raw ownership must not rebuild the group or replay host conventions.
+                        var source = endpoints.DataSources.Single(source => !priorSources.Contains(source));
+                        var snapshot = new DefaultEndpointDataSource(source.Endpoints.ToArray());
+                        endpoints.DataSources.Remove(source);
+                        endpoints.DataSources.Add(snapshot);
+                    }
                 }
 
+                endpoints.ServiceProvider.GetRequiredService<AppSurfaceDocsAliasOwnershipState>().Bind(endpoints);
                 Volatile.Write(ref _runtimes, runtimes);
                 _finalized = true;
             }
@@ -713,7 +741,8 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
         var versionCatalog = new AppSurfaceDocsVersionCatalogService(
             options,
             environment,
-            loggerFactory.CreateLogger<AppSurfaceDocsVersionCatalogService>());
+            loggerFactory.CreateLogger<AppSurfaceDocsVersionCatalogService>())
+        { InstanceName = name };
 
         var publishedTree = CreateNamedPublishedTree(
             versionCatalog,
@@ -755,10 +784,9 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
             return (null, []);
         }
 
-        var (mounts, providers) = AppSurfaceDocsWebModule.BuildPublishedTreeMounts(
-            versionCatalog.GetCatalog(),
-            docsUrlBuilder);
-        if (mounts.Count == 0)
+        var catalog = versionCatalog.GetCatalog();
+        var (mounts, providers) = AppSurfaceDocsWebModule.BuildPublishedTreeMounts(catalog, docsUrlBuilder, logger, versionCatalog.InstanceName);
+        if (mounts.Count == 0 && !catalog.IsAliasNamespaceActive)
         {
             foreach (var provider in providers)
             {
@@ -775,7 +803,8 @@ internal sealed class AppSurfaceDocsInstanceRegistry : IDisposable
                 docsUrlBuilder.RouteRootPath,
                 docsUrlBuilder.PublicOrigin,
                 options.Versioning.MaxRewrittenFileSizeBytes,
-                logger),
+                logger,
+                catalog.IsAliasNamespaceActive),
             providers);
     }
 

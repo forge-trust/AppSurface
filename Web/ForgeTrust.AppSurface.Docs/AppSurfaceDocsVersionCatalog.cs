@@ -20,6 +20,42 @@ public sealed class AppSurfaceDocsVersionCatalog
     /// Gets or sets the published versions known to the catalog.
     /// </summary>
     public List<AppSurfaceDocsPublishedVersion> Versions { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets named public routes that resolve to exact entries from <see cref="Versions"/>.
+    /// </summary>
+    /// <remarks>
+    /// Alias names are normalized route labels under <c>{RouteRootPath}/a/{name}</c>. They do not select a release
+    /// automatically: each entry names one exact version, and only a verified public version can be mounted. See the
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases">version alias guide</see>
+    /// for the configuration, visibility, and failure contract.
+    /// </remarks>
+    public List<AppSurfaceDocsVersionAlias> Aliases { get; set; } = [];
+}
+
+/// <summary>
+/// Describes a named documentation route that points to one exact published version.
+/// </summary>
+/// <remarks>
+/// Names are trimmed and lowercased invariantly, then validated against the safe alias grammar before route creation.
+/// A label has no built-in meaning; maintainers control its exact target and may change that target on host restart.
+/// </remarks>
+public sealed class AppSurfaceDocsVersionAlias
+{
+    /// <summary>Gets or sets the URL-safe alias name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the exact version identifier from the catalog's <c>versions</c> collection.</summary>
+    public string Version { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the reader-facing label; a blank value defaults to the normalized name.</summary>
+    public string? Label { get; set; }
+
+    /// <summary>Gets or sets optional reader-facing summary text.</summary>
+    public string? Summary { get; set; }
+
+    /// <summary>Gets or sets whether the alias is public or hidden; omitted values default to public.</summary>
+    public AppSurfaceDocsVersionVisibility Visibility { get; set; } = AppSurfaceDocsVersionVisibility.Public;
 }
 
 /// <summary>
