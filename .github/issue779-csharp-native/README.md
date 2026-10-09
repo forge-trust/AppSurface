@@ -78,3 +78,7 @@ in its exact installation inventory. The source commit, all product bytes,
 runtime limits, and native assertions are unchanged. Missing, extra, or
 incorrectly classified installation paths still reject before compilation.
 The prior parser-repair run failed this prerequisite before native execution.
+
+## Original fixture clock read
+
+This retry preserves the original fixture, cleanup, owner and private startup bounds. Each guard reads the same `/proc/uptime` value using a Bash builtin in the holder shell instead of a command substitution. Clock values remain fresh and use the same whole-second floor. Local clock controls are procedure evidence only; the prior native precondition failure remains recorded and no native case is credited by this preparation.
