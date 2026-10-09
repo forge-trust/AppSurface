@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Source-only candidate; all runtime records are produced only by actual explicit execution.
 set -euo pipefail
 export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
@@ -105,8 +104,6 @@ ancestor() {
   [[ $p == / ]] && break; p=${p%/*}; [[ -n $p ]] || p=/
  done
 }
-# Node JSON is the authenticated build producer's compact sorted ASCII JSON plus LF.
-# Re-encoding is only for this Python-produced node format, never for C# evidence files.
 validate_node_inventory() {
  local file=$1 digest=$2 root_name=$3 canonical measured
  pin_file "$file" "$digest" "$MAX_NODE_JSON_BYTES"
@@ -141,7 +138,6 @@ validate_node_inventory() {
  ' "$file" >/dev/null || fail node-schema
  pin_file "$file" "$digest" "$MAX_NODE_JSON_BYTES"
 }
-# Exact JSON directory membership includes authenticated empty directories.
 verify_tree_unbatched() {
  local root=$1 manifest=$2 expected=$3 node_file=$4 node_digest=$5 root_name=$6 sealed=${7:-0} policy_extra=${8:-0}
  local line m h rel extra previous= p size before after measured actual desired nodes kind declared_bytes node_rows depth
@@ -230,8 +226,6 @@ verify_tree_unbatched() {
  pin_file "$node_file" "$node_digest" "$MAX_NODE_JSON_BYTES"
  printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
 }
-# Replacement block for the existing fixture, not a standalone/root entry point.
-# Uses only its existing bounded/remaining/ancestor/pin_file/node-schema helpers.
 batch_check_time() {
  local stamp rest now end=$work_end
  [[ $phase != cleanup ]] || end=$hard_end
@@ -267,9 +261,6 @@ batch_snapshot() {
  bounded bash -c 'set -euo pipefail; timeout --signal=KILL "$1" find -P "$2" -printf "%P\0%y\0%D\0%i\0%s\0%m\0%n\0%U\0%G\0%T@\0%C@\0" | head -c 16777217' -- "$(remaining)" "$root" >&"$fd"
  batch_scratch_pin "$path" "$fd" 16777216
 }
-# Data parser only: caller retains FD and supplies authenticated wanted/mode/length maps.
-# Bash dynamic scope shares pre/seen/total from verify_tree; this is not an authority factory.
-# Separately sourceable for future finite data controls without the fixture entry point.
 batch_parse_snapshot() {
  local pass=$1 read_fd=$2 root_name=$3 sealed=$4 field n rel kind record m desired size
  local -a fields=()
@@ -305,7 +296,6 @@ batch_parse_snapshot() {
    else fail full-node-set; fi
   done
 }
-# Exact full JSON/TSV/physical membership, including authenticated empty directories.
 verify_tree() {
  if [[ $mode == prepare-only ]]; then verify_tree_unbatched "$@"; return; fi
  local -r batch_fd_owner_pid=$BASHPID # The actual shell that opens every scratch descriptor.
@@ -422,8 +412,6 @@ verify_tree() {
  remaining >/dev/null
  printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
 }
-# OS aliases ONLY: do lexical resolution ourselves and match every actually encountered link.
-# No realpath membership substitution, no links accepted in deployment manifests.
 normalize_os_target() {
  local path=$1 s; local -a out=(); [[ $path == /* && ${#path}<=4096 && ! $path =~ [[:cntrl:]] ]] || fail alias-target
  IFS=/ read -r -a pieces <<<"$path"
@@ -431,19 +419,94 @@ normalize_os_target() {
  ((${#out[@]}>0)) || fail alias-root-target
  local joined; joined=$(IFS=/; printf '%s' "${out[*]}"); printf '/%s' "$joined"
 }
+# BEGIN N06 alias declaration cache candidate
+# Immutable DECLARATIONS only, never a cached filesystem check/result.
+os_alias_declarations_ready=0
+declare -a os_alias_resolved=() os_alias_hashes=() os_alias_starts=() os_alias_counts=()
+declare -a os_alias_link_paths=() os_alias_link_targets=() os_alias_link_metadata=()
+negative_os_alias_index() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 && $os_alias_declarations_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then printf '%s' "$mid"; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_alias_declarations_initialize() {
+ local rows kind ai ordinal path target metadata extra next=0 current=-1 seen=0 count=0 expected
+ [[ $os_alias_declarations_ready == 0 && ${#os_alias_resolved[@]} == 0 && ${#os_alias_link_paths[@]} == 0 ]] || fail alias-declaration-replay
+ rows=$(bounded jq -r '
+  .aliases|sort_by(.literal)|to_entries[] | .key as $i | .value as $a |
+  (["A",$i,$a.literal,$a.resolved_path,$a.resolved_sha256,($a.links|length)]|map(tostring)|join("\u001f")),
+  ($a.links|to_entries[] | ["L",$i,.key,.value.path,.value.target,
+   "\(.value.uid):\(.value.gid):\(.value.mode):\(.value.device):\(.value.inode)"]|map(tostring)|join("\u001f"))
+ ' "$os_audit")
+ [[ ${#rows} -le 1048576 ]] || fail alias-declaration-bytes
+ expected=${#os_cache_alias_paths[@]}
+ ((expected<=64)) || fail alias-declaration-count
+ if [[ -n $rows ]]; then
+  while IFS=$'\x1f' read -r kind ai ordinal path target metadata extra; do
+   [[ -z $extra && $ai =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-row
+   ai=$((10#$ai))
+   if [[ $kind == A ]]; then
+    ((current<0 || seen==count)) || fail alias-declaration-incomplete
+    ((ai==next && ai<expected)) || fail alias-declaration-order
+    # Header columns: tag, alias index, literal, resolved path, hash, link count.
+    [[ $ordinal == "${os_cache_alias_paths[$ai]}" && $metadata =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-header
+    lexical "$path"; sha "$target"
+    count=$((10#$metadata)); ((count>=1 && count<=16)) || fail alias-declaration-links
+    [[ $(negative_os_file_hash_during_initialize "$ordinal") == "$target" ]] || fail alias-declaration-hash
+    os_alias_resolved+=("$path"); os_alias_hashes+=("$target")
+    os_alias_starts+=("${#os_alias_link_paths[@]}"); os_alias_counts+=("$count")
+    current=$ai; next=$((next+1)); seen=0
+   elif [[ $kind == L ]]; then
+    ((current>=0 && ai==current && seen<count)) || fail alias-declaration-link-order
+    [[ $ordinal =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-link-index
+    ((10#$ordinal==seen)) || fail alias-declaration-link-index
+    lexical "$path"
+    [[ -n $target && ${#target}<=4096 && ! $target =~ [[:cntrl:]] && $metadata =~ ^0:0:777:[0-9]+:[1-9][0-9]*$ ]] || fail alias-declaration-link
+    os_alias_link_paths+=("$path"); os_alias_link_targets+=("$target"); os_alias_link_metadata+=("$metadata")
+    seen=$((seen+1))
+   else fail alias-declaration-kind; fi
+  done <<<"$rows"
+ fi
+ ((next==expected && (current<0 || seen==count) && ${#os_alias_resolved[@]}==expected && ${#os_alias_hashes[@]}==expected && ${#os_alias_starts[@]}==expected && ${#os_alias_counts[@]}==expected)) || fail alias-declaration-membership
+ ((${#os_alias_link_paths[@]}==${#os_alias_link_targets[@]} && ${#os_alias_link_paths[@]}==${#os_alias_link_metadata[@]} && ${#os_alias_link_paths[@]}<=1024)) || fail alias-declaration-link-membership
+ os_alias_declarations_ready=1
+ readonly os_alias_declarations_ready
+ readonly -a os_alias_resolved os_alias_hashes os_alias_starts os_alias_counts os_alias_link_paths os_alias_link_targets os_alias_link_metadata
+}
+# Initialization runs BEFORE os_cache_ready is published. Lookup is declaration-only.
+negative_os_file_hash_during_initialize() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_file_paths[@]}-1)) mid
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then printf '%s' "${os_cache_file_hashes[$mid]}"; return 0
+  elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+# END N06 alias declaration cache candidate
 alias_walk() {
- local record=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved
- literal=$(bounded jq -r .literal <<<"$record"); lexical "$literal"
+ local alias_id=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved slot
+ [[ $os_alias_declarations_ready == 1 && $alias_id =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-index
+ alias_id=$((10#$alias_id)); ((alias_id<${#os_cache_alias_paths[@]})) || fail alias-declaration-index
+ literal=${os_cache_alias_paths[$alias_id]}; lexical "$literal"
  local -a queue=("${components[@]}")
  while ((${#queue[@]})); do
   remaining >/dev/null; steps=$((steps+1)); ((steps<=256)) || fail alias-step-bound
   seg=${queue[0]}; queue=("${queue[@]:1}"); current+=/$seg
   if [[ -L $current ]]; then
-   lp=$(bounded jq -r --argjson i "$index" '.links[$i].path//""' <<<"$record"); [[ $lp == "$current" ]] || fail alias-unreviewed-link
+   ((index<os_alias_counts[alias_id])) || fail alias-unreviewed-link
+   slot=$((os_alias_starts[alias_id]+index)); lp=${os_alias_link_paths[$slot]}; [[ $lp == "$current" ]] || fail alias-unreviewed-link
    metadata=$(bounded stat -c '%u:%g:%a:%d:%i' -- "$current")
-   expected=$(bounded jq -r --argjson i "$index" '.links[$i]|"\(.uid):\(.gid):\(.mode):\(.device):\(.inode)"' <<<"$record")
+   expected=${os_alias_link_metadata[$slot]}
    [[ $metadata == "$expected" ]] || fail alias-lstat-pin
-   target=$(bounded readlink -- "$current"); [[ $target == "$(bounded jq -r --argjson i "$index" '.links[$i].target' <<<"$record")" ]] || fail alias-target-pin
+   target=$(bounded readlink -- "$current"); [[ $target == "${os_alias_link_targets[$slot]}" ]] || fail alias-target-pin
    [[ $(bounded stat -c '%u:%g:%a:%d:%i' -- "$current") == "$metadata" ]] || fail alias-link-changed
    [[ $target == /* ]] || target=${current%/*}/$target
    resolved=$(normalize_os_target "$target"); lexical "$resolved"
@@ -454,16 +517,15 @@ alias_walk() {
    if ((${#queue[@]})); then [[ -d $current ]] || fail alias-parent; fi
   fi
  done
- [[ $index == "$(bounded jq -r '.links|length' <<<"$record")" && $current == "$(bounded jq -r .resolved_path <<<"$record")" ]] || fail alias-resolution
+ [[ $index == "${os_alias_counts[$alias_id]}" && $current == "${os_alias_resolved[$alias_id]}" ]] || fail alias-resolution
  [[ -f $current && ! -L $current ]] || fail alias-final-file
  printf '%s' "$current"
 }
 verify_os_path() {
  local p=$1 h=$2 count row resolved first before after
- count=$(bounded jq --arg p "$p" '[.aliases[]|select(.literal==$p)]|length' "$os_audit")
+ if row=$(negative_os_alias_index "$p"); then count=1; else count=0; fi
  if [[ $count == 1 ]]; then
-  row=$(bounded jq -c --arg p "$p" '.aliases[]|select(.literal==$p)' "$os_audit")
-  [[ $(bounded jq -r .resolved_sha256 <<<"$row") == "$h" ]] || fail alias-hash-binding
+  [[ ${os_alias_hashes[$row]} == "$h" ]] || fail alias-hash-binding
   first=$(alias_walk "$row"); before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$first")
   pin_file "$first" "$h" "$MAX_INPUT_FILE_BYTES"
   resolved=$(alias_walk "$row"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$resolved")
@@ -537,14 +599,12 @@ negative_os_cache_initialize() {
   done <<<"$rows"
  fi
  ((${#os_cache_alias_paths[@]}==expected_aliases && ${#os_cache_alias_rows[@]}==expected_aliases)) || fail OS-cache-alias-membership
+ negative_os_alias_declarations_initialize
  os_cache_ready=1
  readonly os_cache_ready
  readonly -a os_cache_file_paths os_cache_file_hashes os_cache_alias_paths os_cache_alias_rows
 }
 
-# Source definitions only. Requires the unchanged fixture clock, cache, custody,
-# bounded-command, lexical, and alias helpers. No standalone/root entry point.
-# All arrays are indexed by integer; path text is never an evaluated subscript.
 ordinary_os_batch_alias_index() {
  local p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
  osb_alias_index=-1
@@ -573,9 +633,6 @@ ordinary_os_batch_decimal_at_most() {
  ((${#value}<${#cap})) && return 0
  ((${#value}==${#cap})) && [[ $value == "$cap" || $value < "$cap" ]]
 }
-# Detached physical-stat data parser. The full-pass owner supplies exact ordered
-# node/leaf sets, retained input FD, and pre records through Bash dynamic scope.
-# Tests can exercise this parser without constructing a root/native owner.
 ordinary_os_batch_parse_snapshot() {
  local pass=$1 read_fd=$2 field n i=0 p record mode leaf
  local -a fields=()
@@ -605,8 +662,6 @@ ordinary_os_batch_parse_snapshot() {
  done
  ((i==${#osb_node_paths[@]})) || fail OS-batch-node-count
 }
-# All stat invocations use physical/default (no -L) semantics. Exact ancestor
-# membership and types are checked in BOTH snapshots, including / itself.
 ordinary_os_batch_snapshot() {
  local path=$1 fd=$2 i=0 arg_bytes row_bytes projected=0 n
  local -a chunk=()
@@ -634,8 +689,6 @@ ordinary_os_batch_snapshot() {
   remaining >/dev/null
  done
 }
-# The manifest path is selected by the full-pass owner; this separately testable
-# procedure performs no qualification and can return only command success/fault.
 ordinary_os_batch_check_hashes() {
  remaining >/dev/null
  bounded sha256sum --check --strict --status -- "$1"
@@ -648,7 +701,6 @@ ordinary_os_batch_verify_aliases() {
   verify_os_path "$p" "$h"
  done
 }
-# Fixed full-pass API; accepts neither paths nor a replacement owner/token.
 ordinary_os_batch_full_pass() {
  local pass=$1 uuid scratch root_before root_after p h parent i bytes=0 rows=0 row_bytes previous=
  local osb_alias_index=-1 osb_leaf_index=-1 osb_snapshot_bytes=0 ordinary_count=0 alias_count=0
@@ -1254,8 +1306,7 @@ while IFS= read -r python_file; do
  verify_os_path "$python_file" "$python_hash"
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
-  if [[ $(bounded jq -r --arg p "$python_file" '[.aliases[]|select(.literal==$p)]|length' "$os_audit") == 1 ]]; then
-   python_alias=$(bounded jq -c --arg p "$python_file" ' .aliases[]|select(.literal==$p)' "$os_audit")
+  if python_alias=$(negative_os_alias_index "$python_file"); then
    python_resolved=$(alias_walk "$python_alias")
   fi
   bounded jq -e --arg p "$python_resolved" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail negative-stdlib-elf-unreviewed

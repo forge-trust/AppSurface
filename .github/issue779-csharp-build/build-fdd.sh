@@ -20,12 +20,12 @@ import xml.etree.ElementTree as ET
 
 HEAD = '5b5a2af696741203b1cb5ce200182452b5f1fcb7'
 PARENT = '6a766e3471b8a6ea56a15e3e972bf8840289049b'
-HARNESS_PARENT = '5b5a2af696741203b1cb5ce200182452b5f1fcb7'
+HARNESS_PARENT = '03b6c18a71601875ba2b361e76ec0406f5c933f9'
 TREE = '24f5d5e20b6ffed95645287712a3d81570aa8985'
 CAPTURE_SHA = '8bc8f5a31f3952f0858212a5203572b377f58264dbd0c3d1b066739b05bb791b'
 CAPTURE_PROJECTION_SHA = 'ec16ecf615fc176bb38d3c7329af2d4889c760f9191ac9525038e9155715d0b6'
-UBUNTU_PREREQUISITE_SHA = 'ad3ea2bf98966b61269794dfdf64e8a6a39d0dae1a7df48809c3e08b6d5dca2c'
-NATIVE_RUNNER_SHA = 'd5dc13d07e249b476319120fbd7aaf71b341fe6f4b7463f0d3141df36ac19dca'
+UBUNTU_PREREQUISITE_SHA = '59c75ef0c883975b117116237c724d115306d3377ace393f0f012de3bb19db07'
+NATIVE_RUNNER_SHA = 'ae76b4ac6d8745fb761f3e5b12ca3868f0497130240ab91bd80d9bb132b74f21'
 SDK = '10.0.401'
 COUNT = 2827
 FILE_CAP = 256 * 1024 * 1024
@@ -648,13 +648,13 @@ def main():
     harness_head = run(['git', 'rev-parse', 'HEAD'], HARN).strip().decode()
     retry_parent = run(['git', 'show', '-s', '--format=%P', 'HEAD'], HARN).strip().decode()
     require(retry_parent == HARNESS_PARENT, 'direct-retry-parent')
-    require(retry_parent == HEAD and run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == PARENT, 'captured-source-parent-topology')
-    installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'A', '.github/issue779-csharp-build/capture-receipt.json': 'A', '.github/issue779-csharp-native/NativePeerBroker.csproj': 'A', '.github/issue779-csharp-native/Program.cs': 'A', '.github/issue779-csharp-native/README.md': 'A', '.github/issue779-csharp-native/acquire-inbound.sh': 'A', '.github/issue779-csharp-native/build-helper.sh': 'A', '.github/issue779-csharp-native/build-n04-helper.sh': 'A', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'A', '.github/issue779-csharp-native/n04-archive-data.py': 'A', '.github/issue779-csharp-native/n04-helper-receipt-filter.jq': 'A', '.github/issue779-csharp-native/n04-helper-source/NativeRootCoordinator.csproj': 'A', '.github/issue779-csharp-native/n04-helper-source/PossibleStopRegistration.cs': 'A', '.github/issue779-csharp-native/n04-helper-source/Program.cs': 'A', '.github/issue779-csharp-native/n04-helper-source/packages.lock.json': 'A', '.github/issue779-csharp-native/n04-record-data.py': 'A', '.github/issue779-csharp-native/packages.lock.json': 'A', '.github/issue779-csharp-native/prepare-os-audit-v2.py': 'A', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'A', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'A', '.github/issue779-csharp-native/retain-native.sh': 'A', '.github/issue779-csharp-native/run-native.py': 'A', '.github/issue779-csharp-native/source-review.json': 'A', '.github/issue779-csharp-native/test-n04-archive-data.py': 'A', '.github/issue779-csharp-native/test-n04-pipeline-data.py': 'A', '.github/issue779-csharp-native/test-n04-record-data.py': 'A', '.github/issue779-csharp-native/test_actual_batch_parser.py': 'A', '.github/workflows/issue779-csharp-linux-native.yml': 'A'}
+    require(run(['git', 'show', '-s', '--format=%P', retry_parent], HARN).strip().decode() == HEAD, 'published-harness-source-parent-topology')
+    installation_delta = {'.github/issue779-csharp-build/build-fdd.sh': 'M', '.github/issue779-csharp-native/README.md': 'M', '.github/issue779-csharp-native/acquire-inbound.sh': 'M', '.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh': 'M', '.github/issue779-csharp-native/prepare-root-inputs-v2.sh': 'M', '.github/issue779-csharp-native/prepare-ubuntu-runtime.py': 'M', '.github/issue779-csharp-native/run-native.py': 'M', '.github/issue779-csharp-native/source-review.json': 'M', '.github/issue779-csharp-native/test_actual_batch_parser.py': 'M', '.github/workflows/issue779-csharp-linux-native.yml': 'M'}
     installation_status = dict((name, status) for status, name in
                               (row.split('\t') for row in run(['git', 'diff', '--name-status', HARNESS_PARENT, 'HEAD'], HARN).decode().splitlines()))
     require(installation_status == installation_delta, 'exact-retry-installation-delta')
     RESULT['harness_retry_parent'] = retry_parent
-    RESULT['harness_retry_parent_parent'] = PARENT
+    RESULT['harness_retry_parent_parent'] = HEAD
     RESULT['harness_retry_installation_delta'] = installation_status
     run(['git', 'merge-base', '--is-ancestor', HEAD, 'HEAD'], HARN)
     RESULT['harness_parent'] = HARNESS_PARENT
