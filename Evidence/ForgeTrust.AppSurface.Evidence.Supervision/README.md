@@ -1087,3 +1087,83 @@ Schema `issue779-negative-kernel-observation-v1` has twelve fixed root members: 
 `CreateDetached` is an intentional pure metadata seam, covered by [LinuxNegativeKernelObservationTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs). Constructing matching data or JSON does not authenticate a kernel observation, callback, peer, process, root owner, custody, lease, qualification or acceptance. The fixed `joins`/READY labels describe the production projection's checked provenance; detached test calls cannot establish it. Both native authority and acceptance remain false. Original cancellation propagates with its original token before encoding; no allowance resets. Malformed data yields only a fixed ASEVD410 without input or inner exception.
 
 This preparation defines38 new pure cases and runs none. Variant emitters and private fixtures are deliberately unwired: main must source-bind complete rebuilt N05/N06 images and wire bounded root-private observations only at their existing guarded postjoin points. Actual409 allocation output, unchanged occupied/symlink nodes and sentinel bytes, original root410, expected terminal status, quarantine/NSS disposition, genuine positive prerequisites and authenticated canonical retention remain separate checks. If existing ownership or terminal guards cannot pass, retain failure and the missing fact; never weaken those guards or treat copied observation fields as authority. No native N05/N06 or all-sixteen-control acceptance is claimed here.
+
+
+## Fixed private N08/N09 original cancellation images
+
+Source preparation only: this image has no native qualification or case credit. The [original lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) owns callback/STOP/WAIT settlement; the [private CLI callback](../ForgeTrust.AppSurface.Evidence.Cli/README.md) retains output roots until OwnWorkStopped. No proof/admission registry, sandbox, account, syscall guard or public role selector changes.
+
+`EvidenceOriginalCancellationCheckpoint.SelectedPhase` is the sole compilation input: N08 BeforeAllocation or N09 BeforeActivation. The N09 `.cs.in` preparation input replaces exactly that one literal in a separately captured image; it is never read at runtime. The authenticated string-control worker constructs the checkpoint; the explicit request-mode overload remains unchanged and supplies none. Both actual original token checks and the N09 original root assignment retain their order. Checkpoint writes use the original linked stage token inside the original callback; a nonthrowing cancellation registration releases a TCS only. Missing/failed transfer cannot cause root signalling or create a capability. The actual original CallerTokenCancelled and lifecycle first-cause CallerCancelled are separate observations. ReportJoined requires actual OwnWorkStopped. Private stderr disposal additionally requires that same actual original settlement; root FD disposal retains its original guard.
+
+The root server retains one original signal task before dispatch and does not block next accept. Actual READY notification follows original response write, Release, owner check and CompleteWrite(true). Phase bytes are observed by the existing retained stderr pump after its original received-byte charge; no second pipe reader, fabricated READY, background task, runtime selector or timer exists. Exact first-line data is bounded to 1024 bytes. A malformed/missing phase fails observation rather than signalling. The root task verifies the actual reference-equal worker under unchanged native-owner guards, rechecks PID/starttime/UID4/GID4/cgroup/proc bindings around pidfd_open, then sends exactly one SIGINT through its retained pidfd. It never signals a caller PID or broadcasts/retries. The successful signal-task projection states syscall success, not signal delivery/cancellation. Error wakeup is retained in the accept wait; original root cancellation cancels and joins the task before server I/O settlement. All original accept/peer/name/stop/wait/custody/account checks remain.
+
+The root failure-only emitter uses the existing genuine CaptureNegativeObservation after original server/worker/monitor/pump joins, before unchanged custody/account cleanup. That holder guard still requires original natural terminal, full output, fresh empty selected group, reference-equal owners and genuine committed descriptor. Failure to capture is not replaced by detached expected metadata. No normal exit1, account absence, custody success or quarantine is invented. Actual selected runtime/caps/pidfd policy, full source/image/inventories, first SIGINT delivery, actual original-token true and CallerCancelled, no activation, N08 no allocation call and N09 actual retained-root/FD-close order still need native evidence.
+
+Ten new Facts are defined, zero executed: original caller versus stage-only release; nonselected location; duplicate claim; ignored write cancellation retaining the original callback and borrowed stream; closed projection/bounds/canary; and four original-pump framing controls. These use only detached stream/task/token data, never fake leases or live owners. The ignored writer control is not physical FD proof. Existing lifecycle callback-join/fatal/FD-close controls remain byte-identical; compiler/formatter/test validation and independent review are pending. Do not authorize execution from this preparation packet alone.
+
+### Joined original stream export for the private cancellation image
+
+The failure-only root emitter now calls
+[`LinuxWorkerProcess.CaptureCancellationJoinedObservation`](LinuxWorkerProcess.cs),
+which first runs the unchanged `CaptureNegativeObservation` guard. The original
+reference-equal input/owner/accounts/workspace/server, successful natural monitor,
+committed READY, original startup/stop/server/pump joins and fresh selected-group
+emptiness remain mandatory. The only bytes used are the immutable prefixes stored
+by the original joined collector. No new reader, stream, task, callback, path,
+caller-supplied receipt or identity factory is involved. The ordinary successful
+root path emits no joined-stream record.
+
+[`LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached`](LinuxNegativeKernelObservation.cs)
+requires both actual EOFs, no per-stream or shared failure, no failed stop signal,
+no discarded bytes, exact shared received-byte accounting and the original
+protected limit. Complete stdout plus stderr must total at most 64 KiB. This is
+an additional export bound; the existing pump quotas and retained-prefix limits
+remain unchanged. Nothing is truncated, padded, reconstructed or replaced by a
+guessed expected hash. Missing, incomplete or oversized data rejects with the
+existing fixed ASEVD410, and original cancellation propagates unchanged.
+
+The exported `issue779-cancellation-joined-streams-v1` JSON object has exactly
+nine top-level fields: `schema`, `generation`, `stdout`, `stderr`, `received_bytes`,
+`received_byte_limit`, `observation_only`, `native_authority`, `native_acceptance`.
+Each stream has exactly seven fields: `received_bytes`, `retained_bytes`,
+`discarded_bytes`, `eof`, `failure`, `sha256`, `base64`. Base64 encodes the complete
+original bytes, including LF and non-text bytes; SHA256 hashes those same original
+bytes. The line including its one LF is at most 96 KiB. Relaxed JSON escaping is
+restricted here to fixed field strings and base64/hex alphabets so the maximum
+pair fits that bound. This record is neither HTML-safe presentation nor a public
+diagnostic; retain it only in the fixed root-private stderr/canonical artifact.
+
+The root prepares all projections before publication, then writes signal, kernel
+and joined-stream lines in that order before original custody/account cleanup.
+The added write is awaited by the original root execution task with the original
+cleanup token and checks that token afterward. Existing independent unit/job
+containment remains responsible for a writer that ignores cancellation; no new
+timeout, allowance or task is introduced. A late write/cancellation failure stays
+in the existing first-failure/cleanup path even if earlier data lines were written.
+Record presence is never command success or native qualification, and the export
+itself authorizes no account release. Original account/custody/quarantine handling
+is unchanged.
+
+The canonical data adapter must strictly decode base64 and match original full
+byte counts and SHA256 against the kernel record. It must validate the exact phase
+frame, joined caller-token/lifecycle cancellation record and terminal message
+inside the decoded stderr; the root signal projection alone does not prove token
+delivery. Source/image binding, actual Linux pidfd permissions/syscalls, original
+kernel provenance, N08 slot absence/N09 retained allocation without activation,
+retained-root FD disposal and physical filesystem/NSS disposition remain separate
+native prerequisites. No manifest, artifact admission, Trusted or acceptance is
+created by matching data.
+
+[`LinuxCancellationJoinedStreamsTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCancellationJoinedStreamsTests.cs)
+defined 20 pure cases in 13 methods, zero executed at the initial source handoff. They cover
+binary/base64/hash round trips and schema, the exact maximum, zero bytes, both EOFs
+and pump errors, shared errors/quota/stop signal, discarded bytes, wrong accounting
+or limits, oversize, missing output, original cancellation and returned-copy
+independence. They construct detached receipts only; no live native owner or
+signal is fabricated. N09 uses the same changes on its separately captured image,
+preserving its one compile-selected BeforeActivation literal. The later scoped validation ran all 20 codec cases successfully, formatted the
+owned files, and built the CLI product with zero compiler diagnostics. The
+independent source review found no remaining issue in this scope. These local
+macOS results cover the data codec and compilation. Fresh image capture and
+actual Linux cancellation, original kernel ownership, filesystem and account
+disposition controls remain pending.

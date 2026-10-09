@@ -129,6 +129,21 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            // Fixed private cancellation image: original holder projection after server/native/pump joins.
+            if (failed && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server, cleanupToken);
+                    var signal = server.CaptureCancellationSignal(input, owner, accounts, workspace, worker, cleanupToken);
+                    await Console.Error.WriteLineAsync(signal).ConfigureAwait(false);
+                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.Kernel.Bytes)).ConfigureAwait(false);
+                    cleanupToken.ThrowIfCancellationRequested();
+                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.JoinedStreams).AsMemory(),
+                        cleanupToken).ConfigureAwait(false);
+                    cleanupToken.ThrowIfCancellationRequested();
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try

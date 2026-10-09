@@ -73,6 +73,10 @@ internal sealed class SupervisionOutputCollector
     private const int ReadBufferBytes = 16 * 1024;
     private readonly long _receivedByteLimit;
     private readonly int _prefixByteLimit;
+    private SupervisionCancellationPhaseObservation? _cancellationPhase;
+
+    /// <summary>Attaches fixed first-frame data before the original collector dispatch; no new reader.</summary>
+    internal void ObserveCancellation(SupervisionCancellationPhaseObservation phase) => _cancellationPhase = phase;
 
     /// <summary>Creates a collector whose protected limits may be lowered but never raised.</summary>
     /// <param name="receivedByteLimit">Positive shared limit, at most the Contracts 16 MiB maximum.</param>
@@ -119,8 +123,8 @@ internal sealed class SupervisionOutputCollector
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var state = new CollectionState(_receivedByteLimit, stop);
         // Independent dispatch also owns a Stream implementation that stalls before returning its ValueTask.
-        var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token), CancellationToken.None);
-        var stderrTask = Task.Run(() => PumpAsync(stderr, state, stop.Token), CancellationToken.None);
+        var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token, null), CancellationToken.None);
+        var stderrTask = Task.Run(() => PumpAsync(stderr, state, stop.Token, _cancellationPhase), CancellationToken.None);
         await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
         if (cancellationToken.IsCancellationRequested)
         {
@@ -133,7 +137,8 @@ internal sealed class SupervisionOutputCollector
     }
 
     private async Task<SupervisionOutputStreamReceipt> PumpAsync(
-        Stream stream, CollectionState state, CancellationToken cancellationToken)
+        Stream stream, CollectionState state, CancellationToken cancellationToken,
+        SupervisionCancellationPhaseObservation? phase)
     {
         var buffer = new byte[ReadBufferBytes];
         using var prefix = new MemoryStream(_prefixByteLimit);
@@ -166,6 +171,7 @@ internal sealed class SupervisionOutputCollector
                 }
 
                 cancellationToken.ThrowIfCancellationRequested();
+                phase?.Feed(buffer.AsSpan(0, count)); // After original received-byte charge, no second read.
                 var retain = Math.Min(count, _prefixByteLimit - (int)prefix.Length);
                 prefix.Write(buffer, 0, retain);
             }
@@ -181,6 +187,7 @@ internal sealed class SupervisionOutputCollector
             state.Stop(failure);
         }
 
+        phase?.Complete();
         return new SupervisionOutputStreamReceipt(receivedBytes, ImmutableArray.CreateRange(prefix.ToArray()), eof, failure);
     }
 
