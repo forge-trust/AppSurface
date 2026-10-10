@@ -1,0 +1,1016 @@
+#!/usr/bin/env python3
+"""Reviewed test orchestration only; the candidate C# image owns the live lifecycle."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import stat
+import subprocess
+import sys
+import io
+import tarfile
+import time
+import uuid
+
+N03_INDEPENDENT_REVIEW_CLEAR = True
+N03_SOURCE_REBIND_PENDING = False
+SOURCE = 'b4e4f632c080e9c168ac129070ccc5760c3dc2af'
+PARENT = 'b4e4f632c080e9c168ac129070ccc5760c3dc2af'
+SOURCE_MAP = 'd841ad3d4c91b7b84452c36b12622fbadab622b83e0e6cf0f887c2d2128674e6'
+BASE_REVISION = '5e1eba2babdb24c80a952996aa6191e4d458f3be'
+PINS = {
+    'build-helper.sh': '7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4',
+    'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
+    'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
+    'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
+
+    'prepare-root-inputs-v2.sh': '42677e82fa0f4cac3de1a0f40e123c508b2f9fba5d89c4ad2a803392fc8c4b53',
+    'checkpoint-n12-data-integration.sh': '77a51ac243854b330c0cbcaeb514b9761157b223a9b0873110c19b68fbcd8de5',
+    'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
+    'source-review.json': '13ef5ab067e5740ae033a0df9d149c5df3049818b31c68c93831199eb236caa6',
+    'acquire-inbound.sh': 'f27e2bbdff2e752b971719f4c1dd67e2c4c79d6ffc5fd24803a3d7be2ff6ab44',
+    'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
+}
+ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
+               'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
+LOG_CAP = 40 * 1024 * 1024
+
+
+class Rejected(ValueError):
+    def __init__(self, category):
+        super().__init__('native-test-rejected')
+        self.category = category
+
+
+def require(value, category):
+    if not value:
+        raise Rejected(category)
+
+
+def unique(rows):
+    result = {}
+    for key, value in rows:
+        require(key not in result, 'duplicate-json')
+        result[key] = value
+    return result
+
+
+def ident(s):
+    return (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid, s.st_nlink,
+            s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+
+
+def read(path, cap, deadline):
+    require(time.monotonic() < deadline, 'read-deadline')
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and 0 <= before.st_size <= cap,
+            'file-shape')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    chunks = []
+    length = 0
+    try:
+        require(ident(before) == ident(os.fstat(fd)), 'opened-substitution')
+        while True:
+            require(time.monotonic() < deadline, 'read-deadline')
+            data = os.read(fd, min(65536, cap + 1 - length))
+            if not data:
+                break
+            chunks.append(data)
+            length += len(data)
+            require(length <= cap and length <= before.st_size, 'file-growth')
+        require(length == before.st_size and ident(before) == ident(os.fstat(fd)) == ident(path.lstat()),
+                'file-changed')
+    finally:
+        os.close(fd)
+    require(time.monotonic() < deadline, 'read-deadline')
+    return b''.join(chunks)
+
+
+def save(path, value, deadline):
+    data = value if isinstance(value, bytes) else (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    require(len(data) <= LOG_CAP and time.monotonic() < deadline, 'publication-bound')
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        pending = memoryview(data)
+        while pending:
+            require(time.monotonic() < deadline, 'publication-deadline')
+            count = os.write(fd, pending)
+            require(count > 0, 'publication-short-write')
+            pending = pending[count:]
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    require(time.monotonic() < deadline, 'publication-deadline')
+
+
+def validate_audit_failure_context(data):
+    """Validate bounded diagnostic data only; it cannot change the failed audit result."""
+    require(0 < len(data) <= 32768, 'diagnostic-bytes')
+    value = decode(data)
+    fields = {'schema', 'category', 'requester', 'soname', 'candidate_count',
+              'runpath_count', 'cache_count', 'truncated', 'runpath_candidates',
+              'cache_candidates', 'combined_candidates'}
+    require(isinstance(value, dict) and set(value) == fields
+            and value['schema'] == 'issue779-os-audit-dependency-failure-context-v1'
+            and value['category'] == 'dependency-unresolved-or-ambiguous', 'diagnostic-schema')
+    def path_data(path):
+        require(isinstance(path, str) and path.startswith('/') and path != '/'
+                and len(path.encode('utf-8')) <= 4096
+                and all(ord(c) >= 32 and ord(c) != 127 for c in path)
+                and all(part not in ('', '.', '..') for part in path[1:].split('/')), 'diagnostic-path')
+    path_data(value['requester'])
+    require(isinstance(value['soname'], str)
+            and re.fullmatch(r'[A-Za-z0-9_.+-]{1,256}', value['soname']), 'diagnostic-soname')
+    counts = []
+    for count_name, rows_name in (('runpath_count', 'runpath_candidates'),
+                                 ('cache_count', 'cache_candidates'),
+                                 ('candidate_count', 'combined_candidates')):
+        count, rows = value[count_name], value[rows_name]
+        require(type(count) is int and 0 <= count <= 4096 and isinstance(rows, list)
+                and len(rows) == min(count, 8), 'diagnostic-count')
+        for path in rows:
+            path_data(path)
+        counts.append(count)
+    require(type(value['truncated']) is bool and value['truncated'] == any(c > 8 for c in counts)
+            and value['candidate_count'] != 1, 'diagnostic-truncation-or-not-rejected')
+    return value
+
+
+def retain_audit_failure_context(source, destination, deadline):
+    """Copy only the optional fixed sidecar as private data; original audit failure remains fatal."""
+    require(time.monotonic() < deadline, 'diagnostic-deadline')
+    parent = source.parent.lstat()
+    require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.geteuid()
+            and parent.st_gid == os.getegid() and stat.S_IMODE(parent.st_mode) == 0o700,
+            'diagnostic-parent')
+    before = source.lstat()
+    require(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid()
+            and before.st_gid == os.getegid() and before.st_nlink == 1
+            and stat.S_IMODE(before.st_mode) == 0o600 and 0 < before.st_size <= 32768,
+            'diagnostic-file')
+    data = read(source, 32768, deadline)
+    validate_audit_failure_context(data)
+    require(ident(before) == ident(source.lstat()) and ident(parent) == ident(source.parent.lstat()),
+            'diagnostic-substitution')
+    save(destination, data, deadline)
+    after = destination.lstat()
+    require(stat.S_ISREG(after.st_mode) and after.st_uid == os.geteuid()
+            and after.st_gid == os.getegid() and after.st_nlink == 1
+            and stat.S_IMODE(after.st_mode) == 0o600 and after.st_size == len(data),
+            'diagnostic-copy')
+    require(time.monotonic() < deadline, 'diagnostic-deadline')
+    return {'file': destination.name, 'bytes': len(data), 'sha256': sha(data)}
+
+
+def decode(data):
+    return json.loads(data.decode('utf-8'), object_pairs_hook=unique)
+
+
+def decode_n12_record(data):
+    require(data.endswith(b'\n') and data.count(b'\n') == 1 and b'\r' not in data,
+            'n12-record-line-shape')
+    def folded(rows):
+        result, seen = {}, set()
+        for key, value in rows:
+            folded_key = key.casefold()
+            require(folded_key not in seen, 'n12-record-duplicate-key')
+            seen.add(folded_key)
+            result[key] = value
+        return result
+    def invalid_constant(_value):
+        raise Rejected('n12-record-nonfinite-number')
+    return json.loads(data[:-1].decode('utf-8', 'strict'), object_pairs_hook=folded,
+                      parse_constant=invalid_constant)
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def root_deadline(end):
+    # /proc/uptime is CLOCK_BOOTTIME, which must not be assumed equal to Python's
+    # CLOCK_MONOTONIC across a host suspend. Both are bounded by the original outer end.
+    before = time.monotonic()
+    with open('/proc/uptime', encoding='ascii') as source:
+        stamp = source.read(128).split()[0]
+    require(re.fullmatch(r'[0-9]+\.[0-9]+', stamp), 'root-clock-shape')
+    require(time.monotonic() < end, 'root-clock-expiry')
+    return str(int(float(stamp) * 1000) + max(0, int((end - time.monotonic()) * 1000) - 20))
+
+
+def validate_build_commands(receipt):
+    """Validate the fixed command inventory emitted by the reviewed N12 builder."""
+    commands = receipt.get('commands') if type(receipt) is dict else None
+    if type(commands) is not list or len(commands) != 42:
+        raise Rejected('build-commands')
+    if any(type(row) is not dict or type(row.get('ordinal')) is not int for row in commands):
+        raise Rejected('build-commands')
+    if [row.get('ordinal') if type(row) is dict else None for row in commands] != list(range(42)):
+        raise Rejected('build-commands')
+    for row in commands:
+        if (not {'ordinal', 'argv', 'exit', 'failure', 'waited', 'group_absent',
+                 'timed_out', 'forced_cleanup'}.issubset(row)
+                or type(row.get('argv')) is not list
+                or not row['argv'] or any(type(arg) is not str for arg in row['argv'])
+                or type(row.get('exit')) is not int or row['exit'] != 0
+                or row.get('failure') is not None or row.get('waited') is not True
+                or row.get('group_absent') is not True or row.get('timed_out') is not False
+                or row.get('forced_cleanup') is not False):
+            raise Rejected('build-command-terminal')
+    cli = [row for row in commands
+           if any(arg.endswith('ForgeTrust.AppSurface.Cli.csproj') for arg in row['argv'])]
+    selector = '-p:EvidencePrivateQualification=N12'
+    if (len(cli) != 2
+            or sum('restore' in row['argv'] and row['argv'].count(selector) == 1 for row in cli) != 1
+            or sum('publish' in row['argv'] and row['argv'].count(selector) == 1 for row in cli) != 1
+            or sum(arg.startswith('-p:EvidencePrivateQualification=') for row in cli for arg in row['argv']) != 2):
+        raise Rejected('build-private-variant-selection')
+
+
+def validate_build(receipt, maps):
+    require(receipt['schema'] == 'issue779-csharp-fdd-build-v5' and type(receipt['exit']) is int
+            and receipt['exit'] == 0 and receipt.get('failure') is None and receipt['diagnostics'] == []
+            and receipt['source_commit'] == SOURCE and receipt['harness_parent'] == PARENT
+            and receipt.get('selected_variant') == 'N12'
+            and receipt.get('private_qualification') == 'N12'
+            and receipt['native_execution'] is False and receipt['checkpoint_pass'] is False, 'build-terminal')
+    validate_build_commands(receipt)
+    pipe = receipt.get('linux_pipe_regression')
+    require(type(pipe) is dict and set(pipe) == {'method', 'counters', 'trx_sha256', 'unprivileged_library_behavior_only', 'root_factory_exercised', 'native_acceptance', 'runtime_basis'}, 'pipe-regression-schema')
+    require(pipe['method'] == 'OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs'
+            and type(pipe['counters']) is dict and all(pipe['counters'].get(k) == '1' for k in ('total', 'executed', 'passed'))
+            and all(pipe['counters'].get(k) == '0' for k in ('failed', 'error', 'notExecuted', 'timeout', 'aborted'))
+            and type(pipe['trx_sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', pipe['trx_sha256']) is not None
+            and pipe['unprivileged_library_behavior_only'] is True and pipe['root_factory_exercised'] is False
+            and pipe['native_acceptance'] is False and pipe['runtime_basis'] == 'selected SDK dotnet host', 'pipe-regression-terminal')
+    for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
+        fact = receipt[phase]
+        require(fact['head'] == SOURCE and fact['count'] == 2841 and fact['source_map_sha256'] == SOURCE_MAP
+                and all(fact[name] is True for name in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')), 'build-source')
+    require(set(receipt['artifacts']) == {'source', 'tool', 'runtime'}, 'build-map-set')
+    for name, fact in receipt['artifacts'].items():
+        tsv, raw = maps[name]
+        require(sha(tsv) == fact['tsv_sha256'] and sha(raw) == fact['nodes_sha256'], 'build-map-digest')
+        nodes = decode(raw)
+        require(set(nodes) == {'schema', 'root_name', 'files', 'directories'}
+                and nodes['schema'] == 'issue779-build-node-inventory-v1' and nodes['root_name'] == name,
+                'node-schema')
+        require(len(nodes['files']) == fact['file_count'] and len(nodes['files']) + len(nodes['directories']) == fact['node_count']
+                and sum(row['bytes'] for row in nodes['files'].values()) == fact['total_bytes'], 'node-counts')
+    require(receipt['artifacts']['source']['file_count'] == 2841, 'source-count')
+
+
+def absent(pid):
+    try:
+        os.killpg(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        # Existence without signal permission is not absence and must not bypass cleanup.
+        return False
+
+
+UTILITY_SETTLED = r'''
+set -euo pipefail
+[[ $1 =~ ^issue779-native-tool-[0-9a-f]{32}-[0-9]{2}\.service$ ]]
+unit=$1; group=/sys/fs/cgroup/system.slice/$unit
+[[ ! -L /sys/fs/cgroup && ! -L /sys/fs/cgroup/system.slice && ! -L $group ]]
+for checked in "$unit" "${unit%.service}-deadline.service" "${unit%.service}-deadline.timer"; do
+# v255 show-properties returns zero for complete inactive/not-found facts;
+# unlike status/help, no nonzero not-found code is a successful query here.
+query_status=0
+facts=$(/usr/bin/systemctl show --property=LoadState,ActiveState,SubState,Job,MainPID,ControlGroup "$checked") || query_status=$?
+((query_status==0))
+unset values; declare -A values=()
+while IFS='=' read -r key value; do
+ [[ $key == LoadState || $key == ActiveState || $key == SubState || $key == Job || $key == MainPID || $key == ControlGroup ]]
+ [[ ! ${values[$key]+present} ]]; values[$key]=$value
+done <<<"$facts"
+[[ ( ${#values[@]} == 6 || ( $checked == *.timer && ${#values[@]} == 4 ) ) && ( ${values[LoadState]} == loaded || ${values[LoadState]} == not-found ) ]]
+[[ ( ${values[ActiveState]} == inactive || ${values[ActiveState]} == failed ) && ( ${values[SubState]} == dead || ${values[SubState]} == failed ) ]]
+[[ ( ${values[MainPID]-0} == 0 ) && ( -z ${values[Job]} || ${values[Job]} == 0 ) ]]
+[[ -z ${values[ControlGroup]-} || ${values[ControlGroup]} == /system.slice/$checked ]]
+group=/sys/fs/cgroup/system.slice/$checked
+if [[ -e $group ]]; then
+ [[ -d $group && $(/usr/bin/stat -f -c %t -- "$group") == 63677270 ]]
+ /usr/bin/grep -qx 'populated 0' "$group/cgroup.events"
+fi
+done
+printf 'ROOT_TOOL_CGROUP_SETTLED\n'
+'''
+
+GUARD_CREATE = r'''
+set -euo pipefail; umask 077
+[[ $1 =~ ^issue779-native-tool-([0-9a-f]{32})-([0-9]{2})\.service$ ]]
+base=/run/issue779-native-tool-guards-${BASH_REMATCH[1]}; child=$base/${BASH_REMATCH[2]}
+[[ ! -L $base ]]
+if [[ ! -e $base ]]; then /usr/bin/mkdir -m0700 -- "$base"; fi
+[[ $(/usr/bin/stat -c '%u:%g:%a' -- "$base") == 0:0:700 && ! -e $child && ! -L $child ]]
+/usr/bin/mkdir -m0700 -- "$child"
+printf 'armed\n' >"$child/armed"
+[[ $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$child/armed") == 0:0:600:1 ]]
+[[ $2 =~ ^[0-9]+\.[0-9]+$ ]]
+/usr/bin/systemd-run --quiet --unit="${1%.service}-deadline" --on-boot="$2" \
+ --timer-property=AccuracySec=1us --timer-property=RandomizedDelaySec=0 \
+ --property=Type=oneshot --property=TimeoutStartSec=1 --property=TimeoutStopSec=1 \
+ --property=KillMode=control-group --property=RemainAfterExit=no \
+ /usr/bin/systemctl kill --kill-whom=all --signal=KILL "$1"
+timer=${1%.service}-deadline.timer; escaped=${timer//-/_2d}; escaped=${escaped//./_2e}
+target=$(/usr/bin/busctl --system get-property org.freedesktop.systemd1 "/org/freedesktop/systemd1/unit/$escaped" org.freedesktop.systemd1.Timer NextElapseUSecMonotonic)
+[[ $target =~ ^t\ ([1-9][0-9]*)$ ]]; actual=${BASH_REMATCH[1]}
+whole=${2%%.*}; fraction=${2#*.}; [[ ${#fraction} == 6 ]]
+expected=$((10#$whole*1000000+10#$fraction))
+((actual>=expected-1 && actual<=expected+1))
+'''
+
+GUARD_CLOSE = r'''
+set -euo pipefail
+[[ $1 =~ ^issue779-native-tool-([0-9a-f]{32})-([0-9]{2})\.service$ ]]
+base=/run/issue779-native-tool-guards-${BASH_REMATCH[1]}; child=$base/${BASH_REMATCH[2]}
+[[ ! -L $base && ! -L $child && $(/usr/bin/stat -c '%u:%g:%a' -- "$base" "$child") == $'0:0:700\n0:0:700' ]]
+[[ ! -L $child/armed ]]
+if [[ -e $child/armed ]]; then
+ [[ $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$child/armed") == 0:0:600:1 ]]
+ /usr/bin/rm -- "$child/armed"
+fi
+[[ ! -e $child/armed && ! -L $child/armed ]]
+# Missing/GC units may make stop nonzero; subsequent exact state/job/cgroup checks decide settlement.
+/usr/bin/systemctl stop --no-block "$1" "${1%.service}-deadline.timer" "${1%.service}-deadline.service" >/dev/null 2>&1 || :
+'''
+
+ABSOLUTE_ROOT_EXEC = r'''
+set -euo pipefail
+diagnostic_stage=guard
+trap 'code=$?; if ((code!=0)); then printf "ROOT_TOOL_FAILURE:%s:%d\n" "$diagnostic_stage" "$code" >&2; fi' EXIT
+[[ $1 =~ ^[1-9][0-9]{0,14}$ && $2 =~ ^issue779-native-tool-([0-9a-f]{32})-([0-9]{2})\.service$ ]] || exit 1
+end=$1; unit=$2; guard=/run/issue779-native-tool-guards-${BASH_REMATCH[1]}/${BASH_REMATCH[2]}/armed; shift 2
+now_ms() { local value other whole fraction; IFS=' ' read -r value other </proc/uptime; whole=${value%%.*}; fraction=${value#*.}000; printf '%s' "$((10#$whole*1000+10#${fraction:0:3}))"; }
+check_guard() { [[ -f $guard && ! -L $guard && $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$guard") == 0:0:600:1 ]]; }
+check_guard; diagnostic_stage=clock; now=$(now_ms); ((now<end)); left=$((end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+check_guard; now=$(now_ms); ((now<end)); left=$((end-now)); printf -v seconds '%d.%03d' "$((left/1000))" "$((left%1000))"
+diagnostic_stage=exec
+printf 'ROOT_TOOL_PREEXEC\n' >&2
+exec /usr/bin/timeout --signal=KILL "$seconds" /usr/bin/bash --noprofile --norc "$@"
+'''
+
+
+class Runner:
+    def __init__(self, output, deadline):
+        self.output = output
+        self.deadline = deadline
+        self.records = []
+        self.total_bytes = 0
+        self.phase = 'preflight'
+        self.generation = uuid.uuid4().hex
+
+    def root_metadata(self, source, unit, end, extra=()):
+        left = end - time.monotonic()
+        require(left > 0, 'root-metadata-deadline')
+        value = subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/timeout', '--signal=KILL', str(left),
+            '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin', 'LANG=C', 'LC_ALL=C', '/usr/bin/bash',
+            '--noprofile', '--norc', '-c', source, '--', unit, *extra], stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=left,
+            env={'PATH': '/usr/bin:/usr/sbin', 'LANG': 'C', 'LC_ALL': 'C'})
+        require(value.returncode == 0 and len(value.stdout) <= 4096 and time.monotonic() < end, 'root-metadata-terminal')
+        return value.stdout
+
+    def run(self, argv, deadline, allow_failure=False):
+        deadline = min(deadline, self.deadline - 5)
+        require(time.monotonic() < deadline, 'command-preflight-deadline')
+        root_operation = argv[:len(ROOT_PREFIX)] == ROOT_PREFIX
+        unit = 'issue779-native-tool-' + self.generation + '-' + f'{len(self.records):02d}' + '.service' if root_operation else None
+        row = {'ordinal': len(self.records), 'phase': self.phase, 'argv': argv, 'pid': None, 'exit': None, 'root_utility_unit': unit,
+               'waited': False, 'group_absent': False, 'forced_cleanup': False, 'timed_out': False, 'failure': None}
+        self.records.append(row)
+        logs = [self.output / (f'{row["ordinal"]:02d}-' + name + '.log') for name in ('stdout', 'stderr')]
+        handles, process, error = [], None, None
+        started = time.monotonic()
+        cleanup_end = deadline
+        work_end = deadline - 5
+        require(started < work_end, 'phase-cleanup-reserve')
+        try:
+            for path in logs:
+                handles.append(path.open('xb', buffering=0))
+            selected = argv
+            if root_operation:
+                row['root_start_guard_created'] = True
+                self.root_metadata(GUARD_CREATE, unit, work_end, (format(work_end, '.6f'),))
+                remaining = work_end - time.monotonic()
+                require(remaining > 0, 'root-operation-deadline')
+                # systemd owns every ordinary/setsid descendant in the utility cgroup.
+                # An independent ROOT timeout also bounds the --wait/--pipe client.
+                selected = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin', 'LANG=C', 'LC_ALL=C',
+                    '/usr/bin/timeout', '--signal=KILL', str(max(.001, cleanup_end - time.monotonic() - .5)),
+                    '/usr/bin/systemd-run', '--quiet', '--wait', '--pipe', '--expand-environment=no', '--unit=' + unit,
+                    '--property=Type=exec', '--property=User=0', '--property=Group=0',
+                    '--property=KillMode=control-group', '--property=Restart=no', '--property=RemainAfterExit=no',
+                    '--property=ConditionPathExists=/run/issue779-native-tool-guards-' + self.generation + '/' + f'{row["ordinal"]:02d}' + '/armed',
+                    '--property=RuntimeMaxSec=' + str(remaining), '--property=TimeoutStopSec=3',
+                    '--property=SendSIGKILL=yes', '--property=FinalKillSignal=9',
+                    '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin', 'LANG=C', 'LC_ALL=C',
+                    '/usr/bin/bash', '--noprofile', '--norc', '-c', ABSOLUTE_ROOT_EXEC, '--', root_deadline(work_end), unit] + argv[len(ROOT_PREFIX):]
+            row['dispatched_argv'] = selected
+            process = subprocess.Popen(selected, stdin=subprocess.DEVNULL, stdout=handles[0], stderr=handles[1],
+                                       start_new_session=True, env={'PATH': '/usr/bin:/usr/sbin', 'LANG': 'C', 'LC_ALL': 'C'}, umask=0o077)
+            row['pid'] = process.pid
+            while True:
+                require(all(path.stat().st_size <= LOG_CAP for path in logs)
+                        and self.total_bytes + sum(path.stat().st_size for path in logs) <= 80 * 1024 * 1024,
+                        'command-log-bound')
+                if time.monotonic() >= work_end:
+                    row['timed_out'] = True
+                    raise Rejected('command-deadline')
+                if process.poll() is not None:
+                    row['exit'] = process.wait()
+                    row['waited'] = True
+                    require(absent(process.pid), 'command-group-survived')
+                    break
+                time.sleep(min(.02, max(0, deadline - time.monotonic())))
+        except BaseException as caught:
+            error = caught
+        finally:
+            root_close_failed = False
+            if root_operation and row.get('root_start_guard_created'):
+                try:
+                    self.root_metadata(GUARD_CLOSE, unit, cleanup_end)
+                    row['root_start_guard_closed'] = True
+                except BaseException as caught:
+                    error = error or caught
+                    root_close_failed = True
+            if process is not None:
+                try:
+                    unsettled = process.poll() is None or not absent(process.pid)
+                except BaseException as caught:
+                    error = error or caught
+                    unsettled = True
+                root_ambiguous = root_operation and (error is not None or row['exit'] != 0 or not row['waited'] or unsettled or root_close_failed)
+                if unsettled or root_ambiguous:
+                    row['forced_cleanup'] = True
+                    try:
+                        if root_operation:
+                            left = max(.001, cleanup_end - time.monotonic())
+                            stop = subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/timeout', '--signal=KILL', str(left),
+                                '/usr/bin/systemctl', 'stop', '--no-block', unit], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=left,
+                                env={'PATH': '/usr/bin:/usr/sbin', 'LANG': 'C', 'LC_ALL': 'C'})
+                            require(stop.returncode == 0, 'root-utility-stop-request')
+                        else:
+                            os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except BaseException as caught:
+                        error = error or caught
+                try:
+                    process.wait(timeout=max(.001, cleanup_end - time.monotonic()))
+                    row['exit'], row['waited'] = process.returncode, True
+                    while not absent(process.pid) and time.monotonic() < cleanup_end:
+                        time.sleep(.01)
+                    row['group_absent'] = absent(process.pid)
+                    require(row['group_absent'], 'command-group-unjoined')
+                except BaseException as caught:
+                    error = error or caught
+            if root_operation and row.get('root_start_guard_created'):
+                try:
+                    left = max(.001, cleanup_end - time.monotonic())
+                    inspect = subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/timeout', '--signal=KILL', str(left),
+                        '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin', 'LANG=C', 'LC_ALL=C',
+                        '/usr/bin/bash', '--noprofile', '--norc', '-c', UTILITY_SETTLED, '--', unit],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=left,
+                        env={'PATH': '/usr/bin:/usr/sbin', 'LANG': 'C', 'LC_ALL': 'C'})
+                    row['root_utility_cgroup_empty'] = inspect.returncode == 0 and inspect.stdout == b'ROOT_TOOL_CGROUP_SETTLED\n'
+                    require(row['root_utility_cgroup_empty'], 'root-utility-cgroup-unjoined')
+                except BaseException as caught:
+                    error = error or caught
+            for handle in handles:
+                try:
+                    handle.close()
+                except OSError as caught:
+                    error = error or caught
+            row['logs'] = []
+            for path in logs:
+                try:
+                    data = read(path, LOG_CAP, cleanup_end)
+                    row['logs'].append({'name': path.name, 'bytes': len(data), 'sha256': sha(data)})
+                    self.total_bytes += len(data)
+                except BaseException as caught:
+                    error = error or caught
+            if time.monotonic() >= cleanup_end:
+                error = error or Rejected('late-command-completion')
+            row['elapsed_seconds'] = time.monotonic() - started
+            row['failure'] = type(error).__name__ if error else None
+            try:
+                save(self.output / f'command-{row["ordinal"]:02d}.json', row, cleanup_end)
+            except BaseException as caught:
+                error = error or caught
+            if time.monotonic() >= cleanup_end:
+                error = error or Rejected('late-phase-record-publication')
+        if error:
+            raise error
+        require(not row['forced_cleanup'] and row['group_absent'] and row['waited'], 'command-not-settled')
+        require(allow_failure or row['exit'] == 0, 'command-nonzero')
+        data = read(logs[0], LOG_CAP, cleanup_end)
+        require(time.monotonic() < cleanup_end, 'late-stdout-return')
+        return row['exit'], data
+
+
+BOOTSTRAP = r'''
+set -euo pipefail; umask 077
+diagnostic_stage=base
+trap 'code=$?; if ((code!=0)); then printf "ROOT_BOOTSTRAP_FAILURE:%s:%d\n" "$diagnostic_stage" "$code" >&2; fi' EXIT
+[[ $1 =~ ^[0-9a-f]{32}$ ]] || exit 1
+target=/var/lib/appsurface-evidence-bootstrap-$1; shift
+for parent in / /var /var/lib; do
+ [[ -d $parent && ! -L $parent && $(/usr/bin/stat -c '%u:%g' -- "$parent") == 0:0 ]]
+ (( (8#$(/usr/bin/stat -c %a -- "$parent") & 0022)==0 ))
+done
+[[ ! -e $target && ! -L $target ]]
+/usr/bin/mkdir -m0700 -- "$target"
+while (($#)); do
+ diagnostic_stage=source-shape
+ source=$1; name=$2; hash=$3; shift 3
+ [[ $name =~ ^[a-zA-Z0-9.-]+$ && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
+ [[ $(/usr/bin/stat -c %h -- "$source") == 1 && $(/usr/bin/stat -c %s -- "$source") -le 131072 ]]
+ diagnostic_stage=source-digest
+ printf '%s  %s\n' "$hash" "$source" | /usr/bin/sha256sum --check --strict --status
+ diagnostic_stage=copy
+ /usr/bin/dd if="$source" of="$target/$name" iflag=nofollow,nonblock,count_bytes oflag=nofollow conv=fsync,excl count=131073 status=none
+ diagnostic_stage=seal
+ /usr/bin/chown 0:0 -- "$target/$name"
+ mode=0444; [[ $name != acquire-inbound.sh && $name != retain-native.sh ]] || mode=0500
+ /usr/bin/chmod "$mode" -- "$target/$name"
+ diagnostic_stage=destination-digest
+ printf '%s  %s\n' "$hash" "$target/$name" | /usr/bin/sha256sum --check --strict --status
+ diagnostic_stage=source-recheck
+ printf '%s  %s\n' "$hash" "$source" | /usr/bin/sha256sum --check --strict --status
+done
+'''
+
+AUDIT_COPY = r'''
+set -euo pipefail; umask 077
+[[ $1 =~ ^[0-9a-f]{32}$ && $3 =~ ^[0-9a-f]{64}$ ]]
+target=/var/lib/appsurface-evidence-input-$1/control/os-audit.json
+[[ -f $2 && ! -L $2 && $(/usr/bin/stat -c %h -- "$2") == 1 && $(/usr/bin/stat -c %s -- "$2") -le 1048576 ]]
+printf '%s  %s\n' "$3" "$2" | /usr/bin/sha256sum --check --strict --status
+/usr/bin/dd if="$2" of="$target" iflag=nofollow,nonblock,count_bytes oflag=nofollow conv=fsync,excl count=1048577 status=none
+/usr/bin/chown 0:0 -- "$target"; /usr/bin/chmod 0600 -- "$target"
+printf '%s  %s\n' "$3" "$target" | /usr/bin/sha256sum --check --strict --status
+printf '%s  %s\n' "$3" "$2" | /usr/bin/sha256sum --check --strict --status
+'''
+
+DISPATCH = r'''
+set -euo pipefail; umask 077
+# This is the existing audited payload-file envelope, not the per-log budget.
+ulimit -f 262144
+fixture_stdout_pid=; fixture_stderr_pid=
+fixture_stdout_fifo=; fixture_stderr_fifo=
+fixture_stdout_fifo_owned=0; fixture_stderr_fifo_owned=0
+finish_fixture_capture() {
+ local status=$1 pump_status=0 pid
+ trap - EXIT
+ for pid in "$fixture_stdout_pid" "$fixture_stderr_pid"; do
+  [[ -n $pid ]] || continue
+  pump_status=0; wait "$pid" || pump_status=$?
+  if ((status==0 && pump_status!=0)); then status=$pump_status; fi
+ done
+ if ((fixture_stdout_fifo_owned)); then
+  rm -f -- "$fixture_stdout_fifo" || { ((status!=0)) || status=1; }
+ fi
+ if ((fixture_stderr_fifo_owned)); then
+  rm -f -- "$fixture_stderr_fifo" || { ((status!=0)) || status=1; }
+ fi
+ # The prearmed root utility timer owns this entire join, including partial
+ # setup. A missing/failed pump or any earlier fixture failure cannot pass.
+ exit "$status"
+}
+capture_fixture() {
+ local stdout=$1 stderr=$2 fixture_status=0
+ shift 2
+ fixture_stdout_fifo=$stdout.pipe; fixture_stderr_fifo=$stderr.pipe
+ trap 'finish_fixture_capture "$?"' EXIT
+ # Each FIFO is created exclusively in the fixed root-owned private control
+ # directory. Retain every ordinary background child immediately for wait.
+ mkfifo -m 600 -- "$fixture_stdout_fifo"; fixture_stdout_fifo_owned=1
+ mkfifo -m 600 -- "$fixture_stderr_fifo"; fixture_stderr_fifo_owned=1
+ (trap - EXIT; ulimit -f 8192; ulimit -c 0; set -C; exec cat <"$fixture_stdout_fifo" >"$stdout") &
+ fixture_stdout_pid=$!
+ (trap - EXIT; ulimit -f 8192; ulimit -c 0; set -C; exec cat <"$fixture_stderr_fifo" >"$stderr") &
+ fixture_stderr_pid=$!
+ "$@" >"$fixture_stdout_fifo" 2>"$fixture_stderr_fifo" || fixture_status=$?
+ finish_fixture_capture "$fixture_status"
+}
+[[ $1 =~ ^[0-9a-f]{32}$ ]]; g=$1; hash=$2; shift 2
+root=/var/lib/appsurface-evidence-input-$g
+[[ ! -e /run/appsurface-evidence-fixture && ! -L /run/appsurface-evidence-fixture ]]
+[[ $(/usr/bin/stat -c '%u:%g:%a' -- "$root/control") == 0:0:700 ]]
+/usr/bin/jq -ncS --arg g "$g" '{schema:"issue779-native-dispatch-marker-v1",generation:$g,fixture_parent_absent:true}' >"$root/control/fixture-dispatch-marker.json"
+printf '%s  %s\n' "$hash" "$root/reviewed/checkpoint-n12-data-integration.sh" | /usr/bin/sha256sum --check --strict --status
+capture_fixture "$root/control/fixture-stdout.log" "$root/control/fixture-stderr.log" /usr/bin/bash --noprofile --norc "$root/reviewed/checkpoint-n12-data-integration.sh" "$@"
+'''
+
+READ_ROOT_ARCHIVE = r'''
+set -euo pipefail; umask 077
+[[ $1 =~ ^[0-9a-f]{32}$ ]]
+control=/var/lib/appsurface-evidence-input-$1/control; path=$control/native.tar
+[[ ! -L /var && ! -L /var/lib && ! -L /var/lib/appsurface-evidence-input-$1 && ! -L $control && ! -L $path ]]
+[[ $(/usr/bin/stat -c '%u:%g:%a' -- "$control") == 0:0:700 && -f $path ]]
+[[ $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$path") == 0:0:600:1 ]]
+before=$(/usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%y:%z' -- "$path")
+size=$(/usr/bin/stat -c %s -- "$path"); ((size>0 && size<=33619968))
+/usr/bin/dd if="$path" iflag=nofollow,nonblock,count_bytes count=$((size+1)) status=none
+[[ $(/usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%y:%z' -- "$path") == "$before" ]]
+'''
+
+ROOT_ARCHIVE_SHA = r'''
+set -euo pipefail
+[[ $1 =~ ^[0-9a-f]{32}$ ]]; path=/var/lib/appsurface-evidence-input-$1/control/native.tar
+[[ -f $path && ! -L $path && $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$path") == 0:0:600:1 ]]
+/usr/bin/sha256sum -- "$path" | /usr/bin/cut -c1-64
+'''
+
+ARCHIVE_NAMES = {
+    'logs/n03/broker.events.jsonl',
+    'logs/n03/broker.stderr',
+    'logs/n03/worker.stdout',
+    'logs/n03/worker.stderr',
+    'logs/n03/worker-peer.trace',
+    'logs/n03/broker-live.json',
+    'logs/n03/broker-live.json.argv',
+    'logs/n03/broker-live-after.json',
+    'logs/n03/broker-live-after.json.argv',
+    'logs/n03/worker-live.json',
+    'logs/n03/worker-live.json.argv',
+    'logs/n03/result.json',
+    'logs/n03/failure.json',
+
+    'retention-selection.json', 'fixture-stdout.log', 'fixture-stderr.log', 'fixture-result.json',
+    'raw-evidence-plan.json', 'raw-evidence-manifest.json', 'raw-evidence-summary.json', 'worker-live.json',
+    'request-policy.sha256', 'final-files.sha256', 'logs/n01.stdout', 'logs/n01.stderr', 'logs/n02.stdout',
+    'logs/n02.stderr', 'logs/n02.trace', 'logs/observer.stdout', 'logs/observer.stderr', 'logs/kill.log', 'logs/stop.log',    'logs/n02.file-limit',
+    'logs/n02.limits',
+    'logs/n02.facts.json',
+    'logs/n02.io.trace',
+    'logs/n02.credentials.json',
+    'logs/n02-higher.stdout',
+    'logs/n02-higher.stderr',
+    'logs/n02-higher.trace',
+    'logs/n02-higher.file-limit',
+    'logs/n02-higher.limits',
+    'logs/n02-higher.facts.json',
+    'logs/n02-higher.io.trace',
+    'logs/n02-higher.credentials.json',
+    'n02-startup-limit-diagnostic.pending',
+    'n02-startup-limit-diagnostic.json',
+}
+
+
+
+def inspect_archive(data):
+    require(0 < len(data) <= 33619968, 'archive-size')
+    values, total, names = {}, 0, []
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:') as archive:
+        for member in archive:
+            require(member.name in ARCHIVE_NAMES and member.name not in names and member.isfile()
+                    and member.mode == 0o600 and member.uid == 0 and member.gid == 0 and member.mtime == 0
+                    and not member.pax_headers and not member.linkname and 0 <= member.size <= 8388608,
+                    'archive-member')
+            names.append(member.name)
+            require(len(names) <= len(ARCHIVE_NAMES), 'archive-count')
+            total += member.size
+            require(total <= 33554432 + 4096, 'archive-expanded-bound')
+            stream = archive.extractfile(member)
+            require(stream is not None, 'archive-file')
+            with stream:
+                content = stream.read(member.size + 1)
+            require(len(content) == member.size, 'archive-short-read')
+            if member.name == 'logs/n01.stderr':
+                require(0 < len(content) <= 4097 and content.endswith(b'\n'), 'n12-record-bound')
+                values['n12-record-sha256'] = sha(content)
+                values['n12-record'] = decode_n12_record(content)
+            if member.name in ('fixture-result.json', 'retention-selection.json', 'worker-live.json', 'logs/n03/result.json', 'logs/n03/worker-live.json', 'logs/n03/broker-live.json', 'logs/n03/broker-live-after.json'):
+                require(len(content) <= 4096, 'archive-json-size')
+                values[member.name] = decode(content)
+                if member.name == 'logs/n03/result.json':
+                    values['n03-result-sha256'] = sha(content)
+    require(names == sorted(names) and 'retention-selection.json' in values, 'archive-order-or-selection')
+    require('n12-record-sha256' in values, 'n12-record-missing')
+    n12 = values.get('n12-record')
+    n12_fields = {'schema', 'generation', 'leader_pid', 'leader_exit_code', 'leader_exit_status',
+                  'descendant_pid', 'descendant_start_ticks', 'descendant_uids', 'descendant_gids',
+                  'descendant_cgroup', 'group_before_stop', 'pumps_joined_before_stop', 'stdout_eof',
+                  'stderr_eof', 'received_bytes', 'stdout_bytes', 'stderr_bytes', 'group_empty_after_stop',
+                  'custody_and_accounts_not_yet_closed', 'native_authority', 'native_acceptance'}
+    worker = values.get('worker-live.json')
+    require(type(worker) is dict and set(worker) == {'pid', 'uid4', 'gid4', 'cgroup', 'start_time_ticks', 'post_exec_image_pinned', 'exact_worker_arguments', 'ready_protocol_observed'}
+            and type(worker['pid']) is int and worker['pid'] > 0
+            and type(worker['uid4']) is str and re.fullmatch('[1-9][0-9]*(:[1-9][0-9]*){3}', worker['uid4'])
+            and type(worker['gid4']) is str and re.fullmatch('[1-9][0-9]*(:[1-9][0-9]*){3}', worker['gid4'])
+            and len(set(worker['uid4'].split(':'))) == 1 and len(set(worker['gid4'].split(':'))) == 1
+            and type(worker['start_time_ticks']) is str and re.fullmatch('[1-9][0-9]*', worker['start_time_ticks'])
+            and worker['post_exec_image_pinned'] is True and worker['exact_worker_arguments'] is True
+            and worker['ready_protocol_observed'] is False,
+            'n12-worker-schema')
+    require(type(n12) is dict and set(n12) == n12_fields
+            and n12['schema'] == 'issue779-csharp-n12-descendant-observation-v1'
+            and n12['generation'] == values['fixture-result.json']['generation']
+            and re.fullmatch('[0-9a-f]{32}', n12['generation'])
+            and type(n12['leader_pid']) is int and 0 < n12['leader_pid'] <= 2147483647
+            and n12['leader_pid'] == worker['pid']
+            and type(n12['leader_exit_code']) is int and n12['leader_exit_code'] == 1
+            and type(n12['leader_exit_status']) is int and n12['leader_exit_status'] == 0
+            and type(n12['descendant_pid']) is int and 0 < n12['descendant_pid'] <= 2147483647
+            and n12['descendant_pid'] != n12['leader_pid']
+            and type(n12['descendant_start_ticks']) is int and 0 < n12['descendant_start_ticks'] <= 9007199254740991
+            and n12['descendant_start_ticks'] >= int(worker['start_time_ticks'])
+            and type(n12['descendant_uids']) is dict and set(n12['descendant_uids']) == {'Real', 'Effective', 'Saved', 'FileSystem'}
+            and type(n12['descendant_gids']) is dict and set(n12['descendant_gids']) == {'Real', 'Effective', 'Saved', 'FileSystem'}
+            and all(type(v) is int and v > 0 and v <= 4294967295 for v in n12['descendant_uids'].values())
+            and all(type(v) is int and v > 0 and v <= 4294967295 for v in n12['descendant_gids'].values())
+            and len(set(n12['descendant_uids'].values())) == 1 and len(set(n12['descendant_gids'].values())) == 1
+            and all(n12['descendant_uids'][k] == int(worker['uid4'].split(':')[0]) for k in n12['descendant_uids'])
+            and all(n12['descendant_gids'][k] == int(worker['gid4'].split(':')[0]) for k in n12['descendant_gids'])
+            and n12['descendant_cgroup'] == '/system.slice/appsurface-evidence-worker-' + n12['generation'] + '.service'
+            and worker['cgroup'] == '0::' + n12['descendant_cgroup']
+            and type(n12['group_before_stop']) is dict
+            and set(n12['group_before_stop']) == {'Exists', 'Populated', 'Frozen', 'DeviceMajor', 'DeviceMinor', 'KernelInode'}
+            and n12['group_before_stop']['Exists'] is True and n12['group_before_stop']['Populated'] is True
+            and n12['group_before_stop']['Frozen'] is False
+            and type(n12['group_before_stop']['DeviceMajor']) is int and n12['group_before_stop']['DeviceMajor'] >= 0
+            and type(n12['group_before_stop']['DeviceMinor']) is int and n12['group_before_stop']['DeviceMinor'] >= 0
+            and type(n12['group_before_stop']['KernelInode']) is int and 0 < n12['group_before_stop']['KernelInode'] <= 9007199254740991
+            and n12['pumps_joined_before_stop'] is False and n12['stdout_eof'] is True
+            and n12['stderr_eof'] is True and n12['stdout_bytes'] == 0
+            and type(n12['received_bytes']) is int and 0 <= n12['received_bytes'] <= 16777216
+            and type(n12['stdout_bytes']) is int and type(n12['stderr_bytes']) is int
+            and 0 <= n12['stderr_bytes'] <= 16777216
+            and n12['stderr_bytes'] == len(('N12-descendant:' + str(n12['descendant_pid']) + '\n').encode())
+            and n12['received_bytes'] == n12['stdout_bytes'] + n12['stderr_bytes']
+            and n12['group_empty_after_stop'] is True
+            and n12['custody_and_accounts_not_yet_closed'] is True
+            and n12['native_authority'] is False and n12['native_acceptance'] is False,
+            'n12-record-schema')
+    selection = values['retention-selection.json']
+    require(set(selection) == {'schema', 'selection_status', 'data_file_count', 'data_bytes', 'missing_fixed_file_count'}
+            and selection['schema'] == 'issue779-native-retention-selection-v1'
+            and selection['selection_status'] in ('parent-absent', 'parent-empty', 'one-namespace')
+            and type(selection['data_file_count']) is int and selection['data_file_count'] == len(names) - 1
+            and type(selection['data_bytes']) is int and 0 <= selection['data_bytes'] <= 33554432,
+            'selection-schema')
+    return values
+
+
+def validate_native_result(value):
+    require(set(value) == {'worker_unit', 'base_revision', 'file_inspection', 'n03_exit', 'canonical_verification', 'policy_sha256', 'n01_exit', 'n03_result_sha256', 'n12_record_sha256', 'trusted_enabled', 'native_controls_executed', 'source_revision', 'generation', 'owned_process_groups_joined', 'schema', 'remaining_controls', 'n02_exit', 'owner_unit'}, 'native-case-closed-fields')
+    require(value['schema'] == 'issue779-native-n12-fixture-v1' and value['source_revision'] == SOURCE
+            and value['base_revision'] == BASE_REVISION
+            and re.fullmatch('[0-9a-f]{32}', value['generation']) and re.fullmatch('[0-9a-f]{64}', value['policy_sha256'])
+            and value['owner_unit'] == 'appsurface-evidence-owner-' + value['generation'] + '.service'
+            and value['worker_unit'] == 'appsurface-evidence-worker-' + value['generation'] + '.service'
+            and value['file_inspection'] == 'raw-bytes-sha-json-facts-only'
+            and value['canonical_verification'] == 'actual-csharp-RootCustody'
+            and type(value['n01_exit']) is int and value['n01_exit'] == 0
+            and type(value['n02_exit']) is int and value['n02_exit'] == 1
+            and type(value['n03_exit']) is int and value['n03_exit'] == 0 and re.fullmatch('[0-9a-f]{64}', value['n03_result_sha256']) and re.fullmatch('[0-9a-f]{64}', value['n12_record_sha256']) and value['native_controls_executed'] == ['N02', 'N03', 'N12'] and value['owned_process_groups_joined'] is True
+            and value['trusted_enabled'] is False and value['remaining_controls'] == 'pending', 'native-case-receipt')
+
+
+
+def validate_helper_handoff(value, recipe):
+    fields = {'authority','commands','exit','helper_bytes','helper_directories','helper_entry_sha256','helper_files','helper_nodes_sha256','helper_root','helper_tsv_sha256','native_execution','recipe_sha256','runtime_required','schema','sdk_required','sdk_sha256','source_pins'}
+    require(set(value) == fields and value['schema'] == 'issue779-n03-helper-build-handoff-v1' and type(value['exit']) is int and value['exit'] == 0 and value['authority'] is False and value['native_execution'] is False and value['recipe_sha256'] == recipe and value['sdk_required'] == '10.0.401' and value['runtime_required'] == '10.0.12', 'helper-receipt-schema')
+    require(value['source_pins'] == {k:PINS[k] for k in ('Program.cs','NativePeerBroker.csproj','packages.lock.json')}, 'helper-source-pins')
+    require(all(type(value[k]) is int and value[k]>0 for k in ('helper_files','helper_directories')) and value['helper_files']+value['helper_directories']<=8192 and type(value['helper_bytes']) is int and 0<=value['helper_bytes']<=1073741824, 'helper-bounds')
+    require(all(type(value[k]) is str and re.fullmatch('[0-9a-f]{64}',value[k]) for k in ('helper_tsv_sha256','helper_nodes_sha256','helper_entry_sha256','sdk_sha256')), 'helper-digests')
+    require(type(value['commands']) is list and len(value['commands'])==3, 'helper-command-count')
+    for i,row in enumerate(value['commands']):
+        require(set(row)=={'error','exit','forced_cleanup','group_absent','log','log_bytes','waited'} and type(row['exit']) is int and row['exit']==0 and row['waited'] is True and row['group_absent'] is True and row['forced_cleanup'] is False and row['error'] is False and row['log']=='build-%02d.log'%i and type(row['log_bytes']) is int and 0<=row['log_bytes']<=8388608, 'helper-command')
+
+"""Closed data validation candidate. It issues no admission, lease or native proof."""
+
+KEYS = {"asevd402_observed", "broker_exit", "broker_pid", "control", "descriptor_supplied", "kernel_peer_bound_to_owned_worker", "native_acceptance", "owned_process_groups_joined", "ready_request_observed", "request_bytes", "schema", "sent_bytes", "source_commit", "status", "stream_custody", "systemd_worker_authority", "worker_exit", "worker_pid", "worker_stdout_bytes"}
+
+def require_n03_result(raw, source):
+    def reject():
+        raise ValueError("n03-closed-data-rejected")
+    def unique(rows):
+        result = {}
+        for key, value in rows:
+            if key in result: reject()
+            result[key] = value
+        return result
+    def invalid_constant(value):
+        reject()
+    if not isinstance(raw, bytes) or not 0 < len(raw) <= 4096 or raw[-1:] != b"\n": reject()
+    value = json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+    if not isinstance(value, dict) or set(value) != KEYS: reject()
+    expected = {"schema":"issue779-n03-peer-observation-v1", "control":"N03", "status":"observed", "source_commit":source, "worker_exit":1, "broker_exit":0, "worker_stdout_bytes":0, "asevd402_observed":True, "kernel_peer_bound_to_owned_worker":True, "request_bytes":0, "sent_bytes":0, "ready_request_observed":False, "descriptor_supplied":False, "owned_process_groups_joined":True, "native_acceptance":False, "systemd_worker_authority":False, "stream_custody":"private-files-after-original-process-reap"}
+    if any(type(value[k]) is not type(v) or value[k] != v for k,v in expected.items()): reject()
+    if any(type(value[k]) is not int or not 0 < value[k] <= 2147483647 for k in ("worker_pid", "broker_pid")): reject()
+    if value["worker_pid"] == value["broker_pid"]: reject()
+    # Caller must independently require fixture numeric0, exact three case receipt,
+    # authenticated archive/custody, raw peer trace and live identity bindings.
+    return value
+
+
+def validate_n03_archive(values):
+    require('logs/n03/result.json' in values, 'n03-result-missing')
+    result = values['logs/n03/result.json']
+    require_n03_result((json.dumps(result,separators=(',',':'))+'\n').encode(), SOURCE)
+    require(values['fixture-result.json']['n03_result_sha256']==values['n03-result-sha256'], 'n03-result-binding')
+    require(values['fixture-result.json']['n12_record_sha256']==values['n12-record-sha256'], 'n12-record-binding')
+    fields={'schema','pid','start_ticks','uid4','gid4','cgroup','exact_managed_argv','image_pinned','empty_groups','no_new_privs','effective_capabilities_zero'}
+    for name,pid in [('worker-live.json',result['worker_pid']),('broker-live.json',result['broker_pid']),('broker-live-after.json',result['broker_pid'])]:
+        row=values.get('logs/n03/'+name)
+        require(type(row) is dict and set(row)==fields and row['schema']=='issue779-n03-owned-image-sample-v1' and type(row['pid']) is int and row['pid']==pid and type(row['start_ticks']) is str and re.fullmatch('[1-9][0-9]*',row['start_ticks']) and row['exact_managed_argv'] is True and row['image_pinned'] is True and row['empty_groups'] is True and type(row['no_new_privs']) is int and row['no_new_privs']==1 and row['effective_capabilities_zero'] is True, 'n03-live-binding')
+        for field in ('uid4','gid4'):
+            parts=row[field].split(':');require(len(parts)==4 and all(re.fullmatch('[1-9][0-9]*',x) for x in parts) and len(set(parts))==1,'n03-credentials')
+        require(re.fullmatch(r'0::/system.slice/issue779-native-tool-[0-9a-f]{32}-[0-9]+\.service',row['cgroup']), 'n03-cgroup')
+    require(values['logs/n03/broker-live.json']==values['logs/n03/broker-live-after.json'], 'n03-broker-continuity')
+    worker=values['logs/n03/worker-live.json'];broker=values['logs/n03/broker-live.json']
+    require(worker['uid4']!=broker['uid4'] and worker['gid4']==broker['gid4']=='65534:65534:65534:65534' and worker['cgroup']==broker['cgroup'], 'n03-selection-continuity')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--workspace', required=True)
+    parser.add_argument('--build-root', required=True)
+    parser.add_argument('--helper-build-root', required=True)
+    parser.add_argument('--output', required=True)
+    parser.add_argument('--reviewed-script-sha256', required=True)
+    args = parser.parse_args()
+    job_end = int(os.environ['JOB_DEADLINE_MONOTONIC_NS']) / 1_000_000_000
+    start = time.monotonic()
+    final = min(job_end, start + 900)
+    require(N03_INDEPENDENT_REVIEW_CLEAR and not N03_SOURCE_REBIND_PENDING, 'n03-review-or-source-rebind-pending')
+    require(args.execute and sys.platform == 'linux' and os.uname().machine == 'x86_64'
+            and os.geteuid() > 0 and os.getegid() > 0 and final - start > 850, 'native-platform-or-job-budget')
+    workspace, build, output = map(Path, (args.workspace, args.build_root, args.output))
+    require(all(path.is_absolute() for path in (workspace, build, output)), 'absolute-paths')
+    require(not output.exists() and not output.is_symlink(), 'output-reuse')
+    output.mkdir(mode=0o700)
+    helper_build = Path(args.helper_build_root)
+    require(helper_build.is_absolute() and helper_build not in (workspace, build, output), 'helper-build-root')
+    runner = Runner(output, final)
+    result = {'schema': 'issue779-csharp-n02-n03-n12-run-v1', 'source_commit': SOURCE, 'exit': 1,
+              'commands': runner.records, 'native_dispatched': False, 'native_case_receipt_verified': False,
+              'trusted_enabled': False, 'remaining_thirteen_controls': 'pending'}
+    generation = uuid.uuid4().hex
+    root = Path('/var/lib/appsurface-evidence-input-' + generation)
+    retained = False
+    failure = None
+    try:
+        require(re.fullmatch('[0-9a-f]{64}', args.reviewed_script_sha256)
+                and sha(read(Path(__file__), 131072, final)) == args.reviewed_script_sha256, 'orchestrator-pin')
+        reviewed = workspace / '.github/issue779-csharp-native'
+        for name, pin in PINS.items():
+            require(re.fullmatch('[0-9a-f]{64}', pin) and sha(read(reviewed / name, 131072, final)) == pin, 'reviewed-pin')
+        raw = read(build / 'receipts/build-receipt.json', 1048576, final)
+        receipt = decode(raw)
+        require(not os.path.lexists(build / 'receipts/late-publication-failure.json'), 'late-build-publication')
+        maps = {name: (read(build / f'handoff/{name}.tsv', 1048576, final),
+                       read(build / f'handoff/{name}-nodes.json', 4194304, final)) for name in ('source', 'tool', 'runtime')}
+        validate_build(receipt, maps)
+        result['build_receipt_sha256'] = sha(raw)
+        result['generation'] = generation
+        result['build_artifacts'] = receipt['artifacts']
+        require(not os.path.lexists(helper_build / 'late-helper-publication-failure.json'), 'late-helper-publication')
+        helper_raw = read(helper_build / 'helper-build-receipt.json', 1048576, final)
+        helper = decode(helper_raw)
+        validate_helper_handoff(helper, PINS['build-helper.sh'])
+        helper_maps = (read(helper_build / 'helper.tsv', 1048576, final), read(helper_build / 'helper-nodes.json', 4194304, final))
+        require(sha(helper_maps[0]) == helper['helper_tsv_sha256'] and sha(helper_maps[1]) == helper['helper_nodes_sha256'], 'helper-map-pins')
+        helper_nodes = decode(helper_maps[1])
+        require(set(helper_nodes) == {'schema','root_name','files','directories'} and helper_nodes['schema'] == 'issue779-build-node-inventory-v1' and helper_nodes['root_name'] == 'tool', 'helper-node-schema')
+        require(len(helper_nodes['files']) == helper['helper_files'] and len(helper_nodes['directories']) == helper['helper_directories'] and sum(v['bytes'] for v in helper_nodes['files'].values()) == helper['helper_bytes'] and helper_nodes['files']['NativePeerBroker.dll']['sha256'] == helper['helper_entry_sha256'], 'helper-membership-receipt')
+        result['helper_build_receipt_sha256'] = sha(helper_raw)
+        helper_root = Path('/var/lib/appsurface-evidence-n03-helpers') / generation / 'bundle'
+        runner.phase = 'root-bootstrap'
+        bootstrap = Path('/var/lib/appsurface-evidence-bootstrap-' + generation)
+        triples = [part for name, pin in PINS.items() for part in (str(reviewed / name), name, pin)]
+        runner.run(ROOT_PREFIX + ['-c', BOOTSTRAP, '--', generation] + triples, time.monotonic() + 30)
+        runner.phase = 'root-acquisition-and-transport'
+        acquisition_end = min(final - 5, time.monotonic() + 120)
+        acquisition_ms = root_deadline(acquisition_end)
+        runner.run(ROOT_PREFIX + [str(bootstrap / 'acquire-inbound.sh'), '--execute', '--generation', generation,
+            '--build-root', str(build), '--reviewed-root', str(bootstrap), '--deadline-monotonic-ms', acquisition_ms,
+            '--reviewed-script-sha256', PINS['acquire-inbound.sh'], '--transport-sha256', PINS['prepare-root-inputs-v2.sh'],
+            '--fixture-sha256', PINS['checkpoint-n12-data-integration.sh'], '--audit-sha256', PINS['prepare-os-audit-v2.py'],
+            '--source-review-sha256', PINS['source-review.json'], '--helper-build-root', str(helper_build), '--helper-build-receipt-sha256', sha(helper_raw)], acquisition_end)
+        inbound = Path('/var/lib/appsurface-evidence-inbound-' + generation)
+        transport = ['--execute', '--reviewed-script-sha256', PINS['prepare-root-inputs-v2.sh'], '--generation', generation,
+                     '--deadline-monotonic-ms', acquisition_ms, '--source-commit', SOURCE]
+        for name in ('source', 'tool', 'runtime'):
+            fact = receipt['artifacts'][name]
+            transport += ['--' + name + '-root', str(inbound / name), '--' + name + '-map', str(inbound / 'control' / (name + '.tsv')),
+                          '--' + name + '-map-sha256', fact['tsv_sha256'], '--' + name + '-nodes', str(inbound / 'control' / (name + '-nodes.json')),
+                          '--' + name + '-nodes-sha256', fact['nodes_sha256']]
+        transport += ['--helper-root', str(inbound / 'helper'), '--helper-map', str(inbound / 'control/helper.tsv'), '--helper-map-sha256', helper['helper_tsv_sha256'], '--helper-nodes', str(inbound / 'control/helper-nodes.json'), '--helper-nodes-sha256', helper['helper_nodes_sha256'], '--helper-build-receipt', str(inbound / 'control/helper-build-receipt.json'), '--helper-build-receipt-sha256', sha(helper_raw), '--helper-entry-sha256', helper['helper_entry_sha256']]
+        transport += ['--source-review', str(inbound / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
+                      '--build-receipt', str(inbound / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
+                      '--fixture', str(inbound / 'scripts/checkpoint-n12-data-integration.sh'), '--fixture-sha256', PINS['checkpoint-n12-data-integration.sh'],
+                      '--os-audit-script', str(inbound / 'scripts/prepare-os-audit-v2.py'), '--os-audit-script-sha256', PINS['prepare-os-audit-v2.py']]
+        runner.run(ROOT_PREFIX + [str(bootstrap / 'prepare-root-inputs-v2.sh')] + transport, acquisition_end)
+        runner.phase = 'same-host-unprivileged-os-audit'
+        audit_dir = Path('/tmp/issue779-os-audit-' + generation)
+        require(not os.path.lexists(audit_dir), 'audit-output-reuse')
+        audit_dir.mkdir(mode=0o700)
+        audit_end = min(final - 5, time.monotonic() + 60)
+        try:
+            runner.run(['/usr/bin/python3', '-B', str(root / 'reviewed/prepare-os-audit-v2.py'), '--runtime-root', str(root / 'runtime'),
+                        '--tool-root', str(root / 'tool'), '--helper-root', str(helper_root), '--output', str(audit_dir / 'os-audit.json'),
+                        '--deadline-monotonic', str(audit_end)], audit_end)
+        except BaseException:
+            try:
+                result['os_audit_failure_context'] = retain_audit_failure_context(
+                    audit_dir / 'os-audit.json.failure-context.json', output / 'os-audit-failure-context.json', audit_end)
+            except BaseException:
+                pass
+            raise
+        audit = read(audit_dir / 'os-audit.json', 1048576, audit_end)
+        require(decode(audit)['schema'] == 'issue779-fixture-os-elf-pins-v2', 'audit-schema')
+        audit_hash = sha(audit)
+        runner.run(ROOT_PREFIX + ['-c', AUDIT_COPY, '--', generation, str(audit_dir / 'os-audit.json'), audit_hash], audit_end)
+        result['os_audit_sha256'] = audit_hash
+        runner.phase = 'actual-csharp-n02-n03-n12'
+        require(final - time.monotonic() > 665, 'fixture-plus-retention-budget')
+        fixture = ['--execute', '--reviewed-script-sha256', PINS['checkpoint-n12-data-integration.sh']]
+        for name, flag in (('source', 'source'), ('tool', 'payload'), ('runtime', 'runtime')):
+            fact = receipt['artifacts'][name]
+            fixture += ['--' + flag + '-root', str(root / name), '--' + flag + '-manifest', str(root / 'control' / (name + '.tsv')),
+                        '--' + flag + '-manifest-sha256', fact['tsv_sha256'], '--' + flag + '-nodes', str(root / 'control' / (name + '-nodes.json')),
+                        '--' + flag + '-nodes-sha256', fact['nodes_sha256']]
+        fixture += ['--n03-helper-root', str(helper_root), '--n03-helper-map', str(root / 'control/helper.tsv'), '--n03-helper-map-sha256', helper['helper_tsv_sha256'], '--n03-helper-nodes', str(root / 'control/helper-nodes.json'), '--n03-helper-nodes-sha256', helper['helper_nodes_sha256'], '--n03-helper-entry-sha256', helper['helper_entry_sha256'], '--n03-helper-generation', generation]
+        fixture += ['--source-review', str(root / 'control/source-review.json'), '--source-review-sha256', PINS['source-review.json'],
+                    '--build-receipt', str(root / 'control/build-receipt.json'), '--build-receipt-sha256', sha(raw),
+                    '--os-audit', str(root / 'control/os-audit.json'), '--os-audit-sha256', audit_hash,
+                    '--source-revision', SOURCE, '--base-revision', BASE_REVISION,
+                    '--workflow-identity', 'github-actions-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'],
+                    '--entry', 'ForgeTrust.AppSurface.Cli.dll', '--entry-sha256', decode(maps['tool'][1])['files']['ForgeTrust.AppSurface.Cli.dll']['sha256'],
+                    '--runtime-host', 'dotnet', '--n02-uid', str(os.geteuid()), '--n02-gid', str(os.getegid())]
+        result['native_dispatched'] = True
+        code, _ = runner.run(ROOT_PREFIX + ['-c', DISPATCH, '--', generation, PINS['checkpoint-n12-data-integration.sh']] + fixture,
+                             time.monotonic() + 630, allow_failure=True)
+        result['fixture_exit'] = code
+        require(code == 0, 'native-fixture-nonzero')
+    except BaseException as caught:
+        failure = caught
+    finally:
+        # Retention cannot upgrade a failed native operation, and cannot stop/clean its units.
+        if result['native_dispatched'] and time.monotonic() + 35 < final:
+            try:
+                runner.phase = 'bounded-private-retention'
+                retain_end = min(final - 5, time.monotonic() + 30)
+                _, packet = runner.run(ROOT_PREFIX + [str(bootstrap / 'retain-native.sh'), '--execute', '--generation', generation,
+                    '--deadline-monotonic-ms', root_deadline(retain_end), '--reviewed-script-sha256', PINS['retain-native.sh']], retain_end)
+                result['retention_terminal'] = packet.decode('ascii').strip()
+                _, before_sha = runner.run(ROOT_PREFIX + ['-c', ROOT_ARCHIVE_SHA, '--', generation], retain_end)
+                _, archive = runner.run(ROOT_PREFIX + ['-c', READ_ROOT_ARCHIVE, '--', generation], retain_end)
+                _, after_sha = runner.run(ROOT_PREFIX + ['-c', ROOT_ARCHIVE_SHA, '--', generation], retain_end)
+                archive_hash = sha(archive)
+                require(before_sha.decode('ascii').strip() == after_sha.decode('ascii').strip() == archive_hash, 'root-archive-digest')
+                values = inspect_archive(archive)
+                save(output / 'native-private.tar', archive, retain_end)
+                result['private_archive_sha256'] = archive_hash
+                result['private_archive_bytes'] = len(archive)
+                result['retention_selection'] = values['retention-selection.json']
+                if not failure:
+                    require(result.get('fixture_exit') == 0 and 'fixture-result.json' in values, 'successful-native-receipt-missing')
+                    validate_native_result(values['fixture-result.json'])
+                    validate_n03_archive(values)
+                    result['native_case_receipt_verified'] = True
+                    result['native_cases_passed'] = ['N02', 'N03', 'N12']
+                retained = True
+            except BaseException as caught:
+                failure = failure or caught
+        elif result['native_dispatched']:
+            failure = failure or Rejected('retention-budget-unavailable')
+        result['retention_completed'] = retained
+        result['failure'] = {'category': getattr(failure, 'category', 'native-operation'), 'error_class': type(failure).__name__} if failure else None
+        result['elapsed_seconds'] = time.monotonic() - start
+        result['exit'] = 0 if not failure and retained and result['native_case_receipt_verified'] else 1
+        # Original five-second final reserve belongs to invalidation, not another phase.
+        try:
+            save(output / 'native-receipt.pending.json', result, final - 5)
+            require(time.monotonic() < final - 5, 'late-pending-publication')
+            os.rename(output / 'native-receipt.pending.json', output / 'native-receipt.json')
+            require(time.monotonic() < final - 5, 'late-receipt-rename')
+            print('NATIVE_TEST_TERMINAL:' + str(result['exit']), flush=True)
+            require(time.monotonic() < final - 5, 'late-terminal-output')
+        except BaseException:
+            # A published zero is invalid if final output/clock validation fails.
+            # The separately captured outer numeric terminal must also be zero.
+            result['exit'] = 1
+            if time.monotonic() < final:
+                try:
+                    save(output / 'native-late-failure.json', {'exit': 1, 'category': 'late-publication'}, final)
+                except BaseException:
+                    pass
+    return result['exit']
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
