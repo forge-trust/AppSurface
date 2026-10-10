@@ -128,7 +128,7 @@ internal static class EvidenceNativeQualification
     internal static bool PendingStartOwnerDeathEnabled => Current == EvidenceNativeQualificationKind.PendingStartOwnerDeath;
 
     /// <summary>Creates metadata for the private stage wait only in a cancellation qualification image.</summary>
-    /// <returns>Null for ordinary execution and peer replacement; otherwise an internal one-attempt checkpoint.</returns>
+    /// <returns>Null for every image except N08 and N09; otherwise an internal one-attempt checkpoint.</returns>
     internal static EvidenceOriginalCancellationCheckpoint? CreateCancellationCheckpoint() =>
         CancellationEnabled ? new EvidenceOriginalCancellationCheckpoint() : null;
 }
