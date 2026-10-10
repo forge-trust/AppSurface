@@ -51,6 +51,8 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
         var expected = EvidenceNativeQualificationKind.LeaderExitWithDescendant;
+#elif EVIDENCE_PRIVATE_N15
+        var expected = EvidenceNativeQualificationKind.PendingStartOwnerDeath;
 #elif EVIDENCE_PRIVATE_N16
         var expected = EvidenceNativeQualificationKind.AcceptedBlockedWork;
 #elif EVIDENCE_PRIVATE_N13
@@ -80,6 +82,8 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.OwnerDeathAcceptedWorkEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.AcceptedBlockedWork,
             EvidenceNativeQualification.N16StopWaitEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.PendingStartOwnerDeath,
+            EvidenceNativeQualification.PendingStartOwnerDeathEnabled);
         Assert.Equal(EvidenceNativeQualification.WorkerStallEnabled,
             EvidenceFixedSynchronousInputFactory.CreateForProtectedRole() is not null);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();

@@ -20,6 +20,8 @@ internal enum EvidenceNativeQualificationKind
     SynchronousWorkerStall,
     /// <summary>Private N12 normal leader exit with a live same-image output holder.</summary>
     LeaderExitWithDescendant,
+    /// <summary>Private N15 owner death while the real worker start remains pending.</summary>
+    PendingStartOwnerDeath,
     /// <summary>Private N16 accepted blocked workload with concurrent authenticated stop and wait.</summary>
     AcceptedBlockedWork,
     /// <summary>Private N13 owner SIGKILL while the accepted workload remains pending.</summary>
@@ -31,14 +33,14 @@ internal enum EvidenceNativeQualificationKind
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
 /// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
-/// EVIDENCE_PRIVATE_N07, EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
+/// EVIDENCE_PRIVATE_N07, EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14, EVIDENCE_PRIVATE_N15 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
 /// selecting a checkpoint grants no admission or accepted consumer proof.
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
-#if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N07 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N16))
+#if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N07 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N15 && (EVIDENCE_PRIVATE_N16))
 #error A private qualification image must select exactly one checkpoint.
 #endif
 
@@ -61,6 +63,8 @@ internal static class EvidenceNativeQualification
             return EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
             return EvidenceNativeQualificationKind.LeaderExitWithDescendant;
+#elif EVIDENCE_PRIVATE_N15
+            return EvidenceNativeQualificationKind.PendingStartOwnerDeath;
 #elif EVIDENCE_PRIVATE_N16
             return EvidenceNativeQualificationKind.AcceptedBlockedWork;
 #elif EVIDENCE_PRIVATE_N13
@@ -119,6 +123,9 @@ internal static class EvidenceNativeQualification
         EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork => "NATIVE_PRIVATE_PHASE:N14:ACCEPTED_BLOCKED_WORK",
         _ => null
     };
+
+    /// <summary>Gets whether this image owns the fixed N15 pending-start death barrier.</summary>
+    internal static bool PendingStartOwnerDeathEnabled => Current == EvidenceNativeQualificationKind.PendingStartOwnerDeath;
 
     /// <summary>Creates metadata for the private stage wait only in a cancellation qualification image.</summary>
     /// <returns>Null for ordinary execution and peer replacement; otherwise an internal one-attempt checkpoint.</returns>

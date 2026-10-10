@@ -78,8 +78,12 @@ internal sealed partial class LinuxSystemdBackend
     internal async Task<string> StartWorkerAsync(LinuxWorkerUnit worker, CancellationToken token)
     {
         if (worker is null) throw InvalidControl();
-        return await StartOwnedUnitAsync(worker.Unit, worker.Arguments, worker.Properties,
+        var jobPath = await StartOwnedUnitAsync(worker.Unit, worker.Arguments, worker.Properties,
             worker.StandardOutput, worker.StandardError, token).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N15
+        await WaitAtN15PendingStartBarrierAsync(worker.Unit, jobPath, token).ConfigureAwait(false);
+#endif
+        return jobPath;
     }
 
 #if EVIDENCE_PRIVATE_N10
@@ -93,6 +97,30 @@ internal sealed partial class LinuxSystemdBackend
             worker.StandardOutput, worker.StandardError, token).ConfigureAwait(false);
         await checkpoint.WaitAfterStartReplyAsync(worker.Unit, jobPath, token).ConfigureAwait(false);
         return jobPath;
+    }
+#endif
+
+#if EVIDENCE_PRIVATE_N15
+    /// <summary>Publishes a bounded trigger after the real start reply, then holds the original start task.</summary>
+    /// <remarks>The frame grants no admission or join status; the original token remains the only release bound.</remarks>
+    private static async Task WaitAtN15PendingStartBarrierAsync(LinuxUnitName unit, string jobPath,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var frame = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            case_name = "N15",
+            phase = "start-transient-unit-reply",
+            unit = unit.Value,
+            job_path = jobPath,
+        });
+        if (frame.Length is 0 or > 8192) throw InvalidControl();
+
+        using var error = Console.OpenStandardError();
+        await error.WriteAsync(frame.AsMemory(), token).ConfigureAwait(false);
+        await error.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), token).ConfigureAwait(false);
+        await error.FlushAsync(token).ConfigureAwait(false);
+        await Task.Delay(Timeout.InfiniteTimeSpan, token).ConfigureAwait(false);
     }
 #endif
 
