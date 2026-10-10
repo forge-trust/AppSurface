@@ -73,6 +73,18 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>Copies private diagnostic data after the original stop procedure actually returns.</summary>
+    /// <param name="generation">Original owner generation, as diagnostic binding data only.</param>
+    /// <returns>The completed original collector receipt, or a closed unavailable projection.</returns>
+    /// <remarks>
+    /// Unlike Output, this diagnostic does not require or establish physical settlement. The receipt is
+    /// assigned only after the original paired pumps join in FinalizeAsync. No READY, successful output,
+    /// native monitor, cgroup or filesystem custody claim is supplied, and no reader or wait is dispatched.
+    /// The fixed private cancellation failure path alone emits these bytes into its protected root log.
+    /// </remarks>
+    internal byte[] CaptureJoinedOutputDiagnostic(Guid generation) =>
+        LinuxJoinedWorkerOutputDiagnostic.EncodeDetached(generation, _lifetime.StopJoined ? _output : null);
+
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener,

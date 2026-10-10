@@ -559,3 +559,8 @@ PR remain required.
 Prepared the closed N12 same-image output-holder procedure on the integrated C# graph, described in the [Supervision reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#n12-leader-exit-with-an-inherited-output-holder). It exercises natural leader exit followed by real original-unit stop/group/pump joins. The ordinary build remains `None`, has no child or observer, and rejects the private role before configuration. No new admission factory, compiled workload registration, capability or consumer proof is created.
 
 The private intermediate record explicitly precedes custody/account closure. Native N12 completion requires the actual post-stop group/EOF evidence **and** final root success/cleanup and complete source/deployment binding. This source-preparation entry is not a Linux result, a numerical coverage result or checkpoint completion.
+
+
+## Private cancellation failure visibility
+
+The N08/N09 failure-only [joined output diagnostic](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-pre-ready-worker-failure-diagnostics) preserves the actual worker stderr already retained by the original collector when READY/kernel/custody capture is unavailable. Its detached record establishes no native checkpoint or physical settlement. The unchanged first failure and native validators remain authoritative; the next cancellation attempt must diagnose any retained worker error before an evidence-supported execution fix or control credit.
