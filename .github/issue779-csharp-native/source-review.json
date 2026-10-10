@@ -1,0 +1,91 @@
+{
+  "case": "N16",
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "review_evidence": {
+    "build_workflow": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/build-workflow-prepin-review.json",
+      "sha256": "b0c8008442ca74771723d3c8b15cba920ee2a2908cc77663b267d778855ad8b7"
+    },
+    "capture": {
+      "path": "/private/tmp/issue779-csharp-n16-source-capture-preparation-v2/review-after-description-fix.json",
+      "sha256": "b881dbe5388b188e0a426b3b3fe762312d68ad7ec8429aa1ce8d1a1e74aece35"
+    },
+    "csharp_admission_cleanup": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/admission-cleanup-independent-review.json",
+      "sha256": "172cd504fe3d28c2eb939f618b4c46ac84e737393e8d8f8f5d587d19791194a2"
+    },
+    "csharp_failure_latch": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/incremental-failure-latch-review.json",
+      "sha256": "3bfd732a622193d3b55d52079b99145eeca185322f1912e9ef3df3abee26818a"
+    },
+    "csharp_validation": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/failure-latch-validation/receipt.json",
+      "sha256": "c840c5e1442996781b5242b3d8b7453f4990ce5fc420fc9729eb14a036a0db17"
+    },
+    "exact_option_control": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/no-abbreviation-validation/receipt.json",
+      "sha256": "058f97bcd5fe47b51b3ef013e60d28815738e1376ada88811d9b5ad0b56c0daa"
+    },
+    "fixture": {
+      "path": "/private/tmp/issue779-csharp-n16-native-fixture-preparation-v4/shell-source-review.json",
+      "sha256": "3540a2cc8569030be5dfa3639476ae359b9194aba90833b86084895831cbd33d"
+    },
+    "parser": {
+      "path": "/private/tmp/issue779-csharp-n16-native-fixture-preparation-v4/parser-source-review.json",
+      "sha256": "5311d5bd0d180def6ce7b5922a093c244b3a0ff0c3356ec7706ff6bc111a2e47"
+    },
+    "parser_pruned_group_correction": {
+      "path": "/private/tmp/issue779-csharp-n16-pruned-cgroup-parser-v8/incremental-clear-review.json",
+      "sha256": "b2ec30b608492df4e0aaea293297751951faf0a189e31fdb8ebdeb2100693927"
+    },
+    "portable_parser_validation": {
+      "path": "/private/tmp/issue779-csharp-n16-pruned-cgroup-parser-v8/validation-receipt.json",
+      "sha256": "461618ed61b89e5410d1baaefecb91efa881019f84eaa3899ffd4b618d4d29dc"
+    },
+    "root_shell": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/shell-independent-main-review.json",
+      "sha256": "d4db2d54e2e73a61063f5bb1e84c83e5222998df84ac267e4e467248e4c8e258"
+    },
+    "runner_controls": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-controls-receipt-v2.json",
+      "sha256": "4b2f0a2af294d3c6c2ec09b06421141df9ef8bd536c2708306968cc844832a4c"
+    },
+    "runner_controls_targeted": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-controls-receipt-v3.json",
+      "sha256": "099a9b7abe5aaaa9965de25dc4c38eb508a46897dbd4b9be6990209105076540"
+    },
+    "runner_exact_options": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-exact-option-review.json",
+      "sha256": "4cb40d641342da262a40e8ce8e0338d1c60686af0aeaf02406bfea637283ed65"
+    },
+    "runner_fix": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-functional-fix-review.json",
+      "sha256": "8b87ea4716c30c91e9d87271eef50d108fece52e42416845737a1961844aea3c"
+    },
+    "runner_original": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-functional-review.json",
+      "sha256": "73cc57f9b5c2a438282b11a76094244dc7d210e99f4d1c07393a97358670fe52"
+    },
+    "workflow_fix": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/workflow-fix-review.json",
+      "sha256": "a5d943bdeea00f53f966014c7e43dedd824d13cfee73f0831de55178230c8448"
+    }
+  },
+  "review_flags": {
+    "fixture": true,
+    "native_handoff": true,
+    "parser": true,
+    "retention": true,
+    "root_cleanup": true,
+    "root_transport": true,
+    "source_capture": true
+  },
+  "schema": "issue779-n16-native-source-review-v1",
+  "source_capture_sha256": "2ba8a8d962bfd3d78a7d080b5abb550ceb54796156acdb2b1b1b3e502586d128",
+  "source_commit": "dd941d06ec1a038fd4d82228005f14fd3c6440a0",
+  "source_count": 2849,
+  "source_parent": "dbfc4cbda2aa7de0d5a544b47895f209138767e7",
+  "source_tree": "1796a6e5372f14d3793b784d81f4a443332b4f37"
+}
