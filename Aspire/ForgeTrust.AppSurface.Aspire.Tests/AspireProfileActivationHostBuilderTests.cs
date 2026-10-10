@@ -167,6 +167,86 @@ public sealed class AspireProfileActivationHostBuilderTests
     }
 
     [Fact]
+    public async Task RealHost_SynchronousRootDisposalLeavesAsyncOnlyProviderForOwnerAndConcurrentCleanupJoins()
+    {
+        var provider = new AsyncOnlyProbeProvider("async-only", "present", holdDisposal: true);
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]);
+        builder.ConfigureAppConfiguration((_, config) => config.Add(new ProbeSource(provider)));
+        var host = builder.Build();
+        var root = Assert.IsAssignableFrom<IConfigurationRoot>(host.Services.GetRequiredService<IConfiguration>());
+        var lease = Assert.Single(root.Providers, candidate => candidate.TryGet("async-only", out var value) && value == "present");
+
+        var synchronousHostCleanup = Task.Run(host.Dispose);
+        try
+        {
+            await synchronousHostCleanup.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch
+        {
+            provider.ReleaseDisposal();
+            throw;
+        }
+
+        Assert.Equal(0, provider.DisposeCount);
+
+        var externalCleanup = Assert.IsAssignableFrom<IAsyncDisposable>(lease).DisposeAsync().AsTask();
+        Task? ownerCleanup = null;
+
+        try
+        {
+            await provider.DisposeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            ownerCleanup = ownership.DisposeAsync().AsTask();
+
+            Assert.False(ownerCleanup.IsCompleted);
+            Assert.Equal(1, provider.DisposeCount);
+        }
+        finally
+        {
+            ownerCleanup ??= ownership.DisposeAsync().AsTask();
+            provider.ReleaseDisposal();
+        }
+
+        await Task.WhenAll(externalCleanup, ownerCleanup!).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public async Task RealHost_AsyncOnlyProviderLoadFailureAwaitsCleanupAndDrainsOtherLeasesAfterCleanupFailure()
+    {
+        var prior = new AsyncOnlyProbeProvider("prior-async-only", "present");
+        var primary = new InvalidOperationException("unique-async-provider-load-failure");
+        var cleanup = new InvalidOperationException("unique-async-provider-cleanup-failure");
+        var failing = new AsyncOnlyProbeProvider("failing-async-only", "present", primary, cleanup, holdDisposal: true);
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]);
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.Add(new ProbeSource(prior));
+            config.Add(new ProbeSource(failing));
+        });
+
+        Assert.Same(primary, Assert.Throws<InvalidOperationException>(() => builder.Build()));
+        var ownerCleanup = ownership.DisposeAsync().AsTask();
+        try
+        {
+            await failing.DisposeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(ownerCleanup.IsCompleted);
+            Assert.Equal(1, failing.DisposeCount);
+        }
+        finally
+        {
+            failing.ReleaseDisposal();
+        }
+
+        var observedCleanup = await Assert.ThrowsAsync<InvalidOperationException>(() => ownerCleanup.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Same(cleanup, observedCleanup);
+        await prior.DisposeStarted.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(1, prior.DisposeCount);
+        Assert.Equal(1, failing.DisposeCount);
+    }
+
+    [Fact]
     public async Task RealHost_CallerOwnedSingletonAndBorrowedConfigurationRemainOwnedByCaller()
     {
         var callerProvider = new ProbeProvider();
@@ -367,7 +447,7 @@ public sealed class AspireProfileActivationHostBuilderTests
         }
     }
 
-    private sealed class ProbeSource(ProbeProvider provider) : IConfigurationSource
+    private sealed class ProbeSource(IConfigurationProvider provider) : IConfigurationSource
     {
         public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
     }
@@ -396,6 +476,49 @@ public sealed class AspireProfileActivationHostBuilderTests
             return new CallbackRegistration(() => ActiveRegistrations--);
         }
         public void Dispose() { DisposeCount++; if (DisposeError is not null) throw DisposeError; }
+    }
+
+    private sealed class AsyncOnlyProbeProvider : IConfigurationProvider, IAsyncDisposable
+    {
+        private readonly string _key;
+        private readonly string _value;
+        private readonly TaskCompletionSource _disposeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _disposeRelease = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _disposeCount;
+
+        internal AsyncOnlyProbeProvider(string key, string value, Exception? loadError = null, Exception? disposeError = null, bool holdDisposal = false)
+        {
+            _key = key;
+            _value = value;
+            LoadError = loadError;
+            DisposeError = disposeError;
+            if (!holdDisposal)
+            {
+                _disposeRelease.TrySetResult();
+            }
+        }
+
+        internal Exception? LoadError { get; }
+        internal Exception? DisposeError { get; }
+        internal Task DisposeStarted => _disposeStarted.Task;
+        internal int DisposeCount => Volatile.Read(ref _disposeCount);
+        internal void ReleaseDisposal() => _disposeRelease.TrySetResult();
+        public bool TryGet(string key, out string? value)
+        {
+            value = key == _key ? _value : null;
+            return value is not null;
+        }
+        public void Set(string key, string? value) { }
+        public void Load() { if (LoadError is not null) throw LoadError; }
+        public IEnumerable<string> GetChildKeys(IEnumerable<string> earlierKeys, string? parentPath) => earlierKeys;
+        public IChangeToken GetReloadToken() => NullChangeToken.Singleton;
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            _disposeStarted.TrySetResult();
+            await _disposeRelease.Task.ConfigureAwait(false);
+            if (DisposeError is not null) throw DisposeError;
+        }
     }
 
     private sealed class CallbackRegistration(Action dispose) : IDisposable

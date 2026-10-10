@@ -8,6 +8,7 @@ using CliFx.Binding;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Aspire.Testing;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -577,6 +578,97 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
 
         Assert.True(receiptsOnJoined, "Worker 'receipts-on' did not join within the bounded cleanup wait.");
         Assert.True(receiptsOffJoined, "Worker 'receipts-off' did not join within the bounded cleanup wait.");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuilderSupportsDeferredSdkProjectArgumentsAfterBuild(bool configured)
+    {
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), "issue866-deferred-project", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var projectPath = TestPathUtils.PathUnder(root, "Worker.csproj");
+        File.WriteAllText(projectPath, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType></PropertyGroup></Project>");
+        try
+        {
+            IResourceBuilder<ProjectResource>? project = null;
+            await using var builder = configured
+                ? await AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<ConfiguredTestAppHost, ConfiguredTestModule, ConfiguredEmptyProfile>(
+                    new AppSurfaceAspireTestingOptions
+                    {
+                        ConfigureAspireBuilder = graph => project = graph.AddProject("deferred-worker", projectPath, options => options.ExcludeLaunchProfile = true)
+                    })
+                : await AppSurfaceAspireTestingBuilder.CreateAsync<ConfiguredTestAppHost, ConfiguredTestModule, ConfiguredEmptyProfile>();
+            project ??= builder.AddProject("deferred-worker", projectPath, options => options.ExcludeLaunchProfile = true);
+            var context = builder.ExecutionContext;
+            var configuration = builder.Configuration;
+            if (configured)
+            {
+                Assert.Same(builder, project.ApplicationBuilder);
+            }
+
+            _ = await builder.BuildAsync();
+            var result = await ExecutionConfigurationBuilder.Create(project.Resource)
+                .WithArgumentsConfig()
+                .BuildAsync(context, NullLogger.Instance, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Null(result.Exception);
+            Assert.Throws<InvalidOperationException>(() => project.ApplicationBuilder.Build());
+            Assert.Throws<InvalidOperationException>(() => _ = builder.Configuration);
+            if (configured)
+            {
+                Assert.Same(configuration, project.ApplicationBuilder.Configuration);
+            }
+
+            await builder.DisposeAsync();
+            if (configured)
+            {
+                Assert.Throws<ObjectDisposedException>(() => _ = project.ApplicationBuilder.Configuration);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task BuilderDisposal_ReentrantApplicationServiceReturnsWithoutDeadlock(bool configured, bool synchronousOuterDispose)
+    {
+        await using var builder = configured
+            ? await AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<ConfiguredTestAppHost, ConfiguredTestModule, ConfiguredEmptyProfile>(new AppSurfaceAspireTestingOptions())
+            : await AppSurfaceAspireTestingBuilder.CreateAsync<ConfiguredTestAppHost, ConfiguredTestModule, ConfiguredEmptyProfile>();
+        builder.Services.AddSingleton(_ => new ReentrantApplicationDisposalProbe(builder));
+        var application = await builder.BuildAsync();
+        var probe = application.Services.GetRequiredService<ReentrantApplicationDisposalProbe>();
+        if (synchronousOuterDispose)
+        {
+            builder.Dispose();
+        }
+        else
+        {
+            await builder.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        Assert.Equal(1, probe.DisposeCount);
+        await builder.DisposeAsync();
+        Assert.Equal(1, probe.DisposeCount);
+    }
+
+    private sealed class ReentrantApplicationDisposalProbe(AppSurfaceAspireProfileTestingBuilder builder) : IAsyncDisposable
+    {
+        private int _disposeCount;
+        public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            await builder.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        }
     }
 
     public void Dispose()

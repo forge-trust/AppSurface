@@ -350,9 +350,11 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
     }
 
     private sealed class OwnedProvider(IConfigurationProvider inner, AspireProfileActivationHostBuilder owner)
-        : IConfigurationProvider, IDisposable
+        : IConfigurationProvider, IDisposable, IAsyncDisposable
     {
-        private int _disposed;
+        private readonly object _disposalLock = new();
+        private TaskCompletionSource? _disposalCompletion;
+        private ExceptionDispatchInfo? _disposalError;
         internal AspireProfileActivationHostBuilder Owner => owner;
         public bool TryGet(string key, out string? value) => inner.TryGet(key, out value);
         public void Set(string key, string? value) => inner.Set(key, value);
@@ -361,10 +363,91 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
         public IChangeToken GetReloadToken() => new ObservedToken(inner.GetReloadToken(), owner);
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            if (inner is not IDisposable synchronous)
             {
-                (inner as IDisposable)?.Dispose();
+                return;
             }
+
+            TaskCompletionSource? start = null;
+            lock (_disposalLock)
+            {
+                if (_disposalCompletion is null)
+                {
+                    start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _disposalCompletion = start;
+                }
+            }
+
+            if (start is null)
+            {
+                return;
+            }
+
+            try
+            {
+                synchronous.Dispose();
+            }
+            catch (Exception error)
+            {
+                _disposalError = ExceptionDispatchInfo.Capture(error);
+                throw;
+            }
+            finally
+            {
+                start.TrySetResult();
+            }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            TaskCompletionSource? start = null;
+            Task completion;
+            lock (_disposalLock)
+            {
+                if (_disposalCompletion is null)
+                {
+                    start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _disposalCompletion = start;
+                }
+
+                completion = _disposalCompletion.Task;
+            }
+
+            if (start is not null)
+            {
+                _ = DisposeInnerAsync(start);
+            }
+
+            return new ValueTask(JoinDisposalAsync(completion));
+        }
+
+        private async Task DisposeInnerAsync(TaskCompletionSource completion)
+        {
+            try
+            {
+                if (inner is IAsyncDisposable asynchronous)
+                {
+                    await asynchronous.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (inner is IDisposable synchronous)
+                {
+                    synchronous.Dispose();
+                }
+            }
+            catch (Exception error)
+            {
+                _disposalError = ExceptionDispatchInfo.Capture(error);
+            }
+            finally
+            {
+                completion.TrySetResult();
+            }
+        }
+
+        private async Task JoinDisposalAsync(Task completion)
+        {
+            await completion.ConfigureAwait(false);
+            _disposalError?.Throw();
         }
     }
 

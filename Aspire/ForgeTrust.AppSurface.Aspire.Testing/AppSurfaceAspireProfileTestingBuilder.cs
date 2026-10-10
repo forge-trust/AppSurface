@@ -19,11 +19,14 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// The configured factory and profile composition first receive this builder in Preparing state. Graph access and
 /// mutations are available then, while build and disposal are rejected until the factory returns. Customize the
 /// returned builder before its single <see cref="BuildAsync(CancellationToken)"/> call. After a successful build,
-/// all builder access and a second build are rejected. Dispose the
+/// direct builder access and a second build are rejected. Configured resource builders retain the native Aspire
+/// context for deferred SDK callbacks after the application is built; post-build graph mutation is unsupported.
+/// Dispose the
 /// returned <see cref="DistributedApplication"/> before disposing this builder so stop and disposal failures remain at
 /// the application call site. As a fallback, builder disposal disposes the application before profile activation
 /// services. After a process-fatal build failure, builder disposal also makes a best effort to release any captured
-/// partial Aspire provider. Both disposal methods are idempotent; disposal during a build is rejected.
+/// partial Aspire provider. Both disposal methods are idempotent; concurrent callers join cleanup, while reentrant
+/// disposal from that same cleanup flow returns without waiting on itself. Disposal during a build is rejected.
 /// </remarks>
 public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicationTestingBuilder
 {
@@ -41,6 +44,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     private AspireBuildServiceProviderLease? _failedBuildServiceProviderLease;
     private readonly Action<string> _warningSink;
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly AsyncLocal<bool> _insideDisposal = new();
     private int _state;
     private readonly bool _configuredCreation;
     private readonly IDisposable? _creationConfiguration;
@@ -244,10 +248,16 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         var activation = BeginDispose(out var ownsDisposal);
         if (!ownsDisposal)
         {
-            _disposeCompletion.Task.GetAwaiter().GetResult();
+            if (!_insideDisposal.Value)
+            {
+                _disposeCompletion.Task.GetAwaiter().GetResult();
+            }
+
             return;
         }
 
+        var previousDisposalFlow = _insideDisposal.Value;
+        _insideDisposal.Value = true;
         Exception? primaryException = null;
         try
         {
@@ -306,6 +316,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
         finally
         {
+            _insideDisposal.Value = previousDisposalFlow;
             CompleteDispose(primaryException);
         }
 
@@ -350,10 +361,16 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         var activation = BeginDispose(out var ownsDisposal, allowPreparation);
         if (!ownsDisposal)
         {
-            await _disposeCompletion.Task.ConfigureAwait(false);
+            if (!_insideDisposal.Value)
+            {
+                await _disposeCompletion.Task.ConfigureAwait(false);
+            }
+
             return;
         }
 
+        var previousDisposalFlow = _insideDisposal.Value;
+        _insideDisposal.Value = true;
         Exception? primaryException = null;
         try
         {
@@ -408,6 +425,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
         finally
         {
+            _insideDisposal.Value = previousDisposalFlow;
             CompleteDispose(primaryException);
         }
 
@@ -571,7 +589,10 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     private sealed class GuardedResourceBuilder<TResource>(IResourceBuilder<TResource> inner, AppSurfaceAspireProfileTestingBuilder owner)
         : IResourceBuilder<TResource> where TResource : IResource
     {
-        public IDistributedApplicationBuilder ApplicationBuilder => owner;
+        // Aspire evaluates deferred SDK callbacks after the native application is built. At that
+        // point its native context is needed; preparing, active and terminal references stay guarded.
+        public IDistributedApplicationBuilder ApplicationBuilder =>
+            Volatile.Read(ref owner._state) == Built ? inner.ApplicationBuilder : owner;
         public TResource Resource => inner.Resource;
         public IResourceBuilder<TResource> WithAnnotation<TAnnotation>(
             TAnnotation annotation,
