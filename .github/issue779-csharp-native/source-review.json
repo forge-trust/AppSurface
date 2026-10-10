@@ -1,0 +1,38 @@
+{
+  "case": "N10",
+  "native_credit": false,
+  "native_execution": false,
+  "review_evidence": {
+    "complete_input_review": {
+      "closed_by_delta_review_sha256": "a7226bed0bee1a0841d9bf0ca831a9ba29c6b3e53910559f390b4e14de56ef9f",
+      "path": "/private/tmp/issue779-csharp-n10-native-candidate-v8/independent-input-review.json",
+      "previous_finding": "N10-PARSER-02",
+      "sha256": "8f0fc23b328051324f1a8f038f7adcdc8622ab4827f9d71a6909ef21b906f63a"
+    },
+    "pending_start_bool_identity": {
+      "review_sha256": "a7226bed0bee1a0841d9bf0ca831a9ba29c6b3e53910559f390b4e14de56ef9f",
+      "scope": "Exact booleans reject Python integer aliases;10data controls no nativeauthority",
+      "validation_receipt_sha256": "fa74afeea6956326965053dda4eb997af57796bfe8c458a3a088b9af0626c41a"
+    },
+    "pending_start_final_sample_parser": {
+      "path": "/private/tmp/issue779-csharp-n10-pending-start-parser-v7/independent-review.json",
+      "scope": "HasStopped and GroupEmpty exact terminal sample grammar; fixed failed N10 teardown remains deliberate",
+      "sha256": "8ad9f051297ab3cab6937ad064ad249779d62af10be6f0871664c35b3011c146"
+    }
+  },
+  "review_flags": {
+    "fixture": true,
+    "native_handoff": true,
+    "parser": true,
+    "retention": true,
+    "root_cleanup": true,
+    "root_transport": true,
+    "source_capture": true
+  },
+  "schema": "issue779-n10-native-source-review-v1",
+  "source_capture_sha256": "d130827f7afd25e53cb9dc7a1d5345cde22cec64b4600f0a3258c3a6fcc17bbc",
+  "source_commit": "93180b42bb48e1d4170c049468e8b0bb036a68d0",
+  "source_count": 2851,
+  "source_parent": "dd941d06ec1a038fd4d82228005f14fd3c6440a0",
+  "source_tree": "d1b9604a942966e84cbddcf228d8fc653060deda"
+}
