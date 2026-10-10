@@ -5,7 +5,7 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly SOURCE=5b5a2af696741203b1cb5ce200182452b5f1fcb7
-readonly PARENT=75e24668052726f709cdde8ea844d25489379a69
+readonly PARENT=bdb4df808da030faf305db5be6895a4166348c5c
 readonly SOURCE_MAP=ea1c67df712559fab5ec4330b5b7a004010a962d5ff940b25ad9424cd2bc57b5
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
@@ -30,7 +30,7 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256 n04-helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 012e2f5a49420e1a9852905c92f60ec2d37714734487ea54bea0f6ce2711c5fd &&
+[[ ${v[transport-sha256]} == 72fb4ae698cdbb03715e9a91acc63febf733c9a9d519dfc3b77fd413739ea07b &&
    ${v[fixture-sha256]} == 2593a8b1a6a3c6ecb3ce1b1ce6786ffc28ba5c08e547480ddd18847ad994e1ba &&
    ${v[audit-sha256]} == 499dace9538a0c4d4292506759cd432b21e44722ffcf205f8e2a681fe563ec91 &&
    ${v[source-review-sha256]} == 2e81c0ffb3183bc699d82671679ab46154985f4ba2f56180dd73ad4db5d4ae98 ]] || fail frozen-input-pins
@@ -183,8 +183,8 @@ copy_file "$n04_helper_receipt" "$work/n04-helper-build-receipt.json" "${v[n04-h
 bounded /usr/bin/jq -e 'def integer: type=="number" and floor==. and .>=0;
 def digest: type=="string" and test("^[0-9a-f]{64}$");
 keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n04-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
-.recipe_sha256=="870d0f8b95a72dc85d4174d8cc0b649dbab7331fbdd539ab094564177d3a1e1d" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
-.source_pins=={"Program.cs":"7f257a44566896fd6dd33b33481627f7279e572202f97aa84986e8417c7f0ecc","PossibleStopRegistration.cs":"0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6","NativeRootCoordinator.csproj":"6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+.recipe_sha256=="3d47fb3b1f768ad5c56e1694a3a3a280382d9cd3406bec4df807ac9f00d66547" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and
+.source_pins=={"Program.cs":"7b1505668078bb90668e9ccf6fe79bc1db2631b0b18cd591f499548ab0dcf34d","PossibleStopRegistration.cs":"0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6","NativeRootCoordinator.csproj":"6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
 (.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
 (.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
 (.commands|type=="array" and length==3) and all(.commands[]; keys==["error","exit","forced_cleanup","group_absent","log","log_bytes","waited"] and .exit==0 and .waited==true and .group_absent==true and .forced_cleanup==false and .error==false and (.log_bytes|integer) and .log_bytes<=8388608) and

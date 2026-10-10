@@ -15,7 +15,7 @@ import unittest
 
 DONOR = Path(__file__).resolve().parent
 HISTORICAL_RUNNER_SHA = '9b9ac43cf8b4564fbe0de8c6d86617a377ba888b048d1366e652759a109b7620'
-FILTER_SHA = '35699652f7dcec0a557483fe98b47cec0ccfed42d1ed86191757c11decb73b8a'
+FILTER_SHA = 'b0c31c1fa931b7de996a635f4cc1a636c2e5a8f1b0744eeac1a3b56526514bf4'
 RETAINER_SHA = '096b1f8672839560ded52dd18b0faa19123164b854c55aacec43352618ba6346'
 N04_NAMES = frozenset(('logs/n04-helper.stderr', 'logs/n04-helper.stdout',
     'n04-account-ids.tsv', 'n04-consistency.json', 'n04-descriptor.json',

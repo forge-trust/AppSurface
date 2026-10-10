@@ -8,7 +8,7 @@ exec python3 -B - "$2" "$3" "$4" "$5" "$6" <<'PY'
 import hashlib,json,os,pathlib,re,signal,stat,subprocess,sys,time
 SOURCE,SDK,SDK_SHA,OUT,END=sys.argv[1:]
 SOURCE,SDK,OUT=map(pathlib.Path,(SOURCE,SDK,OUT));END=int(END)
-PINS={'Program.cs': '7f257a44566896fd6dd33b33481627f7279e572202f97aa84986e8417c7f0ecc', 'PossibleStopRegistration.cs': '0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6', 'NativeRootCoordinator.csproj': '6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb'}
+PINS={'Program.cs': '7b1505668078bb90668e9ccf6fe79bc1db2631b0b18cd591f499548ab0dcf34d', 'PossibleStopRegistration.cs': '0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6', 'NativeRootCoordinator.csproj': '6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb'}
 RECORDS=[];FINAL=END;WORK=END-5000;RESULT={'schema':'issue779-n04-helper-build-handoff-v1','exit':1,'native_execution':False,'authority':False,'commands':RECORDS,'source_pins':PINS,'sdk_required':'10.0.401','runtime_required':'10.0.12','recipe_sha256':os.environ['N04_HELPER_RECIPE_SHA256']}
 def now():
  b=pathlib.Path('/proc/uptime').read_bytes();assert len(b)<=128

@@ -97,7 +97,8 @@ internal static class Program
         _ = entry.Read(20 * 1024 * 1024, binding.EntrySha, clock);
         checkpoint("Identity");
         var owner = owned.Add(ProcessPin.Capture(binding.OwnerPid, 0, 0, "owner", binding, image,
-            selected.Request, clock));
+            selected.Request, clock, checkpoint));
+        checkpoint("IdentityOwnerDistinct");
         Require(owner.Pid != Environment.ProcessId);
         checkpoint("Rendezvous");
         var rendezvousPath = "/run/appsurface-evidence-n04-" + selected.Generation + "/checkpoint.sock";
@@ -539,41 +540,57 @@ internal static class Program
             string group, uint uid, uint gid, PathPin image)
         { _handles = handles; _metadata = metadata; _initial = initial; _argv = argv; _group = group; _uid = uid; _gid = gid; _image = image; }
         internal static ProcessPin Capture(int pid, uint uid, uint gid, string role, Binding binding,
-            PathPin image, string operand, Clock clock)
+            PathPin image, string operand, Clock clock, Action<string>? diagnostic = null)
         {
             Require(pid > 0 && role is "owner" or "worker"); var handles = new List<SafeFileHandle>();
             try
             {
+                diagnostic?.Invoke("IdentityProcRoot");
                 clock.Check(); handles.Add(Native.Open(-100, "/proc", Native.Directory, 6)); Native.RequireProc(handles[0]);
+                diagnostic?.Invoke("IdentityProcDirectory");
                 handles.Add(Native.Open(Native.Fd(handles[0]), pid.ToString(Invariant), Native.Directory, 15));
+                diagnostic?.Invoke("IdentityFilesOpen");
                 foreach (string name in new[] { "stat", "status", "cgroup", "cmdline" })
                     handles.Add(Native.Open(Native.Fd(handles[1]), name, Native.ReadOnly, 15));
                 // Deliberately follow only the fixed kernel exe link, then compare its object to the selected host.
+                diagnostic?.Invoke("IdentityImageOpen");
                 handles.Add(Native.Open(Native.Fd(handles[1]), "exe", Native.FollowReadOnly, 0));
+                diagnostic?.Invoke("IdentityPidfdOpen");
                 long fd = Native.PidFdOpen(434, pid, 0); Require(fd >= 0 && fd <= int.MaxValue);
                 handles.Add(new SafeFileHandle((IntPtr)fd, true));
+                diagnostic?.Invoke("IdentityMetadata");
                 Metadata[] metadata = handles.Take(7).Select(Native.Stat).ToArray();
                 for (int i = 0; i < 6; i++) { Native.RequireProc(handles[i]); Require(metadata[i].Type == (i < 2 ? 0x4000 : 0x8000)); }
+                diagnostic?.Invoke("IdentityImageObject");
                 Require(metadata[6].SameObject(Native.Stat(image.Leaf)));
                 string[] argv = [binding.Runtime, binding.Entry, "evidence", role == "worker" ? "worker" : "supervise",
                     role == "worker" ? "--control" : "--request", operand];
                 string group = "/system.slice/appsurface-evidence-" + role + "-" + binding.Generation + ".service";
-                Sample initial = ReadSample(handles.ToArray(), argv, group, uid, gid, clock);
+                Sample initial = ReadSample(handles.ToArray(), argv, group, uid, gid, clock, diagnostic);
+                diagnostic?.Invoke("IdentityInitialPid");
                 Require(initial.Pid == pid);
                 var result = new ProcessPin(handles.ToArray(), metadata, initial, argv, group, uid, gid, image);
-                result.Recheck(clock); return result;
+                result.Recheck(clock, diagnostic); return result;
             }
             catch { foreach (var handle in handles.AsEnumerable().Reverse()) handle.Dispose(); throw; }
         }
-        internal Sample Recheck(Clock clock)
+        internal Sample Recheck(Clock clock, Action<string>? diagnostic = null)
         {
+            diagnostic?.Invoke("IdentityPinnedImage");
             clock.Check(); _image.Recheck(clock);
+            diagnostic?.Invoke("IdentityStableMetadata");
             CheckBindings();
-            Sample first = ReadSample(_handles, _argv, _group, _uid, _gid, clock);
-            Sample second = ReadSample(_handles, _argv, _group, _uid, _gid, clock);
+            Sample first = ReadSample(_handles, _argv, _group, _uid, _gid, clock, diagnostic);
+            Sample second = ReadSample(_handles, _argv, _group, _uid, _gid, clock, diagnostic);
+            diagnostic?.Invoke("IdentitySampleIdentity");
             Require(first.SameIdentity(_initial) && second.SameIdentity(first));
-            CheckBindings(); _image.Recheck(clock);
+            diagnostic?.Invoke("IdentityStableMetadata");
+            CheckBindings();
+            diagnostic?.Invoke("IdentityPinnedImage");
+            _image.Recheck(clock);
+            diagnostic?.Invoke("IdentityFinalImageObject");
             Require(Native.Stat(_handles[6]).SameObject(Native.Stat(_image.Leaf)));
+            diagnostic?.Invoke("IdentityFinalClock");
             clock.Check(); return second;
 
             void CheckBindings()
@@ -600,9 +617,12 @@ internal static class Program
         {
             clock.Check(); Require(Native.PidFdSignal(424, Native.Fd(_handles[7]), 0, IntPtr.Zero, 0) == 0); clock.Check();
         }
-        private static Sample ReadSample(SafeFileHandle[] handles, string[] argv, string group, uint uid, uint gid, Clock clock)
+        private static Sample ReadSample(SafeFileHandle[] handles, string[] argv, string group, uint uid, uint gid, Clock clock,
+            Action<string>? diagnostic = null)
         {
+            diagnostic?.Invoke("IdentityStatRead");
             var first = ParseStat(ReadBounded(handles[2], 16384, clock));
+            diagnostic?.Invoke("IdentityStatusRead");
             string status = Decode(ReadBounded(handles[3], 65536, clock));
             uint[]? uids = null; uint[]? gids = null; uint[]? groups = null;
             string[] rows = status[..^1].Split('\n'); Require(rows.Length <= 512);
@@ -615,14 +635,19 @@ internal static class Program
                 else if (name.Equals("Groups", StringComparison.OrdinalIgnoreCase))
                 { Require(name == "Groups" && groups is null); groups = Ids(row[(colon + 1)..], null); }
             }
+            diagnostic?.Invoke("IdentityCredentials");
             Require(uids is not null && gids is not null && groups is not null && uids.All(v => v == uid) && gids.All(v => v == gid)
                 && groups.Length <= 32 && groups.Distinct().Count() == groups.Length
                 && groups.All(v => v == gid));
+            diagnostic?.Invoke("IdentityCgroupRead");
             Require(Decode(ReadBounded(handles[4], 4096, clock)) == "0::" + group + "\n");
+            diagnostic?.Invoke("IdentityArguments");
             byte[] command = ReadBounded(handles[5], 16384, clock);
             Require(command.Length > 0 && command[^1] == 0);
             string[] actualArgv = Utf8.GetString(command)[..^1].Split('\0'); Require(actualArgv.SequenceEqual(argv, StringComparer.Ordinal));
+            diagnostic?.Invoke("IdentityStatAgain");
             var last = ParseStat(ReadBounded(handles[2], 16384, clock));
+            diagnostic?.Invoke("IdentitySampleComparison");
             Require(first.Pid == last.Pid && first.Start == last.Start && "RSDTtKWPI".Contains(last.State));
             return new(last.Pid, last.Start, last.State, uids!, gids!, groups!);
         }

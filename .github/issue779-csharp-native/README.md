@@ -82,3 +82,7 @@ The prior parser-repair run failed this prerequisite before native execution.
 ## Original fixture clock read
 
 This retry preserves the original fixture, cleanup, owner and private startup bounds. Each guard reads the same `/proc/uptime` value using a Bash builtin in the holder shell instead of a command substitution. Clock values remain fresh and use the same whole-second floor. Local clock controls are procedure evidence only; the prior native precondition failure remains recorded and no native case is credited by this preparation.
+
+## Identity diagnostic checkpoints
+
+This private retry adds fixed closed checkpoints to the original owner process capture. Proc opening, metadata, executable binding, stat/status, credentials, cgroup, argv and retained-object rechecks have distinct failure stages. All original guards, syscall selection and cumulative clocks remain intact. There is no exception text, raw process data, fallback, extra authority or native acceptance in these stages. The helper locally restored, formatted and built successfully; actual Linux execution must determine the rejected subpredicate.
