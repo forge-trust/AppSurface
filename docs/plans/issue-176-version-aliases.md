@@ -1370,4 +1370,8 @@ Next: implement this approved plan and its acceptance criteria, then use /ship w
 
 Final human approval recorded as A; C1, design D8 and E1 approved. Implementation acceptance remains pending.
 
+## Draft acceptance amendment — 2026-10-10
+
+The user explicitly instructed: “Defer X5 for the draft PR and continue.” This changes X5's acceptance obligation for draft scope only. The fresh human onboarding trial, its <=5-minute target and human comprehension remain unobserved. Coverage and other approved implementation obligations remain required. Native200% toolbar zoom was subsequently observed on the compiled archive candidate; see the [execution evidence and limits](issue-176-execution-progress.md#current-acceptance-status--2026-10-10). Earlier approval and pending-acceptance records above remain historical.
+
 NO UNRESOLVED DECISIONS

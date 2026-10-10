@@ -4,6 +4,14 @@ Approved plan: [version aliases](issue-176-version-aliases.md). Make-it-so began
 Branch: `codex/make-it-so-docs-version-aliases`, base `main`. Initial base `40de2ef`; current integrated base `c2f062f2`.
 Goal: complete every approved facet through a validated **draft** PR.
 
+## Current acceptance status — 2026-10-10
+
+The user explicitly instructed: “Defer X5 for the draft PR and continue.” X5's fresh human maintainer onboarding trial is therefore deferred for draft scope; its <=5-minute target and human comprehension remain unobserved. This does not waive coverage or report the trial as passed. Earlier pending statements below are historical snapshots.
+
+Native Chrome toolbar zoom was observed at 200% on the compiled candidate for healthy, unavailable, conflicting and long-label archive states. Tested content reflowed, keyboard focus remained visible, and Enter activated the long-label alias. The task-owned window was closed after restoring its original 100% zoom. This observation does not establish full WCAG conformance or every viewport/theme combination.
+
+Candidate `cf62ea69` passed the exact solution coverage script with exit0: all55projects,16,629passed/0failed/4skipped; aggregate96.24%line/88.90%branch and patch95.08%line/93.88%branch. HEAD stayed fixed during the run. Release verifier/CLI/standalone builds had zero warnings/errors, documentation health returned Healthy HTTP200, and strict CDN export exited0 with1,031manifest entries. Compiled hover replay passed both themes with conservative contrast minima5.974dark/9.409light. A fresh exact coverage run remains required immediately before Ship; no draft PR exists at this snapshot.
+
 ## Facets
 
 - Implemented: additive catalog/API/parser/provenance and numeric diagnostics001–011, safe archive projection and responsive native links.
