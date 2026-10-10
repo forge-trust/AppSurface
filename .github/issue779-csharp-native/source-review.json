@@ -1,0 +1,22 @@
+{
+  "capture_sha256": "3f10b0d88cc1bbf004e3ff0758f08a612fd5309c3b2ca2957593ffe99458f8ff",
+  "case": "N08",
+  "cleanup_csharp_review": "/private/tmp/issue779-csharp-cancellation-root-cleanup-peer-v1/review.json",
+  "cleanup_csharp_review_sha256": "43f4d3546bd25319c75795c06abc0604a58e6305b7046129c1af63f56ea5d535",
+  "compile_source_clear": "/private/tmp/issue779-csharp-cancellation-cleanup-audit-cache-validation-v5/receipt.json",
+  "compile_source_clear_sha256": "0b33e6aae8dfc6cab0064a4fac306b9ce94b53834a63c876b3ba04f6d11f9876",
+  "current_source_peer_numeric_exit": 0,
+  "full_source_peer_review": "/private/tmp/issue779-csharp-cancellation-cleanup-source-capture-peer-v1/review.json",
+  "full_source_peer_sha256": "309d4e465af122dfbb2cf2c320f76b61f2c3799d673f6dc5acde5ee86f668343",
+  "integration_review_pending": true,
+  "local_csharp_tests_passed": 14,
+  "native_acceptance": false,
+  "native_execution": false,
+  "original_capture_terminal_unverified": true,
+  "original_source": "deb4bf6b190ec4d38453e513df9e687ac5a63f9e",
+  "python_closure_review": "/private/tmp/issue779-csharp-cancellation-python-closure-peer-v11/review.json",
+  "python_closure_review_sha256": "4980c49d20ebd709e351741a8051882e78db90b3bcb7a2f9e74b2472fc36a0b1",
+  "schema": "issue779-cancellation-source-review-preparation-v2",
+  "source": "5406641bd9dba82a709af135223ebd6dd7d89fdf",
+  "source_count": 2832
+}
