@@ -7,16 +7,16 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Pure grammar and snapshot controls, without dispatch, admission or native authority.</summary>
 public sealed class EvidenceControlProtocolTests
 {
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
     [Fact]
-    public void N16PrivateOperationAcceptsOnlyItsExactOperationField()
+    public void PrivateAcceptedWorkOperationAcceptsOnlyItsExactOperationField()
     {
         Assert.IsType<EvidenceAcceptedBlockedWorkControlRequest>(Parse("{\"op\":\"n16-accepted-work\"}"));
         Assert.Throws<EvidenceAdmissionException>(() => Parse("{\"op\":\"n16-accepted-work\",\"callback\":\"canary\"}"));
     }
 #else
     [Fact]
-    public void N16PrivateOperationIsNotAcceptedByOrdinaryImage()
+    public void PrivateAcceptedWorkOperationIsNotAcceptedByOrdinaryImage()
     {
         Assert.Throws<EvidenceAdmissionException>(() => Parse("{\"op\":\"n16-accepted-work\"}"));
     }

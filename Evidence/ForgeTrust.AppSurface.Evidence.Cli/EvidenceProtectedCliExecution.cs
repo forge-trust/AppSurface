@@ -43,8 +43,13 @@ internal static class EvidenceProtectedCliExecution
         Action<EvidenceOriginalCancellationObservation>? cancellationSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N16
-        if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+        if (EvidenceNativeQualification.OwnerDeathAcceptedWorkEnabled)
+        {
+            await worker.RunAcceptedBlockedWorkUntilOwnerLossAsync(cancellationToken).ConfigureAwait(false);
+            throw new EvidenceAdmissionException("ASEVD410", "The private owner-death observation unexpectedly completed.");
+        }
+        if (EvidenceNativeQualification.N16StopWaitEnabled)
         {
             await worker.RunAcceptedBlockedWorkStopWaitAsync(cancellationToken, CancellationToken.None, CancellationToken.None)
                 .ConfigureAwait(false);

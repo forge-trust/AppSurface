@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Build-selection and original callback controls; no native owner, lease or accepted proof.</summary>
 public sealed class EvidenceNativeQualificationTests
 {
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
     [Fact]
     public void PrivateAcceptancePhaseIsOnlyDetachedDataWithAnExactClosedShape()
     {
@@ -51,6 +51,10 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.LeaderExitWithDescendant;
 #elif EVIDENCE_PRIVATE_N16
         var expected = EvidenceNativeQualificationKind.AcceptedBlockedWork;
+#elif EVIDENCE_PRIVATE_N13
+        var expected = EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork;
+#elif EVIDENCE_PRIVATE_N14
+        var expected = EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork;
 #else
         var expected = EvidenceNativeQualificationKind.None;
 #endif
@@ -63,8 +67,15 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.PendingStartRaceEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.SynchronousWorkerStall,
             EvidenceNativeQualification.WorkerStallEnabled);
-        Assert.Equal(expected == EvidenceNativeQualificationKind.AcceptedBlockedWork,
+        Assert.Equal(expected is EvidenceNativeQualificationKind.AcceptedBlockedWork
+                or EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork
+                or EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork,
             EvidenceNativeQualification.AcceptedBlockedWorkEnabled);
+        Assert.Equal(expected is EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork
+                or EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork,
+            EvidenceNativeQualification.OwnerDeathAcceptedWorkEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.AcceptedBlockedWork,
+            EvidenceNativeQualification.N16StopWaitEnabled);
         Assert.Equal(EvidenceNativeQualification.WorkerStallEnabled,
             EvidenceFixedSynchronousInputFactory.CreateForProtectedRole() is not null);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();

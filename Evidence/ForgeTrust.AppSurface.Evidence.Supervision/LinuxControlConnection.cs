@@ -108,10 +108,10 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
     internal Task<EvidenceControlRequest> ReadRequestAsync(CancellationToken cancellationToken) =>
         _framing.ReadRequestAsync(cancellationToken);
 
-#if EVIDENCE_PRIVATE_N16
-    /// <summary>Writes the fixed N16 accepted/body-blocked phase on this authenticated original connection.</summary>
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    /// <summary>Writes the fixed accepted/body-blocked phase on this authenticated original connection.</summary>
     /// <param name="cancellationToken">The handler's existing root I/O deadline token.</param>
-    /// <remarks>Requires this connection's decoded N16 operation; it creates no capability or new deadline.</remarks>
+    /// <remarks>Requires this connection's decoded private accepted-work operation; it creates no capability or new deadline.</remarks>
     internal Task WriteAcceptedBlockedWorkAsync(CancellationToken cancellationToken) =>
         _framing.WriteAcceptedBlockedWorkAsync(cancellationToken);
 #endif
@@ -251,7 +251,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     private int _preparationPhase;
     private int _validated;
     private int _readyValidated;
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
     private int _acceptedWorkValidated;
     private int _acceptedWorkWritePhase;
     private readonly TaskCompletionSource _acceptedWorkWriteCompleted =
@@ -294,7 +294,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
                 cancellationToken.ThrowIfCancellationRequested();
                 EnsureOpen();
                 if (request is EvidenceReadyControlRequest) Volatile.Write(ref _readyValidated, 1);
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (request is EvidenceAcceptedBlockedWorkControlRequest) Volatile.Write(ref _acceptedWorkValidated, 1);
 #endif
                 Volatile.Write(ref _validated, 1);
@@ -328,8 +328,8 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     /// <param name="token">Existing owner/admission token; cancellation cannot detach an original write.</param>
     internal Task WriteAdmissionStartAsync(CancellationToken token) => WritePhaseAsync(2, null, token);
 
-#if EVIDENCE_PRIVATE_N16
-    /// <summary>Writes the sole fixed N16 acceptance phase after decoding its exact operation request.</summary>
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    /// <summary>Writes the sole fixed accepted-work phase after decoding its exact operation request.</summary>
     /// <param name="token">The original handler/run token; cancellation closes and joins the actual write.</param>
     /// <remarks>This data-only frame preserves the stream and does not authorize any native or product work.</remarks>
     internal async Task WriteAcceptedBlockedWorkAsync(CancellationToken token)
@@ -410,7 +410,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     {
         try
         {
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
             if (Volatile.Read(ref _acceptedWorkWritePhase) == 1)
             {
                 Dispose();
@@ -419,7 +419,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
             }
 #endif
             if (Volatile.Read(ref _validated) != 1 || Volatile.Read(ref _preparationPhase) is not (0 or 4)
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 || (Volatile.Read(ref _acceptedWorkValidated) == 1 && Volatile.Read(ref _acceptedWorkWritePhase) != 2)
 #endif
                 || Interlocked.CompareExchange(ref _writeAttempt, 1, 0) != 0)

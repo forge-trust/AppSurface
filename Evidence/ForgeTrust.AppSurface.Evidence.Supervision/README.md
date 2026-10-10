@@ -46,6 +46,14 @@ Local macOS source validation ran the private N16 and ordinary configurations: 1
 These deterministic barrier and ledger controls are local tests only. They do not establish authenticated Linux execution, root process ownership, OS containment, or N16 native acceptance; those remain required by the [checkpoint-one native gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker).
 
 
+### N13/N14: accepted work held for external owner death
+
+The `EvidencePrivateQualification` build property may select `N13` or `N14`; these values compile exactly one fixed private image through the same project graph. Ordinary `None` retains its existing protocol grammar and has no accepted-work branch or phase frame. There is no argument, environment, JSON field, public API, producer, lease or application selector. The request is the existing operation-only authenticated N16 request. The server registers the actual fixed workload under its existing owner admission gate, writes the same intermediate acceptance frame on the original authenticated connection, then emits one fixed ASCII phase line to its original stdout only after that write and flush complete. The line is a harness synchronization trigger only; it does not authenticate a new peer, record a kernel fact, or establish acceptance.
+
+The N13/N14 worker retains the original accepted-work request and waits for the actual connection to terminate. It sends no STOP, WAIT or EXIT and does not release the server body. The owner-loss driver must terminate the owner using externally measured, identity-bound OS facts; source code does not synthesize SIGKILL/SIGSTOP, a timer, or a successful join. N13 expects owner SIGKILL to make the existing worker `After`/`BindsTo` and control-group policy terminate the dependent unit. N14 expects the already configured owner `RuntimeMaxUSec` and stop/final-kill policy to terminate a SIGSTOPped owner and its dependent unit. Both still require independent unit/PID/start-time/cgroup, pump, account and final custody evidence under the original deadline. If termination or strict cleanup is uncertain, retain output and custody as quarantined failure.
+
+**Pitfall:** the N13/N14 phase line is emitted by the root server after a real response write, but the line itself is not native readiness evidence; the case harness must independently bind the live owner and worker process to their generated units and cgroups before signaling. The current source seam is not a native-run receipt or acceptance claim.
+
 ## Process roles
 
 The protected AppSurface image supplies two explicit roles before normal CLI discovery or configuration:

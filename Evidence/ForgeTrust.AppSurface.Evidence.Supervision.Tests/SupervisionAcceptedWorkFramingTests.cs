@@ -1,11 +1,11 @@
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Supervision;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
-/// <summary>Portable data-framing controls for the private N16 accepted-work phase; no Linux peer is fabricated.</summary>
+/// <summary>Portable data-framing controls for private accepted-work variants; no Linux peer is fabricated.</summary>
 public sealed class SupervisionAcceptedWorkFramingTests
 {
     private static readonly byte[] Request = Encoding.UTF8.GetBytes("{\"op\":\"n16-accepted-work\"}\n");
@@ -35,7 +35,7 @@ public sealed class SupervisionAcceptedWorkFramingTests
         Assert.True(final.RootElement.GetProperty("terminal").GetBoolean());
     }
 
-    /// <summary>Rejects a non-N16 request and duplicate acceptance without leaving the stream reusable.</summary>
+    /// <summary>Rejects another operation and duplicate acceptance without leaving the stream reusable.</summary>
     [Fact]
     public async Task WrongRequestAndDuplicateAcceptanceCloseTheSingleAttempt()
     {

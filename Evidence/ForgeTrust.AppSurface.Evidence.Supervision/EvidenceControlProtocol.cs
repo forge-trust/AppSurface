@@ -25,8 +25,8 @@ internal enum EvidenceControlOperation
     ApplicationStart,
     /// <summary>Identifies a resource for later authenticated readiness observation.</summary>
     ResourceWait,
-#if EVIDENCE_PRIVATE_N16
-    /// <summary>Private N16 fixed blocked-work request; grants no caller-selected dispatch.</summary>
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    /// <summary>Private accepted-work request shared only by N16/N13/N14 compile-owned images.</summary>
     AcceptedBlockedWork,
 #endif
 }
@@ -59,8 +59,8 @@ internal sealed record EvidenceWaitControlRequest : EvidenceControlRequest
     internal override EvidenceControlOperation Operation => EvidenceControlOperation.Wait;
 }
 
-#if EVIDENCE_PRIVATE_N16
-/// <summary>Operation-only request for the fixed private N16 blocked workload.</summary>
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+/// <summary>Operation-only request for the fixed private accepted blocked workload.</summary>
 internal sealed record EvidenceAcceptedBlockedWorkControlRequest : EvidenceControlRequest
 {
     /// <inheritdoc />
@@ -195,7 +195,7 @@ internal static class EvidenceControlProtocol
                 case "wait":
                     RequireFields(fields, "op");
                     return new EvidenceWaitControlRequest();
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 case "n16-accepted-work":
                     RequireFields(fields, "op");
                     return new EvidenceAcceptedBlockedWorkControlRequest();

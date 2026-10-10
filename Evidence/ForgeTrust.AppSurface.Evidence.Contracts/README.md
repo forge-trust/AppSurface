@@ -19,6 +19,8 @@ Start with the [EvidenceHost guide](../../start-here/evidencehost.md) and the [m
 
 The N16 build adds only the [private accepted blocked-work procedure](../ForgeTrust.AppSurface.Evidence.Supervision/README.md#n16-accepted-blocked-work-with-concurrent-stop-and-wait); it is not a public client capability or producer/application registration. Its original workload request remains pending across the fixed intermediate acceptance frame while fresh STOP and WAIT connections join the server-owned body. The client retains and joins all original I/O on failure, and orders EXIT after those joins; no canceled wait releases work ownership.
 
+The N13/N14 private images reuse only the fixed authenticated accepted-work request. They hold that original request after the server commits its intermediate reply, emit a fixed source-owned synchronization line, and issue no stop/wait/exit themselves; the external harness must cause the real owner termination. See the supervision package’s [N13/N14 owner-death procedure](../ForgeTrust.AppSurface.Evidence.Supervision/README.md#n13n14-accepted-work-held-for-external-owner-death) for ordering and evidence requirements. The phase line is not readiness authority, a lease, or native acceptance.
+
 The N12 build adds only the [private same-image descendant procedure](../ForgeTrust.AppSurface.Evidence.Supervision/README.md#n12-leader-exit-with-an-inherited-output-holder). It creates no cancellation checkpoint, descriptor authority or admitted child. Its bounded PID frame is data consumed by the original charged pump; real root process/cgroup/EOF and final custody/account evidence remain mandatory. Ordinary `None` creates no descendant or frame observer and rejects that role before configuration.
 
 

@@ -402,7 +402,32 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
             throw new EvidenceAdmissionException("ASEVD410", "Restricted child or output pump exit was not confirmed.");
     }
 
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    /// <summary>Waits on the original accepted-work request until the authenticated root owner is terminated.</summary>
+    /// <param name="operationToken">The existing operation/deadline token; this method creates no timer or stop path.</param>
+    /// <remarks>
+    /// This N13/N14-only compile-time path waits for the real acceptance frame and then keeps the original
+    /// authenticated request pending. It sends no STOP, WAIT or EXIT and never fabricates a body completion.
+    /// The independent owner unit lifetime must terminate both endpoints; any orderly return is rejected.
+    /// </remarks>
+    internal async Task RunAcceptedBlockedWorkUntilOwnerLossAsync(CancellationToken operationToken)
+    {
+        if (!EvidenceNativeQualification.OwnerDeathAcceptedWorkEnabled)
+            throw new EvidenceAdmissionException("ASEVD410", "The private owner-death operation is unavailable.");
+        var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<JsonElement> original = RequestAsync(new { op = "n16-accepted-work" }, operationToken, accepted);
+        var first = await Task.WhenAny(accepted.Task, original).ConfigureAwait(false);
+        if (ReferenceEquals(first, original))
+        {
+            await original.ConfigureAwait(false);
+            throw InvalidWorkerDescriptor();
+        }
+        await accepted.Task.ConfigureAwait(false);
+        if (original.IsCompleted) throw InvalidWorkerDescriptor();
+        await original.ConfigureAwait(false);
+        throw InvalidWorkerDescriptor();
+    }
+
     /// <summary>Runs the fixed private N16 operation, then sends concurrent fresh stop/wait requests.</summary>
     /// <remarks>
     /// The original request remains pending after its authenticated intermediate acceptance frame.
@@ -413,8 +438,8 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
     internal async Task RunAcceptedBlockedWorkStopWaitAsync(CancellationToken operationToken,
         CancellationToken stopToken, CancellationToken waitToken)
     {
-        if (!EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
-            throw new EvidenceAdmissionException("ASEVD410", "The private blocked workload is unavailable.");
+        if (!EvidenceNativeQualification.N16StopWaitEnabled)
+            throw new EvidenceAdmissionException("ASEVD410", "The private N16 stop/wait procedure is unavailable.");
         using var operationLifetime = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
         using var stopLifetime = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
         using var waitLifetime = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
@@ -532,7 +557,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
     }
 
     private async Task<JsonElement> RequestAsync<T>(T request, CancellationToken cancellationToken
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
         , TaskCompletionSource? acceptedWork = null
 #endif
         )
@@ -555,14 +580,14 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
             throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
         }
         return await ExchangeAsync(socket, request, cancellationToken
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
             , _brokerPid, acceptedWork
 #endif
             ).ConfigureAwait(false);
     }
 
     private static async Task<JsonElement> ExchangeAsync<T>(Socket socket, T request, CancellationToken cancellationToken
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
         , int brokerPid, TaskCompletionSource? acceptedWork
 #endif
         )
@@ -572,7 +597,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         using var stream = new NetworkStream(socket, ownsSocket: false);
         await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(new byte[] { (byte)'\n' }, cancellationToken).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N16
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
         if (acceptedWork is not null)
         {
             var phase = await ReadHandshakeResponseAsync(socket, brokerPid, cancellationToken).ConfigureAwait(false);

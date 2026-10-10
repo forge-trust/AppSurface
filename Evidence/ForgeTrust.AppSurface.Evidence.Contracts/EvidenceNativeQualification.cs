@@ -20,19 +20,23 @@ internal enum EvidenceNativeQualificationKind
     LeaderExitWithDescendant,
     /// <summary>Private N16 accepted blocked workload with concurrent authenticated stop and wait.</summary>
     AcceptedBlockedWork,
+    /// <summary>Private N13 owner SIGKILL while the accepted workload remains pending.</summary>
+    OwnerKilledDuringAcceptedWork,
+    /// <summary>Private N14 owner SIGSTOP until its existing systemd runtime deadline.</summary>
+    OwnerStoppedDuringAcceptedWork,
 }
 
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
 /// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
-/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
+/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
 /// selecting a checkpoint grants no admission or accepted consumer proof.
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
-#if (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N08) || (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N08 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N16 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12))
+#if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N16))
 #error A private qualification image must select exactly one checkpoint.
 #endif
 
@@ -55,6 +59,10 @@ internal static class EvidenceNativeQualification
             return EvidenceNativeQualificationKind.LeaderExitWithDescendant;
 #elif EVIDENCE_PRIVATE_N16
             return EvidenceNativeQualificationKind.AcceptedBlockedWork;
+#elif EVIDENCE_PRIVATE_N13
+            return EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork;
+#elif EVIDENCE_PRIVATE_N14
+            return EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork;
 #else
             return EvidenceNativeQualificationKind.None;
 #endif
@@ -78,7 +86,31 @@ internal static class EvidenceNativeQualification
     internal static bool WorkerStallEnabled => Current == EvidenceNativeQualificationKind.SynchronousWorkerStall;
 
     /// <summary>Gets whether this image owns the fixed N16 blocked-work procedure.</summary>
-    internal static bool AcceptedBlockedWorkEnabled => Current == EvidenceNativeQualificationKind.AcceptedBlockedWork;
+    internal static bool AcceptedBlockedWorkEnabled => Current is EvidenceNativeQualificationKind.AcceptedBlockedWork
+        or EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork
+        or EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork;
+
+    /// <summary>Gets whether this private image holds accepted work for external owner termination.</summary>
+    internal static bool OwnerDeathAcceptedWorkEnabled => Current is EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork
+        or EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork;
+
+    /// <summary>Gets whether the N16 image owns its concurrent STOP/WAIT procedure.</summary>
+    internal static bool N16StopWaitEnabled => Current == EvidenceNativeQualificationKind.AcceptedBlockedWork;
+
+    /// <summary>Validates the closed bounded synchronization frame without treating it as authority.</summary>
+    internal static bool IsOwnerDeathAcceptedWorkPhaseFrame(ReadOnlySpan<byte> frame)
+    {
+        var line = OwnerDeathAcceptedWorkPhaseLine;
+        return line is not null && frame.SequenceEqual(System.Text.Encoding.ASCII.GetBytes(line + "\n"));
+    }
+
+    /// <summary>Gets the single fixed synchronization line emitted after the real acceptance write commits.</summary>
+    internal static string? OwnerDeathAcceptedWorkPhaseLine => Current switch
+    {
+        EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork => "NATIVE_PRIVATE_PHASE:N13:ACCEPTED_BLOCKED_WORK",
+        EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork => "NATIVE_PRIVATE_PHASE:N14:ACCEPTED_BLOCKED_WORK",
+        _ => null
+    };
 
     /// <summary>Creates metadata for the private stage wait only in a cancellation qualification image.</summary>
     /// <returns>Null for ordinary execution and peer replacement; otherwise an internal one-attempt checkpoint.</returns>
