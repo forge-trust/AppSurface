@@ -55,7 +55,7 @@ The native inventory below is fixed for checkpoint 1. Every row requires a named
 | N07 | Replaced parent identity | Retained parent binding rejects substitution; no output capability is activated. |
 | N08 | Cancel before allocation | No allocated slot or subject work; original cancellation stays latched. |
 | N09 | Cancel after retained allocation | Tracked allocation settles before handle/account cleanup; no successful publication. |
-| N10 | Stop racing a pending start | Late unit creation is retained, stopped, and joined; no escaped group or reopened admission. |
+| N10 | Stop racing a pending start | Stop irreversibly closes pending-start admission, attempts the original stop, joins the actual original start task, attempts the second stop after that join, and joins worker finalization/pumps; native evidence must show no escaped group or reopened admission. A post-reply source frame is only a trigger and does not prove late creation or physical settlement. |
 | N11 | Synchronous worker stall | Independent stop ends the worker within the bound; no dispose/hash/success marker from the stalled path. |
 | N12 | Leader exit with live descendant/pump | Leader exit alone cannot establish join; stop ends the descendant and reaches actual EOF, or quarantines. |
 | N13 | Supervisor SIGKILL during work | Dependent units terminate without managed finally; output remains quarantined. |

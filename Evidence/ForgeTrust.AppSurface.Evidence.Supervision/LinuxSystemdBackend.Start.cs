@@ -82,6 +82,20 @@ internal sealed partial class LinuxSystemdBackend
             worker.StandardOutput, worker.StandardError, token).ConfigureAwait(false);
     }
 
+#if EVIDENCE_PRIVATE_N10
+    /// <summary>Runs the same reserved worker start with one compile-owned post-reply observation barrier.</summary>
+    /// <remarks>The barrier emits only after the original validated systemd reply and waits on the same startup token.</remarks>
+    internal async Task<string> StartWorkerForN10Async(LinuxWorkerUnit worker,
+        LinuxN10PendingStartCheckpoint checkpoint, CancellationToken token)
+    {
+        if (worker is null) throw InvalidControl();
+        var jobPath = await StartOwnedUnitAsync(worker.Unit, worker.Arguments, worker.Properties,
+            worker.StandardOutput, worker.StandardError, token).ConfigureAwait(false);
+        await checkpoint.WaitAfterStartReplyAsync(worker.Unit, jobPath, token).ConfigureAwait(false);
+        return jobPath;
+    }
+#endif
+
     /// <summary>Requests one fixed root account utility after pending ownership is retained.</summary>
     /// <remarks>Job reply alone proves no execution, account identity, cgroup exit or output EOF.</remarks>
     internal Task<string> StartAccountUtilityAsync(LinuxAccountUnit unit, CancellationToken token)

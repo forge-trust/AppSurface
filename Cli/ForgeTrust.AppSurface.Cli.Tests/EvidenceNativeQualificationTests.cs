@@ -43,6 +43,8 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
         var expected = EvidenceNativeQualificationKind.CancellationBeforeActivation;
+#elif EVIDENCE_PRIVATE_N10
+        var expected = EvidenceNativeQualificationKind.PendingStartRace;
 #elif EVIDENCE_PRIVATE_N11
         var expected = EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
@@ -57,6 +59,8 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.PeerReplacementEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.LeaderExitWithDescendant,
             EvidenceNativeQualification.DescendantEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.PendingStartRace,
+            EvidenceNativeQualification.PendingStartRaceEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.SynchronousWorkerStall,
             EvidenceNativeQualification.WorkerStallEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.AcceptedBlockedWork,

@@ -46,6 +46,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
     private readonly SupervisionDescendantObservation _descendant = new();
     private LinuxN12LeaderExitObservation? _leaderExitObservation;
+#if EVIDENCE_PRIVATE_N10
+    private readonly LinuxN10PendingStartCheckpoint _n10PendingStart = new();
+    private int _n10StopProcedureCalls;
+#endif
 
     /// <summary>Gets only the original stderr-pump phase task; data creates no process authority.</summary>
     internal Task CancellationPhaseObserved => _cancellationPhase.Observed;
@@ -287,6 +291,41 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         return observation;
     }
 
+#if EVIDENCE_PRIVATE_N10
+    /// <summary>Copies the actual N10 pending-start and post-stop samples after their original joins.</summary>
+    /// <param name="input">Original reference-equal protected input.</param>
+    /// <param name="owner">Original authenticated owner and teardown token source.</param>
+    /// <param name="accounts">Original retained account holder.</param>
+    /// <param name="workspace">Original retained workspace.</param>
+    /// <param name="token">Original root teardown token; no allowance is renewed.</param>
+    /// <returns>Bounded private observations; they prove no admission, custody or successful execution.</returns>
+    /// <remarks>The systemd reply trigger is retained by the compile-owned checkpoint. This method only reads
+    /// the original pending/lifetime snapshots, final post-pump unit/group sample, and joined output receipt.</remarks>
+    internal byte[] CaptureN10PendingStartObservation(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!EvidenceNativeQualification.PendingStartRaceEnabled || !ReferenceEquals(input, _input)
+            || !ReferenceEquals(owner, _owner) || !ReferenceEquals(accounts, _accounts)
+            || !ReferenceEquals(workspace, _workspace) || token != owner.RootTeardownToken
+            || !_lifetime.StartJoined || !_lifetime.StopJoined || Volatile.Read(ref _dispatchAttempted) != 1
+            || _failedSettlementUnit is null || _failedSettlementGroup is null || !_failedSettlementGroupAfterPumps
+            || _output is null || _recipe is null)
+            throw LinuxSystemdBackend.InvalidControl();
+        owner.RequireControlIdentity(token);
+        var pending = _pending.Snapshot;
+        var bytes = _n10PendingStart.EncodeAfterJoin(owner.RunId, Unit, pending,
+            startupJoined: _lifetime.StartJoined, startupFailed: _lifetime.Failed,
+            stopJoined: _lifetime.StopJoined, physicallySettled: PhysicallySettled,
+            stopProcedureCalls: Volatile.Read(ref _n10StopProcedureCalls),
+            finalUnit: _failedSettlementUnit, unitStopped: _recipe.HasStopped(_failedSettlementUnit), group: _failedSettlementGroup,
+            groupAfterPumps: _failedSettlementGroupAfterPumps, output: _output);
+        owner.RequireControlIdentity(token);
+        token.ThrowIfCancellationRequested();
+        return bytes;
+    }
+#endif
+
     /// <summary>Reserves the entire one-attempt startup before any native pipe, connection or unit start.</summary>
     /// <remarks>
     /// Registers both pumps before dispatch, captures actual running unit and kernel identity, then seals
@@ -440,7 +479,13 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 {
                     RequireActive(ct);
                     Interlocked.Exchange(ref _dispatchAttempted, 1); // Before ambiguous OS I/O.
+#if EVIDENCE_PRIVATE_N10
+                    return EvidenceNativeQualification.PendingStartRaceEnabled
+                        ? _backend.StartWorkerForN10Async(_recipe, _n10PendingStart, ct)
+                        : _backend.StartWorkerAsync(_recipe, ct);
+#else
                     return _backend.StartWorkerAsync(_recipe, ct);
+#endif
                 }, startup.Token).ConfigureAwait(false);
             }
             finally { _pipes.CloseWriteCopies(); } // The original FD-transfer/start task is joined.
@@ -520,6 +565,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     private async Task StopSelectedUnitAsync(CancellationToken token)
     {
+#if EVIDENCE_PRIVATE_N10
+        if (EvidenceNativeQualification.PendingStartRaceEnabled) Interlocked.Increment(ref _n10StopProcedureCalls);
+#endif
         if (Volatile.Read(ref _dispatchAttempted) == 0) return;
         _owner.RequireCleanup(token);
         using var stopDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);

@@ -150,6 +150,24 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N10
+            // Emit only after the original worker lifetime returned from its joined two-stop/finalization path.
+            // The record retains sticky cancellation and reports its physical-settlement projection verbatim.
+            if (EvidenceNativeQualification.PendingStartRaceEnabled && failed
+                && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null)
+                try
+                {
+                    var observation = worker.CaptureN10PendingStartObservation(input, owner, accounts,
+                        workspace, cleanupToken);
+                    using var stderr = Console.OpenStandardError();
+                    await stderr.WriteAsync(observation.AsMemory(), cleanupToken).ConfigureAwait(false);
+                    await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), cleanupToken).ConfigureAwait(false);
+                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    owner.RequireControlIdentity(cleanupToken);
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
 #if EVIDENCE_PRIVATE_N16
             // The negative private control exports only actual past authenticated writes and
             // original joined task/kernel data. It never replaces the worker's nonzero failure.
