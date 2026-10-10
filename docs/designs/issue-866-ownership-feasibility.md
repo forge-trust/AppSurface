@@ -28,6 +28,29 @@ Configuration roots built explicitly inside user callbacks belong to the caller.
 
 Once Build returns, file-provider and service-provider cleanup follows the returned host. Detached and partially constructed configuration trees remain with the activation ownership scope. Secondary disposal errors do not replace a primary factory error; captured configuration leases are still drained after such errors. These boundaries follow actual [configuration-root construction and disposal](https://github.com/dotnet/runtime/blob/v10.0.8/src/libraries/Microsoft.Extensions.Configuration/src/ConfigurationRoot.cs) and [host disposal](https://github.com/dotnet/runtime/blob/v10.0.8/src/libraries/Microsoft.Extensions.Hosting/src/Internal/Host.cs), rather than private reflection or diagnostic interception.
 
+## Configured factory ownership
+
+The [testing wrapper lifecycle](../../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#builder-lifecycle) includes the factory-only `Preparing` state. Its guard forwards graph customization through the same wrapper used for composition. A successful factory call transfers that wrapper to the caller without building or starting the Aspire application.
+
+```mermaid
+flowchart TD
+    F[Configured factory during Preparing] --> A[Activation lease]
+    A --> H[Observed activation host and selected raw provider]
+    A --> L[Identity leases for acquired configuration providers, reload registrations and file providers]
+    F --> W[Guarded Aspire testing wrapper]
+    W --> U[Unbuilt Aspire configuration and acquired file providers]
+    F -->|composition completes| C[Caller receives Active wrapper]
+    C --> W
+    W -->|BuildAsync transfers graph ownership| P[Built Aspire application]
+    P --> R[Aspire provider and application resources]
+    W -->|fallback application disposal| P
+    W -->|activation cleanup after Aspire cleanup| A
+```
+
+The two service providers stay separate: activation services construct the AppSurface profile and components; Aspire services belong to the application graph. Before a successful Aspire build, the wrapper retains ownership of its acquired unbuilt graph objects. On factory abort, it cleans that graph before the activation lease. After a successful build, the application owns the Aspire graph, and wrapper disposal provides an application-first fallback before releasing activation services.
+
+Inside the activation lease, the observing host builder captures acquisitions before host construction can fail. Returned hosts perform their normal provider and file-provider cleanup; idempotent leases also drain partially constructed or detached configuration trees without repeating cleanup. A synchronous configuration-root disposal leaves an async-only provider for the activation owner to await. Recursive cleanup returns immediately within its own disposal flow, while independent callers join the same completion. Caller-owned roots and objects remain subject to the [ownership boundaries above](#ownership-boundaries-and-limits).
+
 ## Reproducible integration
 
 The durable [ownership regression fixture](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/AspireProfileActivationHostBuilderTests.cs) covers partial source/root failures, nested/shared/detached configuration, caller-owned objects, replaced providers, constructor-visible order, Development validation, actual Autofac-module precedence, returned-host cleanup errors and explicit lifecycle forwarding. Run it with:

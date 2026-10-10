@@ -153,6 +153,27 @@ Typed tests support constructor-injected services, `PassThroughArgs`, `GetDepend
 
 ## Builder Lifecycle
 
+The configured factory owns the wrapper while it is `Preparing`. Only the factory can complete preparation or abort it; callbacks can customize the graph but cannot build or dispose it. The legacy factory returns an `Active` wrapper directly. Both factories then use the same lifecycle:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Preparing: configured factory
+    [*] --> Active: legacy factory
+    Preparing --> Active: factory completes composition
+    Preparing --> Disposing: factory aborts preparation
+    Active --> Building: one BuildAsync call
+    Building --> Built: application returned
+    Building --> Faulted: failure or cancellation
+    Active --> Disposing: disposal
+    Built --> Disposing: disposal
+    Faulted --> Disposing: disposal
+    Disposing --> Disposed: cleanup settles
+```
+
+Rejected lifecycle calls leave the current state unchanged. Disposal during `Building` is rejected, and a failed build cannot be retried. `Disposed` is terminal even when cleanup throws. During `Disposing`, independent calls join cleanup; a recursive call from that cleanup flow returns immediately.
+
+The internal [ownership diagram and activation record](../../docs/designs/issue-866-ownership-feasibility.md#configured-factory-ownership) explain which graph objects the factory acquires and when ownership transfers. These internal seams preserve the public lifecycle rather than exposing an additional build or cleanup API.
+
 - Customize `Configuration`, `Services`, and resources before `BuildAsync`.
 - Call `BuildAsync` exactly once. Concurrent or repeated builds fail with `InvalidOperationException`.
 - After a successful build, every builder member is rejected; inspect or customize the graph before `BuildAsync` and use the returned application afterward.
