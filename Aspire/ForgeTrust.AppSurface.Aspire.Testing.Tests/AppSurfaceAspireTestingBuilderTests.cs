@@ -7,8 +7,10 @@ using ForgeTrust.AppSurface.Aspire.Testing;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 [Collection(AspireEnvironmentCollection.Name)]
 public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
@@ -1142,6 +1144,235 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Equal(0, activation.AsyncDisposeCount);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConfiguredUnbuiltDispose_ReleasesConfigurationAndOriginalAndCurrentFileProviders(
+        bool replaceCurrentFileProvider,
+        bool useAsyncDispose)
+    {
+        var disposalOrder = new List<string>();
+        var configurationProvider = new TrackingConfigurationProvider("configuration", disposalOrder);
+        var configuration = new ConfigurationManager();
+        configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
+        var creationFileProvider = new AsyncOnlyTrackingFileProvider("creation-file-provider", disposalOrder);
+        TrackingFileProvider currentFileProvider = replaceCurrentFileProvider
+            ? new SynchronousTrackingFileProvider("current-file-provider", disposalOrder)
+            : creationFileProvider;
+        var environment = new TrackingHostEnvironment(creationFileProvider);
+        var activation = new TrackingActivationProbe(disposalOrder);
+        var builder = CreatePreparingTestingBuilder(configuration, environment, activation);
+        environment.ContentRootFileProvider = currentFileProvider;
+        builder.CompletePreparation();
+
+        if (useAsyncDispose)
+        {
+            await builder.DisposeAsync();
+        }
+        else
+        {
+            builder.Dispose();
+        }
+
+        Assert.Equal(
+            replaceCurrentFileProvider
+                ? ["configuration", "current-file-provider", "creation-file-provider", "activation"]
+                : ["configuration", "creation-file-provider", "activation"],
+            disposalOrder);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(1, currentFileProvider.DisposeCount);
+        Assert.Equal(1, creationFileProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+
+        await builder.DisposeAsync();
+
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(1, currentFileProvider.DisposeCount);
+        Assert.Equal(1, creationFileProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Dispose_ReentrantSynchronousCallReturnsToItsOwningCleanup(bool useAsyncDispose)
+    {
+        var activation = new ReentrantDisposalProbe();
+        var builder = CreateTestingBuilder(A.Fake<IDistributedApplicationBuilder>(), activation);
+        activation.Reenter = () => Task.Run(builder.Dispose).WaitAsync(TimeSpan.FromSeconds(2));
+
+        if (useAsyncDispose)
+        {
+            await builder.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        else
+        {
+            await Task.Run(builder.Dispose).WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.Equal(1, activation.DisposeCount);
+        Assert.Throws<ObjectDisposedException>(() => _ = builder.Configuration);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfiguredUnbuiltDispose_PropagatesFirstFailureAfterDrainingResourcesAndActivation(
+        bool useAsyncDispose)
+    {
+        var disposalOrder = new List<string>();
+        var configurationFailure = new CleanupException();
+        var configurationProvider = new TrackingConfigurationProvider(
+            "configuration",
+            disposalOrder,
+            configurationFailure);
+        var configuration = new ConfigurationManager();
+        configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
+        var creationFileProvider = new AsyncOnlyTrackingFileProvider(
+            "creation-file-provider",
+            disposalOrder,
+            new CleanupException());
+        var currentFileProvider = new SynchronousTrackingFileProvider(
+            "current-file-provider",
+            disposalOrder,
+            new CleanupException());
+        var environment = new TrackingHostEnvironment(creationFileProvider);
+        var activation = new TrackingActivationProbe(disposalOrder, new CleanupException());
+        var builder = CreatePreparingTestingBuilder(configuration, environment, activation);
+        environment.ContentRootFileProvider = currentFileProvider;
+        builder.CompletePreparation();
+
+        if (useAsyncDispose)
+        {
+            var exception = await Assert.ThrowsAsync<CleanupException>(() => builder.DisposeAsync().AsTask());
+            Assert.Same(configurationFailure, exception);
+        }
+        else
+        {
+            var exception = Assert.Throws<CleanupException>(() => builder.Dispose());
+            Assert.Same(configurationFailure, exception);
+        }
+
+        Assert.Equal(
+            ["configuration", "current-file-provider", "creation-file-provider", "activation"],
+            disposalOrder);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(1, currentFileProvider.DisposeCount);
+        Assert.Equal(1, creationFileProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
+    [Fact]
+    public async Task CreateConfiguredAsync_HookFailurePreservesPrimaryAfterAcquiredGraphCleanupFailures()
+    {
+        ThrowingCleanupModule.LastProbe = null;
+        var disposalOrder = new List<string>();
+        var configurationProvider = new TrackingConfigurationProvider(
+            "configuration",
+            disposalOrder,
+            new CleanupException());
+        var currentFileProvider = new AsyncOnlyTrackingFileProvider(
+            "current-file-provider",
+            disposalOrder,
+            new CleanupException());
+        var hookFailure = new InvalidOperationException("primary Aspire hook failure");
+        var options = new AppSurfaceAspireTestingOptions
+        {
+            ConfigureAspireBuilder = builder =>
+            {
+                builder.Configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
+                builder.Environment.ContentRootFileProvider = currentFileProvider;
+                throw hookFailure;
+            }
+        };
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+                TestAppHost,
+                ThrowingCleanupModule,
+                ThrowingCleanupProfile>(options));
+
+        Assert.Contains("Aspire builder failed", exception.Message, StringComparison.Ordinal);
+        Assert.Same(hookFailure, exception.InnerException);
+        Assert.Equal(["configuration", "current-file-provider"], disposalOrder);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(1, currentFileProvider.DisposeCount);
+        Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingCleanupModule.LastProbe).DisposeCount);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ConfiguredFailureKeepsBuildErrorAfterUnbuiltCleanupFailures()
+    {
+        var disposalOrder = new List<string>();
+        var configurationProvider = new TrackingConfigurationProvider(
+            "configuration",
+            disposalOrder,
+            new CleanupException());
+        var configuration = new ConfigurationManager();
+        configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
+        var creationFileProvider = new AsyncOnlyTrackingFileProvider(
+            "creation-file-provider",
+            disposalOrder,
+            new CleanupException());
+        var currentFileProvider = new SynchronousTrackingFileProvider(
+            "current-file-provider",
+            disposalOrder,
+            new CleanupException());
+        var environment = new TrackingHostEnvironment(creationFileProvider);
+        var buildFailure = new InvalidOperationException("primary build failure");
+        var services = new ServiceCollection();
+        services.AddSingleton<IHost>(_ => A.Fake<IHost>());
+        var activation = new TrackingActivationProbe(disposalOrder, new CleanupException());
+        var builder = CreatePreparingTestingBuilder(
+            configuration,
+            environment,
+            activation,
+            services,
+            buildFailure);
+        environment.ContentRootFileProvider = currentFileProvider;
+        builder.CompletePreparation();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => builder.BuildAsync());
+
+        Assert.Same(buildFailure, exception);
+        Assert.Equal(
+            ["configuration", "current-file-provider", "creation-file-provider", "activation"],
+            disposalOrder);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(1, currentFileProvider.DisposeCount);
+        Assert.Equal(1, creationFileProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+        await builder.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task CompletePreparation_OutsidePreparingRejectsWithoutChangingLifecycleState()
+    {
+        var innerBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        var builder = new AppSurfaceAspireProfileTestingBuilder(
+            innerBuilder,
+            new AsyncOnlyDisposalProbe(),
+            isPreparing: true);
+        await using var ownedBuilder = builder;
+
+        builder.CompletePreparation();
+        Assert.Throws<InvalidOperationException>(builder.CompletePreparation);
+        Assert.Same(innerBuilder.Configuration, builder.Configuration);
+
+        _ = await builder.BuildAsync();
+
+        Assert.Throws<InvalidOperationException>(builder.CompletePreparation);
+        Assert.Throws<InvalidOperationException>(() => _ = builder.Configuration);
+    }
+
     private static AppSurfaceAspireProfileTestingBuilder CreateTestingBuilder(
         IDistributedApplicationBuilder inner,
         IAsyncDisposable activation,
@@ -1155,6 +1386,29 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
 
         A.CallTo(() => inner.Services).Returns(services);
         return new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+    }
+
+    private static AppSurfaceAspireProfileTestingBuilder CreatePreparingTestingBuilder(
+        ConfigurationManager configuration,
+        TrackingHostEnvironment environment,
+        IAsyncDisposable activation,
+        IServiceCollection? services = null,
+        Exception? buildFailure = null)
+    {
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Configuration).Returns(configuration);
+        A.CallTo(() => inner.Environment).Returns(environment);
+        if (services is not null)
+        {
+            A.CallTo(() => inner.Services).Returns(services);
+        }
+
+        if (buildFailure is not null)
+        {
+            A.CallTo(() => inner.Build()).Throws(buildFailure);
+        }
+
+        return new AppSurfaceAspireProfileTestingBuilder(inner, activation, isPreparing: true);
     }
 
     private static IDistributedApplicationBuilder CreateProcessFatalAspireBuilder(
@@ -1228,6 +1482,137 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             ? AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<TAppHost, TModule, TProfile>(
                 new AppSurfaceAspireTestingOptions())
             : AppSurfaceAspireTestingBuilder.CreateAsync<TAppHost, TModule, TProfile>();
+
+    private sealed class TrackingConfigurationSource(
+        TrackingConfigurationProvider provider) : IConfigurationSource
+    {
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
+    }
+
+    private sealed class TrackingConfigurationProvider(
+        string name,
+        ICollection<string> disposalOrder,
+        Exception? disposeFailure = null) : IConfigurationProvider, IDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public IEnumerable<string> GetChildKeys(IEnumerable<string> earlierKeys, string? parentPath) => earlierKeys;
+
+        public IChangeToken GetReloadToken() => NullChangeToken.Singleton;
+
+        public void Load()
+        {
+        }
+
+        public void Set(string key, string? value)
+        {
+        }
+
+        public bool TryGet(string key, out string? value)
+        {
+            value = null;
+            return false;
+        }
+
+        public void Dispose()
+        {
+            DisposeCount++;
+            disposalOrder.Add(name);
+            if (disposeFailure is not null)
+            {
+                throw disposeFailure;
+            }
+        }
+    }
+
+    private sealed class TrackingHostEnvironment(IFileProvider contentRootFileProvider) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+
+        public string ApplicationName { get; set; } = typeof(TestAppHost).Assembly.GetName().Name!;
+
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = contentRootFileProvider;
+    }
+
+    private abstract class TrackingFileProvider(
+        string name,
+        ICollection<string> disposalOrder,
+        Exception? disposeFailure) : IFileProvider
+    {
+        public int DisposeCount { get; private set; }
+
+        public IDirectoryContents GetDirectoryContents(string subpath) => NotFoundDirectoryContents.Singleton;
+
+        public IFileInfo GetFileInfo(string subpath) => new NotFoundFileInfo(subpath);
+
+        public IChangeToken Watch(string filter) => NullChangeToken.Singleton;
+
+        protected void RecordDisposal()
+        {
+            DisposeCount++;
+            disposalOrder.Add(name);
+            if (disposeFailure is not null)
+            {
+                throw disposeFailure;
+            }
+        }
+    }
+
+    private sealed class AsyncOnlyTrackingFileProvider(
+        string name,
+        ICollection<string> disposalOrder,
+        Exception? disposeFailure = null)
+        : TrackingFileProvider(name, disposalOrder, disposeFailure), IAsyncDisposable
+    {
+        public ValueTask DisposeAsync()
+        {
+            RecordDisposal();
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class SynchronousTrackingFileProvider(
+        string name,
+        ICollection<string> disposalOrder,
+        Exception? disposeFailure = null)
+        : TrackingFileProvider(name, disposalOrder, disposeFailure), IDisposable
+    {
+        public void Dispose() => RecordDisposal();
+    }
+
+    private sealed class TrackingActivationProbe(
+        ICollection<string> disposalOrder,
+        Exception? disposeFailure = null) : IAsyncDisposable
+    {
+        public int DisposeCount { get; private set; }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            disposalOrder.Add("activation");
+            return disposeFailure is null
+                ? ValueTask.CompletedTask
+                : ValueTask.FromException(disposeFailure);
+        }
+    }
+
+    private sealed class ReentrantDisposalProbe : IAsyncDisposable
+    {
+        public Func<Task>? Reenter { get; set; }
+
+        public int DisposeCount { get; private set; }
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposeCount++;
+            if (Reenter is not null)
+            {
+                await Reenter().ConfigureAwait(false);
+            }
+        }
+    }
 
     public void Dispose()
     {

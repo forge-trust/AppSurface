@@ -1,8 +1,8 @@
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using ForgeTrust.AppSurface.Aspire;
-using ForgeTrust.AppSurface.Dependency.Autofac;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Dependency.Autofac;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -247,6 +247,125 @@ public sealed class AspireProfileActivationHostBuilderTests
     }
 
     [Fact]
+    public async Task RealStartup_ModulePropertiesAndRepeatedSourcesReuseOwnedProvider()
+    {
+        const string key = "activation-owned-provider";
+        const string propertyName = "activation-module-marker";
+        var provider = new ProbeProvider();
+        provider.Seed(key, "module-value");
+        var marker = new object();
+        IDictionary<object, object>? moduleProperties = null;
+        var module = new ProbeModule
+        {
+            Before = builder =>
+            {
+                moduleProperties = builder.Properties;
+                builder.Properties[propertyName] = marker;
+            }
+        };
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = Startup(module, ownership);
+
+        Assert.NotNull(moduleProperties);
+        Assert.Same(moduleProperties, builder.Properties);
+        Assert.Same(marker, builder.Properties[propertyName]);
+
+        builder.ConfigureAppConfiguration((_, configuration) =>
+        {
+            configuration.Sources.Clear();
+            configuration.Add(new ProbeSource(provider));
+            configuration.Add(new ReusingFirstSource());
+        });
+
+        var host = builder.Build();
+        var root = Assert.IsAssignableFrom<IConfigurationRoot>(host.Services.GetRequiredService<IConfiguration>());
+        var providers = root.Providers.ToArray();
+
+        Assert.Equal(2, providers.Length);
+        Assert.Same(providers[0], providers[1]);
+        Assert.True(providers[0].TryGet(key, out var before));
+        Assert.Equal("module-value", before);
+
+        providers[0].Set(key, "updated-value");
+        Assert.Equal("updated-value", root[key]);
+
+        var token = providers[0].GetReloadToken();
+        Assert.False(token.HasChanged);
+        Assert.True(token.ActiveChangeCallbacks);
+        provider.HasChanged = true;
+        provider.ActiveChangeCallbacks = false;
+        Assert.True(token.HasChanged);
+        Assert.False(token.ActiveChangeCallbacks);
+
+        await ownership.DisposeAsync();
+        Assert.Equal(1, provider.DisposeCount);
+    }
+
+    [Fact]
+    public async Task RealHost_LateReloadRegistrationAfterOwnerCleanupIsDisposedImmediately()
+    {
+        const string key = "late-registration-provider";
+        var provider = new ProbeProvider();
+        provider.Seed(key, "available");
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]);
+        builder.ConfigureAppConfiguration((_, configuration) =>
+        {
+            configuration.Sources.Clear();
+            configuration.Add(new ProbeSource(provider));
+        });
+
+        var host = builder.Build();
+        var root = Assert.IsAssignableFrom<IConfigurationRoot>(host.Services.GetRequiredService<IConfiguration>());
+        var observedProvider = Assert.Single(root.Providers, candidate => candidate.TryGet(key, out var value) && value == "available");
+        var token = observedProvider.GetReloadToken();
+        await ownership.DisposeAsync();
+
+        Assert.Equal(1, provider.DisposeCount);
+        Assert.Equal(0, provider.ActiveRegistrations);
+        var registrationsBeforeLateCall = provider.RegistrationCount;
+        var disposalsBeforeLateCall = provider.RegistrationDisposeCount;
+        var callbackCount = 0;
+        var registration = token.RegisterChangeCallback(_ => callbackCount++, null);
+        try
+        {
+            Assert.Equal(registrationsBeforeLateCall + 1, provider.RegistrationCount);
+            Assert.Equal(disposalsBeforeLateCall + 1, provider.RegistrationDisposeCount);
+            Assert.Equal(0, provider.ActiveRegistrations);
+            Assert.Equal(0, callbackCount);
+        }
+        finally
+        {
+            registration.Dispose();
+        }
+
+        Assert.Equal(disposalsBeforeLateCall + 1, provider.RegistrationDisposeCount);
+    }
+
+    [Fact]
+    public async Task RealHost_FactoryCreatedSynchronousHostUsesOwnedAsyncCleanupFallback()
+    {
+        var factory = new ProbeFactory();
+        var suppliedHost = new SynchronousOwnedHost(() => factory.Returned!);
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]).UseServiceProviderFactory(_ => factory);
+        builder.ConfigureServices((_, services) => services.AddSingleton<IHost>(_ => suppliedHost));
+
+        var host = builder.Build();
+
+        Assert.NotSame(suppliedHost, host);
+        Assert.IsAssignableFrom<IAsyncDisposable>(host);
+        Assert.Same(factory.Returned, host.Services);
+
+        await ownership.DisposeAsync();
+        await ownership.DisposeAsync();
+
+        Assert.Equal(1, suppliedHost.Disposals);
+        Assert.Equal(1, factory.Returned!.SyncDisposeCount);
+        Assert.Equal(0, factory.Returned.AsyncDisposeCount);
+    }
+
+    [Fact]
     public async Task RealHost_CallerOwnedSingletonAndBorrowedConfigurationRemainOwnedByCaller()
     {
         var callerProvider = new ProbeProvider();
@@ -452,6 +571,11 @@ public sealed class AspireProfileActivationHostBuilderTests
         public IConfigurationProvider Build(IConfigurationBuilder builder) => provider;
     }
 
+    private sealed class ReusingFirstSource : IConfigurationSource
+    {
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => builder.Sources[0].Build(builder);
+    }
+
     private sealed class FailingSource(Exception primary) : IConfigurationSource
     {
         public IConfigurationProvider Build(IConfigurationBuilder builder) => throw primary;
@@ -459,21 +583,30 @@ public sealed class AspireProfileActivationHostBuilderTests
 
     private sealed class ProbeProvider : IConfigurationProvider, IChangeToken, IDisposable
     {
+        private readonly Dictionary<string, string?> _values = new(StringComparer.OrdinalIgnoreCase);
         public Exception? LoadError { get; init; }
         public Exception? DisposeError { get; init; }
         public int DisposeCount { get; private set; }
         public int ActiveRegistrations { get; private set; }
-        public bool HasChanged => false;
-        public bool ActiveChangeCallbacks => true;
-        public bool TryGet(string key, out string? value) { value = null; return false; }
-        public void Set(string key, string? value) { }
+        public int RegistrationCount { get; private set; }
+        public int RegistrationDisposeCount { get; private set; }
+        public bool HasChanged { get; set; }
+        public bool ActiveChangeCallbacks { get; set; } = true;
+        public bool TryGet(string key, out string? value) => _values.TryGetValue(key, out value);
+        public void Set(string key, string? value) => _values[key] = value;
+        internal void Seed(string key, string? value) => _values[key] = value;
         public void Load() { if (LoadError is not null) throw LoadError; }
         public IEnumerable<string> GetChildKeys(IEnumerable<string> earlierKeys, string? parentPath) => earlierKeys;
         public IChangeToken GetReloadToken() => this;
         public IDisposable RegisterChangeCallback(Action<object?> callback, object? state)
         {
             ActiveRegistrations++;
-            return new CallbackRegistration(() => ActiveRegistrations--);
+            RegistrationCount++;
+            return new CallbackRegistration(() =>
+            {
+                ActiveRegistrations--;
+                RegistrationDisposeCount++;
+            });
         }
         public void Dispose() { DisposeCount++; if (DisposeError is not null) throw DisposeError; }
     }
