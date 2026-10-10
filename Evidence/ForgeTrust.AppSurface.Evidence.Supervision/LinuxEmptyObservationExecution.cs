@@ -58,6 +58,9 @@ internal static class LinuxEmptyObservationExecution
         }
         var failed = false;
         var cleanupFailed = false;
+        var cancellationProjectionWritten = false;
+        var accountsClosedUnderCustody = false;
+        uint cancellationResultsGid = 0;
         var cleanupToken = CancellationToken.None;
         long finalCloseStarted = 0;
         TimeSpan finalCloseAllowance = TimeSpan.Zero;
@@ -134,6 +137,7 @@ internal static class LinuxEmptyObservationExecution
                 && workspace is not null && worker is not null && server is not null)
                 try
                 {
+                    cancellationResultsGid = accounts.ResultsGid;
                     var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server, cleanupToken);
                     var signal = server.CaptureCancellationSignal(input, owner, accounts, workspace, worker, cleanupToken);
                     await Console.Error.WriteLineAsync(signal).ConfigureAwait(false);
@@ -142,6 +146,7 @@ internal static class LinuxEmptyObservationExecution
                     await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.JoinedStreams).AsMemory(),
                         cleanupToken).ConfigureAwait(false);
                     cleanupToken.ThrowIfCancellationRequested();
+                    cancellationProjectionWritten = true;
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is null && input is not null && owner is not null && accounts is not null
@@ -154,7 +159,12 @@ internal static class LinuxEmptyObservationExecution
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             if (custody is not null)
-                try { phase = EvidenceNativeObservationPhase.AccountsClose; await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false); }
+                try
+                {
+                    phase = EvidenceNativeObservationPhase.AccountsClose;
+                    await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false);
+                    accountsClosedUnderCustody = true;
+                }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
                 try { phase = EvidenceNativeObservationPhase.AccountsClose; await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }
@@ -198,8 +208,40 @@ internal static class LinuxEmptyObservationExecution
         }
         if (cleanupFailed) throw failures.Rejected();
         token.ThrowIfCancellationRequested();
+        // The optional diagnostic is attached only after every original cleanup and deadline check.
+        // No earlier first-fault projection can conceal a failed finalization behind this record.
+        if (failed && cancellationProjectionWritten && accountsClosedUnderCustody && owner is not null)
+            throw failures.Rejected(owner.RunId, cancellationResultsGid);
         if (failed || manifest is null) throw failures.Rejected();
         return manifest;
+    }
+
+    /// <summary>Encodes fixed private cancellation cleanup data; it creates no native ownership or completion capability.</summary>
+    /// <param name="generation">Original generation data; native composition supplies the actual owner generation.</param>
+    /// <param name="resultsGid">Original nonroot results group ID, captured before account cleanup changes NSS.</param>
+    /// <returns>Bounded JSON with no raw exception, path, message, admission or successful-run claim.</returns>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD410 for empty generation or reserved group data.</exception>
+    /// <remarks>
+    /// Detached calls prove encoding only. RunAsync emits these bytes solely after the original root
+    /// custody account-close task, every local-owner close and final remaining-interval check succeed.
+    /// Native validation must separately bind the exact root image and process exit, require root-owned
+    /// terminal filesystem custody and independently observe all generated NSS names and IDs absent.
+    /// </remarks>
+    internal static string EncodeCancellationCleanupDetached(Guid generation, uint resultsGid)
+    {
+        if (generation == Guid.Empty || resultsGid is 0 or uint.MaxValue) throw Rejected();
+        return System.Text.Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(new
+        {
+            schema = "issue779-cancellation-root-cleanup-v1",
+            generation = generation.ToString("N"),
+            results_gid = resultsGid,
+            accounts_closed = true,
+            root_custody_closed = true,
+            original_owners_closed = true,
+            observation_only = true,
+            native_authority = false,
+            native_acceptance = false
+        }));
     }
 
     /// <summary>Checks captured timing data after native owners close; it neither renews a deadline nor issues authority.</summary>

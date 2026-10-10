@@ -1167,3 +1167,23 @@ independent source review found no remaining issue in this scope. These local
 macOS results cover the data codec and compilation. Fresh image capture and
 actual Linux cancellation, original kernel ownership, filesystem and account
 disposition controls remain pending.
+
+### Final cancellation cleanup observation
+
+The fixed private cancellation image carries an optional `issue779-cancellation-root-cleanup-v1`
+record through the [negative-only exception](EvidenceNativeObservationFailure.cs). Its nine fields are
+`schema`, `generation`, `results_gid`, `accounts_closed`, `root_custody_closed`,
+`original_owners_closed`, `observation_only`, `native_authority`, and `native_acceptance`.
+The [original root composition](LinuxEmptyObservationExecution.cs) attaches it only after joined
+root custody, strict account deletion, every local owner close and the original final deadline check.
+A later cleanup failure suppresses the record even when an earlier execution fault remains first.
+The reserved [process entry](../../Cli/ForgeTrust.AppSurface.Cli/EvidenceProcessEntryPoint.cs) writes
+it after the original failure packet and before the unchanged fixed negative terminal message.
+
+This diagnostic cannot authorize execution or turn cancellation into successful Evidence. Detached
+encoding controls establish shape only. Native validation must bind the exact original root process
+and image, require all account-associated nodes to have their terminal root:root policy, compare
+retained output device/inode with the original descriptor, and check every generated account name
+and numeric UID/GID absent in both NSS lookup directions. The original descriptor bytes retain the
+pre-transfer identities; comparing their old UID/GID to root-owned terminal nodes would reject valid
+cleanup. Missing cleanup data, mutable terminal nodes, present accounts or expired checks reject.
