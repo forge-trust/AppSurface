@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -14,6 +15,8 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
         var expected = EvidenceNativeQualificationKind.CancellationBeforeActivation;
+#elif EVIDENCE_PRIVATE_N11
+        var expected = EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
         var expected = EvidenceNativeQualificationKind.LeaderExitWithDescendant;
 #else
@@ -24,6 +27,10 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.PeerReplacementEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.LeaderExitWithDescendant,
             EvidenceNativeQualification.DescendantEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.SynchronousWorkerStall,
+            EvidenceNativeQualification.WorkerStallEnabled);
+        Assert.Equal(EvidenceNativeQualification.WorkerStallEnabled,
+            EvidenceFixedSynchronousInputFactory.CreateForProtectedRole() is not null);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();
         if (expected is not (EvidenceNativeQualificationKind.CancellationBeforeAllocation
             or EvidenceNativeQualificationKind.CancellationBeforeActivation))
@@ -37,7 +44,7 @@ public sealed class EvidenceNativeQualificationTests
         Assert.NotNull(checkpoint);
         var phase = expected == EvidenceNativeQualificationKind.CancellationBeforeAllocation
             ? EvidenceOriginalCancellationPhase.BeforeAllocation : EvidenceOriginalCancellationPhase.BeforeActivation;
-        Assert.Equal(phase, EvidenceOriginalCancellationCheckpoint.SelectedPhase);
+        Assert.Equal(EvidenceOriginalCancellationCheckpoint.SelectedPhase, phase);
         using var caller = new CancellationTokenSource();
         using var stage = CancellationTokenSource.CreateLinkedTokenSource(caller.Token);
         using var error = new MemoryStream();

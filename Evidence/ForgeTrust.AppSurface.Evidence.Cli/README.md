@@ -14,6 +14,8 @@ for current release risk, migration guidance, and readiness.
 
 ## Command workflow
 
+The internal [N11 synchronous input-factory fixture](EvidenceFixedSynchronousInputFactory.cs) is created only when the shared compile-owned selector selects N11. The protected string-role path passes it into the existing tracked Admission callback after authenticated READY; `None` continues through the normal protected input resolver. Its fixed stderr marker only identifies entry into the deliberate synchronous stall. See the [Contracts qualification reference](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#ordinary-execution-and-private-qualification-images) for selection and artifact constraints.
+
 ```bash
 appsurface evidence init --sample
 appsurface evidence doctor --path src/Orders/SubmitOrder.cs

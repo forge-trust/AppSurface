@@ -49,7 +49,8 @@ internal static class EvidenceProtectedCliExecution
             throw new EvidenceAdmissionException("ASEVD410", "The fixed N04 peer probe unexpectedly accepted a protected wait reply.");
         }
         return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken,
-            diagnosticSink, cancellationSink, EvidenceNativeQualification.CreateCancellationCheckpoint()).ConfigureAwait(false);
+            diagnosticSink, cancellationSink, EvidenceNativeQualification.CreateCancellationCheckpoint(),
+            EvidenceFixedSynchronousInputFactory.CreateForProtectedRole()).ConfigureAwait(false);
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>
@@ -64,7 +65,8 @@ internal static class EvidenceProtectedCliExecution
     private static async Task<EvidenceManifest> RunAsync(EvidenceLinuxWorkerSupervisor worker, EvidenceExecutionMode mode,
         CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink,
         Action<EvidenceOriginalCancellationObservation>? cancellationSink = null,
-        EvidenceOriginalCancellationCheckpoint? cancellationCheckpoint = null)
+        EvidenceOriginalCancellationCheckpoint? cancellationCheckpoint = null,
+        EvidenceFixedSynchronousInputFactory? fixedInputFactory = null)
     {
         var descriptor = worker.Descriptor;
         var clock = TimeProvider.System;
@@ -82,7 +84,9 @@ internal static class EvidenceProtectedCliExecution
 
             var resolved = await execution.ExecuteAsync(EvidenceRunStage.Admission,
                 TimeSpan.FromSeconds(descriptor.AdmissionSeconds),
-                async token => await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false),
+                async token => fixedInputFactory is null
+                    ? await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false)
+                    : await fixedInputFactory.StallBeforeReturningTask().ConfigureAwait(false),
                 callerCancellation).ConfigureAwait(false);
             if (resolved.Outcome != EvidenceWorkerStageOutcome.Passed)
                 throw execution.TerminalException as EvidenceAdmissionException

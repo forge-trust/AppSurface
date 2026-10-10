@@ -13,7 +13,7 @@ The old native/private-harness repair loop remains stopped. Its snapshots and re
 
 ## Common source and qualification builds
 
-Ordinary supervisor and worker roles share one integrated source graph. The internal [compile-owned qualification selector](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) defaults to `None`; private N04/N08/N09/N12 builds are described in the [Supervision package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#ordinary-execution-and-private-qualification-images). A private checkpoint must not leave an unconditional helper wait or injected signal in ordinary execution. Its build selection creates no runtime admission, producer registration or consumer proof. Previously verified controls on private snapshots remain evidence for those snapshots until revalidated on the integrated graph.
+Ordinary supervisor and worker roles share one integrated source graph. The internal [compile-owned qualification selector](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) defaults to `None`; private N04/N08/N09/N11/N12 builds are described in the [Supervision package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#ordinary-execution-and-private-qualification-images). A private checkpoint must not leave an unconditional helper wait or injected signal in ordinary execution. Its build selection creates no runtime admission, producer registration or consumer proof. Previously verified controls on private snapshots remain evidence for those snapshots until revalidated on the integrated graph.
 
 ## Execution rules
 
@@ -564,3 +564,12 @@ The private intermediate record explicitly precedes custody/account closure. Nat
 ## Private cancellation failure visibility
 
 The N08/N09 failure-only [joined output diagnostic](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-pre-ready-worker-failure-diagnostics) preserves the actual worker stderr already retained by the original collector when READY/kernel/custody capture is unavailable. Its detached record establishes no native checkpoint or physical settlement. The unchanged first failure and native validators remain authoritative; the next cancellation attempt must diagnose any retained worker error before an evidence-supported execution fix or control credit.
+
+### 2026-10-10: N11 synchronous worker factory source integration
+
+Integrated the N11 synchronous stall into the common source graph using the compile-owned
+`EvidencePrivateQualification=N11` selector. The [protected CLI reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md)
+documents its placement after authenticated READY inside the existing tracked Admission callback.
+Ordinary `None` continues through the normal protected input resolver. The deliberate `Thread.Sleep`
+was not run locally, and this source-only integration establishes no native failure-settlement result,
+checkpoint completion or consumer proof. The N11 failed-settlement emitter/codec remains separate work.
