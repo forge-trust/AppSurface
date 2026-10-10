@@ -14,12 +14,16 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
         var expected = EvidenceNativeQualificationKind.CancellationBeforeActivation;
+#elif EVIDENCE_PRIVATE_N12
+        var expected = EvidenceNativeQualificationKind.LeaderExitWithDescendant;
 #else
         var expected = EvidenceNativeQualificationKind.None;
 #endif
         Assert.Equal(expected, EvidenceNativeQualification.Current);
         Assert.Equal(expected == EvidenceNativeQualificationKind.PeerReplacement,
             EvidenceNativeQualification.PeerReplacementEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.LeaderExitWithDescendant,
+            EvidenceNativeQualification.DescendantEnabled);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();
         if (expected is not (EvidenceNativeQualificationKind.CancellationBeforeAllocation
             or EvidenceNativeQualificationKind.CancellationBeforeActivation))

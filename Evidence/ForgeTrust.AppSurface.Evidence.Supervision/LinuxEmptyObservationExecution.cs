@@ -100,10 +100,22 @@ internal static class LinuxEmptyObservationExecution
             server.RequireSuccessfulCompletion(job.Token);
             phase = EvidenceNativeObservationPhase.WorkerExit;
             await worker.WaitForExitAsync().ConfigureAwait(false);
+            if (EvidenceNativeQualification.DescendantEnabled)
+                await worker.ObserveLeaderExitWithDescendantAsync(job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkerStop;
             await worker.StopAndJoinAsync().ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkerCompletion;
             worker.RequireSuccessfulCompletion();
+            if (EvidenceNativeQualification.DescendantEnabled)
+            {
+                var bytes = worker.CaptureJoinedDescendantObservation();
+                owner.RequireCleanup(default);
+                using var error = Console.OpenStandardError();
+                await error.WriteAsync(bytes, owner.RootTeardownToken).ConfigureAwait(false);
+                await error.WriteAsync(new byte[] { (byte)'\n' }, owner.RootTeardownToken).ConfigureAwait(false);
+                await error.FlushAsync(owner.RootTeardownToken).ConfigureAwait(false);
+                owner.RequireCleanup(default);
+            }
             phase = EvidenceNativeObservationPhase.BeginTeardown;
             owner.BeginRootTeardown();
             cleanupToken = owner.RootTeardownToken;

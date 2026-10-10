@@ -13,7 +13,7 @@ The old native/private-harness repair loop remains stopped. Its snapshots and re
 
 ## Common source and qualification builds
 
-Ordinary supervisor and worker roles share one integrated source graph. The internal [compile-owned qualification selector](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) defaults to `None`; private N04/N08/N09 builds are described in the [Supervision package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#ordinary-execution-and-private-qualification-images). A private checkpoint must not leave an unconditional helper wait or injected signal in ordinary execution. Its build selection creates no runtime admission, producer registration or consumer proof. Previously verified controls on private snapshots remain evidence for those snapshots until revalidated on the integrated graph.
+Ordinary supervisor and worker roles share one integrated source graph. The internal [compile-owned qualification selector](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) defaults to `None`; private N04/N08/N09/N12 builds are described in the [Supervision package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#ordinary-execution-and-private-qualification-images). A private checkpoint must not leave an unconditional helper wait or injected signal in ordinary execution. Its build selection creates no runtime admission, producer registration or consumer proof. Previously verified controls on private snapshots remain evidence for those snapshots until revalidated on the integrated graph.
 
 ## Execution rules
 
@@ -553,3 +553,9 @@ supply this proof. Next prepare that capture and trusted OS bootstrap, execute N
 setup issues, and then finish every mandatory N01–N16 case. No subset opens the checkpoint exit gate.
 Checkpoints 2–4, complete platform/consumer proof, unchanged coverage gate, QA and the validated draft
 PR remain required.
+
+### 2026-10-10: N12 private same-image descendant source
+
+Prepared the closed N12 same-image output-holder procedure on the integrated C# graph, described in the [Supervision reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#n12-leader-exit-with-an-inherited-output-holder). It exercises natural leader exit followed by real original-unit stop/group/pump joins. The ordinary build remains `None`, has no child or observer, and rejects the private role before configuration. No new admission factory, compiled workload registration, capability or consumer proof is created.
+
+The private intermediate record explicitly precedes custody/account closure. Native N12 completion requires the actual post-stop group/EOF evidence **and** final root success/cleanup and complete source/deployment binding. This source-preparation entry is not a Linux result, a numerical coverage result or checkpoint completion.

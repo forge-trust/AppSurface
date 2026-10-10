@@ -8,6 +8,8 @@ internal enum EvidenceProcessRole
 {
     Worker,
     Supervisor,
+    /// <summary>Private N12 child; unavailable in every ordinary build and never an admitted worker.</summary>
+    OutputHolder,
 }
 
 /// <summary>Parsed process-role data; selection does not authenticate or grant execution authority.</summary>
@@ -28,7 +30,8 @@ internal static class EvidenceProcessRoleParser
         return arguments.Count >= 2
             && string.Equals(arguments[0], "evidence", StringComparison.OrdinalIgnoreCase)
             && (string.Equals(arguments[1], "worker", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(arguments[1], "supervise", StringComparison.OrdinalIgnoreCase));
+                || string.Equals(arguments[1], "supervise", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(arguments[1], LinuxN12Descendant.Role, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Parses one exact role and its single bounded path option or fixed help request.</summary>
@@ -40,6 +43,14 @@ internal static class EvidenceProcessRoleParser
     {
         ArgumentNullException.ThrowIfNull(arguments);
         if (arguments.Count < 3 || arguments[0] != "evidence") throw InvalidRole();
+        if (arguments[1] == LinuxN12Descendant.Role)
+        {
+            if (!EvidenceNativeQualification.DescendantEnabled || arguments.Count != 4 || arguments[2] != "--parent")
+                throw InvalidRole();
+            try { _ = LinuxN12Descendant.ParsePid(arguments[3]); }
+            catch (EvidenceAdmissionException) { throw InvalidRole(); }
+            return new(EvidenceProcessRole.OutputHolder, arguments[3], false);
+        }
         var role = arguments[1] switch
         {
             "worker" => EvidenceProcessRole.Worker,

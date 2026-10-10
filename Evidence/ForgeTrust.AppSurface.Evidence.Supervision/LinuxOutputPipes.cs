@@ -113,12 +113,14 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     /// <param name="prefixByteLimit">Per-stream retained prefix; defaults to 1 MiB and may only be lowered.</param>
     /// <param name="cancellationPhase">Optional data-only observer fed by the original charged stderr pump;
     /// creates no second reader, independent task or process authority.</param>
+    /// <param name="descendant">Private N12 PID-data observer from the same original charged stderr pump; not process authentication.</param>
     /// <remarks>Account utility callers may select 128 KiB/4 KiB. Run-wide accounting remains the owner's duty.</remarks>
     internal Task<SupervisionOutputReceipt> BeginCollectAsync(CancellationToken token,
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
         int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
-        SupervisionCancellationPhaseObservation? cancellationPhase = null) =>
-        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit, cancellationPhase);
+        SupervisionCancellationPhaseObservation? cancellationPhase = null,
+        SupervisionDescendantObservation? descendant = null) =>
+        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit, cancellationPhase, descendant);
 
     /// <summary>Irreversibly closes both local write copies, only after the actual start task joined.</summary>
     /// <remarks>Attempts both closes and latches failure. This cannot close systemd's copies or stop a unit.</remarks>
@@ -229,10 +231,12 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
     internal Task<SupervisionOutputReceipt> BeginCollectAsync(CancellationToken token,
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
         int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
-        SupervisionCancellationPhaseObservation? cancellationPhase = null)
+        SupervisionCancellationPhaseObservation? cancellationPhase = null,
+        SupervisionDescendantObservation? descendant = null)
     {
         var collector = new SupervisionOutputCollector(receivedByteLimit, prefixByteLimit);
         if (cancellationPhase is not null) collector.ObserveCancellation(cancellationPhase);
+        if (descendant is not null) collector.ObserveDescendant(descendant);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<SupervisionOutputReceipt> task;
         lock (_sync)

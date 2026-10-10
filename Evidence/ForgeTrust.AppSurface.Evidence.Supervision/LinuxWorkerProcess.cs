@@ -40,6 +40,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxUnitProperties? _naturalTerminal;
     private SupervisionOutputReceipt? _output;
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
+    private readonly SupervisionDescendantObservation _descendant = new();
+    private LinuxN12LeaderExitObservation? _leaderExitObservation;
 
     /// <summary>Gets only the original stderr-pump phase task; data creates no process authority.</summary>
     internal Task CancellationPhaseObserved => _cancellationPhase.Observed;
@@ -258,6 +260,47 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>Captures N12 live child/group and unfinished output only after the original leader monitor joined, before stop.</summary>
+    /// <remarks>
+    /// The private frame is PID data, not authentication. This actual holder captures the child through
+    /// root-owned retained proc handles using its original worker account and generated cgroup. It checks
+    /// the original owner/deadline and unfinished original output task around the sample. Missing, dead,
+    /// foreign or early-EOF children reject; the ordinary stop path still contains and joins the unit.
+    /// No portable record or Boolean can construct this native holder or supply its saved observation.
+    /// </remarks>
+    internal async Task ObserveLeaderExitWithDescendantAsync(CancellationToken token)
+    {
+        if (!EvidenceNativeQualification.DescendantEnabled || _leaderExitObservation is not null
+            || _exit?.IsCompletedSuccessfully != true || _naturalTerminal is null || _worker is null || _pipes is null
+            || _lifetime.IsClosed) throw LinuxSystemdBackend.InvalidControl();
+        _owner.RequireCleanupLaunchInput(_input, token);
+        var pid = checked((uint)await _descendant.Observed.WaitAsync(token).ConfigureAwait(false));
+        if (pid == _worker.Pid) throw LinuxSystemdBackend.InvalidControl();
+        using var child = LinuxProcessIdentity.Capture(pid, _accountData.WorkerUid, _accountData.WorkerGid, Unit, token);
+        child.Recheck(token);
+        var group = LinuxCgroupProbe.Read(Unit, token);
+        var outputJoined = _pipes.JoinAsync().IsCompleted;
+        _owner.RequireCleanupLaunchInput(_input, token);
+        child.Recheck(token);
+        LinuxN12LeaderExitObservation.RequireBeforeStop(_naturalTerminal, _worker.Pid, child.SampledFacts,
+            _accountData.WorkerUid, _accountData.WorkerGid, Unit, group, outputJoined);
+        _leaderExitObservation = new(_owner.RunId, _worker.Pid, child.SampledFacts, group, _naturalTerminal);
+    }
+
+    /// <summary>Copies N12 observations only after original unit, native monitor, both EOFs and final group checks joined.</summary>
+    /// <remarks>This bounded private record carries no completion/admission authority; root custody and account closure must still succeed.</remarks>
+    internal byte[] CaptureJoinedDescendantObservation()
+    {
+        if (!EvidenceNativeQualification.DescendantEnabled || _leaderExitObservation is null) throw LinuxSystemdBackend.InvalidControl();
+        RequireSuccessfulCompletion();
+        _owner.RequireCleanup(default);
+        var group = LinuxCgroupProbe.Read(Unit, default);
+        if (!LinuxAccountUtility.GroupEmpty(group) || _output is not { Successful: true }) throw LinuxSystemdBackend.InvalidControl();
+        var bytes = _leaderExitObservation.EncodeJoined(_output, group);
+        _owner.RequireCleanup(default);
+        return bytes;
+    }
+
     /// <summary>Closes startup and shares pending containment, full startup join, group and pump finalization.</summary>
     /// <remarks>
     /// Uses one cumulative cleanup allowance bounded by the unchanged original owner/job deadline.
@@ -304,7 +347,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _outputDeadline.CancelAfter(_owner.Remaining);
             _pipes = LinuxOutputPipes.Create();
             _ = _pipes.BeginCollectAsync(_outputDeadline.Token, cancellationPhase:
-                EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null);
+                EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null,
+                descendant: EvidenceNativeQualification.DescendantEnabled ? _descendant : null);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(_jobDeadline.Token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                 TimeSpan.FromSeconds(_input.Request.StartSeconds).Ticks)));
