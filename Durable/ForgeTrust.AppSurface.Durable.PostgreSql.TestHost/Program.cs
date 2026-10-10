@@ -6,6 +6,12 @@ using ForgeTrust.AppSurface.Durable.PostgreSql;
 using ForgeTrust.AppSurface.Flow;
 using Npgsql;
 
+if (args.Length > 0 && args[0] == "execution-checkpoint")
+{
+    await ExecutionCheckpointHost.RunAsync(args[1..]);
+    return;
+}
+
 if (args.Length == 5
     && args[0] == "flow-timer"
     && Guid.TryParse(args[1], out var flowRuntimeEpoch)

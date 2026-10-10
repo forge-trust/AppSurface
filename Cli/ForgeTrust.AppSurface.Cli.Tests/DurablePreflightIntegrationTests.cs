@@ -111,7 +111,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
     }
 
     [Fact]
-    public async Task Schema_ten_owner_preflight_reports_pending_0011_without_structural_findings_or_catalog_changes()
+    public async Task Schema_ten_owner_preflight_reports_all_pending_migrations_without_structural_findings_or_catalog_changes()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.DowngradeToSchemaTenAsync();
@@ -124,16 +124,16 @@ public sealed class DurableSchemaPreflightIntegrationTests
         var after = await fixture.ReadStatusAsync();
         Assert.Equal(DurableRuntimeSchemaCompatibility.UpgradeRequired, before.Compatibility);
         Assert.Equal(10, before.InstalledVersion);
-        Assert.Equal(11, before.RequiredVersion);
-        Assert.Equal([11], before.PendingVersions);
+        Assert.Equal(12, before.RequiredVersion);
+        Assert.Equal([11, 12], before.PendingVersions);
         Assert.Equal(before.Compatibility, result.Status.Compatibility);
         Assert.Equal(before.InstalledVersion, result.Status.InstalledVersion);
         Assert.Equal(before.RequiredVersion, result.Status.RequiredVersion);
-        Assert.Equal([11], result.Status.PendingVersions);
+        Assert.Equal([11, 12], result.Status.PendingVersions);
         Assert.Empty(result.FailedChecks);
         Assert.Equal("unresolved", result.CallerEvidenceKind);
-        Assert.Contains("pending migration 0011", commandError.Message, StringComparison.Ordinal);
-        Assert.Contains("not a passing gate", commandError.Message, StringComparison.Ordinal);
+        Assert.Contains("preflight is UpgradeRequired", commandError.Message, StringComparison.Ordinal);
+        Assert.Contains("generate a reviewed forward script", commandError.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("structural preflight failed", commandError.Message, StringComparison.Ordinal);
         Assert.Equal(before.Compatibility, after.Compatibility);
         Assert.Equal(before.StoreId, after.StoreId);
@@ -752,15 +752,19 @@ public sealed class DurableSchemaPreflightIntegrationTests
     public async Task Successful_preflight_elapsed_includes_nonpooled_physical_close_and_fence_release()
     {
         await using var fixture = await Fixture.CreateAsync();
+        const string applicationName = "issue845-successful-physical-close";
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var elapsed = Stopwatch.StartNew();
-        var result = await fixture.RunAsync(RuntimeA);
-        elapsed.Stop();
+        var result = await fixture.RunAsync(RuntimeA, applicationName: applicationName, cancellationToken: completionDeadline.Token);
 
         Assert.Empty(result.FailedChecks);
+        await fixture.AssertNoFenceLocksAsync();
+        // Client close has no server acknowledgement; observe backend exit within the same total budget.
+        await fixture.WaitForSessionExitAsync(applicationName, completionDeadline.Token);
+        Assert.Equal(0, await fixture.CountPreflightSessionsAsync());
+        elapsed.Stop();
         Assert.True(elapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Successful preflight including nonpooled connection disposal took {elapsed.Elapsed}.");
-        Assert.Equal(0, await fixture.CountPreflightSessionsAsync());
-        await fixture.AssertNoFenceLocksAsync();
     }
 
     private static string SocketProbeConnectionString(int port, int timeoutSeconds) =>
@@ -1591,7 +1595,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 DROP POLICY runtime_heartbeat_migration_owner ON appsurface_durable.runtime_heartbeat;
                 DROP INDEX appsurface_durable.ix_runtime_heartbeat_retention;
                 DROP FUNCTION appsurface_durable.prune_runtime_heartbeats(interval, integer, text, uuid);
-                DELETE FROM appsurface_durable.schema_migration WHERE version = 11;
+                DELETE FROM appsurface_durable.schema_migration WHERE version >= 11;
                 UPDATE appsurface_durable.store_metadata
                 SET schema_version = 10,
                     minimum_reader_version = 10,

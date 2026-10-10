@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable
 
+The [runtime doctor reference](../runtime-doctor.md) explains how canonical diagnostic descriptors support connected-store diagnosis and preserve separate application verification.
+
 > **Public preview:** the [PostgreSQL provider](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
 > current conformance path. This package installs no runtime and starts no hosted service.
 
@@ -17,6 +19,21 @@ Runtime-provider and operator APIs live in
 
 Do not choose it for arbitrary replayable code, exactly-once external effects, child workflows, unbounded fan-out, a
 message bus, storage, or worker hosting.
+
+## Retry plans and execution deadlines
+
+Choose legacy backoff, a deadline-only policy, or an acceptance-relative plan with the canonical
+[execution-policy v1 reference](../execution-policies-v1.md). Existing constructors keep the legacy fingerprint and
+timing behavior. The named `DurableWorkExecutionPolicy` factories compose an existing retry/lease policy with an
+optional `DurableAttemptPlan`; `DurableExecutionDeadline` is an exclusive UTC cutoff. A legacy policy without a plan
+or deadline retains v1 fingerprint and timestamp precision, while planned and deadline requests require microsecond
+precision. Deadline-only requests keep `dueAtUtc`, including an overdue due time; planned requests reject it. The
+public execution snapshot accepts only a next eligibility equal to one of the plan's acceptance-relative slots (or
+`null` when no slot remains); a slot may still be shown when a deadline or circuit cutoff makes it inadmissible. The
+reference covers validation,
+precision, direct Work plus reconciler adoption, fingerprint compatibility, late effect truth, and the schema-12
+[migration checklist](../migrations/execution-policies-v1.md). Its chooser example is compiled from the
+[packed adopter source](../packed-consumers/Adopter/TypedWorkDefinitionProof.cs).
 
 ## Typed Work definitions
 
@@ -78,8 +95,196 @@ internal static class TypedWorkDefinitionProof
         maximumLeaseLifetime: TimeSpan.FromMinutes(5),
         backoffAlgorithm: "exponential-v1");
 
+    // docs:snippet durable-execution-policy-chooser:start
+    internal static void VerifyExecutionPolicyChooser()
+    {
+        var scope = new DurableScopeId("execution-policy-proof-scope");
+        var command = new DurableCommandId("execution-policy-proof-command");
+        var input = new LedgerWork("entry-1");
+        var legacy = ReconciledDefinition.CreateRequest(
+            scope, command, "legacy-key", input, retryPolicy: ExplicitRetry);
+        if (legacy.ExecutionPolicy.AttemptPlan is not null
+            || legacy.ExecutionDeadline is not null
+            || legacy.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v1")
+        {
+            throw new InvalidOperationException("Legacy request construction changed its policy or fingerprint schema.");
+        }
+
+        var deadline = new DurableExecutionDeadline(
+            new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero));
+        var deadlineOnly = DurableWorkRequest.CreateWithExecutionPolicy(
+            scope,
+            command,
+            "deadline-only-key",
+            OrdinaryDefinition.WorkName,
+            "v2",
+            OrdinaryDefinition.WorkCodec.Encode(new InvoiceWork("invoice-1002")),
+            OrdinaryDefinition.ProviderSafety,
+            DurableWorkExecutionPolicy.FromRetryPolicy(ExplicitRetry),
+            deadline);
+        if (deadlineOnly.ExecutionPolicy.AttemptPlan is not null
+            || deadlineOnly.ExecutionDeadline != deadline
+            || deadlineOnly.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2")
+        {
+            throw new InvalidOperationException("Deadline-only construction must retain legacy backoff with the opt-in fingerprint.");
+        }
+
+        var retry = new DurableWorkRetryPolicy(
+            maximumAttempts: 5,
+            maximumElapsedTime: TimeSpan.FromHours(4),
+            initialRetryDelay: TimeSpan.FromMinutes(5),
+            maximumRetryDelay: TimeSpan.FromHours(1),
+            leaseDuration: TimeSpan.FromMinutes(1),
+            renewalCadence: TimeSpan.FromSeconds(15),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(10),
+            backoffAlgorithm: "exponential-v1");
+        var plan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20),
+             TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
+            TimeSpan.FromMinutes(240));
+        var policy = DurableWorkExecutionPolicy.ForAttemptPlan(retry, plan);
+        var definition = DurableWork.DefineWithExecutionPolicy<LedgerWork, LedgerResult>(
+            "examples.ledger.reconcile", "v2",
+            TypedWorkCodecs.LedgerWorkCodec, TypedWorkCodecs.LedgerResultCodec,
+            DurableProviderSafety.ReconcileBeforeRetry, policy);
+        var services = new ServiceCollection();
+        services.AddDurableWork(definition.ExecutedBy<LedgerExecutor>()
+            .ReconciledBy<LedgerReconciler>());
+        var request = definition.CreateRequestWithExecutionPolicy(
+            scope, command, "ledger-reconcile-v2", input,
+            executionDeadline: deadline);
+        using var provider = services.BuildServiceProvider();
+        var registration = provider.GetRequiredService<IDurableWorkRegistry>()
+            .GetRequired(definition.WorkName, definition.WorkVersion);
+        if (!request.ExecutionPolicy.Equals(policy)
+            || request.ExecutionDeadline != deadline
+            || request.DueAtUtc is not null
+            || request.Fingerprint.SchemaId != "appsurface.durable.work.enqueue.v2"
+            || !registration.DefaultExecutionPolicy.Equals(policy))
+        {
+            throw new InvalidOperationException("Planned Work must preserve its named policy through request and registration.");
+        }
+
+    }
+    // docs:snippet durable-execution-policy-chooser:end
+
+    // docs:snippet durable-execution-policy-timing-proof:start
+    internal static void VerifyExecutionPolicyTimingProof()
+    {
+        var acceptedAt = new DateTimeOffset(2030, 1, 1, 12, 0, 0, TimeSpan.Zero);
+        var plan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(20),
+             TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(180)],
+            TimeSpan.FromMinutes(240));
+        var expectedOffsets = new[]
+        {
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(5),
+            TimeSpan.FromMinutes(20),
+            TimeSpan.FromMinutes(60),
+            TimeSpan.FromMinutes(180),
+        };
+        var expectedAttemptNumbers = new[] { 1, 2, 3, 4, 5 };
+        var expectedEligibility = new[]
+        {
+            acceptedAt,
+            acceptedAt.AddMinutes(5),
+            acceptedAt.AddMinutes(20),
+            acceptedAt.AddMinutes(60),
+            acceptedAt.AddMinutes(180),
+        };
+        var exclusiveCutoff = acceptedAt.Add(plan.MaximumCircuitDuration);
+        if (!plan.ElapsedOffsets.SequenceEqual(expectedOffsets)
+            || plan.MaximumCircuitDuration != TimeSpan.FromMinutes(240)
+            || plan.ElapsedOffsets[^1] >= plan.MaximumCircuitDuration)
+        {
+            throw new InvalidOperationException("The fixed five-slot plan must keep every slot before its exclusive circuit cutoff.");
+        }
+
+        for (var slot = 0; slot < expectedOffsets.Length; slot++)
+        {
+            var eligibility = acceptedAt.Add(plan.ElapsedOffsets[slot]);
+            if (eligibility != expectedEligibility[slot]
+                || expectedAttemptNumbers[slot] != slot + 1
+                || eligibility >= exclusiveCutoff)
+            {
+                throw new InvalidOperationException("Zero-based offsets must map to one-based attempts at fixed acceptance-relative times.");
+            }
+        }
+
+        // Schedule arithmetic only: these observations do not simulate database claims or provider I/O.
+        var callerCommitAt = acceptedAt.AddMinutes(25);
+        var delayedFirstClaimAt = acceptedAt.AddMinutes(30);
+        var downtimeRecoveryAt = acceptedAt.AddMinutes(90);
+        var nextSlotAfterSafeAttemptOne = expectedEligibility[1];
+        var overdueSlotsAfterDowntime = expectedEligibility.Count(time => time < downtimeRecoveryAt);
+        if (!(acceptedAt < callerCommitAt && callerCommitAt < delayedFirstClaimAt)
+            || nextSlotAfterSafeAttemptOne != acceptedAt.AddMinutes(5)
+            || nextSlotAfterSafeAttemptOne >= delayedFirstClaimAt
+            || overdueSlotsAfterDowntime != 4
+            || expectedEligibility[4] <= downtimeRecoveryAt)
+        {
+            throw new InvalidOperationException("Late commit and downtime must not rebase or skip fixed slots; only safe sequential retries advance them.");
+        }
+    }
+    // docs:snippet durable-execution-policy-timing-proof:end
+
+    // docs:snippet durable-execution-policy-one-slot:start
+    internal static void VerifyOneSlotPolicyValidation()
+    {
+        static DurableWorkRetryPolicy CreateRetryPolicy(int maximumAttempts) => new(
+            maximumAttempts: maximumAttempts,
+            maximumElapsedTime: TimeSpan.FromHours(1),
+            initialRetryDelay: TimeSpan.FromMinutes(1),
+            maximumRetryDelay: TimeSpan.FromMinutes(1),
+            leaseDuration: TimeSpan.FromMinutes(1),
+            renewalCadence: TimeSpan.FromSeconds(15),
+            maximumLeaseLifetime: TimeSpan.FromMinutes(5),
+            backoffAlgorithm: "exponential-v1");
+
+        var oneSlotPlan = new DurableAttemptPlan(
+            "attempt-plan-v1",
+            [TimeSpan.Zero],
+            TimeSpan.FromMinutes(30));
+        var oneAttemptPolicy = DurableWorkExecutionPolicy.ForAttemptPlan(
+            CreateRetryPolicy(maximumAttempts: 1),
+            oneSlotPlan);
+        var acceptedPlan = oneAttemptPolicy.AttemptPlan;
+        if (oneAttemptPolicy.RetryPolicy.MaximumAttempts != 1
+            || acceptedPlan is null
+            || acceptedPlan.ElapsedOffsets.Count != 1
+            || acceptedPlan.ElapsedOffsets[0] != TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("A one-slot plan permits exactly one execution and no planned retry.");
+        }
+
+        var retryCountMismatchRejected = false;
+        try
+        {
+            _ = DurableWorkExecutionPolicy.ForAttemptPlan(
+                CreateRetryPolicy(maximumAttempts: 2),
+                oneSlotPlan);
+        }
+        catch (ArgumentException)
+        {
+            retryCountMismatchRejected = true;
+        }
+
+        if (!retryCountMismatchRejected)
+        {
+            throw new InvalidOperationException("A one-slot plan must reject a retry policy that permits another attempt.");
+        }
+    }
+    // docs:snippet durable-execution-policy-one-slot:end
+
     internal static void Run()
     {
+        VerifyExecutionPolicyChooser();
+        VerifyExecutionPolicyTimingProof();
+        VerifyOneSlotPolicyValidation();
+
         var services = new ServiceCollection();
         new AppSurfaceDurableModule().ConfigureServices(
             new StartupContext([], new PassiveHostModule()),
@@ -432,7 +637,7 @@ PostgreSQL storage registration remains passive as well; continuous processing r
 When a host starts the opted-in worker, startup validates schema compatibility and the active runtime epoch. It fails
 closed when those values are incompatible and never applies DDL or advances migration history. See the
 [Slice 7 discovery and reconciliation guide](../README.md#slice-7-discovery-and-reconciliation) for the ordered
-`0001`–`0010` migration flow, canonical role recipe, registry-scoped Work-discovery rollout, recovery posture, and the
+`0001`–`0012` migration flow, canonical role recipe, registry-scoped Work-discovery rollout, recovery posture, and the
 implemented [`durable schema` CLI commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands).
 
 When an external activator needs execution certainty, use the [operational-assessment adoption guide](../operational-assessments.md)
@@ -448,7 +653,7 @@ source families inherit the audience and compatibility policy shown here.
 
 | Audience | Public types | Contract role |
 |---|---|---|
-| All adopters | `DurableScopeId`, `DurableWorkId`, `DurableCommandId`, `DurableProblem`, `DurableOperationResult<T>`, `DurableProblemCodes` | Opaque identity and safe diagnostics |
+| All adopters | `DurableScopeId`, `DurableWorkId`, `DurableCommandId`, `DurableProblem`, `DurableOperationResult<T>`, `DurableProblemCodes`, `DurableDiagnosticCatalog`, `DurableDiagnosticDescriptor` | Opaque identity and safe diagnostics |
 | Serialization authors | `DurableDataClassification`, `DurableEncodedPayload`, `IDurablePayloadCodec`, `IDurablePayloadCodec<T>`, `SystemTextJsonDurablePayloadCodec<T>`, registry types | Explicit, versioned, policy-approved payload bytes |
 | Work authors | `DurableProviderSafety`, retry/state/request/acceptance types, `IDurableWorkClient`, execution/prepared-work/registration/registry types, `DurableWorkExitKind`, `DurableWorkExit<T>`, `DurableEncodedWorkExit`, `IDurableWorkExitExecutor<TWork,TResult>`, `DurableWorkExitCompatibilityException`, and `DurableServiceCollectionExtensions` | Declare, enqueue, and execute typed Work through a provider adapter |
 | Flow authors | Flow identifiers, state/request/result/snapshot/client types; evaluation, activity, event, registration, registry, and determinism-verifier types | Persist one explicit Flow transition at a time |
@@ -459,6 +664,31 @@ source families inherit the audience and compatibility policy shown here.
 
 The application surface intentionally excludes runtime pump, claim, health, drain, scope-control, and Work operator
 types. Those are Provider SPI.
+
+## Canonical diagnostic descriptors
+
+`DurableDiagnosticCatalog.TryGet(string code, out DurableDiagnosticDescriptor? descriptor)` returns `true` and the
+catalog-owned canonical descriptor for a known affected code. For an unknown code it returns `false` and sets
+`descriptor` to `null`; a null `code` throws `ArgumentNullException`. The [canonical runtime diagnostic reference](../../troubleshooting/durable-diagnostics.md#canonical-runtime-diagnostic-descriptors)
+defines each descriptor, and the [PostgreSQL hosted-runtime diagnostics table](../../troubleshooting/durable-diagnostics.md#postgresql-hosted-runtime-diagnostics)
+shows how those codes fit provider health and admission guidance.
+
+`DurableDiagnosticDescriptor` is sealed and immutable. Its get-only `Code`, `Problem`, `Cause`, `Fix`, and
+`DocumentationUrl` properties provide the stable code, privacy-safe explanation, likely cause, corrective guidance,
+and absolute HTTPS destination. Its constructor is not public: obtain descriptors through the catalog. The catalog
+covers `ASDUR103`, `ASDUR108`, `ASDUR400`–`ASDUR404`, and `ASDUR408`–`ASDUR415`; other Durable or
+application-owned codes retain their existing owners and meanings.
+
+Use the descriptor to render canonical wording for an existing health/admission code or a doctor finding. Provider
+health snapshots continue to carry their existing state and code; the catalog does not replace their source factories
+or classification rules. When creating a `DurableProblem`, pass descriptor fields to the existing constructor and
+supply the operation's caller-owned correlation identifier; the catalog does not generate or replace correlation. For
+doctor input, output, and exit behavior, follow the [runtime doctor reference](../runtime-doctor.md).
+
+Catalog membership describes shared diagnostic text. It does not add a health state or change activation/readiness
+predicates: in particular, `ASDUR414` and `ASDUR415` describe doctor terminal outcomes, and provider health/admission
+continues to accept only its existing closed code/state combinations. Do not interpret a descriptor or a clean doctor
+result as application readiness or deployment authorization.
 
 ## Command fingerprints
 
@@ -508,8 +738,10 @@ validation before persistence.
 | Provider SPI behavior | Requires provider conformance evidence before adoption |
 
 Diagnostics available now cover contract validation, semantic conflicts, and PostgreSQL Work storage, schema,
-activation, and restore failures. Heartbeat, drain, and hosted-runtime diagnostics are provider-owned. See the
-[`ASDURxxx` catalog](../../troubleshooting/durable-diagnostics.md).
+activation, and restore failures. Provider health and admission retain their existing state and drain predicates;
+doctor heartbeat and terminal findings describe its one-shot observation only. See the
+[canonical diagnostic entries and hosted-runtime table](../../troubleshooting/durable-diagnostics.md#canonical-runtime-diagnostic-descriptors)
+and the [runtime doctor reference](../runtime-doctor.md).
 
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance

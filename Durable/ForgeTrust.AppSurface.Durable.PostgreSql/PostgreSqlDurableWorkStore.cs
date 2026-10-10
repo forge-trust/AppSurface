@@ -12,7 +12,7 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql;
 /// This internal class supports controlled derived test seams. Overrides must preserve claim identity, runtime epoch
 /// and scope-generation fences, lease ownership, dispatch projection, Work history, and transaction guarantees.
 /// </remarks>
-internal class PostgreSqlDurableWorkStore
+internal partial class PostgreSqlDurableWorkStore
 {
     private static readonly Uri WorkDocumentation = new("https://appsurface.dev/docs/durable/work");
     private static readonly Uri ScopeDocumentation = new("https://appsurface.dev/docs/durable/scopes");
@@ -131,6 +131,12 @@ internal class PostgreSqlDurableWorkStore
                 request.CommandId.Value));
         }
 
+        if (request.ExecutionPolicy.AttemptPlan is not null || request.ExecutionDeadline is not null)
+        {
+            return await AcceptExecutionPolicyAsync(connection, transaction, request, runtimeEpoch,
+                scopeGeneration.Value, derivedActivityId, sendWakeNotification, cancellationToken).ConfigureAwait(false);
+        }
+
         var fingerprint = request.Fingerprint;
         var workId = DurableWorkId.New();
         var dispatchId = Guid.NewGuid();
@@ -181,8 +187,9 @@ internal class PostgreSqlDurableWorkStore
             FROM appsurface_durable.dispatch
             WHERE aggregate_kind = 'work'
               AND state IN ('available', 'leased')
-              AND due_at <= clock_timestamp()
-            ORDER BY due_at, priority DESC, dispatch_id
+              AND COALESCE(execution_discovery_at, due_at) <= CASE WHEN execution_discovery_at IS NULL
+                  THEN pg_catalog.clock_timestamp() ELSE appsurface_durable.work_execution_now() END
+            ORDER BY COALESCE(execution_discovery_at, due_at), priority DESC, dispatch_id
             LIMIT @maximum_candidates;
             """;
         await using var connection = await _dispatcherDataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
@@ -270,6 +277,12 @@ internal class PostgreSqlDurableWorkStore
                 await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                 return null;
             }
+
+            var executionRow = await ReadExecutionRowLockedAsync(connection, transaction, candidate.ScopeId,
+                candidate.WorkId, cancellationToken).ConfigureAwait(false);
+            if (executionRow is not null)
+                return await ClaimExecutionPolicyAsync(connection, transaction, candidate, workerId, executionRow,
+                    onTransitionApplied, cancellationToken).ConfigureAwait(false);
 
             var transition = await TrySuspendEpochMismatchAsync(
                     connection,
@@ -766,6 +779,11 @@ internal class PostgreSqlDurableWorkStore
                 return null;
             }
 
+            var executionRow = await ReadExecutionRowLockedAsync(connection, transaction, claim.ScopeId,
+                claim.WorkId, cancellationToken).ConfigureAwait(false);
+            if (executionRow is not null)
+                return await RenewExecutionPolicyAsync(connection, transaction, claim, executionRow, cancellationToken).ConfigureAwait(false);
+
             const string sql = """
                 UPDATE appsurface_durable.work AS work
                 SET lease_expires_at = LEAST(
@@ -866,6 +884,12 @@ internal class PostgreSqlDurableWorkStore
                 await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
                 return null;
             }
+
+            var executionRow = await ReadExecutionRowLockedAsync(connection, transaction, claim.ScopeId,
+                claim.WorkId, cancellationToken).ConfigureAwait(false);
+            if (executionRow is not null)
+                return await PermitExecutionPolicyAsync(connection, transaction, claim, executionRow,
+                    onTerminalApplied, cancellationToken).ConfigureAwait(false);
 
             var existing = await ReadCurrentEffectPermitAsync(
                 connection,
@@ -1200,6 +1224,12 @@ internal class PostgreSqlDurableWorkStore
                 return staleResult with { Outcome = PostgreSqlWorkObservationOutcome.StaleObservation };
             }
 
+            var executionRow = await ReadExecutionRowLockedAsync(connection, transaction, claim.ScopeId,
+                claim.WorkId, cancellationToken).ConfigureAwait(false);
+            if (executionRow is not null)
+                return await CompleteExecutionPolicyAsync(connection, transaction, claim, completion, executionRow,
+                    onProjectionApplied, cancellationToken).ConfigureAwait(false);
+
             var effectiveRetryDelay = completion.Kind is
                 PostgreSqlWorkCompletionKind.Retry or PostgreSqlWorkCompletionKind.ProvenNoEffect
                 ? await ReadRetryDelayAsync(
@@ -1471,6 +1501,17 @@ internal class PostgreSqlDurableWorkStore
             await EnsureCurrentEpochAsync(
                 connection, transaction, _runtimeEpoch, cancellationToken).ConfigureAwait(false);
             await SetScopeAsync(connection, transaction, scopeId, cancellationToken).ConfigureAwait(false);
+            await using (var scopeLock = new NpgsqlCommand("SELECT generation FROM appsurface_durable.scope WHERE scope_id=@scope_id FOR SHARE;", connection, transaction))
+            {
+                scopeLock.Parameters.AddWithValue("scope_id", scopeId.Value);
+                await scopeLock.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+            }
+            var executionRow = await ReadExecutionRowLockedAsync(connection, transaction, scopeId,
+                workId, cancellationToken).ConfigureAwait(false);
+            if (executionRow is not null)
+                return await CancelExecutionPolicyAsync(connection, transaction, executionRow, expectedRevision,
+                    actorId, reasonCode, onProjectionApplied, cancellationToken).ConfigureAwait(false);
+
             const string sql = """
                 WITH evidence AS
                 (
@@ -2149,7 +2190,8 @@ internal class PostgreSqlDurableWorkStore
         PostgreSqlDurableWorkClaim claim,
         string eventType,
         PostgreSqlWorkCompletion completion,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset? observedAtUtc = null)
     {
         EnsureBoundedJson(completion.DetailsJson);
         const string sql = """
@@ -2159,7 +2201,7 @@ internal class PostgreSqlDurableWorkStore
                 aggregate_revision,
                 runtime_epoch, is_stale_observation,
                 observation_contract_id, observation_schema_version, observation_codec_id,
-                observation_classification, observation_payload, observation_sha256, details
+                observation_classification, observation_payload, observation_sha256, observation_retention_policy_id, details, observed_at
             )
             VALUES
             (
@@ -2167,7 +2209,7 @@ internal class PostgreSqlDurableWorkStore
                 @aggregate_revision,
                 @runtime_epoch, true,
                 @observation_contract_id, @observation_schema_version, @observation_codec_id,
-                @observation_classification, @observation_payload, @observation_sha256, @details::jsonb
+                @observation_classification, @observation_payload, @observation_sha256, @observation_retention_policy_id, @details::jsonb, COALESCE(@observed_at, pg_catalog.clock_timestamp())
             );
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
@@ -2176,6 +2218,10 @@ internal class PostgreSqlDurableWorkStore
         command.Parameters.AddWithValue("aggregate_revision", claim.Revision);
         command.Parameters.AddWithValue("details", completion.DetailsJson);
         AddObservationParameters(command, completion.Result);
+        command.Parameters.Add(new NpgsqlParameter("observed_at", NpgsqlDbType.TimestampTz)
+        {
+            Value = observedAtUtc is { } observed ? observed.UtcDateTime : DBNull.Value,
+        });
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -2204,6 +2250,10 @@ internal class PostgreSqlDurableWorkStore
         command.Parameters.Add(new NpgsqlParameter("observation_sha256", NpgsqlDbType.Bytea)
         {
             Value = result is null ? DBNull.Value : Convert.FromHexString(result.Sha256),
+        });
+        command.Parameters.Add(new NpgsqlParameter("observation_retention_policy_id", NpgsqlDbType.Text)
+        {
+            Value = result?.RetentionPolicyId ?? (object)DBNull.Value,
         });
     }
 
@@ -2466,7 +2516,8 @@ internal class PostgreSqlDurableWorkStore
             Enumerable.Range(1, RequiredSchemaVersion).ToArray(),
             "The caller-owned transaction targets a database where the durable schema is not installed.");
 
-    private static async ValueTask EnsureCurrentEpochAsync(
+    /// <summary>Holds the migration fence and checks the active epoch before scoped provider operations.</summary>
+    internal static async ValueTask EnsureCurrentEpochAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         Guid runtimeEpoch,
@@ -2813,16 +2864,17 @@ internal class PostgreSqlDurableWorkStore
         string eventType,
         bool isStaleObservation,
         string detailsJson,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset? observedAtUtc = null)
     {
         EnsureBoundedJson(detailsJson);
         const string sql = """
             INSERT INTO appsurface_durable.work_history
                 (scope_id, work_id, aggregate_revision, event_type, attempt_number, lease_generation, scope_generation,
-                 runtime_epoch, is_stale_observation, details)
+                 runtime_epoch, is_stale_observation, details, observed_at)
             VALUES
                 (@scope_id, @work_id, @aggregate_revision, @event_type, @attempt_number, @lease_generation, @scope_generation,
-                 @runtime_epoch, @is_stale, @details::jsonb);
+                 @runtime_epoch, @is_stale, @details::jsonb, COALESCE(@observed_at, pg_catalog.clock_timestamp()));
             """;
         await using var command = new NpgsqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("scope_id", claim.ScopeId.Value);
@@ -2835,6 +2887,10 @@ internal class PostgreSqlDurableWorkStore
         command.Parameters.AddWithValue("runtime_epoch", claim.RuntimeEpoch);
         command.Parameters.AddWithValue("is_stale", isStaleObservation);
         command.Parameters.AddWithValue("details", detailsJson);
+        command.Parameters.Add(new NpgsqlParameter("observed_at", NpgsqlDbType.TimestampTz)
+        {
+            Value = observedAtUtc is { } observed ? observed.UtcDateTime : DBNull.Value,
+        });
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -2919,7 +2975,14 @@ internal sealed record PostgreSqlDurableWorkClaim(
     bool CancellationRequested,
     TimeSpan LeaseRenewalCadence)
 {
-    internal DurableClaimedWork ToProviderClaim() => new(
+    /// <summary>Accepted opt-in facts; legacy claims retain a null projection.</summary>
+    internal DurableWorkExecutionSnapshot? Execution { get; init; }
+
+    internal DurableClaimedWork ToProviderClaim() => Execution is { } execution
+        ? DurableClaimedWork.CreateWithExecution(
+            ScopeId, WorkId, ActivityId, WorkName, WorkVersion, Payload, ProviderSafety,
+            AttemptNumber, LeaseGeneration, ScopeGeneration, RuntimeEpoch.ToString("D"), execution)
+        : new(
         ScopeId,
         WorkId,
         ActivityId,

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.Provider;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -101,15 +102,13 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             PostgreSqlDurableControlPlaneOperation.HealthObservation,
             exception,
             cancellationToken,
-            out var unavailableCause))
+            out var classification))
         {
             var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
             LogUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 "SchemaStatus",
-                unavailableCause,
-                DurableProblemCodes.StoreUnavailable,
-                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                classification);
             return CreateUnavailableSnapshot(
                 installedVersion: 0,
                 requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
@@ -143,15 +142,13 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             PostgreSqlDurableControlPlaneOperation.HealthObservation,
             exception,
             cancellationToken,
-            out var unavailableCause))
+            out var classification))
         {
             var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
             LogUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 "SchemaStatus",
-                unavailableCause,
-                DurableProblemCodes.StoreUnavailable,
-                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                classification);
             return CreateUnavailableSnapshot(
                 installedVersion: 0,
                 requiredVersion: PostgreSqlDurableRuntimeSchemaManager.RequiredVersion,
@@ -171,23 +168,22 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 exception,
                 cancellationToken,
-                out var unavailableCause))
+                out var classification))
             {
                 var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
                 LogUnavailable(
                     PostgreSqlDurableControlPlaneOperation.HealthObservation,
                     "SchemaObservationTimestamp",
-                    unavailableCause,
-                    DurableProblemCodes.StoreUnavailable,
-                    PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                    classification);
                 return CreateUnavailableSnapshot(
                     schema.InstalledVersion,
                     schema.RequiredVersion,
                     unavailableObservedAtUtc);
             }
 
+            var diagnostic = PostgreSqlDurableFailureClassifier.DiagnosticForSchema(schema.Compatibility);
             return CreateIncompatibleSnapshot(
-                ProblemForSchema(schema.Compatibility),
+                diagnostic.Code,
                 schema.InstalledVersion,
                 schema.RequiredVersion,
                 observedAtUtc);
@@ -206,6 +202,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
                 : await ReadObservationAsync(sharedConnection, cancellationToken).ConfigureAwait(false);
             var epochCompatible = observation.ActiveEpoch == _registration.WorkOptions.RuntimeEpoch;
             var (state, problemCode) = ResolveState(observation, epochCompatible);
+            problemCode = PostgreSqlDurableFailureClassifier.CanonicalProblemCode(problemCode);
             return new DurableRuntimeHealthSnapshot(
                 state,
                 problemCode,
@@ -234,15 +231,13 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
             PostgreSqlDurableControlPlaneOperation.HealthObservation,
             exception,
             cancellationToken,
-            out var unavailableCause))
+            out var classification))
         {
             var unavailableObservedAtUtc = DateTimeOffset.UtcNow;
             LogUnavailable(
                 PostgreSqlDurableControlPlaneOperation.HealthObservation,
                 "RuntimeObservation",
-                unavailableCause,
-                DurableProblemCodes.StoreUnavailable,
-                PostgreSqlDurableDiagnostics.OperationalAssessmentTroubleshooting);
+                classification);
             return CreateUnavailableSnapshot(
                 schema.InstalledVersion,
                 schema.RequiredVersion,
@@ -950,7 +945,7 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         DateTimeOffset observedAtUtc) =>
         new(
             DurableRuntimeHealthState.Unavailable,
-            DurableProblemCodes.StoreUnavailable,
+            PostgreSqlDurableFailureClassifier.CanonicalProblemCode(DurableProblemCodes.StoreUnavailable),
             schemaCompatible: false,
             epochCompatible: false,
             installedVersion,
@@ -977,9 +972,6 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         command.Parameters.AddWithValue("runtime_epoch", _registration.WorkOptions.RuntimeEpoch);
         command.Parameters.AddWithValue("hosted_surfaces", (short)_registration.Options.HostedSurfaces);
     }
-
-    private static string ProblemForSchema(DurableRuntimeSchemaCompatibility compatibility) =>
-        PostgreSqlDurableFailureClassifier.ProblemForSchema(compatibility);
 
     private static InvalidOperationException LostWorkerIdentity() => new(
         $"{DurableProblemCodes.WorkerIdentityConflict}: This worker generation no longer owns the configured worker identity.");
@@ -1050,13 +1042,12 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
         PostgreSqlDurableControlPlaneOperation operation,
         Exception exception,
         CancellationToken cancellationToken,
-        out PostgreSqlDurableUnavailableCause unavailableCause)
+        out PostgreSqlDurableFailureClassification classification)
     {
-        var classification = PostgreSqlDurableFailureClassifier.Classify(
+        classification = PostgreSqlDurableFailureClassifier.Classify(
             operation,
             exception,
             cancellationToken);
-        unavailableCause = classification.UnavailableCause.GetValueOrDefault();
         return classification.Disposition == PostgreSqlDurableFailureDisposition.Unavailable;
     }
 
@@ -1078,16 +1069,41 @@ internal sealed partial class PostgreSqlDurableRuntimeHealth : IDurableRuntimeHe
     private static DateTimeOffset? ReadNullableUtc(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : ReadUtc(reader, ordinal);
 
+    private void LogUnavailable(
+        PostgreSqlDurableControlPlaneOperation operation,
+        string phase,
+        PostgreSqlDurableFailureClassification classification)
+    {
+        if (classification.UnavailableCause is not { } cause
+            || classification.Diagnostic is not { } diagnostic)
+        {
+            throw new InvalidDataException("An unavailable control-plane classification requires its canonical diagnostic.");
+        }
+
+        LogUnavailableCore(
+            operation,
+            phase,
+            cause,
+            diagnostic.Code,
+            diagnostic.Problem,
+            diagnostic.Cause,
+            diagnostic.Fix,
+            diagnostic.DocumentationUrl.AbsoluteUri);
+    }
+
     [LoggerMessage(
         EventId = 4110,
         Level = LogLevel.Warning,
-        Message = "{ProblemCode} durable PostgreSQL control-plane operation {Operation} at phase {Phase} was unavailable due to {Cause}. See {TroubleshootingAnchor}.")]
-    private partial void LogUnavailable(
+        Message = "{ProblemCode} {DiagnosticProblem}: durable PostgreSQL control-plane operation {Operation} at phase {Phase} was unavailable due to {Cause}. Cause: {DiagnosticCause}. Fix: {DiagnosticFix}. See {DocumentationUrl}.")]
+    private partial void LogUnavailableCore(
         PostgreSqlDurableControlPlaneOperation operation,
         string phase,
         PostgreSqlDurableUnavailableCause cause,
         string problemCode,
-        string troubleshootingAnchor);
+        string diagnosticProblem,
+        string diagnosticCause,
+        string diagnosticFix,
+        string documentationUrl);
 
     private sealed record RuntimeObservation(
         DateTimeOffset ObservedAtUtc,

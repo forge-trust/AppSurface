@@ -58,11 +58,12 @@ public sealed class ExternalActivationTelemetryTests
     {
         var stopped = new List<Activity>();
         using var listener = Listen(stopped.Add);
+        var logger = new ExternalActivationLogger();
         using var provider = BuildProvider(
             FixedHealth(ExternalActivationTestSupport.Health(DurableRuntimeHealthState.Stale, DurableProblemCodes.ActivatorStale)),
             FixedAdmission(new DurableRuntimePumpAttempt(DurableRuntimePumpAttemptKind.Unavailable, null, DurableProblemCodes.StoreUnavailable)),
             new ExternalActivationClock(),
-            new ExternalActivationLogger());
+            logger);
 
         var result = await provider.GetRequiredService<IDurableExternalActivationService>().ActivateAsync(Request());
 
@@ -78,6 +79,10 @@ public sealed class ExternalActivationTelemetryTests
             (OutcomeTag, "PumpFailed"),
             (HealthStateTag, "Stale"),
             (ProblemCodeTag, DurableProblemCodes.StoreUnavailable));
+        Assert.Contains(
+            logger.Entries,
+            entry => entry.Message.Contains("code ASDUR103 problem Store unavailable.", StringComparison.Ordinal));
+        Assert.All(logger.Entries, entry => Assert.Null(entry.Exception));
     }
 
     [Fact]

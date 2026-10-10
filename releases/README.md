@@ -45,7 +45,8 @@ The release evidence bundle is not a signature or hosted-build attestation. It i
 ## Durable public-preview release gate
 
 The Durable packages are eligible for coordinated prerelease publication only when release review confirms schema
-ownership, migrations `0001` through `0011`, the canonical PostgreSQL role recipe, registry-scoped Work discovery,
+ownership, migrations `0001` through `0012`, the schema-12 reader/writer compatibility floor, the canonical PostgreSQL
+role recipe, registry-scoped Work discovery,
 the drain-first `0009` role transition, migration-`0010` runtime-health compatibility, passive storage registration,
 explicit `AddWorkerHost()` hosting, startup
 schema/epoch validation without DDL, recovery procedures, and the real PostgreSQL conformance evidence. The package
@@ -53,13 +54,18 @@ chooser is the machine-facing install map; the [Durable discovery guide](../Dura
 is the reader-facing operational boundary. The `durable schema` commands do not replace this release review: scripts
 are offline, status and preflight resolve a named connection environment variable, and apply requires a named
 migration-owner environment variable. No command accepts or prints connection strings; the least-privilege role
-guidance still applies to each online operation. The example is local proof rather than production operations guidance.
+guidance still applies to each online operation. For the current execution-policy compatibility and rollout
+requirements, see the [canonical policy guide](../Durable/execution-policies-v1.md) and [migration checklist](../Durable/migrations/execution-policies-v1.md).
+The example is local proof rather than production operations guidance.
 
-Schema-11 preflight requires the complete reviewed role-pair file and an independently reviewed migration-owner role,
+The historical schema-11 preflight proof requires the complete reviewed role-pair file and an independently reviewed migration-owner role,
 including for one-pair stores. The [complete runtime-set operations checklist](../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 defines the candidate and published exact-package proofs and the application's continuously guarded activation gate.
-Both release channels must prove one pair, second-pair enrollment, an identical rerun and a modeled two-pair schema-10
-upgrade using the matching CLI/provider bundle. Missing or partial candidate evidence blocks publication; published
+The current schema-12 release gate requires preflight with the matching current CLI/provider package after migration
+`0012` and the current role recipe; that recipe cannot be run against a schema-11-or-older store. Use the matching
+historical package and recipe for an old-schema proof. Both release channels must prove one pair, second-pair enrollment,
+an identical rerun, and a modeled two-pair schema-10 upgrade using the matching CLI/provider bundle. Missing or partial
+candidate evidence blocks publication; published
 archive or recipe mismatches and failed public proof keep application activation closed. Owner-diagnostic results never
 cover runtime credentials. The [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845)
 describes carrier ownership and receipt retention.

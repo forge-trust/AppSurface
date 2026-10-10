@@ -23,7 +23,7 @@ internal sealed partial class DurableCommand : ICommand
     {
         ArgumentNullException.ThrowIfNull(console);
         await console.Output.WriteLineAsync(
-            "Use 'appsurface durable schema status', 'script', 'preflight', or 'apply'. Runtime work mutations are intentionally not CLI commands.").ConfigureAwait(false);
+            "Use 'appsurface durable doctor' for read-only store/runtime checks, or 'appsurface durable schema status', 'script', 'preflight', or 'apply'. Runtime work mutations are intentionally not CLI commands.").ConfigureAwait(false);
     }
 }
 

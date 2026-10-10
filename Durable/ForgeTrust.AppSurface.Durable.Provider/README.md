@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.Provider
 
+The [runtime doctor](../runtime-doctor.md) provides a separate one-store CLI observation. It does not replace these host-health or pump-admission contracts, or their application-owned decisions.
+
 > **Public preview:** the [`PostgreSQL provider`](../ForgeTrust.AppSurface.Durable.PostgreSql/README.md) supplies the
 > current conformance path. This package contains SPI contracts, not a runtime.
 
@@ -18,6 +20,13 @@ Ordinary applications and reusable modules should reference only `ForgeTrust.App
 provide PostgreSQL storage, migrations, polling, schedule execution, hosted services, endpoints, metrics, an OpenTelemetry
 SDK, or export configuration. Its external-activation service emits a bounded activity through the shared
 `ActivitySource`; hosts own listening, sampling, processing, and export.
+
+For #765 timing propagation, Provider consumes Core's closed
+[`DurableWorkExecutionSnapshot`](../execution-policies-v1.md#validation-and-timing-rules). The nullable `Execution`
+projections on legacy-compatible claim and inspection values carry accepted policy, deadline, acceptance instant, next
+eligibility, and admission cutoff as descriptive facts only. They can be stale and never authorize provider I/O;
+authoritative store checks, current fences, and effect-safety rules remain mandatory. See the
+[execution-policy reference](../execution-policies-v1.md) and its [compatibility and migration sequence](../migrations/execution-policies-v1.md).
 
 ## Slice 7 discovery boundary
 
@@ -131,6 +140,19 @@ does not grant a provider an arbitrary exit factory, direct Work-state access, o
 The execution identity transition is enforceable: create the first identity from an activity id and current fences,
 then call `Advance` for a later attempt/lease/scope/runtime epoch. The provider key remains exactly the activity id so
 lease turnover cannot create a new external idempotency identity.
+
+### Accepted execution snapshot propagation
+
+For an opt-in Work claim, construct `DurableClaimedWork` with
+`DurableClaimedWork.CreateWithExecution(existingClaimArguments, executionSnapshot)`. The original constructor remains
+unchanged and leaves `Execution` null for legacy Work. The provider adapter carries the exact immutable snapshot to
+`DurableWorkExecutionContext.Execution` and exposes the same reference from
+`DurablePreparedWorkInvocation.Execution`. The snapshot contains accepted policy and timing facts only; it can be
+stale by the time preparation or invocation reaches the executor, so it never grants permission to call the provider.
+An opted-in provider must still commit its effect permit and perform the authoritative one-use invocation admission
+check immediately before the executor call. Use the `CreateWithExecution` factories on `DurableWorkSnapshot` and
+`DurableWorkListItem` when returning inspection data for opt-in rows. Their existing constructors remain compatible and
+produce a null `Execution` value.
 
 ## Command fingerprints
 

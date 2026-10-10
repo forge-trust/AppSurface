@@ -467,6 +467,9 @@ jobs:
           pnpm --dir Web run assets:build
           pnpm --dir Web run assets:verify
 
+      - name: Verify the Durable doctor report consumer
+        run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
+
       - name: Run solution coverage and gate
         env:
           BUILD_CONFIGURATION: Release

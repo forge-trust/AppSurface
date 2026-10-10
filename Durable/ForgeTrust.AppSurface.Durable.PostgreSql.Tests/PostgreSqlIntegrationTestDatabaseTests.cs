@@ -175,6 +175,76 @@ public sealed class PostgreSqlIntegrationTestDatabaseTests
 
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposeAsync_RemovesClockRoleAfterSuccessfulOrFailedDatabaseDrop(bool failDrop)
+    {
+        var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        try
+        {
+            await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+            await database.SetExecutionTimeAsync(DateTimeOffset.UtcNow);
+            await using var clockOwner = database.DataSource.CreateCommand(
+                "SELECT pg_catalog.pg_get_userbyid(proowner) FROM pg_catalog.pg_proc WHERE oid = 'appsurface_durable.work_execution_now()'::regprocedure;");
+            var role = Assert.IsType<string>(await clockOwner.ExecuteScalarAsync());
+            Assert.StartsWith("appsurface_clock_reader_", role, StringComparison.Ordinal);
+            var maintenanceSettings = new NpgsqlConnectionStringBuilder(database.ConnectionString) { Database = "postgres" };
+            await using var maintenance = new NpgsqlConnection(maintenanceSettings.ConnectionString);
+            await maintenance.OpenAsync();
+            if (failDrop)
+            {
+                var expected = new InvalidOperationException("Injected isolated database drop failure.");
+                var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => database.DisposeAsync(
+                    _ => ValueTask.FromException(expected)).AsTask());
+                Assert.Same(expected, actual);
+                Assert.False(actual.Data.Contains("ExecutionClockCleanupException"));
+                await using var surviving = new NpgsqlConnection(database.ConnectionString);
+                await surviving.OpenAsync();
+                await using var clock = new NpgsqlCommand(
+                    "SELECT pg_catalog.to_regprocedure('appsurface_durable.work_execution_now()') IS NULL;", surviving);
+                Assert.True((bool)(await clock.ExecuteScalarAsync())!);
+            }
+            else
+            {
+                await database.DisposeAsync();
+            }
+
+            await using var roleExists = new NpgsqlCommand("SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = @role);", maintenance);
+            roleExists.Parameters.AddWithValue("role", role);
+            Assert.False((bool)(await roleExists.ExecuteScalarAsync())!);
+        }
+        finally
+        {
+            // Retry only this owned fixture's deletion after the failure case, and verify idempotent disposal.
+            await database.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_PreservesDatabaseDropFailureWhenClockCleanupAlsoFails()
+    {
+        var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        try
+        {
+            await new PostgreSqlDurableRuntimeSchemaManager(database.DataSource).ApplyAsync();
+            await database.SetExecutionTimeAsync(DateTimeOffset.UtcNow);
+            var expected = new InvalidOperationException("Injected isolated database drop failure.");
+            var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => database.DisposeAsync(async maintenance =>
+            {
+                await maintenance.CloseAsync();
+                throw expected;
+            }).AsTask());
+            Assert.Same(expected, actual);
+            Assert.IsAssignableFrom<Exception>(actual.Data["ExecutionClockCleanupException"]);
+        }
+        finally
+        {
+            // A fresh maintenance connection on retry must release the remaining role and database.
+            await database.DisposeAsync();
+        }
+    }
+
+    [Theory]
     [InlineData("160000")]
     [InlineData("170000")]
     [InlineData("999999")]

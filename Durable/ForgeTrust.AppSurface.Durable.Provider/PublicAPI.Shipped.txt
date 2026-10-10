@@ -32,11 +32,13 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWo
   method public System.Boolean Equals(System.Object? obj)
   method public System.Int32 GetHashCode()
   method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork CreateWithExecution(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableEncodedPayload payload, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.Int32 attemptNumber, System.Int64 leaseGeneration, System.Int64 scopeGeneration, System.String runtimeEpoch, ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot executionSnapshot)
   method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? left, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? right)
   method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? left, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork? right)
   property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload Payload { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot? Execution { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
   property public System.Int32 AttemptNumber { get: public; }
   property public System.Int64 LeaseGeneration { get: public; }
@@ -212,6 +214,7 @@ type public enum ForgeTrust.AppSurface.Durable.Provider.DurableManualResolutionK
 type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation
   method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedPayload> InvokeAsync(System.Threading.CancellationToken cancellationToken = default)
   method public System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedWorkExit> InvokeExitAsync(System.Threading.CancellationToken cancellationToken = default)
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot? Execution { get: public; }
 type public static class ForgeTrust.AppSurface.Durable.Provider.DurableProviderWorkAdapter
   method public static ForgeTrust.AppSurface.Durable.Provider.DurablePreparedWorkInvocation Prepare(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim)
   method public static System.Threading.Tasks.ValueTask<ForgeTrust.AppSurface.Durable.DurableEncodedEffectReconciliation> ReconcileAsync(ForgeTrust.AppSurface.Durable.DurableWorkRegistration registration, System.IServiceProvider services, ForgeTrust.AppSurface.Durable.Provider.DurableClaimedWork claim, System.Threading.CancellationToken cancellationToken = default)
@@ -589,9 +592,11 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkListI
   method public System.Boolean Equals(System.Object? obj)
   method public System.Int32 GetHashCode()
   method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem CreateWithExecution(ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableWorkState state, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.Int32 attemptNumber, System.Int64 revision, System.DateTimeOffset acceptedAtUtc, System.DateTimeOffset dueAtUtc, System.DateTimeOffset updatedAtUtc, System.String? terminalCode, System.Boolean cancellationRequested, System.Boolean requiresRecoveryRelease, ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot executionSnapshot)
   method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? right)
   method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkListItem? right)
   property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot? Execution { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
   property public System.Boolean CancellationRequested { get: public; }
@@ -720,11 +725,13 @@ type public sealed class ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnaps
   method public System.Boolean Equals(System.Object? obj)
   method public System.Int32 GetHashCode()
   method public System.String ToString()
+  method public static ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot CreateWithExecution(ForgeTrust.AppSurface.Durable.DurableScopeId scopeId, ForgeTrust.AppSurface.Durable.DurableWorkId workId, System.String activityId, System.String workName, System.String workVersion, ForgeTrust.AppSurface.Durable.DurableWorkState state, ForgeTrust.AppSurface.Durable.DurableProviderSafety providerSafety, System.String providerKey, System.Int32 attemptNumber, System.Int64 revision, System.DateTimeOffset acceptedAtUtc, System.DateTimeOffset dueAtUtc, System.DateTimeOffset updatedAtUtc, System.Nullable<System.DateTimeOffset> terminalAtUtc, System.String? terminalCode, ForgeTrust.AppSurface.Durable.DurableEncodedPayload? result, ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot executionSnapshot)
   method public static System.Boolean op_Equality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? right)
   method public static System.Boolean op_Inequality(ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? left, ForgeTrust.AppSurface.Durable.Provider.DurableWorkSnapshot? right)
   property public ForgeTrust.AppSurface.Durable.DurableEncodedPayload? Result { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableProviderSafety ProviderSafety { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableScopeId ScopeId { get: public; }
+  property public ForgeTrust.AppSurface.Durable.DurableWorkExecutionSnapshot? Execution { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableWorkId WorkId { get: public; }
   property public ForgeTrust.AppSurface.Durable.DurableWorkState State { get: public; }
   property public System.DateTimeOffset AcceptedAtUtc { get: public; }

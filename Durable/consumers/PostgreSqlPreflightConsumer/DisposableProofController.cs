@@ -110,6 +110,7 @@ internal static class DisposableProofController
                 schema10LanePairs, disposableEpoch, disposableStoreId);
             await AssertSchemaTenAsync(upgradeDbOwner);
             await ApplyWithExactCliAsync(cliPath, upgradeDbOwner);
+            await AssertSchemaTwelveAsync(upgradeDbOwner);
             await ApplyPackagedRecipeAsync(pg, "preflight_schema10", owner, options.RolePairsPath);
             // The modeled schema-10 lane already initialized this epoch. A forward
             // migration and role reconciliation must preserve it, not initialize it again.
@@ -1198,6 +1199,18 @@ internal static class DisposableProofController
         await using var connection = await OpenNonPooledAsync(cs);
         await using var command = new NpgsqlCommand("SELECT schema_version=10 AND (SELECT count(*) FROM appsurface_durable.schema_migration)=10 AND to_regprocedure('appsurface_durable.prune_runtime_heartbeats(interval,integer,text,uuid)') IS NULL FROM appsurface_durable.store_metadata WHERE singleton;", connection);
         if (await command.ExecuteScalarAsync() is not true) throw new InvalidOperationException("Baseline is not modeled schema 10 with exactly 0001-0010 and no schema-11 routine.");
+    }
+
+    private static async Task AssertSchemaTwelveAsync(string cs)
+    {
+        await using var dataSource = NpgsqlDataSource.Create(cs);
+        var status = await new PostgreSqlDurableRuntimeSchemaManager(dataSource).GetStatusAsync();
+        if (!status.IsCompatible || status.InstalledVersion != 12 || status.RequiredVersion != 12
+            || status.MinimumReaderVersion != 12 || status.MinimumWriterVersion != 12)
+        {
+            throw new InvalidOperationException(
+                "Schema-10 upgrade did not produce compatible schema 12 with reader and writer floors at 12.");
+        }
     }
 
     private static async Task AssertSchema10BoundaryAsync(string cs, IReadOnlyList<RolePair> pairs)
