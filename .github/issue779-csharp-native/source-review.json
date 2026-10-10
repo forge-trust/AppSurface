@@ -1,0 +1,15 @@
+{
+  "capture_sha256": "4b3cd32263156769d44c0499238f6f6223309f1d125a888459fadf94882849c6",
+  "case": "N08",
+  "clock_review_sha256": "e4123ff284a967e8000bccaa9dc04e0c6c9fd50342ab2d316982e9fe354a40f2",
+  "full_source_peer_review": "/private/tmp/issue779-csharp-n08-n09-joined-stream-capture-peer-v3/review.json",
+  "integration_review_pending": false,
+  "integration_review_sha256": "fc9a8613b80f7334b1b5445ded6266da73f8f5821bfea8ea73f7f2ded37d6403",
+  "local_csharp_tests_passed": 20,
+  "native_acceptance": false,
+  "native_execution": false,
+  "prior_integration_review_sha256": "3b3001d82d7c98969f4ac1ebbd9315789e8d4f948132fa379370ba266a961241",
+  "schema": "issue779-cancellation-source-review-preparation-v1",
+  "source": "deb4bf6b190ec4d38453e513df9e687ac5a63f9e",
+  "source_count": 2831
+}
