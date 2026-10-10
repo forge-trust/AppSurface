@@ -100,13 +100,15 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Equal(1, activation.DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_RejectsCommandBoundProfileMembers()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_RejectsCommandBoundProfileMembers(bool configured)
     {
         var optionException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, BoundProfile>());
+            CreateFactoryAsync<TestAppHost, TestModule, BoundProfile>(configured));
         var parameterException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, ParameterBoundProfile>());
+            CreateFactoryAsync<TestAppHost, TestModule, ParameterBoundProfile>(configured));
 
         Assert.Contains(nameof(BoundProfile.Value), optionException.Message, StringComparison.Ordinal);
         Assert.Contains("CliFx", optionException.Message, StringComparison.Ordinal);
@@ -122,11 +124,13 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Contains("[Command]", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task CreateAsync_RejectsMissingProjectDirectory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_RejectsMissingProjectDirectory(bool configured)
     {
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<MissingDirectoryAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<MissingDirectoryAppHost, TestModule, EmptyProfile>(configured));
 
         Assert.Contains("existing directory", exception.Message, StringComparison.Ordinal);
     }
@@ -152,31 +156,35 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Contains("same AppHost assembly", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task CreateAsync_RejectsNonPublicAndAbstractTypes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_RejectsNonPublicAndAbstractTypes(bool configured)
     {
         var moduleException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, NonPublicModule, EmptyProfile>());
+            CreateFactoryAsync<TestAppHost, NonPublicModule, EmptyProfile>(configured));
         var profileException = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, AbstractProfile>());
+            CreateFactoryAsync<TestAppHost, TestModule, AbstractProfile>(configured));
 
         Assert.Contains("module", moduleException.Message, StringComparison.Ordinal);
         Assert.Contains("profile", profileException.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task CreateAsync_RejectsInvalidProjectPathMetadata()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_RejectsInvalidProjectPathMetadata(bool configured)
     {
         var missing = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<MissingProjectPathAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<MissingProjectPathAppHost, TestModule, EmptyProfile>(configured));
         var wrongType = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<WrongProjectPathTypeAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<WrongProjectPathTypeAppHost, TestModule, EmptyProfile>(configured));
         var empty = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<EmptyProjectPathAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<EmptyProjectPathAppHost, TestModule, EmptyProfile>(configured));
         var getter = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<ThrowingProjectPathAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<ThrowingProjectPathAppHost, TestModule, EmptyProfile>(configured));
         var invalid = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<InvalidProjectPathAppHost, TestModule, EmptyProfile>());
+            CreateFactoryAsync<InvalidProjectPathAppHost, TestModule, EmptyProfile>(configured));
 
         Assert.Contains("ProjectPath", missing.Message, StringComparison.Ordinal);
         Assert.Contains("ProjectPath", wrongType.Message, StringComparison.Ordinal);
@@ -202,13 +210,15 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.True(Assert.IsType<DisposalProbe>(TestModule.LastProbe).IsDisposed);
     }
 
-    [Fact]
-    public async Task CreateAsync_ProcessFatalCompositionFailureDisposesActivation()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_ProcessFatalCompositionFailureDisposesActivation(bool configured)
     {
         TestModule.LastProbe = null;
 
         var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, FatalThrowingProfile>());
+            CreateFactoryAsync<TestAppHost, TestModule, FatalThrowingProfile>(configured));
 
         Assert.Equal("fatal composition failure", exception.Message);
         Assert.True(Assert.IsType<DisposalProbe>(TestModule.LastProbe).IsDisposed);
@@ -238,77 +248,89 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.True(Assert.IsType<DisposalProbe>(CancelingModule.LastProbe).IsDisposed);
     }
 
-    [Fact]
-    public async Task CreateAsync_OperationCanceledWithoutCancelledTokenReturnsCancelledTask()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_OperationCanceledWithoutCancelledTokenReturnsCancelledTask(bool configured)
     {
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, TestModule, UnboundCancellationProfile>());
+            CreateFactoryAsync<TestAppHost, TestModule, UnboundCancellationProfile>(configured));
 
         Assert.True(Assert.IsType<DisposalProbe>(TestModule.LastProbe).IsDisposed);
     }
 
-    [Fact]
-    public async Task CreateAsync_CleanupFailureDoesNotReplaceCompositionFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_CleanupFailureDoesNotReplaceCompositionFailure(bool configured)
     {
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, ThrowingCleanupModule, ThrowingCleanupProfile>());
+            CreateFactoryAsync<TestAppHost, ThrowingCleanupModule, ThrowingCleanupProfile>(configured));
 
         Assert.IsType<CompositionException>(exception.InnerException);
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingCleanupModule.LastProbe).DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_ProcessFatalCleanupFailureDoesNotReplaceCompositionFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_ProcessFatalCleanupFailureDoesNotReplaceCompositionFailure(bool configured)
     {
         FatalCleanupModule.LastProbe = null;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, FatalCleanupModule, FatalCleanupProfile>());
+            CreateFactoryAsync<TestAppHost, FatalCleanupModule, FatalCleanupProfile>(configured));
 
         Assert.IsType<CompositionException>(exception.InnerException);
         Assert.Equal(1, Assert.IsType<FatalThrowingDisposalProbe>(FatalCleanupModule.LastProbe).DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_CleanupFailureDoesNotReplaceActivationFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_CleanupFailureDoesNotReplaceActivationFailure(bool configured)
     {
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<
+            CreateFactoryAsync<
                 TestAppHost,
                 ThrowingActivationCleanupModule,
-                ThrowingActivationProfile>());
+                ThrowingActivationProfile>(configured));
 
         Assert.Contains("Profile activation failed", exception.Message, StringComparison.Ordinal);
         Assert.IsType<ActivationException>(exception.InnerException);
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_LoggerAcquisitionFailureDoesNotReplaceActivationFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_LoggerAcquisitionFailureDoesNotReplaceActivationFailure(bool configured)
     {
         SelectiveFailureLoggerFactory.CreateFailureCategory = AspireProfileActivatorCategory;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<
+            CreateFactoryAsync<
                 TestAppHost,
                 ThrowingActivationCleanupModule,
-                ThrowingActivationProfile>());
+                ThrowingActivationProfile>(configured));
 
         Assert.IsType<ActivationException>(exception.InnerException);
         Assert.Equal(1, SelectiveFailureLoggerFactory.CreateFailureCount);
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingActivationCleanupModule.LastProbe).DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_LoggerFailureDoesNotReplaceActivationFailure()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_LoggerFailureDoesNotReplaceActivationFailure(bool configured)
     {
         SelectiveFailureLoggerFactory.LogFailureCategory = AspireProfileActivatorCategory;
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<
+            CreateFactoryAsync<
                 TestAppHost,
                 ThrowingActivationCleanupModule,
-                ThrowingActivationProfile>());
+                ThrowingActivationProfile>(configured));
 
         Assert.IsType<ActivationException>(exception.InnerException);
         Assert.Equal(1, SelectiveFailureLoggerFactory.LogFailureCount);
@@ -341,13 +363,15 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Equal(1, Assert.IsType<ThrowingDisposalProbe>(ThrowingCleanupModule.LastProbe).DisposeCount);
     }
 
-    [Fact]
-    public async Task CreateAsync_ProcessFatalActivationFailureDisposesBuiltHost()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_ProcessFatalActivationFailureDisposesBuiltHost(bool configured)
     {
         FatalActivationModule.LastProbe = null;
 
         var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, FatalActivationModule, FatalActivationProfile>());
+            CreateFactoryAsync<TestAppHost, FatalActivationModule, FatalActivationProfile>(configured));
 
         Assert.Equal("fatal activation failure", exception.Message);
         Assert.True(Assert.IsType<DisposalProbe>(FatalActivationModule.LastProbe).IsDisposed);
@@ -363,11 +387,13 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.True(Assert.IsType<AsyncActivationDisposalProbe>(AsyncActivationModule.LastProbe).IsDisposed);
     }
 
-    [Fact]
-    public async Task CreateAsync_CompositionFailureDisposesAsyncOnlyActivationServices()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateAsync_CompositionFailureDisposesAsyncOnlyActivationServices(bool configured)
     {
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            AppSurfaceAspireTestingBuilder.CreateAsync<TestAppHost, AsyncActivationModule, AsyncActivationThrowingProfile>());
+            CreateFactoryAsync<TestAppHost, AsyncActivationModule, AsyncActivationThrowingProfile>(configured));
 
         Assert.IsType<CompositionException>(exception.InnerException);
         Assert.True(Assert.IsType<AsyncActivationDisposalProbe>(AsyncActivationModule.LastProbe).IsDisposed);
@@ -1173,6 +1199,35 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         getPartialHostProbe = () => Assert.IsType<OrderedThrowingProviderDisposalProbe>(partialHostProbe);
         return actualBuilder;
     }
+
+    [Fact]
+    public async Task CreateConfiguredAsync_BuilderCreationFailureDisposesActivationBeforeWrapperTransfer()
+    {
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+                TestAppHost, TestModule, FailingAspireArgumentsProfile>(
+                new AppSurfaceAspireTestingOptions
+                {
+                    ConfigureActivationServices = services => services.AddSingleton<FailingAspireArgumentsProfile>(),
+                    ConfigureAspireBuilder = _ => throw new InvalidOperationException("Aspire hook must not run.")
+                }));
+
+        Assert.Contains("Aspire builder failed", error.Message, StringComparison.Ordinal);
+        Assert.Contains("PassThroughArgs", error.Message, StringComparison.Ordinal);
+        Assert.IsType<InvalidOperationException>(error.InnerException);
+        Assert.Equal("Aspire arguments getter failure", error.InnerException.Message);
+        Assert.Equal(1, Assert.IsType<DisposalProbe>(TestModule.LastProbe).DisposeCount);
+    }
+
+    private static Task<AppSurfaceAspireProfileTestingBuilder> CreateFactoryAsync<TAppHost, TModule, TProfile>(
+        bool configured)
+        where TAppHost : class
+        where TModule : IAppSurfaceHostModule, new()
+        where TProfile : AspireProfile =>
+        configured
+            ? AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<TAppHost, TModule, TProfile>(
+                new AppSurfaceAspireTestingOptions())
+            : AppSurfaceAspireTestingBuilder.CreateAsync<TAppHost, TModule, TProfile>();
 
     public void Dispose()
     {
@@ -2096,4 +2151,18 @@ public abstract class AbstractProfile : AspireProfile
         : base(logger)
     {
     }
+}
+
+[Command("failing-aspire-arguments")]
+public sealed partial class FailingAspireArgumentsProfile : AspireProfile
+{
+    public FailingAspireArgumentsProfile(DisposalProbe probe, ILogger<FailingAspireArgumentsProfile> logger)
+        : base(logger)
+    {
+        _ = probe;
+    }
+
+    public override string[] PassThroughArgs => throw new InvalidOperationException("Aspire arguments getter failure");
+
+    public override IEnumerable<IAspireComponent> GetComponents() => [];
 }

@@ -108,3 +108,25 @@
 
 - **What:** Add a source analyzer and optional codemod for legacy dotted AppSurface configuration-key call sites. **Why:** Runtime diagnostics can identify executed paths, but they cannot prove that every attribute, direct read, audit registration, provider mapping, and dormant branch has migrated. **Pros:** Gives maintainers a compile-time inventory and automates safe `.` to `:` replacements. **Cons:** The analyzer would freeze grammar and API assumptions too early if built before the typed key and migration diagnostics stabilize. **Context:** The logical-key contract deliberately keeps only one permanent colon syntax and uses bounded compatibility input; the analyzer should consume the final parser rules rather than reimplementing them. **Effort estimate:** L (human team) -> M with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable `AppSurfaceConfigKey`, application-boundary parser, diagnostic codes, and release-train policy.
 - **What:** Add a credentialed Google Secret Manager contract proof for explicit mappings, convention ids, versions, and exact provenance. **Why:** The fake transport proves AppSurface behavior but cannot prove deployed IAM, API resource validation, or response-name behavior. **Pros:** Catches provider drift before a release and validates the exact native-resource contract. **Cons:** Requires a dedicated project, credential rotation, cleanup, cost controls, and a trust-boundary design for CI. **Context:** Keep the default provider suite deterministic and value-safe; run the live proof as a separate protected release verification rather than enumerating unclaimed secrets. **Effort estimate:** M (human team) -> S with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable Google codec/resource-claim contract and approved CI credential design.
+
+## Issue 866 follow-ups — deferred by autoplan
+
+### C6: asynchronous preparation hooks
+
+**What:** Consider an async hook family only after a named consumer requires awaited setup.
+**Why:** It could support external setup without unsupported async-void callbacks; current Skoolit graph selection is synchronous.
+**Pros:** Explicit cancellation and awaited ownership. **Cons:** More overloads and lifecycle branches.
+**Context:** [The configured testing design](docs/designs/issue-866-pre-activation-testing-hooks.md) keeps synchronous actions. Gather the adopter's awaited operation before designing another API.
+**Effort:** human L / agent M
+**Priority:** P3
+**Depends on:** issue 866 adoption and concrete async demand.
+
+### C7: provider-specific replacement guidance
+
+**What:** Gather multiple provider-specific replacement needs before considering a general abstraction.
+**Why:** ConfigureContainer can override service-collection descriptors; stronger guarantees require real provider contracts.
+**Pros:** Clear consumer guidance across providers. **Cons:** Provider coupling and maintenance.
+**Context:** [The configured testing design](docs/designs/issue-866-pre-activation-testing-hooks.md) preserves default-provider and Autofac semantics; it does not promise universal last-wins behavior. Start with two concrete adopter cases.
+**Effort:** human L / agent M
+**Priority:** P3
+**Depends on:** current provider proof and at least two consumer needs.

@@ -604,11 +604,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 61
-    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
-    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
+    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph or constructor inputs must be selected per call without invoking the asynchronous AppHost entry point.
+    includes: Typed AppHost, module, and profile selection; CreateConfiguredAsync pre-activation configuration and service hooks; a pre-composition Aspire builder hook; immutable per-call scenario injection; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
     does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
+    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; use the [configured graph-only proof](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof) when per-call values must reach profile constructors, and keep native AppHosts on Aspire's native testing API.
     depends_on:
       - ForgeTrust.AppSurface.Aspire
     expected_dependency_package_ids:

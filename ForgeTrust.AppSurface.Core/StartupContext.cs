@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using ForgeTrust.AppSurface.Core.Defaults;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Core;
 
@@ -24,6 +25,17 @@ public record StartupContext(
     IEnvironmentProvider? EnvironmentProvider = null,
     params List<Action<IServiceCollection>> CustomRegistrations)
 {
+    /// <summary>
+    /// Gets an internal factory for a host builder before defaults and module callbacks are registered.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to null, which preserves Host.CreateDefaultBuilder. Aspire testing supplies a per-call
+    /// ownership observer here to capture resources acquired before a host can be returned. The factory
+    /// must apply Generic Host defaults for the supplied normalized arguments and preserve the selected
+    /// service-provider factory. This is an internal startup seam, not a public customization API.
+    /// </remarks>
+    internal Func<string[], IHostBuilder>? HostBuilderFactory { get; init; }
+
     internal ModuleDependencyBuilder Dependencies { get; } = new();
 
     /// <summary>

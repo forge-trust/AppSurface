@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Aspire.Testing" Version="{{PACKAGE_VERSION}}" />
+    <PackageReference Include="Aspire.Hosting" Version="13.4.4" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.4" />
+    <PackageReference Include="Aspire.Hosting.Testing" Version="13.4.4" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
+  </ItemGroup>
+</Project>
