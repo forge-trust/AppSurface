@@ -22,6 +22,9 @@ If your CI gate should distinguish an explicit low-risk change from an incomplet
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
+If a shared typed wrapper lives in a Domain assembly outside normal module
+discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 
 For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
 

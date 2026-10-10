@@ -808,20 +808,38 @@ public static class ConfigAuditServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// Registers one host registry and an independent startup marker. Parser option validation must not depend
-    /// on the registry, since registry construction itself consumes those options through the parser.
-    /// </summary>
+    /// <summary>Ensures one parser/registry and each framework startup-validation bundle per collection.</summary>
+    /// <remarks>
+    /// Each named framework validator's exact implementation descriptor identifies its own installation bundle.
+    /// Other caller validators do not suppress framework validation. Repeated explicit selection, discovery, and
+    /// manual audit registration keep infrastructure descriptors stable; intentional manual declarations remain additive.
+    /// Key-policy validation is independent of the registry to avoid a parser/options dependency cycle. Parser and
+    /// registry TryAdd calls always run, preserving caller replacements. Manual tampering with private installation
+    /// bundle descriptors is outside this idempotency contract.
+    /// </remarks>
+    /// <param name="services">The current host collection; installation never builds a provider or reads values.</param>
     internal static void EnsureDeclarationInfrastructure(IServiceCollection services)
     {
-        services.AddOptions<AppSurfaceConfigKeyOptions>()
-            .Validate(options => Enum.IsDefined(options.LegacyDotPathBehavior),
-                "LegacyDotPathBehavior must name a supported mode.")
-            .ValidateOnStart();
+        if (!services.Any(descriptor =>
+                descriptor.ServiceType == typeof(IValidateOptions<AppSurfaceConfigKeyOptions>)
+                && !descriptor.IsKeyedService
+                && descriptor.ImplementationType == typeof(AppSurfaceConfigKeyOptionsValidator)))
+        {
+            services.AddOptions<AppSurfaceConfigKeyOptions>().ValidateOnStart();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<
+                IValidateOptions<AppSurfaceConfigKeyOptions>, AppSurfaceConfigKeyOptionsValidator>());
+        }
+
         services.TryAddSingleton<IConfigKeyInputParser, ConfigKeyInputParser>();
         services.TryAddSingleton<ConfigDeclarationRegistry>();
-        services.AddOptions<ConfigDeclarationStartupOptions>().ValidateOnStart();
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<
-            IValidateOptions<ConfigDeclarationStartupOptions>, ConfigDeclarationStartupValidator>());
+        if (!services.Any(descriptor =>
+                descriptor.ServiceType == typeof(IValidateOptions<ConfigDeclarationStartupOptions>)
+                && !descriptor.IsKeyedService
+                && descriptor.ImplementationType == typeof(ConfigDeclarationStartupValidator)))
+        {
+            services.AddOptions<ConfigDeclarationStartupOptions>().ValidateOnStart();
+            services.TryAddEnumerable(ServiceDescriptor.Singleton<
+                IValidateOptions<ConfigDeclarationStartupOptions>, ConfigDeclarationStartupValidator>());
+        }
     }
 }

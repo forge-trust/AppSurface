@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ConfigPackageConsumer.DomainFixture</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>ForgeTrust.AppSurface.Config.PackageConsumer.DomainFixture</PackageId>
+    <Version>$(PackageVersion)</Version>
+    <PackageVersion>$(PackageVersion)</PackageVersion>
+    <IsPackable>true</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Config" Version="$(PackageVersion)" />
+  </ItemGroup>
+</Project>

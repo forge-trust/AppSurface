@@ -6,6 +6,14 @@ collision domains, precedence, and native representability. The
 [upgrade guide](config-key-migration.md) covers the intentional pre-1.0 source and
 binary break.
 
+This guide is for implementing a native source provider. If your source already
+supplies values and you only need to select one typed wrapper from a Domain assembly,
+use [`AddAppSurfaceConfig<TConfig>()`](../Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+and verify the package boundary with the
+[packed consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md). Explicit wrapper
+registration does not implement or replace `IConfigProvider`, and it does not add a
+provider to the host.
+
 ```csharp
 public sealed class ExampleProvider : IConfigProvider
 {
