@@ -347,7 +347,17 @@ internal sealed class LinuxEmptyObservationControlServer
             if (EvidenceNativeQualification.PeerReplacementEnabled)
                 _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
             if (EvidenceNativeQualification.ParentReplacementEnabled)
-                _n07 = LinuxN07CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+            {
+                try
+                {
+                    _n07 = LinuxN07CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+                }
+                catch (Exception error) when (Recoverable(error))
+                {
+                    _failures.Capture(LinuxControlFailureStage.N07CheckpointCreate, null, error);
+                    throw;
+                }
+            }
             await RunCoreAsync(token).ConfigureAwait(false);
         }
         finally
@@ -419,7 +429,11 @@ internal sealed class LinuxEmptyObservationControlServer
                 // This pause occurs before RegisterAccept's synchronous worker/name checks.
                 // It is separate from the irreversible EXIT admission-close barrier.
                 if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
-                if (_n07 is not null) await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                if (_n07 is not null)
+                {
+                    stage = LinuxControlFailureStage.N07BeforeNextAccept;
+                    await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                }
                 stage = LinuxControlFailureStage.Accept;
                 SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
                 lock (_executionGate)

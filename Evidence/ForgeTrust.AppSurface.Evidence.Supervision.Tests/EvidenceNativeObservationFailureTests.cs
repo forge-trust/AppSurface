@@ -843,6 +843,33 @@ public sealed class EvidenceNativeObservationFailureTests
         }
     }
 
+    [Theory]
+    [InlineData((int)LinuxControlFailureStage.N07CheckpointCreate)]
+    [InlineData((int)LinuxControlFailureStage.N07BeforeNextAccept)]
+    public void N07LifecycleStagesRoundTripAsClosedRedactedFailureData(int stageValue)
+    {
+        var stage = (LinuxControlFailureStage)stageValue;
+        var control = LinuxControlFailure.Capture(stage, null,
+            new IOException("private-stage-canary", new Exception("inner-stage-canary")));
+        Assert.Equal(stage, control.Stage);
+        Assert.Null(control.Operation);
+        Assert.Null(control.DiagnosticCode);
+        Assert.Equal(EvidenceNativeObservationErrorKind.Io, control.ErrorKind);
+
+        var root = EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ServerRun,
+            new IOException("outer-stage-canary"), control);
+        using var parsed = JsonDocument.Parse(root.ToJson());
+        var nested = parsed.RootElement.GetProperty("control_failure");
+        Assert.Equal(new[] { "stage", "operation", "error_kind", "diagnostic_code" },
+            nested.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(stage.ToString(), nested.GetProperty("stage").GetString());
+        Assert.Equal(JsonValueKind.Null, nested.GetProperty("operation").ValueKind);
+        Assert.Equal("Io", nested.GetProperty("error_kind").GetString());
+        Assert.Equal(JsonValueKind.Null, nested.GetProperty("diagnostic_code").ValueKind);
+        Assert.DoesNotContain("canary", root.ToJson());
+        Assert.True(Encoding.UTF8.GetByteCount(root.ToJson()) + 1 <= 1024);
+    }
+
     [Fact]
     public void InvalidControlStageOperationAndMessageCodesClampWithoutLeaking()
     {

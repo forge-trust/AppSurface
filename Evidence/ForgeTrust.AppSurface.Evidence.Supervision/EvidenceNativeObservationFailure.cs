@@ -488,6 +488,10 @@ internal enum LinuxControlFailureStage
     ListenerNativeAcceptSocketOther,
     /// <summary>Actual retained accepted-connection disposal failure before original rethrow.</summary>
     ListenerAcceptedClose,
+    /// <summary>Closed N07 checkpoint-owner creation checkpoint; diagnostic data only.</summary>
+    N07CheckpointCreate,
+    /// <summary>Closed N07 before-next-accept checkpoint; diagnostic data only.</summary>
+    N07BeforeNextAccept,
 }
 
 /// <summary>Detached four-field first caught control fault; no bytes, identities, paths or exception objects survive.</summary>
