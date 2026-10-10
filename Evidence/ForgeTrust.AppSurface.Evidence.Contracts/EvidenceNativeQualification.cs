@@ -12,6 +12,8 @@ internal enum EvidenceNativeQualificationKind
     CancellationBeforeAllocation,
     /// <summary>Private original caller cancellation checkpoint N09, after allocation and before activation.</summary>
     CancellationBeforeActivation,
+    /// <summary>Private original stop racing an already reserved systemd worker start, N10.</summary>
+    PendingStartRace,
     /// <summary>Private N11 synchronous worker input-factory stall.</summary>
     SynchronousWorkerStall,
     /// <summary>Private N12 normal leader exit with a live same-image output holder.</summary>
@@ -23,14 +25,14 @@ internal enum EvidenceNativeQualificationKind
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
 /// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
-/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
+/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
 /// selecting a checkpoint grants no admission or accepted consumer proof.
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
-#if (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N08) || (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N08 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N16 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12))
+#if (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N08) || (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N08 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N16 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12))
 #error A private qualification image must select exactly one checkpoint.
 #endif
 
@@ -45,6 +47,8 @@ internal static class EvidenceNativeQualification
             return EvidenceNativeQualificationKind.CancellationBeforeAllocation;
 #elif EVIDENCE_PRIVATE_N09
             return EvidenceNativeQualificationKind.CancellationBeforeActivation;
+#elif EVIDENCE_PRIVATE_N10
+            return EvidenceNativeQualificationKind.PendingStartRace;
 #elif EVIDENCE_PRIVATE_N11
             return EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
@@ -66,6 +70,9 @@ internal static class EvidenceNativeQualification
 
     /// <summary>Gets whether the compiled image owns the closed N12 descendant procedure.</summary>
     internal static bool DescendantEnabled => Current == EvidenceNativeQualificationKind.LeaderExitWithDescendant;
+
+    /// <summary>Gets whether this image observes the original pending-start stop race.</summary>
+    internal static bool PendingStartRaceEnabled => Current == EvidenceNativeQualificationKind.PendingStartRace;
 
     /// <summary>Gets whether the fixed private N11 image stalls at the real synchronous worker input-factory boundary.</summary>
     internal static bool WorkerStallEnabled => Current == EvidenceNativeQualificationKind.SynchronousWorkerStall;
