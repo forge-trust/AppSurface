@@ -65,7 +65,12 @@ internal static class EvidenceProcessEntryPoint
         }
         catch (EvidenceNativeObservationException error) when (supervisorSelected)
         {
-            try { await console.Error.WriteLineAsync(error.Failure.ToJson()); }
+            try
+            {
+                await console.Error.WriteLineAsync(error.Failure.ToJson());
+                if (error.CancellationCleanupJson is { } cleanup)
+                    await console.Error.WriteLineAsync(cleanup);
+            }
             catch (Exception) { } // Diagnostic output cannot replace the original fixed negative outcome.
             await console.Error.WriteLineAsync(error.Message);
             return 1;
