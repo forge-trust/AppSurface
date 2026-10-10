@@ -1214,3 +1214,11 @@ original-worker and zero-send facts, actual terminal code/status, original natur
 pump hashes/EOFs and fresh group facts under original clocks. No compiler, formatter, tests,
 helper execution or native validation was performed for this source packet. Previous
 checkpoint validation records describe their earlier frozen image only.
+
+## Fixed N04 preparation before admission
+
+The private N04 image uses [LinuxN04CheckpointOwner](LinuxN04CheckpointOwner.cs) to finish the actual root helper's image and process audit before the worker's READY admission clock starts. The original authenticated READY request first receives a closed `pre-admission` frame containing the root's positive remaining job milliseconds (maximum one hour). The root then waits for its separately authenticated root helper under the original job token. The helper captures the already connected managed worker and broker, releases preparation, and still stops that worker only after actual READY data preparation.
+
+The same retained connection sends `admission-start` and then the existing descriptor response under the unchanged admission allowance. [SupervisionControlLineFraming](LinuxControlConnection.cs) allows exactly one fixed preparation/start pair after a READY request and one final response. Each native write repeats kernel peer checks; phase cancellation closes the stream and joins the actual write. Preparation is registered before dispatch, retained alongside both original READY exchanges, and joined before any checkpoint descriptor closes. A phase notification provides no admission, native acceptance or ownership authority.
+
+Preparation consumes the original job deadline. It does not extend the job, reset cleanup, alter the peer or workspace guards, or reopen next-accept. Replays, wrong order, expiry and premature close fail closed. The portable order/framing controls verify data and actual task joining; actual root/worker/helper execution remains a separate required Linux control.

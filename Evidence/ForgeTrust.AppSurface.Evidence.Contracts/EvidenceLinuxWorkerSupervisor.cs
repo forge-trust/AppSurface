@@ -123,20 +123,162 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         {
             await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), handshakeCancellation.Token).ConfigureAwait(false);
             brokerPid = RequireRootPeer(socket);
-            var response = await ExchangeAsync(socket, new { op = "ready" }, handshakeCancellation.Token).ConfigureAwait(false);
-            allowance = ParseWorkerRemainingAllowance(response);
-            descriptor = ParseWorkerDescriptor(response.GetProperty("descriptor"));
-            ValidateWorkerRuntimeBinding(descriptor, socketPath, brokerPid, Environment.ProcessId, GetUid(), GetGid(), DateTimeOffset.UtcNow);
+            var response = await ExchangeHandshakeAsync(socket, brokerPid, handshakeCancellation.Token).ConfigureAwait(false);
+            TimeSpan? preparationAllowance = null;
+            if (response.TryGetProperty("phase", out _))
+            {
+                // Only an already authenticated root can announce preparation. The first connect/read
+                // remains bounded by Admission; preparation consumes the original job allowance.
+                preparationAllowance = ParseWorkerPreparationAllowance(response);
+                handshakeCancellation.Token.ThrowIfCancellationRequested();
+                handshakeDeadline.CancelAfter(Timeout.InfiniteTimeSpan);
+                var remaining = WorkerPreparationRemaining(preparationAllowance.Value,
+                    TimeProvider.System.GetElapsedTime(handshakeStarted));
+                using var preparationDeadline = new CancellationTokenSource(remaining);
+                using var preparationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken, preparationDeadline.Token);
+                response = await ReadHandshakeResponseAsync(socket, brokerPid, preparationCancellation.Token).ConfigureAwait(false);
+                ValidateWorkerAdmissionStart(response);
+                remaining = WorkerPreparationRemaining(preparationAllowance.Value,
+                    TimeProvider.System.GetElapsedTime(handshakeStarted));
+                using var admissionDeadline = new CancellationTokenSource(remaining < EvidenceRunBudgetLimits.Admission
+                    ? remaining : EvidenceRunBudgetLimits.Admission);
+                using var admissionCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+                    preparationCancellation.Token, admissionDeadline.Token);
+                response = await ReadHandshakeResponseAsync(socket, brokerPid, admissionCancellation.Token).ConfigureAwait(false);
+                (descriptor, allowance) = ParseAndBindReadyResponse(response, socket, socketPath, brokerPid,
+                    handshakeStarted, preparationAllowance, admissionCancellation.Token);
+            }
+            else
+            {
+                (descriptor, allowance) = ParseAndBindReadyResponse(response, socket, socketPath, brokerPid,
+                    handshakeStarted, null, handshakeCancellation.Token);
+            }
         }
         catch (OperationCanceledException) when (handshakeDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             throw new EvidenceAdmissionException("ASEVD402", "Protected worker authentication exceeded its admission deadline.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new EvidenceAdmissionException("ASEVD402", "Protected worker preparation or admission exceeded its original allowance.");
         }
         catch (EvidenceAdmissionException error) { throw NormalizeWorkerHandshakeFailure(error); }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
             or FormatException or OverflowException) { throw NormalizeWorkerHandshakeFailure(error); }
 
         return new EvidenceLinuxWorkerSupervisor(socketPath, brokerPid, descriptor, handshakeStarted, allowance);
+    }
+
+    private static (EvidenceLinuxWorkerDescriptor Descriptor, TimeSpan Allowance) ParseAndBindReadyResponse(
+        JsonElement response, Socket socket, string socketPath, int brokerPid, long started,
+        TimeSpan? originalPreparationAllowance, CancellationToken admissionToken)
+    {
+        admissionToken.ThrowIfCancellationRequested();
+        var allowance = ParseWorkerRemainingAllowance(response);
+        if (originalPreparationAllowance is { } original && allowance > original) allowance = original;
+        var descriptor = ParseWorkerDescriptor(response.GetProperty("descriptor"));
+        ValidateWorkerRuntimeBinding(descriptor, socketPath, brokerPid, Environment.ProcessId, GetUid(), GetGid(), DateTimeOffset.UtcNow);
+        if (RequireRootPeer(socket) != brokerPid) throw InvalidWorkerDescriptor();
+        ValidateWorkerPreparationCompletion(admissionToken, originalPreparationAllowance,
+            TimeProvider.System.GetElapsedTime(started));
+        return (descriptor, allowance);
+    }
+
+    /// <summary>Requires the live original admission token and preparation allowance after final synchronous validation.</summary>
+    /// <param name="admissionToken">The actual still-owned admission/job token; caller cancellation stays cancellation.</param>
+    /// <param name="originalPreparationAllowance">Original root preparation allowance, or null for the legacy ready exchange.</param>
+    /// <param name="elapsed">All monotonic elapsed connection time, including final parsing and runtime validation.</param>
+    /// <exception cref="OperationCanceledException">The original admission/job token has expired or been cancelled.</exception>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 when the original preparation allowance has expired.</exception>
+    /// <remarks>Data-only guard; no supervisor, authentication or admission can be issued by this method.</remarks>
+    internal static void ValidateWorkerPreparationCompletion(CancellationToken admissionToken,
+        TimeSpan? originalPreparationAllowance, TimeSpan elapsed)
+    {
+        admissionToken.ThrowIfCancellationRequested();
+        if (originalPreparationAllowance is { } original) _ = WorkerPreparationRemaining(original, elapsed);
+    }
+
+    /// <summary>Parses an authenticated-root preparation announcement as bounded data, never admission.</summary>
+    /// <param name="response">Exactly ok, phase and remaining_job_ms; phase must be pre-admission.</param>
+    /// <returns>The positive original root job allowance, at most one hour.</returns>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 for any invalid or ambiguous announcement.</exception>
+    internal static TimeSpan ParseWorkerPreparationAllowance(JsonElement response)
+    {
+        try
+        {
+            WorkerObject(response, ["ok", "phase", "remaining_job_ms"], []);
+            if (response.GetProperty("ok").ValueKind != JsonValueKind.True
+                || response.GetProperty("phase").GetString() != "pre-admission") throw InvalidWorkerDescriptor();
+            var number = response.GetProperty("remaining_job_ms");
+            if (number.ValueKind != JsonValueKind.Number || !number.TryGetInt64(out var milliseconds)
+                || milliseconds is <= 0 or > 3600000) throw InvalidWorkerDescriptor();
+            return TimeSpan.FromMilliseconds(milliseconds);
+        }
+        catch (Exception error) when (error is InvalidOperationException
+            or KeyNotFoundException or FormatException or OverflowException) { throw InvalidWorkerDescriptor(); }
+    }
+
+    /// <summary>Requires the exact root phase transition; it conveys no descriptor or admission capability.</summary>
+    /// <param name="response">Exactly ok=true and phase=admission-start.</param>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 for malformed or unexpected transitions.</exception>
+    internal static void ValidateWorkerAdmissionStart(JsonElement response)
+    {
+        try
+        {
+            WorkerObject(response, ["ok", "phase"], []);
+            if (response.GetProperty("ok").ValueKind != JsonValueKind.True
+                || response.GetProperty("phase").GetString() != "admission-start") throw InvalidWorkerDescriptor();
+        }
+        catch (Exception error) when (error is InvalidOperationException
+            or KeyNotFoundException or FormatException or OverflowException) { throw InvalidWorkerDescriptor(); }
+    }
+
+    /// <summary>Subtracts all observed connection time from the original preparation allowance without resetting it.</summary>
+    /// <param name="allowance">Authenticated positive root allowance, at most one hour.</param>
+    /// <param name="elapsed">Monotonic elapsed time since this worker began its original connection.</param>
+    /// <returns>Strictly positive remaining preparation time.</returns>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 for invalid bounds or expiry.</exception>
+    /// <remarks>This arithmetic helper creates no peer, supervisor, owner or admission.</remarks>
+    internal static TimeSpan WorkerPreparationRemaining(TimeSpan allowance, TimeSpan elapsed)
+    {
+        if (allowance <= TimeSpan.Zero || allowance > TimeSpan.FromHours(1)
+            || elapsed < TimeSpan.Zero || elapsed >= allowance) throw InvalidWorkerDescriptor();
+        return allowance - elapsed;
+    }
+
+    private static async Task<JsonElement> ExchangeHandshakeAsync(Socket socket, int brokerPid, CancellationToken token)
+    {
+        if (RequireRootPeer(socket) != brokerPid) throw InvalidWorkerDescriptor();
+        using var stream = new NetworkStream(socket, ownsSocket: false);
+        await stream.WriteAsync(EvidenceCanonicalJson.Serialize(new { op = "ready" }), token).ConfigureAwait(false);
+        await stream.WriteAsync(new byte[] { (byte)'\n' }, token).ConfigureAwait(false);
+        return await ReadHandshakeResponseAsync(socket, brokerPid, token).ConfigureAwait(false);
+    }
+
+    private static async Task<JsonElement> ReadHandshakeResponseAsync(Socket socket, int brokerPid, CancellationToken token)
+    {
+        // Reading one bounded byte preserves the next phase even if root frames arrive in one packet.
+        // Artifact exchanges retain their separate existing bulk reader.
+        using var stream = new NetworkStream(socket, ownsSocket: false);
+        using var output = new MemoryStream();
+        var one = new byte[1];
+        while (output.Length < 64 * 1024)
+        {
+            token.ThrowIfCancellationRequested();
+            if (RequireRootPeer(socket) != brokerPid || await stream.ReadAsync(one, token).ConfigureAwait(false) != 1)
+                throw InvalidWorkerDescriptor();
+            if (RequireRootPeer(socket) != brokerPid) throw InvalidWorkerDescriptor();
+            token.ThrowIfCancellationRequested();
+            if (one[0] == '\n')
+            {
+                var response = EvidenceCanonicalJson.Deserialize<JsonElement>(output.ToArray(), 64 * 1024);
+                token.ThrowIfCancellationRequested();
+                return response;
+            }
+            output.WriteByte(one[0]);
+        }
+        throw InvalidWorkerDescriptor();
     }
 
     /// <summary>Preserves a host-selected channel diagnostic and normalizes malformed handshake failures.</summary>

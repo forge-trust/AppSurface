@@ -12,11 +12,13 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 internal sealed class LinuxN04CheckpointOrder
 {
     private readonly object _gate = new();
-    private readonly List<Task> _operations = new(2);
+    private readonly List<Task> _operations = new(3);
     private readonly TaskCompletionSource _nextAccept = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _phase;
     private bool _closed;
     private bool _failed;
+    private bool _preparationClaimed;
+    private bool _preparationCompleted;
 
     /// <summary>Gets sticky procedure failure data, not a kernel or native case outcome.</summary>
     internal bool Failed { get { lock (_gate) return _failed; } }
@@ -32,12 +34,33 @@ internal sealed class LinuxN04CheckpointOrder
         }
     }
 
+    /// <summary>Claims root preparation before READY admission; the original job token bounds its native exchange.</summary>
+    internal void ClaimPreparation()
+    {
+        lock (_gate)
+        {
+            if (_closed || _failed || _phase != 1 || _preparationClaimed) throw Rejected();
+            _preparationClaimed = true;
+        }
+    }
+
+    /// <summary>Records the authenticated helper release without granting READY or reopening next-accept.</summary>
+    internal void CompletePreparation()
+    {
+        lock (_gate)
+        {
+            if (_closed || _failed || _phase != 1 || !_preparationClaimed || _preparationCompleted) throw Rejected();
+            _preparationCompleted = true;
+        }
+    }
+
     /// <summary>Claims the sole preparation or commitment operation without invoking callbacks.</summary>
     internal void Claim(bool prepared)
     {
         lock (_gate)
         {
-            if (_closed || _failed || _phase != (prepared ? 1 : 3)) throw Rejected();
+            if (_closed || _failed || _phase != (prepared ? 1 : 3)
+                || (prepared && _preparationClaimed && !_preparationCompleted)) throw Rejected();
             _phase = prepared ? 2 : 4;
         }
     }
@@ -48,7 +71,7 @@ internal sealed class LinuxN04CheckpointOrder
         ArgumentNullException.ThrowIfNull(operation);
         lock (_gate)
         {
-            if (_closed || _operations.Count >= 2) throw Rejected();
+            if (_closed || _operations.Count >= 3) throw Rejected();
             _operations.Add(operation);
         }
     }
@@ -204,6 +227,10 @@ internal sealed class LinuxN04CheckpointOwner
     /// <summary>Waits before the next synchronous listener registration under the original root token.</summary>
     internal Task BeforeNextAcceptAsync(CancellationToken token) => _order.BeforeNextAcceptAsync(_workerExit, token);
 
+    /// <summary>Signals pre-admission preparation and waits for the root helper under the original root job token.</summary>
+    /// <remarks>Registered before dispatch; it grants no worker admission, and close joins its original socket I/O.</remarks>
+    internal Task AdmissionPreparedAsync(CancellationToken token) => StartExchange(null, token);
+
     /// <summary>Signals genuine READY data preparation and waits for a separate authenticated root release.</summary>
     /// <remarks>The original request token/deadline and held reply ordering are unchanged.</remarks>
     internal Task ReadyPreparedAsync(CancellationToken token) => StartExchange(true, token);
@@ -212,14 +239,14 @@ internal sealed class LinuxN04CheckpointOwner
     /// <remarks>The committed notification is data, never accepted-peer or native case proof; it does not reopen next-accept.</remarks>
     internal Task ReadyCommittedAsync(CancellationToken token) => StartExchange(false, token);
 
-    private Task StartExchange(bool prepared, CancellationToken token)
+    private Task StartExchange(bool? prepared, CancellationToken token)
     {
         var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task operation;
         lock (_gate)
         {
             if (_closing) throw LinuxN04CheckpointOrder.Rejected();
-            _order.Claim(prepared);
+            if (prepared is { } ready) _order.Claim(ready); else _order.ClaimPreparation();
             operation = ExchangeOwnedAsync(dispatch.Task, prepared, token);
             _order.Retain(operation);
         }
@@ -227,7 +254,7 @@ internal sealed class LinuxN04CheckpointOwner
         return operation;
     }
 
-    private async Task ExchangeOwnedAsync(Task dispatch, bool prepared, CancellationToken token)
+    private async Task ExchangeOwnedAsync(Task dispatch, bool? prepared, CancellationToken token)
     {
         await dispatch.ConfigureAwait(false);
         var previous = CurrentExchange.Value;
@@ -236,7 +263,7 @@ internal sealed class LinuxN04CheckpointOwner
         try
         {
             Check(io.Token);
-            if (prepared)
+            if (prepared is null)
             {
                 Socket? acquired = await _listener.AcceptAsync(io.Token).ConfigureAwait(false);
                 try
@@ -252,7 +279,7 @@ internal sealed class LinuxN04CheckpointOwner
             }
             Socket peer;
             lock (_gate) { peer = _peer ?? throw LinuxN04CheckpointOrder.Rejected(); RequirePeer(peer); }
-            var message = Encoding.ASCII.GetBytes("N04 " + (prepared ? "READY_PREPARED " : "READY_COMMITTED ") + _generation + "\n");
+            var message = Encoding.ASCII.GetBytes("N04 " + (prepared is null ? "ADMISSION_PREPARED " : prepared.Value ? "READY_PREPARED " : "READY_COMMITTED ") + _generation + "\n");
             var sent = 0;
             while (sent < message.Length)
             {
@@ -261,9 +288,9 @@ internal sealed class LinuxN04CheckpointOwner
                 if (count <= 0) throw LinuxN04CheckpointOrder.Rejected();
                 sent += count;
             }
-            if (prepared)
+            if (prepared != false)
             {
-                var expected = Encoding.ASCII.GetBytes("N04 RELEASE_READY " + _generation + "\n");
+                var expected = Encoding.ASCII.GetBytes("N04 " + (prepared is null ? "RELEASE_ADMISSION " : "RELEASE_READY ") + _generation + "\n");
                 var buffer = new byte[expected.Length];
                 for (var offset = 0; offset < buffer.Length; offset++)
                 {
@@ -274,7 +301,7 @@ internal sealed class LinuxN04CheckpointOwner
                 if (!buffer.AsSpan().SequenceEqual(expected)) throw LinuxN04CheckpointOrder.Rejected();
             }
             Check(io.Token); RequirePeer(peer);
-            _order.Complete(prepared);
+            if (prepared is { } ready) _order.Complete(ready); else _order.CompletePreparation();
         }
         catch (Exception) { _order.MarkFailed(); throw; }
         finally { CurrentExchange.Value = previous; }

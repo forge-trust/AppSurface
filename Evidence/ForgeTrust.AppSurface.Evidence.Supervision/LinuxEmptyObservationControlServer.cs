@@ -373,6 +373,16 @@ internal sealed class LinuxEmptyObservationControlServer
                 case EvidenceReadyControlRequest:
                     stage = LinuxControlFailureStage.ReadyAuthorization;
                     _owner.RequireActive(io.Token);
+                    // Connect/read above kept its Admission bound. The fixed root-helper audit
+                    // now precedes admission and consumes this handler's original root/job token.
+                    io.Token.ThrowIfCancellationRequested();
+                    io.CancelAfter(Timeout.InfiniteTimeSpan);
+                    await connection.WritePreparationAsync((long)_owner.Remaining.TotalMilliseconds, io.Token).ConfigureAwait(false);
+                    await _n04!.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
+                    io.Token.ThrowIfCancellationRequested(); _owner.RequireActive(io.Token);
+                    io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
+                        TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
+                    await connection.WriteAdmissionStartAsync(io.Token).ConfigureAwait(false);
                     stage = LinuxControlFailureStage.ReadyClaim;
                     claim = _sequence.ClaimReady();
                     stage = LinuxControlFailureStage.ReadyData;

@@ -108,6 +108,17 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
     internal Task<EvidenceControlRequest> ReadRequestAsync(CancellationToken cancellationToken) =>
         _framing.ReadRequestAsync(cancellationToken);
 
+    /// <summary>Writes the fixed pre-admission allowance to the authenticated worker without closing its original socket.</summary>
+    /// <param name="remainingJobMilliseconds">Positive original job remainder, at most one hour; never a new deadline.</param>
+    /// <param name="token">Original root handler/job token.</param>
+    /// <remarks>Only the existing native connection may issue this frame. It grants no admission or descriptor.</remarks>
+    internal Task WritePreparationAsync(long remainingJobMilliseconds, CancellationToken token) =>
+        _framing.WritePreparationAsync(remainingJobMilliseconds, token);
+
+    /// <summary>Writes the fixed admission-start transition after root preparation; the final response still closes the socket.</summary>
+    /// <param name="token">Existing root admission/job token.</param>
+    internal Task WriteAdmissionStartAsync(CancellationToken token) => _framing.WriteAdmissionStartAsync(token);
+
     /// <summary>Writes one bounded JSON response after a validated request, then closes the socket.</summary>
     /// <param name="utf8Json">Root-produced JSON object data, not a caller-selected execution capability.</param>
     /// <param name="cancellationToken">Existing root I/O/run deadline cancellation.</param>
@@ -215,7 +226,8 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
 /// This intentional portable data seam cannot construct LinuxControlConnection. Each read is capped by the
 /// remaining 64 KiB line allowance, including LF. Bytes following LF in the same read reject before decoding.
 /// It does not drain future bytes or require client EOF: the existing client awaits a reply on the same socket.
-/// CAS permits only one request attempt and one response; later frames can never dispatch another request.
+/// CAS permits only one request attempt and one final response. A fixed preparation/admission-start pair
+/// may precede that response, in order, without another request; phase data grants no admission.
 /// Cancellation disposes the stream but still awaits its original operation, even if that stream ignores stop.
 /// </remarks>
 internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposable
@@ -228,7 +240,9 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     private readonly Stream _stream;
     private int _readAttempt;
     private int _writeAttempt;
+    private int _preparationPhase;
     private int _validated;
+    private int _readyValidated;
     private int _closeStarted;
     private int _disposeFailed;
     private readonly TaskCompletionSource _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -265,6 +279,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
                 var request = EvidenceControlProtocol.Parse(frame.AsMemory(0, newline));
                 cancellationToken.ThrowIfCancellationRequested();
                 EnsureOpen();
+                if (request is EvidenceReadyControlRequest) Volatile.Write(ref _readyValidated, 1);
                 Volatile.Write(ref _validated, 1);
                 return request;
             }
@@ -285,6 +300,48 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
         }
     }
 
+    /// <summary>Writes one fixed preparation frame as data after a validated request, preserving the original stream.</summary>
+    /// <param name="remainingJobMilliseconds">Positive original job remainder, at most 3600000 milliseconds.</param>
+    /// <param name="token">Existing owner/job token; cancellation closes and joins original I/O.</param>
+    /// <remarks>No callback, credential, deadline reset or admission capability is created by this portable framing seam.</remarks>
+    internal Task WritePreparationAsync(long remainingJobMilliseconds, CancellationToken token) =>
+        WritePhaseAsync(0, remainingJobMilliseconds, token);
+
+    /// <summary>Writes the single admission-start phase only after the original preparation frame completed.</summary>
+    /// <param name="token">Existing owner/admission token; cancellation cannot detach an original write.</param>
+    internal Task WriteAdmissionStartAsync(CancellationToken token) => WritePhaseAsync(2, null, token);
+
+    private async Task WritePhaseAsync(int expectedPhase, long? milliseconds, CancellationToken token)
+    {
+        try
+        {
+            if (Volatile.Read(ref _validated) != 1 || Volatile.Read(ref _readyValidated) != 1 || Volatile.Read(ref _writeAttempt) != 0
+                || (expectedPhase == 0 && (milliseconds is null or <= 0 or > 3600000))
+                || Interlocked.CompareExchange(ref _preparationPhase, expectedPhase + 1, expectedPhase) != expectedPhase)
+                throw Reject(ControlLineFailure.InvalidSequence);
+            using var cancellation = token.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            var bytes = expectedPhase == 0
+                ? EvidenceCanonicalJson.Serialize(new { ok = true, phase = "pre-admission", remaining_job_ms = milliseconds!.Value })
+                : EvidenceCanonicalJson.Serialize(new { ok = true, phase = "admission-start" });
+            var frame = new byte[bytes.Length + 1]; bytes.CopyTo(frame, 0); frame[^1] = (byte)'\n';
+            await _stream.WriteAsync(frame.AsMemory(), token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            if (Interlocked.CompareExchange(ref _preparationPhase, expectedPhase + 2, expectedPhase + 1) != expectedPhase + 1)
+                throw Reject(ControlLineFailure.InvalidSequence);
+        }
+        catch (Exception error) when (token.IsCancellationRequested && Recoverable(error))
+        {
+            Dispose(); throw new OperationCanceledException("Protected control I/O was cancelled.", token);
+        }
+        catch (ControlLineException) { Dispose(); throw; }
+        catch (Exception error) when (Recoverable(error)) { throw Reject(ControlLineFailure.IoFailed); }
+        finally
+        {
+            if (Volatile.Read(ref _closeStarted) != 0) await _closeCompleted.Task.ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Validates, snapshots and writes one JSON object plus LF, then closes the owned stream.</summary>
     /// <param name="utf8Json">Response object data; payload must leave one byte for LF.</param>
     /// <param name="cancellationToken">Existing owner token; actual write completion is awaited.</param>
@@ -292,7 +349,8 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     {
         try
         {
-            if (Volatile.Read(ref _validated) != 1 || Interlocked.CompareExchange(ref _writeAttempt, 1, 0) != 0)
+            if (Volatile.Read(ref _validated) != 1 || Volatile.Read(ref _preparationPhase) is not (0 or 4)
+                || Interlocked.CompareExchange(ref _writeAttempt, 1, 0) != 0)
                 throw Reject(ControlLineFailure.InvalidSequence);
             using var cancellation = cancellationToken.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);
             cancellationToken.ThrowIfCancellationRequested();

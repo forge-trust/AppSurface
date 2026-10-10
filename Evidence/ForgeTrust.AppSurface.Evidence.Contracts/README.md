@@ -310,3 +310,11 @@ Required openat2 errors 1/22/38/95 retain the existing direct native inner excep
 classification; there is no path-based fallback. Artifact allocation's exclusive slot, exact 0700/0600
 policy, named rechecks and diagnostic operations retain their existing behavior. Sampled statx metadata
 or a directory entry never becomes a protected writer or runtime lease.
+
+## Authenticated preparation phases
+
+[EvidenceLinuxWorkerSupervisor.ConnectAsync](EvidenceLinuxWorkerSupervisor.cs) continues to authenticate the actual root `SO_PEERCRED` before any handshake response. Existing one-response READY brokers remain supported. A C# root may first send exactly `{ok:true,phase:"pre-admission",remaining_job_ms:<positive integer>}` and then exactly `{ok:true,phase:"admission-start"}` before the existing descriptor response. The initial connection/read retains the admission bound; preparation is bounded by the original reported job remainder, conservatively reduced by all connection elapsed time. The final admission timer remains at most the existing admission allowance and the original job remainder.
+
+The bounded handshake reader consumes only its current frame, preserving a following phase or descriptor that arrives in the same packet. Every read rechecks the same actual root PID. `ParseWorkerPreparationAllowance`, `ValidateWorkerAdmissionStart` and `WorkerPreparationRemaining` are internal data-only APIs: strict schemas, duplicate/case alias rejection, positive milliseconds capped at one hour, no clock extension and fixed ASEVD402 rejection without caller data. They create no supervisor or admission. Cancellation by the caller remains cancellation; phase expiry rejects authentication. The descriptor/runtime binding and supervisor construction still occur only after the genuine final READY response.
+
+Final synchronous parsing and runtime binding remain inside the live admission/job token scope. `ValidateWorkerPreparationCompletion` rechecks that actual token and the original preparation remainder after validation, before supervisor construction. Expiry during parsing rejects authentication; an already expired, merely unarmed supervisor is not returned. This internal data guard itself issues no authority.

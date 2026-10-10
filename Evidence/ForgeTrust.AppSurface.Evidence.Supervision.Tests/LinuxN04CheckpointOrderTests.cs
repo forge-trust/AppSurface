@@ -142,11 +142,46 @@ public sealed class LinuxN04CheckpointOrderTests
     }
 
     [Fact]
-    public async Task OnlyTwoOriginalExchangesCanBeRetained()
+    public async Task OnlyThreeOriginalExchangesCanBeRetained()
     {
         var order = new LinuxN04CheckpointOrder();
-        order.Retain(Task.CompletedTask); order.Retain(Task.CompletedTask);
+        order.Retain(Task.CompletedTask); order.Retain(Task.CompletedTask); order.Retain(Task.CompletedTask);
         Assert.ThrowsAny<Exception>(() => order.Retain(Task.CompletedTask));
         order.Close(); await order.JoinAsync();
     }
+    [Fact]
+    public void AdmissionPreparationMustCompleteBeforeReadyAndCannotReplay()
+    {
+        var order = new LinuxN04CheckpointOrder();
+        Assert.ThrowsAny<Exception>(() => order.ClaimPreparation());
+        order.Reserve();
+        Assert.ThrowsAny<Exception>(() => order.CompletePreparation());
+        order.ClaimPreparation();
+        Assert.ThrowsAny<Exception>(() => order.ClaimPreparation());
+        Assert.ThrowsAny<Exception>(() => order.Claim(true));
+        order.CompletePreparation();
+        Assert.ThrowsAny<Exception>(() => order.CompletePreparation());
+        order.Claim(true); order.Complete(true); order.Claim(false); order.Complete(false);
+        Assert.ThrowsAny<Exception>(() => order.ClaimPreparation());
+    }
+
+    [Fact]
+    public async Task CloseJoinsTheOriginalPreparationBeforeReadyCanEverBeClaimed()
+    {
+        var order = new LinuxN04CheckpointOrder(); order.Reserve(); order.ClaimPreparation();
+        var dispatch = Signal(); var entered = Signal(); var release = Signal();
+        async Task Original() { await dispatch.Task; entered.SetResult(); await release.Task; }
+        var original = Original(); order.Retain(original);
+        Assert.False(entered.Task.IsCompleted);
+        try
+        {
+            dispatch.SetResult(); await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            order.Close(); var join = order.JoinAsync(); Assert.False(join.IsCompleted);
+            Assert.ThrowsAny<Exception>(() => order.CompletePreparation());
+            Assert.ThrowsAny<Exception>(() => order.Claim(true));
+        }
+        finally { release.TrySetResult(); order.Close(); await order.JoinAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
+        Assert.True(original.IsCompletedSuccessfully);
+    }
+
 }
