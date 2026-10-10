@@ -1,16 +1,16 @@
-using System.Net;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Core;
-using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.Docs.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
@@ -22,10 +22,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Microsoft.Extensions.FileProviders;
 
 namespace ForgeTrust.AppSurface.Docs.Tests;
 
@@ -34,7 +34,10 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
 {
     private readonly string _root = Path.Join(Path.GetTempPath(), "appsurface-alias-integration", Guid.NewGuid().ToString("N"));
 
-    public AppSurfaceDocsVersionAliasIntegrationTests() => Directory.CreateDirectory(_root);
+    public AppSurfaceDocsVersionAliasIntegrationTests()
+    {
+        Directory.CreateDirectory(_root);
+    }
 
     [Theory]
     [InlineData(false, "/docs", "")]
