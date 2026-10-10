@@ -54,4 +54,60 @@ public sealed class LinuxCancellationCleanupObservationTests
         Assert.Throws<EvidenceAdmissionException>(() =>
             LinuxEmptyObservationExecution.EncodeCancellationCleanupDetached(Guid.Empty, 2003));
     }
+
+    [Fact]
+    public void AcceptedWorkCleanup_UsesDistinctClosedSchemaWithoutChangingTheOriginalFailure()
+    {
+        var generation = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var latch = new EvidenceNativeObservationFailureLatch();
+        latch.Capture(EvidenceNativeObservationPhase.WorkerCompletion, new IOException("private-canary"));
+        var original = latch.Rejected();
+        Assert.Null(original.RootCleanupJson);
+        var observed = latch.Rejected(generation, 2003, LinuxNegativeCleanupKind.AcceptedBlockedWork);
+        Assert.Same(original.Failure, observed.Failure);
+        Assert.Equal(original.Message, observed.Message);
+        Assert.Null(observed.CancellationCleanupJson);
+        Assert.Null(observed.InnerException);
+        Assert.DoesNotContain("private-canary", observed.RootCleanupJson!, StringComparison.Ordinal);
+        using var parsed = JsonDocument.Parse(observed.RootCleanupJson!);
+        var value = parsed.RootElement;
+        Assert.Equal(9, value.EnumerateObject().Count());
+        Assert.Equal("issue779-accepted-work-root-cleanup-v1", value.GetProperty("schema").GetString());
+        Assert.Equal(generation.ToString("N"), value.GetProperty("generation").GetString());
+        Assert.Equal(2003u, value.GetProperty("results_gid").GetUInt32());
+        foreach (var name in new[] { "accounts_closed", "root_custody_closed", "original_owners_closed", "observation_only" })
+            Assert.True(value.GetProperty(name).GetBoolean());
+        Assert.False(value.GetProperty("native_authority").GetBoolean());
+        Assert.False(value.GetProperty("native_acceptance").GetBoolean());
+        Assert.InRange(System.Text.Encoding.UTF8.GetByteCount(observed.RootCleanupJson!), 1, 1023);
+        Assert.Equal(observed.RootCleanupJson,
+            LinuxEmptyObservationExecution.EncodeNegativeCleanupDetached(generation, 2003, LinuxNegativeCleanupKind.AcceptedBlockedWork));
+        var cancellation = latch.Rejected(generation, 2003);
+        Assert.Equal(cancellation.CancellationCleanupJson, cancellation.RootCleanupJson);
+    }
+
+    [Theory]
+    [InlineData(0u)]
+    [InlineData(uint.MaxValue)]
+    public void AcceptedWorkCleanup_RejectsReservedGroupData(uint gid)
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxEmptyObservationExecution.EncodeNegativeCleanupDetached(Guid.NewGuid(), gid,
+                LinuxNegativeCleanupKind.AcceptedBlockedWork));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void NegativeCleanup_RejectsIncompleteOrUnknownDiagnosticKind()
+    {
+        var latch = new EvidenceNativeObservationFailureLatch();
+        Assert.Throws<ArgumentException>(() => latch.Rejected(cleanupKind: LinuxNegativeCleanupKind.AcceptedBlockedWork));
+        Assert.Throws<ArgumentException>(() => latch.Rejected(Guid.NewGuid(), 2003, (LinuxNegativeCleanupKind)99));
+        Assert.Throws<ArgumentException>(() => latch.Rejected(Guid.NewGuid(), null, LinuxNegativeCleanupKind.AcceptedBlockedWork));
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxEmptyObservationExecution.EncodeNegativeCleanupDetached(
+            Guid.NewGuid(), 2003, (LinuxNegativeCleanupKind)99));
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxEmptyObservationExecution.EncodeNegativeCleanupDetached(
+            Guid.Empty, 2003, LinuxNegativeCleanupKind.AcceptedBlockedWork));
+    }
 }

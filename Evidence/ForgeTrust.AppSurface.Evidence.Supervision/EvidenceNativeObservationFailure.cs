@@ -786,9 +786,18 @@ internal sealed class EvidenceNativeObservationFailureLatch
         Interlocked.CompareExchange(ref _first, EvidenceNativeObservationFailure.Capture(phase, error, control, custody), null);
     /// <summary>Builds a negative-only exception, with a closed missing-result fallback if no exception was caught.</summary>
     internal EvidenceNativeObservationException Rejected(Guid? completedCancellationGeneration = null,
-        uint? completedResultsGid = null) => new(First
+        uint? completedResultsGid = null, LinuxNegativeCleanupKind cleanupKind = LinuxNegativeCleanupKind.Cancellation) => new(First
         ?? EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ResultCheck, null),
-        completedCancellationGeneration, completedResultsGid);
+        completedCancellationGeneration, completedResultsGid, cleanupKind);
+}
+
+/// <summary>Closed negative diagnostic families; none issues a cleanup or admission capability.</summary>
+internal enum LinuxNegativeCleanupKind
+{
+    /// <summary>Original cancellation cleanup diagnostic, retaining its existing wire schema.</summary>
+    Cancellation,
+    /// <summary>Original accepted blocked-work cleanup, after all final custody closes.</summary>
+    AcceptedBlockedWork
 }
 
 /// <summary>Internal negative-only wrapper carrying closed diagnostic data and the original fixed ASEVD410 text.</summary>
@@ -797,21 +806,29 @@ internal sealed class EvidenceNativeObservationException : Exception
 {
     /// <summary>Creates the reserved supervisor's negative diagnostic; it has no inner exception.</summary>
     internal EvidenceNativeObservationException(EvidenceNativeObservationFailure failure,
-        Guid? completedCancellationGeneration = null, uint? completedResultsGid = null)
+        Guid? completedCancellationGeneration = null, uint? completedResultsGid = null,
+        LinuxNegativeCleanupKind cleanupKind = LinuxNegativeCleanupKind.Cancellation)
         : base(new EvidenceAdmissionException("ASEVD410",
             "The protected empty Observation execution or final cleanup could not be established.").Message)
     {
         ArgumentNullException.ThrowIfNull(failure);
         if (completedCancellationGeneration.HasValue != completedResultsGid.HasValue)
             throw new ArgumentException("Cancellation cleanup metadata must be supplied together.");
+        if (!Enum.IsDefined(cleanupKind) || (!completedCancellationGeneration.HasValue
+            && cleanupKind != LinuxNegativeCleanupKind.Cancellation))
+            throw new ArgumentException("Negative cleanup kind requires complete paired metadata.");
         Failure = failure;
-        CancellationCleanupJson = completedCancellationGeneration is { } generation
-            ? LinuxEmptyObservationExecution.EncodeCancellationCleanupDetached(generation, completedResultsGid!.Value)
+        RootCleanupJson = completedCancellationGeneration is { } generation
+            ? LinuxEmptyObservationExecution.EncodeNegativeCleanupDetached(generation, completedResultsGid!.Value, cleanupKind)
             : null;
+        CancellationCleanupJson = cleanupKind == LinuxNegativeCleanupKind.Cancellation ? RootCleanupJson : null;
     }
     /// <summary>Gets detached diagnostic data, never a successful result or native owner.</summary>
     internal EvidenceNativeObservationFailure Failure { get; }
     /// <summary>Gets optional detached cancellation cleanup data; missing data cannot establish cleanup.</summary>
     /// <remarks>Only native composition after original finalization may attach this diagnostic. It grants no runtime authority.</remarks>
     internal string? CancellationCleanupJson { get; }
+    /// <summary>Gets optional failure-only final cleanup data; absence never establishes cleanup.</summary>
+    /// <remarks>Native composition attaches it after final closure; detached encoding grants no authority.</remarks>
+    internal string? RootCleanupJson { get; }
 }

@@ -16,19 +16,21 @@ internal enum EvidenceNativeQualificationKind
     SynchronousWorkerStall,
     /// <summary>Private N12 normal leader exit with a live same-image output holder.</summary>
     LeaderExitWithDescendant,
+    /// <summary>Private N16 accepted blocked workload with concurrent authenticated stop and wait.</summary>
+    AcceptedBlockedWork,
 }
 
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
 /// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
-/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N11 or EVIDENCE_PRIVATE_N12 across the complete same-image project graph.
+/// EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
 /// selecting a checkpoint grants no admission or accepted consumer proof.
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
-#if (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N08) || (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N08 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09))
+#if (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N08) || (EVIDENCE_PRIVATE_N04 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N08 && EVIDENCE_PRIVATE_N09) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N16 && (EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12))
 #error A private qualification image must select exactly one checkpoint.
 #endif
 
@@ -47,6 +49,8 @@ internal static class EvidenceNativeQualification
             return EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
             return EvidenceNativeQualificationKind.LeaderExitWithDescendant;
+#elif EVIDENCE_PRIVATE_N16
+            return EvidenceNativeQualificationKind.AcceptedBlockedWork;
 #else
             return EvidenceNativeQualificationKind.None;
 #endif
@@ -65,6 +69,9 @@ internal static class EvidenceNativeQualification
 
     /// <summary>Gets whether the fixed private N11 image stalls at the real synchronous worker input-factory boundary.</summary>
     internal static bool WorkerStallEnabled => Current == EvidenceNativeQualificationKind.SynchronousWorkerStall;
+
+    /// <summary>Gets whether this image owns the fixed N16 blocked-work procedure.</summary>
+    internal static bool AcceptedBlockedWorkEnabled => Current == EvidenceNativeQualificationKind.AcceptedBlockedWork;
 
     /// <summary>Creates metadata for the private stage wait only in a cancellation qualification image.</summary>
     /// <returns>Null for ordinary execution and peer replacement; otherwise an internal one-attempt checkpoint.</returns>

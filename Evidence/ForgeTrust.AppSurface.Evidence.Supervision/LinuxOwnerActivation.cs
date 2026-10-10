@@ -212,6 +212,16 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
     private int _closed;
     private int _failed;
     private int _cleanupRejected;
+    private readonly object _workAdmissionGate = new();
+
+    /// <summary>Serializes synchronous workload registration/dispatch with admission closure.</summary>
+    /// <remarks>
+    /// Holding this gate grants no authority. The dispatcher must recheck RequireActive inside it,
+    /// register ownership before starting work, and leave it before any asynchronous wait. Every
+    /// managed admission-close path uses this same gate, including failed/canceled recheck latches,
+    /// containment and disposal.
+    /// </remarks>
+    internal object WorkAdmissionGate => _workAdmissionGate;
 
     private LinuxOwnerActivation(EvidenceProtectedLaunchInput input, LinuxOwnerFacts facts,
         LinuxProcessIdentity identity, LinuxOwnerGuard guard, Guid runId)
@@ -348,11 +358,14 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
             token.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
-        { Interlocked.Exchange(ref _failed, 1); throw; }
+        { CloseWorkAdmission(); throw; }
         catch
         {
-            Interlocked.Exchange(ref _failed, 1);
-            Interlocked.Exchange(ref _cleanupRejected, 1);
+            lock (_workAdmissionGate)
+            {
+                Interlocked.Exchange(ref _failed, 1);
+                Interlocked.Exchange(ref _cleanupRejected, 1);
+            }
             throw;
         }
     }
@@ -377,8 +390,11 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch
         {
-            Interlocked.Exchange(ref _failed, 1);
-            Interlocked.Exchange(ref _cleanupRejected, 1);
+            lock (_workAdmissionGate)
+            {
+                Interlocked.Exchange(ref _failed, 1);
+                Interlocked.Exchange(ref _cleanupRejected, 1);
+            }
             throw;
         }
     }
@@ -398,12 +414,17 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
 
     /// <summary>Irreversibly closes work admission without asserting a native identity failure.</summary>
     /// <remarks>Used for interrupted read-only inspection. This never clears either failure latch or grants cleanup.</remarks>
-    internal void CloseWorkAdmission() => Interlocked.Exchange(ref _failed, 1);
+    internal void CloseWorkAdmission()
+    {
+        lock (_workAdmissionGate) Interlocked.Exchange(ref _failed, 1);
+    }
 
     /// <summary>Closes retained guard handles after users and pending starts join; never rearms a generation.</summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _closed, 1) == 0)
+        bool close;
+        lock (_workAdmissionGate) close = Interlocked.Exchange(ref _closed, 1) == 0;
+        if (close)
         {
             try { _teardown.Dispose(); }
             finally

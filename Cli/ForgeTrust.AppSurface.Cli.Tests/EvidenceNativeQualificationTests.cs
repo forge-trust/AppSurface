@@ -6,6 +6,34 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Build-selection and original callback controls; no native owner, lease or accepted proof.</summary>
 public sealed class EvidenceNativeQualificationTests
 {
+#if EVIDENCE_PRIVATE_N16
+    [Fact]
+    public void PrivateAcceptancePhaseIsOnlyDetachedDataWithAnExactClosedShape()
+    {
+        using var frame = System.Text.Json.JsonDocument.Parse("{\"ok\":true,\"phase\":\"work-accepted\",\"body_blocked\":true}");
+        EvidenceLinuxWorkerSupervisor.ValidateAcceptedBlockedWorkPhase(frame.RootElement);
+    }
+
+    [Theory]
+    [InlineData("{\"ok\":false,\"phase\":\"work-accepted\",\"body_blocked\":true}")]
+    [InlineData("{\"ok\":true,\"phase\":\"canary-accepted\",\"body_blocked\":true}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\",\"body_blocked\":false}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\",\"body_blocked\":\"canary\"}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\"}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\",\"body_blocked\":true,\"callback\":\"canary\"}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\",\"body_blocked\":true,\"body_blocked\":true}")]
+    [InlineData("{\"ok\":true,\"phase\":\"work-accepted\",\"Body_blocked\":true}")]
+    public void PrivateAcceptancePhaseRejectsIncompleteUnclosedAndUnblockedData(string input)
+    {
+        using var frame = System.Text.Json.JsonDocument.Parse(input);
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            EvidenceLinuxWorkerSupervisor.ValidateAcceptedBlockedWorkPhase(frame.RootElement));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.Message);
+    }
+#endif
+
     [Fact]
     public async Task CompiledImageOwnsOnlyItsSelectedCheckpoint()
     {
@@ -19,6 +47,8 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.SynchronousWorkerStall;
 #elif EVIDENCE_PRIVATE_N12
         var expected = EvidenceNativeQualificationKind.LeaderExitWithDescendant;
+#elif EVIDENCE_PRIVATE_N16
+        var expected = EvidenceNativeQualificationKind.AcceptedBlockedWork;
 #else
         var expected = EvidenceNativeQualificationKind.None;
 #endif
@@ -29,6 +59,8 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.DescendantEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.SynchronousWorkerStall,
             EvidenceNativeQualification.WorkerStallEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.AcceptedBlockedWork,
+            EvidenceNativeQualification.AcceptedBlockedWorkEnabled);
         Assert.Equal(EvidenceNativeQualification.WorkerStallEnabled,
             EvidenceFixedSynchronousInputFactory.CreateForProtectedRole() is not null);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();

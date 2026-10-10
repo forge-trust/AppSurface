@@ -34,10 +34,11 @@
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N09'">$(DefineConstants);EVIDENCE_PRIVATE_N09</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N11'">$(DefineConstants);EVIDENCE_PRIVATE_N11</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N12'">$(DefineConstants);EVIDENCE_PRIVATE_N12</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N16'">$(DefineConstants);EVIDENCE_PRIVATE_N16</DefineConstants>
   </PropertyGroup>
   <Target Name="ValidateEvidencePrivateQualification" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N11' and '$(EvidencePrivateQualification)' != 'N12'"
-           Text="EvidencePrivateQualification must be None, N04, N08, N09, N11 or N12." />
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N11' and '$(EvidencePrivateQualification)' != 'N12' and '$(EvidencePrivateQualification)' != 'N16'"
+           Text="EvidencePrivateQualification must be None, N04, N08, N09, N11, N12 or N16." />
   </Target>
   <Target Name="RejectPrivateEvidenceQualificationPackage" BeforeTargets="Pack">
     <Error Condition="'$(EvidencePrivateQualification)' != 'None'"

@@ -99,6 +99,46 @@ public sealed class SupervisionControlSequenceTests
     }
 
     [Fact]
+    public async Task ConcurrentStopAndWaitJoinAcceptedBlockedWorkWithoutHandlerSelfJoin()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var workload = ledger.BeginWorkload();
+        using var stopHandler = ledger.BeginControl();
+        using var waitHandler = ledger.BeginControl();
+        var stopEntered = Gate();
+        var releaseStop = Gate();
+        var sequence = new SupervisionControlSequence(ledger, async _ =>
+        {
+            Assert.True(ledger.IsWorkloadAdmissionClosed);
+            stopEntered.TrySetResult();
+            await releaseStop.Task;
+            Assert.True(workload.Complete());
+            return Joined();
+        });
+
+        var stop = sequence.StopAsync(default);
+        var wait = sequence.JoinStartedStopAsync();
+        try
+        {
+            await stopEntered.Task.WaitAsync(Guard);
+            var concurrentStop = sequence.StopAsync(new CancellationToken(canceled: true));
+            Assert.Same(stop, concurrentStop);
+            Assert.False(wait.IsCompleted);
+            Assert.Throws<InvalidOperationException>(() => ledger.BeginWorkload());
+            Assert.Equal(1, ledger.ActiveWorkloads);
+            Assert.Equal(2, ledger.ActiveControls);
+        }
+        finally
+        {
+            releaseStop.TrySetResult();
+            await Task.WhenAll(stop, wait).WaitAsync(Guard);
+        }
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(2, ledger.ActiveControls); // Work join excludes both requesting control handlers.
+        Assert.True(sequence.ClaimWait().Positive);
+    }
+
+    [Fact]
     public async Task CancelIgnoringStopRemainsOwnedUntilBothActualTaskAndLedgerJoinThenFails()
     {
         var ledger = new SupervisionWorkRegistry(); var workload = ledger.BeginWorkload(); var entered = Gate();

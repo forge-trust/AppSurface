@@ -43,6 +43,14 @@ internal static class EvidenceProtectedCliExecution
         Action<EvidenceOriginalCancellationObservation>? cancellationSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+        if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+        {
+            await worker.RunAcceptedBlockedWorkStopWaitAsync(cancellationToken, CancellationToken.None, CancellationToken.None)
+                .ConfigureAwait(false);
+            throw new EvidenceAdmissionException("ASEVD410", "The private N16 control race completed without product admission.");
+        }
+#endif
         if (EvidenceNativeQualification.PeerReplacementEnabled)
         {
             await worker.WaitForOwnedExitAsync(cancellationToken).ConfigureAwait(false);

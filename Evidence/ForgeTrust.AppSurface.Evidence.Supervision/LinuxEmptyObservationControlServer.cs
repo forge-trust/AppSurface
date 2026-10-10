@@ -9,7 +9,8 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// assertion can enroll a workload. Run/artifact/application requests reject until their native checkpoint
 /// is composed. The descendant ledger therefore has no dispatched work in this checkpoint. The worker
 /// itself is excluded: its stop/wait request cannot join its own process or active control handler.
-/// Exit ACK is only protocol completion. The outer root owner must subsequently join the worker's original
+/// The N16 private image adds one fixed server-owned blocked workload after registering it in this ledger;
+/// ordinary images have no such dispatch or barrier. Exit ACK is only protocol completion. The outer root owner must subsequently join the worker's original
 /// native/output tasks, recheck custody, close filesystem ownership and delete accounts strictly.
 /// </remarks>
 internal sealed class LinuxEmptyObservationControlServer
@@ -38,9 +39,57 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly TaskCompletionSource _cancellationFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _cancellationSignal;
     private int _signalClaimed;
+#if EVIDENCE_PRIVATE_N16
+    private readonly object _n16Gate = new();
+    private readonly TaskCompletionSource _n16BodyEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16StopStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16WaitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _n16Work;
+    private int _n16WorkClaimed;
+    private int _n16AcceptedCommitted;
+    private int _n16ResponseCommitted;
+    private int _n16StopCommitted;
+    private int _n16WaitCommitted;
+    private int _n16ControlsOverlapped;
+#endif
 
     /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
     internal bool CancellationSignalJoined => _cancellationSignal?.IsCompletedSuccessfully == true;
+
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Projects private N16 past write/task events only after original server and native holder joins.</summary>
+    /// <remarks>
+    /// Requires the original custody owners, all accepted-body/control joins, authenticated response
+    /// writes and the final committed EXIT. This bounded record is failure-only data; it grants no completion, admission,
+    /// account deletion, product acceptance or authority to a reader.
+    /// </remarks>
+    internal byte[] CaptureAcceptedBlockedWork(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (!_sequence.ExitAcknowledged || !_exitCommitted.Task.IsCompletedSuccessfully) throw Rejected();
+        lock (_n16Gate)
+            if (_n16Work?.IsCompletedSuccessfully != true || Volatile.Read(ref _n16WorkClaimed) != 1
+                || Volatile.Read(ref _n16AcceptedCommitted) != 1 || Volatile.Read(ref _n16ResponseCommitted) != 1
+                || Volatile.Read(ref _n16StopCommitted) != 1 || Volatile.Read(ref _n16WaitCommitted) != 1
+                || Volatile.Read(ref _n16ControlsOverlapped) != 1) throw Rejected();
+        var bytes = EvidenceCanonicalJson.Serialize(new
+        {
+            schema = "issue779-accepted-blocked-work-v1", generation = owner.RunId.ToString("N"),
+            @case = "N16", accepted_write_committed = true, request_blocked_during_control_overlap = true,
+            original_body_joined = true, original_request_response_committed = true,
+            stop_write_committed = true, positive_wait_write_committed = true,
+            exit_write_committed = true,
+            handlers_joined = true, active_workloads = 0, active_controls = 0,
+            native_authority = false, native_acceptance = false
+        });
+        token.ThrowIfCancellationRequested();
+        if (bytes.Length is 0 or > 4096) throw Rejected();
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        return bytes;
+    }
+#endif
 
     /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
     /// <remarks>Successful syscall and READY observations still cannot establish caller-token delivery.</remarks>
@@ -416,15 +465,58 @@ internal sealed class LinuxEmptyObservationControlServer
             if (request is EvidenceStopControlRequest)
             {
                 stage = LinuxControlFailureStage.Stop;
-                await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false);
+                var stopTask = _sequence.StopAsync(CleanupToken());
+#if EVIDENCE_PRIVATE_N16
+                if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+                    _n16StopStarted.TrySetResult();
+#endif
+                await stopTask.ConfigureAwait(false);
             }
             // WAIT joins only an already owned STOP, outside response ordering. It never starts
             // containment itself or holds the reply gate while that original procedure is pending.
             else if (request is EvidenceWaitControlRequest)
             {
                 stage = LinuxControlFailureStage.WaitJoin;
+#if EVIDENCE_PRIVATE_N16
+                if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && Volatile.Read(ref _n16WorkClaimed) == 1)
+                {
+                    lock (_n16Gate)
+                        if (_n16Work?.IsCompleted == false && _ledger.ActiveWorkloads == 1 && _ledger.ActiveControls >= 3)
+                            Volatile.Write(ref _n16ControlsOverlapped, 1);
+                    _n16WaitStarted.TrySetResult();
+                    await _n16StopStarted.Task.WaitAsync(io.Token).ConfigureAwait(false);
+                }
+#endif
                 await _sequence.JoinStartedStopAsync().ConfigureAwait(false);
             }
+#if EVIDENCE_PRIVATE_N16
+            else if (request is EvidenceAcceptedBlockedWorkControlRequest)
+            {
+                if (!EvidenceNativeQualification.AcceptedBlockedWorkEnabled) throw Rejected();
+                lock (_owner.WorkAdmissionGate)
+                {
+                    _owner.RequireActive(io.Token);
+                    lock (_n16Gate)
+                    {
+                        stage = LinuxControlFailureStage.RequestClassify;
+                        if (Interlocked.Exchange(ref _n16WorkClaimed, 1) != 0) throw Rejected();
+                        var registration = _ledger.BeginWorkload();
+                        _n16Work = RunN16BlockedWorkAsync(registration);
+                    }
+                }
+                await _n16BodyEntered.Task.WaitAsync(io.Token).ConfigureAwait(false);
+                // Acceptance is an intermediate frame on this original connection. Do not
+                // hold the reply-order gate while the actual workload/request remains blocked.
+                await connection.WriteAcceptedBlockedWorkAsync(io.Token).ConfigureAwait(false);
+                Volatile.Write(ref _n16AcceptedCommitted, 1);
+                Task originalWork;
+                lock (_n16Gate) originalWork = _n16Work ?? throw Rejected();
+                // The handler wait may cancel so final server draining can reach containment.
+                // Its original body stays retained in _n16Work and the workload ledger; the
+                // stop callback below always releases and joins that task before custody.
+                await originalWork.WaitAsync(io.Token).ConfigureAwait(false);
+            }
+#endif
             stage = LinuxControlFailureStage.ReplyGate;
             await _replyOrder.WaitAsync(io.Token).ConfigureAwait(false);
             heldReplyOrder = true;
@@ -464,6 +556,11 @@ internal sealed class LinuxEmptyObservationControlServer
                     stage = LinuxControlFailureStage.ResponseData;
                     response = EvidenceCanonicalJson.Serialize(new { ok = true, owned_exit = claim.Positive });
                     break;
+#if EVIDENCE_PRIVATE_N16
+                case EvidenceAcceptedBlockedWorkControlRequest:
+                    response = EvidenceCanonicalJson.Serialize(new { ok = true, work_joined = true });
+                    break;
+#endif
                 case EvidenceExitControlRequest:
                     stage = LinuxControlFailureStage.CleanupBound;
                     RequireCleanupBound();
@@ -492,10 +589,20 @@ internal sealed class LinuxEmptyObservationControlServer
             _owner.RequireControlIdentity(io.Token);
             stage = LinuxControlFailureStage.PostWriteCheck;
             if (isCleanupRequest) RequireCleanupBound();
+#if EVIDENCE_PRIVATE_N16
+            if (request is EvidenceAcceptedBlockedWorkControlRequest)
+                Volatile.Write(ref _n16ResponseCommitted, 1);
+            else if (request is EvidenceStopControlRequest && Volatile.Read(ref _n16WorkClaimed) == 1)
+                Volatile.Write(ref _n16StopCommitted, 1);
+#endif
             if (claim is not null)
             {
                 stage = LinuxControlFailureStage.ReplyCommit;
                 _sequence.CompleteWrite(claim, true);
+#if EVIDENCE_PRIVATE_N16
+                if (claim.Operation == EvidenceControlOperation.Wait && claim.Positive && Volatile.Read(ref _n16WorkClaimed) == 1)
+                    Volatile.Write(ref _n16WaitCommitted, 1);
+#endif
                 var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
                 if (readyCommitted)
                 {
@@ -548,12 +655,54 @@ internal sealed class LinuxEmptyObservationControlServer
 
     private Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)
     {
+#if EVIDENCE_PRIVATE_N16
+        if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+        {
+            if (!_ledger.IsWorkloadAdmissionClosed) throw Rejected();
+            return StopAndJoinN16WorkAsync(token);
+        }
+#endif
         _owner.RequireControlIdentity(token);
         if (!_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
         // This private server has no work-dispatch path or external workload registration API.
         // These are observations of the genuine empty descendant set, not worker exit assertions.
         return Task.FromResult(new SupervisionControlJoinFacts(true, true, true));
     }
+
+#if EVIDENCE_PRIVATE_N16
+    private async Task<SupervisionControlJoinFacts> StopAndJoinN16WorkAsync(CancellationToken token)
+    {
+        Task? n16Work;
+        lock (_n16Gate) n16Work = _n16Work;
+        if (n16Work is null)
+        {
+            if (_ledger.ActiveWorkloads != 0) throw Rejected();
+            _owner.RequireControlIdentity(token);
+            return new SupervisionControlJoinFacts(true, true, true);
+        }
+        if (_ledger.ActiveWorkloads != 1) throw Rejected();
+        // Release the fixed accepted body, then join its original task even if the caller's
+        // cleanup token is canceled. The body has no external work and completes on this signal.
+        try { await _n16WaitStarted.Task.WaitAsync(token).ConfigureAwait(false); }
+        finally
+        {
+            // Even expiry or a missing WAIT must release and join the original body. Neither
+            // canceled handler waits nor failed replies can erase its workload registration.
+            _n16Release.TrySetResult();
+            await n16Work.ConfigureAwait(false);
+        }
+        _owner.RequireControlIdentity(token);
+        if (_ledger.ActiveWorkloads != 0) throw Rejected();
+        return new SupervisionControlJoinFacts(true, true, true);
+    }
+
+    private async Task RunN16BlockedWorkAsync(SupervisionWorkRegistry.Workload registration)
+    {
+        _n16BodyEntered.TrySetResult();
+        try { await _n16Release.Task.ConfigureAwait(false); }
+        finally { registration.Complete(); }
+    }
+#endif
 
     private CancellationToken CleanupToken()
     {

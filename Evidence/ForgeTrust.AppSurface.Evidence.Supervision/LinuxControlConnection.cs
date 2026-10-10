@@ -108,6 +108,14 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
     internal Task<EvidenceControlRequest> ReadRequestAsync(CancellationToken cancellationToken) =>
         _framing.ReadRequestAsync(cancellationToken);
 
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Writes the fixed N16 accepted/body-blocked phase on this authenticated original connection.</summary>
+    /// <param name="cancellationToken">The handler's existing root I/O deadline token.</param>
+    /// <remarks>Requires this connection's decoded N16 operation; it creates no capability or new deadline.</remarks>
+    internal Task WriteAcceptedBlockedWorkAsync(CancellationToken cancellationToken) =>
+        _framing.WriteAcceptedBlockedWorkAsync(cancellationToken);
+#endif
+
     /// <summary>Writes the fixed pre-admission allowance to the authenticated worker without closing its original socket.</summary>
     /// <param name="remainingJobMilliseconds">Positive original job remainder, at most one hour; never a new deadline.</param>
     /// <param name="token">Original root handler/job token.</param>
@@ -243,6 +251,12 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     private int _preparationPhase;
     private int _validated;
     private int _readyValidated;
+#if EVIDENCE_PRIVATE_N16
+    private int _acceptedWorkValidated;
+    private int _acceptedWorkWritePhase;
+    private readonly TaskCompletionSource _acceptedWorkWriteCompleted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
     private int _closeStarted;
     private int _disposeFailed;
     private readonly TaskCompletionSource _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -280,6 +294,9 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
                 cancellationToken.ThrowIfCancellationRequested();
                 EnsureOpen();
                 if (request is EvidenceReadyControlRequest) Volatile.Write(ref _readyValidated, 1);
+#if EVIDENCE_PRIVATE_N16
+                if (request is EvidenceAcceptedBlockedWorkControlRequest) Volatile.Write(ref _acceptedWorkValidated, 1);
+#endif
                 Volatile.Write(ref _validated, 1);
                 return request;
             }
@@ -310,6 +327,50 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     /// <summary>Writes the single admission-start phase only after the original preparation frame completed.</summary>
     /// <param name="token">Existing owner/admission token; cancellation cannot detach an original write.</param>
     internal Task WriteAdmissionStartAsync(CancellationToken token) => WritePhaseAsync(2, null, token);
+
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Writes the sole fixed N16 acceptance phase after decoding its exact operation request.</summary>
+    /// <param name="token">The original handler/run token; cancellation closes and joins the actual write.</param>
+    /// <remarks>This data-only frame preserves the stream and does not authorize any native or product work.</remarks>
+    internal async Task WriteAcceptedBlockedWorkAsync(CancellationToken token)
+    {
+        var ownsWriteAttempt = false;
+        try
+        {
+            if (Volatile.Read(ref _acceptedWorkValidated) != 1 || Volatile.Read(ref _preparationPhase) != 0)
+                throw Reject(ControlLineFailure.InvalidSequence);
+            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 1, 0) != 0)
+            {
+                if (Volatile.Read(ref _acceptedWorkWritePhase) == 1)
+                {
+                    Dispose();
+                    await _acceptedWorkWriteCompleted.Task.ConfigureAwait(false);
+                }
+                throw Reject(ControlLineFailure.InvalidSequence);
+            }
+            ownsWriteAttempt = true;
+            using var cancellation = token.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            var bytes = EvidenceCanonicalJson.Serialize(new { ok = true, phase = "work-accepted", body_blocked = true });
+            var frame = new byte[bytes.Length + 1]; bytes.CopyTo(frame, 0); frame[^1] = (byte)'\n';
+            await _stream.WriteAsync(frame.AsMemory(), token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 2, 1) != 1)
+                throw Reject(ControlLineFailure.InvalidSequence);
+        }
+        catch (Exception error) when (token.IsCancellationRequested && Recoverable(error))
+        {
+            Dispose(); throw new OperationCanceledException("Protected control I/O was cancelled.", token);
+        }
+        catch (ControlLineException) { Dispose(); throw; }
+        catch (Exception error) when (Recoverable(error)) { throw Reject(ControlLineFailure.IoFailed); }
+        finally
+        {
+            if (ownsWriteAttempt) _acceptedWorkWriteCompleted.TrySetResult();
+            if (Volatile.Read(ref _closeStarted) != 0) await _closeCompleted.Task.ConfigureAwait(false);
+        }
+    }
+#endif
 
     private async Task WritePhaseAsync(int expectedPhase, long? milliseconds, CancellationToken token)
     {
@@ -349,7 +410,18 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
     {
         try
         {
+#if EVIDENCE_PRIVATE_N16
+            if (Volatile.Read(ref _acceptedWorkWritePhase) == 1)
+            {
+                Dispose();
+                await _acceptedWorkWriteCompleted.Task.ConfigureAwait(false);
+                throw Reject(ControlLineFailure.InvalidSequence);
+            }
+#endif
             if (Volatile.Read(ref _validated) != 1 || Volatile.Read(ref _preparationPhase) is not (0 or 4)
+#if EVIDENCE_PRIVATE_N16
+                || (Volatile.Read(ref _acceptedWorkValidated) == 1 && Volatile.Read(ref _acceptedWorkWritePhase) != 2)
+#endif
                 || Interlocked.CompareExchange(ref _writeAttempt, 1, 0) != 0)
                 throw Reject(ControlLineFailure.InvalidSequence);
             using var cancellation = cancellationToken.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);

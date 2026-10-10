@@ -63,6 +63,10 @@ internal static class LinuxEmptyObservationExecution
         var cancellationProjectionStage = LinuxCancellationProjectionStage.Unknown;
         var accountsClosedUnderCustody = false;
         uint cancellationResultsGid = 0;
+#if EVIDENCE_PRIVATE_N16
+        var acceptedWorkProjectionWritten = false;
+        uint acceptedWorkResultsGid = 0;
+#endif
         var cleanupToken = CancellationToken.None;
         long finalCloseStarted = 0;
         TimeSpan finalCloseAllowance = TimeSpan.Zero;
@@ -146,6 +150,33 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N16
+            // The negative private control exports only actual past authenticated writes and
+            // original joined task/kernel data. It never replaces the worker's nonzero failure.
+            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && failed && !cleanupFailed
+                && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    var control = server.CaptureAcceptedBlockedWork(input, owner, accounts, workspace, worker, cleanupToken);
+                    var kernel = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
+                    acceptedWorkResultsGid = accounts.RequireControlOwnedBy(owner, cleanupToken).ResultsGid;
+                    cleanupToken.ThrowIfCancellationRequested();
+                    using (var stderr = Console.OpenStandardError())
+                    {
+                        foreach (var bytes in new[] { control, kernel.Bytes })
+                        {
+                            await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
+                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        }
+                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    }
+                    cleanupToken.ThrowIfCancellationRequested();
+                    owner.RequireControlIdentity(cleanupToken);
+                    acceptedWorkProjectionWritten = true;
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
             // Private N11 failure-only data comes from the original joined holders before custody
             // and account closure. Capture failure never clears or replaces the execution failure.
             if (EvidenceNativeQualification.WorkerStallEnabled && (failed || cleanupFailed)
@@ -326,6 +357,10 @@ internal static class LinuxEmptyObservationExecution
         // No earlier first-fault projection can conceal a failed finalization behind this record.
         if (failed && cancellationProjectionWritten && accountsClosedUnderCustody && owner is not null)
             throw failures.Rejected(owner.RunId, cancellationResultsGid);
+#if EVIDENCE_PRIVATE_N16
+        if (failed && acceptedWorkProjectionWritten && accountsClosedUnderCustody && owner is not null)
+            throw failures.Rejected(owner.RunId, acceptedWorkResultsGid, LinuxNegativeCleanupKind.AcceptedBlockedWork);
+#endif
         if (failed || manifest is null) throw failures.Rejected();
         return manifest;
     }
@@ -342,11 +377,27 @@ internal static class LinuxEmptyObservationExecution
     /// terminal filesystem custody and independently observe all generated NSS names and IDs absent.
     /// </remarks>
     internal static string EncodeCancellationCleanupDetached(Guid generation, uint resultsGid)
+        => EncodeNegativeCleanupDetached(generation, resultsGid, LinuxNegativeCleanupKind.Cancellation);
+
+    /// <summary>Encodes one closed failure-only cleanup record; detached calls establish encoding only.</summary>
+    /// <param name="generation">Original owner generation data, not a caller capability.</param>
+    /// <param name="resultsGid">Original nonreserved results group, copied before account deletion.</param>
+    /// <param name="kind">One of the two closed negative cleanup diagnostic families.</param>
+    /// <returns>Bounded fixed-schema JSON with no raw error or native authority.</returns>
+    /// <exception cref="EvidenceAdmissionException">Fixed ASEVD410 for invalid generation, group or kind.</exception>
+    /// <remarks>
+    /// The cancellation schema remains unchanged. Accepted-work cleanup is a separate schema required
+    /// in addition to its pre-custody event and kernel records. Native composition alone attaches it
+    /// after strict original account/handle closure and the final captured monotonic deadline check.
+    /// An expected nonzero root exit without this record cannot prove successful negative-run cleanup.
+    /// </remarks>
+    internal static string EncodeNegativeCleanupDetached(Guid generation, uint resultsGid, LinuxNegativeCleanupKind kind)
     {
-        if (generation == Guid.Empty || resultsGid is 0 or uint.MaxValue) throw Rejected();
+        if (generation == Guid.Empty || resultsGid is 0 or uint.MaxValue || !Enum.IsDefined(kind)) throw Rejected();
         return System.Text.Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(new
         {
-            schema = "issue779-cancellation-root-cleanup-v1",
+            schema = kind == LinuxNegativeCleanupKind.Cancellation
+                ? "issue779-cancellation-root-cleanup-v1" : "issue779-accepted-work-root-cleanup-v1",
             generation = generation.ToString("N"),
             results_gid = resultsGid,
             accounts_closed = true,

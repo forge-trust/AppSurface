@@ -402,6 +402,74 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
             throw new EvidenceAdmissionException("ASEVD410", "Restricted child or output pump exit was not confirmed.");
     }
 
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Runs the fixed private N16 operation, then sends concurrent fresh stop/wait requests.</summary>
+    /// <remarks>
+    /// The original request remains pending after its authenticated intermediate acceptance frame.
+    /// STOP and WAIT use separate connections and their supplied cleanup tokens, then the original
+    /// request is joined before return. Failure closes and joins every started request; a phase frame
+    /// grants no admission, lease, producer registration or native completion authority.
+    /// </remarks>
+    internal async Task RunAcceptedBlockedWorkStopWaitAsync(CancellationToken operationToken,
+        CancellationToken stopToken, CancellationToken waitToken)
+    {
+        if (!EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+            throw new EvidenceAdmissionException("ASEVD410", "The private blocked workload is unavailable.");
+        using var operationLifetime = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
+        using var stopLifetime = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
+        using var waitLifetime = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
+        var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<JsonElement> operation = RequestAsync(new { op = "n16-accepted-work" }, operationLifetime.Token, accepted);
+        Task? stop = null;
+        Task? wait = null;
+        Task? completion = null;
+        try
+        {
+            var first = await Task.WhenAny(accepted.Task, operation).ConfigureAwait(false);
+            if (ReferenceEquals(first, operation))
+            {
+                await operation.ConfigureAwait(false);
+                throw InvalidWorkerDescriptor();
+            }
+            await accepted.Task.ConfigureAwait(false);
+            if (operation.IsCompleted) throw InvalidWorkerDescriptor();
+            stop = RequestStopAsync(stopLifetime.Token).AsTask();
+            wait = WaitForOwnedExitAsync(waitLifetime.Token).AsTask();
+            await Task.WhenAll(stop, wait).ConfigureAwait(false);
+            var completed = await operation.ConfigureAwait(false);
+            WorkerObject(completed, ["ok", "work_joined"], []);
+            WorkerRequire(completed.GetProperty("ok").ValueKind == JsonValueKind.True
+                && completed.GetProperty("work_joined").ValueKind == JsonValueKind.True);
+            // The ordered EXIT exchange also joins the server's earlier post-write commits
+            // before this private worker can terminate. It creates no product admission.
+            completion = CompleteWorkerAsync(stopLifetime.Token).AsTask();
+            await completion.ConfigureAwait(false);
+        }
+        finally
+        {
+            operationLifetime.Cancel();
+            stopLifetime.Cancel();
+            waitLifetime.Cancel();
+            foreach (var original in new Task?[] { operation, stop, wait, completion })
+                if (original is not null)
+                    try { await original.ConfigureAwait(false); }
+                    catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+                    { /* The original failure propagates; every started I/O task has now joined. */ }
+        }
+    }
+
+    /// <summary>Validates the fixed private acceptance frame as data; authenticates no peer or workload.</summary>
+    /// <param name="phase">A bounded frame read from the original pinned root connection.</param>
+    internal static void ValidateAcceptedBlockedWorkPhase(JsonElement phase)
+    {
+        WorkerObject(phase, ["ok", "phase", "body_blocked"], []);
+        WorkerRequire(phase.GetProperty("ok").ValueKind == JsonValueKind.True
+            && phase.GetProperty("phase").ValueKind == JsonValueKind.String
+            && phase.GetProperty("phase").GetString() == "work-accepted"
+            && phase.GetProperty("body_blocked").ValueKind == JsonValueKind.True);
+    }
+#endif
+
     /// <summary>Reports terminal worker completion only after local work, artifact finalization and cleanup stop.</summary>
     internal async ValueTask CompleteWorkerAsync(CancellationToken stoppingToken) =>
         _ = await RequestAsync(new { op = "exit" }, stoppingToken).ConfigureAwait(false);
@@ -463,7 +531,11 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         return results;
     }
 
-    private async Task<JsonElement> RequestAsync<T>(T request, CancellationToken cancellationToken)
+    private async Task<JsonElement> RequestAsync<T>(T request, CancellationToken cancellationToken
+#if EVIDENCE_PRIVATE_N16
+        , TaskCompletionSource? acceptedWork = null
+#endif
+        )
     {
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
         await socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), cancellationToken).ConfigureAwait(false);
@@ -482,16 +554,32 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
                 throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
             throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
         }
-        return await ExchangeAsync(socket, request, cancellationToken).ConfigureAwait(false);
+        return await ExchangeAsync(socket, request, cancellationToken
+#if EVIDENCE_PRIVATE_N16
+            , _brokerPid, acceptedWork
+#endif
+            ).ConfigureAwait(false);
     }
 
-    private static async Task<JsonElement> ExchangeAsync<T>(Socket socket, T request, CancellationToken cancellationToken)
+    private static async Task<JsonElement> ExchangeAsync<T>(Socket socket, T request, CancellationToken cancellationToken
+#if EVIDENCE_PRIVATE_N16
+        , int brokerPid, TaskCompletionSource? acceptedWork
+#endif
+        )
     {
         var bytes = EvidenceCanonicalJson.Serialize(request);
         if (bytes.Length > 64 * 1024 - 1) throw new EvidenceAdmissionException("ASEVD402", "Control request exceeds its byte limit.");
         using var stream = new NetworkStream(socket, ownsSocket: false);
         await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(new byte[] { (byte)'\n' }, cancellationToken).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+        if (acceptedWork is not null)
+        {
+            var phase = await ReadHandshakeResponseAsync(socket, brokerPid, cancellationToken).ConfigureAwait(false);
+            ValidateAcceptedBlockedWorkPhase(phase);
+            acceptedWork.TrySetResult();
+        }
+#endif
         using var output = new MemoryStream();
         var buffer = new byte[8192];
         while (output.Length <= MaximumResponseBytes)

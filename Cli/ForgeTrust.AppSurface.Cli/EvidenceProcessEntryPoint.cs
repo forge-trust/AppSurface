@@ -75,7 +75,7 @@ internal static class EvidenceProcessEntryPoint
             try
             {
                 await console.Error.WriteLineAsync(error.Failure.ToJson());
-                if (error.CancellationCleanupJson is { } cleanup)
+                if (error.RootCleanupJson is { } cleanup)
                     await console.Error.WriteLineAsync(cleanup);
             }
             catch (Exception) { } // Diagnostic output cannot replace the original fixed negative outcome.
