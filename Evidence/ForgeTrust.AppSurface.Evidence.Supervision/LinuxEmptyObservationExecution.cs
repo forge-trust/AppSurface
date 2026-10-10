@@ -219,6 +219,29 @@ internal static class LinuxEmptyObservationExecution
                     owner.RequireControlIdentity(cleanupToken);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N09
+            // The actual workspace holder was acquired before the original SIGINT. After
+            // server/worker joins, recheck the empty slot and close both retained descriptors
+            // before root custody can release the generated accounts.
+            if (input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    var allocation = server.CaptureAndCloseN09AllocationSlot(
+                        input, owner, accounts, workspace, worker, cleanupToken);
+                    if (allocation is not null)
+                    {
+                        cleanupToken.ThrowIfCancellationRequested();
+                        owner.RequireControlIdentity(cleanupToken);
+                        using var stderr = Console.OpenStandardError();
+                        await stderr.WriteAsync(allocation.AsMemory(), cleanupToken).ConfigureAwait(false);
+                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        owner.RequireControlIdentity(cleanupToken);
+                    }
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
             // Fixed private cancellation image: original holder projection after server/native/pump joins.
             if (EvidenceNativeQualification.CancellationEnabled && failed && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)

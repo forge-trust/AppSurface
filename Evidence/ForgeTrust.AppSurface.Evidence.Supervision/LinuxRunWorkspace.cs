@@ -437,6 +437,14 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
             _closed = true;
             var handles = _nodes.Select(static node => node.Handle).ToList();
             if (_descriptor is not null) handles.Add(_descriptor);
+            if (_n09AllocationSlot is not null)
+            {
+                // Defensive owner-lifetime fallback. The N09 execution normally closes these
+                // after joins and before custody; custody still attempts them before account release.
+                handles.Add(_n09AllocationSlot.Slot);
+                handles.Add(_n09AllocationSlot.Parent);
+                _n09AllocationSlot = null;
+            }
             if (!Close(handles)) { _quarantined = true; throw LinuxWorkspaceLayout.Invalid(); }
     }
 

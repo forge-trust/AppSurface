@@ -109,6 +109,31 @@ internal sealed class LinuxEmptyObservationControlServer
         });
     }
 
+#if EVIDENCE_PRIVATE_N09
+    /// <summary>Rechecks and closes the actual N09 allocation holder after original worker joins.</summary>
+    /// <remarks>The bounded metadata record is consistency data only and cannot establish native acceptance.</remarks>
+    internal byte[]? CaptureAndCloseN09AllocationSlot(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        if (!workspace.HasN09AllocationSlot) return null;
+        try
+        {
+            RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+            worker.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
+            if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
+                || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully
+                || Volatile.Read(ref _negativeReadyCommitted) != 1) throw Rejected();
+            return workspace.CloseAndCaptureN09AllocationSlot(token);
+        }
+        catch (Exception error) when (Recoverable(error))
+        {
+            try { workspace.CloseN09AllocationSlotWithoutCapture(); }
+            catch (Exception closeError) when (Recoverable(closeError)) { /* Preserve the original failure; workspace remains quarantined. */ }
+            throw;
+        }
+    }
+#endif
+
     private async Task SignalCancellationOwnedAsync(Task dispatch, CancellationToken token)
     {
         await dispatch.ConfigureAwait(false);
@@ -118,6 +143,11 @@ internal sealed class LinuxEmptyObservationControlServer
             await _worker.CancellationPhaseObserved.WaitAsync(token).ConfigureAwait(false);
             _worker.RequireServerOwner(_input, _owner, _accounts, _workspace, _listener, token);
             var identity = _worker.RequireWorker(token);
+#if EVIDENCE_PRIVATE_N09
+            // Retain the real allocated output slot after the authenticated phase/READY and
+            // immediately before the original, identity-bound SIGINT.
+            _workspace.RetainN09AllocationSlot(token);
+#endif
             if (Interlocked.Exchange(ref _signalClaimed, 1) != 0) throw Rejected();
             LinuxOriginalCancellationSignal.Send(_worker, identity, _owner, token);
         }
