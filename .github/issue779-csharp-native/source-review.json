@@ -1,0 +1,39 @@
+{
+  "installed_fixture_sha256": "77a51ac243854b330c0cbcaeb514b9761157b223a9b0873110c19b68fbcd8de5",
+  "join_owned_followup": {
+    "review_receipt_sha256": "7e9b3d07e96bcac25d8b02a3ce683bf6fe8d054c11939a3a096e2647d6b72dd3",
+    "scope": "exact reviewed join_owned function only; N12 guards and diagnostics unchanged"
+  },
+  "native_control_credit": false,
+  "native_execution": false,
+  "reviews": [
+    {
+      "path": "/private/tmp/issue779-csharp-n12-descendant-peer-v1/review.json",
+      "released": true,
+      "result": "CLEAR",
+      "sha256": "c064ac23824bd239f89a9b3e741663f4bd1481334d45c1085f3c0b9dad6d4a54"
+    },
+    {
+      "path": "/private/tmp/issue779-csharp-n12-descendant-peer-v1/incremental-review.json",
+      "released": true,
+      "result": "CLEAR",
+      "sha256": "b65f0813a3587bc8fb3cfba98dacaa8267b5b2caf117924b9376b27225741082"
+    },
+    {
+      "followup_required": "review fixture-result digest extension and current 17-input composition",
+      "installed_fixture_sha256": "b6f003420f83357cac9156fa609852d60e0e0f44c84deac428e7268cfbb62ab5",
+      "path": "/private/tmp/issue779-csharp-n12-native-preparation-v1/data-peer-review.json",
+      "released": true,
+      "result": "CLEAR_FOR_PINNED_BASE_ONLY",
+      "reviewed_fixture_sha256": "8ff605ba54ada240b5bd4c10f328f877024aa8414c38212b8524833cc6d289c1",
+      "scope": "bounded data integration only; native execution/build/source binding pending",
+      "sha256": "76d4d3eeab4cc47eabe4c3e62acdab0f5346494785a628e1c0f3d5a0af36086d"
+    }
+  ],
+  "schema": "issue779-n12-scoped-source-review-binding-v1",
+  "scope_limit": "Scoped source/data evidence only. The data peer receipt binds the pinned base fixture; the installed fixture adds the bounded result digest and requires independent composition review. No build or native acceptance.",
+  "source_commit": "b4e4f632c080e9c168ac129070ccc5760c3dc2af",
+  "source_count": 2841,
+  "source_parent": "5e1eba2babdb24c80a952996aa6191e4d458f3be",
+  "source_tree": "f97a0bfa2fd3459ff29e82783b470bd2d59d17bf"
+}
