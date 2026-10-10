@@ -1,0 +1,18 @@
+{
+  "capture_sha256": "4cd4521a98f2cf6ef393d671c423a5a5632620bc879a9296d6305815763007d7",
+  "case": "N08",
+  "fixture_peer_review": "/private/tmp/issue779-csharp-cancellation-root-join-fixture-fix-v1/incremental-review.json",
+  "fixture_peer_review_sha256": "7e9b3d07e96bcac25d8b02a3ce683bf6fe8d054c11939a3a096e2647d6b72dd3",
+  "integration_review_pending": true,
+  "local_tests_passed": 109,
+  "local_validation": "/private/tmp/issue779-csharp-n08-cleanup-account-access-v1/validation-attempt-1/receipt.json",
+  "local_validation_sha256": "9263cc82642a1c7398d9c44c21787de63e5d836906327276dfd4de396d87591a",
+  "native_acceptance": false,
+  "native_execution": false,
+  "primary_modified": false,
+  "schema": "issue779-cancellation-cleanup-account-source-review-v1",
+  "source": "07bd3a852f06172fc6168e21ff1c351690c6505c",
+  "source_count": 2848,
+  "source_peer_review": "/private/tmp/issue779-csharp-n08-cleanup-account-access-v1/source-peer-review.json",
+  "source_peer_review_sha256": "09d614a56bbc4c4b45790b5635cc3aff3b75947693246b814a27ac4ed0f4929d"
+}
