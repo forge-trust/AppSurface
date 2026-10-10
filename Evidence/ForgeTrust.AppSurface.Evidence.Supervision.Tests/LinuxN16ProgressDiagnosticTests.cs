@@ -1,6 +1,7 @@
 #if EVIDENCE_PRIVATE_N16
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Supervision;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -90,6 +91,72 @@ public sealed class LinuxN16ProgressDiagnosticTests
                 LinuxN16ProgressDiagnostic.MaximumElapsedMilliseconds + 1)));
         Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
             1, 86_400_001_001, 1_000));
+    }
+
+    /// <summary>A valid progress snapshot decorates the same latched failure without changing its negative result.</summary>
+    [Fact]
+    public void RejectedWithValidProgressRetainsOriginalFailureAndMessage()
+    {
+        var latch = NewFailureLatch(out var original);
+        var first = latch.First;
+        var snapshot = Snapshot(LinuxN16ProgressDiagnostic.Milestone.BodyEntered, 125);
+
+        var rejected = latch.RejectedWithN16Progress(snapshot);
+
+        Assert.Same(first, rejected.Failure);
+        Assert.Equal("ASEVD410", rejected.Failure.DiagnosticCode);
+        Assert.Equal(original.Message, rejected.Message);
+        Assert.Null(rejected.InnerException);
+        Assert.Null(rejected.RootCleanupJson);
+        Assert.Equal(snapshot, rejected.N16ProgressSnapshot);
+    }
+
+    /// <summary>Invalid or unknown stage data falls back to the identical original negative failure.</summary>
+    [Theory]
+    [InlineData(int.MaxValue, 12)]
+    [InlineData(0, 12)]
+    [InlineData(1, LinuxN16ProgressDiagnostic.MaximumElapsedMilliseconds + 1)]
+    public void RejectedWithInvalidProgressFallsBackToOriginalFailure(int milestone, long elapsed)
+    {
+        var latch = NewFailureLatch(out var original);
+        var first = latch.First;
+        var invalid = Snapshot((LinuxN16ProgressDiagnostic.Milestone)milestone, elapsed);
+
+        var rejected = latch.RejectedWithN16Progress(invalid);
+
+        Assert.Same(first, rejected.Failure);
+        Assert.Equal("ASEVD410", rejected.Failure.DiagnosticCode);
+        Assert.Equal(original.Message, rejected.Message);
+        Assert.Null(rejected.InnerException);
+        Assert.Null(rejected.RootCleanupJson);
+        Assert.Null(rejected.N16ProgressSnapshot);
+    }
+
+    /// <summary>Missing optional progress data leaves the existing negative exception unchanged.</summary>
+    [Fact]
+    public void RejectedWithoutProgressHasNoAdditionalSnapshot()
+    {
+        var latch = NewFailureLatch(out var original);
+        var first = latch.First;
+
+        var rejected = latch.RejectedWithN16Progress(null);
+
+        Assert.Same(first, rejected.Failure);
+        Assert.Equal("ASEVD410", rejected.Failure.DiagnosticCode);
+        Assert.Equal(original.Message, rejected.Message);
+        Assert.Null(rejected.InnerException);
+        Assert.Null(rejected.RootCleanupJson);
+        Assert.Null(rejected.N16ProgressSnapshot);
+    }
+
+    private static EvidenceNativeObservationFailureLatch NewFailureLatch(out EvidenceNativeObservationException original)
+    {
+        var latch = new EvidenceNativeObservationFailureLatch();
+        var failure = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxEmptyObservationExecution.RequireFinalClose(TimeProvider.System, 0, TimeSpan.Zero));
+        latch.Capture(EvidenceNativeObservationPhase.WorkerStop, failure);
+        original = latch.Rejected();
+        return latch;
     }
 }
 #endif

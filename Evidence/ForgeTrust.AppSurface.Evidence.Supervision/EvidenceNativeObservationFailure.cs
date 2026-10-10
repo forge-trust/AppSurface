@@ -789,6 +789,27 @@ internal sealed class EvidenceNativeObservationFailureLatch
         uint? completedResultsGid = null, LinuxNegativeCleanupKind cleanupKind = LinuxNegativeCleanupKind.Cancellation) => new(First
         ?? EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ResultCheck, null),
         completedCancellationGeneration, completedResultsGid, cleanupKind);
+
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Builds the same negative failure and optionally attaches validated, detached N16 progress data.</summary>
+    /// <remarks>Invalid progress is omitted; the first failure and fixed ASEVD410 result are preserved.</remarks>
+    internal EvidenceNativeObservationException RejectedWithN16Progress(
+        LinuxN16ProgressDiagnostic.Snapshot? progress,
+        Guid? completedCancellationGeneration = null, uint? completedResultsGid = null,
+        LinuxNegativeCleanupKind cleanupKind = LinuxNegativeCleanupKind.Cancellation)
+    {
+        var failure = First ?? EvidenceNativeObservationFailure.Capture(EvidenceNativeObservationPhase.ResultCheck, null);
+        if (progress is null) return new(failure, completedCancellationGeneration, completedResultsGid, cleanupKind);
+        try
+        {
+            return new(failure, progress, completedCancellationGeneration, completedResultsGid, cleanupKind);
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            return new(failure, completedCancellationGeneration, completedResultsGid, cleanupKind);
+        }
+    }
+#endif
 }
 
 /// <summary>Closed negative diagnostic families; none issues a cleanup or admission capability.</summary>
@@ -804,6 +825,18 @@ internal enum LinuxNegativeCleanupKind
 /// <remarks>It retains no raw error or inner exception and cannot construct an admission or native receipt.</remarks>
 internal sealed class EvidenceNativeObservationException : Exception
 {
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Creates the existing negative result with one validated detached N16 progress snapshot.</summary>
+    internal EvidenceNativeObservationException(EvidenceNativeObservationFailure failure,
+        LinuxN16ProgressDiagnostic.Snapshot progress, Guid? completedCancellationGeneration = null,
+        uint? completedResultsGid = null, LinuxNegativeCleanupKind cleanupKind = LinuxNegativeCleanupKind.Cancellation)
+        : this(failure, completedCancellationGeneration, completedResultsGid, cleanupKind)
+    {
+        _ = LinuxN16ProgressDiagnostic.EncodeDetached(progress);
+        N16ProgressSnapshot = progress;
+    }
+#endif
+
     /// <summary>Creates the reserved supervisor's negative diagnostic; it has no inner exception.</summary>
     internal EvidenceNativeObservationException(EvidenceNativeObservationFailure failure,
         Guid? completedCancellationGeneration = null, uint? completedResultsGid = null,
@@ -825,6 +858,10 @@ internal sealed class EvidenceNativeObservationException : Exception
     }
     /// <summary>Gets detached diagnostic data, never a successful result or native owner.</summary>
     internal EvidenceNativeObservationFailure Failure { get; }
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Gets optional closed detached progress data; it establishes no native or cleanup fact.</summary>
+    internal LinuxN16ProgressDiagnostic.Snapshot? N16ProgressSnapshot { get; }
+#endif
     /// <summary>Gets optional detached cancellation cleanup data; missing data cannot establish cleanup.</summary>
     /// <remarks>Only native composition after original finalization may attach this diagnostic. It grants no runtime authority.</remarks>
     internal string? CancellationCleanupJson { get; }

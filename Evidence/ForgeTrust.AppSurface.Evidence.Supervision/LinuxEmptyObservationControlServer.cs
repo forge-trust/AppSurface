@@ -108,12 +108,12 @@ internal sealed class LinuxEmptyObservationControlServer
 #if EVIDENCE_PRIVATE_N16
     /// <summary>Copies only existing N16 server flags and the age of its last observed original milestone.</summary>
     /// <remarks>This method performs no owner, admission, custody, wait, token, or kernel operation.</remarks>
-    internal byte[] CaptureN16ProgressDiagnostic()
+    internal LinuxN16ProgressDiagnostic.Snapshot CaptureN16ProgressDiagnostic()
     {
         var mark = Volatile.Read(ref _n16LastProgress);
         long? elapsed = mark is null ? null : LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
             mark.Timestamp, Stopwatch.GetTimestamp(), Stopwatch.Frequency);
-        return LinuxN16ProgressDiagnostic.EncodeDetached(new(
+        return new(
             mark?.Milestone ?? LinuxN16ProgressDiagnostic.Milestone.Unknown,
             elapsed,
             Volatile.Read(ref _n16WorkClaimed) == 1,
@@ -125,7 +125,7 @@ internal sealed class LinuxEmptyObservationControlServer
             Volatile.Read(ref _n16ControlsOverlapped) == 1,
             Volatile.Read(ref _n16StopCommitted) == 1,
             Volatile.Read(ref _n16WaitCommitted) == 1,
-            _exitCommitted.Task.IsCompletedSuccessfully));
+            _exitCommitted.Task.IsCompletedSuccessfully);
     }
 
     private void ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone milestone) =>

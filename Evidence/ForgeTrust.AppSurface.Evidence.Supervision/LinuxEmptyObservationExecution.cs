@@ -67,6 +67,7 @@ internal static class LinuxEmptyObservationExecution
         var acceptedWorkProjectionWritten = false;
         var acceptedWorkProjectionWriteAttempted = false;
         uint acceptedWorkResultsGid = 0;
+        LinuxN16ProgressDiagnostic.Snapshot? n16ProgressDiagnostic = null;
 #endif
         var cleanupToken = CancellationToken.None;
         long finalCloseStarted = 0;
@@ -208,21 +209,16 @@ internal static class LinuxEmptyObservationExecution
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #endif
 #if EVIDENCE_PRIVATE_N16
-            // A failed incomplete N16 projection gets one bounded snapshot after the original server join.
-            // Complete accepted-work records already carry terminal flags, so this adds no duplicate line.
-            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && (failed || cleanupFailed)
+            // Retain one detached snapshot after the original server and worker joins. The CLI can
+            // attach it to the already-owned terminal error path without another cleanup-token write.
+            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && !token.IsCancellationRequested
+                && (failed || cleanupFailed)
                 && !acceptedWorkProjectionWriteAttempted && server is not null && serverTask?.IsCompleted == true)
                 try
                 {
-                    var progress = server.CaptureN16ProgressDiagnostic();
-                    if (progress.Length is 0 or > LinuxN16ProgressDiagnostic.MaximumJsonBytes) throw Rejected();
-                    cleanupToken.ThrowIfCancellationRequested();
-                    using var stderr = Console.OpenStandardError();
-                    await stderr.WriteAsync(progress.AsMemory(), cleanupToken).ConfigureAwait(false);
-                    await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), cleanupToken).ConfigureAwait(false);
-                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    n16ProgressDiagnostic = server.CaptureN16ProgressDiagnostic();
                 }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                catch (Exception error) when (Recoverable(error)) { } // Detached diagnostics never change the first fault or cleanup result.
 #endif
             // Private N11 failure-only data comes from the original joined holders before custody
             // and account closure. Capture failure never clears or replaces the execution failure.
@@ -421,7 +417,14 @@ internal static class LinuxEmptyObservationExecution
                 try { phase = EvidenceNativeObservationPhase.FinalDeadline; RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
         }
-        if (cleanupFailed) throw failures.Rejected();
+        if (cleanupFailed)
+        {
+#if EVIDENCE_PRIVATE_N16
+            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic);
+#else
+            throw failures.Rejected();
+#endif
+        }
         token.ThrowIfCancellationRequested();
         // The optional diagnostic is attached only after every original cleanup and deadline check.
         // No earlier first-fault projection can conceal a failed finalization behind this record.
@@ -429,9 +432,17 @@ internal static class LinuxEmptyObservationExecution
             throw failures.Rejected(owner.RunId, cancellationResultsGid);
 #if EVIDENCE_PRIVATE_N16
         if (failed && acceptedWorkProjectionWritten && accountsClosedUnderCustody && owner is not null)
-            throw failures.Rejected(owner.RunId, acceptedWorkResultsGid, LinuxNegativeCleanupKind.AcceptedBlockedWork);
+            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic, owner.RunId, acceptedWorkResultsGid,
+                LinuxNegativeCleanupKind.AcceptedBlockedWork);
 #endif
-        if (failed || manifest is null) throw failures.Rejected();
+        if (failed || manifest is null)
+        {
+#if EVIDENCE_PRIVATE_N16
+            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic);
+#else
+            throw failures.Rejected();
+#endif
+        }
         return manifest;
     }
 

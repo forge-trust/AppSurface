@@ -77,6 +77,11 @@ internal static class EvidenceProcessEntryPoint
                 await console.Error.WriteLineAsync(error.Failure.ToJson());
                 if (error.RootCleanupJson is { } cleanup)
                     await console.Error.WriteLineAsync(cleanup);
+#if EVIDENCE_PRIVATE_N16
+                if (error.N16ProgressSnapshot is { } progress)
+                    await console.Error.WriteLineAsync(Encoding.UTF8.GetString(
+                        LinuxN16ProgressDiagnostic.EncodeDetached(progress)));
+#endif
             }
             catch (Exception) { } // Diagnostic output cannot replace the original fixed negative outcome.
             await console.Error.WriteLineAsync(error.Message);
