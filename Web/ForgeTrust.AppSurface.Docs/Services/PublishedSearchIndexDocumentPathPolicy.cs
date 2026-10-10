@@ -79,17 +79,67 @@ internal static class PublishedSearchIndexDocumentPathPolicy
 
         if (path.StartsWith(ExactVersionPrefix, StringComparison.Ordinal))
         {
-            return ValidateVersionedArchivePath(value, path, ExactVersionPrefix, context.Version);
+            return ValidateVersionedArchivePath(value, path, ExactVersionPrefix, context.Version, common.ValidatedFragment);
         }
 
         if (path.StartsWith(ArchiveVersionPrefix, StringComparison.Ordinal))
         {
-            return ValidateVersionedArchivePath(value, path, ArchiveVersionPrefix, context.Version);
+            return ValidateVersionedArchivePath(value, path, ArchiveVersionPrefix, context.Version, common.ValidatedFragment);
         }
 
         return IsReservedDocumentRoute(relativePath)
             ? Reject(PublishedSearchIndexPathRejectionReason.ReservedRoute, value)
             : common;
+    }
+
+    /// <summary>
+    /// Validates a nested recommendation URL stored in an immutable release archive.
+    /// </summary>
+    /// <param name="value">The original complete recommendation URL, including any query or fragment.</param>
+    /// <param name="context">The exact archive version being validated.</param>
+    /// <returns>A canonical stable-<c>/docs</c> route and its validated fragment, or a redacted rejection.</returns>
+    /// <remarks>
+    /// Recommendation paths always store the stable export route, even when the top-level document-path policy accepts
+    /// an already-versioned path for compatibility. The original value is passed through that existing policy first so
+    /// URL shape, origin, suffix encoding, traversal, and reserved-route checks run before the query is discarded.
+    /// </remarks>
+    internal static PublishedSearchIndexPathValidationResult ValidateRecommendationArchivePath(
+        string? value,
+        PublishedSearchIndexArchivePathContext context)
+    {
+        var validation = ValidateArchivePath(value, context);
+        if (!validation.IsValid)
+        {
+            return validation;
+        }
+
+        var normalizedPath = validation.NormalizedPath!;
+        var decodedPath = Uri.UnescapeDataString(normalizedPath);
+        if (!IsUnderRootOrdinal(decodedPath, ExpectedArchiveRoot))
+        {
+            return Reject(PublishedSearchIndexPathRejectionReason.OutsideDocsRoot, value);
+        }
+
+        var relativePath = decodedPath.Length == ExpectedArchiveRoot.Length
+            ? string.Empty
+            : decodedPath[(ExpectedArchiveRoot.Length + 1)..];
+        var firstSeparator = relativePath.IndexOf('/');
+        var firstSegment = firstSeparator >= 0 ? relativePath[..firstSeparator] : relativePath;
+        if (firstSegment.Equals("v", StringComparison.OrdinalIgnoreCase)
+            || firstSegment.Equals("versions", StringComparison.OrdinalIgnoreCase))
+        {
+            return Reject(
+                firstSeparator >= 0
+                    ? PublishedSearchIndexPathRejectionReason.WrongVersion
+                    : PublishedSearchIndexPathRejectionReason.ReservedRoute,
+                value);
+        }
+
+        return IsReservedDocumentRoute(relativePath)
+               || firstSegment.Equals("sections", StringComparison.OrdinalIgnoreCase)
+               || firstSegment.Equals("search-index", StringComparison.OrdinalIgnoreCase)
+            ? Reject(PublishedSearchIndexPathRejectionReason.ReservedRoute, value)
+            : validation;
     }
 
     /// <summary>
@@ -183,7 +233,8 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         string? originalValue,
         string path,
         string prefix,
-        string version)
+        string version,
+        string? validatedFragment)
     {
         var remainder = path[prefix.Length..];
         var separator = remainder.IndexOf('/');
@@ -196,7 +247,7 @@ internal static class PublishedSearchIndexDocumentPathPolicy
         var versionRelativePath = separator >= 0 ? remainder[(separator + 1)..] : string.Empty;
         return IsReservedDocumentRoute(versionRelativePath)
             ? Reject(PublishedSearchIndexPathRejectionReason.ReservedRoute, originalValue)
-            : PublishedSearchIndexPathValidationResult.Valid(path);
+            : PublishedSearchIndexPathValidationResult.Valid(path, validatedFragment);
     }
 
     private static PublishedSearchIndexPathValidationResult ValidateCommon(string? value)
@@ -254,7 +305,9 @@ internal static class PublishedSearchIndexDocumentPathPolicy
             return Reject(PublishedSearchIndexPathRejectionReason.EncodedTraversal, value);
         }
 
-        return PublishedSearchIndexPathValidationResult.Valid(path);
+        var fragmentIndex = candidate.IndexOf('#');
+        var validatedFragment = fragmentIndex >= 0 ? candidate[fragmentIndex..] : null;
+        return PublishedSearchIndexPathValidationResult.Valid(path, validatedFragment);
     }
 
     private static bool TryClassifyAbsoluteOrSchemeUrl(
@@ -508,6 +561,7 @@ internal sealed record PublishedSearchIndexServedPathContext(string DocsRootPath
 /// The validated path portion without query string or fragment when valid. This value is safe to log and to use for
 /// docs-root matching because unsafe suffixes and rejected inputs never appear here.
 /// </param>
+/// <param name="ValidatedFragment">The validated fragment, including its leading <c>#</c>, when one was supplied.</param>
 /// <param name="RedactedValue">
 /// A non-sensitive description of the rejected input for diagnostics. This is the only rejected-value field callers
 /// should include in operator-visible logs or reader-facing availability messages.
@@ -516,16 +570,18 @@ internal sealed record PublishedSearchIndexPathValidationResult(
     bool IsValid,
     PublishedSearchIndexPathRejectionReason Reason,
     string? NormalizedPath,
+    string? ValidatedFragment,
     string RedactedValue)
 {
     /// <summary>
     /// Creates a successful validation result for a normalized path-only value.
     /// </summary>
     /// <param name="normalizedPath">The safe-to-log path portion with any query string or fragment removed.</param>
+    /// <param name="validatedFragment">The validated fragment, including its leading <c>#</c>, or <see langword="null"/> when none was supplied.</param>
     /// <returns>A valid result with <see cref="PublishedSearchIndexPathRejectionReason.None"/>.</returns>
-    public static PublishedSearchIndexPathValidationResult Valid(string normalizedPath)
+    public static PublishedSearchIndexPathValidationResult Valid(string normalizedPath, string? validatedFragment = null)
     {
-        return new(true, PublishedSearchIndexPathRejectionReason.None, normalizedPath, string.Empty);
+        return new(true, PublishedSearchIndexPathRejectionReason.None, normalizedPath, validatedFragment, string.Empty);
     }
 
     /// <summary>
@@ -538,7 +594,7 @@ internal sealed record PublishedSearchIndexPathValidationResult(
         PublishedSearchIndexPathRejectionReason reason,
         string redactedValue)
     {
-        return new(false, reason, null, redactedValue);
+        return new(false, reason, null, null, redactedValue);
     }
 }
 

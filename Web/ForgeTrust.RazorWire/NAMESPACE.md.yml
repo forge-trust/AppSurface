@@ -46,3 +46,7 @@ entry_points:
     keywords:
       - AppSurface module
       - endpoint conventions
+related_pages:
+  - Web/ForgeTrust.RazorWire/README.md
+  - Web/ForgeTrust.RazorWire/Docs/stream-authorization.md
+  - Web/ForgeTrust.RazorWire/Docs/dialog-responses.md

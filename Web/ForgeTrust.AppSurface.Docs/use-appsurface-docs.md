@@ -558,6 +558,87 @@ redirect_aliases:
 
 `redirect_aliases` values are docs-root-relative routes, not Netlify `_redirects` syntax. Leave out query strings, fragments, host names, splats, placeholders, and status codes. Static export uses HTML alias files by default for generic hosts; use `appsurface docs export --mode cdn --redirects netlify` when publishing to Netlify-compatible CDN hosts. For Netlify export, avoid defining two aliases that differ only by percent encoding unless they point to the same canonical page.
 
+### Build a three-page next-read example
+
+Recommended next reads keep the pages you curate first and append up to three metadata-backed suggestions. Use explicit links for prerequisites and deliberate reading order; leave automatic discovery enabled when metadata already gives a useful connection. The full defaults, eligibility rules, stable reason codes, API, and JSON contract are in the [package reference](./README.md#recommended-next-reads).
+
+This repository has a small real example with a guide, an example, and a troubleshooting page. Each page uses the same **explicit** `component: ForgeTrust.RazorWire`; the guide curates the troubleshooting page. The other two pages have no hide flags, and the source guide has no sequence key, so no hide or sequence rule blocks the example.
+
+Read the three existing Markdown sources and paired metadata before editing. Merge only the fields shown below, preserving each file's existing title, summary, sequence values, order, and curated-link order unless a step explicitly supplies them.
+
+1. Put front matter at the top of [`Web/ForgeTrust.RazorWire/Docs/stream-authorization.md`](../ForgeTrust.RazorWire/Docs/stream-authorization.md):
+
+   ```yaml
+   ---
+   title: RazorWire Stream Authorization
+   summary: Authorize RazorWire event streams before subscription and map safe denial outcomes.
+   page_type: guide
+   component: ForgeTrust.RazorWire
+   related_pages:
+     - Web/ForgeTrust.RazorWire/Docs/antiforgery.md
+   ---
+   ```
+
+2. Add these fields to the [`examples/razorwire-mvc/README.md.yml` sidecar](https://github.com/forge-trust/AppSurface/blob/main/examples/razorwire-mvc/README.md.yml) for the public [`examples/razorwire-mvc/README.md` page](../../examples/razorwire-mvc/README.md). Keep its existing `sequence_key`, `order`, and authored `related_pages` entries in their current order:
+
+   ```yaml
+   title: RazorWire MVC Example
+   summary: Run the RazorWire MVC sample and inspect its interactive server-rendered flows.
+   page_type: example
+   component: ForgeTrust.RazorWire
+   sequence_key: razorwire-proof
+   order: 20
+   related_pages:
+     - Web/ForgeTrust.RazorWire/README.md
+     - Web/ForgeTrust.RazorWire/Docs/page-navigation.md
+     - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+     - Web/ForgeTrust.RazorWire/Docs/form-loading.md
+     - Web/ForgeTrust.RazorWire/Docs/antiforgery.md
+     - Web/ForgeTrust.RazorWire/Docs/dialog-responses.md
+   ```
+
+3. Add the same explicit component to the [`Web/ForgeTrust.RazorWire/Docs/antiforgery.md.yml` sidecar](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.RazorWire/Docs/antiforgery.md.yml), keeping its existing title, troubleshooting role, sequence, order, and curated links:
+
+   ```yaml
+   title: Security & Anti-Forgery
+   page_type: troubleshooting
+   component: ForgeTrust.RazorWire
+   sequence_key: razorwire-proof
+   order: 30
+   related_pages:
+     - Web/ForgeTrust.RazorWire/README.md
+     - Web/ForgeTrust.RazorWire/Docs/hybrid-hosting.md
+     - Web/ForgeTrust.RazorWire/Docs/form-failures.md
+     - Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md
+     - Web/ForgeTrust.RazorWire/DESIGN.md
+   ```
+
+From the repository root, check for the .NET 10 SDK, then keep restore, build, and host startup as separate steps:
+
+```bash
+dotnet --list-sdks
+dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+dotnet build Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore
+dotnet run --project Cli/ForgeTrust.AppSurface.Cli --no-build --no-restore -- docs preview --repo . --port 5189
+```
+
+Restore resolves the CLI and its project references. Build compiles that project graph without another restore. The `dotnet run` command starts the preview host; wait for its ready URL, then wait separately for the initial source harvest to reach a terminal health state. Open [`http://127.0.0.1:5189/docs/_health.json`](http://127.0.0.1:5189/docs/_health.json) and confirm the harvest status is terminal before checking the page.
+
+In the browser, open [`http://127.0.0.1:5189/docs/web/forgetrust.razorwire/docs/stream-authorization`](http://127.0.0.1:5189/docs/web/forgetrust.razorwire/docs/stream-authorization). Confirm that the curated “Security & Anti-Forgery” row appears first. A qualifying RazorWire example may follow when it resolves in the current snapshot. A row with `shared-component` uses “Try an example for this component”; without that evidence, use the topic caption. An empty automatic suffix is valid. Follow the authored Security & Anti-Forgery link and read its authorization guidance to finish the first-use path at a concrete next read.
+
+For timing, record restore, build, host-ready, and first terminal harvest timestamps separately, and label cache state from what you observed. On a later process start with warm restore/build outputs, the host still performs a new initial harvest. A page reload after the current host's harvest is terminal measures warm navigation only; it does not measure another harvest. Do not report restore or build as cold unless those steps actually had to populate cold caches.
+
+If a later strict static export reports `RWEXPORT011` for a recommendation row, use its reported path to identify the row and verify that its target is present in the same exported tree; see the [recommendation diagnostics](./README.md#recommended-next-reads).
+
+To verify opt-out behavior for a different page, use a sidecar with both keys:
+
+```yaml
+related_pages: []
+auto_related_pages: false
+```
+
+This clears authored links and disables suggestions for that source only. `related_pages: []` alone still allows suggestions, and this opt-out does not prevent the page from being recommended elsewhere. The three real author files in this walkthrough are [`stream-authorization.md`](../ForgeTrust.RazorWire/Docs/stream-authorization.md), [`examples/razorwire-mvc/README.md.yml`](https://github.com/forge-trust/AppSurface/blob/main/examples/razorwire-mvc/README.md.yml), and [`antiforgery.md.yml`](https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.RazorWire/Docs/antiforgery.md.yml).
+
 ### Fix a poorly ranked page
 
 When a page exists but ranks below a less useful result, start with the authored content and metadata before changing search code:

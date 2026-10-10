@@ -10,6 +10,10 @@ namespace ForgeTrust.AppSurface.Docs.Services;
 /// <remarks>
 /// Frozen manifests are archive-local read models. They preserve the route identity that existed when an exact release
 /// tree was exported, but they do not replace <see cref="DocRouteIdentityCatalog" /> for live source-backed docs.
+/// New exports also bind every logical canonical identity to an ordinary HTML artifact beneath the complete export
+/// root and declare <c>htmlUrlBase: export-root</c>. Legacy v1 documents without these optional fields retain logical
+/// redirects and docs-relative HTML rewriting. Partial mappings, unsafe paths, unfinished exporter staging, and route
+/// namespace collisions disable the entire new manifest; verified archive loading rejects them before activation.
 /// </remarks>
 internal sealed class AppSurfaceDocsFrozenRouteManifest
 {
@@ -26,11 +30,24 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     private static readonly AppSurfaceDocsFrozenRouteManifest EmptyManifest = new(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 
     private readonly IReadOnlyDictionary<string, string> _canonicalRoutePathByAlias;
+    private readonly IReadOnlyDictionary<string, string> _artifactPathByCanonicalRoute;
 
-    private AppSurfaceDocsFrozenRouteManifest(IReadOnlyDictionary<string, string> canonicalRoutePathByAlias)
+    private AppSurfaceDocsFrozenRouteManifest(
+        IReadOnlyDictionary<string, string> canonicalRoutePathByAlias,
+        IReadOnlyDictionary<string, string>? artifactPathByCanonicalRoute = null,
+        bool htmlUsesExportRootUrls = false)
     {
         _canonicalRoutePathByAlias = canonicalRoutePathByAlias;
+        _artifactPathByCanonicalRoute = artifactPathByCanonicalRoute ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        HtmlUsesExportRootUrls = htmlUsesExportRootUrls;
     }
+
+    /// <summary>Whether HTML URLs are relative to the complete export root rather than the legacy logical docs root.</summary>
+    internal bool HtmlUsesExportRootUrls { get; }
+
+    /// <summary>Gets the ordinary HTML members that release verification must bind to this same archive.</summary>
+    internal IReadOnlyCollection<string> CanonicalArtifactPaths => Array.AsReadOnly(
+        _artifactPathByCanonicalRoute.Values.Select(GetRoutePathPart).ToArray());
 
     /// <summary>
     /// Gets the empty manifest used when an archive has no frozen route identity or when parsing failed.
@@ -80,6 +97,30 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
 
         var document = CreateDocument(routeManifest);
         ValidateDocument(document, strict: true, out _);
+        return JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine;
+    }
+
+    /// <summary>Stages live canonical URLs for exporter finalization before release-manifest hashing.</summary>
+    /// <param name="routeManifest">The source-backed snapshot whose canonical pages the exporter seeds.</param>
+    /// <returns>Strictly validated route JSON containing private <c>exportCanonicalLiveUrl</c> members.</returns>
+    /// <remarks>
+    /// This is an exporter handoff, not a consumable archive. The exporter must replace every staging member with
+    /// the successful ordinary HTML outcome's whole-root <c>canonicalArtifactPath</c> and add
+    /// <c>htmlUrlBase: export-root</c> before integrity hashing. Final archive loading rejects leftover staging data.
+    /// Use <see cref="Serialize"/> for legacy logical-route fixtures that do not undergo this finalization.
+    /// </remarks>
+    internal static string SerializeForExport(AppSurfaceDocsRouteManifest routeManifest)
+    {
+        ArgumentNullException.ThrowIfNull(routeManifest);
+        var document = CreateDocument(routeManifest);
+        ValidateDocument(document, strict: true, out _);
+        document = document with
+        {
+            Entries = document.Entries.Select((entry, index) => entry with
+            {
+                ExportCanonicalLiveUrl = JsonSerializer.SerializeToElement(routeManifest.Entries[index].CanonicalLiveUrl)
+            }).ToArray()
+        };
         return JsonSerializer.Serialize(document, SerializerOptions) + Environment.NewLine;
     }
 
@@ -136,7 +177,9 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                 return Empty;
             }
 
-            var aliasMap = ValidateDocument(document, strict: false, out var ignoredRouteCount);
+            var modern = HasArtifactProjection(document);
+            var aliasMap = ValidateDocument(document, strict: modern, out var ignoredRouteCount);
+            var artifactMap = ValidateArtifactProjection(document);
             if (ignoredRouteCount > 0)
             {
                 logger.LogWarning(
@@ -146,7 +189,9 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
                     ignoredRouteCount);
             }
 
-            return aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
+            return aliasMap.Count == 0 && artifactMap.Count == 0 && !modern
+                ? Empty
+                : new AppSurfaceDocsFrozenRouteManifest(aliasMap, artifactMap, modern);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or NotSupportedException)
         {
@@ -186,7 +231,10 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             }
 
             var aliasMap = ValidateDocument(document, strict: true, out _);
-            manifest = aliasMap.Count == 0 ? Empty : new AppSurfaceDocsFrozenRouteManifest(aliasMap);
+            var artifactMap = ValidateArtifactProjection(document);
+            manifest = aliasMap.Count == 0 && artifactMap.Count == 0 && !HasArtifactProjection(document)
+                ? Empty
+                : new AppSurfaceDocsFrozenRouteManifest(aliasMap, artifactMap, HasArtifactProjection(document));
             return true;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
@@ -214,6 +262,16 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
 
         canonicalRoutePath = resolvedCanonicalRoutePath;
         return true;
+    }
+
+    /// <summary>Resolves a logical canonical identity to its finalized archive HTML member and canonical fragment.</summary>
+    /// <param name="canonicalRoutePath">The logical identity, including the empty docs-root identity.</param>
+    /// <param name="artifactPath">Whole-export-root relative HTML member, with the frozen canonical fragment.</param>
+    /// <returns>Whether this archive supplies a finalized mapping for the identity.</returns>
+    internal bool TryResolveCanonicalArtifactPath(string canonicalRoutePath, out string artifactPath)
+    {
+        return _artifactPathByCanonicalRoute.TryGetValue(
+            GetRoutePathPart(NormalizeRoutePath(canonicalRoutePath)), out artifactPath!);
     }
 
     internal static string NormalizeRoutePath(string? routePath)
@@ -275,13 +333,22 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
         out int ignoredRouteCount)
     {
         ignoredRouteCount = 0;
+        var hasArtifactProjection = HasArtifactProjection(document);
         var canonicalRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var unsafeCanonicalRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in document.Entries ?? [])
         {
-            if (entry.CanonicalRoutePath is null)
+            if (entry is null || entry.CanonicalRoutePath is null)
             {
                 throw new InvalidOperationException("Frozen AppSurface Docs route manifest entries require canonicalRoutePath values.");
+            }
+
+            if (hasArtifactProjection
+                && (entry.CanonicalRoutePath.Any(char.IsControl)
+                    || (entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? [])
+                        .Any(alias => alias?.Any(char.IsControl) == true)))
+            {
+                throw new InvalidOperationException("Frozen AppSurface Docs artifact route identities cannot contain control characters.");
             }
 
             var canonicalRoutePath = NormalizeRoutePath(entry.CanonicalRoutePath);
@@ -402,15 +469,89 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
             : routePath[..fragmentIndex];
     }
 
+    private static bool HasArtifactProjection(FrozenRouteManifestDocument document)
+    {
+        return document.HtmlUrlBase is not null
+               || (document.Entries ?? []).Any(entry => entry?.CanonicalArtifactPath is not null);
+    }
+
+    private static IReadOnlyDictionary<string, string> ValidateArtifactProjection(FrozenRouteManifestDocument document)
+    {
+        var entries = document.Entries ?? [];
+        if (entries.Any(entry => entry.ExportCanonicalLiveUrl.ValueKind != JsonValueKind.Undefined))
+        {
+            throw new InvalidOperationException("Frozen AppSurface Docs route manifest contains unfinished exportCanonicalLiveUrl staging data.");
+        }
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!HasArtifactProjection(document))
+        {
+            return result;
+        }
+
+        if (!string.Equals(document.HtmlUrlBase, "export-root", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Frozen AppSurface Docs artifact mappings require htmlUrlBase 'export-root'.");
+        }
+
+        var canonicalRoutes = entries.Select(entry => GetRoutePathPart(NormalizeRoutePath(entry.CanonicalRoutePath)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var aliasPaths = entries.SelectMany(entry => (entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? []))
+            .Select(alias => GetRoutePathPart(NormalizeRoutePath(alias))).ToArray();
+        var aliases = aliasPaths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (aliasPaths.Any(string.IsNullOrWhiteSpace) || aliases.Count != aliasPaths.Length)
+        {
+            throw new InvalidOperationException("Frozen AppSurface Docs artifact aliases require distinct nonempty route paths, independent of fragments.");
+        }
+
+        var artifacts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in entries)
+        {
+            var artifact = entry.CanonicalArtifactPath;
+            if (!IsSafeArtifactPath(artifact))
+            {
+                throw new InvalidOperationException("Frozen AppSurface Docs canonicalArtifactPath must be a safe whole-root relative HTML file.");
+            }
+
+            var canonical = NormalizeRoutePath(entry.CanonicalRoutePath);
+            var canonicalPath = GetRoutePathPart(canonical);
+            if (!artifacts.Add(artifact!)
+                || aliases.Contains(artifact!)
+                || (canonicalRoutes.Contains(artifact!) && !string.Equals(artifact, canonicalPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Frozen AppSurface Docs canonicalArtifactPath '{artifact}' collides with another route, alias, or artifact.");
+            }
+
+            result.Add(canonicalPath, artifact + canonical[canonicalPath.Length..]);
+        }
+
+        return result;
+    }
+
+    private static bool IsSafeArtifactPath(string? path)
+    {
+        return !string.IsNullOrWhiteSpace(path)
+               && string.Equals(path, path.Trim(), StringComparison.Ordinal)
+               && !path.StartsWith("/", StringComparison.Ordinal)
+               && !path.Any(char.IsControl)
+               && path.IndexOfAny(['\\', ':', '?', '#', '%']) < 0
+               && !path.Contains("//", StringComparison.Ordinal)
+               && path.Split('/').All(segment => !string.IsNullOrWhiteSpace(segment) && !segment.StartsWith(".", StringComparison.Ordinal))
+               && Path.GetExtension(path).Equals(".html", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record FrozenRouteManifestDocument(
         string Schema,
-        IReadOnlyList<FrozenRouteManifestEntry> Entries);
+        IReadOnlyList<FrozenRouteManifestEntry> Entries,
+        string? HtmlUrlBase = null);
 
     private sealed record FrozenRouteManifestEntry(
         string SourcePath,
         string CanonicalRoutePath,
         IReadOnlyList<string> RecoveryAliases,
-        IReadOnlyList<string> DeclaredAliases);
+        IReadOnlyList<string> DeclaredAliases,
+        string? CanonicalArtifactPath = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] JsonElement ExportCanonicalLiveUrl = default);
 }
 
 /// <summary>

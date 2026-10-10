@@ -17,7 +17,7 @@ namespace ForgeTrust.RazorWire.Cli;
 /// A static generation engine that crawls a RazorWire application and exports its routes to CDN or hybrid static files.
 /// </summary>
 [ExcludeFromCodeCoverage]
-public class ExportEngine
+public partial class ExportEngine
 {
     private readonly ILogger<ExportEngine> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -159,12 +159,18 @@ public class ExportEngine
 
         ValidateExport(context);
         await MaterializeTextRoutesAsync(context, cancellationToken);
+        await RewriteAppSurfaceDocsGenericSearchIndexConfigAsync(context, cancellationToken);
         await MaterializeRedirectsAsync(context, cancellationToken);
+        if (context.ReleaseArchiveManifestEnabled)
+        {
+            await FinalizeAppSurfaceDocsRouteManifestAsync(context, cancellationToken);
+        }
+
         await MaterializeDeploymentExtrasAsync(context, cancellationToken);
         if (context.ReleaseArchiveManifestEnabled)
         {
-            await NormalizeAppSurfaceDocsArchiveSearchIndexAsync(context.OutputPath, cancellationToken);
-            await MaterializeAppSurfaceDocsArchiveRootAssetsAsync(context.OutputPath, cancellationToken);
+            await NormalizeAppSurfaceDocsArchiveSearchIndexAsync(context, cancellationToken);
+            await MaterializeAppSurfaceDocsArchiveRootAssetsAsync(context, cancellationToken);
             context.ReleaseArchiveManifest = await ReleaseArchiveManifestWriter.WriteAsync(context.OutputPath, cancellationToken);
             _logger.LogInformation(
                 """
@@ -191,14 +197,22 @@ public class ExportEngine
     }
 
     private static async Task NormalizeAppSurfaceDocsArchiveSearchIndexAsync(
-        string outputPath,
+        ExportContext context,
         CancellationToken cancellationToken)
     {
-        var searchIndexPaths = new[]
-        {
-            Path.Join(outputPath, "docs", "search-index.json"),
-            Path.Join(outputPath, "search-index.json")
-        };
+        var outputPath = context.OutputPath;
+        var indexOutcomes = context.RouteOutcomes.Values
+            .Where(outcome => outcome.Succeeded && outcome.Route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var searchIndexPaths = indexOutcomes
+            .Select(outcome => outcome.Route == "/search-index.json"
+                ? Path.Join(outputPath, "search-index.static.json")
+                : outcome.ArtifactPath!)
+            // A caller may prepopulate the legacy default docs subtree without crawling its index.
+            .Concat(indexOutcomes.Length == 0 ? [Path.Join(outputPath, "docs", "search-index.json")] : [])
+            .Append(Path.Join(outputPath, "search-index.json"))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
         foreach (var searchIndexPath in searchIndexPaths)
         {
@@ -221,31 +235,50 @@ public class ExportEngine
                 continue;
             }
 
+            if (!metadata.ContainsKey("generatedAtUtc")) continue;
             metadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
             await using var output = new FileStream(searchIndexPath, FileMode.Create, FileAccess.Write, FileShare.None);
             await JsonSerializer.SerializeAsync(output, rootObject, AppSurfaceDocsArchiveSearchIndexJsonOptions, cancellationToken);
         }
     }
 
+    /// <summary>
+    /// Promotes assets from the one managed docs index's source folder. With no managed index, preserves the legacy
+    /// prepopulated default docs handoff, including its already-authored index; all copies retain physical guards and
+    /// distinct root names. Managed indexes use independent generic and frozen projections instead of mirroring.
+    /// </summary>
     private static async Task MaterializeAppSurfaceDocsArchiveRootAssetsAsync(
-        string outputPath,
+        ExportContext context,
         CancellationToken cancellationToken)
     {
-        var docsRoot = Path.Join(outputPath, "docs");
-        if (!Directory.Exists(docsRoot))
+        var outputPath = context.OutputPath;
+        var indexOutcomes = context.RouteOutcomes.Values
+            .Where(outcome => outcome.Succeeded && outcome.Route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (indexOutcomes.Length > 1)
         {
             return;
         }
+        var legacyPrepopulated = indexOutcomes.Length == 0;
+        var docsRoot = legacyPrepopulated
+            ? Path.Join(outputPath, "docs")
+            : Path.GetDirectoryName(indexOutcomes[0].ArtifactPath!);
+        var indexRoute = legacyPrepopulated ? "/docs/search-index.json" : indexOutcomes[0].Route;
+        if (docsRoot is null || !Directory.Exists(docsRoot)) return;
+        var isRootSource = string.Equals(Path.GetFullPath(docsRoot), Path.GetFullPath(outputPath), StringComparison.Ordinal);
 
         foreach (var fileName in AppSurfaceDocsArchiveRootAssetNames)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var sourcePath = Path.Join(docsRoot, fileName);
             var targetPath = Path.Join(outputPath, fileName);
-            if (!File.Exists(sourcePath) || File.Exists(targetPath))
+            if ((fileName == "search-index.json" && !legacyPrepopulated) || !File.Exists(sourcePath) || isRootSource)
             {
                 continue;
             }
+            if (File.Exists(targetPath) || Directory.Exists(targetPath))
+                throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
+                    $"[recommendation-data] Frozen archive root asset '{fileName}' collides with an existing export artifact. Fix: export one docs root into a clean output namespace.", indexRoute)]);
 
             ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, sourcePath, "archive-root-asset-read");
             ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, targetPath, "archive-root-asset-write");
@@ -330,6 +363,16 @@ public class ExportEngine
                 {
                     await WriteCssRouteAsync(route, filePath, css, context, rewriteManagedReferences: false, cancellationToken);
                 }
+            }
+            else if (route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase))
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                JsonObject? root;
+                try { root = JsonNode.Parse(body) as JsonObject; }
+                catch (JsonException) { ThrowRecommendationFailure(context, route, "documents", "unreadable JSON"); throw; }
+                if (root is not null)
+                    AddReferencesAndQueue(ReadRecommendationReferences(root, route, context).Select(item => item.Reference), context);
+                context.RouteOutcomes[route] = ExportRouteOutcome.Success(route, contentType, filePath, artifactUrl, body);
             }
             else
             {
@@ -463,7 +506,15 @@ public class ExportEngine
 
     private async Task MaterializeTextRoutesAsync(ExportContext context, CancellationToken cancellationToken)
     {
-        foreach (var outcome in context.RouteOutcomes.Values.Where(o => o.Succeeded && o.TextBody is not null).ToList())
+        var searchIndexes = context.RouteOutcomes.Values
+            .Where(outcome => outcome.Succeeded && outcome.Route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (context.ReleaseArchiveManifestEnabled && searchIndexes.Length > 1)
+            throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
+                "[recommendation-data] Multiple documentation search-index roots cannot share one frozen archive namespace. Fix: export one docs root per archive.", searchIndexes[0].Route)]);
+
+        foreach (var outcome in context.RouteOutcomes.Values.Where(o => o.Succeeded && o.TextBody is not null)
+                     .OrderBy(outcome => outcome.Route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase)).ToList())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -480,6 +531,40 @@ public class ExportEngine
             else if (outcome.IsCss)
             {
                 await WriteCssRouteAsync(outcome.Route, outcome.ArtifactPath, body, context, rewriteManagedReferences: context.Mode == ExportMode.Cdn, cancellationToken);
+            }
+
+            if (outcome.Route.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase))
+            {
+                var genericPath = outcome.Route == "/search-index.json" && context.ReleaseArchiveManifestEnabled
+                    ? Path.Join(context.OutputPath, "search-index.static.json")
+                    : outcome.ArtifactPath;
+                ValidateSearchIndexProjectionPath(context, outcome, genericPath!, "generic");
+                var rewritten = RewriteRecommendationIndex(body, outcome.Route, context);
+                if (context.ReleaseArchiveManifestEnabled && JsonNode.Parse(rewritten) is JsonObject genericRoot
+                    && genericRoot["metadata"] is JsonObject genericMetadata && genericMetadata.ContainsKey("generatedAtUtc"))
+                    genericMetadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
+                if (genericPath == outcome.ArtifactPath)
+                    await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(context.OutputPath, outcome.ArtifactPath,
+                        "AppSurface Docs search index", outcome.Route, Encoding.UTF8.GetBytes(rewritten), Encoding.UTF8, cancellationToken);
+                else
+                    await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(context.OutputPath, genericPath!,
+                        "AppSurface Docs generic search index", outcome.Route, Encoding.UTF8.GetBytes(rewritten), Encoding.UTF8, cancellationToken);
+                if (context.ReleaseArchiveManifestEnabled)
+                {
+                    var frozen = RewriteRecommendationIndex(body, outcome.Route, context, frozenProjection: true);
+                    if (JsonNode.Parse(frozen) is JsonObject frozenRoot && frozenRoot["metadata"] is JsonObject metadata
+                        && metadata.ContainsKey("generatedAtUtc"))
+                        metadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
+                    var frozenPath = Path.Join(context.OutputPath, "search-index.json");
+                    if (genericPath == frozenPath)
+                        throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
+                            "[recommendation-data] Search-index projections collide at the export root. Fix: use distinct generic and frozen artifact names.", outcome.Route)]);
+                    if (File.Exists(frozenPath))
+                        throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
+                            "[recommendation-data] Frozen search-index output collides with an existing export artifact. Fix: export to a clean output namespace.", outcome.Route)]);
+                    await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(context.OutputPath, frozenPath,
+                        "AppSurface Docs frozen search index", outcome.Route, Encoding.UTF8.GetBytes(frozen), Encoding.UTF8, cancellationToken);
+                }
             }
 
             context.RouteOutcomes[outcome.Route] = ExportRouteOutcome.Success(
@@ -503,6 +588,19 @@ public class ExportEngine
             default:
                 throw new InvalidOperationException($"Unsupported redirect strategy '{context.RedirectStrategy}'.");
         }
+    }
+
+    private static void ValidateSearchIndexProjectionPath(
+        ExportContext context,
+        ExportRouteOutcome indexOutcome,
+        string path,
+        string projection)
+    {
+        var collision = context.RouteOutcomes.Values.Any(outcome => outcome.Route != indexOutcome.Route
+            && string.Equals(outcome.ArtifactPath, path, StringComparison.Ordinal));
+        if (collision || File.Exists(path))
+            throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
+                $"[recommendation-data] The {projection} search-index projection collides with an existing export artifact. Fix: choose a non-colliding output namespace.", indexOutcome.Route)]);
     }
 
     private async Task MaterializeDeploymentExtrasAsync(ExportContext context, CancellationToken cancellationToken)
@@ -1463,6 +1561,63 @@ public class ExportEngine
         };
 
         return builder.Uri.ToString();
+    }
+
+    private static async Task RewriteAppSurfaceDocsGenericSearchIndexConfigAsync(
+        ExportContext context,
+        CancellationToken cancellationToken)
+    {
+        foreach (var html in context.RouteOutcomes.Values.Where(outcome => outcome.Succeeded && outcome.IsHtml && outcome.ArtifactPath is not null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(html.ArtifactPath!)) continue;
+            var contents = await File.ReadAllTextAsync(html.ArtifactPath!, cancellationToken);
+            var marker = contents.IndexOf(AppSurfaceDocsClientConfigMarker, StringComparison.Ordinal);
+            if (marker < 0) continue;
+            var equals = contents.IndexOf('=', marker + AppSurfaceDocsClientConfigMarker.Length);
+            var open = equals < 0 ? -1 : contents.IndexOf('{', equals + 1);
+            if (open < 0) continue;
+            var close = FindJsonObjectEnd(contents, open);
+            if (close < 0) continue;
+            JsonObject? config;
+            try { config = JsonNode.Parse(contents[open..(close + 1)]) as JsonObject; }
+            catch (JsonException) { continue; }
+            if (config?["docsSearchIndexUrl"] is not JsonValue value || !value.TryGetValue<string>(out var configuredUrl)
+                || !ExportReferenceProcessor.TrySplitManagedUrl(configuredUrl, out var indexRoute, out _, out _)
+                || !context.RouteOutcomes.TryGetValue(indexRoute, out var indexOutcome)
+                || !indexOutcome.Succeeded || indexOutcome.ArtifactUrl is null
+                || !indexRoute.EndsWith("/search-index.json", StringComparison.OrdinalIgnoreCase)) continue;
+            var genericUrl = context.ReleaseArchiveManifestEnabled && indexRoute == "/search-index.json"
+                ? "/search-index.static.json"
+                : indexOutcome.ArtifactUrl;
+            if (string.Equals(configuredUrl, genericUrl, StringComparison.Ordinal)) continue;
+            config["docsSearchIndexUrl"] = genericUrl;
+            var updated = contents[..open] + config.ToJsonString() + contents[(close + 1)..];
+            await ExportAuthArtifactAuditor.WriteTextArtifactAsync(context.OutputPath, html.ArtifactPath!,
+                "AppSurface Docs HTML artifact", html.Route, updated, encoding: null, cancellationToken);
+        }
+    }
+
+    private static int FindJsonObjectEnd(string text, int open)
+    {
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+        for (var index = open; index < text.Length; index++)
+        {
+            var character = text[index];
+            if (inString)
+            {
+                if (escaped) escaped = false;
+                else if (character == '\\') escaped = true;
+                else if (character == '"') inString = false;
+                continue;
+            }
+            if (character == '"') inString = true;
+            else if (character == '{') depth++;
+            else if (character == '}' && --depth == 0) return index;
+        }
+        return -1;
     }
 
     private async Task WriteHtmlRouteAsync(
