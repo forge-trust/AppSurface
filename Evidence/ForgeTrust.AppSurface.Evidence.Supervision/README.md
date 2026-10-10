@@ -1394,3 +1394,18 @@ The private N08/N09 [root composition](LinuxEmptyObservationExecution.cs) may fa
 `LinuxCancellationProjectionFailure.EncodeDetached(Guid, LinuxCancellationProjectionStage, Exception)` produces eight fixed JSON fields under `issue779-cancellation-projection-failure-v1`. It permits at most 1 KiB plus one LF, contains a closed stage/error family and a filtered diagnostic code, and excludes exception text, inner errors, paths and raw streams. Missing generation/error or unknown enum values reject. Detached tests verify data encoding only. The composition emits it only from the existing compile-selected cancellation failure catch using the original cleanup token and owner checks. It adds no OS read, stop, task, allowance, custody capability or positive result.
 
 The checkpoint is assigned before each original operation. It identifies the failed operation, not an inner syscall or the earliest concurrent failure. Failed diagnostic output cannot replace the original failure. The existing large-record attempt flag remains authoritative after any partial large write; this small additional record cannot authorize a second large export. Successful cancellation projections emit no new record. The fixed fixture still requires original kernel, signal, stream, custody and account cleanup evidence before a negative control qualifies.
+
+### Account identity data during cancellation cleanup
+
+The private N08/N09 [root composition](LinuxEmptyObservationExecution.cs) reads the retained results GID through
+[`LinuxRunAccounts.RequireControlOwnedBy`](LinuxRunAccounts.cs) after work admission closes and before account
+cleanup starts. This internal accessor requires the same account holder and original live root control identity,
+the original cleanup token and deadline, and accounts that have neither started closing nor entered quarantine.
+It returns immutable identity data; it grants no work admission, custody or account deletion. The active-only
+`ResultsGid` property continues to reject after teardown begins. Using that property during cleanup would reject
+before the original kernel and signal observations can be captured.
+
+The copied GID is attached to the failure-only cleanup record only after the existing worker/server/pump joins,
+root filesystem custody, strict account deletion and final owner/deadline checks succeed. A copied number cannot
+replace any of those checks. The actual Linux N08 regression remains required; local compile and metadata tests
+do not establish physical settlement or a successful native checkpoint.

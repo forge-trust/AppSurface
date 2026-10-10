@@ -596,3 +596,13 @@ unchanged. Local codec/build checks and the next genuine Linux result must be re
 #### N08 capture-stage diagnosis
 
 The fifth private cancellation run retained original physical settlement, joined monitor/pumps and normal nonzero worker exit, but rejected its cancellation capture. That evidence does not identify the failed kernel, signal or encoding guard. A separate [closed projection checkpoint](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxCancellationProjectionFailure.cs) now records the original failing operation without changing its guard or replacing the [first execution failure](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs). This is diagnostic preparation; N08/N09 remain unqualified until the genuine Linux cases satisfy their full original records, custody and strict account cleanup.
+
+#### N08 retained account data during teardown
+
+The sixth cancellation candidate rejected before kernel and signal capture: its `Unknown / Admission / ASEVD402`
+projection precedes the active-only `accounts.ResultsGid` read. The root has already closed work admission at that
+point. The correction uses the existing [cleanup account accessor](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#account-identity-data-during-cancellation-cleanup)
+with the original retained holder, live root identity, cleanup token and deadline. Active account getters remain
+closed, and custody/account deletion retain their original prerequisites. Native N08 must be rerun to verify the
+full cancellation, kernel, signal, joined-output, custody and strict account-cleanup result; this source correction
+alone earns no control credit.
