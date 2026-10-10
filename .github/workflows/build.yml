@@ -40,7 +40,7 @@ jobs:
         run: dotnet run --project examples/config-key-contract --configuration Release
       - name: Run framework-neutral conformance package tests
         run: dotnet test Config/ForgeTrust.AppSurface.Config.Testing.Tests --configuration Release
-      - name: Verify isolated packed consumer
+      - name: Verify packed Domain, Web, and staged worker contract
         run: python scripts/verify_config_package_consumer.py --work-directory "${{ runner.temp }}/config-package-contract"
       - name: Upload contract evidence
         if: ${{ always() }}
@@ -49,6 +49,7 @@ jobs:
           name: config-package-contract-${{ matrix.os }}
           path: |
             ${{ runner.temp }}/config-package-contract/evidence.json
+            ${{ runner.temp }}/config-package-contract/pinned-inventory.md
             ${{ runner.temp }}/config-package-contract/*.log
           if-no-files-found: warn
 
