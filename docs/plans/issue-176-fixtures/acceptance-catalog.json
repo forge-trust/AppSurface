@@ -1,0 +1,35 @@
+{
+  "recommendedVersion": "0.2.0-preview.11",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "exactTreePath": "releases/0.1.0",
+      "releaseManifestSha256": "e0cfc160ab116cf13a94b603c665b63115e5db7eece01dfc67634a8b9dfaa30a",
+      "visibility": "Public",
+      "supportState": "Maintained"
+    },
+    {
+      "version": "0.2.0-preview.11",
+      "exactTreePath": "releases/0.2.0-preview.11",
+      "releaseManifestSha256": "5fbd511d7b66faf49bbadf76b6b412f9f4971671c15ac56b266fbb6eeb319bdd",
+      "visibility": "Public",
+      "supportState": "Current"
+    }
+  ],
+  "aliases": [
+    {
+      "name": "stable",
+      "version": "0.1.0",
+      "label": "Stable"
+    },
+    {
+      "name": "preview",
+      "version": "0.2.0-preview.11",
+      "label": "Preview"
+    },
+    {
+      "name": "v1",
+      "version": "0.1.0"
+    }
+  ]
+}

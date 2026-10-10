@@ -4797,7 +4797,7 @@ public class AppSurfaceDocsViewsTests
 
         var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
         var previewLink = document.QuerySelectorAll("a[href='/docs/next']")
-            .Single(link => link.TextContent.Contains("Open preview docs", StringComparison.Ordinal));
+            .Single(link => link.TextContent.Contains("Open live source docs", StringComparison.Ordinal));
         var archiveLink = document.QuerySelectorAll("a[href='/docs/versions']")
             .Single(link => link.TextContent.Contains("Refresh archive", StringComparison.Ordinal));
         var exactVersionLink = document.QuerySelectorAll("a[href='/docs/v/1.2.3']")

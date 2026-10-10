@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Caching;
 using ForgeTrust.AppSurface.Docs.Controllers;
@@ -55,6 +56,174 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         Assert.Equal("/docs/v/1.0.0", version.Href);
         Assert.True(version.IsRecommended);
         Assert.True(version.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Versions_ShouldProjectAliasStatesWithoutLeakingHiddenOrInvalidMetadata(bool hiddenDuplicateFirst)
+    {
+        var healthyTree = CreateExactTree("1.0.0");
+        var aliasesJson = """
+            [
+              { "name": "preview", "version": "1.0.0", "label": "<script>preview</script>", "summary": "<img src=x onerror=alert(1)>" },
+              { "name": "broken", "version": "2.0.0", "label": "Broken", "summary": "Public target unavailable" },
+              { "name": "hidden-target", "version": "3.0.0", "label": "Hidden", "summary": "Must not leak" },
+              { "name": "unknown-target", "version": "9.9.9", "label": "Unknown", "summary": "No target identifier" },
+              { "name": "invalid-public", "version": 42, "label": "Recovered secret label", "summary": "Recovered secret summary", "visibility": "Public" },
+              { "name": "duplicate", "version": "1.0.0", "label": "Public duplicate label", "summary": "Public duplicate summary", "visibility": "Public" },
+              { "name": "duplicate", "version": "3.0.0", "label": "Hidden duplicate label", "summary": "Hidden duplicate summary", "visibility": "Hidden" },
+              { "name": "hidden-duplicate", "version": "1.0.0", "visibility": "Hidden" },
+              { "name": "hidden-duplicate", "version": "3.0.0", "visibility": "Hidden" },
+              { "name": "invalid-duplicate", "version": 42, "visibility": "Public", "summary": "Must stay hidden" },
+              { "name": "invalid-duplicate", "version": 43, "visibility": "Public", "summary": "Also stays hidden" },
+              { "name": "invalid-default-visibility", "version": 42, "summary": "Missing explicit visibility" },
+              { "name": "bad-visibility", "version": 42, "label": "Bad", "visibility": "unknown" }
+            ]
+            """;
+        if (hiddenDuplicateFirst)
+        {
+            var aliases = JsonNode.Parse(aliasesJson)!.AsArray();
+            var publicDuplicate = aliases[5]!.DeepClone();
+            var hiddenDuplicate = aliases[6]!.DeepClone();
+            aliases[5] = hiddenDuplicate;
+            aliases[6] = publicDuplicate;
+            aliasesJson = aliases.ToJsonString();
+        }
+        var catalogPath = WriteCatalogWithAliases(
+            new AppSurfaceDocsVersionCatalog
+            {
+                RecommendedVersion = "1.0.0",
+                Versions =
+                [
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "1.0.0",
+                        ExactTreePath = Path.GetRelativePath(_tempDirectory, healthyTree),
+                        SupportState = AppSurfaceDocsVersionSupportState.Current,
+                        AdvisoryState = AppSurfaceDocsVersionAdvisoryState.Vulnerable
+                    },
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "2.0.0",
+                        ExactTreePath = "missing-release",
+                        SupportState = AppSurfaceDocsVersionSupportState.Deprecated,
+                        AdvisoryState = AppSurfaceDocsVersionAdvisoryState.SecurityRisk
+                    },
+                    new AppSurfaceDocsPublishedVersion
+                    {
+                        Version = "3.0.0",
+                        ExactTreePath = "missing-hidden-release",
+                        Visibility = AppSurfaceDocsVersionVisibility.Hidden
+                    }
+                ]
+            },
+            aliasesJson);
+        using (var serializedCatalog = JsonDocument.Parse(File.ReadAllText(catalogPath)))
+        {
+            Assert.Equal(13, serializedCatalog.RootElement.GetProperty("aliases").GetArrayLength());
+            Assert.Single(
+                serializedCatalog.RootElement.EnumerateObject(),
+                property => string.Equals(property.Name, "aliases", StringComparison.OrdinalIgnoreCase));
+        }
+
+        var controller = CreateController(catalogPath);
+
+        var result = controller.Versions();
+
+        var view = Assert.IsType<ViewResult>(result);
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(view.Model);
+        Assert.Collection(
+            model.Aliases,
+            preview =>
+            {
+                Assert.Equal("preview", preview.Name);
+                Assert.Equal("<script>preview</script>", preview.Label);
+                Assert.Equal("<img src=x onerror=alert(1)>", preview.Summary);
+                Assert.Equal("1.0.0", preview.TargetVersion);
+                Assert.Equal("/docs/a/preview", preview.Href);
+                Assert.Equal("Vulnerable", preview.AdvisoryLabel);
+                Assert.True(preview.IsAvailable);
+                Assert.Null(preview.AvailabilityMessage);
+            },
+            broken =>
+            {
+                Assert.Equal("broken", broken.Name);
+                Assert.Equal("2.0.0", broken.TargetVersion);
+                Assert.Equal("Deprecated", broken.SupportStateLabel);
+                Assert.Equal("Security risk", broken.AdvisoryLabel);
+                Assert.False(broken.IsAvailable);
+                Assert.Null(broken.Href);
+            },
+            hiddenTarget =>
+            {
+                Assert.Equal("hidden-target", hiddenTarget.Name);
+                Assert.Equal("Hidden", hiddenTarget.Label);
+                Assert.Equal("Must not leak", hiddenTarget.Summary);
+                Assert.Null(hiddenTarget.TargetVersion);
+                Assert.Null(hiddenTarget.SupportStateLabel);
+                Assert.Null(hiddenTarget.AdvisoryLabel);
+                Assert.Null(hiddenTarget.Href);
+            },
+            unknownTarget =>
+            {
+                Assert.Equal("unknown-target", unknownTarget.Name);
+                Assert.Null(unknownTarget.TargetVersion);
+                Assert.Null(unknownTarget.SupportStateLabel);
+                Assert.Null(unknownTarget.AdvisoryLabel);
+                Assert.Null(unknownTarget.Href);
+            },
+            invalid =>
+            {
+                Assert.Equal("invalid-public", invalid.Name);
+                Assert.Equal("This release entry is not configured correctly.", invalid.AvailabilityMessage);
+                Assert.Equal(string.Empty, invalid.Label);
+                Assert.Null(invalid.Summary);
+                Assert.Null(invalid.TargetVersion);
+                Assert.Null(invalid.Href);
+            },
+            duplicate =>
+            {
+                Assert.Equal("duplicate", duplicate.Name);
+                Assert.Equal("This release entry has conflicting definitions.", duplicate.AvailabilityMessage);
+                Assert.Equal(string.Empty, duplicate.Label);
+                Assert.Null(duplicate.Summary);
+                Assert.Null(duplicate.TargetVersion);
+                Assert.Null(duplicate.Href);
+            });
+
+        Assert.DoesNotContain(
+            model.Aliases,
+            alias => alias.Name is "hidden-duplicate" or "invalid-duplicate" or "invalid-default-visibility" or "bad-visibility");
+        Assert.DoesNotContain(model.Aliases, alias => alias.Label.Contains("secret", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(model.Aliases, alias => alias.Summary?.Contains("duplicate", StringComparison.OrdinalIgnoreCase) == true);
+        Assert.Collection(
+            model.Versions,
+            exact =>
+            {
+                Assert.Equal("1.0.0", exact.Version);
+                Assert.Equal("/docs/v/1.0.0", exact.Href);
+                Assert.True(exact.IsRecommended);
+                Assert.True(exact.IsAvailable);
+            },
+            unavailableExact =>
+            {
+                Assert.Equal("2.0.0", unavailableExact.Version);
+                Assert.Null(unavailableExact.Href);
+                Assert.False(unavailableExact.IsAvailable);
+            });
+    }
+
+    [Fact]
+    public void Versions_ShouldDefaultAliasesToAnEmptyArchiveProjection_WhenNoneAreDeclared()
+    {
+        var catalogPath = WriteCatalog(new AppSurfaceDocsVersionCatalog());
+        var controller = CreateController(catalogPath);
+
+        var result = controller.Versions();
+
+        var model = Assert.IsType<AppSurfaceDocsVersionArchiveViewModel>(Assert.IsType<ViewResult>(result).Model);
+        Assert.Empty(model.Aliases);
     }
 
     [Fact]
@@ -476,6 +645,25 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         var path = Path.Combine(_tempDirectory, "catalog.json");
         PinReleaseManifestDigests(catalog);
         File.WriteAllText(path, JsonSerializer.Serialize(catalog));
+        return path;
+    }
+
+    private string WriteCatalogWithAliases(AppSurfaceDocsVersionCatalog catalog, string aliasesJson)
+    {
+        PinReleaseManifestDigests(catalog);
+        var json = JsonNode.Parse(JsonSerializer.Serialize(catalog))!.AsObject();
+        var aliasProperties = json
+            .Select(property => property.Key)
+            .Where(property => string.Equals(property, "aliases", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        foreach (var aliasProperty in aliasProperties)
+        {
+            json.Remove(aliasProperty);
+        }
+
+        json["aliases"] = JsonNode.Parse(aliasesJson);
+        var path = Path.Combine(_tempDirectory, "catalog-with-aliases.json");
+        File.WriteAllText(path, json.ToJsonString());
         return path;
     }
 

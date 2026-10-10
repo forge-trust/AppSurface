@@ -2616,19 +2616,104 @@ public class DocsController : Controller
                 })
             .ToList();
 
+        const string invalidAliasMessage = "This release entry is not configured correctly.";
+        const string conflictingAliasMessage = "This release entry has conflicting definitions.";
+        const string unavailableAliasMessage = "This release entry is not currently available.";
+        var projectedAliases = new List<AppSurfaceDocsVersionAliasArchiveEntryViewModel>();
+        var projectedNames = new HashSet<string>(StringComparer.Ordinal);
+        var publicConflictNames = catalog.Aliases
+            .Where(
+                alias => alias.IsNameConflict
+                         && alias.IsDefinitionValid
+                         && alias.Visibility == AppSurfaceDocsVersionVisibility.Public
+                         && !string.IsNullOrWhiteSpace(alias.Name))
+            .Select(alias => alias.Name!)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var alias in catalog.Aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias.Name))
+            {
+                continue;
+            }
+
+            if (alias.IsNameConflict)
+            {
+                if (!projectedNames.Add(alias.Name))
+                {
+                    continue;
+                }
+
+                if (publicConflictNames.Contains(alias.Name))
+                {
+                    projectedAliases.Add(
+                        new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+                        {
+                            Name = alias.Name,
+                            AvailabilityMessage = conflictingAliasMessage
+                        });
+                }
+
+                continue;
+            }
+
+            if (!alias.IsDefinitionValid)
+            {
+                if (alias.HasExplicitPublicVisibility
+                    && alias.Visibility == AppSurfaceDocsVersionVisibility.Public)
+                {
+                    projectedAliases.Add(
+                        new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+                        {
+                            Name = alias.Name,
+                            AvailabilityMessage = invalidAliasMessage
+                        });
+                }
+
+                continue;
+            }
+
+            if (alias.Visibility != AppSurfaceDocsVersionVisibility.Public)
+            {
+                continue;
+            }
+
+            var target = alias.TargetVersion is { Visibility: AppSurfaceDocsVersionVisibility.Public } publicTarget
+                ? publicTarget
+                : null;
+            var targetIsKnownPublic = target is not null;
+            projectedAliases.Add(
+                new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+                {
+                    Name = alias.Name,
+                    Label = string.IsNullOrWhiteSpace(alias.Label) ? alias.Name : alias.Label,
+                    Summary = alias.Summary,
+                    TargetVersion = target?.Version,
+                    SupportStateLabel = targetIsKnownPublic ? GetSupportStateLabel(target!.SupportState) : null,
+                    AdvisoryLabel = targetIsKnownPublic ? GetAdvisoryLabel(target!.AdvisoryState) : null,
+                    Href = alias.IsAvailable && targetIsKnownPublic ? alias.RootUrl : null,
+                    AvailabilityMessage = alias.IsAvailable
+                        ? null
+                        : targetIsKnownPublic
+                            ? alias.AvailabilityIssue ?? unavailableAliasMessage
+                            : unavailableAliasMessage,
+                    IsAvailable = alias.IsAvailable && targetIsKnownPublic && !string.IsNullOrWhiteSpace(alias.RootUrl)
+                });
+        }
+
         return new AppSurfaceDocsVersionArchiveViewModel
         {
-            Heading = entryFallback ? "Published documentation versions" : "Documentation versions",
+            Heading = "Documentation versions",
             Description = entryFallback
                 ? "The stable docs entry is waiting for a healthy recommended release tree. You can keep reading the preview surface or open an exact published version below."
-                : "Choose the exact release you want to read, or keep using the current preview surface for unreleased work.",
+                : "Choose a moving label for a maintained entry point, or an exact release URL for a fixed citation.",
             AvailabilityMessage = catalog.AvailabilityIssue
                 ?? (entryFallback
                     ? $"No healthy recommended release tree is currently mounted at {PathBaseAware(_docsUrlBuilder.DocsEntryRootPath)}."
                     : null),
             PreviewHref = _docsUrlBuilder.BuildHomeUrl(),
             VersionsHref = _docsUrlBuilder.BuildVersionsUrl(),
-            Versions = versions
+            Versions = versions,
+            Aliases = projectedAliases
         };
     }
 

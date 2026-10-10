@@ -2387,6 +2387,290 @@ The version catalog is the release-level source of truth for version routing and
 - `versions[].advisoryState`
   - Release-level warning badge. Supported values are `None`, `Vulnerable`, and `SecurityRisk`.
 
+### Version aliases
+
+Use a named alias when readers need a memorable route that maintainers can retarget to one already-published exact
+release. Aliases are explicit catalog pointers; labels such as `stable`, `preview`, `lts`, and `v1` have no built-in
+meaning, freshness, support, or promotion behavior. The exact release remains the identity in canonical metadata
+and the archive. Keep [`recommendedVersion`](#published-version-catalog) independent: it still controls the route-
+family root alias and is never inferred from a named label.
+
+Add `aliases` to the existing version catalog. Omit it, set it to `null`, or use an empty array to leave the `{root}/a`
+namespace inactive and preserve existing routing. A nonempty array or malformed non-null declaration activates
+ownership of that namespace for the host lifetime, including when every entry is invalid, hidden, or unavailable:
+
+```json
+{
+  "recommendedVersion": "0.2.0-preview.11",
+  "versions": [
+    {
+      "version": "0.1.0",
+      "exactTreePath": "./releases/0.1.0",
+      "releaseManifestSha256": "e0cfc160ab116cf13a94b603c665b63115e5db7eece01dfc67634a8b9dfaa30a",
+      "visibility": "Public"
+    },
+    {
+      "version": "0.2.0-preview.11",
+      "exactTreePath": "./releases/0.2.0-preview.11",
+      "releaseManifestSha256": "5fbd511d7b66faf49bbadf76b6b412f9f4971671c15ac56b266fbb6eeb319bdd",
+      "visibility": "Public"
+    }
+  ],
+  "aliases": [
+    { "name": "stable", "version": "0.1.0", "label": "Stable", "summary": "First stable release." },
+    { "name": "preview", "version": "0.2.0-preview.11", "label": "Preview", "summary": "Current preview." },
+    { "name": "v1", "version": "0.1.0", "label": "Version 1", "visibility": "Public" }
+  ]
+}
+```
+
+Each `AppSurfaceDocsVersionAlias` descriptor has these fields:
+
+- `name` (required): trimmed and lowercased invariantly, then validated as 1–64 ASCII characters. The first and last
+  characters must be ASCII letters or digits; interior characters may also be `.`, `_`, or `-`. Thus `" Stable_1 "`
+  becomes `stable_1`; slashes, percent signs, Unicode letters, embedded whitespace, and edge punctuation are invalid.
+- `version` (required): an exact, case-insensitive catalog version identifier. It never names another alias.
+- `label` (optional): reader-facing archive text; blank or omitted values use the normalized name.
+- `summary` (optional): reader-facing explanation. There is no product-imposed display-text ceiling; ordinary JSON
+  depth, process memory, filesystem, and rendering limits still apply.
+- `visibility` (optional): `Public` by default or `Hidden`. A hidden alias is retained for operator inspection but is
+  omitted from public archive data and is not served publicly. JSON accepts the enum names case-insensitively and
+  defined numeric enum values; prefer the named strings for readable configuration.
+
+`AppSurfaceDocsVersionCatalog.Aliases` is an additive `List<AppSurfaceDocsVersionAlias>` initialized empty. The resolved
+catalog keeps its existing four-positional-member constructor/deconstruction and sentinel defaults; it adds
+`IReadOnlyList<AppSurfaceDocsResolvedVersionAlias> Aliases { get; init; } = []` and
+`bool IsAliasNamespaceActive { get; init; } = false`. Each `AppSurfaceDocsResolvedVersionAlias` retains operator provenance: normalized name,
+`ConfiguredVersion`, a `TargetVersion` only when safe to disclose, display/visibility data, validity and conflict
+state, and diagnostic code. Do not serialize this operator model as the public archive model. The public projection
+contains only safe public rows and never hidden target identifiers, invalid raw configuration, or physical paths.
+Invalid entries fail individually; duplicate normalized names invalidate the whole group. Active namespace ownership
+remains even when entries cannot be served, so an invalid or absent label cannot fall through to another Docs surface.
+See [alias diagnostics](#alias-diagnostics) for stable codes and fixes.
+
+The catalog service discovers alias declaration ownership as soon as the JSON root is valid, before trusted-root or
+version-tree resolution. If a later root/tree step fails, the prior exact-catalog failure semantics remain, while a
+discovered active alias namespace stays owned with unavailable entries; no partial public alias target is published.
+An ordinary catalog read/JSON failure before declarations can be discovered keeps the prior unavailable-catalog
+behavior. Omitted, `null`, and empty collections remain inactive.
+
+Resolved operator fields are additive and non-positional:
+
+| Property | Meaning |
+| --- | --- |
+| `Name` | Normalized valid name, or `null` for an invalid authored name. |
+| `Label` / `Summary` | Validated reader copy; label defaults to normalized name when blank, summary defaults to `null`. |
+| `Visibility` | Parsed visibility, defaulting to `Public` when omitted/null; `null` when an authored value is invalid. |
+| `ConfiguredVersion` | Trimmed configured exact target for operator diagnostics; may identify a hidden target and must not be publicly projected. |
+| `TargetVersion` | Existing `AppSurfaceDocsResolvedVersion` object for a known public exact target; `null` for hidden or unresolved targets. Its `Version` identifies the exact release. |
+| `RootUrl` | Alias root only when the name is valid; otherwise `null`. |
+| `IsAvailable` | True only for a valid, unique public definition with a verified available public target. |
+| `IsDefinitionValid` | Whether the name and descriptor metadata are structurally valid, independent of target availability. |
+| `HasExplicitPublicVisibility` | True only when the descriptor explicitly selected `Public`; omitted/null visibility still defaults public. |
+| `IsNameConflict` | True for every member of a duplicate normalized-name group. |
+| `DiagnosticCode` / `AvailabilityIssue` | Stable operator code plus generic sanitized reader recovery copy where applicable; neither is a machine-readable error payload contract. |
+
+An available public alias points directly to one public, archive-verified, available exact version. Alias chains,
+implicit fallback, automatic promotion, CLI validation/promotion commands, and hot reload are outside this API.
+Catalogs resolve once for the host lifetime. To retarget, publish and verify the target first, atomically replace the
+catalog, then restart or redeploy every host. Exact release URLs and trees remain independently addressable.
+
+For a route root `/docs`, a healthy `stable` entry mounts at `/docs/a/stable`, while the exact release remains at
+`/docs/v/0.1.0`. Links, navigation, assets, search results, and fragments stay alias-local; canonical and Open Graph
+metadata identify the exact version. `DocsUrlBuilder.BuildAliasRootUrl(string)` and
+`BuildAliasDocUrl(string, string)` build app-relative alias URLs with the same name grammar; they validate syntax, not
+whether a configured public alias exists. Invalid names throw `ArgumentException`; a null name throws
+`ArgumentNullException`. Existing route-root, `PathBase`, and `PublicOrigin` behavior governs URL generation:
+`PublicOrigin` affects absolute canonical metadata and does not gain `PathBase`. Custom roots use the same contract
+(for example, `/foo/bar/a/stable`); a root-mounted family uses `/a/stable` and `/v/{version}`.
+
+Owned requests are classified from the received raw target together with framework path coordinates so normalization
+cannot hand an unsafe or unknown path to live, recommended, exact, or another named Docs route. The selected endpoint
+still runs through normal host routing, authentication, authorization, and endpoint conventions. Owned `GET`/`HEAD`
+requests and their auth, redirect, not-found, and method responses carry `Cache-Control: no-store` at header commit;
+unsupported methods return `405` with `Allow: GET, HEAD`, and `HEAD` has no body. Missing pages are terminal `404`s
+even when another alias or the recommended tree contains that path. Recovery omits rejected raw paths, physical paths,
+and hidden target details. Invalid/unknown owned paths are terminal `404`s; invalid received-path evidence emits only
+the bounded `ASDOCSALIAS010` operator warning. Frozen route-manifest redirects preserve their recorded identity and
+never trigger fallback.
+
+Alias names reserve `{RouteRootPath}/a`. Startup checks the frozen Docs-owned route inventory, live routes, and
+recommended handler inventory (including frozen canonical/source-shaped paths) for collisions, including
+ancestor/descendant overlaps. A collision fails startup with a control-safe route description truncated at 256 UTF-8
+bytes and corrective action; exact `/v/.../a` paths are outside this namespace. Inventory and
+verified identities are frozen for the host lifetime: added files do not become servable, and in-place archive changes
+are refused by existing integrity checks. Publish complete immutable trees before startup; there is no watcher or
+per-request full collision rescan.
+
+#### Named-host routing hook
+
+The default `AppSurfaceDocsWebModule` installs alias ownership automatically when its namespace is active. For named
+`AppSurfaceDocsInstance` handles, call `UseAppSurfaceDocsAliases` after `PathBase`/forwarded-path setup and before
+routing, authentication, authorization, or any response writer. Then map all handles and finalize them on that same
+builder. Repeated calls on one builder are idempotent; an active named alias without the hook fails finalization with
+`ASDOCSALIAS011`. Alias-free named hosts need no hook.
+
+<!-- appsurface:snippet id="docs-alias-named-host" file="Web/ForgeTrust.AppSurface.Docs.Tests/AppSurfaceDocsVersionAliasPublicApiConsumerTests.cs" marker="docs-alias-named-host" lang="csharp" -->
+```csharp
+private static WebApplication ConfigureNamedAliasHost(WebApplicationBuilder builder)
+{
+    var publicDocs = builder.Services.AddAppSurfaceDocs(
+        "public",
+        builder.Configuration.GetSection("AppSurfaceDocs:Public"));
+    builder.Services.AddAuthentication();
+    builder.Services.AddAuthorization();
+
+    var app = builder.Build();
+    app.UsePathBase("/products");
+    app.UseAppSurfaceDocsAliases();
+    app.UseRouting();
+    app.UseAuthentication();
+    app.UseAuthorization();
+
+    IEndpointRouteBuilder endpoints = app;
+    endpoints.MapRazorWire();
+    publicDocs.MapEndpoints(endpoints).AllowAnonymous();
+    endpoints.FinalizeAppSurfaceDocsInstances();
+
+    return app;
+}
+```
+<!-- /appsurface:snippet -->
+
+Do not move the hook after `UseRouting` or place a response-writing middleware ahead of it. A hook on another
+application builder does not satisfy the named instance requirement. Authentication and authorization remain
+host-owned; the hook selects the real convention-bearing endpoint rather than bypassing it.
+
+#### Rollout and operating limits
+
+Upgrade the Docs runtime on every host before deploying a nonempty `aliases` array; an older runtime does not own the
+namespace. Alias-free catalogs need no migration. Verify exact archives with the existing
+[`docs verify-archive` command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-verify-archive), stage the
+catalog and trees together, inspect startup collision results, then smoke-test archive rows, navigation, search,
+exact canonical metadata, `HEAD`, unsupported methods, and a missing page before switching traffic. Retarget by
+atomically replacing the catalog and restarting/draining the fleet. Roll back by restoring the prior verified catalog
+and restarting. Removing aliases can reactivate legacy `/a` routing and must be deliberate.
+
+`no-store` asks compliant HTTP caches not to store owned responses. It does not purge application caches, rewrite
+proxy/CDN policy, or make a rolling fleet atomic: old and new processes may serve different pointers until drained.
+Check each proxy/CDN's behavior and drain mixed-version hosts when readers require one pointer view. This feature adds
+no cache-purge infrastructure, cross-host synchronization, hot reload, telemetry, or promotion workflow.
+
+There is no alias-count ceiling or new catalog-byte/display-text ceiling. Parsing inherits the existing JSON maximum
+depth of 64; actual catalog size, tree inventory, and rendered output remain subject to process memory, filesystem,
+and configured rewritten-file limits. Alias resolution/projection use startup snapshots and share one file provider
+and frozen verified cache per physical target within an instance; providers are disposed with the host. They do not
+verify/export a tree per label or scan all aliases per request. For 10,000- and 20,000-label observations, record the
+runtime/OS/build/fixture, label and distinct-target counts, warmup, resolution/projection/render elapsed time and
+allocation scope separately, rendered response size, row order/count, and selected first/middle/last requests. These
+are evidence observations, not supported maxima, capacity promises, timing thresholds, or SLOs. A warm human
+onboarding target of at most five minutes is unobserved and is not a CI gate.
+For the pinned stable/prerelease artifacts and expected route-by-route proof, follow the
+[Issue #176 acceptance fixture](../../docs/plans/issue-176-fixtures/README.md) alongside the
+[consumer walkthrough](./use-appsurface-docs.md#configure-and-verify-moving-version-aliases).
+
+### Alias diagnostics
+
+Alias configuration/request warning logs use fixed codes and structured reason/action/documentation fields, validated
+names where available, and entry indices/group count where relevant. They never log rejected raw paths, malformed
+authored names, display text, hidden target identifiers, or physical paths. Follow the corrective action, update
+trusted configuration or middleware order, and restart to rebuild the immutable snapshot. Existing
+`ASDOCSARCHIVE` diagnostics remain authoritative for manifest and file-integrity failures. The config-log fields are
+`AliasDiagnosticCode`, `AliasReason`, `AliasAction`, `DocumentationReference`, `AliasName`, `EntryIndices`, and
+`GroupCount`; unused string fields are empty and unused indices/counts are empty/zero. Request code `010` logs fixed code/reason/action and
+`DocumentationReference`, without arbitrary request strings. Startup collision/missing-hook exceptions carry their
+stable numeric code and safe corrective guidance.
+
+Precedence is shape, then name, then metadata; duplicate-name code `005` replaces target-resolution diagnostics for
+the entire normalized group and is emitted once per group. Request code `010` uses a bounded one-time warning and
+does not retain arbitrary request strings.
+
+| Code | Cause | Fix |
+| --- | --- | --- |
+| [`ASDOCSALIAS001`](#asdocsalias001) | `aliases` is neither an array nor `null`. | Use descriptor objects in an array, or omit/null the collection; restart. |
+| [`ASDOCSALIAS002`](#asdocsalias002) | An item is not an object, including `null`. | Replace or remove the indexed item; restart. |
+| [`ASDOCSALIAS003`](#asdocsalias003) | Name is missing, has the wrong type, or fails the trimmed 1–64 ASCII grammar. | Set a valid name such as `stable`, `preview`, or `v1`; restart. |
+| [`ASDOCSALIAS004`](#asdocsalias004) | Required target or display/visibility metadata has an invalid type/value. | Use a string exact `version`, string `label`/`summary` when supplied, and supported `visibility`; restart. |
+| [`ASDOCSALIAS005`](#asdocsalias005) | Multiple entries normalize to one name; the whole group is invalid. | Rename/remove duplicates. One group diagnostic records entry indices/count; restart. |
+| [`ASDOCSALIAS006`](#asdocsalias006) | Target does not match an exact catalog version. | Point `version` to an exact identifier in `versions`; restart. |
+| [`ASDOCSALIAS007`](#asdocsalias007) | Target version is hidden. | Select a public exact version or keep the alias hidden; restart. A valid hidden alias alone is not an error. |
+| [`ASDOCSALIAS008`](#asdocsalias008) | Public target is unavailable, unverified, or trusted-root resolution failed. | Publish/verify the exact tree and manifest pin; correct trusted-root settings; inspect any `ASDOCSARCHIVE` evidence; restart. |
+| [`ASDOCSALIAS009`](#asdocsalias009) | Active `{RouteRootPath}/a` overlaps a frozen Docs-owned route. The startup message has a control-safe bounded route. | Move the conflicting route/configuration; route order is not a fix. Restart. |
+| [`ASDOCSALIAS010`](#asdocsalias010) | Owned request cannot be validated against raw/framework path coordinates. It is terminal; a one-time warning records a fixed reason. | Preserve `RawTarget`, apply `PathBase` before the hook, and correct proxy forwarding; restart if pipeline setup changed. |
+| [`ASDOCSALIAS011`](#asdocsalias011) | Active named aliases lack the hook marker on their endpoint builder. | Install `UseAppSurfaceDocsAliases()` on the same builder after path setup and before routing/auth; then map and finalize; restart. |
+
+Operator correction example:
+
+```json
+"aliases": [
+  { "name": "stable", "version": "0.1.0", "visibility": "Public" },
+  { "name": "preview", "version": "0.2.0-preview.11", "visibility": "Public" }
+]
+```
+
+The public archive never reveals hidden-target details during recovery. Automation should consume fixed codes and
+structured fields; diagnostic prose is for people and is not a machine-parsing contract.
+
+##### ASDOCSALIAS001
+
+The collection has the wrong shape. Use an array of objects or omit/set `null` to disable aliases. The reason is
+`collection-shape`; restart after correction.
+
+##### ASDOCSALIAS002
+
+An indexed item is not an object. Replace/remove it; the reason is `item-shape` and malformed item contents are not
+echoed. Restart after correction.
+
+##### ASDOCSALIAS003
+
+The name is missing or invalid. Use a trimmed 1–64 character ASCII name with alphanumeric edges and only letters,
+digits, `.`, `_`, or `-` inside. The reason is `invalid-name`; the rejected value is not logged. Restart after correction.
+
+##### ASDOCSALIAS004
+
+Required target or optional display/visibility metadata has an invalid type/value. Keep `version`, `label`, and
+`summary` strings when supplied and use a supported visibility. The reason is `invalid-metadata`; restart after fix.
+
+##### ASDOCSALIAS005
+
+Multiple entries normalize to one name. Rename/remove every entry in the group. One group diagnostic retains safe
+entry indices/count and duplicate status supersedes target-resolution errors. Restart after correction.
+
+##### ASDOCSALIAS006
+
+The configured version does not identify a `versions[]` entry. Choose an existing exact identifier; aliases cannot
+point to aliases. Restart after updating the catalog.
+
+##### ASDOCSALIAS007
+
+The exact target exists but is hidden. Choose a public verified release or keep the alias hidden. A valid hidden alias
+alone is not a diagnostic. Restart after a visibility/target change.
+
+##### ASDOCSALIAS008
+
+The target cannot safely be exposed because trusted-root/catalog resolution or archive verification is unavailable.
+Verify the exact archive and manifest pin. Preserve the original `ASDOCSARCHIVE` trust evidence; correct it before
+exposing the alias, then restart.
+
+##### ASDOCSALIAS009
+
+Startup found an overlap between the active namespace and the frozen live/recommended/Docs route inventory. The
+exception identifies a bounded safe route and action. Resolve ownership; route order is not a safe fix. Restart to
+rebuild and validate the inventory.
+
+##### ASDOCSALIAS010
+
+An owned request could not be classified safely from received and framework path coordinates. It is consumed without
+content or fallback; the one-time warning uses fixed reason/action/reference fields. Preserve server `RawTarget`,
+establish `PathBase` first, and install the hook before routing/writers. Review trusted proxy forwarding; do not log
+the raw request path.
+
+##### ASDOCSALIAS011
+
+Named finalization found an active alias collection without `UseAppSurfaceDocsAliases()` on that exact builder. Install
+the hook after path setup and before routing/auth/writers, then map all handles and call
+`FinalizeAppSurfaceDocsInstances()`. Restart after correcting middleware composition.
+
 ### Release evidence bundles
 
 Official AppSurface release preparation also writes `releases/v{version}.evidence.json` with schema `appsurface-release-evidence-bundle-v1`. That bundle is repository release-artifact consistency evidence: it can reference the catalog `exactTreePath`, the catalog `releaseManifestSha256`, release notes, release JSON, package release-note paths, and commit identity so release-prep and publish workflows can prove those fields agree.

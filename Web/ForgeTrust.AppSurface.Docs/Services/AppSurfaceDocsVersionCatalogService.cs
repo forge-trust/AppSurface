@@ -43,6 +43,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
     private readonly ILogger<AppSurfaceDocsVersionCatalogService> _logger;
     private readonly Lazy<AppSurfaceDocsResolvedVersionCatalog> _catalog;
 
+    /// <summary>Gets the validated product identity included in safe alias diagnostics before the first lazy load.</summary>
+    internal string InstanceName { get; init; } = "Default";
+
     /// <summary>
     /// Initializes a new instance of <see cref="AppSurfaceDocsVersionCatalogService"/>.
     /// </summary>
@@ -137,6 +140,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath);
         }
 
+        // Capture ownership before any trusted-root or version-tree failure can return early.
+        var aliasResolver = new AppSurfaceDocsVersionAliasCatalogResolver(_docsUrlBuilder, _logger, InstanceName);
+        var aliasDeclaration = aliasResolver.Parse(root);
+
         var catalogDirectory = Path.GetDirectoryName(catalogPath) ?? _environment.ContentRootPath;
         string trustedReleaseRootPath;
         try
@@ -153,7 +160,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 "AppSurface Docs trusted release root configuration is invalid. Published release trees will stay unavailable.");
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(
                 catalogPath,
-                "Trusted release root path is invalid.");
+                "Trusted release root path is invalid.") with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
@@ -165,7 +176,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         {
             _logger.LogWarning(
                 "AppSurface Docs trusted release root is unavailable. Published release trees will stay unavailable.");
-            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue);
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue) with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         var seenVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -187,7 +202,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 ex,
                 "AppSurface Docs version catalog {CatalogPath} has an invalid top-level payload. Versioned release trees will stay unavailable.",
                 catalogPath);
-            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath);
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath) with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         foreach (var versionEntry in versionEntries)
@@ -228,7 +247,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
 
         var recommendedVersionEntry = ResolveRecommendedVersion(recommendedVersion, versions, catalogPath);
-        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalogPath, versions, recommendedVersionEntry);
+        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalogPath, versions, recommendedVersionEntry)
+        {
+            Aliases = aliasResolver.Resolve(aliasDeclaration, versions),
+            IsAliasNamespaceActive = aliasDeclaration.IsActive
+        };
     }
 
     private string? LogAndIgnoreInvalidRecommendedVersion(string catalogPath, string issue)
@@ -775,6 +798,11 @@ public enum AppSurfaceDocsResolvedVersionCatalogStatus
 /// <see cref="AppSurfaceDocsVersionVisibility.Public" /> only. Public-but-unavailable releases remain in that list so the
 /// archive can surface their degraded status instead of pretending they do not exist.
 /// </para>
+/// <para>
+/// <see cref="Aliases"/> contains operator-facing alias resolution state in authored order. Consumers that render the
+/// public archive must first create a safe projection; <see cref="AppSurfaceDocsResolvedVersionAlias.ConfiguredVersion"/>
+/// may identify hidden configuration and must not be serialized into reader-facing markup.
+/// </para>
 /// </remarks>
 public sealed record AppSurfaceDocsResolvedVersionCatalog(
     AppSurfaceDocsResolvedVersionCatalogStatus Status,
@@ -782,6 +810,15 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
     IReadOnlyList<AppSurfaceDocsResolvedVersion> Versions,
     AppSurfaceDocsResolvedVersion? RecommendedVersion)
 {
+    /// <summary>
+    /// Gets the resolved aliases in authored order. Invalid entries and every member of duplicate-name groups remain
+    /// available here for operator diagnostics.
+    /// </summary>
+    public IReadOnlyList<AppSurfaceDocsResolvedVersionAlias> Aliases { get; init; } = [];
+
+    /// <summary>Gets whether alias declarations activate ownership of the configured alias namespace.</summary>
+    public bool IsAliasNamespaceActive { get; init; }
+
     /// <summary>
     /// Gets the sentinel catalog result for hosts where versioning is disabled entirely.
     /// </summary>

@@ -1,0 +1,40 @@
+{
+  "aliasCount": 20000,
+  "exactTargetCount": 2,
+  "aliasTargetCount": 1,
+  "providers": 2,
+  "aliasProviderIdentities": 1,
+  "aliasFrozenCacheIdentities": 1,
+  "runtime": ".NET 10.0.2",
+  "os": "macOS 26.7.1",
+  "architecture": "Arm64",
+  "configuration": "Release",
+  "fixture": "deterministic synthetic two verified trees; labels label-0 through label-N",
+  "measuredAtUtc": "2026-10-09T22:45:05.43318+00:00",
+  "warmup": "one fresh catalog load, one projection, one full HTTP archive render",
+  "resolution": {
+    "elapsedMilliseconds": 36.0308,
+    "allocatedBytes": 23248920,
+    "scope": "current thread; includes read, parse, exact archive verification and alias resolution"
+  },
+  "projection": {
+    "elapsedMilliseconds": 12.2871,
+    "allocatedBytes": 2285736,
+    "scope": "current thread; public controller Versions projection with an already resolved catalog"
+  },
+  "rendering": {
+    "elapsedMilliseconds": 160.4445,
+    "allocatedBytes": 69872224,
+    "scope": "process-wide allocations including background work; complete archive Razor render and localhost HTTP transfer",
+    "responseBytes": 28911783
+  },
+  "rowCount": 20000,
+  "first": "label-0",
+  "last": "label-19999",
+  "selectedRequests": [
+    0,
+    10000,
+    19999
+  ],
+  "supportedCapacityClaim": false
+}
