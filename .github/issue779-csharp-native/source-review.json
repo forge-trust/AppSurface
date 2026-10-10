@@ -1,0 +1,37 @@
+{
+  "capture_projection_sha256": "9025b36b83f8d4caf73c835f716b050dabc0ab4c962ba72b1e35be60c6f41c48",
+  "capture_receipt_sha256": "8dc806d6d12a72dc017205a5eae480e7eba51ac6dc01e803ff8f3463b7fec66c",
+  "current_full_suite_executed": false,
+  "historical_baseline_source_review_sha256": "5b6f8d53c4b973975bd2e1727e5a60909e8e3427068a3e44495cb18406ece8e8",
+  "n07": {
+    "alias_qualification_receipt_sha256": "937a148db1604d4c776d4eecb6d28a45fa5966c8b9d77f9f35d18ab83e13e182",
+    "alias_qualification_selected_functions_sha256": "66f1107153050b7680ec52d693daa192d58c62a27a14af84b23003f1c977d63b",
+    "alias_result_peer_sha256": "fa5a532cef56e89d3d06e45d4ac6cdaf2da5fdd6e5aadab46e52955cb3b85599",
+    "composition_peer_sha256": "5e386966de9075fdb92b0838533bf3bd17e84cf996d5a830fe89c835b26abc79",
+    "final_composition_peer_pending": false,
+    "fresh_full34_rerun": false,
+    "handoff_data_sha256": "f0878673a2dc5e63ce1ec641743127e9aaf88e3745e03fa01b8bd8ee10e0c7f0",
+    "helper_native_qualification_observed": false,
+    "interface_peer_sha256": "1dd41bdc76fb564eb7941395dd49921169b540d61ee76221116a4f5bb26a2260",
+    "local_distinct_passes": 34,
+    "local_validation_sha256": "a5e6b35456e69ea8351b990d1efdcfa8941abdb5ee215eb4284b7b235a4d1f5f",
+    "ordering_data_sha256": "5a09ec544db9ecee2a8e73c60d288d364f8d60a445c2fa3462f290bf933011e7",
+    "ordering_peer_sha256": "e0dd3d05fca3f82976d0fd0dd619b7d6436e28e67951a2b359e737ef6cad6689",
+    "sampler_close_data_sha256": "d916fb3bc0fa217253bb55c8a3a337b2a28af35c35fbf3fdd740710ed1576c92",
+    "sampler_close_peer_sha256": "bde45be07dbf1b572bba5dc101c6149d67b8c7adeb9c589c5d71a6ef23cba85e",
+    "selected_alias_Linux_qualification_pending": false,
+    "source_capture_peer_sha256": "a5ba95edde0c821a55654340cf574559e5f7da33b6000cdf68fc20461aa23a63"
+  },
+  "native_execution": false,
+  "native_fixture_cases_pending": [
+    "N07"
+  ],
+  "parent_commit": "5214a278cf710bfcf3ebca9f9ea4db557ee2adbb",
+  "production_registry_enabled": false,
+  "root_trust_issuer": false,
+  "schema": "issue779-reviewed-csharp-candidate-v1",
+  "source_commit": "e011aa1b5384d4116dfdcb93d6253a589e564d7a",
+  "source_count": 2836,
+  "source_map_sha256": "8eca59b5654987cd5e698ad83d03e5461c59a2f74574a28e99cb984928e5e6a3",
+  "source_tree": "f5baab1333320e5d48435ee47efcb303e7a6ad05"
+}
