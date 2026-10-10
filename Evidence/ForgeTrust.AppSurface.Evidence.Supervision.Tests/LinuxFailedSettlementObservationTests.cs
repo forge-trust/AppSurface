@@ -59,6 +59,39 @@ public sealed class LinuxFailedSettlementObservationTests
         Assert.False(root.GetProperty("native_acceptance").GetBoolean());
     }
 
+    /// <summary>The cancellation fallback preserves joined fault data and leaves settlement false.</summary>
+    [Fact]
+    public void CancellationFamilyChangesOnlyTheClosedSchemaLabel()
+    {
+        var data = Valid();
+        var ordinary = Encode(data).Bytes;
+        var cancellation = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output,
+            scenario: LinuxFailedSettlementScenario.OriginalCancellation).Bytes;
+        using var json = JsonDocument.Parse(cancellation);
+        Assert.Equal("issue779-cancellation-original-failed-settlement-v1",
+            json.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("Faulted", json.RootElement.GetProperty("monitor").GetString());
+        Assert.False(json.RootElement.GetProperty("lifetime").GetProperty("physically_settled").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+        Assert.Equal(Encoding.UTF8.GetString(ordinary).Replace("issue779-n11-original-failed-settlement-v1",
+            "issue779-cancellation-original-failed-settlement-v1", StringComparison.Ordinal),
+            Encoding.UTF8.GetString(cancellation));
+    }
+
+    /// <summary>Unrecognized family metadata rejects before supplied text or bytes can enter a diagnostic.</summary>
+    [Fact]
+    public void UnknownDiagnosticFamilyRejects()
+    {
+        var data = Valid();
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+                data.State, data.Pending, data.Terminal, data.Group, data.Output,
+                scenario: (LinuxFailedSettlementScenario)999));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
     /// <summary>Exports exact full raw bytes only when both streams are clean, complete and within the bound.</summary>
     [Fact]
     public void CompleteStreamsExportExactBytesAndReturnDefensiveCopies()

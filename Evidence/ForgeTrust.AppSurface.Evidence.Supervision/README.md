@@ -1356,7 +1356,7 @@ the recorded counts and closed failure categories remain. The actual lifetime fa
 `PhysicallySettled` values are copied without being cleared, and emission cannot change quarantine, custody,
 account closure or a failed result.
 
-The compile-selected N11 emitter is skipped by ordinary `None`. It runs after the original server and
+The compile-selected N11 emitter and N08/N09 failure fallback are skipped by ordinary `None`. They run after the original server and
 worker join attempts and before filesystem custody/account closure, using only the original teardown token.
 Terminal and cgroup values come from the existing post-pump finalization reads; no additional process or
 cgroup sampling, timer, stop, or deadline reset is performed. Capture also requires the original
@@ -1367,6 +1367,13 @@ physical-custody guard. Failed settlement may therefore be retained as data when
 finished; `PhysicallySettled` may remain false. A missing join, READY event or authenticated owner rejects
 capture. Neither this descriptor data nor the observation releases custody or accounts.
 
+`CreateDetached(..., token, scenario)` accepts the internal closed `LinuxFailedSettlementScenario` values
+`WorkerStall` (the default) and `OriginalCancellation`. The first preserves
+`issue779-n11-original-failed-settlement-v1`; the second uses
+`issue779-cancellation-original-failed-settlement-v1` with identical members and bounds. An unknown enum
+rejects with the fixed ASEVD410 data error. Native callers select the family from compile-owned image
+metadata; neither the argument nor a detached call selects a runtime operation or grants ownership.
+
 Focused local checks passed 87 executions: 59 codec/lifetime/pending-start controls, one N11 build-selection
 control and 27 ordinary qualification/protected CLI controls. These checks establish local data and
 procedure behavior; the deliberate stall and actual Linux stop/group/pump/custody evidence remain unverified.
@@ -1374,8 +1381,8 @@ procedure behavior; the deliberate stall and actual Linux stop/group/pump/custod
 
 ### Private pre-READY worker failure diagnostics
 
-The fixed N08/N09 cancellation images use [LinuxJoinedWorkerOutputDiagnostic](LinuxJoinedWorkerOutputDiagnostic.cs) when their existing kernel/custody projection fails. A worker can terminate before READY, while the original collector has already retained its error. `LinuxWorkerProcess.CaptureJoinedOutputDiagnostic` reads only the immutable receipt assigned after the original paired pumps join in `FinalizeAsync`; a missing receipt remains `unavailable`. Its diagnostic accessor deliberately supplies no physical settlement, READY, filesystem custody, account cleanup or admission fact. The ordinary build never invokes this emitter.
+The fixed N08/N09 cancellation images first attempt the [failed-settlement observation](#private-n11-failed-settlement-observation) when their existing kernel/custody projection fails before writing. This exposes the original monitor/lifetime/pending-start state and post-pump finalization samples even when successful physical settlement is unavailable. It preserves the failure and existing success/custody guards. If its original READY or join prerequisites are unavailable, they use [LinuxJoinedWorkerOutputDiagnostic](LinuxJoinedWorkerOutputDiagnostic.cs). A worker can terminate before READY, while the original collector has already retained its error. `LinuxWorkerProcess.CaptureJoinedOutputDiagnostic` reads only the immutable receipt assigned after the original paired pumps join in `FinalizeAsync`; a missing receipt remains `unavailable`. Its diagnostic accessor deliberately supplies no physical settlement, READY, filesystem custody, account cleanup or admission fact. The ordinary build never invokes either fallback.
 
 The internal data-only `EncodeDetached(Guid, SupervisionOutputReceipt?)` API emits the closed `issue779-joined-worker-output-diagnostic-v1` schema. It records actual received counts, per-stream EOF and closed failures, bounded prefix hashes, and at most 65,536 stderr bytes in base64; the whole JSON is at most 98,304 bytes. Stdout is represented by counts and a hash, without raw bytes. `physical_settlement_unknown` is always true; `native_authority` and `native_acceptance` are always false. Detached encoder tests establish serialization only.
 
-The native composition writes this one line only after the original stop procedure has returned, solely when the existing private cancellation projection rejected before any of its output writes were attempted. Once an original projection write is attempted, a partial write may already exist, so the fallback is suppressed to preserve the fixed aggregate root-log bound. It reuses the original cleanup token and authenticated owner checks, preserving the first failure. The fixed native fixture redirects this private image's root stderr into a root-owned 0600 log in its protected directory, and its existing 114,688-byte retention cap bounds the diagnostic. Base64 is a reversible private encoding: do not echo it in public logs or treat it as sanitization. Read/decode it only through the verified bounded private artifact path. Diagnostic absence or write failure never permits retry, successful cleanup, account release, a native control pass or Trusted enablement.
+The native composition writes at most one fallback line only after the original stop procedure has returned, solely when the existing private cancellation projection rejected before any of its output writes were attempted. Once any original projection or fallback write is attempted, a partial write may already exist, so another large record is suppressed to preserve the fixed aggregate root-log bound. It reuses the original cleanup token and authenticated owner checks, preserving the first failure. The fixed native fixture redirects this private image's root stderr into a root-owned 0600 log in its protected directory, and its existing 114,688-byte retention cap bounds the diagnostic. Base64 is a reversible private encoding: do not echo it in public logs or treat it as sanitization. Read/decode it only through the verified bounded private artifact path. Diagnostic absence or write failure never permits retry, successful cleanup, account release, a native control pass or Trusted enablement.

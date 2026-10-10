@@ -263,7 +263,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _lifetime.Failed, PhysicallySettled, LinuxFailedSettlementObservation.ClosedTaskState(_exit),
             _failedSettlementGroupAfterPumps);
         var observation = LinuxFailedSettlementObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
-            descriptor, state, pending, _failedSettlementUnit, _failedSettlementGroup, _output, token);
+            descriptor, state, pending, _failedSettlementUnit, _failedSettlementGroup, _output, token,
+            EvidenceNativeQualification.CancellationEnabled ? LinuxFailedSettlementScenario.OriginalCancellation
+                : LinuxFailedSettlementScenario.WorkerStall);
         owner.RequireControlIdentity(token);
         token.ThrowIfCancellationRequested();
         return observation;

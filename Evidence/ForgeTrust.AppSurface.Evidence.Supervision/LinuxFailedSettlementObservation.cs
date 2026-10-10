@@ -15,6 +15,15 @@ internal enum LinuxFailedMonitorState
     Cancelled,
 }
 
+/// <summary>Closed private diagnostic families; selecting a family grants no execution authority.</summary>
+internal enum LinuxFailedSettlementScenario
+{
+    /// <summary>Original synchronous worker-stall failure, retaining its existing schema.</summary>
+    WorkerStall,
+    /// <summary>Original caller cancellation with unavailable successful negative-kernel projection.</summary>
+    OriginalCancellation,
+}
+
 /// <summary>Original joined lifetime and finalization facts; these flags grant no native authority.</summary>
 /// <param name="StartupJoined">Whether the complete original startup task has joined.</param>
 /// <param name="StopJoined">Whether the original containment and finalization task has joined.</param>
@@ -32,7 +41,8 @@ internal sealed record LinuxFailedSettlementState(bool StartupJoined, bool StopJ
 /// Full raw streams and their digests are included only when both pumps reached EOF with exact retained and
 /// received byte counts, no discard or error, and a combined size within the raw bound. Otherwise raw and
 /// digest values are null while the actual closed pump failure and count metadata remains. The producer emits
-/// this record only for compile-selected N11, after original joins and before custody/account closure.
+/// this record only for compile-selected N11 or the N08/N09 failure fallback, after original joins and
+/// before custody/account closure. Its scenario changes only the fixed schema label.
 /// </remarks>
 internal sealed class LinuxFailedSettlementObservation
 {
@@ -66,13 +76,14 @@ internal sealed class LinuxFailedSettlementObservation
     /// <param name="group">Last original finalization cgroup sample, when one completed.</param>
     /// <param name="output">Original output receipt assigned after pump joins.</param>
     /// <param name="token">Original cleanup token; cancellation prevents publication.</param>
+    /// <param name="scenario">Closed private diagnostic family, never a runtime execution selector.</param>
     /// <returns>Bounded detached failure data that cannot upgrade settlement.</returns>
     /// <exception cref="InvalidOperationException">A supplied closed metadata value violates the fixed schema.</exception>
     /// <exception cref="OperationCanceledException">The original cleanup token is cancelled.</exception>
     internal static LinuxFailedSettlementObservation CreateDetached(Guid generation, LinuxProcessSample identity,
         string descriptorSha256, LinuxFailedSettlementState state, SupervisionPendingStartSnapshot pending,
         LinuxUnitProperties? terminal, LinuxCgroupSample? group, SupervisionOutputReceipt output,
-        CancellationToken token = default)
+        CancellationToken token = default, LinuxFailedSettlementScenario scenario = LinuxFailedSettlementScenario.WorkerStall)
     {
         token.ThrowIfCancellationRequested();
         try
@@ -82,7 +93,7 @@ internal sealed class LinuxFailedSettlementObservation
                 || descriptorSha256.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
                 || !state.StartupJoined || !state.StopJoined || !pending.StartReserved || !pending.StartJoined
                 || !pending.Closed || !pending.StopJoined || !Enum.IsDefined(state.Monitor)
-                || !Enum.IsDefined(pending.FirstFailure)) throw Rejected();
+                || !Enum.IsDefined(pending.FirstFailure) || !Enum.IsDefined(scenario)) throw Rejected();
             var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, generation);
             LinuxProcessData.RequireExpected(identity, identity.Stat.Pid, identity.Uids.Real,
                 identity.Gids.Real, unit, LinuxProcessSamplingRole.Worker);
@@ -109,7 +120,10 @@ internal sealed class LinuxFailedSettlementObservation
             token.ThrowIfCancellationRequested();
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schema = "issue779-n11-original-failed-settlement-v1", generation = generation.ToString("N"),
+                schema = scenario == LinuxFailedSettlementScenario.WorkerStall
+                    ? "issue779-n11-original-failed-settlement-v1"
+                    : "issue779-cancellation-original-failed-settlement-v1",
+                generation = generation.ToString("N"),
                 worker_unit = unit.Value,
                 process = new { pid = identity.Stat.Pid, starttime_ticks = identity.Stat.StartTimeTicks,
                     uid4 = Ids(identity.Uids), gid4 = Ids(identity.Gids), control_group = identity.ControlGroup },

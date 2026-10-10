@@ -209,20 +209,38 @@ internal static class LinuxEmptyObservationExecution
                 catch (Exception error) when (Recoverable(error))
                 {
                     Record(error); cleanupFailed = true;
-                    // A pre-READY worker failure cannot satisfy the kernel/custody projection above.
-                    // Retain only the already joined original pump data in the fixed private root log.
-                    // This never replaces the first fault or upgrades native settlement/cleanup.
+                    // A joined nonzero worker can lack the successful negative-kernel projection.
+                    // Retain the original post-pump unit/group and lifetime state if READY committed.
+                    // A pre-READY or otherwise unjoined failure keeps the existing pump-only fallback.
+                    // Neither diagnostic replaces the first fault or upgrades settlement/cleanup.
                     if (!cancellationProjectionWriteAttempted) try
                     {
                         owner.RequireControlIdentity(cleanupToken);
-                        var diagnostic = worker.CaptureJoinedOutputDiagnostic(owner.RunId);
+                        var diagnostic = worker.CaptureFailedSettlementObservation(input, owner, accounts,
+                            workspace, server, cleanupToken).Bytes;
+                        cancellationProjectionWriteAttempted = true; // A partial write forbids a second large record.
                         using var stderr = Console.OpenStandardError();
                         await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
                         await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
                         await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
                         owner.RequireControlIdentity(cleanupToken);
                     }
-                    catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { Record(diagnosticError); }
+                    catch (Exception diagnosticError) when (Recoverable(diagnosticError))
+                    {
+                        Record(diagnosticError);
+                        if (!cancellationProjectionWriteAttempted) try
+                        {
+                            owner.RequireControlIdentity(cleanupToken);
+                            var diagnostic = worker.CaptureJoinedOutputDiagnostic(owner.RunId);
+                            cancellationProjectionWriteAttempted = true;
+                            using var stderr = Console.OpenStandardError();
+                            await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
+                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                            await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                            owner.RequireControlIdentity(cleanupToken);
+                        }
+                        catch (Exception outputError) when (Recoverable(outputError)) { Record(outputError); }
+                    }
                 }
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)

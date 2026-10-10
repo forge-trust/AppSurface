@@ -579,3 +579,16 @@ its server owner guard grants no worker physical settlement or filesystem custod
 failed/false settlement data after the original lifetime and pumps join. Focused local checks passed 87
 executions with zero compiler warnings/errors. The deliberate stall and actual Linux containment/custody
 remain required; no native checkpoint or Linux result is claimed.
+
+
+### 2026-10-10: cancellation fallback finalization evidence
+
+The latest private N08 run retained the actual caller and lifecycle cancellation plus owned-work join,
+but did not establish the complete root settlement/custody control. The private fallback now uses the
+[original failed-settlement codec](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-n11-failed-settlement-observation)
+when committed READY and the original joins exist. It copies monitor, lifetime, pending start, terminal,
+cgroup and charged-pump data from the original holders before account/custody closure. Its new fixed
+cancellation schema preserves false settlement and creates no native authority or acceptance. A failed
+capture before output retains the existing pump-only fallback; a partial attempted write forbids a
+second large diagnostic. The original failure, native success/custody guards, quotas and deadline remain
+unchanged. Local codec/build checks and the next genuine Linux result must be recorded separately.
