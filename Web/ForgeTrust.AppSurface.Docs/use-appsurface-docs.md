@@ -283,8 +283,9 @@ curl -sS http://127.0.0.1:5180/docs/a/stable/search-index.json | rg 'AGENTS.md|/
 curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:5180/docs/a/stable/artifacts/issue-728-test-efficiency/candidate-inventory
 ```
 
-Inspect the returned page's `<link rel="canonical">` and Open Graph URL for the exact `/docs/v/{version}` target;
-the first command prints headers, not HTML. The POST should return `405` with `Allow: GET, HEAD`; the final request
+Inspect the returned page's `<link rel="canonical">` for the exact `/docs/v/{version}` target and check the Open Graph
+URL when the selected archived page contains one. The stable fixture's `AGENTS.md` page has no Open Graph URL element.
+The first command prints headers, not HTML. The POST should return `405` with `Allow: GET, HEAD`; the final request
 should print `404` even though the recommended preview contains the document.
 
 #### Named host registration and middleware order

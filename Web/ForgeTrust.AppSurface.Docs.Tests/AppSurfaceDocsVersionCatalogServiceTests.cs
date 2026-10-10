@@ -143,6 +143,83 @@ public sealed class AppSurfaceDocsVersionCatalogServiceTests : IDisposable
         Assert.Null(alias.TargetVersion);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void GetCatalog_ShouldAcceptConfiguredJsonCommentsAndTrailingCommas(bool includeComment, bool includeTrailingComma)
+    {
+        var exactTree = CreateExactTree("json-options-alias-target");
+        var relativeTree = Path.GetRelativePath(_tempDirectory, exactTree);
+        var manifestDigest = WriteReleaseManifest(exactTree);
+        var json = $$"""
+            {
+              "recommendedVersion": "1.2.0",
+              "versions": [{ "version": "1.2.0", "exactTreePath": {{JsonSerializer.Serialize(relativeTree)}}, "releaseManifestSha256": "{{manifestDigest}}" }],
+              "aliases": [{ "name": "stable", "version": "1.2.0" }]
+            }
+            """;
+
+        if (includeComment)
+        {
+            json = json.Insert(json.IndexOf('{') + 1, "\n  // accepted catalog comment");
+        }
+
+        if (includeTrailingComma)
+        {
+            json = json.Insert(json.LastIndexOf('}'), ",");
+        }
+
+        var catalogPath = WriteRawCatalogJson(json);
+        var catalog = CreateCatalogService(catalogPath).GetCatalog();
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalog.Status);
+        Assert.True(catalog.IsAliasNamespaceActive);
+        Assert.True(catalog.RecommendedVersion?.IsAvailable);
+        Assert.Equal("1.2.0", catalog.RecommendedVersion?.Version);
+        Assert.Same(catalog.RecommendedVersion, Assert.Single(catalog.Versions));
+        var alias = Assert.Single(catalog.Aliases);
+        Assert.Equal("stable", alias.Name);
+        Assert.True(alias.IsAvailable);
+        Assert.Same(catalog.RecommendedVersion, alias.TargetVersion);
+    }
+
+    [Theory]
+    [InlineData(63, true)]
+    [InlineData(64, false)]
+    public void GetCatalog_ShouldApplyInheritedMaximumJsonDepthWithoutPartialPublication(int nestedArrayLevels, bool expectedResolved)
+    {
+        var exactTree = CreateExactTree("json-depth-alias-target");
+        var relativeTree = Path.GetRelativePath(_tempDirectory, exactTree);
+        var manifestDigest = WriteReleaseManifest(exactTree);
+        var nestedArrays = new string('[', nestedArrayLevels) + "0" + new string(']', nestedArrayLevels);
+        var json = $$"""
+            {"recommendedVersion":"1.2.0","versions":[{"version":"1.2.0","exactTreePath":{{JsonSerializer.Serialize(relativeTree)}},"releaseManifestSha256":"{{manifestDigest}}"}],"aliases":[{"name":"stable","version":"1.2.0"}],"ignored":{{nestedArrays}}}
+            """;
+        var catalogPath = WriteRawCatalogJson(json);
+
+        var catalog = CreateCatalogService(catalogPath).GetCatalog();
+
+        if (expectedResolved)
+        {
+            Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalog.Status);
+            Assert.True(catalog.IsAliasNamespaceActive);
+            Assert.True(catalog.RecommendedVersion?.IsAvailable);
+            Assert.Single(catalog.Versions);
+            var alias = Assert.Single(catalog.Aliases);
+            Assert.Equal("stable", alias.Name);
+            Assert.True(alias.IsAvailable);
+            Assert.Same(catalog.RecommendedVersion, alias.TargetVersion);
+            return;
+        }
+
+        Assert.Equal(AppSurfaceDocsResolvedVersionCatalogStatus.Unavailable, catalog.Status);
+        Assert.False(catalog.IsAliasNamespaceActive);
+        Assert.Empty(catalog.Aliases);
+        Assert.Empty(catalog.Versions);
+        Assert.Null(catalog.RecommendedVersion);
+    }
+
     [Fact]
     public void Constructor_ShouldThrow_WhenDependenciesAreNull()
     {

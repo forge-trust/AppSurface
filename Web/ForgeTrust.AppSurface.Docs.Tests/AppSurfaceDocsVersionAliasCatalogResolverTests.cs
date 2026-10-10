@@ -8,8 +8,15 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 public sealed class AppSurfaceDocsVersionAliasCatalogResolverTests
 {
     [Theory]
+    [InlineData(null, false, "")]
+    [InlineData("", false, "")]
+    [InlineData("   ", false, "")]
     [InlineData("PREVIEW", true, "preview")]
     [InlineData(" x ", true, "x")]
+    [InlineData("9", true, "9")]
+    [InlineData("v1.stable", true, "v1.stable")]
+    [InlineData("v1_stable", true, "v1_stable")]
+    [InlineData("v1-stable", true, "v1-stable")]
     [InlineData(".bad", false, "")]
     [InlineData("bad-", false, "")]
     [InlineData("two words", false, "")]

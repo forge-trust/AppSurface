@@ -647,7 +647,7 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
         var preview = Tree("preview", "preview-page", true);
         if (collisionFile is not null)
         {
-            var path = Path.Join(preview, collisionFile);
+            var path = TestPathUtils.PathUnder(preview, collisionFile);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, "<html>namespace collision</html>");
         }
@@ -700,7 +700,7 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
                 sha256 = Hash(File.ReadAllBytes(path))
             }).OrderBy(file => file.path).ToArray();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new { schema = AppSurfaceDocsReleaseArchiveVerifier.Schema, files });
-        File.WriteAllBytes(Path.Join(root, AppSurfaceDocsReleaseArchiveVerifier.FileName), bytes);
+        File.WriteAllBytes(TestPathUtils.PathUnder(root, AppSurfaceDocsReleaseArchiveVerifier.FileName), bytes);
         return Hash(bytes);
     }
 

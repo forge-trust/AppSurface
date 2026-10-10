@@ -58,10 +58,38 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         Assert.True(version.IsAvailable);
     }
 
-    [Fact]
-    public void Versions_ShouldProjectAliasStatesWithoutLeakingHiddenOrInvalidMetadata()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Versions_ShouldProjectAliasStatesWithoutLeakingHiddenOrInvalidMetadata(bool hiddenDuplicateFirst)
     {
         var healthyTree = CreateExactTree("1.0.0");
+        var aliasesJson = """
+            [
+              { "name": "preview", "version": "1.0.0", "label": "<script>preview</script>", "summary": "<img src=x onerror=alert(1)>" },
+              { "name": "broken", "version": "2.0.0", "label": "Broken", "summary": "Public target unavailable" },
+              { "name": "hidden-target", "version": "3.0.0", "label": "Hidden", "summary": "Must not leak" },
+              { "name": "unknown-target", "version": "9.9.9", "label": "Unknown", "summary": "No target identifier" },
+              { "name": "invalid-public", "version": 42, "label": "Recovered secret label", "summary": "Recovered secret summary", "visibility": "Public" },
+              { "name": "duplicate", "version": "1.0.0", "label": "Public duplicate label", "summary": "Public duplicate summary", "visibility": "Public" },
+              { "name": "duplicate", "version": "3.0.0", "label": "Hidden duplicate label", "summary": "Hidden duplicate summary", "visibility": "Hidden" },
+              { "name": "hidden-duplicate", "version": "1.0.0", "visibility": "Hidden" },
+              { "name": "hidden-duplicate", "version": "3.0.0", "visibility": "Hidden" },
+              { "name": "invalid-duplicate", "version": 42, "visibility": "Public", "summary": "Must stay hidden" },
+              { "name": "invalid-duplicate", "version": 43, "visibility": "Public", "summary": "Also stays hidden" },
+              { "name": "invalid-default-visibility", "version": 42, "summary": "Missing explicit visibility" },
+              { "name": "bad-visibility", "version": 42, "label": "Bad", "visibility": "unknown" }
+            ]
+            """;
+        if (hiddenDuplicateFirst)
+        {
+            var aliases = JsonNode.Parse(aliasesJson)!.AsArray();
+            var publicDuplicate = aliases[5]!.DeepClone();
+            var hiddenDuplicate = aliases[6]!.DeepClone();
+            aliases[5] = hiddenDuplicate;
+            aliases[6] = publicDuplicate;
+            aliasesJson = aliases.ToJsonString();
+        }
         var catalogPath = WriteCatalogWithAliases(
             new AppSurfaceDocsVersionCatalog
             {
@@ -90,23 +118,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
                     }
                 ]
             },
-            """
-            [
-              { "name": "preview", "version": "1.0.0", "label": "<script>preview</script>", "summary": "<img src=x onerror=alert(1)>" },
-              { "name": "broken", "version": "2.0.0", "label": "Broken", "summary": "Public target unavailable" },
-              { "name": "hidden-target", "version": "3.0.0", "label": "Hidden", "summary": "Must not leak" },
-              { "name": "unknown-target", "version": "9.9.9", "label": "Unknown", "summary": "No target identifier" },
-              { "name": "invalid-public", "version": 42, "label": "Recovered secret label", "summary": "Recovered secret summary", "visibility": "Public" },
-              { "name": "duplicate", "version": "1.0.0", "label": "Public duplicate label", "summary": "Public duplicate summary", "visibility": "Public" },
-              { "name": "duplicate", "version": "3.0.0", "label": "Hidden duplicate label", "summary": "Hidden duplicate summary", "visibility": "Hidden" },
-              { "name": "hidden-duplicate", "version": "1.0.0", "visibility": "Hidden" },
-              { "name": "hidden-duplicate", "version": "3.0.0", "visibility": "Hidden" },
-              { "name": "invalid-duplicate", "version": 42, "visibility": "Public", "summary": "Must stay hidden" },
-              { "name": "invalid-duplicate", "version": 43, "visibility": "Public", "summary": "Also stays hidden" },
-              { "name": "invalid-default-visibility", "version": 42, "summary": "Missing explicit visibility" },
-              { "name": "bad-visibility", "version": 42, "label": "Bad", "visibility": "unknown" }
-            ]
-            """);
+            aliasesJson);
         using (var serializedCatalog = JsonDocument.Parse(File.ReadAllText(catalogPath)))
         {
             Assert.Equal(13, serializedCatalog.RootElement.GetProperty("aliases").GetArrayLength());

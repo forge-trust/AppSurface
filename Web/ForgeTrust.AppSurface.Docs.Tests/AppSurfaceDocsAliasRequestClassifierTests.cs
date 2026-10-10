@@ -8,6 +8,8 @@ public sealed class AppSurfaceDocsAliasRequestClassifierTests
 {
     [Theory]
     [InlineData("/docs/a/stable/guide", "/docs/a/stable/guide", "", "/docs/a", "stable", true)]
+    [InlineData("/docs/a/stable", "", "", "/docs/a", null, false)]
+    [InlineData("/docs/a/stable", "/docs/a/stable", "/", "/docs/a", "stable", true)]
     [InlineData("/docs/a/STABLE/guide?x=1", "/docs/a/STABLE/guide", "", "/docs/a", "stable", true)]
     [InlineData("/docs/%61/stable/guide", "/docs/a/stable/guide", "", "/docs/a", "stable", true)]
     [InlineData("/docs/a/stable/hello%20world", "/docs/a/stable/hello world", "", "/docs/a", "stable", true)]
