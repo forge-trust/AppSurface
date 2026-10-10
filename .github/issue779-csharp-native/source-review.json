@@ -1,0 +1,76 @@
+{
+  "capture_receipt_sha256": "fdcc9634c5028133440a013926499da50150849db5d5607843db17005b2de725",
+  "composition_review_pending_at_preparation": true,
+  "historical_local_validation_receipt_sha256": "893562ef63c067ff9dd5879fd34130b256fd9c8bbec3355ddf89bd571d001c9b",
+  "historical_source_review_sha256": "5b6f8d53c4b973975bd2e1727e5a60909e8e3427068a3e44495cb18406ece8e8",
+  "local_validation_counter_correction_sha256": "8799270f9f33fe14b5a08bfbf32e2276b942435a69919bd002148cd0f916201c",
+  "local_validation_passed": 201,
+  "local_validation_receipt_sha256": "136b4ad720761e7253591712a48644f53ab6039e503f81fd853f32b5f7b70920",
+  "native_acceptance": false,
+  "native_execution": false,
+  "native_fixture_cases_pending": [
+    "N04"
+  ],
+  "parent_commit": "5b5a2af696741203b1cb5ce200182452b5f1fcb7",
+  "pre_admission_validation": {
+    "compiler_diagnostics": [],
+    "helper_compile_exit": 0,
+    "latest_targeted_tests_passed": 31,
+    "native_credit": false,
+    "native_execution": false,
+    "prior_tests_passed": 201,
+    "retry_receipt_sha256": "5e9af6350270b65ecb1359b5bbba98567e453cb036d101d5c6bc84a543f571ff",
+    "schema": "issue779-n04-preparation-final-local-v2",
+    "source_ready_path": "/private/tmp/issue779-csharp-n04-pre-admission-core-v2/source-ready-final.json",
+    "source_ready_sha256": "88d0964166c6acad961e05015b47a0f2e2fbe18cf0d4c3715f3ef8e24e49078e"
+  },
+  "production_registry_enabled": false,
+  "qualified_alias_retry_preparation": {
+    "alias_port_peer": {
+      "path": "/private/tmp/issue779-csharp-n04-n07-alias-port-source-peer-v1/review.json",
+      "sha256": "f378553571f9971aff0f4cc8755e1cc756b861289985d1f62d609b2a3a588faf"
+    },
+    "candidate_linux_qualification": {
+      "receipt_path": "/private/tmp/issue779-csharp-n04-alias-port-artifact-analysis-v1/selected/qualification.json",
+      "receipt_sha256": "4495dc5bf40998b890fca5c10bf8286ea89449ddbc07ea70be8496df548f7d5c",
+      "review_path": "/private/tmp/issue779-csharp-n04-qualified-alias-retry-composition-v2/main-authenticated-qualification-review.json",
+      "review_sha256": "7ea187529e5456114c0a00f8fdb49d61f2b9e4dd7e47d8b51834b45008b5342d"
+    },
+    "execution_ready": true,
+    "fixed_fixture_sha256": "4b6bb40550acc29370e0e6e72889e3868ae283e3ca062d81f1e8aa733043736f",
+    "harness_parent": "03b6c18a71601875ba2b361e76ec0406f5c933f9",
+    "native_acceptance": false,
+    "prior_failure_scope": "prelaunch native-life guard; no current retry execution",
+    "schema": "issue779-n04-qualified-alias-retry-metadata-v1"
+  },
+  "reviewed_source_release_sha256": "40c8c08c8081d676f23301acd808cececc4e17a8b185561500b8562288ee1c96",
+  "root_trust_issuer": false,
+  "runtime_receipts": null,
+  "schema": "issue779-reviewed-csharp-candidate-v1",
+  "source_commit": "3c23e2ad3bcc1186c670cf9e4240b5154c3518d4",
+  "source_count": 2829,
+  "source_map_sha256": "19b5293c99dd9efd4057682af76f88e469a5e19c851b42ea6bde860a5f885034",
+  "source_peer_reviews": {
+    "csharp_peer": {
+      "path": "/private/tmp/issue779-csharp-n04-genuine-peer-probe-review-v1/review.json",
+      "sha256": "3dc2d4e4066b60fb533292ff679f8588e842d397d63bca508cbf085f10847653"
+    },
+    "helper_deployment": {
+      "path": "/private/tmp/issue779-csharp-n04-helper-deployment-review-v1/review.json",
+      "sha256": "8ce340c987cb3d5a7b635c56100f255685316433a002ffb3d41d9022e3f17ad4"
+    },
+    "helper_policy": {
+      "path": "/private/tmp/issue779-csharp-n04-helper-policy-review-v1/review.json",
+      "sha256": "481e8cbf6eedf5157b4fc55a70bc8cb90b6c9632a7efe40b35718ca55f743702"
+    },
+    "pipeline": {
+      "path": "/private/tmp/issue779-csharp-n04-runner-helper-integration-review-v1/review.json",
+      "sha256": "a46a85170fc3492f5f74ea4296e884f3b49dad82b032d14102e220235114ebec"
+    },
+    "pre_admission_incremental": {
+      "path": "/private/tmp/issue779-csharp-n04-pre-admission-peer-v2/incremental-review.json",
+      "sha256": "adfd292b6853a06333eb7b4036d1445dbdf7ab9866269d98f3635ce295be41e2"
+    }
+  },
+  "source_tree": "5a6314e2134b01d7e516ea5dd935ad9fbd2a9004"
+}
