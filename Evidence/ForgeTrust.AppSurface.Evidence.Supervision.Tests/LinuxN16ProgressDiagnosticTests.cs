@@ -1,0 +1,95 @@
+#if EVIDENCE_PRIVATE_N16
+using System.Text;
+using System.Text.Json;
+using ForgeTrust.AppSurface.Evidence.Supervision;
+
+namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
+
+/// <summary>Pure N16 progress-record data controls; these tests acquire no native owner or execution lease.</summary>
+public sealed class LinuxN16ProgressDiagnosticTests
+{
+    private static LinuxN16ProgressDiagnostic.Snapshot Snapshot(LinuxN16ProgressDiagnostic.Milestone milestone,
+        long? elapsedMilliseconds = null, bool progress = false) => new(milestone, elapsedMilliseconds,
+        progress, progress, progress, progress, progress, progress, progress, progress, progress, progress);
+
+    /// <summary>An unobserved milestone has a null duration and carries no authority.</summary>
+    [Fact]
+    public void UnknownMilestoneUsesNullDurationAndFixedMetadataOnly()
+    {
+        var bytes = LinuxN16ProgressDiagnostic.EncodeDetached(Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown));
+        using var json = JsonDocument.Parse(bytes);
+        var root = json.RootElement;
+
+        Assert.Equal("issue779-n16-progress-diagnostic-v1", root.GetProperty("schema").GetString());
+        Assert.Equal("Unknown", root.GetProperty("last_milestone").GetString());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("last_milestone_elapsed_ms").ValueKind);
+        Assert.False(root.GetProperty("native_authority").GetBoolean());
+        Assert.False(root.GetProperty("native_acceptance").GetBoolean());
+        Assert.Equal(15, root.EnumerateObject().Count());
+        Assert.InRange(bytes.Length, 1, LinuxN16ProgressDiagnostic.MaximumJsonBytes);
+        Assert.DoesNotContain("canary", Encoding.UTF8.GetString(bytes));
+    }
+
+    /// <summary>Observed flags and a fixed closed milestone survive encoding without adding caller fields.</summary>
+    [Fact]
+    public void ObservedSnapshotContainsOnlyClosedMilestoneFlags()
+    {
+        var bytes = LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.ExitCommitted, 1_234, progress: true));
+        using var json = JsonDocument.Parse(bytes);
+        var root = json.RootElement;
+
+        Assert.Equal("ExitCommitted", root.GetProperty("last_milestone").GetString());
+        Assert.Equal(1_234, root.GetProperty("last_milestone_elapsed_ms").GetInt64());
+        Assert.True(root.GetProperty("accepted_write_committed").GetBoolean());
+        Assert.True(root.GetProperty("wait_write_committed").GetBoolean());
+        Assert.True(root.GetProperty("exit_committed").GetBoolean());
+        Assert.Equal(JsonValueKind.False, root.GetProperty("native_authority").ValueKind);
+        Assert.Equal(JsonValueKind.False, root.GetProperty("native_acceptance").ValueKind);
+        Assert.DoesNotContain("\"path\"", Encoding.UTF8.GetString(bytes));
+        Assert.InRange(bytes.Length, 1, LinuxN16ProgressDiagnostic.MaximumJsonBytes);
+    }
+
+    /// <summary>Elapsed time uses the supplied monotonic frequency and rounds down to whole milliseconds.</summary>
+    [Fact]
+    public void MonotonicElapsedMillisecondsUsesBoundedTickArithmetic()
+    {
+        Assert.Equal(2_500, LinuxN16ProgressDiagnostic.ElapsedMilliseconds(100, 125, 10));
+        Assert.Equal(0, LinuxN16ProgressDiagnostic.ElapsedMilliseconds(100, 100, 10));
+    }
+
+    /// <summary>Reversed or invalid monotonic samples cannot be encoded as a plausible duration.</summary>
+    [Theory]
+    [InlineData(100, 99, 10)]
+    [InlineData(100, 100, 0)]
+    [InlineData(0, 100, 10)]
+    public void InvalidMonotonicSamplesReject(long start, long end, long frequency) =>
+        Assert.Throws<InvalidOperationException>(() =>
+            LinuxN16ProgressDiagnostic.ElapsedMilliseconds(start, end, frequency));
+
+    /// <summary>Invalid closed stages and inconsistent unknown/duration pairs fail closed.</summary>
+    [Fact]
+    public void InvalidStageAndUnknownDurationMismatchReject()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            LinuxN16ProgressDiagnostic.EncodeDetached(null!));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot((LinuxN16ProgressDiagnostic.Milestone)int.MaxValue)));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown, elapsedMilliseconds: 0)));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.BodyEntered)));
+    }
+
+    /// <summary>Elapsed values have a fixed upper bound independent of any caller-provided budget.</summary>
+    [Fact]
+    public void ElapsedValueAboveFixedBoundRejects()
+    {
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.WorkClaimed,
+                LinuxN16ProgressDiagnostic.MaximumElapsedMilliseconds + 1)));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
+            1, 86_400_001_001, 1_000));
+    }
+}
+#endif

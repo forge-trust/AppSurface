@@ -65,6 +65,7 @@ internal static class LinuxEmptyObservationExecution
         uint cancellationResultsGid = 0;
 #if EVIDENCE_PRIVATE_N16
         var acceptedWorkProjectionWritten = false;
+        var acceptedWorkProjectionWriteAttempted = false;
         uint acceptedWorkResultsGid = 0;
 #endif
         var cleanupToken = CancellationToken.None;
@@ -190,6 +191,7 @@ internal static class LinuxEmptyObservationExecution
                     var kernel = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
                     acceptedWorkResultsGid = accounts.RequireControlOwnedBy(owner, cleanupToken).ResultsGid;
                     cleanupToken.ThrowIfCancellationRequested();
+                    acceptedWorkProjectionWriteAttempted = true;
                     using (var stderr = Console.OpenStandardError())
                     {
                         foreach (var bytes in new[] { control, kernel.Bytes })
@@ -202,6 +204,23 @@ internal static class LinuxEmptyObservationExecution
                     cleanupToken.ThrowIfCancellationRequested();
                     owner.RequireControlIdentity(cleanupToken);
                     acceptedWorkProjectionWritten = true;
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
+#if EVIDENCE_PRIVATE_N16
+            // A failed incomplete N16 projection gets one bounded snapshot after the original server join.
+            // Complete accepted-work records already carry terminal flags, so this adds no duplicate line.
+            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && (failed || cleanupFailed)
+                && !acceptedWorkProjectionWriteAttempted && server is not null && serverTask?.IsCompleted == true)
+                try
+                {
+                    var progress = server.CaptureN16ProgressDiagnostic();
+                    if (progress.Length is 0 or > LinuxN16ProgressDiagnostic.MaximumJsonBytes) throw Rejected();
+                    cleanupToken.ThrowIfCancellationRequested();
+                    using var stderr = Console.OpenStandardError();
+                    await stderr.WriteAsync(progress.AsMemory(), cleanupToken).ConfigureAwait(false);
+                    await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), cleanupToken).ConfigureAwait(false);
+                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #endif

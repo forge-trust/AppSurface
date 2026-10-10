@@ -1,3 +1,6 @@
+#if EVIDENCE_PRIVATE_N16
+using System.Diagnostics;
+#endif
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -58,6 +61,9 @@ internal sealed class LinuxEmptyObservationControlServer
     private int _n16StopCommitted;
     private int _n16WaitCommitted;
     private int _n16ControlsOverlapped;
+#if EVIDENCE_PRIVATE_N16
+    private LinuxN16ProgressMark? _n16LastProgress;
+#endif
 #endif
 
     /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
@@ -97,6 +103,35 @@ internal sealed class LinuxEmptyObservationControlServer
         return bytes;
     }
 #endif
+#endif
+
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Copies only existing N16 server flags and the age of its last observed original milestone.</summary>
+    /// <remarks>This method performs no owner, admission, custody, wait, token, or kernel operation.</remarks>
+    internal byte[] CaptureN16ProgressDiagnostic()
+    {
+        var mark = Volatile.Read(ref _n16LastProgress);
+        long? elapsed = mark is null ? null : LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
+            mark.Timestamp, Stopwatch.GetTimestamp(), Stopwatch.Frequency);
+        return LinuxN16ProgressDiagnostic.EncodeDetached(new(
+            mark?.Milestone ?? LinuxN16ProgressDiagnostic.Milestone.Unknown,
+            elapsed,
+            Volatile.Read(ref _n16WorkClaimed) == 1,
+            _n16BodyEntered.Task.IsCompletedSuccessfully,
+            Volatile.Read(ref _n16AcceptedCommitted) == 1,
+            Volatile.Read(ref _n16ResponseCommitted) == 1,
+            _n16StopStarted.Task.IsCompletedSuccessfully,
+            _n16WaitStarted.Task.IsCompletedSuccessfully,
+            Volatile.Read(ref _n16ControlsOverlapped) == 1,
+            Volatile.Read(ref _n16StopCommitted) == 1,
+            Volatile.Read(ref _n16WaitCommitted) == 1,
+            _exitCommitted.Task.IsCompletedSuccessfully));
+    }
+
+    private void ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone milestone) =>
+        Volatile.Write(ref _n16LastProgress, new(milestone, Stopwatch.GetTimestamp()));
+
+    private sealed record LinuxN16ProgressMark(LinuxN16ProgressDiagnostic.Milestone Milestone, long Timestamp);
 #endif
 
     /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
@@ -543,7 +578,12 @@ internal sealed class LinuxEmptyObservationControlServer
                 var stopTask = _sequence.StopAsync(CleanupToken());
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
+                {
                     _n16StopStarted.TrySetResult();
+#if EVIDENCE_PRIVATE_N16
+                    ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.StopStarted);
+#endif
+                }
 #endif
                 await stopTask.ConfigureAwait(false);
             }
@@ -558,7 +598,14 @@ internal sealed class LinuxEmptyObservationControlServer
                     lock (_n16Gate)
                         if (_n16Work?.IsCompleted == false && _ledger.ActiveWorkloads == 1 && _ledger.ActiveControls >= 3)
                             Volatile.Write(ref _n16ControlsOverlapped, 1);
+#if EVIDENCE_PRIVATE_N16
+                    if (Volatile.Read(ref _n16ControlsOverlapped) == 1)
+                        ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.ControlsOverlapped);
+#endif
                     _n16WaitStarted.TrySetResult();
+#if EVIDENCE_PRIVATE_N16
+                    ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.WaitStarted);
+#endif
                     await _n16StopStarted.Task.WaitAsync(io.Token).ConfigureAwait(false);
                 }
 #endif
@@ -575,6 +622,9 @@ internal sealed class LinuxEmptyObservationControlServer
                     {
                         stage = LinuxControlFailureStage.RequestClassify;
                         if (Interlocked.Exchange(ref _n16WorkClaimed, 1) != 0) throw Rejected();
+#if EVIDENCE_PRIVATE_N16
+                        ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.WorkClaimed);
+#endif
                         var registration = _ledger.BeginWorkload();
                         _n16Work = RunN16BlockedWorkAsync(registration);
                     }
@@ -584,6 +634,9 @@ internal sealed class LinuxEmptyObservationControlServer
                 // hold the reply-order gate while the actual workload/request remains blocked.
                 await connection.WriteAcceptedBlockedWorkAsync(io.Token).ConfigureAwait(false);
                 Volatile.Write(ref _n16AcceptedCommitted, 1);
+#if EVIDENCE_PRIVATE_N16
+                ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.AcceptedWriteCommitted);
+#endif
                 if (EvidenceNativeQualification.OwnerDeathAcceptedWorkEnabled)
                 {
                     var frame = LinuxOwnerDeathPhaseFrame.Create();
@@ -676,9 +729,19 @@ internal sealed class LinuxEmptyObservationControlServer
             if (isCleanupRequest) RequireCleanupBound();
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
             if (request is EvidenceAcceptedBlockedWorkControlRequest)
+            {
                 Volatile.Write(ref _n16ResponseCommitted, 1);
+#if EVIDENCE_PRIVATE_N16
+                ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.ResponseCommitted);
+#endif
+            }
             else if (request is EvidenceStopControlRequest && Volatile.Read(ref _n16WorkClaimed) == 1)
+            {
                 Volatile.Write(ref _n16StopCommitted, 1);
+#if EVIDENCE_PRIVATE_N16
+                ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.StopWriteCommitted);
+#endif
+            }
 #endif
             if (claim is not null)
             {
@@ -686,7 +749,12 @@ internal sealed class LinuxEmptyObservationControlServer
                 _sequence.CompleteWrite(claim, true);
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (claim.Operation == EvidenceControlOperation.Wait && claim.Positive && Volatile.Read(ref _n16WorkClaimed) == 1)
+                {
                     Volatile.Write(ref _n16WaitCommitted, 1);
+#if EVIDENCE_PRIVATE_N16
+                    ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.WaitWriteCommitted);
+#endif
+                }
 #endif
                 var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
                 if (readyCommitted)
@@ -729,7 +797,14 @@ internal sealed class LinuxEmptyObservationControlServer
             stage = LinuxControlFailureStage.CleanupRegistrationClose;
             cleanupCancellation.Dispose();
             stage = LinuxControlFailureStage.ExitCommit;
-            if (committedExit) _exitCommitted.TrySetResult();
+            if (committedExit)
+            {
+                _exitCommitted.TrySetResult();
+#if EVIDENCE_PRIVATE_N16
+                if (Volatile.Read(ref _n16WorkClaimed) == 1)
+                    ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.ExitCommitted);
+#endif
+            }
         }
         }
         catch (Exception error) when (Recoverable(error))
@@ -786,6 +861,9 @@ internal sealed class LinuxEmptyObservationControlServer
     private async Task RunN16BlockedWorkAsync(SupervisionWorkRegistry.Workload registration)
     {
         _n16BodyEntered.TrySetResult();
+#if EVIDENCE_PRIVATE_N16
+        ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.BodyEntered);
+#endif
         try { await _n16Release.Task.ConfigureAwait(false); }
         finally { registration.Complete(); }
     }
