@@ -1346,6 +1346,31 @@ and numeric UID/GID absent in both NSS lookup directions. The original descripto
 pre-transfer identities; comparing their old UID/GID to root-owned terminal nodes would reject valid
 cleanup. Missing cleanup data, mutable terminal nodes, present accounts or expired checks reject.
 
+### Private N11 failed-settlement observation
+
+The internal [LinuxFailedSettlementObservation](LinuxFailedSettlementObservation.cs) is detached, bounded
+failure data, not a completion receipt. Its JSON is capped at 64 KiB and exact combined raw stdout/stderr
+export at 32 KiB. Raw bytes and hashes are present only when both original pumps joined with EOF, exact
+received/retained counts, no discard and no stream/output failure; otherwise raw/hash fields are null and
+the recorded counts and closed failure categories remain. The actual lifetime failure and
+`PhysicallySettled` values are copied without being cleared, and emission cannot change quarantine, custody,
+account closure or a failed result.
+
+The compile-selected N11 emitter is skipped by ordinary `None`. It runs after the original server and
+worker join attempts and before filesystem custody/account closure, using only the original teardown token.
+Terminal and cgroup values come from the existing post-pump finalization reads; no additional process or
+cgroup sampling, timer, stop, or deadline reset is performed. Capture also requires the original
+reference-equal holders, committed READY and closed server I/O. The descriptor accessor calls the
+[server owner guard](LinuxEmptyObservationControlServer.cs), which checks completed I/O and handler
+joins, closed workload/control admission and the original owner references. It does not call the worker
+physical-custody guard. Failed settlement may therefore be retained as data when those original joins
+finished; `PhysicallySettled` may remain false. A missing join, READY event or authenticated owner rejects
+capture. Neither this descriptor data nor the observation releases custody or accounts.
+
+Focused local checks passed 87 executions: 59 codec/lifetime/pending-start controls, one N11 build-selection
+control and 27 ordinary qualification/protected CLI controls. These checks establish local data and
+procedure behavior; the deliberate stall and actual Linux stop/group/pump/custody evidence remain unverified.
+
 
 ### Private pre-READY worker failure diagnostics
 

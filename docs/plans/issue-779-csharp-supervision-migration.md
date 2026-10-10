@@ -572,4 +572,10 @@ Integrated the N11 synchronous stall into the common source graph using the comp
 documents its placement after authenticated READY inside the existing tracked Admission callback.
 Ordinary `None` continues through the normal protected input resolver. The deliberate `Thread.Sleep`
 was not run locally, and this source-only integration establishes no native failure-settlement result,
-checkpoint completion or consumer proof. The N11 failed-settlement emitter/codec remains separate work.
+checkpoint completion or consumer proof. The N11 failed-settlement codec and compile-selected failure-only
+emitter are now present in the [Supervision source](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-n11-failed-settlement-observation).
+Capture requires the original authenticated server's committed READY and completed I/O/handler joins;
+its server owner guard grants no worker physical settlement or filesystem custody. The observation preserves
+failed/false settlement data after the original lifetime and pumps join. Focused local checks passed 87
+executions with zero compiler warnings/errors. The deliberate stall and actual Linux containment/custody
+remain required; no native checkpoint or Linux result is claimed.

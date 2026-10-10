@@ -39,6 +39,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private TaskCompletionSource? _dispose;
     private LinuxUnitProperties? _naturalTerminal;
     private SupervisionOutputReceipt? _output;
+    // Retained only from the existing post-pump finalization reads; these values do not affect settlement.
+    private LinuxUnitProperties? _failedSettlementUnit;
+    private LinuxCgroupSample? _failedSettlementGroup;
+    private bool _failedSettlementGroupAfterPumps;
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
     private readonly SupervisionDescendantObservation _descendant = new();
     private LinuxN12LeaderExitObservation? _leaderExitObservation;
@@ -223,6 +227,46 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         var streams = LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached(owner.RunId, output, token);
         owner.RequireControlIdentity(token);
         return (kernel, streams);
+    }
+
+    /// <summary>Copies failure-only data after the original worker and server owners have joined.</summary>
+    /// <param name="input">Reference-equal protected launch input.</param>
+    /// <param name="owner">Original authenticated owner and teardown token source.</param>
+    /// <param name="accounts">Reference-equal retained accounts.</param>
+    /// <param name="workspace">Reference-equal workspace retaining the sealed descriptor.</param>
+    /// <param name="server">Original server with committed READY and closed handlers and I/O.</param>
+    /// <param name="token">Original root teardown token, without a renewed allowance.</param>
+    /// <returns>Detached bounded data that preserves failure and settlement flags without granting custody or success.</returns>
+    /// <exception cref="EvidenceAdmissionException">An original binding, READY event or join prerequisite is missing.</exception>
+    /// <exception cref="OperationCanceledException">The original teardown token is cancelled.</exception>
+    /// <remarks>
+    /// Terminal and cgroup fields come only from the existing post-pump finalization reads retained by this
+    /// holder. This method performs no process, cgroup, timer or stop operation. It reports PhysicallySettled
+    /// exactly as recorded, including false, and cannot clear the lifetime failure or quarantine state.
+    /// </remarks>
+    internal LinuxFailedSettlementObservation CaptureFailedSettlementObservation(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
+        LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || token != owner.RootTeardownToken)
+            throw LinuxSystemdBackend.InvalidControl();
+        var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
+        var pending = _pending.Snapshot;
+        if (!_lifetime.StartJoined || !_lifetime.StopJoined || !pending.StartReserved
+            || !pending.StartJoined || !pending.Closed || !pending.StopJoined
+            || _exit?.IsCompleted != true || _output is null || _worker is null)
+            throw LinuxSystemdBackend.InvalidControl();
+        var state = new LinuxFailedSettlementState(_lifetime.StartJoined, _lifetime.StopJoined,
+            _lifetime.Failed, PhysicallySettled, LinuxFailedSettlementObservation.ClosedTaskState(_exit),
+            _failedSettlementGroupAfterPumps);
+        var observation = LinuxFailedSettlementObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
+            descriptor, state, pending, _failedSettlementUnit, _failedSettlementGroup, _output, token);
+        owner.RequireControlIdentity(token);
+        token.ThrowIfCancellationRequested();
+        return observation;
     }
 
     /// <summary>Reserves the entire one-attempt startup before any native pipe, connection or unit start.</summary>
@@ -523,8 +567,12 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 // Keep the original AddRef until this last authenticated terminal/kernel observation
                 // after pumps and the original monitor have joined. No renewed deadline is introduced.
                 var stopped = await _backend!.ReadUnitAsync(Unit, _cleanupDeadline!.Token).ConfigureAwait(false);
+                _failedSettlementUnit = stopped;
                 unitJoined &= _recipe!.HasStopped(stopped) && (_worker is null || stopped.ExecMainPid == _worker.Pid);
-                groupJoined &= LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, default));
+                var finalGroup = LinuxCgroupProbe.Read(Unit, default);
+                _failedSettlementGroup = finalGroup;
+                _failedSettlementGroupAfterPumps = true;
+                groupJoined &= LinuxAccountUtility.GroupEmpty(finalGroup);
             }
             _backend?.Dispose();
             var pending = _pending.Snapshot;

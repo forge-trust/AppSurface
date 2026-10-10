@@ -145,6 +145,28 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            // Private N11 failure-only data comes from the original joined holders before custody
+            // and account closure. Capture failure never clears or replaces the execution failure.
+            if (EvidenceNativeQualification.WorkerStallEnabled && (failed || cleanupFailed)
+                && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null && serverTask is not null)
+                try
+                {
+                    var observation = worker.CaptureFailedSettlementObservation(input, owner, accounts,
+                        workspace, server, cleanupToken);
+                    var bytes = observation.Bytes;
+                    if (bytes.Length is 0 or > LinuxFailedSettlementObservation.MaximumJsonBytes) throw Rejected();
+                    cleanupToken.ThrowIfCancellationRequested();
+                    using (var stderr = Console.OpenStandardError())
+                    {
+                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
+                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    }
+                    cleanupToken.ThrowIfCancellationRequested();
+                    owner.RequireControlIdentity(cleanupToken);
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             // Fixed private N04 image: copy facts only from the original joined holders, before
             // substituted-path custody can reject. This record cannot turn the failed run positive.
             if (EvidenceNativeQualification.PeerReplacementEnabled && (failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
