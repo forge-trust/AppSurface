@@ -207,9 +207,11 @@ and declaration kind; it preserves manual declarations and never invokes an opaq
 factory to identify metadata. The helper does not keep a mutable selected-type set
 or probe a built provider. Expected shape, package-compatibility, conflict, and
 metadata failures occur before its own descriptor additions; a custom collection's
-`Add` failure is not a transactional rollback guarantee. The generic public
-constraint already excludes non-class and non-`IConfig` arguments; the internal
-type seam validates those shapes as well.
+`Add` failure is not a transactional rollback guarantee. The public constraints
+require an `IConfig` reference type. The registrar additionally requires a closed,
+concrete class with a public instance constructor; an interface such as `IConfig`
+therefore fails its runtime shape check. The internal type seam validates those
+same requirements.
 
 If application request state must be scoped, keep the wrapper singleton-safe and
 place request-specific state in a scoped application service or use the existing
