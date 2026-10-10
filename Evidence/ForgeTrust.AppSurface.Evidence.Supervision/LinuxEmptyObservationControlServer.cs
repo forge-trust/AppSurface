@@ -34,6 +34,52 @@ internal sealed class LinuxEmptyObservationControlServer
     private int _localOwnersClosed;
     private int _connectionCloseFailed;
     private readonly LinuxControlFailureLatch _failures = new();
+    private readonly TaskCompletionSource _cancellationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _cancellationFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _cancellationSignal;
+    private int _signalClaimed;
+
+    /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
+    internal bool CancellationSignalJoined => _cancellationSignal?.IsCompletedSuccessfully == true;
+
+    /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
+    /// <remarks>Successful syscall and READY observations still cannot establish caller-token delivery.</remarks>
+    internal string CaptureCancellationSignal(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
+            || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully || Volatile.Read(ref _negativeReadyCommitted) != 1)
+            throw Rejected();
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schema = "issue779-cancellation-signal-v1", generation = _owner.RunId.ToString("N"),
+            @case = EvidenceOriginalCancellationCheckpoint.Case, signal = 2, syscall_exit = 0,
+            original_signal_task_joined = true, ready_committed = true, phase_observed = true,
+            native_authority = false
+        });
+    }
+
+    private async Task SignalCancellationOwnedAsync(Task dispatch, CancellationToken token)
+    {
+        await dispatch.ConfigureAwait(false);
+        try
+        {
+            await _cancellationReady.Task.WaitAsync(token).ConfigureAwait(false);
+            await _worker.CancellationPhaseObserved.WaitAsync(token).ConfigureAwait(false);
+            _worker.RequireServerOwner(_input, _owner, _accounts, _workspace, _listener, token);
+            var identity = _worker.RequireWorker(token);
+            if (Interlocked.Exchange(ref _signalClaimed, 1) != 0) throw Rejected();
+            LinuxOriginalCancellationSignal.Send(_worker, identity, _owner, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception error) when (Recoverable(error))
+        {
+            _cancellationFailed.TrySetException(error);
+            _ = _cancellationFailed.Task.Exception;
+            throw;
+        }
+    }
 
     /// <summary>Gets first caught server-fault data; this establishes no protocol or native outcome.</summary>
     internal LinuxControlFailure? FirstFailure => _failures.First;
@@ -154,7 +200,8 @@ internal sealed class LinuxEmptyObservationControlServer
         {
             // Fixed private N04 image: acquisition belongs to the already registered original run.
             // No caller/environment selector or detached checkpoint task exists.
-            _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+            if (EvidenceNativeQualification.PeerReplacementEnabled)
+                _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
             await RunCoreAsync(token).ConfigureAwait(false);
         }
         finally
@@ -189,12 +236,19 @@ internal sealed class LinuxEmptyObservationControlServer
         stage = LinuxControlFailureStage.RequestLifetime;
         var handlers = new List<Task>(SupervisionWorkRegistry.MaximumActiveControls);
         Task<LinuxControlConnection>? pending = null;
+        using var cancellationLifetime = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
+        var signalDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _cancellationSignal = EvidenceNativeQualification.CancellationEnabled
+            ? SignalCancellationOwnedAsync(signalDispatch.Task, cancellationLifetime.Token)
+            : Task.CompletedTask;
+        signalDispatch.SetResult(); // Task retained before its actual wait/syscall dispatch, outside gates.
         try
         {
             while (!_exitIntent.Task.IsCompleted && !_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
             {
                 stage = LinuxControlFailureStage.AcceptLoop;
                 requests.Token.ThrowIfCancellationRequested();
+                if (_cancellationFailed.Task.IsCompleted) await _cancellationSignal.ConfigureAwait(false);
                 // Join each original completed handler before removing its retained task. No proxy
                 // wait or success snapshot substitutes for observing the actual procedure.
                 for (var index = handlers.Count - 1; index >= 0; index--)
@@ -207,13 +261,13 @@ internal sealed class LinuxEmptyObservationControlServer
                 if (handlers.Count == SupervisionWorkRegistry.MaximumActiveControls)
                 {
                     stage = LinuxControlFailureStage.CapacityWait;
-                    await Task.WhenAny(handlers.Append(_exitIntent.Task).Append(_exitCommitted.Task).Append(naturalExit))
+                    await Task.WhenAny(handlers.Append(_exitIntent.Task).Append(_exitCommitted.Task).Append(naturalExit).Append(_cancellationFailed.Task))
                         .WaitAsync(requests.Token).ConfigureAwait(false);
                     continue;
                 }
                 // This pause occurs before RegisterAccept's synchronous worker/name checks.
                 // It is separate from the irreversible EXIT admission-close barrier.
-                await _n04!.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
                 stage = LinuxControlFailureStage.Accept;
                 SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
                 lock (_executionGate)
@@ -224,8 +278,9 @@ internal sealed class LinuxEmptyObservationControlServer
                 pending = registeredAccept.Task;
                 registeredAccept.Dispatch(); // Actual accept work starts outside both admission gates.
                 stage = LinuxControlFailureStage.AcceptJoin;
-                var next = await Task.WhenAny(pending, _exitIntent.Task, _exitCommitted.Task, naturalExit)
+                var next = await Task.WhenAny(pending, _exitIntent.Task, _exitCommitted.Task, naturalExit, _cancellationFailed.Task)
                     .WaitAsync(requests.Token).ConfigureAwait(false);
+                if (ReferenceEquals(next, _cancellationFailed.Task)) await _cancellationSignal.ConfigureAwait(false);
                 if (_exitIntent.Task.IsCompleted || !ReferenceEquals(next, pending)) break;
                 stage = LinuxControlFailureStage.AcceptJoin;
                 var connection = await pending.ConfigureAwait(false);
@@ -235,7 +290,7 @@ internal sealed class LinuxEmptyObservationControlServer
                 lock (_executionGate)
                 {
                     if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
-                    _n04!.ReserveNextAcceptBeforeHandlerDispatch();
+                    _n04?.ReserveNextAcceptBeforeHandlerDispatch();
                     var control = _ledger.BeginControl();
                     stage = LinuxControlFailureStage.HandlerDispatch;
                     handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
@@ -252,11 +307,17 @@ internal sealed class LinuxEmptyObservationControlServer
         finally
         {
             var ioJoined = true;
+            // Cancel and join this original added task under the same requests/root deadline.
+            try { cancellationLifetime.Cancel(); }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+            try { await _cancellationSignal.ConfigureAwait(false); }
+            catch (OperationCanceledException) when (cancellationLifetime.IsCancellationRequested) { }
+            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
             stage = LinuxControlFailureStage.AcceptCancel;
             try { accepts.Cancel(); }
             catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
             // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
-            try { await _n04!.CloseAndJoinAsync().ConfigureAwait(false); }
+            try { if (_n04 is not null) await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
             catch (Exception error) when (Recoverable(error))
             { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
             // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
@@ -378,7 +439,7 @@ internal sealed class LinuxEmptyObservationControlServer
                     io.Token.ThrowIfCancellationRequested();
                     io.CancelAfter(Timeout.InfiniteTimeSpan);
                     await connection.WritePreparationAsync((long)_owner.Remaining.TotalMilliseconds, io.Token).ConfigureAwait(false);
-                    await _n04!.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
+                    if (_n04 is not null) await _n04.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
                     io.Token.ThrowIfCancellationRequested(); _owner.RequireActive(io.Token);
                     io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                         TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
@@ -387,7 +448,7 @@ internal sealed class LinuxEmptyObservationControlServer
                     claim = _sequence.ClaimReady();
                     stage = LinuxControlFailureStage.ReadyData;
                     response = _worker.CreateReadyData(io.Token).ReadyBytes;
-                    await _n04!.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+                    if (_n04 is not null) await _n04.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
                     break;
                 case EvidenceStopControlRequest:
                     stage = LinuxControlFailureStage.CleanupBound;
@@ -437,11 +498,14 @@ internal sealed class LinuxEmptyObservationControlServer
                 _sequence.CompleteWrite(claim, true);
                 var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
                 if (readyCommitted)
+                {
                     Interlocked.Exchange(ref _negativeReadyCommitted, 1);
+                    _cancellationReady.TrySetResult(); // Only after original write/release/owner/CompleteWrite.
+                }
                 committedExit = claim.Operation == EvidenceControlOperation.Exit;
                 claim = null;
-                if (readyCommitted)
-                    await _n04!.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
+                if (readyCommitted && _n04 is not null)
+                    await _n04.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
             }
         }
         catch (Exception error) when (Recoverable(error))

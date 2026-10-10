@@ -1,5 +1,16 @@
 # Evidence.Supervision
 
+## Ordinary execution and private qualification images
+
+The [C# migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) requires one source graph for ordinary supervisor and worker roles. [EvidenceNativeQualification](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) is internal build metadata with a production default of `None`. Ordinary execution creates no N04 root-helper rendezvous, cancellation-stage barrier, stderr phase observer or root-injected SIGINT. The ordinary worker follows authenticated planning, allocation, activation, cleanup and collection.
+
+Private qualification builds use the closed MSBuild property `EvidencePrivateQualification=N04`, `N08` or `N09`; its default is `None`. [Directory.Build.props](../../Directory.Build.props) appends the corresponding `EVIDENCE_PRIVATE_N04`, `EVIDENCE_PRIVATE_N08` or `EVIDENCE_PRIVATE_N09` symbol across the complete graph while preserving package-owned symbols. Unknown property values reject before build; multiple manually supplied checkpoint symbols fail compilation. Private qualification builds reject `Pack` so their assemblies cannot be published as production NuGet packages. N04 preserves the original authenticated peer replacement check; N08/N09 retain the original stage/caller tokens and the original root-owned, joined signal procedure. No argument, environment variable, descriptor field, public callback or candidate digest selects these behaviors. These builds must remain private qualification artifacts and are not deployable production artifacts or accepted consumer proof.
+
+The internal API exposes `Current` (`None`, `PeerReplacement`, `CancellationBeforeAllocation`, `CancellationBeforeActivation`), `PeerReplacementEnabled`, `CancellationEnabled`, and `CreateCancellationCheckpoint()`. The factory returns null for ordinary/N04 images; cancellation images receive a single internal checkpoint whose wait remains inside the tracked callback. Root server construction and pump observation use the same build-owned selection. Native identities, deadlines, pending ownership, physical joins, FD custody, account closure and failure latches still apply independently of that selection.
+
+A private image must compile Contracts, Supervision, Evidence.Cli and the executable from the same selected source and symbols. Mixing assemblies compiled with different selections is unsupported. Data/token tests do not establish genuine Linux execution; each native checkpoint still requires its own immutable source/image binding and retained kernel observations. The historical private-image sections below describe their original source snapshots rather than a passing result for this integrated source.
+
+
 Internal C# supervision for the [EvidenceHost trust boundary](../../start-here/evidencehost.md).
 The library is part of the protected CLI deployment and is not an independently supported NuGet API.
 It references Contracts and Planner; root composition does not load Coverage or Aspire to supervise processes.
@@ -1222,3 +1233,104 @@ The private N04 image uses [LinuxN04CheckpointOwner](LinuxN04CheckpointOwner.cs)
 The same retained connection sends `admission-start` and then the existing descriptor response under the unchanged admission allowance. [SupervisionControlLineFraming](LinuxControlConnection.cs) allows exactly one fixed preparation/start pair after a READY request and one final response. Each native write repeats kernel peer checks; phase cancellation closes the stream and joins the actual write. Preparation is registered before dispatch, retained alongside both original READY exchanges, and joined before any checkpoint descriptor closes. A phase notification provides no admission, native acceptance or ownership authority.
 
 Preparation consumes the original job deadline. It does not extend the job, reset cleanup, alter the peer or workspace guards, or reopen next-accept. Replays, wrong order, expiry and premature close fail closed. The portable order/framing controls verify data and actual task joining; actual root/worker/helper execution remains a separate required Linux control.
+
+
+
+## Fixed private N08/N09 original cancellation images
+
+Source preparation only: this image has no native qualification or case credit. The [original lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) owns callback/STOP/WAIT settlement; the [private CLI callback](../ForgeTrust.AppSurface.Evidence.Cli/README.md) retains output roots until OwnWorkStopped. No proof/admission registry, sandbox, account, syscall guard or public role selector changes.
+
+`EvidenceOriginalCancellationCheckpoint.SelectedPhase` is the sole compilation input: N08 BeforeAllocation or N09 BeforeActivation. The N09 `.cs.in` preparation input replaces exactly that one literal in a separately captured image; it is never read at runtime. The authenticated string-control worker constructs the checkpoint; the explicit request-mode overload remains unchanged and supplies none. Both actual original token checks and the N09 original root assignment retain their order. Checkpoint writes use the original linked stage token inside the original callback; a nonthrowing cancellation registration releases a TCS only. Missing/failed transfer cannot cause root signalling or create a capability. The actual original CallerTokenCancelled and lifecycle first-cause CallerCancelled are separate observations. ReportJoined requires actual OwnWorkStopped. Private stderr disposal additionally requires that same actual original settlement; root FD disposal retains its original guard.
+
+The root server retains one original signal task before dispatch and does not block next accept. Actual READY notification follows original response write, Release, owner check and CompleteWrite(true). Phase bytes are observed by the existing retained stderr pump after its original received-byte charge; no second pipe reader, fabricated READY, background task, runtime selector or timer exists. Exact first-line data is bounded to 1024 bytes. A malformed/missing phase fails observation rather than signalling. The root task verifies the actual reference-equal worker under unchanged native-owner guards, rechecks PID/starttime/UID4/GID4/cgroup/proc bindings around pidfd_open, then sends exactly one SIGINT through its retained pidfd. It never signals a caller PID or broadcasts/retries. The successful signal-task projection states syscall success, not signal delivery/cancellation. Error wakeup is retained in the accept wait; original root cancellation cancels and joins the task before server I/O settlement. All original accept/peer/name/stop/wait/custody/account checks remain.
+
+The root failure-only emitter uses the existing genuine CaptureNegativeObservation after original server/worker/monitor/pump joins, before unchanged custody/account cleanup. That holder guard still requires original natural terminal, full output, fresh empty selected group, reference-equal owners and genuine committed descriptor. Failure to capture is not replaced by detached expected metadata. No normal exit1, account absence, custody success or quarantine is invented. Actual selected runtime/caps/pidfd policy, full source/image/inventories, first SIGINT delivery, actual original-token true and CallerCancelled, no activation, N08 no allocation call and N09 actual retained-root/FD-close order still need native evidence.
+
+Ten new Facts are defined, zero executed: original caller versus stage-only release; nonselected location; duplicate claim; ignored write cancellation retaining the original callback and borrowed stream; closed projection/bounds/canary; and four original-pump framing controls. These use only detached stream/task/token data, never fake leases or live owners. The ignored writer control is not physical FD proof. Existing lifecycle callback-join/fatal/FD-close controls remain byte-identical; compiler/formatter/test validation and independent review are pending. Do not authorize execution from this preparation packet alone.
+
+### Joined original stream export for the private cancellation image
+
+The failure-only root emitter now calls
+[`LinuxWorkerProcess.CaptureCancellationJoinedObservation`](LinuxWorkerProcess.cs),
+which first runs the unchanged `CaptureNegativeObservation` guard. The original
+reference-equal input/owner/accounts/workspace/server, successful natural monitor,
+committed READY, original startup/stop/server/pump joins and fresh selected-group
+emptiness remain mandatory. The only bytes used are the immutable prefixes stored
+by the original joined collector. No new reader, stream, task, callback, path,
+caller-supplied receipt or identity factory is involved. The ordinary successful
+root path emits no joined-stream record.
+
+[`LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached`](LinuxNegativeKernelObservation.cs)
+requires both actual EOFs, no per-stream or shared failure, no failed stop signal,
+no discarded bytes, exact shared received-byte accounting and the original
+protected limit. Complete stdout plus stderr must total at most 64 KiB. This is
+an additional export bound; the existing pump quotas and retained-prefix limits
+remain unchanged. Nothing is truncated, padded, reconstructed or replaced by a
+guessed expected hash. Missing, incomplete or oversized data rejects with the
+existing fixed ASEVD410, and original cancellation propagates unchanged.
+
+The exported `issue779-cancellation-joined-streams-v1` JSON object has exactly
+nine top-level fields: `schema`, `generation`, `stdout`, `stderr`, `received_bytes`,
+`received_byte_limit`, `observation_only`, `native_authority`, `native_acceptance`.
+Each stream has exactly seven fields: `received_bytes`, `retained_bytes`,
+`discarded_bytes`, `eof`, `failure`, `sha256`, `base64`. Base64 encodes the complete
+original bytes, including LF and non-text bytes; SHA256 hashes those same original
+bytes. The line including its one LF is at most 96 KiB. Relaxed JSON escaping is
+restricted here to fixed field strings and base64/hex alphabets so the maximum
+pair fits that bound. This record is neither HTML-safe presentation nor a public
+diagnostic; retain it only in the fixed root-private stderr/canonical artifact.
+
+The root prepares all projections before publication, then writes signal, kernel
+and joined-stream lines in that order before original custody/account cleanup.
+The added write is awaited by the original root execution task with the original
+cleanup token and checks that token afterward. Existing independent unit/job
+containment remains responsible for a writer that ignores cancellation; no new
+timeout, allowance or task is introduced. A late write/cancellation failure stays
+in the existing first-failure/cleanup path even if earlier data lines were written.
+Record presence is never command success or native qualification, and the export
+itself authorizes no account release. Original account/custody/quarantine handling
+is unchanged.
+
+The canonical data adapter must strictly decode base64 and match original full
+byte counts and SHA256 against the kernel record. It must validate the exact phase
+frame, joined caller-token/lifecycle cancellation record and terminal message
+inside the decoded stderr; the root signal projection alone does not prove token
+delivery. Source/image binding, actual Linux pidfd permissions/syscalls, original
+kernel provenance, N08 slot absence/N09 retained allocation without activation,
+retained-root FD disposal and physical filesystem/NSS disposition remain separate
+native prerequisites. No manifest, artifact admission, Trusted or acceptance is
+created by matching data.
+
+[`LinuxCancellationJoinedStreamsTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCancellationJoinedStreamsTests.cs)
+defined 20 pure cases in 13 methods, zero executed at the initial source handoff. They cover
+binary/base64/hash round trips and schema, the exact maximum, zero bytes, both EOFs
+and pump errors, shared errors/quota/stop signal, discarded bytes, wrong accounting
+or limits, oversize, missing output, original cancellation and returned-copy
+independence. They construct detached receipts only; no live native owner or
+signal is fabricated. N09 uses the same changes on its separately captured image,
+preserving its one compile-selected BeforeActivation literal. The later scoped validation ran all 20 codec cases successfully, formatted the
+owned files, and built the CLI product with zero compiler diagnostics. The
+independent source review found no remaining issue in this scope. These local
+macOS results cover the data codec and compilation. Fresh image capture and
+actual Linux cancellation, original kernel ownership, filesystem and account
+disposition controls remain pending.
+
+### Final cancellation cleanup observation
+
+The fixed private cancellation image carries an optional `issue779-cancellation-root-cleanup-v1`
+record through the [negative-only exception](EvidenceNativeObservationFailure.cs). Its nine fields are
+`schema`, `generation`, `results_gid`, `accounts_closed`, `root_custody_closed`,
+`original_owners_closed`, `observation_only`, `native_authority`, and `native_acceptance`.
+The [original root composition](LinuxEmptyObservationExecution.cs) attaches it only after joined
+root custody, strict account deletion, every local owner close and the original final deadline check.
+A later cleanup failure suppresses the record even when an earlier execution fault remains first.
+The reserved [process entry](../../Cli/ForgeTrust.AppSurface.Cli/EvidenceProcessEntryPoint.cs) writes
+it after the original failure packet and before the unchanged fixed negative terminal message.
+
+This diagnostic cannot authorize execution or turn cancellation into successful Evidence. Detached
+encoding controls establish shape only. Native validation must bind the exact original root process
+and image, require all account-associated nodes to have their terminal root:root policy, compare
+retained output device/inode with the original descriptor, and check every generated account name
+and numeric UID/GID absent in both NSS lookup directions. The original descriptor bytes retain the
+pre-transfer identities; comparing their old UID/GID to root-owned terminal nodes would reject valid
+cleanup. Missing cleanup data, mutable terminal nodes, present accounts or expired checks reject.

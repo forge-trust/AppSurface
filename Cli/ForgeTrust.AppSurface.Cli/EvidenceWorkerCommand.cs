@@ -25,7 +25,8 @@ internal sealed class EvidenceWorkerCommand
             if (string.IsNullOrWhiteSpace(ControlChannel))
                 throw new EvidenceAdmissionException("ASEVD402", "An authenticated independent worker control channel is required.");
             var manifest = await EvidenceProtectedCliExecution.RunAsync(ControlChannel, console.RegisterCancellationHandler(),
-                diagnostic => WriteAllocationDiagnostic(console, diagnostic)).ConfigureAwait(false);
+                diagnostic => WriteAllocationDiagnostic(console, diagnostic),
+                diagnostic => console.Error.WriteLine(EvidenceOriginalCancellationCheckpoint.Encode(diagnostic))).ConfigureAwait(false);
             if (manifest.ClaimKind == EvidenceClaimKind.None)
                 throw new CommandException("ASEVD211: Evidence execution was incomplete. Inspect the protected failure manifest and use a fresh supervised run after owned exit.");
         }

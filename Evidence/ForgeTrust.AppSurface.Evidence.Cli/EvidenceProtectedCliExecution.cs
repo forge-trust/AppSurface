@@ -30,20 +30,26 @@ internal sealed record EvidenceAllocationFailureDiagnostic(EvidenceAllocationPha
 /// <remarks>The production Trusted proof allowlist is empty until full consumer acceptance; this entry cannot bypass it.</remarks>
 internal static class EvidenceProtectedCliExecution
 {
-    /// <summary>Runs the fixed private N04 peer probe after the actual authenticated READY connection.</summary>
+    /// <summary>Runs ordinary protected execution after the actual authenticated READY connection.</summary>
     /// <remarks>
-    /// This source-owned image performs the genuine wait request before creating a lifecycle, admission or
+    /// A private compiled N04 image performs the genuine wait request before creating a lifecycle, admission or
     /// output allocator. A changed broker rejects before request serialization and reaches the ordinary
     /// worker error boundary without the lifecycle's FailFast cleanup. The caller token is unchanged.
     /// An unexpected accepted reply rejects with ASEVD410. No runtime selector or execution grant exists;
-    /// the explicit-request overload and the ordinary execution implementation remain unchanged.
+    /// ordinary builds create no checkpoint and run the resolved protected execution path.
     /// </remarks>
     internal static async Task<EvidenceManifest> RunAsync(string controlChannel, CancellationToken cancellationToken,
-        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null)
+        Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink = null,
+        Action<EvidenceOriginalCancellationObservation>? cancellationSink = null)
     {
         var worker = await EvidenceLinuxWorkerSupervisor.ConnectAsync(controlChannel, cancellationToken).ConfigureAwait(false);
-        await worker.WaitForOwnedExitAsync(cancellationToken).ConfigureAwait(false);
-        throw new EvidenceAdmissionException("ASEVD410", "The fixed N04 peer probe unexpectedly accepted a protected wait reply.");
+        if (EvidenceNativeQualification.PeerReplacementEnabled)
+        {
+            await worker.WaitForOwnedExitAsync(cancellationToken).ConfigureAwait(false);
+            throw new EvidenceAdmissionException("ASEVD410", "The fixed N04 peer probe unexpectedly accepted a protected wait reply.");
+        }
+        return await RunAsync(worker, EvidenceModeSelection.Select(worker.Descriptor.Mode), cancellationToken,
+            diagnosticSink, cancellationSink, EvidenceNativeQualification.CreateCancellationCheckpoint()).ConfigureAwait(false);
     }
 
     /// <summary>Checks an explicit caller mode against the protected launcher before any callback.</summary>
@@ -56,7 +62,9 @@ internal static class EvidenceProtectedCliExecution
     }
 
     private static async Task<EvidenceManifest> RunAsync(EvidenceLinuxWorkerSupervisor worker, EvidenceExecutionMode mode,
-        CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink)
+        CancellationToken callerCancellation, Action<EvidenceAllocationFailureDiagnostic>? diagnosticSink,
+        Action<EvidenceOriginalCancellationObservation>? cancellationSink = null,
+        EvidenceOriginalCancellationCheckpoint? cancellationCheckpoint = null)
     {
         var descriptor = worker.Descriptor;
         var clock = TimeProvider.System;
@@ -65,6 +73,7 @@ internal static class EvidenceProtectedCliExecution
             TimeSpan.FromSeconds(descriptor.CleanupSeconds), TimeSpan.FromSeconds(descriptor.StoppingSeconds),
             collectionReserve: collectionLimit);
         EvidenceLinuxArtifactRoot? root = null;
+        Stream? privateError = null;
         EvidenceAdmissionResult? admission = null;
         try
         {
@@ -105,27 +114,35 @@ internal static class EvidenceProtectedCliExecution
                 throw new EvidenceAdmissionException("ASEVD421", "The protected allocation reserve is exhausted.");
             var phase = EvidenceAllocationPhase.None;
             var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            if (cancellationCheckpoint is not null) privateError = Console.OpenStandardError();
             var allocated = await execution.ExecuteAsync(EvidenceRunStage.Admission, stage!.Duration,
-                token =>
+                async token =>
                 {
                     phase = EvidenceAllocationPhase.BeforeAllocation;
+                    if (cancellationCheckpoint is not null)
+                        await cancellationCheckpoint.WaitAtAsync(EvidenceOriginalCancellationPhase.BeforeAllocation,
+                            privateError!, token, callerCancellation).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     phase = EvidenceAllocationPhase.Allocation;
                     var allocatedRoot = EvidenceLinuxArtifactRoot.Allocate(descriptor.OutputParent, descriptor.OutputParentIdentity,
                         descriptor.OutputSlot, descriptor.WorkerUid, descriptor.WorkerGid, out operation);
                     root = allocatedRoot; // Retain ownership even if cancellation wins before the callback returns.
                     phase = EvidenceAllocationPhase.BeforeActivation;
+                    if (cancellationCheckpoint is not null)
+                        await cancellationCheckpoint.WaitAtAsync(EvidenceOriginalCancellationPhase.BeforeActivation,
+                            privateError!, token, callerCancellation).ConfigureAwait(false);
                     token.ThrowIfCancellationRequested();
                     phase = EvidenceAllocationPhase.Activation;
                     admission.Activate(allocatedRoot.Identity.ToString());
                     phase = EvidenceAllocationPhase.Completed;
-                    return ValueTask.FromResult(allocatedRoot);
+                    return allocatedRoot;
                 }, callerCancellation).ConfigureAwait(false);
             budget.CompleteCurrentStage();
             if (allocated.Outcome != EvidenceWorkerStageOutcome.Passed)
             {
                 admission.LatchFailure();
                 ReportAllocationFailure(execution, allocated.Outcome, phase, operation, diagnosticSink);
+                cancellationCheckpoint?.ReportJoined(execution, cancellationSink);
                 throw new EvidenceAdmissionException("ASEVD409", "Fresh output allocation or activation failed.");
             }
 
@@ -229,6 +246,7 @@ internal static class EvidenceProtectedCliExecution
         {
             // Production FailFast never unwinds this finally; a live callback cannot race handle disposal.
             if (root is not null && execution.OwnWorkStopped) await root.DisposeAsync().ConfigureAwait(false);
+            if (execution.OwnWorkStopped) privateError?.Dispose(); // Never close a writer while its original callback remains live.
         }
     }
 

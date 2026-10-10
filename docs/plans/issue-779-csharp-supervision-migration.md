@@ -11,6 +11,10 @@ One protected AppSurface deployment supplies supervisor and worker roles. A type
 
 The old native/private-harness repair loop remains stopped. Its snapshots and receipts are historical evidence. Existing source changes are preserved; the migration does not reset the branch or manufacture a new passing baseline.
 
+## Common source and qualification builds
+
+Ordinary supervisor and worker roles share one integrated source graph. The internal [compile-owned qualification selector](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) defaults to `None`; private N04/N08/N09 builds are described in the [Supervision package reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#ordinary-execution-and-private-qualification-images). A private checkpoint must not leave an unconditional helper wait or injected signal in ordinary execution. Its build selection creates no runtime admission, producer registration or consumer proof. Previously verified controls on private snapshots remain evidence for those snapshots until revalidated on the integrated graph.
+
 ## Execution rules
 
 - Build one immutable source revision through the ordinary dependency graph. Avoid mixing private Contracts/Planner assemblies with another product revision.

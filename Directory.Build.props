@@ -26,6 +26,21 @@
     <BaseIntermediateOutputPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <MSBuildProjectExtensionsPath Condition="'$(IsTailwindRuntimeProject)' == 'true'">$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
   </PropertyGroup>
+  <!-- Private checkpoint selection is build metadata. Preserve package-owned compiler symbols. -->
+  <PropertyGroup>
+    <EvidencePrivateQualification Condition="'$(EvidencePrivateQualification)' == ''">None</EvidencePrivateQualification>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N04'">$(DefineConstants);EVIDENCE_PRIVATE_N04</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N08'">$(DefineConstants);EVIDENCE_PRIVATE_N08</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N09'">$(DefineConstants);EVIDENCE_PRIVATE_N09</DefineConstants>
+  </PropertyGroup>
+  <Target Name="ValidateEvidencePrivateQualification" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09'"
+           Text="EvidencePrivateQualification must be None, N04, N08 or N09." />
+  </Target>
+  <Target Name="RejectPrivateEvidenceQualificationPackage" BeforeTargets="Pack">
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None'"
+           Text="Private Evidence qualification images cannot be packed as production packages." />
+  </Target>
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="" Condition="Exists('$(MSBuildThisFileDirectory)LICENSE')" />
   </ItemGroup>

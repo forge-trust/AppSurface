@@ -111,11 +111,14 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     /// <param name="token">Cancellation from the existing owner deadline/stop; no new timer is created.</param>
     /// <param name="receivedByteLimit">Shared pair maximum; defaults to 16 MiB and may only be lowered.</param>
     /// <param name="prefixByteLimit">Per-stream retained prefix; defaults to 1 MiB and may only be lowered.</param>
+    /// <param name="cancellationPhase">Optional data-only observer fed by the original charged stderr pump;
+    /// creates no second reader, independent task or process authority.</param>
     /// <remarks>Account utility callers may select 128 KiB/4 KiB. Run-wide accounting remains the owner's duty.</remarks>
     internal Task<SupervisionOutputReceipt> BeginCollectAsync(CancellationToken token,
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
-        int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream) =>
-        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit);
+        int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
+        SupervisionCancellationPhaseObservation? cancellationPhase = null) =>
+        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit, cancellationPhase);
 
     /// <summary>Irreversibly closes both local write copies, only after the actual start task joined.</summary>
     /// <remarks>Attempts both closes and latches failure. This cannot close systemd's copies or stop a unit.</remarks>
@@ -225,9 +228,11 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
     /// <summary>Registers one collector before pump dispatch; invalid limit data does not consume the attempt.</summary>
     internal Task<SupervisionOutputReceipt> BeginCollectAsync(CancellationToken token,
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
-        int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream)
+        int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
+        SupervisionCancellationPhaseObservation? cancellationPhase = null)
     {
         var collector = new SupervisionOutputCollector(receivedByteLimit, prefixByteLimit);
+        if (cancellationPhase is not null) collector.ObserveCancellation(cancellationPhase);
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<SupervisionOutputReceipt> task;
         lock (_sync)
