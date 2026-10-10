@@ -363,9 +363,17 @@ public sealed class DurableTemplateTimingProofTests
 
     [Theory]
     [InlineData("primed-image")]
+    [InlineData("primed-image-missing")]
+    [InlineData("primed-image-at-start")]
     [InlineData("primed-cache")]
+    [InlineData("primed-cache-closure")]
+    [InlineData("primed-http-cache")]
     [InlineData("cold-image")]
+    [InlineData("cold-image-at-start")]
+    [InlineData("cold-image-after")]
     [InlineData("cold-cache")]
+    [InlineData("cold-package-cache")]
+    [InlineData("cold-cache-closure")]
     public void ImageAndCacheObservationsMustMatchTheRequestedMode(string fault)
     {
         var mode = fault.StartsWith("cold-", StringComparison.Ordinal) ? DurableTemplateTimingMode.Cold : DurableTemplateTimingMode.Primed;
@@ -373,18 +381,31 @@ public sealed class DurableTemplateTimingProofTests
         samples[0] = fault switch
         {
             "primed-image" => samples[0] with { ImageDigestAfter = new string('9', 64) },
+            "primed-image-missing" => samples[0] with { DockerImagePresentAtStart = false },
+            "primed-image-at-start" => samples[0] with { ImageDigestAtStart = new string('9', 64) },
             "primed-cache" => samples[0] with { PackageCacheEmptyAtStart = true },
+            "primed-cache-closure" => samples[0] with { PackageCacheClosureSha256 = Hash("different-primed-closure") },
+            "primed-http-cache" => samples[0] with { HttpCacheEmptyAtStart = false },
             "cold-image" => samples[0] with { DockerImagePresentAtStart = true },
+            "cold-image-at-start" => samples[0] with { ImageDigestAtStart = samples[0].ImageDigestAfter },
+            "cold-image-after" => samples[0] with { ImageDigestAfter = new string('9', 64) },
             "cold-cache" => samples[0] with { HttpCacheEmptyAtStart = false },
+            "cold-package-cache" => samples[0] with { PackageCacheEmptyAtStart = false },
+            "cold-cache-closure" => samples[0] with { PackageCacheClosureSha256 = Hash("nonempty-cold-closure") },
             _ => throw new ArgumentOutOfRangeException(nameof(fault))
         };
 
         var receipt = DurableTemplateTimingProof.Evaluate(Request(mode), samples);
         var expectedFailure = mode == DurableTemplateTimingMode.Primed
-            ? fault == "primed-image" ? "primed-image" : "primed-cache-closure"
-            : fault == "cold-image" ? "cold-image-state" : "cold-cache-state";
+            ? fault.StartsWith("primed-image", StringComparison.Ordinal) ? "primed-image" : "primed-cache-closure"
+            : fault.StartsWith("cold-image", StringComparison.Ordinal) ? "cold-image-state" : "cold-cache-state";
 
-        Assert.Contains(expectedFailure, receipt.Samples[0].ValidationFailures);
+        Assert.False(receipt.Succeeded);
+        Assert.Equal(5, receipt.Samples.Count);
+        Assert.Same(samples[0], receipt.Samples[0].Sample);
+        Assert.Equal(expectedFailure, Assert.Single(receipt.Samples[0].ValidationFailures));
+        Assert.Contains(expectedFailure, receipt.FailureCode.Split(','));
+        Assert.All(receipt.Samples.Skip(1), result => Assert.Empty(result.ValidationFailures));
     }
 
     [Theory]
@@ -409,20 +430,26 @@ public sealed class DurableTemplateTimingProofTests
 
     [Theory]
     [InlineData("missing")]
+    [InlineData("null-list")]
     [InlineData("null-entry")]
     public void MissingOrNullCommandEvidenceFailsClosed(string fault)
     {
         var samples = Samples(DurableTemplateTimingMode.Primed, [100, 110, 115, 125, 130]);
         samples[0] = samples[0] with
         {
-            Commands = fault == "missing"
-                ? []
-                : [samples[0].Commands[0], null!, samples[0].Commands[2]]
+            Commands = fault switch
+            {
+                "missing" => [],
+                "null-list" => null!,
+                "null-entry" => [samples[0].Commands[0], null!, samples[0].Commands[2]],
+                _ => throw new ArgumentOutOfRangeException(nameof(fault))
+            }
         };
 
         var receipt = DurableTemplateTimingProof.Evaluate(Request(DurableTemplateTimingMode.Primed), samples);
 
-        Assert.Contains(fault == "missing" ? "command-sequence" : "command-ProjectCreate", receipt.Samples[0].ValidationFailures);
+        AssertRetainedRejectedSample(samples, receipt, 0,
+            fault == "null-entry" ? "command-ProjectCreate" : "command-sequence");
     }
 
     [Theory]

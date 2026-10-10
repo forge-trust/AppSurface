@@ -83,7 +83,10 @@ public sealed class SetupOperationLifetimeTests
             var settled = await cleanup;
             Assert.False(settled);
             Assert.Contains("owned-resource-stop-unfinished", failures);
-            Assert.Contains("setup-operation-unfinished:container-start", failures);
+            // The stop timeout may resume after the shared deadline, leaving no observation allowance.
+            Assert.Contains(failures, failure => failure is
+                "setup-operation-unfinished:container-start" or "setup-operation-observation-budget-exhausted");
+            Assert.Equal(1, lifetime.PendingCount);
             Assert.InRange(Stopwatch.GetElapsedTime(startedAt), TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(1));
         }
         finally
