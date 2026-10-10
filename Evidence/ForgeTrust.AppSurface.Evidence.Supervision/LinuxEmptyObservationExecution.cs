@@ -60,6 +60,7 @@ internal static class LinuxEmptyObservationExecution
         var cleanupFailed = false;
         var cancellationProjectionWritten = false;
         var cancellationProjectionWriteAttempted = false;
+        var cancellationProjectionStage = LinuxCancellationProjectionStage.Unknown;
         var accountsClosedUnderCustody = false;
         uint cancellationResultsGid = 0;
         var cleanupToken = CancellationToken.None;
@@ -193,22 +194,42 @@ internal static class LinuxEmptyObservationExecution
                 try
                 {
                     cancellationResultsGid = accounts.ResultsGid;
-                    var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server, cleanupToken);
+                    var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server,
+                        cleanupToken, ref cancellationProjectionStage);
+                    cancellationProjectionStage = LinuxCancellationProjectionStage.SignalProvenance;
                     var signal = server.CaptureCancellationSignal(input, owner, accounts, workspace, worker, cleanupToken);
                     // Even a faulted write may have emitted a partial line. Do not append another
                     // potentially large projection once any original output write was attempted.
                     cancellationProjectionWriteAttempted = true;
+                    cancellationProjectionStage = LinuxCancellationProjectionStage.SignalWrite;
                     await Console.Error.WriteLineAsync(signal).ConfigureAwait(false);
+                    cancellationProjectionStage = LinuxCancellationProjectionStage.KernelWrite;
                     await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.Kernel.Bytes)).ConfigureAwait(false);
+                    cancellationProjectionStage = LinuxCancellationProjectionStage.JoinedStreamWrite;
                     cleanupToken.ThrowIfCancellationRequested();
                     await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.JoinedStreams).AsMemory(),
                         cleanupToken).ConfigureAwait(false);
+                    cancellationProjectionStage = LinuxCancellationProjectionStage.FinalBound;
                     cleanupToken.ThrowIfCancellationRequested();
                     cancellationProjectionWritten = true;
                 }
                 catch (Exception error) when (Recoverable(error))
                 {
                     Record(error); cleanupFailed = true;
+                    // This separate, bounded checkpoint explains a later capture failure without
+                    // replacing the earlier server failure or any original settlement predicate.
+                    try
+                    {
+                        owner.RequireControlIdentity(cleanupToken);
+                        var bytes = LinuxCancellationProjectionFailure.EncodeDetached(owner.RunId,
+                            cancellationProjectionStage, error);
+                        using var diagnostic = Console.OpenStandardError();
+                        await diagnostic.WriteAsync(bytes, cleanupToken).ConfigureAwait(false);
+                        await diagnostic.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        await diagnostic.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        owner.RequireControlIdentity(cleanupToken);
+                    }
+                    catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { Record(diagnosticError); }
                     // A joined nonzero worker can lack the successful negative-kernel projection.
                     // Retain the original post-pump unit/group and lifetime state if READY committed.
                     // A pre-READY or otherwise unjoined failure keeps the existing pump-only fallback.

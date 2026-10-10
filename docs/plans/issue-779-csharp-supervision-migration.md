@@ -592,3 +592,7 @@ cancellation schema preserves false settlement and creates no native authority o
 capture before output retains the existing pump-only fallback; a partial attempted write forbids a
 second large diagnostic. The original failure, native success/custody guards, quotas and deadline remain
 unchanged. Local codec/build checks and the next genuine Linux result must be recorded separately.
+
+#### N08 capture-stage diagnosis
+
+The fifth private cancellation run retained original physical settlement, joined monitor/pumps and normal nonzero worker exit, but rejected its cancellation capture. That evidence does not identify the failed kernel, signal or encoding guard. A separate [closed projection checkpoint](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxCancellationProjectionFailure.cs) now records the original failing operation without changing its guard or replacing the [first execution failure](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs). This is diagnostic preparation; N08/N09 remain unqualified until the genuine Linux cases satisfy their full original records, custody and strict account cleanup.

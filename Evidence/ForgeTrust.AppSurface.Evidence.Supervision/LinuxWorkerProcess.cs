@@ -195,10 +195,22 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
         LinuxEmptyObservationControlServer server, CancellationToken token)
     {
+        var stage = LinuxCancellationProjectionStage.Unknown;
+        return CaptureNegativeObservationCore(input, owner, accounts, workspace, server, token, ref stage);
+    }
+
+    private LinuxNegativeKernelObservation CaptureNegativeObservationCore(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
+        LinuxEmptyObservationControlServer server, CancellationToken token, ref LinuxCancellationProjectionStage stage)
+    {
+        stage = LinuxCancellationProjectionStage.OriginalCustody;
         var group = RequireCustodyOwnerCore(input, owner, accounts, workspace, server, token);
+        stage = LinuxCancellationProjectionStage.OriginalMonitor;
         if (_worker is null || _exit?.IsCompletedSuccessfully != true || _naturalTerminal is null || _output is null)
             throw LinuxSystemdBackend.InvalidControl();
+        stage = LinuxCancellationProjectionStage.ReadyDescriptor;
         var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
+        stage = LinuxCancellationProjectionStage.KernelEncoding;
         return LinuxNegativeKernelObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
             _naturalTerminal, group, _output, descriptor, token);
     }
@@ -210,6 +222,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// <param name="workspace">Original retained workspace and descriptor.</param>
     /// <param name="server">Original joined peer-authenticated server.</param>
     /// <param name="token">Original cleanup token, without a reset deadline.</param>
+    /// <param name="stage">Closed diagnostic checkpoint assigned immediately before each original guarded operation.</param>
     /// <returns>Copied detached data; no identity, custody, account release or acceptance is granted.</returns>
     /// <remarks>
     /// CaptureNegativeObservation runs unchanged, including its one fresh selected-group sample, all
@@ -220,11 +233,14 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// </remarks>
     internal (LinuxNegativeKernelObservation Kernel, byte[] JoinedStreams) CaptureCancellationJoinedObservation(
         EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner, LinuxRunAccounts accounts,
-        LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token)
+        LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token,
+        ref LinuxCancellationProjectionStage stage)
     {
-        var kernel = CaptureNegativeObservation(input, owner, accounts, workspace, server, token);
+        var kernel = CaptureNegativeObservationCore(input, owner, accounts, workspace, server, token, ref stage);
+        stage = LinuxCancellationProjectionStage.JoinedStreamEncoding;
         var output = _output ?? throw LinuxSystemdBackend.InvalidControl();
         var streams = LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached(owner.RunId, output, token);
+        stage = LinuxCancellationProjectionStage.HolderIdentity;
         owner.RequireControlIdentity(token);
         return (kernel, streams);
     }
