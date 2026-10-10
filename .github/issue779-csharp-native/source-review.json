@@ -1,0 +1,18 @@
+{
+  "capture_sha256": "9dcc944daa1f3fe09b07c149aeb57ec44408919b7ef441874f1e0ed698fc3001",
+  "case": "N08",
+  "fixture_peer_review": "/private/tmp/issue779-csharp-cancellation-root-join-fixture-fix-v1/incremental-review.json",
+  "fixture_peer_review_sha256": "7e9b3d07e96bcac25d8b02a3ce683bf6fe8d054c11939a3a096e2647d6b72dd3",
+  "integration_review_pending": true,
+  "local_tests_passed": 89,
+  "local_validation": "/private/tmp/issue779-csharp-cancellation-settlement-diagnostic-v1/validation-attempt-1/final-validation-receipt.json",
+  "local_validation_sha256": "38ad088e4785125a6261244393d4c22e2f3f2a7c05c531240217fae85dc0512f",
+  "native_acceptance": false,
+  "native_execution": false,
+  "primary_modified": false,
+  "schema": "issue779-cancellation-settlement-source-review-v1",
+  "source": "96c45807e1ab3f4b74bbe6dc487560f2fee6cdfa",
+  "source_count": 2846,
+  "source_peer_review": "/private/tmp/issue779-csharp-cancellation-settlement-diagnostic-v1/source-peer-review.json",
+  "source_peer_review_sha256": "12710ed1cb49d167f7da7da89bee6d1b035efa61620271c365a7552f2ee07f2e"
+}
