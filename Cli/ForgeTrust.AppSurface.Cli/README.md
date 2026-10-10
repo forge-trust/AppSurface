@@ -1,6 +1,6 @@
 # AppSurface CLI
 
-Use [appsurface durable doctor](../../Durable/runtime-doctor.md) for a non-mutating store/runtime diagnosis in text or version-one JSON. It accepts environment-source names and optional paired worker/actual-threshold inputs, and supplies explicit exits and next actions.
+Use [appsurface durable doctor](../../Durable/runtime-doctor.md) for a non-mutating store/runtime diagnosis in text or version-one JSON. It accepts environment-source names and optional paired worker/actual-threshold inputs, and supplies explicit exits and next actions. Clean output links the [canonical Durable worker starter](../../start-here/durable-worker.md) while requiring the diagnosed application's own composition verifier; its null command does not invent or execute that verifier.
 
 For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires the complete reviewed-manifest gate and the [combined deployment receipt procedure](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
 

@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Forge Trust",
+  "classifications": [
+    "AppSurface",
+    "Durable",
+    "Worker",
+    "PostgreSQL"
+  ],
+  "identity": "ForgeTrust.AppSurface.Durable.Templates.DurableWorker",
+  "name": "AppSurface Durable Worker",
+  "shortName": "appsurface-durable-worker",
+  "sourceName": "AppSurfaceDurableWorker",
+  "preferNameDirectory": true,
+  "primaryOutputs": [
+    {
+      "path": "src/AppSurfaceDurableWorker/AppSurfaceDurableWorker.csproj"
+    }
+  ],
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  }
+}

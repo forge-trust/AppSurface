@@ -913,6 +913,68 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Contains("dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease", markdown, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("Template")]
+    [InlineData(" Dependency ; tEmPlAtE ; ")]
+    public async Task GenerateAsync_RendersTemplateInstallCommandWithExplicitReleasedVersion(string packageType)
+    {
+        await WriteCommonChooserFilesAsync(includeUnreleased: true);
+        var manifestPath = TestPathUtils.PathUnder(_repositoryRoot, "packages", "package-index.yml");
+        var manifest = await File.ReadAllTextAsync(manifestPath);
+        var templateEntry = string.Join(
+            Environment.NewLine,
+            [
+                "  - project: Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj",
+                "    product_family: appsurface",
+                "    classification: public",
+                "    publish_decision: publish",
+                "    release_track: coordinated",
+                "    order: 60",
+                "    use_when: Create an application-owned Durable worker from this starter.",
+                "    includes: A dotnet new template pack.",
+                "    does_not_include: A deployed worker or production credentials.",
+                "    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Templates/README.md"
+            ]);
+        await WriteFileAsync("packages/package-index.yml", $"{manifest.TrimEnd()}{Environment.NewLine}{templateEntry}");
+        await WriteFileAsync(
+            "Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj",
+            "<Project />");
+        await WriteFileAsync("Durable/ForgeTrust.AppSurface.Durable.Templates/README.md", "# Durable worker template");
+
+        var generator = CreateGenerator(new Dictionary<string, PackageProjectMetadata>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj",
+                "ForgeTrust.AppSurface.Web"),
+            ["Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.OpenApi/ForgeTrust.AppSurface.Web.OpenApi.csproj",
+                "ForgeTrust.AppSurface.Web.OpenApi"),
+            ["Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64.csproj",
+                "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64"),
+            ["Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.AppSurface.Docs/ForgeTrust.AppSurface.Docs.csproj",
+                "ForgeTrust.AppSurface.Docs"),
+            ["Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj"] = CreateMetadata(
+                "Web/ForgeTrust.RazorWire.Cli/ForgeTrust.RazorWire.Cli.csproj",
+                "ForgeTrust.RazorWire.Cli",
+                isTool: true,
+                outputType: "Exe"),
+            ["Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj"] = CreateMetadata(
+                "Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj",
+                "ForgeTrust.AppSurface.Durable.Templates",
+                packageType: packageType)
+        });
+
+        var markdown = await generator.GenerateAsync(CreateRequest());
+
+        Assert.Contains("Template rows use `dotnet new install <package-id>@<version>` and require an explicit released version.", markdown, StringComparison.Ordinal);
+        Assert.Contains("`dotnet new install ForgeTrust.AppSurface.Durable.Templates@<version>`", markdown, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Durable.Templates", markdown, StringComparison.Ordinal);
+        Assert.Contains("`dotnet package add ForgeTrust.AppSurface.Web`", markdown, StringComparison.Ordinal);
+        Assert.Contains("`dotnet tool install --global ForgeTrust.RazorWire.Cli --prerelease`", markdown, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task GenerateAsync_RendersSharedTaggedReleaseNoteInReadinessSummary()
     {
@@ -2263,6 +2325,8 @@ public sealed class PackageIndexGeneratorTests : IDisposable
 
     [Theory]
     [InlineData("--manifest")]
+    [InlineData("--native-pg-bin")]
+    [InlineData("--durable-template-evidence")]
     [InlineData("--coverage-proof-work-dir")]
     [InlineData("--coverage-proof-report")]
     [InlineData("--docs-proof-work-dir")]
@@ -2272,6 +2336,26 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         var error = Assert.Throws<PackageIndexException>(() => CommandLineOptions.Parse([option], _repositoryRoot));
 
         Assert.Contains("requires a value", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CommandLineOptions_ResolvesNativeToolsAndTrustedTemplateEvidenceAgainstTheChosenRepository()
+    {
+        var defaults = CommandLineOptions.Parse([], _repositoryRoot);
+        Assert.Null(defaults.NativePgBin);
+        Assert.Null(defaults.DurableTemplateEvidenceDirectory);
+        var evidence = Path.Join(_repositoryRoot, "downloaded-evidence");
+
+        var parsed = CommandLineOptions.Parse([
+            "--repo-root", "consumer-repository",
+            "--native-pg-bin", "native-tools/bin",
+            "--durable-template-evidence", evidence
+        ], _repositoryRoot);
+
+        Assert.Equal(Path.Join(_repositoryRoot, "consumer-repository", "native-tools", "bin"), parsed.NativePgBin);
+        Assert.Equal(evidence, parsed.DurableTemplateEvidenceDirectory);
+        Assert.False(Directory.Exists(parsed.NativePgBin));
+        Assert.False(Directory.Exists(evidence));
     }
 
     [Fact]
@@ -3217,6 +3301,7 @@ public sealed class PackageIndexGeneratorTests : IDisposable
               <PropertyGroup>
                 <TargetFramework>net10.0</TargetFramework>
                 <OutputType>Exe</OutputType>
+                <PackageType>Template</PackageType>
               </PropertyGroup>
               <ItemGroup>
                 <ProjectReference Include="../Dependency/Dependency.csproj" />
@@ -3230,6 +3315,9 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal("App", metadata.PackageId);
         Assert.Equal("net10.0", metadata.TargetFramework);
         Assert.False(metadata.IsTool);
+        Assert.Equal("Template", metadata.PackageType);
+        Assert.True(metadata.IsTemplate);
+        Assert.Equal("dotnet new install App@<version>", metadata.InstallCommand);
         Assert.Equal("Exe", metadata.OutputType);
         Assert.Single(metadata.ProjectReferences);
         Assert.EndsWith("src/Dependency/Dependency.csproj", metadata.ProjectReferences[0].Replace('\\', '/'), StringComparison.Ordinal);
@@ -3333,9 +3421,65 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal("net10.0", metadata.TargetFramework);
         Assert.True(metadata.IsPackable);
         Assert.False(metadata.IsTool);
+        Assert.Equal(string.Empty, metadata.PackageType);
+        Assert.False(metadata.IsTemplate);
+        Assert.Equal("dotnet package add ForgeTrust.AppSurface.Web", metadata.InstallCommand);
         Assert.Equal("Library", metadata.OutputType);
         Assert.Single(metadata.ProjectReferences);
         Assert.Equal("/repo/src/Dependency/Dependency.csproj", metadata.ProjectReferences[0]);
+    }
+
+    [Theory]
+    [InlineData(null, false, false, "dotnet package add Candidate")]
+    [InlineData(null, true, false, "dotnet tool install --global Candidate --prerelease")]
+    [InlineData(" Dependency ; tEmPlAtE ; ", true, true, "dotnet new install Candidate@<version>")]
+    [InlineData("TemplateExtension", false, false, "dotnet package add Candidate")]
+    public void ParseMetadataJson_ResolvesOptionalPackageTypeWithoutMisclassifyingTheInstallCommand(
+        string? packageType, bool isTool, bool isTemplate, string expectedCommand)
+    {
+        var standardOutput = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            Properties = new
+            {
+                PackageId = "Candidate",
+                TargetFramework = "net10.0",
+                IsPackable = "true",
+                PackAsTool = isTool ? "true" : "false",
+                PackageType = packageType,
+                OutputType = "Library"
+            }
+        });
+
+        var metadata = DotNetProjectMetadataProvider.ParseMetadataJson("src/Candidate/Candidate.csproj", standardOutput);
+
+        Assert.Equal(packageType ?? string.Empty, metadata.PackageType);
+        Assert.Equal(isTemplate, metadata.IsTemplate);
+        Assert.Equal(expectedCommand, metadata.InstallCommand);
+    }
+
+    [Theory]
+    [InlineData("42")]
+    [InlineData("[]")]
+    [InlineData("{}")]
+    public void ParseMetadataJson_RejectsPackageTypeValuesThatAreNotStrings(string packageTypeJson)
+    {
+        var standardOutput = $$"""
+            {
+              "Properties": {
+                "PackageId": "Candidate",
+                "TargetFramework": "net10.0",
+                "IsPackable": "true",
+                "PackAsTool": "false",
+                "PackageType": {{packageTypeJson}},
+                "OutputType": "Library"
+              }
+            }
+            """;
+
+        var error = Assert.Throws<PackageIndexException>(() =>
+            DotNetProjectMetadataProvider.ParseMetadataJson("src/Candidate/Candidate.csproj", standardOutput));
+
+        Assert.Contains("malformed JSON", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -3717,9 +3861,10 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         string targetFramework = "net10.0",
         bool isTool = false,
         bool isPackable = true,
-        IReadOnlyList<string>? projectReferences = null)
+        IReadOnlyList<string>? projectReferences = null,
+        string packageType = "")
     {
-        return new PackageProjectMetadata(projectPath, packageId, targetFramework, isPackable, isTool, outputType, projectReferences ?? []);
+        return new PackageProjectMetadata(projectPath, packageId, targetFramework, isPackable, isTool, outputType, projectReferences ?? [], packageType);
     }
 
     private static PackageManifestEntry CreateReadinessManifestEntry(

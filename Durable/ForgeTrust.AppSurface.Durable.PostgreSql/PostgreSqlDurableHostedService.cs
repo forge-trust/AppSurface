@@ -265,41 +265,44 @@ internal sealed partial class PostgreSqlDurableHostedService : BackgroundService
 
     private async Task ListenForWakeHintsAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            try
+            while (!stoppingToken.IsCancellationRequested)
             {
-                await using var connection = await _registration.RuntimeDataSource.OpenConnectionAsync(stoppingToken)
-                    .ConfigureAwait(false);
-                connection.Notification += OnNotification;
                 try
                 {
-                    await using var listen = new NpgsqlCommand("LISTEN appsurface_durable_wake;", connection);
-                    await listen.ExecuteNonQueryAsync(stoppingToken).ConfigureAwait(false);
-                    while (!stoppingToken.IsCancellationRequested)
+                    await using var connection = await _registration.RuntimeDataSource.OpenConnectionAsync(stoppingToken)
+                        .ConfigureAwait(false);
+                    connection.Notification += OnNotification;
+                    try
                     {
-                        await connection.WaitAsync(stoppingToken).ConfigureAwait(false);
+                        await using var listen = new NpgsqlCommand("LISTEN appsurface_durable_wake;", connection);
+                        await listen.ExecuteNonQueryAsync(stoppingToken).ConfigureAwait(false);
+                        while (!stoppingToken.IsCancellationRequested)
+                        {
+                            await connection.WaitAsync(stoppingToken).ConfigureAwait(false);
+                        }
+                    }
+                    finally
+                    {
+                        connection.Notification -= OnNotification;
                     }
                 }
-                finally
+                catch (NpgsqlException) when (!stoppingToken.IsCancellationRequested)
                 {
-                    connection.Notification -= OnNotification;
+                    LogListenerRetry(_registration.Options.TransientFailureDelay);
+                    await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
+                }
+                catch (TimeoutException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    LogListenerRetry(_registration.Options.TransientFailureDelay);
+                    await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
                 }
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (NpgsqlException) when (!stoppingToken.IsCancellationRequested)
-            {
-                LogListenerRetry(_registration.Options.TransientFailureDelay);
-                await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
-            }
-            catch (TimeoutException) when (!stoppingToken.IsCancellationRequested)
-            {
-                LogListenerRetry(_registration.Options.TransientFailureDelay);
-                await Task.Delay(_registration.Options.TransientFailureDelay, stoppingToken).ConfigureAwait(false);
-            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Listener shutdown also cancels retry delays started inside the provider exception handlers.
         }
     }
 

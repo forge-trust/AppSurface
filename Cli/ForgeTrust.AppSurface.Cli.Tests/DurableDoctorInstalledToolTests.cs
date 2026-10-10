@@ -923,6 +923,13 @@ public sealed class DurableDoctorInstalledToolTests
             {
                 Assert.Contains(code, run.StandardOutput, StringComparison.Ordinal);
             }
+            if (row.NextAction == "verify")
+            {
+                Assert.Contains("Next action: Run the application's composition verifier", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Required input: consumer verifier command\n", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n",
+                    run.StandardOutput, StringComparison.Ordinal);
+            }
             return;
         }
 
@@ -996,6 +1003,10 @@ public sealed class DurableDoctorInstalledToolTests
         if (row.NextAction == "verify")
         {
             Assert.Equal(JsonValueKind.Null, command.ValueKind);
+            Assert.Equal(["consumer verifier command"],
+                action.GetProperty("requiredInputs").EnumerateArray().Select(static input => input.GetString()));
+            Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                action.GetProperty("documentationUrl").GetString());
             return;
         }
 

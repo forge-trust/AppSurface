@@ -448,6 +448,9 @@ jobs:
       - name: Verify Tailwind release artifact transport
         run: python3 .github/tests/tailwind_workflow_transport_tests.py
 
+      - name: Verify Durable template release artifact transport
+        run: python3 .github/tests/durable_template_workflow_transport_tests.py
+
       - name: Verify generated Markdown snippets
         run: |
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify

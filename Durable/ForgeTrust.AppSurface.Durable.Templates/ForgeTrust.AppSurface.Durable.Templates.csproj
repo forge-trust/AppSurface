@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>true</IsPackable>
+    <IsTool>false</IsTool>
+    <PackageId>ForgeTrust.AppSurface.Durable.Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <Description>Application-owned starter for an authenticated AppSurface Durable external-activation worker.</Description>
+    <PackageTags>appsurface;durable;worker;dotnet-template</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TemplateContentRoot Condition="'$(TemplateContentRoot)' == ''">$(MSBuildProjectDirectory)/content/durable-worker</TemplateContentRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(TemplateContentRoot)/**/*"
+             Exclude="$(TemplateContentRoot)/.template.config/**/*;$(TemplateContentRoot)/src/**/bin/**/*;$(TemplateContentRoot)/src/**/obj/**/*;$(TemplateContentRoot)/tests/**/bin/**/*;$(TemplateContentRoot)/tests/**/obj/**/*;$(TemplateContentRoot)/**/TestResults/**/*;$(TemplateContentRoot)/**/.vs/**/*;$(TemplateContentRoot)/**/.git/**/*">
+      <Pack>true</Pack>
+      <PackagePath>content/durable-worker/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+    </Content>
+    <Content Include="$(TemplateContentRoot)/.template.config/**/*">
+      <Pack>true</Pack>
+      <PackagePath>content/durable-worker/.template.config/%(RecursiveDir)%(Filename)%(Extension)</PackagePath>
+    </Content>
+  </ItemGroup>
+</Project>

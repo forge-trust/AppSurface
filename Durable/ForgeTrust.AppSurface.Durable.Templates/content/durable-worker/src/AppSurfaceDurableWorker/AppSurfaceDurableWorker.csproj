@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>AppSurfaceDurableWorker</AssemblyName>
+    <RootNamespace>AppSurfaceDurableWorker</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <Content Include="../../appsettings.json"
+             Link="appsettings.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <PackageReference Include="ForgeTrust.AppSurface.Durable" />
+    <PackageReference Include="ForgeTrust.AppSurface.Durable.Provider" />
+    <PackageReference Include="ForgeTrust.AppSurface.Durable.PostgreSql" />
+    <PackageReference Include="ForgeTrust.AppSurface.Observability" />
+    <PackageReference Include="ForgeTrust.AppSurface.Workers" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+  </ItemGroup>
+</Project>

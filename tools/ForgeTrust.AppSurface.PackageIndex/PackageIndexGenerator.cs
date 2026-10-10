@@ -726,7 +726,7 @@ internal sealed class PackageIndexGenerator
         builder.AppendLine();
         builder.AppendLine("AppSurface is a coordinated .NET 10 package family. Start with the package that matches the app you're building, then add optional modules only when your app needs them.");
         builder.AppendLine();
-        builder.AppendLine($"{targetFrameworkSummary} Published library rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`. Public previews marked publication held are source-only and intentionally have no install command.");
+        builder.AppendLine($"{targetFrameworkSummary} Published library rows use `dotnet package add`; in .NET 10, `dotnet package add` and `dotnet add package` are equivalent. Tool rows use `dotnet tool install`. Template rows use `dotnet new install <package-id>@<version>` and require an explicit released version. Public previews marked publication held are source-only and intentionally have no install command.");
         builder.AppendLine();
         builder.AppendLine("## Web app");
         builder.AppendLine();
@@ -2317,7 +2317,8 @@ internal sealed class PackageIndexException : Exception
 }
 
 /// <summary>
-/// Contract for evaluating one discovered project into package metadata suitable for chooser rendering.
+/// Contract for evaluating one discovered project into package metadata suitable for chooser rendering, including its
+/// package type so the chooser can distinguish templates from ordinary NuGet packages and .NET tools.
 /// </summary>
 internal interface IProjectMetadataProvider
 {
@@ -2335,7 +2336,8 @@ internal interface IProjectMetadataProvider
 }
 
 /// <summary>
-/// Evaluated package metadata used by the chooser renderer.
+/// Evaluated package metadata used by the chooser renderer, including NuGet package type information for selecting
+/// the correct adopter install command.
 /// </summary>
 /// <param name="ProjectPath">Repository-relative path to the project that produced this metadata.</param>
 /// <param name="PackageId">NuGet package identifier emitted by the project.</param>
@@ -2344,6 +2346,7 @@ internal interface IProjectMetadataProvider
 /// <param name="IsTool">Whether the project reports itself as a .NET tool package.</param>
 /// <param name="OutputType">Resolved output type, such as <c>Library</c> or <c>Exe</c>.</param>
 /// <param name="ProjectReferences">Evaluated project reference paths that contribute package dependency assets.</param>
+/// <param name="PackageType">The evaluated NuGet package type list. An empty value represents the default package type.</param>
 internal sealed record PackageProjectMetadata(
     string ProjectPath,
     string PackageId,
@@ -2351,14 +2354,27 @@ internal sealed record PackageProjectMetadata(
     bool IsPackable,
     bool IsTool,
     string OutputType,
-    IReadOnlyList<string> ProjectReferences)
+    IReadOnlyList<string> ProjectReferences,
+    string PackageType = "")
 {
     /// <summary>
-    /// Gets the primary install command shown in the chooser for this package or tool.
+    /// Gets whether the evaluated NuGet package type list contains <c>Template</c>, compared case-insensitively.
+    /// Package types are semicolon-delimited, matching the evaluated MSBuild property.
     /// </summary>
-    internal string InstallCommand => IsTool
-        ? $"dotnet tool install --global {PackageId} --prerelease"
-        : $"dotnet package add {PackageId}";
+    internal bool IsTemplate => PackageType
+        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Contains("Template", StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets the primary install command shown in the chooser for this package, tool, or template.
+    /// Template commands include an <c>&lt;version&gt;</c> placeholder that consumers replace with an explicit released
+    /// version; tools retain their global prerelease install command, and libraries use the .NET package-add command.
+    /// </summary>
+    internal string InstallCommand => IsTemplate
+        ? $"dotnet new install {PackageId}@<version>"
+        : IsTool
+            ? $"dotnet tool install --global {PackageId} --prerelease"
+            : $"dotnet package add {PackageId}";
 }
 
 /// <summary>
@@ -2480,7 +2496,8 @@ internal sealed class PackageProjectScanner
 }
 
 /// <summary>
-/// Evaluates project metadata by invoking <c>dotnet msbuild</c> and reading JSON property output.
+/// Evaluates project metadata by invoking <c>dotnet msbuild</c> and reading JSON property output, including the
+/// evaluated <c>PackageType</c> used to identify template packs.
 /// </summary>
 /// <remarks>
 /// This provider depends on a functioning local .NET SDK and assumes the project can be evaluated from the
@@ -2523,7 +2540,7 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
                 [
                     "msbuild",
                     projectPath,
-                    "-getProperty:PackageId,TargetFramework,TargetFrameworks,IsPackable,PackAsTool,OutputType",
+                    "-getProperty:PackageId,TargetFramework,TargetFrameworks,IsPackable,PackAsTool,PackageType,OutputType",
                     "-getItem:ProjectReference"
                 ],
                 repositoryRoot,
@@ -2567,6 +2584,9 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
                 : null;
             var isPackable = GetRequiredStringProperty(properties, "IsPackable");
             var packAsTool = GetRequiredStringProperty(properties, "PackAsTool");
+            var packageType = properties.TryGetProperty("PackageType", out var packageTypeElement)
+                ? packageTypeElement.GetString() ?? string.Empty
+                : string.Empty;
             var outputType = GetRequiredStringProperty(properties, "OutputType");
             var projectReferences = ReadProjectReferences(document.RootElement);
 
@@ -2586,7 +2606,8 @@ internal sealed class DotNetProjectMetadataProvider : IProjectMetadataProvider
                 bool.TryParse(isPackable, out var parsedIsPackable) && parsedIsPackable,
                 bool.TryParse(packAsTool, out var parsedPackAsTool) && parsedPackAsTool,
                 outputType,
-                projectReferences);
+                projectReferences,
+                packageType);
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {

@@ -67,6 +67,9 @@
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
   </Folder>
   <Folder Name="/Durable/">
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Templates.Tests/ForgeTrust.AppSurface.Durable.Templates.Tests.csproj" />
+    <Project Path="Durable/ForgeTrust.AppSurface.Durable.Templates.VerificationHost/ForgeTrust.AppSurface.Durable.Templates.VerificationHost.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Testing.Tests/ForgeTrust.AppSurface.Durable.Testing.Tests.csproj" />
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.PostgreSql.Tests/ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj" />

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>AppSurfaceDurableWorker</AssemblyName>
+    <RootNamespace>AppSurfaceDurableWorker</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/**/*.cs"
+             Exclude="../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/Program.cs;../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/**/bin/**/*.cs;../ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/**/obj/**/*.cs"
+             Link="GeneratedHost/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable/ForgeTrust.AppSurface.Durable.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.Provider/ForgeTrust.AppSurface.Durable.Provider.csproj" />
+    <ProjectReference Include="../ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj" />
+    <ProjectReference Include="../../Observability/ForgeTrust.AppSurface.Observability/ForgeTrust.AppSurface.Observability.csproj" />
+    <ProjectReference Include="../../Workers/ForgeTrust.AppSurface.Workers/ForgeTrust.AppSurface.Workers.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+  </ItemGroup>
+
+</Project>
