@@ -720,6 +720,10 @@ body {
     color: var(--docs-color-link-visited);
 }
 
+.docs-version-archive__action:hover {
+    color: var(--docs-color-link);
+}
+
 .docs-version-archive__action:focus-visible {
     outline: var(--docs-focus-outline);
     outline-offset: 3px;
