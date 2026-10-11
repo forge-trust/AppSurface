@@ -1,0 +1,38 @@
+{
+  "case": "N09",
+  "final_all16_n03_required": true,
+  "n03_separate_procedure_status": "REQUIRED_SEPARATE_ALL16_CONTROL_PENDING",
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "native_pending": true,
+  "pending_static_review_flags": [],
+  "review_flags": {
+    "BUILD_REVIEWED": true,
+    "CANCELLATION_INTEGRATION_REVIEW_CLEAR": true,
+    "FIXTURE_REVIEWED": true,
+    "NATIVE_HANDOFF_REVIEWED": true,
+    "OS_AUDIT_REVIEWED": true,
+    "PARSER_REVIEWED": true,
+    "ROOT_CLEANUP_REVIEWED": true,
+    "ROOT_TRANSPORT_REVIEWED": true,
+    "SOURCE_CAPTURE_REVIEWED": true,
+    "UBUNTU_RUNTIME_REVIEWED": true
+  },
+  "schema": "issue779-n09-native-source-review-v1",
+  "source_capture_full_map_sha256": "a3dbb4a7be588b3e5234bf728e4eda4032f5ee8acab1d2ab7213cceef106586e",
+  "source_capture_sha256": "653d30169f6fc3aed53274349304dfebc3aff2b529e42bf3a4524a37fa546fd2",
+  "source_commit": "0c100a94d93f82fd633e5674009a41659940d010",
+  "source_count": 2865,
+  "source_final_retarget_pending": false,
+  "source_map_sha256": "a3dbb4a7be588b3e5234bf728e4eda4032f5ee8acab1d2ab7213cceef106586e",
+  "source_parent": "03ff51b361d686e6e2590a27e9a4f43529cdbaf2",
+  "source_tree": "3ab6be00223c9259466f1b1c191d6d2158a35e2e",
+  "static_review_basis": [
+    {
+      "path": "/private/tmp/issue779-csharp-n09-current-common-candidate-v6/independent-review.json",
+      "sha256": "f1d81d06ff65d132a6a7fb88e5829c15d84109434f1090b47cb25015393f7baa"
+    }
+  ],
+  "status": "STATIC_SCOPES_REVIEWED; NATIVE_RESULT_PENDING"
+}
