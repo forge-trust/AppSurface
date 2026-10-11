@@ -316,42 +316,33 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
 
     private async Task<LinuxControlConnection> AcceptActualAsync(CancellationToken token)
     {
-        Socket? accepted = null;
         var stage = LinuxControlFailureStage.ListenerState;
         try
         {
             lock (_gate)
             {
                 if (_admissionClosing || _closing || Volatile.Read(ref _socketClosed) != 0) throw new SupervisionAcceptShutdownException();
-                Check(token, ref stage);
+                // The accept token owns network interruption only. Native identity checks remain
+                // bounded by the actual owner, including cancellation racing this precheck.
+                Check(default, ref stage);
             }
             using var cancellation = token.UnsafeRegister(static state => ((LinuxControlListener)state!).CloseSocket(), this);
             stage = LinuxControlFailureStage.ListenerNativeAccept;
-            try { accepted = await _socket.AcceptAsync(token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
-            { throw new SupervisionAcceptShutdownException(); }
-            catch (ObjectDisposedException) when (Volatile.Read(ref _socketClosed) != 0)
-            { throw new SupervisionAcceptShutdownException(); }
-            catch (SocketException error) when (Volatile.Read(ref _socketClosed) != 0
-                && error.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
-            { throw new SupervisionAcceptShutdownException(); }
-            lock (_gate)
+            return await SupervisionAcceptedResource.CompleteAsync(AcceptNativeAsync(), (accepted, checkToken) =>
             {
-                stage = LinuxControlFailureStage.ListenerState;
-                // An actual late accepted socket still passes retained name/process/peer checks. The
-                // listener's endpoint was checked before accept; its own closed socket cannot be queried.
-                // Caller cancellation only interrupts network wait; the actually accepted socket still
-                // receives the same uncancelled native identity checks before its owned late close.
-                var checkToken = token.IsCancellationRequested ? default : token;
-                Check(checkToken, ref stage, allowClosedListener: true);
-                stage = LinuxControlFailureStage.ListenerWorkerSelection;
-                var worker = _worker ?? throw LinuxControlListenerPolicy.Invalid();
-                RequireWorker(worker, checkToken, ref stage);
-                stage = LinuxControlFailureStage.ListenerAcceptedPeer;
-                var result = LinuxControlConnection.Accept(accepted, _owner, worker);
-                accepted = null; // The connection factory owns the socket, including rejection.
-                return result;
-            }
+                lock (_gate)
+                {
+                    stage = LinuxControlFailureStage.ListenerState;
+                    // Every returned socket receives uncancelled native identity checks under the
+                    // original owner deadline, even if network cancellation arrives during them.
+                    Check(checkToken, ref stage, allowClosedListener: true);
+                    stage = LinuxControlFailureStage.ListenerWorkerSelection;
+                    var worker = _worker ?? throw LinuxControlListenerPolicy.Invalid();
+                    RequireWorker(worker, checkToken, ref stage);
+                    stage = LinuxControlFailureStage.ListenerAcceptedPeer;
+                    return LinuxControlConnection.Accept(accepted, _owner, worker);
+                }
+            }, static accepted => accepted.Dispose()).ConfigureAwait(false);
         }
         catch (SupervisionAcceptShutdownException) { throw; }
         catch (OperationCanceledException error)
@@ -366,7 +357,18 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
             lock (_gate) { _failures.Capture(stage, null, error); Fail(); }
             throw LinuxControlListenerPolicy.Invalid();
         }
-        finally { accepted?.Dispose(); }
+
+        async Task<Socket> AcceptNativeAsync()
+        {
+            try { return await _socket.AcceptAsync(token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            { throw new SupervisionAcceptShutdownException(); }
+            catch (ObjectDisposedException) when (Volatile.Read(ref _socketClosed) != 0)
+            { throw new SupervisionAcceptShutdownException(); }
+            catch (SocketException error) when (Volatile.Read(ref _socketClosed) != 0
+                && error.SocketErrorCode is SocketError.OperationAborted or SocketError.Interrupted)
+            { throw new SupervisionAcceptShutdownException(); }
+        }
     }
 
     private void Check(CancellationToken token)

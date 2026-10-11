@@ -1462,3 +1462,21 @@ clear failure or establish successful custody. With ordinary `None`, the N07 che
 its pump observer is absent, and the allocation-fault writer is not used. The shared N07 selector and its
 complete compile/test/native qualification remain pending integration review; this source merge is not
 a native acceptance claim.
+
+### Accepted socket cancellation boundary
+
+[LinuxControlListener](LinuxControlListener.cs) uses its accept token solely to interrupt
+the original network wait and close the listener. Before dispatch and after a socket is
+returned, workspace, retained-name, owner, worker and peer validation use the actual
+owner's original deadline independently of that network token. Cancellation arriving
+between accept completion and a workspace check cannot suppress those checks or turn
+orderly admission closure into a workspace cancellation failure. A failed identity or
+expired owner still rejects and remains sticky.
+
+The internal [SupervisionAcceptedResource](SupervisionAcceptedResource.cs) procedure
+joins the original accept, supplies CancellationToken.None to synchronous validation,
+and closes an untransferred resource on rejection. It creates no native identity or
+admission. [Barrier controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptedResourceTests.cs)
+exercise cancellation during validation, failure propagation, late-result close and
+EXIT admission-drain ordering. Full listener/handler joins and the sixteen required
+Linux controls remain necessary; portable procedure results grant no native proof.
