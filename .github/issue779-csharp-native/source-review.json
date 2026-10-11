@@ -1,0 +1,191 @@
+{
+  "case": "N16",
+  "current_scope_coverage": {
+    "fixture": [
+      "fixture_workflow_runner",
+      "main_inputs"
+    ],
+    "native_handoff": [
+      "main_inputs"
+    ],
+    "parser": [
+      "main_inputs"
+    ],
+    "retention": [
+      "main_inputs"
+    ],
+    "root_cleanup": [
+      "CSharp_admission_cleanup",
+      "main_inputs"
+    ],
+    "root_transport": [
+      "main_inputs"
+    ],
+    "source_capture": [
+      "source_capture",
+      "source_timing_delta",
+      "CSharp_admission_cleanup"
+    ]
+  },
+  "historical_review_evidence": {
+    "accepted_socket_cancellation_source": {
+      "path": "/private/var/folders/cz/2sw6sw1j01q8vy7w7trdx5040000gn/T/issue779-csharp-accepted-socket-cancellation-cfxgmtl7/source-review-aggregate.json",
+      "sha256": "7f7616e1f4e2cefe75bae3ff751e11fad6cab45b38f277341fdcdd91fcedb623"
+    },
+    "actual_root_query_controls": {
+      "path": "/private/tmp/issue779-csharp-n16-common-source-native-candidate-v8/actual-root-query-results.json",
+      "sha256": "e30bc28b13de1c3f25bf1608040ba2d3efda9f719bfe29f588bf0140861454b4"
+    },
+    "build_workflow": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/build-workflow-prepin-review.json",
+      "sha256": "b0c8008442ca74771723d3c8b15cba920ee2a2908cc77663b267d778855ad8b7"
+    },
+    "capture": {
+      "path": "/private/tmp/issue779-csharp-n16-source-capture-preparation-v2/review-after-description-fix.json",
+      "sha256": "b881dbe5388b188e0a426b3b3fe762312d68ad7ec8429aa1ce8d1a1e74aece35"
+    },
+    "csharp_admission_cleanup": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/admission-cleanup-independent-review.json",
+      "sha256": "172cd504fe3d28c2eb939f618b4c46ac84e737393e8d8f8f5d587d19791194a2"
+    },
+    "csharp_failure_latch": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/incremental-failure-latch-review.json",
+      "sha256": "3bfd732a622193d3b55d52079b99145eeca185322f1912e9ef3df3abee26818a"
+    },
+    "csharp_validation": {
+      "path": "/private/tmp/issue779-csharp-n16-accepted-work-source-v1/failure-latch-validation/receipt.json",
+      "sha256": "c840c5e1442996781b5242b3d8b7453f4990ce5fc420fc9729eb14a036a0db17"
+    },
+    "current_binding_delta": {
+      "path": "/private/tmp/issue779-csharp-n16-accept-cancellation-native-publication-v1/readme-resolution-review.json",
+      "sha256": "a016f6c6486ce5bea0fd9e7b0f0b134805fdb24cc5afca5b98c7288c2903aec4"
+    },
+    "current_composed_input_review": {
+      "path": "/private/tmp/issue779-csharp-n16-client-progress-native-candidate-v2/full-input-review.json",
+      "sha256": "809a5cfe48a5813764ddf8577e36988b4acceaa40563afae163c11bc8fa82782"
+    },
+    "current_exit_diagnostic_parser_and_composition": {
+      "path": "/private/tmp/issue779-csharp-n16-exit-diagnostic-native-candidate-v2/independent-review.json",
+      "sha256": "e53d6eb96d6334ae85aa3c2dfbbcf5b7af98d24637ed0094530c307aa3040f04"
+    },
+    "current_v8_independent_clear": {
+      "path": "/private/tmp/issue779-csharp-n16-common-source-native-candidate-v8/independent-current-v8-review.json",
+      "sha256": "018f7af4d3f52ec5837531525113ebc93e23109c75babf0b4fca138bfdf3b23c"
+    },
+    "exact_option_control": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/no-abbreviation-validation/receipt.json",
+      "sha256": "058f97bcd5fe47b51b3ef013e60d28815738e1376ada88811d9b5ad0b56c0daa"
+    },
+    "fixture": {
+      "path": "/private/tmp/issue779-csharp-n16-native-fixture-preparation-v4/shell-source-review.json",
+      "sha256": "3540a2cc8569030be5dfa3639476ae359b9194aba90833b86084895831cbd33d"
+    },
+    "parser": {
+      "path": "/private/tmp/issue779-csharp-n16-native-fixture-preparation-v4/parser-source-review.json",
+      "sha256": "5311d5bd0d180def6ce7b5922a093c244b3a0ff0c3356ec7706ff6bc111a2e47"
+    },
+    "root_shell": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/shell-independent-main-review.json",
+      "sha256": "d4db2d54e2e73a61063f5bb1e84c83e5222998df84ac267e4e467248e4c8e258"
+    },
+    "runner_controls": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-controls-receipt-v2.json",
+      "sha256": "4b2f0a2af294d3c6c2ec09b06421141df9ef8bd536c2708306968cc844832a4c"
+    },
+    "runner_controls_targeted": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-controls-receipt-v3.json",
+      "sha256": "099a9b7abe5aaaa9965de25dc4c38eb508a46897dbd4b9be6990209105076540"
+    },
+    "runner_exact_options": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-exact-option-review.json",
+      "sha256": "4cb40d641342da262a40e8ce8e0338d1c60686af0aeaf02406bfea637283ed65"
+    },
+    "runner_fix": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-functional-fix-review.json",
+      "sha256": "8b87ea4716c30c91e9d87271eef50d108fece52e42416845737a1961844aea3c"
+    },
+    "runner_original": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/runner-functional-review.json",
+      "sha256": "73cc57f9b5c2a438282b11a76094244dc7d210e99f4d1c07393a97358670fe52"
+    },
+    "workflow_fix": {
+      "path": "/private/tmp/issue779-csharp-n16-native-integration-preparation-v2/workflow-fix-review.json",
+      "sha256": "a5d943bdeea00f53f966014c7e43dedd824d13cfee73f0831de55178230c8448"
+    }
+  },
+  "historical_review_evidence_usage": "Preserved history only; not current gate evidence.",
+  "independent_source_review_pending": false,
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "review_evidence": {
+    "CSharp_admission_cleanup": {
+      "bytes": 9751,
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-n16-v3-current-admission-review-v1/review.json",
+      "released": true,
+      "sha256": "b6f0f8d7d6d25d92a6666dd16e8169f2e08fbed704c98413783a400c14b5828a"
+    },
+    "fixture_workflow_runner": {
+      "bytes": 6768,
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-n16-v3-current-scope-review-v1/review.json",
+      "released": true,
+      "sha256": "0ac749bee1643ee9bb31ab9b4e3fc53d11af3f470125534fbcd61d10af566859"
+    },
+    "main_inputs": {
+      "bytes": 9072,
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-n16-v3-main-input-review-v1/review.json",
+      "released": true,
+      "sha256": "66ce8d1223e9135f8a7b4900c4478854cb4ae5ccd84b826b45a95f6404c1ec57"
+    },
+    "source_capture": {
+      "bytes": 4953,
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-n11-stop-timing-source-v1/independent-capture-review.json",
+      "released": true,
+      "sha256": "3cb315a9d45f52cae3044cd72de1c177f5115f3e869ed291daba0a69f80b35de"
+    },
+    "source_timing_delta": {
+      "bytes": 3717,
+      "clear": true,
+      "path": "/private/tmp/issue779-csharp-n11-stop-timing-source-v1/independent-source-review.json",
+      "released": true,
+      "sha256": "bde6bca61d61ac61e121a411281ed05c2f42383b7536552ee2263c561ec0b6f6"
+    }
+  },
+  "review_flags": {
+    "fixture": true,
+    "native_handoff": true,
+    "parser": true,
+    "retention": true,
+    "root_cleanup": true,
+    "root_transport": true,
+    "source_capture": true
+  },
+  "reviews": {
+    "current_exact_input_review": {
+      "path": "/private/tmp/issue779-csharp-n16-current-retained-custody-v3/independent-input-review.json",
+      "sha256": "7a7fa5e348ceebacfa357dc877c1499d29d5f3842c8cf69baabc7b023b7ba5f6"
+    },
+    "current_independent-capture-review": {
+      "path": "/private/tmp/issue779-csharp-n11-stop-timing-source-v1/independent-capture-review.json",
+      "sha256": "3cb315a9d45f52cae3044cd72de1c177f5115f3e869ed291daba0a69f80b35de"
+    },
+    "current_independent-source-review": {
+      "path": "/private/tmp/issue779-csharp-n11-stop-timing-source-v1/independent-source-review.json",
+      "sha256": "bde6bca61d61ac61e121a411281ed05c2f42383b7536552ee2263c561ec0b6f6"
+    },
+    "retained_custody_audit": {
+      "path": "/private/tmp/issue779-csharp-n16-retained-custody-preparation-v1/independent-review.json",
+      "sha256": "d3088d0f88d9b8b4e8eab7d0bd4db15cea18bd587fca70a8c88c8ab5ce4fbadb"
+    }
+  },
+  "schema": "issue779-n16-native-source-review-v1",
+  "source_capture_sha256": "b1e43764ca61d2430f4cfc6e77aa20c3504fcc1be226e1d8e59f21ef127953e7",
+  "source_commit": "a6933fa3dc2c7a88832abf337447f88527477703",
+  "source_count": 2869,
+  "source_parent": "0adef6032217b4181898a4d6d129e1248cb0eda3",
+  "source_tree": "867aec31f950052666275268f08fe1a7f7fa3c25"
+}
