@@ -448,15 +448,18 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
 
     private void CloseSocket()
     {
-        if (Interlocked.Exchange(ref _socketClosed, 1) == 0)
+        // Endpoint checks already hold this same gate. Close cannot dispose the socket
+        // between their closed-state sample and endpoint read. No callback runs under
+        // the accept ownership gate; cancellation dispatch remains outside that gate.
+        SupervisionAcceptedResource.CloseUnderGate(_gate, ref _socketClosed, () =>
         {
             try { _socket.Dispose(); }
             catch (Exception error) when (Recoverable(error))
             {
-                lock (_gate) { _failures.Capture(LinuxControlFailureStage.ListenerSocketClose, null, error); Fail(); }
+                _failures.Capture(LinuxControlFailureStage.ListenerSocketClose, null, error); Fail();
                 throw LinuxControlListenerPolicy.Invalid();
             }
-        }
+        });
     }
 
     /// <summary>Joins the original accepted-connection close and records its first failure before rethrowing.</summary>

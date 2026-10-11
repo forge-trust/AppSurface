@@ -40,4 +40,24 @@ internal static class SupervisionAcceptedResource
             if (!transferred) closeRejected(accepted);
         }
     }
+
+    /// <summary>Closes once under the same gate held by retained endpoint checks.</summary>
+    /// <param name="gate">The actual listener gate; endpoint inspection holds it too.</param>
+    /// <param name="closed">Irreversible close-attempt state, including a failed close.</param>
+    /// <param name="closeActual">Synchronous actual resource close, never a join callback.</param>
+    /// <remarks>
+    /// A check cannot observe an open resource and then race its disposal. The caller dispatches
+    /// outside the accept-ownership gate and joins original accept I/O separately. The latch is
+    /// set before close; failure cannot authorize another attempt or reopen admission.
+    /// </remarks>
+    internal static void CloseUnderGate(object gate, ref int closed, Action closeActual)
+    {
+        ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(closeActual);
+        lock (gate)
+        {
+            if (Interlocked.Exchange(ref closed, 1) == 0) closeActual();
+        }
+    }
+
 }

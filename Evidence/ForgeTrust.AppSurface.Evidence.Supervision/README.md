@@ -1480,3 +1480,9 @@ admission. [Barrier controls](../ForgeTrust.AppSurface.Evidence.Supervision.Test
 exercise cancellation during validation, failure propagation, late-result close and
 EXIT admission-drain ordering. Full listener/handler joins and the sixteen required
 Linux controls remain necessary; portable procedure results grant no native proof.
+
+Endpoint inspection and irreversible socket disposal share the listener gate through
+`SupervisionAcceptedResource.CloseUnderGate`. A close callback therefore cannot dispose
+the socket between its open-state sample and endpoint read. Close attempts stay latched
+even when disposal throws. The close dispatch occurs outside the accept-ownership gate;
+the original accept and handler tasks still require their separate joins.

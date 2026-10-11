@@ -188,6 +188,58 @@ public sealed class SupervisionAcceptedResourceTests
         Assert.Equal(0, checks); Assert.Equal(0, closes);
     }
 
+    [Fact]
+    public async Task EndpointInspectionAndActualCloseUseTheSameGate()
+    {
+        var gate = new object(); var entered = Gate(); var release = Gate(); var closeStarted = Gate();
+        var closed = 0; var calls = 0;
+        var inspection = Task.Run(() =>
+        {
+            lock (gate)
+            {
+                Assert.Equal(0, Volatile.Read(ref closed));
+                entered.SetResult(); release.Task.GetAwaiter().GetResult();
+                Assert.Equal(0, calls); Assert.Equal(0, Volatile.Read(ref closed));
+            }
+        });
+        Task? close = null;
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            close = Task.Run(() =>
+            {
+                closeStarted.SetResult();
+                SupervisionAcceptedResource.CloseUnderGate(gate, ref closed, () =>
+                {
+                    Assert.True(Monitor.IsEntered(gate)); Interlocked.Increment(ref calls);
+                });
+            });
+            await closeStarted.Task.WaitAsync(Guard);
+            Assert.False(close.IsCompleted); Assert.Equal(0, calls);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await inspection.WaitAsync(Guard);
+            if (close is not null) await close.WaitAsync(Guard);
+        }
+        Assert.Equal(1, closed); Assert.Equal(1, calls);
+        SupervisionAcceptedResource.CloseUnderGate(gate, ref closed, () => throw new InvalidOperationException());
+        Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public void FailedActualCloseStaysLatchedAndCannotRetry()
+    {
+        var gate = new object(); var closed = 0; var calls = 0;
+        Assert.Throws<IOException>(() => SupervisionAcceptedResource.CloseUnderGate(gate, ref closed, () =>
+        {
+            Assert.True(Monitor.IsEntered(gate)); Interlocked.Increment(ref calls); throw new IOException();
+        }));
+        SupervisionAcceptedResource.CloseUnderGate(gate, ref closed, () => Interlocked.Increment(ref calls));
+        Assert.Equal(1, closed); Assert.Equal(1, calls);
+    }
+
     private sealed class Item;
     private static TaskCompletionSource Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static async Task RejectAsync(Task task)
