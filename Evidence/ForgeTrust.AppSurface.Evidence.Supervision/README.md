@@ -1,5 +1,20 @@
 # Evidence.Supervision
 
+## Account identity during teardown
+
+After `BeginRootTeardown`, new work admission is closed. The private N08/N09 cancellation
+projection therefore reads the original results GID through
+[`LinuxRunAccounts.RequireControlOwnedBy`](LinuxRunAccounts.cs), using the reference-equal
+owner and its original cleanup token. This accessor returns the retained identity snapshot
+only while the account holder remains open, unquarantined and valid. It does not grant work
+admission or permit account deletion. The active-only `ResultsGid` property remains unsuitable
+for this phase and continues to reject after work admission closes.
+
+The [root composition](LinuxEmptyObservationExecution.cs) captures the snapshot before
+custody closes accounts. Every original worker, server, output, custody and final deadline
+check still applies. The native N09 cancellation fixture must independently verify those
+facts; successful metadata encoding or local tests alone do not complete that control.
+
 ## Ordinary execution and private qualification images
 
 The [C# migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) requires one source graph for ordinary supervisor and worker roles. [EvidenceNativeQualification](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) is internal build metadata with a production default of `None`. Ordinary execution creates no N04 root-helper rendezvous, cancellation-stage barrier, N15 stderr frame or wait, stderr phase observer, or root-injected SIGINT. The ordinary worker follows authenticated planning, allocation, activation, cleanup and collection.

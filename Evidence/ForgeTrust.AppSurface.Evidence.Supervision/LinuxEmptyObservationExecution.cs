@@ -293,7 +293,9 @@ internal static class LinuxEmptyObservationExecution
                 && workspace is not null && worker is not null && server is not null)
                 try
                 {
-                    cancellationResultsGid = accounts.ResultsGid;
+                    // Teardown has closed work admission. The retained control owner still
+                    // authenticates cleanup identity without reopening account work access.
+                    cancellationResultsGid = accounts.RequireControlOwnedBy(owner, cleanupToken).ResultsGid;
                     var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server,
                         cleanupToken, ref cancellationProjectionStage);
                     cancellationProjectionStage = LinuxCancellationProjectionStage.SignalProvenance;
@@ -451,7 +453,8 @@ internal static class LinuxEmptyObservationExecution
 
     /// <summary>Encodes fixed private cancellation cleanup data; it creates no native ownership or completion capability.</summary>
     /// <param name="generation">Original generation data; native composition supplies the actual owner generation.</param>
-    /// <param name="resultsGid">Original nonroot results group ID, captured before account cleanup changes NSS.</param>
+    /// <param name="resultsGid">Original nonroot results group ID, copied through the retained control owner
+    /// before account cleanup changes NSS.</param>
     /// <returns>Bounded JSON with no raw exception, path, message, admission or successful-run claim.</returns>
     /// <exception cref="EvidenceAdmissionException">Fixed ASEVD410 for empty generation or reserved group data.</exception>
     /// <remarks>
