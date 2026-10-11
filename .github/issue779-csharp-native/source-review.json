@@ -1,0 +1,72 @@
+{
+  "case": "N09",
+  "current_review_evidence": {
+    "base_full_semantic_review": "/private/tmp/issue779-csharp-n09-cleanup-access-v14-main-finalization-v1/independent-v14-semantic-review.json",
+    "base_full_semantic_review_sha256": "9a3e3ef0f088cd7f4df3c3c893a537efe0ff959ed171a924c0216b39e908fd10",
+    "basis": "Executable source outside terminal parser/tests unchanged except verified SHA pins; terminal delta reviewed independently. Native results remain pending.",
+    "terminal_delta_review": "/private/tmp/issue779-csharp-n09-root-terminal-projection-v15-independent-review-v1/review.json",
+    "terminal_delta_review_sha256": "a6c05140ae96b0837cfcddb356ddb3774af4028438b3a6ae538700a439762974"
+  },
+  "final_all16_n03_required": true,
+  "historical_static_review_basis": [
+    {
+      "path": "/private/tmp/issue779-csharp-n09-current-common-candidate-v6/independent-review.json",
+      "sha256": "f1d81d06ff65d132a6a7fb88e5829c15d84109434f1090b47cb25015393f7baa"
+    },
+    {
+      "path": "/private/tmp/issue779-csharp-n09-capture-cap-candidate-v11/independent-remaining-scopes-v11.json",
+      "sha256": "3a50ba01e97e5a2490324bea4b144554cdf42aac589169a208b677fc01b93228"
+    },
+    {
+      "path": "/private/tmp/issue779-csharp-n09-capture-cap-candidate-v11/independent-review-v11.json",
+      "sha256": "efde611e7078c521b3d3816c60560b8e7b35fc8418fe42e15e45fecc7f7f553b"
+    }
+  ],
+  "historical_v14_review_flags": {
+    "BUILD_REVIEWED": true,
+    "CANCELLATION_INTEGRATION_REVIEW_CLEAR": true,
+    "FIXTURE_REVIEWED": true,
+    "NATIVE_HANDOFF_REVIEWED": true,
+    "OS_AUDIT_REVIEWED": true,
+    "PARSER_REVIEWED": true,
+    "ROOT_CLEANUP_REVIEWED": true,
+    "ROOT_TRANSPORT_REVIEWED": true,
+    "SOURCE_CAPTURE_REVIEWED": true,
+    "UBUNTU_RUNTIME_REVIEWED": true
+  },
+  "n03_separate_procedure_status": "REQUIRED_SEPARATE_ALL16_CONTROL_PENDING",
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "native_pending": true,
+  "pending_static_review_flags": [],
+  "review_flags": {
+    "BUILD_REVIEWED": true,
+    "CANCELLATION_INTEGRATION_REVIEW_CLEAR": true,
+    "FIXTURE_REVIEWED": true,
+    "NATIVE_HANDOFF_REVIEWED": true,
+    "OS_AUDIT_REVIEWED": true,
+    "PARSER_REVIEWED": true,
+    "ROOT_CLEANUP_REVIEWED": true,
+    "ROOT_TRANSPORT_REVIEWED": true,
+    "SOURCE_CAPTURE_REVIEWED": true,
+    "UBUNTU_RUNTIME_REVIEWED": true
+  },
+  "schema": "issue779-n09-native-source-review-v1",
+  "source_capture_full_map_sha256": "caa0fb7bb7cb2e6628c85477c7864e8e9b063a1164e29fe6aeb7ac6d5ed54e26",
+  "source_capture_sha256": "fde517820a8bc0af61ebd625337b6522d5c328986017364ac2d443841b97dbb5",
+  "source_commit": "0adef6032217b4181898a4d6d129e1248cb0eda3",
+  "source_count": 2867,
+  "source_final_retarget_pending": false,
+  "source_map_sha256": "caa0fb7bb7cb2e6628c85477c7864e8e9b063a1164e29fe6aeb7ac6d5ed54e26",
+  "source_parent": "7e1d87d502dab7df654299e4773a41c037bd1efd",
+  "source_tree": "e9e69f26590578ed9127bc8fd5e61b037d51888a",
+  "static_review_basis": [
+    {
+      "path": "/private/tmp/issue779-csharp-n09-cleanup-access-v14-main-finalization-v1/independent-v14-semantic-review.json",
+      "scope": "v14 exact-19 semantic retarget review; pre-promotion bytes",
+      "sha256": "9a3e3ef0f088cd7f4df3c3c893a537efe0ff959ed171a924c0216b39e908fd10"
+    }
+  ],
+  "status": "EXACT_SOURCE_SCOPES_REVIEWED; NATIVE_RESULT_PENDING"
+}
