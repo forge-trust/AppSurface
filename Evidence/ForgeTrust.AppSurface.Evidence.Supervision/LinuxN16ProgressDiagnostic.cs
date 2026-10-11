@@ -56,11 +56,30 @@ internal static class LinuxN16ProgressDiagnostic
         ExitResponseReceived
     }
 
+    /// <summary>Closed client-side stage of the original private N16 EXIT exchange.</summary>
+    internal enum ClientExitStage
+    {
+        Unknown, ConnectStarted, RootPeerCheck, RootPeerVerified, RequestWrite, RequestLineWritten,
+        ResponseReadStarted, ResponseReadCompleted
+    }
+
+    /// <summary>Closed failure classes from the original EXIT socket operation.</summary>
+    internal enum ClientExitFailureClass { None, Cancelled, Socket, Disposed, Protocol, Other }
+
+    /// <summary>Closed diagnostic-code family; arbitrary exception codes are never retained.</summary>
+    internal enum ClientExitDiagnosticCode { None, ASEVD402, ASEVD410, ASEVD420 }
+
     /// <summary>Closed client progress copied from the original joined stderr receipt.</summary>
     /// <param name="LastMilestone">The last ordered marker, or Unknown when the stream cannot be trusted.</param>
     /// <param name="JoinedStreamComplete">Whether the original paired output receipt is complete; not process success.</param>
     /// <param name="MarkerSequenceValid">Whether at least one exact, ordered marker was parsed from that receipt.</param>
-    internal sealed record ClientSnapshot(ClientMilestone LastMilestone, bool JoinedStreamComplete, bool MarkerSequenceValid);
+    /// <param name="ExitStage">The last fixed EXIT barrier or the operation stage that failed.</param>
+    /// <param name="ExitFailureClass">A closed failure category from the original EXIT request, if one was recorded.</param>
+    /// <param name="ExitDiagnosticCode">A closed diagnostic-code family; no exception text is retained.</param>
+    internal sealed record ClientSnapshot(ClientMilestone LastMilestone, bool JoinedStreamComplete, bool MarkerSequenceValid,
+        ClientExitStage ExitStage = ClientExitStage.Unknown,
+        ClientExitFailureClass ExitFailureClass = ClientExitFailureClass.None,
+        ClientExitDiagnosticCode ExitDiagnosticCode = ClientExitDiagnosticCode.None);
 
     /// <summary>Copied original N16 server flags and the monotonic age of its last observed milestone.</summary>
     /// <remarks>This detached data has no native, admission, custody, or success authority.</remarks>
@@ -110,13 +129,25 @@ internal static class LinuxN16ProgressDiagnostic
                 != (snapshot.LastMilestoneElapsedMilliseconds is null)
             || snapshot.LastMilestoneElapsedMilliseconds is < 0 or > MaximumElapsedMilliseconds
             || (snapshot.Client is { } client && (!Enum.IsDefined(client.LastMilestone)
+                || !Enum.IsDefined(client.ExitStage) || !Enum.IsDefined(client.ExitFailureClass)
+                || !Enum.IsDefined(client.ExitDiagnosticCode)
+                || (client.ExitFailureClass != ClientExitFailureClass.None
+                    && (client.ExitStage is ClientExitStage.Unknown or ClientExitStage.ResponseReadCompleted))
+                || (client.ExitFailureClass == ClientExitFailureClass.None && client.ExitDiagnosticCode != ClientExitDiagnosticCode.None)
+                || (client.ExitStage != ClientExitStage.Unknown
+                    && (!client.MarkerSequenceValid
+                        || client.LastMilestone is not (ClientMilestone.ExitStarted or ClientMilestone.ExitResponseReceived)))
+                || (client.ExitFailureClass != ClientExitFailureClass.None
+                    && client.LastMilestone != ClientMilestone.ExitStarted)
+                || (client.ExitStage == ClientExitStage.ResponseReadCompleted
+                    && client.LastMilestone != ClientMilestone.ExitResponseReceived)
                 || client.MarkerSequenceValid && (!client.JoinedStreamComplete || client.LastMilestone == ClientMilestone.Unknown)
                 || client.LastMilestone != ClientMilestone.Unknown && (!client.JoinedStreamComplete || !client.MarkerSequenceValid))))
             throw Rejected();
 
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            schema = "issue779-n16-progress-diagnostic-v1",
+            schema = "issue779-n16-progress-diagnostic-v2",
             last_milestone = snapshot.LastMilestone.ToString(),
             last_milestone_elapsed_ms = snapshot.LastMilestoneElapsedMilliseconds,
             work_claimed = snapshot.WorkClaimed,
@@ -132,6 +163,9 @@ internal static class LinuxN16ProgressDiagnostic
             client_last_milestone = snapshot.Client?.LastMilestone.ToString() ?? ClientMilestone.Unknown.ToString(),
             client_joined_stream_complete = snapshot.Client?.JoinedStreamComplete ?? false,
             client_marker_sequence_valid = snapshot.Client?.MarkerSequenceValid ?? false,
+            client_exit_stage = snapshot.Client?.ExitStage.ToString() ?? ClientExitStage.Unknown.ToString(),
+            client_exit_failure_class = snapshot.Client?.ExitFailureClass.ToString() ?? ClientExitFailureClass.None.ToString(),
+            client_exit_diagnostic_code = snapshot.Client?.ExitDiagnosticCode.ToString() ?? ClientExitDiagnosticCode.None.ToString(),
             native_authority = false,
             native_acceptance = false,
         });
@@ -152,6 +186,12 @@ internal static class LinuxN16ProgressDiagnostic
 
         var last = ClientMilestone.Unknown;
         var expected = 1;
+        var exitStage = ClientExitStage.Unknown;
+        var exitFailure = ClientExitFailureClass.None;
+        var exitCode = ClientExitDiagnosticCode.None;
+        var expectedExit = 1;
+        var sawMarker = false;
+        var sawExitFailure = false;
         var prefix = output.Stderr.Prefix.AsSpan();
         var start = 0;
         for (var index = 0; index <= prefix.Length; index++)
@@ -159,17 +199,82 @@ internal static class LinuxN16ProgressDiagnostic
             if (index != prefix.Length && prefix[index] != (byte)'\n') continue;
             var line = prefix[start..index];
             start = index + 1;
-            if (line.Length == 0 || !line.StartsWith("ASEVDN16C:"u8)) continue;
-            if (index == prefix.Length || line.Length > 96 || line.Length != 12 || line[10] is < (byte)'0' or > (byte)'9'
-                || line[11] is < (byte)'0' or > (byte)'9')
-                return new(ClientMilestone.Unknown, true, false);
-            var number = (line[10] - (byte)'0') * 10 + line[11] - (byte)'0';
-            if (number != expected || number is < 1 or > 7) return new(ClientMilestone.Unknown, true, false);
-            last = (ClientMilestone)number;
-            expected++;
+            if (line.Length == 0) continue;
+            if (line.StartsWith("ASEVDN16C:"u8))
+            {
+                if (sawExitFailure || index == prefix.Length || line.Length != 12 || !TwoDigits(line, 10, out var number)
+                    || number != expected || number is < 1 or > 7
+                    || number == 7 && expectedExit != 1 && expectedExit != 6)
+                    return InvalidClientProgress();
+                last = (ClientMilestone)number;
+                expected++;
+                sawMarker = true;
+            }
+            else if (line.StartsWith("ASEVDN16X:"u8))
+            {
+                if (last != ClientMilestone.ExitStarted || sawExitFailure || index == prefix.Length
+                    || line.Length != 12 || !TwoDigits(line, 10, out var number)
+                    || number != expectedExit || number is < 1 or > 5)
+                    return InvalidClientProgress();
+                exitStage = number switch
+                {
+                    1 => ClientExitStage.ConnectStarted,
+                    2 => ClientExitStage.RootPeerVerified,
+                    3 => ClientExitStage.RequestLineWritten,
+                    4 => ClientExitStage.ResponseReadStarted,
+                    _ => ClientExitStage.ResponseReadCompleted
+                };
+                expectedExit++;
+                sawMarker = true;
+            }
+            else if (line.StartsWith("ASEVDN16E:"u8))
+            {
+                if (last != ClientMilestone.ExitStarted || sawExitFailure || index == prefix.Length
+                    || line.Length != 18 || line[12] != (byte)':'
+                    || line[15] != (byte)':' || !TwoDigits(line, 10, out var stage)
+                    || !TwoDigits(line, 13, out var failure) || !TwoDigits(line, 16, out var code)
+                    || stage is < 1 or > 4 || failure is < 1 or > 5 || code is < 0 or > 3
+                    || code != 0 && failure != (int)ClientExitFailureClass.Protocol
+                    || !FailureMatchesProgress(stage, expectedExit - 1))
+                    return InvalidClientProgress();
+                exitStage = stage switch
+                {
+                    1 => ClientExitStage.ConnectStarted,
+                    2 => ClientExitStage.RootPeerCheck,
+                    3 => ClientExitStage.RequestWrite,
+                    _ => ClientExitStage.ResponseReadStarted
+                };
+                exitFailure = (ClientExitFailureClass)failure;
+                exitCode = (ClientExitDiagnosticCode)code;
+                sawExitFailure = true;
+                sawMarker = true;
+            }
+            else if (line.StartsWith("ASEVDN16"u8))
+            {
+                return InvalidClientProgress();
+            }
         }
-        return new(last, true, last != ClientMilestone.Unknown);
+        return new(last, true, sawMarker, exitStage, exitFailure, exitCode);
     }
+
+    private static bool TwoDigits(ReadOnlySpan<byte> line, int offset, out int value)
+    {
+        value = 0;
+        if (offset < 0 || offset + 1 >= line.Length || line[offset] is < (byte)'0' or > (byte)'9'
+            || line[offset + 1] is < (byte)'0' or > (byte)'9') return false;
+        value = (line[offset] - (byte)'0') * 10 + line[offset + 1] - (byte)'0';
+        return true;
+    }
+
+    private static bool FailureMatchesProgress(int stage, int lastExitMarker) => stage switch
+    {
+        1 or 2 => lastExitMarker == 1,
+        3 => lastExitMarker == 2,
+        4 => lastExitMarker is 3 or 4,
+        _ => false
+    };
+
+    private static ClientSnapshot InvalidClientProgress() => new(ClientMilestone.Unknown, true, false);
 
     /// <summary>Measures a monotonic timestamp interval as bounded whole milliseconds.</summary>
     /// <param name="startedAt">The original milestone timestamp.</param>

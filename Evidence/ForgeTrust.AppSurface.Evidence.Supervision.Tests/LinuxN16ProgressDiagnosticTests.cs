@@ -22,12 +22,12 @@ public sealed class LinuxN16ProgressDiagnosticTests
         using var json = JsonDocument.Parse(bytes);
         var root = json.RootElement;
 
-        Assert.Equal("issue779-n16-progress-diagnostic-v1", root.GetProperty("schema").GetString());
+        Assert.Equal("issue779-n16-progress-diagnostic-v2", root.GetProperty("schema").GetString());
         Assert.Equal("Unknown", root.GetProperty("last_milestone").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("last_milestone_elapsed_ms").ValueKind);
         Assert.False(root.GetProperty("native_authority").GetBoolean());
         Assert.False(root.GetProperty("native_acceptance").GetBoolean());
-        Assert.Equal(18, root.EnumerateObject().Count());
+        Assert.Equal(21, root.EnumerateObject().Count());
         Assert.InRange(bytes.Length, 1, LinuxN16ProgressDiagnostic.MaximumJsonBytes);
         Assert.DoesNotContain("canary", Encoding.UTF8.GetString(bytes));
     }
@@ -134,6 +134,80 @@ public sealed class LinuxN16ProgressDiagnosticTests
         Assert.False(completeWithoutMarkers.MarkerSequenceValid);
     }
 
+    /// <summary>EXIT markers identify completed client I/O barriers; a terminal failure remains data-only.</summary>
+    [Fact]
+    public void ClientExitFailureReportsLastCompletedBarrierWithoutChangingAuthority()
+    {
+        const string canary = "private-exit-diagnostic-canary";
+        var trace = string.Join("\n", Enumerable.Range(1, 6).Select(number => $"ASEVDN16C:{number:D2}"))
+            + "\nASEVDN16X:01\nASEVDN16X:02\nASEVDN16X:03\nASEVDN16X:04\nASEVDN16E:04:01:00\n";
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput(canary + "\n" + trace, eof: true));
+
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.ExitStarted, parsed.LastMilestone);
+        Assert.True(parsed.JoinedStreamComplete);
+        Assert.True(parsed.MarkerSequenceValid);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitStage.ResponseReadStarted, parsed.ExitStage);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitFailureClass.Cancelled, parsed.ExitFailureClass);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitDiagnosticCode.None, parsed.ExitDiagnosticCode);
+
+        var encoded = LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown) with { Client = parsed });
+        using var json = JsonDocument.Parse(encoded);
+        Assert.Equal("ResponseReadStarted", json.RootElement.GetProperty("client_exit_stage").GetString());
+        Assert.Equal("Cancelled", json.RootElement.GetProperty("client_exit_failure_class").GetString());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+        Assert.DoesNotContain(canary, Encoding.UTF8.GetString(encoded));
+        Assert.InRange(encoded.Length, 1, LinuxN16ProgressDiagnostic.MaximumJsonBytes);
+    }
+
+    /// <summary>Only complete, ordered EXIT exchanges produce the response-completed marker.</summary>
+    [Fact]
+    public void ClientExitSuccessRequiresAllFiveBarriersBeforeResponseReceived()
+    {
+        var trace = string.Join("\n", Enumerable.Range(1, 6).Select(number => $"ASEVDN16C:{number:D2}"))
+            + "\n" + string.Join("\n", Enumerable.Range(1, 5).Select(number => $"ASEVDN16X:{number:D2}"))
+            + "\nASEVDN16C:07\n";
+
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput(trace, eof: true));
+
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.ExitResponseReceived, parsed.LastMilestone);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitStage.ResponseReadCompleted, parsed.ExitStage);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitFailureClass.None, parsed.ExitFailureClass);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientExitDiagnosticCode.None, parsed.ExitDiagnosticCode);
+        Assert.True(parsed.MarkerSequenceValid);
+    }
+
+    /// <summary>EXIT failures must agree with the last completed barrier and the closed code/class mapping.</summary>
+    [Theory]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:01:01:00\\n", "ConnectStarted", "Cancelled", "None")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:02:04:01\\n", "RootPeerCheck", "Protocol", "ASEVD402")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16X:02\\nASEVDN16E:03:02:00\\n", "RequestWrite", "Socket", "None")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16X:02\\nASEVDN16X:03\\nASEVDN16E:04:01:00\\n", "ResponseReadStarted", "Cancelled", "None")]
+    public void ClientExitFailureStagesAreClosedAndOrdered(string trace, string expectedStage,
+        string expectedFailure, string expectedCode)
+    {
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(
+            JoinedOutput(trace.Replace("\\n", "\n", StringComparison.Ordinal), eof: true));
+
+        Assert.True(parsed.MarkerSequenceValid);
+        Assert.Equal(expectedStage, parsed.ExitStage.ToString());
+        Assert.Equal(expectedFailure, parsed.ExitFailureClass.ToString());
+        Assert.Equal(expectedCode, parsed.ExitDiagnosticCode.ToString());
+    }
+
+    /// <summary>Malformed, misplaced, duplicated or post-failure EXIT markers collapse to unknown.</summary>
+    [Theory]
+    [InlineData("ASEVDN16X:01\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:02\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:03:02:00\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:01:01:00\\nASEVDN16X:02\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:01:00:00\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16X:01\\nASEVDN16E:01:02:04\\n")]
+    [InlineData("ASEVDN16C:01\\nASEVDN16C:02\\nASEVDN16C:03\\nASEVDN16C:04\\nASEVDN16C:05\\nASEVDN16C:06\\nASEVDN16Z:01\\n")]
+    public void InvalidClientExitMarkerSequenceIsUnknown(string trace) =>
+        AssertUnknown(JoinedOutput(trace.Replace("\\n", "\n", StringComparison.Ordinal), eof: true));
+
     /// <summary>Unavailable, truncated, failed, or over-budget original receipts cannot supply client milestones.</summary>
     [Theory]
     [InlineData(0)]
@@ -194,6 +268,39 @@ public sealed class LinuxN16ProgressDiagnosticTests
         };
 
         Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(snapshot));
+    }
+
+    /// <summary>Detached EXIT fields accept only closed enums and states consistent with the joined marker sequence.</summary>
+    [Fact]
+    public void InconsistentDetachedClientExitStateRejects()
+    {
+        var validBase = Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown);
+        var client = new LinuxN16ProgressDiagnostic.ClientSnapshot(
+            LinuxN16ProgressDiagnostic.ClientMilestone.ExitStarted, true, true,
+            LinuxN16ProgressDiagnostic.ClientExitStage.RootPeerCheck,
+            LinuxN16ProgressDiagnostic.ClientExitFailureClass.Protocol,
+            LinuxN16ProgressDiagnostic.ClientExitDiagnosticCode.ASEVD402);
+
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(validBase with
+        {
+            Client = client with { ExitStage = (LinuxN16ProgressDiagnostic.ClientExitStage)int.MaxValue }
+        }));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(validBase with
+        {
+            Client = client with { ExitFailureClass = LinuxN16ProgressDiagnostic.ClientExitFailureClass.None }
+        }));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(validBase with
+        {
+            Client = client with { ExitDiagnosticCode = (LinuxN16ProgressDiagnostic.ClientExitDiagnosticCode)int.MaxValue }
+        }));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(validBase with
+        {
+            Client = client with { LastMilestone = LinuxN16ProgressDiagnostic.ClientMilestone.Unknown }
+        }));
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(validBase with
+        {
+            Client = client with { LastMilestone = LinuxN16ProgressDiagnostic.ClientMilestone.ExitResponseReceived }
+        }));
     }
 
     private static void AssertUnknown(SupervisionOutputReceipt? output)

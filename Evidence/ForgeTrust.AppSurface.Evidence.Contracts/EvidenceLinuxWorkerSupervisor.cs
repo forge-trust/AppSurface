@@ -508,6 +508,39 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
     private enum N16ClientProgress { OriginalRequestStarted = 1, ControlsStarted, ControlsJoined,
         OriginalResponseReceived, OriginalResponseValidated, ExitStarted, ExitResponseReceived }
 
+    private enum N16ExitStage { Connect = 1, RootPeerCheck, RequestWrite, ResponseRead }
+
+    private sealed class N16ExitTracker
+    {
+        private N16ExitStage _stage = N16ExitStage.Connect;
+
+        internal void Begin(N16ExitStage stage) => _stage = stage;
+
+        internal void Mark(int marker)
+        {
+            if (marker is < 1 or > 5) return;
+            try { Console.Error.Write($"ASEVDN16X:{marker:D2}\n"); }
+            catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException)) { }
+        }
+
+        internal void Failed(Exception error)
+        {
+            var kind = error switch
+            {
+                OperationCanceledException => 1,
+                SocketException => 2,
+                ObjectDisposedException => 3,
+                EvidenceAdmissionException => 4,
+                _ => 5
+            };
+            var code = error is EvidenceAdmissionException admission ? admission.Code switch
+            { "ASEVD402" => 1, "ASEVD410" => 2, "ASEVD420" => 3, _ => 0 } : 0;
+            if (kind is < 1 or > 5 || code is < 0 or > 3) return;
+            try { Console.Error.Write($"ASEVDN16E:{(int)_stage:D2}:{kind:D2}:{code:D2}\n"); }
+            catch (Exception writeError) when (writeError is not (OutOfMemoryException or StackOverflowException or AccessViolationException)) { }
+        }
+    }
+
     /// <summary>Writes one fixed progress token to the original stderr pipe; marker failure never changes control flow.</summary>
     /// <param name="milestone">One closed compile-owned point in the original N16 procedure.</param>
     /// <remarks>Writes synchronously to the existing worker pipe under the original process containment. It adds no timer, retry, reader, caller data or cleanup allowance; a blocked write remains owned until the existing OS lifetime stops the worker.</remarks>
@@ -549,8 +582,24 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #endif
 
     /// <summary>Reports terminal worker completion only after local work, artifact finalization and cleanup stop.</summary>
+#if EVIDENCE_PRIVATE_N16
+    internal async ValueTask CompleteWorkerAsync(CancellationToken stoppingToken)
+    {
+        var tracker = new N16ExitTracker();
+        try
+        {
+            _ = await RequestAsync(new { op = "exit" }, stoppingToken, null, tracker).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            tracker.Failed(error);
+            throw;
+        }
+    }
+#else
     internal async ValueTask CompleteWorkerAsync(CancellationToken stoppingToken) =>
         _ = await RequestAsync(new { op = "exit" }, stoppingToken).ConfigureAwait(false);
+#endif
 
     /// <summary>Launches a tokenized command only through the restricted subject broker, returning acknowledged bounded output.</summary>
     internal async Task<EvidenceRestrictedProcessResult> RunSubjectAsync(
@@ -613,10 +662,19 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
         , TaskCompletionSource? acceptedWork = null
 #endif
+#if EVIDENCE_PRIVATE_N16
+        , N16ExitTracker? n16Exit = null
+#endif
         )
     {
         using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+#if EVIDENCE_PRIVATE_N16
+        if (n16Exit is not null) n16Exit.Mark(1);
+#endif
         await socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), cancellationToken).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+        n16Exit?.Begin(N16ExitStage.RootPeerCheck);
+#endif
         if (RequireRootPeer(socket) != _brokerPid)
         {
             // Fixed private N04 image: the actual root replacement must finish its live peer sample
@@ -632,9 +690,16 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
                 throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
             throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
         }
+#if EVIDENCE_PRIVATE_N16
+        n16Exit?.Mark(2);
+        n16Exit?.Begin(N16ExitStage.RequestWrite);
+#endif
         return await ExchangeAsync(socket, request, cancellationToken
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
             , _brokerPid, acceptedWork
+#endif
+#if EVIDENCE_PRIVATE_N16
+            , n16Exit
 #endif
             ).ConfigureAwait(false);
     }
@@ -643,6 +708,9 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
         , int brokerPid, TaskCompletionSource? acceptedWork
 #endif
+#if EVIDENCE_PRIVATE_N16
+        , N16ExitTracker? n16Exit
+#endif
         )
     {
         var bytes = EvidenceCanonicalJson.Serialize(request);
@@ -650,6 +718,10 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         using var stream = new NetworkStream(socket, ownsSocket: false);
         await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         await stream.WriteAsync(new byte[] { (byte)'\n' }, cancellationToken).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+        n16Exit?.Mark(3);
+        n16Exit?.Begin(N16ExitStage.ResponseRead);
+#endif
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
         if (acceptedWork is not null)
         {
@@ -660,6 +732,9 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #endif
         using var output = new MemoryStream();
         var buffer = new byte[8192];
+#if EVIDENCE_PRIVATE_N16
+        n16Exit?.Mark(4);
+#endif
         while (output.Length <= MaximumResponseBytes)
         {
             var count = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -673,6 +748,9 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
             var response = EvidenceCanonicalJson.Deserialize<JsonElement>(output.ToArray(), MaximumResponseBytes);
             if (!response.GetProperty("ok").GetBoolean())
                 throw new EvidenceAdmissionException("ASEVD420", "The protected broker rejected execution or its output budget.");
+#if EVIDENCE_PRIVATE_N16
+            n16Exit?.Mark(5);
+#endif
             return response;
         }
 
