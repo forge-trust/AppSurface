@@ -92,6 +92,26 @@ public sealed class LinuxFailedSettlementObservationTests
         Assert.Null(error.InnerException);
     }
 
+    /// <summary>Optional original stop timing stays detached numeric data and cannot change any failure fact.</summary>
+    [Fact]
+    public void StopTimingAddsOnlyExplicitN11DiagnosticField()
+    {
+        var data = Valid();
+        var timing = new LinuxWorkerStopTimingSnapshot(20_000, 5000, 15_000_000,
+            0, 1, 2, null, null, 3, 4, 5, 6, null, 7);
+        var observation = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output, stopTiming: timing);
+        using var json = JsonDocument.Parse(observation.Bytes);
+        using var original = JsonDocument.Parse(Encode(data).Bytes);
+        foreach (var property in original.RootElement.EnumerateObject())
+            Assert.Equal(property.Value.GetRawText(), json.RootElement.GetProperty(property.Name).GetRawText());
+        Assert.Equal(7, json.RootElement.GetProperty("stop_timing").GetProperty("stop_joined_ms").GetInt64());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+        Assert.Throws<InvalidOperationException>(() => LinuxFailedSettlementObservation.CreateDetached(
+            data.Generation, data.Identity, Digest, data.State, data.Pending, data.Terminal, data.Group,
+            data.Output, scenario: LinuxFailedSettlementScenario.OriginalCancellation, stopTiming: timing));
+    }
+
     /// <summary>Exports exact full raw bytes only when both streams are clean, complete and within the bound.</summary>
     [Fact]
     public void CompleteStreamsExportExactBytesAndReturnDefensiveCopies()

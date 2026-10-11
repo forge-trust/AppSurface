@@ -40,6 +40,10 @@ internal sealed class EvidenceProtectedLaunchInput : IDisposable
     /// <summary>Gets SHA-256 measured from the retained protected policy file.</summary>
     internal string PolicySha256 { get; }
 
+    /// <summary>Copies the original monotonic remainder for private diagnostics, without checking or changing admission.</summary>
+    /// <remarks>A negative value describes expiry. This never replaces <see cref="Remaining"/> or any execution guard.</remarks>
+    internal TimeSpan DiagnosticRemaining => _allowance - TimeProvider.System.GetElapsedTime(_startedAt);
+
     /// <summary>Gets the original monotonic remainder; expiry remains latched and cannot be reset by retry.</summary>
     internal TimeSpan Remaining
     {

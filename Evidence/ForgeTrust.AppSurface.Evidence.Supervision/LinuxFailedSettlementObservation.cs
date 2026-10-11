@@ -77,13 +77,15 @@ internal sealed class LinuxFailedSettlementObservation
     /// <param name="output">Original output receipt assigned after pump joins.</param>
     /// <param name="token">Original cleanup token; cancellation prevents publication.</param>
     /// <param name="scenario">Closed private diagnostic family, never a runtime execution selector.</param>
+    /// <param name="stopTiming">Optional original N11 numeric stop observations; never an exit or deadline receipt.</param>
     /// <returns>Bounded detached failure data that cannot upgrade settlement.</returns>
     /// <exception cref="InvalidOperationException">A supplied closed metadata value violates the fixed schema.</exception>
     /// <exception cref="OperationCanceledException">The original cleanup token is cancelled.</exception>
     internal static LinuxFailedSettlementObservation CreateDetached(Guid generation, LinuxProcessSample identity,
         string descriptorSha256, LinuxFailedSettlementState state, SupervisionPendingStartSnapshot pending,
         LinuxUnitProperties? terminal, LinuxCgroupSample? group, SupervisionOutputReceipt output,
-        CancellationToken token = default, LinuxFailedSettlementScenario scenario = LinuxFailedSettlementScenario.WorkerStall)
+        CancellationToken token = default, LinuxFailedSettlementScenario scenario = LinuxFailedSettlementScenario.WorkerStall,
+        LinuxWorkerStopTimingSnapshot? stopTiming = null)
     {
         token.ThrowIfCancellationRequested();
         try
@@ -93,7 +95,8 @@ internal sealed class LinuxFailedSettlementObservation
                 || descriptorSha256.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
                 || !state.StartupJoined || !state.StopJoined || !pending.StartReserved || !pending.StartJoined
                 || !pending.Closed || !pending.StopJoined || !Enum.IsDefined(state.Monitor)
-                || !Enum.IsDefined(pending.FirstFailure) || !Enum.IsDefined(scenario)) throw Rejected();
+                || !Enum.IsDefined(pending.FirstFailure) || !Enum.IsDefined(scenario)
+                || stopTiming is not null && scenario != LinuxFailedSettlementScenario.WorkerStall) throw Rejected();
             var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, generation);
             LinuxProcessData.RequireExpected(identity, identity.Stat.Pid, identity.Uids.Real,
                 identity.Gids.Real, unit, LinuxProcessSamplingRole.Worker);
@@ -118,6 +121,9 @@ internal sealed class LinuxFailedSettlementObservation
                 && output.Stderr.ReceivedBytes == output.Stderr.Prefix.Length
                 && output.ReceivedBytes <= MaximumRawBytes;
             token.ThrowIfCancellationRequested();
+            // Retain the old strict shape when timing was not supplied. The new N11 fixture parses
+            // the additive field explicitly; cancellation and production frames remain byte compatible.
+            using var timingJson = stopTiming is null ? null : JsonDocument.Parse(stopTiming.Encode());
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
                 schema = scenario == LinuxFailedSettlementScenario.WorkerStall
@@ -147,6 +153,20 @@ internal sealed class LinuxFailedSettlementObservation
                     stop_signal_failed = output.StopSignalFailed, export_complete = complete },
                 observation_only = true, native_authority = false, native_acceptance = false,
             });
+            if (timingJson is not null)
+            {
+                using var original = JsonDocument.Parse(bytes);
+                using var stream = new MemoryStream();
+                using (var writer = new Utf8JsonWriter(stream))
+                {
+                    writer.WriteStartObject();
+                    foreach (var property in original.RootElement.EnumerateObject()) property.WriteTo(writer);
+                    writer.WritePropertyName("stop_timing");
+                    timingJson.RootElement.WriteTo(writer);
+                    writer.WriteEndObject();
+                }
+                bytes = stream.ToArray();
+            }
             token.ThrowIfCancellationRequested();
             if (bytes.Length is 0 or > MaximumJsonBytes) throw Rejected();
             return new(bytes);

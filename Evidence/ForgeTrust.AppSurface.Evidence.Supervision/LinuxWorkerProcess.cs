@@ -46,6 +46,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxN07FailureSettlement? _failureSettlement;
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
     private readonly SupervisionDescendantObservation _descendant = new();
+    private readonly LinuxWorkerStopTiming? _stopTiming = EvidenceNativeQualification.WorkerStallEnabled
+        ? new(TimeProvider.System) : null;
     private LinuxN12LeaderExitObservation? _leaderExitObservation;
 #if EVIDENCE_PRIVATE_N10
     private readonly LinuxN10PendingStartCheckpoint _n10PendingStart = new();
@@ -322,7 +324,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         var observation = LinuxFailedSettlementObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
             descriptor, state, pending, _failedSettlementUnit, _failedSettlementGroup, _output, token,
             EvidenceNativeQualification.CancellationEnabled ? LinuxFailedSettlementScenario.OriginalCancellation
-                : LinuxFailedSettlementScenario.WorkerStall);
+                : LinuxFailedSettlementScenario.WorkerStall, _stopTiming?.Snapshot);
         owner.RequireControlIdentity(token);
         token.ThrowIfCancellationRequested();
         return observation;
@@ -458,7 +460,22 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// merely because a stop reply or main PID zero was observed. The listener stays owned by the server
     /// until its handlers join; disposal subsequently closes every retained connection before proc FDs.
     /// </remarks>
-    internal Task StopAndJoinAsync() => _lifetime.StopAsync(ContainAsync, FinalizeAsync);
+    internal Task StopAndJoinAsync()
+    {
+        if (_stopTiming is not null)
+        {
+            try { _stopTiming.Begin(_input.DiagnosticRemaining, TimeSpan.FromSeconds(_input.Request.StoppingSeconds), _recipe?.RuntimeMicroseconds); }
+            catch (Exception) { } // Numeric diagnostics cannot replace the original stop result.
+        }
+        var stop = _lifetime.StopAsync(ContainAsync, FinalizeAsync);
+        return _stopTiming is null ? stop : ObserveStopJoinAsync(stop);
+    }
+
+    private async Task ObserveStopJoinAsync(Task original)
+    {
+        try { await original.ConfigureAwait(false); }
+        finally { _stopTiming!.Observe(LinuxWorkerStopMilestone.StopJoined); }
+    }
 
     /// <summary>Requires natural zero-status exit, successful original startup/cleanup/output and a live cleanup bound.</summary>
     /// <remarks>A force-stopped worker, nonzero exit, incomplete output or sticky earlier failure cannot pass this guard.</remarks>
@@ -591,6 +608,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     private async Task ContainAsync()
     {
+        _stopTiming?.Observe(LinuxWorkerStopMilestone.ContainmentStarted);
         try
         {
             _owner.BeginRootTeardown();
@@ -611,7 +629,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         stopDeadline.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
             TimeSpan.FromSeconds(_input.Request.StoppingSeconds).Ticks)));
         using var stop = await LinuxSystemdBackend.ConnectAsync(stopDeadline.Token).ConfigureAwait(false);
+        var stopAttempt = _stopTiming?.StopRequestStarted();
         await stop.StopUnitAsync(Unit, stopDeadline.Token).ConfigureAwait(false);
+        if (stopAttempt is int attempt) _stopTiming?.StopRequestReplied(attempt);
         _owner.RequireCleanup(stopDeadline.Token);
     }
 
@@ -635,7 +655,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                     if (_recipe!.HasStopped(stopped)
                         && (_worker is null || stopped.ExecMainPid == _worker.Pid)
                         && LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, _cleanupDeadline.Token)))
-                    { groupJoined = true; unitJoined = true; break; }
+                    {
+                        _stopTiming?.Observe(LinuxWorkerStopMilestone.UnitAndGroupStopped);
+                        groupJoined = true; unitJoined = true; break;
+                    }
                     await Task.Delay(TimeSpan.FromMilliseconds(25), _cleanupDeadline.Token).ConfigureAwait(false);
                 }
             }
@@ -646,6 +669,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             try { await _exit.ConfigureAwait(false); }
             catch { failed = true; }
             monitorJoined = _exit.IsCompleted;
+            if (monitorJoined) _stopTiming?.Observe(LinuxWorkerStopMilestone.MonitorJoined);
         }
         if (_pipes is not null)
         {
@@ -654,6 +678,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             try
             {
                 _output = await _pipes.JoinAsync().ConfigureAwait(false);
+                _stopTiming?.Observe(LinuxWorkerStopMilestone.PumpsJoined);
                 if (!_output.Successful) failed = true;
             }
             catch { failed = true; }
@@ -675,6 +700,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 var finalGroup = LinuxCgroupProbe.Read(Unit, default);
                 _failedSettlementGroup = finalGroup;
                 _failedSettlementGroupAfterPumps = true;
+                _stopTiming?.Observe(LinuxWorkerStopMilestone.FinalUnitAndGroupSampled);
                 groupJoined &= LinuxAccountUtility.GroupEmpty(finalGroup);
             }
             _backend?.Dispose();
@@ -712,6 +738,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Publish only after every fallible final check and close. No concurrent reader may see a
         // transient true projection that a later owner recheck or descriptor close could revoke.
         Interlocked.Exchange(ref _physicallySettled, 1);
+        _stopTiming?.Observe(LinuxWorkerStopMilestone.SettlementPublished);
     }
 
     private async Task DisposeCoreAsync(TaskCompletionSource completion)

@@ -678,6 +678,31 @@ owner to contain stalls; a managed token alone does not provide physical termina
 
 ## Verification boundaries
 
+### Original worker-stop timing diagnostics
+
+The private N11 stalled-worker image records numeric observations at the original
+`LinuxWorkerProcess` containment, systemd stop request/reply, terminal unit and empty
+group inspection, monitor/pump join, final inspection, and stop-task completion.
+The [failed-settlement record](LinuxFailedSettlementObservation.cs) adds `stop_timing`
+only when the N11 holder has a reliable [monotonic snapshot](LinuxWorkerStopTiming.cs).
+Ordinary and cancellation frames retain their original shape. No supplied JSON or
+timestamp creates an owner, admission, physical exit or native acceptance.
+
+`EvidenceProtectedLaunchInput.DiagnosticRemaining` copies the existing monotonic job
+remainder without latching expiry or replacing the execution guards. At first stop
+entry, the holder records that remainder, the unchanged stopping allowance, and the
+actual worker recipe's `RuntimeMaxUSec`. Event values are elapsed milliseconds from
+that entry. Repeated calls keep the first samples; missing events remain null, and a
+clock failure makes timing unavailable. The numeric object is at most 1 KiB within
+the existing private frame bound. It starts no timer, dispatches no new operation,
+and cannot extend job or cleanup time.
+
+A systemd stop reply measures request completion, not signal delivery. Timing proof
+requires the matching stopped-unit/empty-group observation and original joins within
+the recorded original allowance; a shell launcher duration is insufficient. Native
+tests must bind this private record to the actual run and selected unit. Local
+bookkeeping tests establish no Linux shutdown bound or checkpoint credit.
+
 Portable tests cover grammar, data snapshots, pending ownership, control-handler separation, output
 accounting and cancellation joins. They create no protected admission or kernel exit receipt.
 The checkpoint's 16 real Linux cases are mandatory before protected runtime cutover; wiring the guarded
