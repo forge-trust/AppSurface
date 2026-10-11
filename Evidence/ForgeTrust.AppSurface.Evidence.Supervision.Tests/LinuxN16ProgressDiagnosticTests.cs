@@ -1,4 +1,5 @@
 #if EVIDENCE_PRIVATE_N16
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -11,7 +12,7 @@ public sealed class LinuxN16ProgressDiagnosticTests
 {
     private static LinuxN16ProgressDiagnostic.Snapshot Snapshot(LinuxN16ProgressDiagnostic.Milestone milestone,
         long? elapsedMilliseconds = null, bool progress = false) => new(milestone, elapsedMilliseconds,
-        progress, progress, progress, progress, progress, progress, progress, progress, progress, progress);
+        progress, progress, progress, progress, progress, progress, progress, progress, progress, progress, null);
 
     /// <summary>An unobserved milestone has a null duration and carries no authority.</summary>
     [Fact]
@@ -26,7 +27,7 @@ public sealed class LinuxN16ProgressDiagnosticTests
         Assert.Equal(JsonValueKind.Null, root.GetProperty("last_milestone_elapsed_ms").ValueKind);
         Assert.False(root.GetProperty("native_authority").GetBoolean());
         Assert.False(root.GetProperty("native_acceptance").GetBoolean());
-        Assert.Equal(15, root.EnumerateObject().Count());
+        Assert.Equal(18, root.EnumerateObject().Count());
         Assert.InRange(bytes.Length, 1, LinuxN16ProgressDiagnostic.MaximumJsonBytes);
         Assert.DoesNotContain("canary", Encoding.UTF8.GetString(bytes));
     }
@@ -91,6 +92,124 @@ public sealed class LinuxN16ProgressDiagnosticTests
                 LinuxN16ProgressDiagnostic.MaximumElapsedMilliseconds + 1)));
         Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
             1, 86_400_001_001, 1_000));
+    }
+
+    /// <summary>Only exact ordered client tokens in a fully joined output receipt become copied milestones.</summary>
+    [Fact]
+    public void ClientProgressRequiresOrderedFixedMarkersAndJoinedEof()
+    {
+        const string privateCanary = "private-client-stderr-canary";
+        var output = JoinedOutput(privateCanary + "\nASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\n", eof: true);
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(output);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.ControlsJoined, parsed.LastMilestone);
+        Assert.True(parsed.JoinedStreamComplete);
+        Assert.True(parsed.MarkerSequenceValid);
+        var fullTrace = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput(
+            string.Join("\n", Enumerable.Range(1, 7).Select(number => $"ASEVDN16C:{number:D2}")) + "\n", eof: true));
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.ExitResponseReceived, fullTrace.LastMilestone);
+        Assert.True(fullTrace.MarkerSequenceValid);
+        AssertUnknown(JoinedOutput(string.Join("\n", Enumerable.Range(1, 8)
+            .Select(number => $"ASEVDN16C:{number:D2}")) + "\n", eof: true));
+        var encoded = LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown) with { Client = parsed });
+        Assert.DoesNotContain(privateCanary, Encoding.UTF8.GetString(encoded));
+
+        AssertUnknown(JoinedOutput("ASEVDN16C:01\nASEVDN16C:03\n", eof: true));
+        AssertUnknown(JoinedOutput("ASEVDN16C:01\nASEVDN16C:01\n", eof: true));
+        AssertUnknown(JoinedOutput("ASEVDN16C:99\n", eof: true));
+        AssertUnknown(JoinedOutput("ASEVDN16C:01canary\n", eof: true));
+        AssertUnknown(JoinedOutput("ASEVDN16C:" + new string('9', 97) + "\n", eof: true));
+        AssertUnknown(JoinedOutput(string.Concat(Enumerable.Range(1, 11).Select(_ => "ASEVDN16C:01\n")), eof: true));
+        AssertUnknown(JoinedOutput(new string('x', 96 * 1024), eof: true));
+        var missingEof = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput("ASEVDN16C:01\n", eof: false));
+        AssertUnknown(JoinedOutput("ASEVDN16C:01\n", eof: false));
+        Assert.False(missingEof.JoinedStreamComplete);
+        var failedPump = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(
+            JoinedOutput("ASEVDN16C:01\n", eof: true, failure: SupervisionOutputFailure.ReadFailed));
+        AssertUnknown(JoinedOutput("ASEVDN16C:01\n", eof: true, failure: SupervisionOutputFailure.ReadFailed));
+        Assert.False(failedPump.JoinedStreamComplete);
+        var completeWithoutMarkers = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput("ordinary stderr\n", eof: true));
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.Unknown, completeWithoutMarkers.LastMilestone);
+        Assert.True(completeWithoutMarkers.JoinedStreamComplete);
+        Assert.False(completeWithoutMarkers.MarkerSequenceValid);
+    }
+
+    /// <summary>Unavailable, truncated, failed, or over-budget original receipts cannot supply client milestones.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    public void IncompleteOriginalReceiptDoesNotExposeClientProgress(int fault)
+    {
+        // Fixed public documentation boundary; this test does not expose the Contracts internal limit type.
+        const int maximumRetainedPrefixBytes = 1024 * 1024;
+        var joined = JoinedOutput("ASEVDN16C:01\n", eof: true);
+        SupervisionOutputReceipt? output = fault switch
+        {
+            0 => null,
+            1 => joined with { Stderr = joined.Stderr with { Prefix = default } },
+            2 => joined with
+            {
+                Stderr = joined.Stderr with { ReceivedBytes = joined.Stderr.ReceivedBytes + 1 },
+                ReceivedBytes = joined.ReceivedBytes + 1
+            },
+            3 => joined with { ReceivedBytes = joined.ReceivedBytes + 1 },
+            4 => joined with { QuotaExceeded = true },
+            5 => joined with { StopSignalFailed = true },
+            6 => joined with { Stdout = joined.Stdout with { EndOfStream = false } },
+            7 => joined with { ReceivedByteLimit = joined.ReceivedBytes - 1 },
+            8 => JoinedOutput("ASEVDN16C:01\n" + new string('x',
+                maximumRetainedPrefixBytes), eof: true) with
+            {
+                ReceivedByteLimit = maximumRetainedPrefixBytes + 13
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(fault))
+        };
+
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(output);
+
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.Unknown, parsed.LastMilestone);
+        Assert.False(parsed.JoinedStreamComplete);
+        Assert.False(parsed.MarkerSequenceValid);
+    }
+
+    /// <summary>Detached client data cannot claim a milestone with an invalid enum or incomplete marker receipt.</summary>
+    [Theory]
+    [InlineData(int.MaxValue, false, false)]
+    [InlineData(0, false, true)]
+    [InlineData(0, true, true)]
+    [InlineData(3, false, true)]
+    [InlineData(3, true, false)]
+    public void InconsistentDetachedClientSnapshotRejects(int milestone, bool joined, bool valid)
+    {
+        var snapshot = Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown) with
+        {
+            Client = new((LinuxN16ProgressDiagnostic.ClientMilestone)milestone, joined, valid)
+        };
+
+        Assert.Throws<InvalidOperationException>(() => LinuxN16ProgressDiagnostic.EncodeDetached(snapshot));
+    }
+
+    private static void AssertUnknown(SupervisionOutputReceipt? output)
+    {
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(output);
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.Unknown, parsed.LastMilestone);
+        Assert.False(parsed.MarkerSequenceValid);
+    }
+
+    private static SupervisionOutputReceipt JoinedOutput(string stderr, bool eof,
+        SupervisionOutputFailure failure = SupervisionOutputFailure.None)
+    {
+        var bytes = Encoding.UTF8.GetBytes(stderr).ToImmutableArray();
+        var empty = new SupervisionOutputStreamReceipt(0, ImmutableArray<byte>.Empty, true, SupervisionOutputFailure.None);
+        var output = new SupervisionOutputStreamReceipt(bytes.Length, bytes, eof, failure);
+        return new(empty, output, bytes.Length, 1024 * 1024, failure, false, false);
     }
 
     /// <summary>A valid progress snapshot decorates the same latched failure without changing its negative result.</summary>

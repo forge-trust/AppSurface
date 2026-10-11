@@ -216,7 +216,10 @@ internal static class LinuxEmptyObservationExecution
                 && !acceptedWorkProjectionWriteAttempted && server is not null && serverTask?.IsCompleted == true)
                 try
                 {
-                    n16ProgressDiagnostic = server.CaptureN16ProgressDiagnostic();
+                    n16ProgressDiagnostic = server.CaptureN16ProgressDiagnostic() with
+                    {
+                        Client = worker?.CaptureJoinedN16ClientProgress()
+                    };
                 }
                 catch (Exception error) when (Recoverable(error)) { } // Detached diagnostics never change the first fault or cleanup result.
 #endif

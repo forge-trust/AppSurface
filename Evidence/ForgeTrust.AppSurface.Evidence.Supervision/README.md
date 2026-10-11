@@ -1444,6 +1444,10 @@ After the original server and worker tasks join, the N09 cleanup path rechecks t
 
 The checkpoint is assigned before each original operation. It identifies the failed operation, not an inner syscall or the earliest concurrent failure. Failed diagnostic output cannot replace the original failure. The existing large-record attempt flag remains authoritative after any partial large write; this small additional record cannot authorize a second large export. Successful cancellation projections emit no new record. The fixed fixture still requires original kernel, signal, stream, custody and account cleanup evidence before a negative control qualifies.
 
+### N16 client progress in the terminal failure diagnostic
+
+The private N16 client emits only the seven fixed `ASEVDN16C:01` through `ASEVDN16C:07` tokens to the worker's existing stderr pipe. The original output pump remains the sole reader. After the worker stop and paired pumps join, `LinuxWorkerProcess` parses only the retained stderr prefix when the complete paired receipt is successful; missing EOF, pump failure, truncation, unknown marker, duplicate, or reordered marker yields `Unknown` and cannot be interpreted as a completed request. Unrelated stderr bytes are not copied into this diagnostic. The snapshot adds only a closed client milestone and a joined-stream-complete bit to the existing failure-only N16 record, bounded by its existing 1 KiB encoder. It does not change the original failure, cleanup sequence, deadlines, server milestones, or native evidence requirements. These markers can localize a client await boundary; they do not establish peer behavior, process settlement, custody, EXIT acceptance, or native success. The pure data controls exercise the fixed frame grammar and incomplete joined-receipt cases without a fake peer or process.
+
 
 ## N07 parent replacement observation (private source integration)
 

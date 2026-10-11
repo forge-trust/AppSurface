@@ -444,6 +444,9 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         using var stopLifetime = CancellationTokenSource.CreateLinkedTokenSource(stopToken);
         using var waitLifetime = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
         var accepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#if EVIDENCE_PRIVATE_N16
+        WriteN16ClientProgress(N16ClientProgress.OriginalRequestStarted);
+#endif
         Task<JsonElement> operation = RequestAsync(new { op = "n16-accepted-work" }, operationLifetime.Token, accepted);
         Task? stop = null;
         Task? wait = null;
@@ -458,17 +461,35 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
             }
             await accepted.Task.ConfigureAwait(false);
             if (operation.IsCompleted) throw InvalidWorkerDescriptor();
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.ControlsStarted);
+#endif
             stop = RequestStopAsync(stopLifetime.Token).AsTask();
             wait = WaitForOwnedExitAsync(waitLifetime.Token).AsTask();
             await Task.WhenAll(stop, wait).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.ControlsJoined);
+#endif
             var completed = await operation.ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.OriginalResponseReceived);
+#endif
             WorkerObject(completed, ["ok", "work_joined"], []);
             WorkerRequire(completed.GetProperty("ok").ValueKind == JsonValueKind.True
                 && completed.GetProperty("work_joined").ValueKind == JsonValueKind.True);
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.OriginalResponseValidated);
+#endif
             // The ordered EXIT exchange also joins the server's earlier post-write commits
             // before this private worker can terminate. It creates no product admission.
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.ExitStarted);
+#endif
             completion = CompleteWorkerAsync(stopLifetime.Token).AsTask();
             await completion.ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N16
+            WriteN16ClientProgress(N16ClientProgress.ExitResponseReceived);
+#endif
         }
         finally
         {
@@ -482,6 +503,38 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
                     { /* The original failure propagates; every started I/O task has now joined. */ }
         }
     }
+
+#if EVIDENCE_PRIVATE_N16
+    private enum N16ClientProgress { OriginalRequestStarted = 1, ControlsStarted, ControlsJoined,
+        OriginalResponseReceived, OriginalResponseValidated, ExitStarted, ExitResponseReceived }
+
+    /// <summary>Writes one fixed progress token to the original stderr pipe; marker failure never changes control flow.</summary>
+    /// <param name="milestone">One closed compile-owned point in the original N16 procedure.</param>
+    /// <remarks>Writes synchronously to the existing worker pipe under the original process containment. It adds no timer, retry, reader, caller data or cleanup allowance; a blocked write remains owned until the existing OS lifetime stops the worker.</remarks>
+    private static void WriteN16ClientProgress(N16ClientProgress milestone)
+    {
+        var marker = milestone switch
+        {
+            N16ClientProgress.OriginalRequestStarted => "ASEVDN16C:01\n",
+            N16ClientProgress.ControlsStarted => "ASEVDN16C:02\n",
+            N16ClientProgress.ControlsJoined => "ASEVDN16C:03\n",
+            N16ClientProgress.OriginalResponseReceived => "ASEVDN16C:04\n",
+            N16ClientProgress.OriginalResponseValidated => "ASEVDN16C:05\n",
+            N16ClientProgress.ExitStarted => "ASEVDN16C:06\n",
+            N16ClientProgress.ExitResponseReceived => "ASEVDN16C:07\n",
+            _ => string.Empty
+        };
+        if (marker.Length == 0) return;
+        try
+        {
+            Console.Error.Write(marker);
+        }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            // A diagnostic write cannot replace the original authenticated operation result.
+        }
+    }
+#endif
 
     /// <summary>Validates the fixed private acceptance frame as data; authenticates no peer or workload.</summary>
     /// <param name="phase">A bounded frame read from the original pinned root connection.</param>

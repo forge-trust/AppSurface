@@ -125,7 +125,8 @@ internal sealed class LinuxEmptyObservationControlServer
             Volatile.Read(ref _n16ControlsOverlapped) == 1,
             Volatile.Read(ref _n16StopCommitted) == 1,
             Volatile.Read(ref _n16WaitCommitted) == 1,
-            _exitCommitted.Task.IsCompletedSuccessfully);
+            _exitCommitted.Task.IsCompletedSuccessfully,
+            null);
     }
 
     private void ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone milestone) =>

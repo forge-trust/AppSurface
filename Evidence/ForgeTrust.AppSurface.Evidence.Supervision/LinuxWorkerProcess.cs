@@ -94,6 +94,14 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     internal byte[] CaptureJoinedOutputDiagnostic(Guid generation) =>
         LinuxJoinedWorkerOutputDiagnostic.EncodeDetached(generation, _lifetime.StopJoined ? _output : null);
 
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Copies N16 client markers from the original output pair only after its existing stop and pumps join.</summary>
+    /// <remarks>The original stop task must join, including its failure. Missing EOF or an incomplete/error output receipt produces Unknown. Physical settlement is not required for diagnostic data; this adds no reader or wait.</remarks>
+    internal LinuxN16ProgressDiagnostic.ClientSnapshot CaptureJoinedN16ClientProgress() =>
+        LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(
+            _lifetime.StopJoined ? _output : null);
+#endif
+
     /// <summary>Returns data observed by the original stderr pump for the selected private N07 image.</summary>
     internal Task<byte[]> N07Precleanup(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace)
