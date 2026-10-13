@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -344,6 +345,50 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         Assert.True(execution.OwnWorkStopped);
         Assert.True(execution.IsAdmissionClosed);
         Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
+    [Fact]
+    public async Task N11DisposerMarkersFollowSuccessfulRegistrationAndRunAtMostOnce()
+    {
+        var supervisor = new MetadataSupervisor();
+        var execution = Execution(supervisor);
+        var helper = new EvidenceFixedSynchronousInputFactory();
+        using var error = new StringWriter();
+
+        Assert.True(helper.RegisterDisposer(execution, error));
+        Assert.Equal("FIXTURE_N11_DISPOSER_ARMED" + Environment.NewLine, error.ToString());
+        helper.WriteInputFactoryEnteredMarker(error);
+        Assert.Equal(
+            "FIXTURE_N11_DISPOSER_ARMED" + Environment.NewLine
+            + "FIXTURE_N11_INPUT_FACTORY_ENTERED" + Environment.NewLine,
+            error.ToString());
+        Assert.False(helper.RegisterDisposer(execution, error));
+
+        var cleanup = execution.StopAndDisposeAsync();
+        var concurrentCleanup = execution.StopAndDisposeAsync();
+        Assert.True(await cleanup);
+        Assert.True(await concurrentCleanup);
+        Assert.Equal(
+            "FIXTURE_N11_DISPOSER_ARMED" + Environment.NewLine
+            + "FIXTURE_N11_INPUT_FACTORY_ENTERED" + Environment.NewLine
+            + "FIXTURE_N11_DISPOSER_INVOKED" + Environment.NewLine,
+            error.ToString());
+        Assert.Equal(1, supervisor.WaitCount);
+    }
+
+    [Fact]
+    public async Task N11DisposerRegistrationAfterClosedAdmissionWritesNoMarker()
+    {
+        var supervisor = new MetadataSupervisor();
+        var execution = Execution(supervisor);
+        Assert.True(await execution.StopAndDisposeAsync());
+
+        var helper = new EvidenceFixedSynchronousInputFactory();
+        using var error = new StringWriter();
+        Assert.False(helper.RegisterDisposer(execution, error));
+        Assert.False(helper.RegisterDisposer(execution, error));
+        Assert.Empty(error.ToString());
+        Assert.Equal(1, supervisor.WaitCount);
     }
 
     private static EvidenceProducerDeclaration Declaration() => new("coverage", "coverage", "1.0.0", [],

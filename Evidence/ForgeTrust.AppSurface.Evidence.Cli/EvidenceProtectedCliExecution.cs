@@ -92,6 +92,9 @@ internal static class EvidenceProtectedCliExecution
         EvidenceAdmissionResult? admission = null;
         try
         {
+            if (fixedInputFactory is not null && !fixedInputFactory.RegisterDisposer(execution, Console.Error))
+                throw new EvidenceAdmissionException("ASEVD410", "The fixed worker disposer could not be registered.");
+
             if (EvidenceModeSelection.Select(descriptor.Mode) != mode)
                 throw new EvidenceAdmissionException("ASEVD401", "The caller mode conflicts with the protected launcher.");
 
