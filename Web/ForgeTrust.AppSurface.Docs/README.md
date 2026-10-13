@@ -3187,7 +3187,7 @@ Among qualified task pages, the target-role preference is:
 | Source role | Target priority, highest first |
 | --- | --- |
 | Section landing or introductory/default page | Guide → Example → Troubleshooting |
-| Guide | Example → Troubleshooting → Guide |
+| Guide or How-to | Example → Troubleshooting → Guide |
 | Example | Troubleshooting → Guide → Example |
 | Troubleshooting | Guide → Example → Troubleshooting |
 | API reference | Example → Guide → Troubleshooting |
@@ -3220,6 +3220,8 @@ The component wording is truthful only when `reasonCodes` contains `shared-compo
 #### Render a compatible read-next link
 
 The package's Razor view uses an internal mount-aware helper. A host-owned MVC view can use the public `Url.Content` helper with `~` plus the app-relative `Page.Href`, as below, to add the request `PathBase` once. This model's href excludes `PathBase`; a JSON client's surface-projected `path` is already ready to use and must not receive another prefix. Give each title a unique ID and label the link with that title alone; put the explanatory caption outside the link. This keeps the title as the accessible link name while allowing the caption to be localized from `PrimaryReasonCode` and `ReasonCodes` when the default `ReasonText` is not appropriate.
+
+This example assumes a model produced by `DocAggregator`, which populates `RecommendedPages`. Custom model producers that still populate only `RelatedPages` should preserve the [authored-only fallback](#public-api-and-explanation-contract) when the combined list is empty; an empty `RecommendedPages` list alone does not mean the authored list is empty.
 
 ```razor
 @model ForgeTrust.AppSurface.Docs.Models.DocDetailsViewModel
