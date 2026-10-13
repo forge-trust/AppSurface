@@ -495,7 +495,14 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     }
 
     [Fact]
-    public async Task RealBootstrapRunnerFailsClosedWhenCancelledChildLeavesOutputPipeOpen()
+    public Task RealBootstrapRunnerFailsClosedWhenCancelledChildLeavesOutputPipeOpen() =>
+        VerifyCancelledPipeHoldingDescendantAsync(cancelBeforeIdentityCapture: false);
+
+    [Fact]
+    public Task RealBootstrapRunnerCleansUpGatedDescendantBeforeIdentityCapture() =>
+        VerifyCancelledPipeHoldingDescendantAsync(cancelBeforeIdentityCapture: true);
+
+    private async Task VerifyCancelledPipeHoldingDescendantAsync(bool cancelBeforeIdentityCapture)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -510,11 +517,26 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var scriptPath = Path.Join(_root, "cancel-descendant-holds-pipes.sh");
         var descendantPidPath = Path.Join(_root, "cancel-descendant.pid");
+        var releaseDescendantPath = Path.Join(_root, "cancel-descendant.release");
+        var stopDescendantPath = Path.Join(_root, "cancel-descendant.stop");
+        var descendantExitedPath = Path.Join(_root, "cancel-descendant.exited");
         WriteExecutableScript(scriptPath,
             "#!/bin/sh\n"
-            + "\"" + sleepPath + "\" 60 &\n"
+            + "(\n"
+            + "  remaining=300\n"
+            + "  while [ ! -f \"" + releaseDescendantPath + "\" ]; do\n"
+            + "    if [ -f \"" + stopDescendantPath + "\" ] || [ \"$remaining\" -le 0 ]; then\n"
+            + "      echo exited > \"" + descendantExitedPath + "\"\n"
+            + "      exit 0\n"
+            + "    fi\n"
+            + "    remaining=$((remaining - 1))\n"
+            + "    \"" + sleepPath + "\" 0.01\n"
+            + "  done\n"
+            + "  exec \"" + sleepPath + "\" 60\n"
+            + ") &\n"
             + "echo $! > \"" + descendantPidPath + "\"\n"
-            + "wait\n");
+            + "wait\n"
+            + "exec \"" + sleepPath + "\" 60\n");
         var rootTerminationVerified = false;
         var runner = new NativePostgreSqlBootstrapRunner(async process =>
         {
@@ -528,6 +550,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             return rootTerminationVerified;
         });
         using var cancellation = new CancellationTokenSource();
+        var startupClock = Stopwatch.StartNew();
         var runTask = runner.RunAsync(
             new NativePostgreSqlBootstrapRequest(scriptPath, [], _root, string.Empty, 3_000),
             cancellation.Token);
@@ -538,25 +561,44 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         try
         {
             Assert.True(
-                await WaitForFileAsync(descendantPidPath, runTask, TimeSpan.FromSeconds(3)),
+                await WaitForFileAsync(descendantPidPath, runTask, TimeSpan.FromSeconds(3) - startupClock.Elapsed),
                 "The bootstrap shim did not start its pipe-holding descendant before the test deadline.");
-            Assert.True(int.TryParse(File.ReadAllText(descendantPidPath).Trim(), out var descendantPid));
-            descendant = Process.GetProcessById(descendantPid);
-            descendantStartTime = descendant.StartTime;
-            descendantProcessName = descendant.ProcessName;
-            Assert.Equal(Path.GetFileNameWithoutExtension(sleepPath), descendantProcessName);
-            Assert.False(descendant.HasExited);
+            if (!cancelBeforeIdentityCapture)
+            {
+                Assert.True(int.TryParse(File.ReadAllText(descendantPidPath).Trim(), out var descendantPid));
+                descendant = Process.GetProcessById(descendantPid);
+                descendantStartTime = descendant.StartTime;
+                descendantProcessName = descendant.ProcessName;
+                var expectedProcessName = Path.GetFileNameWithoutExtension(sleepPath);
+                // Publishing a forked PID precedes exec. Hold that state so this race is deterministic.
+                Assert.NotEqual(expectedProcessName, descendantProcessName);
+                File.WriteAllText(releaseDescendantPath, "released");
+                while (startupClock.Elapsed < TimeSpan.FromSeconds(3) && !runTask.IsCompleted && !descendant.HasExited)
+                {
+                    descendant.Refresh();
+                    descendantProcessName = descendant.ProcessName;
+                    if (string.Equals(expectedProcessName, descendantProcessName, StringComparison.Ordinal))
+                    {
+                        break;
+                    }
+                    await Task.Delay(10);
+                }
+                Assert.Equal(expectedProcessName, descendantProcessName);
+                Assert.False(descendant.HasExited);
 
-            cancellation.Cancel();
+                cancellation.Cancel();
 
-            await Assert.ThrowsAsync<NativePostgreSqlBootstrapTerminationException>(() => runTask);
+                await Assert.ThrowsAsync<NativePostgreSqlBootstrapTerminationException>(() => runTask);
 
-            Assert.True(rootTerminationVerified);
-            Assert.True(cancellation.IsCancellationRequested);
-            Assert.False(descendant.HasExited);
+                Assert.True(rootTerminationVerified);
+                Assert.True(cancellation.IsCancellationRequested);
+                Assert.False(descendant.HasExited);
+            }
         }
         finally
         {
+            // Stop the gate even when setup failed before a Process identity could be captured.
+            File.WriteAllText(stopDescendantPath, "stop");
             cancellation.Cancel();
             if (!runTask.IsCompleted)
             {
@@ -597,6 +639,13 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
                 descendant.Dispose();
             }
+        }
+
+        if (cancelBeforeIdentityCapture)
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
+            Assert.True(rootTerminationVerified);
+            Assert.True(File.Exists(descendantExitedPath));
         }
     }
 
