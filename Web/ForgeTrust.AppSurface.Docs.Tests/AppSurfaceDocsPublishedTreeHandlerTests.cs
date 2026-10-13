@@ -1,16 +1,23 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Caching;
+using ForgeTrust.AppSurface.Docs.Controllers;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.Theming;
 using ForgeTrust.AppSurface.Web;
 using ForgeTrust.AppSurface.Web.TagHelpers;
 using ForgeTrust.AppSurface.Web.Theming;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Razor.TagHelpers;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Primitives;
@@ -132,6 +139,281 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         Assert.Equal("text/css", headRequest.Response.ContentType);
         Assert.Equal(string.Empty, ReadBody(headRequest));
         Assert.NotNull(headRequest.Response.ContentLength);
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldServeSelectedPhysicalTreeAndKeepExactCanonicalRoot()
+    {
+        var tree = CreatePublishedTree("owned-alias-physical");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(
+            [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var selection = new AppSurfaceDocsAliasRequest("/docs/a", "stable", true);
+        var htmlRequest = CreateContext(HttpMethods.Get, "/docs/a/stable");
+        var assetRequest = CreateContext(HttpMethods.Get, "/docs/a/stable/search.css");
+        var headRequest = CreateContext(HttpMethods.Head, "/docs/a/stable");
+
+        await HandleSelectedAliasAsync(handler, htmlRequest, selection);
+        await HandleSelectedAliasAsync(handler, assetRequest, selection);
+        await HandleSelectedAliasAsync(handler, headRequest, selection);
+
+        var html = ReadBody(htmlRequest);
+        Assert.Equal(StatusCodes.Status200OK, htmlRequest.Response.StatusCode);
+        Assert.Equal("text/html", htmlRequest.Response.ContentType);
+        Assert.Contains("href=\"/docs/a/stable/guide.html\"", html, StringComparison.Ordinal);
+        Assert.Contains("href=\"/docs/v/1.2.3/guide.html\"", html, StringComparison.Ordinal);
+        Assert.Contains("sandbox allow-same-origin", htmlRequest.Response.Headers["Content-Security-Policy"].ToString(), StringComparison.Ordinal);
+        Assert.Contains("script-src 'none'", htmlRequest.Response.Headers["Content-Security-Policy"].ToString(), StringComparison.Ordinal);
+
+        Assert.Equal("text/css", assetRequest.Response.ContentType);
+        Assert.Contains("body { color: #fff; }", ReadBody(assetRequest), StringComparison.Ordinal);
+
+        Assert.Equal(StatusCodes.Status200OK, headRequest.Response.StatusCode);
+        Assert.Equal("text/html", headRequest.Response.ContentType);
+        Assert.Empty(ReadBody(headRequest));
+        Assert.NotNull(headRequest.Response.ContentLength);
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldUseCoveredDocsHtmlFallbackAfterFlatCandidates()
+    {
+        var flatTree = CreatePublishedTree("owned-alias-docs-flat-precedence");
+        Directory.Delete(Path.Join(flatTree, "guide"), recursive: true);
+        Directory.CreateDirectory(Path.Join(flatTree, "docs"));
+        File.WriteAllText(Path.Join(flatTree, "guide.html"), "<!DOCTYPE html><html><body>flat guide</body></html>");
+        File.WriteAllText(Path.Join(flatTree, "docs", "guide.html"), "<!DOCTYPE html><html><body>nested guide</body></html>");
+        var flatHandler = CreateHandler(
+            [CreateVerifiedAliasMount(flatTree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var flatRequest = CreateContext(HttpMethods.Get, "/docs/a/stable/guide");
+
+        await HandleSelectedAliasAsync(
+            flatHandler,
+            flatRequest,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Contains("flat guide", ReadBody(flatRequest), StringComparison.Ordinal);
+        Assert.DoesNotContain("nested guide", ReadBody(flatRequest), StringComparison.Ordinal);
+
+        var exportedTree = CreatePublishedTree("owned-alias-docs-fallback");
+        Directory.Delete(Path.Join(exportedTree, "guide"), recursive: true);
+        Directory.CreateDirectory(Path.Join(exportedTree, "docs"));
+        File.WriteAllText(Path.Join(exportedTree, "docs", "guide.html"), "<!DOCTYPE html><html><body>verified CDN guide</body></html>");
+        var exportedHandler = CreateHandler(
+            [CreateVerifiedAliasMount(exportedTree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var exportedRequest = CreateContext(HttpMethods.Get, "/docs/a/stable/guide");
+
+        await HandleSelectedAliasAsync(
+            exportedHandler,
+            exportedRequest,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Contains("verified CDN guide", ReadBody(exportedRequest), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("io")]
+    [InlineData("unlisted-docs")]
+    [InlineData("rewrite-limit")]
+    public async Task HandleOwnedAliasAsync_ShouldRetainInheritedHostCspOnGenericRecovery(string failureKind)
+    {
+        const string hostCsp = "default-src 'self'; frame-ancestors 'none'";
+        AppSurfaceDocsPublishedTreeHandler handler;
+        DefaultHttpContext request;
+        switch (failureKind)
+        {
+            case "rewrite-limit":
+                {
+                    const string html = "<p>xx</p>";
+                    const string filePath = "index.html";
+                    var provider = new TestFileProvider((filePath, new TestFileInfo(filePath,
+                        Encoding.UTF8.GetByteCount(html), () => new MemoryStream(Encoding.UTF8.GetBytes(html)))));
+                    handler = CreateHandler(
+                        [CreateVerifiedAliasTestMount("/docs/a/stable", "stable", filePath, html, provider)],
+                        maxRewrittenFileSizeBytes: 8);
+                    request = CreateContext(HttpMethods.Get, "/docs/a/stable");
+                    break;
+                }
+            case "io":
+                {
+                    const string html = "<!DOCTYPE html><html><body>read failure</body></html>";
+                    const string filePath = "index.html";
+                    var provider = new TestFileProvider(
+                        (filePath, new TestFileInfo(filePath, Encoding.UTF8.GetByteCount(html), static () =>
+                            throw new IOException("simulated archive read failure"))));
+                    handler = CreateHandler(
+                        [CreateVerifiedAliasTestMount("/docs/a/stable", "stable", filePath, html, provider)]);
+                    request = CreateContext(HttpMethods.Get, "/docs/a/stable");
+                    break;
+                }
+            case "unlisted-docs":
+                {
+                    var tree = CreatePublishedTree("owned-alias-unlisted-docs-file");
+                    Directory.Delete(Path.Join(tree, "guide"), recursive: true);
+                    Directory.CreateDirectory(Path.Join(tree, "docs"));
+                    File.WriteAllText(Path.Join(tree, "docs", "guide.html"), "<!DOCTYPE html><html><body>verified guide</body></html>");
+                    handler = CreateHandler(
+                        [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+                    File.WriteAllText(Path.Join(tree, "docs", "unlisted.html"), "unlisted nested secret");
+                    request = CreateContext(HttpMethods.Get, "/docs/a/stable/unlisted");
+                    break;
+                }
+            default:
+                {
+                    var tree = CreatePublishedTree("owned-alias-missing-page");
+                    handler = CreateHandler(
+                        [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+                    request = CreateContext(HttpMethods.Get, "/docs/a/stable/missing");
+                    break;
+                }
+        }
+
+        using var services = CreateAliasRecoveryServiceProvider();
+        using var scope = services.CreateScope();
+        request.RequestServices = scope.ServiceProvider;
+        request.Response.Headers.ContentSecurityPolicy = hostCsp;
+        var httpContextAccessor = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>();
+        httpContextAccessor.HttpContext = request;
+
+        await HandleSelectedAliasAsync(
+            handler,
+            request,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Equal(StatusCodes.Status404NotFound, request.Response.StatusCode);
+        Assert.Equal(hostCsp, request.Response.Headers.ContentSecurityPolicy.ToString());
+        var body = ReadBody(request);
+        Assert.Contains("Documentation page not found", body, StringComparison.Ordinal);
+        Assert.Contains("href=\"/docs/versions\"", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("unlisted nested secret", body, StringComparison.Ordinal);
+        httpContextAccessor.HttpContext = null;
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldAbortAndConsume_WhenResponseStartedBeforeSelectionHandling()
+    {
+        var tree = CreatePublishedTree("owned-alias-already-started");
+        var handler = CreateHandler(
+            [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var request = CreateContext(HttpMethods.Post, "/docs/a/stable/guide");
+        var responseBody = new MemoryStream();
+        var (responseFeature, lifetimeFeature) = InstallTerminalResponseFeatures(request, responseBody, hasStarted: true);
+
+        await HandleSelectedAliasAsync(
+            handler,
+            request,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Equal(1, lifetimeFeature.AbortCount);
+        Assert.Equal(StatusCodes.Status200OK, responseFeature.StatusCode);
+        Assert.Empty(responseBody.ToArray());
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldAbortAfterPartialResponseWriteFailsWithoutWritingRecoveryBody()
+    {
+        var tree = CreatePublishedTree("owned-alias-write-io-failure");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(
+            [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var request = CreateContext(HttpMethods.Get, "/docs/a/stable");
+        var (responseFeature, lifetimeFeature) = InstallTerminalResponseFeatures(request, Stream.Null);
+        var responseBody = new PartialWriteFailureStream(
+            responseFeature,
+            bytesToWriteBeforeFailure: 24,
+            () => new IOException("simulated client disconnect"));
+        request.Response.Body = responseBody;
+
+        await HandleSelectedAliasAsync(
+            handler,
+            request,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Equal(1, responseBody.WriteCount);
+        Assert.Equal(1, lifetimeFeature.AbortCount);
+        Assert.Equal(StatusCodes.Status200OK, responseFeature.StatusCode);
+        Assert.Equal(24, responseBody.WrittenBytes.Length);
+        Assert.DoesNotContain("Documentation page not found", responseBody.WrittenText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldAbortAfterPartialResponseWriteIsCanceledWithoutWritingRecoveryBody()
+    {
+        var tree = CreatePublishedTree("owned-alias-write-canceled");
+        WriteCanonicalPage(tree, "/docs/guide.html");
+        var handler = CreateHandler(
+            [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var request = CreateContext(HttpMethods.Get, "/docs/a/stable");
+        using var cancellation = new CancellationTokenSource();
+        var (responseFeature, lifetimeFeature) = InstallTerminalResponseFeatures(request, Stream.Null);
+        var responseBody = new PartialWriteFailureStream(
+            responseFeature,
+            bytesToWriteBeforeFailure: 24,
+            () =>
+            {
+                cancellation.Cancel();
+                return new OperationCanceledException(request.RequestAborted);
+            });
+        request.RequestAborted = cancellation.Token;
+        request.Response.Body = responseBody;
+
+        await HandleSelectedAliasAsync(
+            handler,
+            request,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.Equal(1, responseBody.WriteCount);
+        Assert.Equal(1, lifetimeFeature.AbortCount);
+        Assert.True(request.RequestAborted.IsCancellationRequested);
+        Assert.Equal(StatusCodes.Status200OK, responseFeature.StatusCode);
+        Assert.Equal(24, responseBody.WrittenBytes.Length);
+        Assert.DoesNotContain("Documentation page not found", responseBody.WrittenText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldAbortWhenRequestIsCanceledBeforeResponseStarts()
+    {
+        var tree = CreatePublishedTree("owned-alias-canceled-before-response");
+        var handler = CreateHandler(
+            [CreateVerifiedAliasMount(tree, "/docs/a/stable", "stable", "/docs/v/1.2.3")]);
+        var request = CreateContext(HttpMethods.Get, "/docs/a/stable/search.css");
+        var responseBody = new MemoryStream();
+        var (responseFeature, lifetimeFeature) = InstallTerminalResponseFeatures(request, responseBody);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        request.RequestAborted = cancellation.Token;
+
+        await HandleSelectedAliasAsync(
+            handler,
+            request,
+            new AppSurfaceDocsAliasRequest("/docs/a", "stable", true));
+
+        Assert.False(responseFeature.HasStarted);
+        Assert.Equal(1, lifetimeFeature.AbortCount);
+        Assert.Empty(responseBody.ToArray());
+    }
+
+    [Fact]
+    public async Task HandleOwnedAliasAsync_ShouldPropagateUnrelatedInvalidOperationException()
+    {
+        const string filePath = "index.html";
+        const string html = "<!DOCTYPE html><html><body>verified input</body></html>";
+        var provider = new TestFileProvider(
+            (filePath, new TestFileInfo(filePath, Encoding.UTF8.GetByteCount(html), static () =>
+                throw new InvalidOperationException("unexpected provider failure"))));
+        var mount = CreateVerifiedAliasTestMount("/docs/a/stable", "stable", filePath, html, provider);
+        var handler = CreateHandler([mount]);
+        var request = CreateContext(HttpMethods.Get, "/docs/a/stable");
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            HandleSelectedAliasAsync(
+                handler,
+                request,
+                new AppSurfaceDocsAliasRequest("/docs/a", "stable", true)));
+
+        Assert.Equal("unexpected provider failure", exception.Message);
+        Assert.Equal(StatusCodes.Status200OK, request.Response.StatusCode);
+        Assert.Empty(ReadBody(request));
     }
 
     [Fact]
@@ -1692,7 +1974,20 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         return CreateHandler(treePath, mountRootPath);
     }
 
-    private AppSurfaceDocsPublishedTreeMount CreateVerifiedMount(string treePath, string mountRootPath, string? canonicalRootPath = null)
+    private AppSurfaceDocsPublishedTreeMount CreateVerifiedAliasMount(
+        string treePath,
+        string mountRootPath,
+        string aliasName,
+        string canonicalRootPath)
+    {
+        return CreateVerifiedMount(treePath, mountRootPath, canonicalRootPath, aliasName);
+    }
+
+    private AppSurfaceDocsPublishedTreeMount CreateVerifiedMount(
+        string treePath,
+        string mountRootPath,
+        string? canonicalRootPath = null,
+        string? aliasName = null)
     {
         var manifestDigest = WriteReleaseManifest(treePath);
         Assert.True(AppSurfaceDocsReleaseArchiveVerifier.TryVerify(
@@ -1710,7 +2005,28 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
             new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, treePath),
             AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
             archive,
-            canonicalRootPath);
+            canonicalRootPath,
+            aliasName);
+    }
+
+    private static AppSurfaceDocsPublishedTreeMount CreateVerifiedAliasTestMount(
+        string mountRootPath,
+        string aliasName,
+        string filePath,
+        string expectedContent,
+        IFileProvider provider)
+    {
+        var archive = new AppSurfaceDocsVerifiedReleaseArchive(
+            new[] { CreateArchiveFileFromText(filePath, expectedContent) }
+                .ToDictionary(file => file.Path, StringComparer.Ordinal),
+            AppSurfaceDocsFrozenRouteManifest.Empty);
+        return new AppSurfaceDocsPublishedTreeMount(
+            mountRootPath,
+            provider,
+            archiveVerificationState: AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
+            verifiedReleaseArchive: archive,
+            canonicalRootPath: "/docs/v/1.2.3",
+            aliasName: aliasName);
     }
 
     private static AppSurfaceDocsPublishedTreeMount CreateVerifiedTestMount(
@@ -1918,6 +2234,59 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         return context;
     }
 
+    private static async Task HandleSelectedAliasAsync(
+        AppSurfaceDocsPublishedTreeHandler handler,
+        DefaultHttpContext context,
+        AppSurfaceDocsAliasRequest selection)
+    {
+        context.Features.Set(selection);
+        Assert.False(await handler.TryHandleAsync(context));
+        await handler.HandleOwnedAliasAsync(context, selection);
+    }
+
+    private static (TestHttpResponseFeature Response, TestHttpRequestLifetimeFeature Lifetime)
+        InstallTerminalResponseFeatures(DefaultHttpContext context, Stream responseBody, bool hasStarted = false)
+    {
+        var response = new TestHttpResponseFeature
+        {
+            Body = responseBody,
+            HasStarted = hasStarted
+        };
+        var lifetime = new TestHttpRequestLifetimeFeature();
+        context.Features.Set<IHttpResponseFeature>(response);
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+        context.Response.Body = responseBody;
+        return (response, lifetime);
+    }
+
+    private static ServiceProvider CreateAliasRecoveryServiceProvider()
+    {
+        var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var webRoot = Path.Join(repoRoot, "Web", "ForgeTrust.AppSurface.Docs");
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["AppSurfaceDocs:Source:RepositoryRoot"] = repoRoot,
+                    ["AppSurfaceDocs:Harvest:StartupMode"] = nameof(AppSurfaceDocsHarvestStartupMode.Disabled)
+                })
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<DiagnosticListener>(_ => new DiagnosticListener("AppSurfaceDocsPublishedTreeHandlerTests"));
+        services.AddSingleton<DiagnosticSource>(provider => provider.GetRequiredService<DiagnosticListener>());
+        services.AddSingleton<IWebHostEnvironment>(_ => new TestWebHostEnvironment(repoRoot, webRoot));
+        services.AddSingleton<IConfiguration>(_ => configuration);
+        services.AddMemoryCache();
+        services.AddSingleton<IMemo, Memo>();
+        services.AddAppSurfaceDocs();
+        services.AddSingleton(
+            AppSurfaceDocsAssetPathResolver.CreateForRootModule(typeof(AppSurfaceDocsWebModule).Assembly));
+        services.AddControllersWithViews().AddApplicationPart(typeof(DocsController).Assembly);
+        return services.BuildServiceProvider();
+    }
+
     private static string ReadBody(HttpContext httpContext)
     {
         httpContext.Response.Body.Position = 0;
@@ -2029,6 +2398,134 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
         {
             OpenCount++;
             return streamFactory();
+        }
+    }
+
+    private sealed class TestHttpResponseFeature : IHttpResponseFeature
+    {
+        public int StatusCode { get; set; } = StatusCodes.Status200OK;
+
+        public string? ReasonPhrase { get; set; }
+
+        public IHeaderDictionary Headers { get; set; } = new HeaderDictionary();
+
+        public Stream Body { get; set; } = Stream.Null;
+
+        public bool HasStarted { get; set; }
+
+        public void OnStarting(Func<object, Task> callback, object state)
+        {
+        }
+
+        public void OnCompleted(Func<object, Task> callback, object state)
+        {
+        }
+    }
+
+    private sealed class TestHttpRequestLifetimeFeature : IHttpRequestLifetimeFeature
+    {
+        public CancellationToken RequestAborted { get; set; }
+
+        public int AbortCount { get; private set; }
+
+        public void Abort() => AbortCount++;
+    }
+
+    private sealed class PartialWriteFailureStream(
+        TestHttpResponseFeature responseFeature,
+        int bytesToWriteBeforeFailure,
+        Func<Exception> createFailure) : Stream
+    {
+        private readonly MemoryStream _written = new();
+
+        public int WriteCount { get; private set; }
+
+        public byte[] WrittenBytes => _written.ToArray();
+
+        public string WrittenText => Encoding.UTF8.GetString(WrittenBytes);
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => _written.Length;
+
+        public override long Position
+        {
+            get => _written.Position;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            WriteAndFail(buffer.AsSpan(offset, count));
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            WriteAndFail(buffer.Span);
+            return ValueTask.CompletedTask;
+        }
+
+        public override Task WriteAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken)
+        {
+            return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _written.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private void WriteAndFail(ReadOnlySpan<byte> buffer)
+        {
+            WriteCount++;
+            responseFeature.HasStarted = true;
+            _written.Write(buffer[..Math.Min(bytesToWriteBeforeFailure, buffer.Length)]);
+            throw createFailure();
+        }
+    }
+
+    private sealed class TestWebHostEnvironment(string contentRootPath, string webRootPath)
+        : IWebHostEnvironment, IDisposable
+    {
+        public string ApplicationName { get; set; } = typeof(AppSurfaceDocsWebModule).Assembly.GetName().Name!;
+
+        public IFileProvider WebRootFileProvider { get; set; } = new PhysicalFileProvider(webRootPath);
+
+        public string WebRootPath { get; set; } = webRootPath;
+
+        public string EnvironmentName { get; set; } = Environments.Development;
+
+        public string ContentRootPath { get; set; } = contentRootPath;
+
+        public IFileProvider ContentRootFileProvider { get; set; } = new PhysicalFileProvider(contentRootPath);
+
+        public void Dispose()
+        {
+            (WebRootFileProvider as IDisposable)?.Dispose();
+            (ContentRootFileProvider as IDisposable)?.Dispose();
         }
     }
 

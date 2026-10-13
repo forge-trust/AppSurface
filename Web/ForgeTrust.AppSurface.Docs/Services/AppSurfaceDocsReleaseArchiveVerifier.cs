@@ -635,6 +635,9 @@ public sealed class AppSurfaceDocsVerifiedReleaseArchive
     /// </summary>
     public int FileCount => _filesByPath.Count;
 
+    /// <summary>Gets the verified immutable inventory used for startup namespace collision checks.</summary>
+    internal IEnumerable<string> CoveredPaths => _filesByPath.Keys;
+
     /// <summary>
     /// Gets the route manifest parsed from verified release archive bytes.
     /// </summary>

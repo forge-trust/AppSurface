@@ -120,6 +120,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         }
 
         services.TryAddSingleton<LegacyAppSurfaceDocsRegistrationMarker>();
+        services.TryAddSingleton<AppSurfaceDocsAliasOwnershipState>();
 
         services.AddOptions<AppSurfaceDocsOptions>()
             .BindConfiguration(AppSurfaceDocsOptions.SectionName)
@@ -225,6 +226,7 @@ public static class AppSurfaceDocsServiceCollectionExtensions
         }
 
         services.TryAddSingleton<NamedAppSurfaceDocsRegistrationMarker>();
+        services.TryAddSingleton<AppSurfaceDocsAliasOwnershipState>();
         EnsureNamedInstanceInfrastructure(services);
         services.AddSingleton(declaration);
         services.TryAddSingleton<AppSurfaceDocsInstanceRegistry>(
