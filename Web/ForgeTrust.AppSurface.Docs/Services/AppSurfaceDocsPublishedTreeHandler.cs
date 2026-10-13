@@ -32,6 +32,10 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
     private static readonly FileExtensionContentTypeProvider ContentTypeProvider = new();
     private readonly IReadOnlyList<AppSurfaceDocsPublishedTreeMount> _mounts;
+    private readonly IReadOnlyDictionary<string, AppSurfaceDocsPublishedTreeMount> _aliasMounts;
+
+    /// <summary>Gets whether a catalog actively reserves this instance's alias namespace, including zero mounts.</summary>
+    internal bool IsAliasNamespaceActive { get; }
     private readonly string _previewRootPath;
     private readonly string _routeRootPath;
     private readonly string? _publicOrigin;
@@ -48,13 +52,15 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     /// <param name="publicOrigin">The runtime public origin used for absolute canonical metadata, or <see langword="null" /> to preserve exported origins.</param>
     /// <param name="maxRewrittenFileSizeBytes">Maximum input size, in bytes, for published-tree HTML and search-index rewrites.</param>
     /// <param name="logger">Logger used for frozen manifest diagnostics.</param>
+    /// <param name="isAliasNamespaceActive">Whether the catalog reserves the alias namespace even without mounted targets.</param>
     internal AppSurfaceDocsPublishedTreeHandler(
         IEnumerable<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath,
         string routeRootPath = DocsUrlBuilder.DocsEntryPath,
         string? publicOrigin = null,
         long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes,
-        ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null)
+        ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null,
+        bool isAliasNamespaceActive = false)
     {
         ArgumentNullException.ThrowIfNull(mounts);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
@@ -65,9 +71,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             throw new ArgumentOutOfRangeException(nameof(maxRewrittenFileSizeBytes));
         }
 
-        _mounts = mounts
-            .OrderByDescending(mount => mount.MountRootPath.Length)
-            .ToList();
+        var allMounts = mounts.ToArray();
+        _aliasMounts = allMounts.Where(mount => mount.AliasName is not null)
+            .ToDictionary(mount => mount.AliasName!, StringComparer.OrdinalIgnoreCase);
+        _mounts = allMounts.Where(mount => mount.AliasName is null)
+            .OrderByDescending(mount => mount.MountRootPath.Length).ToArray();
+        IsAliasNamespaceActive = isAliasNamespaceActive;
         _previewRootPath = previewRootPath;
         _routeRootPath = routeRootPath;
         _publicOrigin = DocsUrlBuilder.NormalizePublicOriginOrNull(publicOrigin);
@@ -83,6 +92,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     internal async Task<bool> TryHandleAsync(HttpContext httpContext)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (httpContext.Features.Get<AppSurfaceDocsAliasRequest>() is not null)
+        {
+            return false;
+        }
 
         if (!HttpMethods.IsGet(httpContext.Request.Method)
             && !HttpMethods.IsHead(httpContext.Request.Method))
@@ -103,34 +117,111 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 return false;
             }
 
-            if (TryResolveFrozenManifestRedirect(httpContext, mount, requestPath, out var redirectUrl))
-            {
-                WritePermanentRedirect(httpContext, redirectUrl);
-                return true;
-            }
-
-            if (!TryResolveFile(mount, requestPath, out var fileInfo, out var relativeFilePath))
-            {
-                return false;
-            }
-
-            if (!CanServeResolvedFile(mount, relativeFilePath, fileInfo))
-            {
-                return false;
-            }
-
-            await WriteResponseAsync(
-                httpContext,
-                mount,
-                _previewRootPath,
-                _routeRootPath,
-                _publicOrigin,
-                relativeFilePath,
-                fileInfo);
-            return true;
+            return await TryServeMountAsync(httpContext, mount, requestPath);
         }
 
         return false;
+    }
+
+    /// <summary>Consumes an owned alias request terminally after the host's authorization middleware.</summary>
+    /// <param name="context">Authorized request with sticky received-path ownership state.</param>
+    /// <param name="selection">Raw safety/label state selected before routing.</param>
+    internal async Task HandleOwnedAliasAsync(HttpContext context, AppSurfaceDocsAliasRequest selection)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(selection);
+        if (context.Response.HasStarted)
+        {
+            context.Abort();
+            return;
+        }
+
+        AppSurfaceDocsApplicationBuilderExtensions.SuppressStatusPages(context);
+        var hostContentSecurityPolicy = context.Response.Headers.ContentSecurityPolicy;
+        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+        {
+            context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+            context.Response.Headers.Allow = "GET, HEAD";
+            context.Response.ContentLength = 0;
+            return;
+        }
+
+        try
+        {
+            if (selection.IsSafe && selection.Name is not null
+                && _aliasMounts.TryGetValue(selection.Name, out var mount)
+                && await TryServeMountAsync(context, mount, context.Request.Path.Value ?? string.Empty)
+                && context.Response.StatusCode < 400)
+            {
+                return;
+            }
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            context.Abort();
+            return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // Expected read failures use the same generic recovery only before headers are committed.
+        }
+
+        if (context.Response.HasStarted || context.RequestAborted.IsCancellationRequested)
+        {
+            context.Abort();
+            return;
+        }
+
+        try
+        {
+            await WriteAliasRecoveryAsync(context, hostContentSecurityPolicy);
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            context.Abort();
+        }
+    }
+
+    /// <summary>Serves exactly the selected mount; a false result never changes that selection.</summary>
+    private async Task<bool> TryServeMountAsync(HttpContext context, AppSurfaceDocsPublishedTreeMount mount, string requestPath)
+    {
+        if (TryResolveFrozenManifestRedirect(context, mount, requestPath, out var redirectUrl))
+        {
+            WritePermanentRedirect(context, redirectUrl);
+            return true;
+        }
+
+        if (!TryResolveFile(mount, requestPath, out var fileInfo, out var relativeFilePath)
+            || !CanServeResolvedFile(mount, relativeFilePath, fileInfo))
+        {
+            return false;
+        }
+
+        await WriteResponseAsync(context, mount, _previewRootPath, _routeRootPath, _publicOrigin, relativeFilePath, fileInfo);
+        return true;
+    }
+
+    /// <summary>Uses one generic, encoded Docs recovery response for all owned GET/HEAD failures.</summary>
+    private async Task WriteAliasRecoveryAsync(HttpContext context, Microsoft.Extensions.Primitives.StringValues hostContentSecurityPolicy)
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.Remove("ETag");
+        context.Response.Headers.Remove("Last-Modified");
+        if (hostContentSecurityPolicy.Count == 0)
+        {
+            context.Response.Headers.Remove("Content-Security-Policy");
+        }
+        else
+        {
+            context.Response.Headers.ContentSecurityPolicy = hostContentSecurityPolicy;
+        }
+        var html = await AppSurfaceDocsAliasRecoveryRenderer.RenderAsync(context, DocsUrlBuilder.JoinPath(_routeRootPath, "versions"));
+        context.Response.ContentLength = Encoding.UTF8.GetByteCount(html);
+        if (!HttpMethods.IsHead(context.Request.Method))
+        {
+            await context.Response.WriteAsync(html, context.RequestAborted);
+        }
     }
 
     private bool ShouldBypassStableAlias(string requestPath, string mountRootPath)
@@ -267,7 +358,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             }
         }
 
-        foreach (var candidate in BuildCandidatePaths(relativeRequestPath))
+        foreach (var candidate in BuildCandidatePaths(relativeRequestPath).Concat(BuildExportedDocsCandidatePaths(mount, relativeRequestPath)))
         {
             var candidateFile = mount.FileProvider.GetFileInfo(candidate);
             if (!candidateFile.Exists || !TryValidateResolvedFile(mount, candidate, candidateFile))
@@ -281,6 +372,33 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
 
         return false;
+    }
+
+    /// <summary>Resolves root-export document files without changing the selected verified archive or its bytes.</summary>
+    /// <remarks>
+    /// CDN exports retain the original /docs directory while shared search assets live at the tree root. Flat archives
+    /// keep their existing precedence. Only verified, inventory-covered HTML candidates qualify for this layout.
+    /// </remarks>
+    private static IEnumerable<string> BuildExportedDocsCandidatePaths(AppSurfaceDocsPublishedTreeMount mount, string requestPath)
+    {
+        if (mount.VerifiedReleaseArchive is not { } archive)
+        {
+            yield break;
+        }
+
+        var trimmed = requestPath.TrimStart('/');
+        var candidates = trimmed.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+            ? new[] { trimmed }
+            : BuildCandidatePaths(requestPath);
+        foreach (var candidate in candidates)
+        {
+            var exportedPath = "docs/" + candidate;
+            if (candidate.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                && archive.TryGetFile(exportedPath, out _))
+            {
+                yield return exportedPath;
+            }
+        }
     }
 
     private bool TryValidateFrozenManifestPath(AppSurfaceDocsPublishedTreeMount mount)
@@ -907,6 +1025,7 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// The app-relative route root canonical metadata should prefer. When omitted, canonical metadata self-points to
     /// <paramref name="mountRootPath" />. Pass the exact-version root for recommended aliases that mirror a frozen tree.
     /// </param>
+    /// <param name="aliasName">Normalized catalog label; separates aliases from the legacy mount scan.</param>
     internal AppSurfaceDocsPublishedTreeMount(
         string mountRootPath,
         IFileProvider fileProvider,
@@ -914,8 +1033,10 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
         AppSurfaceDocsFrozenRouteManifestCache? frozenRouteManifest = null,
         AppSurfaceDocsReleaseArchiveVerificationState archiveVerificationState = AppSurfaceDocsReleaseArchiveVerificationState.AvailableUnverifiedLegacy,
         AppSurfaceDocsVerifiedReleaseArchive? verifiedReleaseArchive = null,
-        string? canonicalRootPath = null)
+        string? canonicalRootPath = null,
+        string? aliasName = null)
     {
+        AliasName = aliasName;
         MountRootPath = NormalizeMountRootPath(mountRootPath, nameof(mountRootPath));
         FileProvider = fileProvider ?? throw new ArgumentNullException(nameof(fileProvider));
         ExactTreeRootPath = string.IsNullOrWhiteSpace(exactTreeRootPath)
@@ -933,6 +1054,10 @@ internal sealed record AppSurfaceDocsPublishedTreeMount
     /// Gets the request-path root where the tree should appear.
     /// </summary>
     public string MountRootPath { get; }
+
+    /// <summary>Gets the normalized catalog label for dictionary dispatch, or null for legacy mounts.</summary>
+    public string? AliasName { get; }
+
 
     /// <summary>
     /// Gets the static file provider for the tree contents.

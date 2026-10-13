@@ -124,14 +124,16 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// </summary>
     /// <remarks>
     /// This hook only mutates the pipeline when versioning is enabled and the resolved
-    /// <see cref="AppSurfaceDocsVersionCatalogService" /> yields at least one available published tree. In that case the
-    /// module mounts exact-version exports, optionally adds the configured route-family root alias for the recommended
-    /// release, and inserts a short-circuiting middleware branch that lets <see cref="AppSurfaceDocsPublishedTreeHandler" /> serve
-    /// matching requests before the live preview surface sees them.
+    /// <see cref="AppSurfaceDocsVersionCatalogService" /> yields an available published tree or an active alias
+    /// declaration. The module mounts exact-version exports and the independently selected recommended tree, shares
+    /// those resources with healthy named aliases, and installs received-path ownership before host routing and auth.
+    /// Owned alias requests execute their actual mapped endpoint after the host's authorization middleware.
     /// </remarks>
     /// <remarks>
     /// The middleware registration is intentionally skipped when versioning is disabled, when the catalog service is
-    /// absent, when the configured catalog resolves no healthy trees, or when the recommended release is unavailable.
+    /// absent, or when the configured catalog has neither healthy trees nor active aliases. An active alias declaration
+    /// still reserves the namespace when every target is unavailable. Install this hook after PathBase setup and before
+    /// routing, authentication, authorization, static files and other response writers.
     /// Mounted <see cref="PhysicalFileProvider" /> instances are shared across mounts that point at the same exact tree
     /// path and are disposed on <see cref="IHostApplicationLifetime.ApplicationStopping" />. Call this hook before
     /// terminal middleware so mounted published-tree requests can short-circuit correctly.
@@ -155,9 +157,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var docsUrlBuilder = app.ApplicationServices.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(options);
         var catalog = catalogService.GetCatalog();
-        var (mounts, mountedProviders) = BuildPublishedTreeMounts(catalog, docsUrlBuilder);
+        var (mounts, mountedProviders) = BuildPublishedTreeMounts(catalog, docsUrlBuilder,
+            app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
 
-        if (mounts.Count == 0)
+        if (mounts.Count == 0 && !catalog.IsAliasNamespaceActive)
         {
             return;
         }
@@ -170,7 +173,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             docsUrlBuilder.RouteRootPath,
             docsUrlBuilder.PublicOrigin,
             options.Versioning.MaxRewrittenFileSizeBytes,
-            app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>());
+            app.ApplicationServices.GetService<ILogger<AppSurfaceDocsPublishedTreeHandler>>(),
+            catalog.IsAliasNamespaceActive);
+        if (catalog.IsAliasNamespaceActive)
+        {
+            app.UseAppSurfaceDocsAliases();
+            app.ApplicationServices.GetRequiredService<AppSurfaceDocsAliasOwnershipState>().DefaultHandler = publishedTreeHandler;
+        }
+
         app.Use(
             async (httpContext, next) =>
             {
@@ -201,12 +211,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
     /// </remarks>
     /// <param name="catalog">The resolved version catalog that describes available published trees.</param>
     /// <param name="docsUrlBuilder">The configured URL builder that supplies the route-family alias root.</param>
+    /// <param name="logger">Startup logger for safe alias collision diagnostics.</param>
+    /// <param name="instanceName">Validated Docs product identity, Default for a module host.</param>
     /// <returns>
     /// The ordered mount list plus the unique provider instances that should be disposed with the host lifetime.
     /// </returns>
     internal static (IReadOnlyList<AppSurfaceDocsPublishedTreeMount> Mounts, IReadOnlyList<PhysicalFileProvider> Providers) BuildPublishedTreeMounts(
         AppSurfaceDocsResolvedVersionCatalog catalog,
-        DocsUrlBuilder docsUrlBuilder)
+        DocsUrlBuilder docsUrlBuilder, ILogger? logger = null, string instanceName = "Default")
     {
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(docsUrlBuilder);
@@ -217,39 +229,64 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             AppSurfaceDocsTrustedReleasePathGuard.PhysicalPathComparer);
         var mounts = new List<AppSurfaceDocsPublishedTreeMount>();
 
-        foreach (var version in catalog.PublicVersions.Where(version => version.IsAvailable && version.ExactTreePath is not null))
+        try
         {
-            var provider = GetOrCreateProvider(version.ExactTreePath!, providersByPath);
-            var manifestCache = GetOrCreateFrozenRouteManifestCache(
-                version.ExactTreePath!,
-                provider,
-                version.VerifiedReleaseArchive,
-                manifestCachesByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(
-                version.ExactRootUrl,
-                provider,
-                version.ExactTreePath,
-                manifestCache,
-                version.ArchiveVerificationState,
-                version.VerifiedReleaseArchive));
-        }
+            foreach (var version in catalog.PublicVersions.Where(version => version.IsAvailable && version.ExactTreePath is not null))
+            {
+                var provider = GetOrCreateProvider(version.ExactTreePath!, providersByPath);
+                var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                    version.ExactTreePath!,
+                    provider,
+                    version.VerifiedReleaseArchive,
+                    manifestCachesByPath);
+                mounts.Add(new AppSurfaceDocsPublishedTreeMount(
+                    version.ExactRootUrl,
+                    provider,
+                    version.ExactTreePath,
+                    manifestCache,
+                    version.ArchiveVerificationState,
+                    version.VerifiedReleaseArchive));
+            }
 
-        if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
+            if (catalog.RecommendedVersion is { IsAvailable: true, ExactTreePath: not null } recommendedVersion)
+            {
+                var provider = GetOrCreateProvider(recommendedVersion.ExactTreePath, providersByPath);
+                var manifestCache = GetOrCreateFrozenRouteManifestCache(
+                    recommendedVersion.ExactTreePath,
+                    provider,
+                    recommendedVersion.VerifiedReleaseArchive,
+                    manifestCachesByPath);
+                mounts.Add(new AppSurfaceDocsPublishedTreeMount(
+                    docsUrlBuilder.DocsEntryRootPath,
+                    provider,
+                    recommendedVersion.ExactTreePath,
+                    manifestCache,
+                    recommendedVersion.ArchiveVerificationState,
+                    recommendedVersion.VerifiedReleaseArchive,
+                    recommendedVersion.ExactRootUrl));
+            }
+
+            foreach (var alias in catalog.Aliases.Where(alias => alias.IsAvailable && alias.TargetVersion is { ExactTreePath: not null }))
+            {
+                var target = alias.TargetVersion!;
+                var provider = GetOrCreateProvider(target.ExactTreePath!, providersByPath);
+                var manifest = GetOrCreateFrozenRouteManifestCache(target.ExactTreePath!, provider,
+                    target.VerifiedReleaseArchive, manifestCachesByPath);
+                mounts.Add(new AppSurfaceDocsPublishedTreeMount(alias.RootUrl!, provider, target.ExactTreePath,
+                    manifest, target.ArchiveVerificationState, target.VerifiedReleaseArchive,
+                    target.ExactRootUrl, alias.Name));
+            }
+
+            AppSurfaceDocsAliasCollisionGuard.Validate(catalog, docsUrlBuilder, logger, instanceName);
+        }
+        catch
         {
-            var provider = GetOrCreateProvider(recommendedVersion.ExactTreePath, providersByPath);
-            var manifestCache = GetOrCreateFrozenRouteManifestCache(
-                recommendedVersion.ExactTreePath,
-                provider,
-                recommendedVersion.VerifiedReleaseArchive,
-                manifestCachesByPath);
-            mounts.Add(new AppSurfaceDocsPublishedTreeMount(
-                docsUrlBuilder.DocsEntryRootPath,
-                provider,
-                recommendedVersion.ExactTreePath,
-                manifestCache,
-                recommendedVersion.ArchiveVerificationState,
-                recommendedVersion.VerifiedReleaseArchive,
-                recommendedVersion.ExactRootUrl));
+            foreach (var provider in providersByPath.Values)
+            {
+                provider.Dispose();
+            }
+
+            throw;
         }
 
         return (mounts, providersByPath.Values.ToList());
@@ -400,6 +437,14 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         var docsOptions = ResolveOptions(endpoints.ServiceProvider);
         var docsUrlBuilder = endpoints.ServiceProvider.GetService(typeof(DocsUrlBuilder)) as DocsUrlBuilder
                              ?? new DocsUrlBuilder(docsOptions);
+        var catalog = endpoints.ServiceProvider.GetService<AppSurfaceDocsVersionCatalogService>()?.GetCatalog();
+        if (catalog?.IsAliasNamespaceActive == true
+            && endpoints.ServiceProvider.GetService<AppSurfaceDocsAliasOwnershipState>()?.DefaultHandler is { } aliasHandler)
+        {
+            MapAliasOwnerEndpoint(endpoints, docsUrlBuilder, aliasHandler, static _ => { });
+            endpoints.ServiceProvider.GetRequiredService<AppSurfaceDocsAliasOwnershipState>().Bind(endpoints);
+        }
+
         MapEmbeddedAssetFallback(endpoints, AppSurfaceDocsPackagedStylesheetPath, "css/site.gen.css");
         MapEmbeddedAssetFallback(
             endpoints,
@@ -741,6 +786,10 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
         if (runtime.PublishedTreeHandler is not null)
         {
             MapNamedPublishedTreeEndpoints(endpoints, urls, runtime.PublishedTreeHandler, applyInstanceConventions);
+            if (runtime.PublishedTreeHandler.IsAliasNamespaceActive)
+            {
+                MapAliasOwnerEndpoint(endpoints, urls, runtime.PublishedTreeHandler, applyInstanceConventions);
+            }
         }
 
         MapBrandingAssetDirectory(endpoints, options, applyInstanceConventions);
@@ -951,6 +1000,21 @@ public class AppSurfaceDocsWebModule : IAppSurfaceWebModule
             endpoints,
             $"{AppSurfaceDocsStaticAssetBasePath}/rich-authoring-client.js",
             "docs/rich-authoring-client.js");
+    }
+
+    /// <summary>Maps one all-method endpoint whose final host conventions are reused for raw ownership dispatch.</summary>
+    internal static void MapAliasOwnerEndpoint(IEndpointRouteBuilder endpoints, DocsUrlBuilder urls,
+        AppSurfaceDocsPublishedTreeHandler handler, Action<IEndpointConventionBuilder> conventions)
+    {
+        var root = DocsUrlBuilder.JoinPath(urls.RouteRootPath, "a");
+        var endpoint = endpoints.Map(root + "/{**path}", async context =>
+        {
+            var request = context.Features.Get<AppSurfaceDocsAliasRequest>()
+                ?? AppSurfaceDocsAliasRequestClassifier.Classify(context, [root])
+                ?? new AppSurfaceDocsAliasRequest(root, null, false);
+            await handler.HandleOwnedAliasAsync(context, request);
+        }).WithMetadata(new AppSurfaceDocsAliasOwnershipMetadata(root));
+        conventions(endpoint);
     }
 
     private static void MapNamedPublishedTreeEndpoints(

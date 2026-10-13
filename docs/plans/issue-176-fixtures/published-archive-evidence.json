@@ -1,0 +1,66 @@
+{
+  "releases": [
+    {
+      "version": "0.1.0",
+      "archiveSHA": "0155762af86eb3b42ac3349759c178b5ec8e209e60c3aa26ae37b62516665cc5",
+      "manifestSHA": "e0cfc160ab116cf13a94b603c665b63115e5db7eece01dfc67634a8b9dfaa30a",
+      "files": 403,
+      "integrityMismatches": [],
+      "requiredPresent": true,
+      "firstDocs": [
+        {
+          "path": "/docs",
+          "title": "AppSurface"
+        },
+        {
+          "path": "/docs/agents",
+          "title": "AGENTS.md"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire",
+          "title": "RazorWire JavaScript API"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire#attribute-data-rw-form",
+          "title": "data-rw-form"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire#attribute-data-rw-form-failure",
+          "title": "data-rw-form-failure"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-preview.11",
+      "archiveSHA": "6940694384411d8f20591405a9f4c20d797bf1da414fc6a9ab6ac35494a2ea70",
+      "manifestSHA": "5fbd511d7b66faf49bbadf76b6b412f9f4971671c15ac56b266fbb6eeb319bdd",
+      "files": 892,
+      "integrityMismatches": [],
+      "requiredPresent": true,
+      "firstDocs": [
+        {
+          "path": "/docs",
+          "title": "AppSurface"
+        },
+        {
+          "path": "/docs/agents",
+          "title": "AGENTS.md"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire",
+          "title": "RazorWire JavaScript API"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire#attribute-data-rw-form",
+          "title": "data-rw-form"
+        },
+        {
+          "path": "/docs/api/javascript/razorwire#attribute-data-rw-form-collection",
+          "title": "data-rw-form-collection"
+        }
+      ]
+    }
+  ],
+  "common": "/docs/agents",
+  "missingFromStable": "/docs/artifacts/issue-728-test-efficiency/candidate-inventory"
+}
