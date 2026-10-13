@@ -109,8 +109,18 @@ demonstration markers; no credential store or remote secret service is used.
 | --- | --- |
 | `--package-version VERSION` | `0.1.0-config-contract.local`; applies to every candidate package |
 | `--configuration NAME` | `Release`; used for candidate packing and the generated consumer |
-| `--work-directory PATH` | A fresh directory; verifier-owned `consumer`, `domain-project`, `domain-feed`, `nuget-packages`, `http-cache`, and `dotnet-home` paths must not exist (also `packages` when packing sources) |
-| `--artifacts PATH` | Use an existing package directory instead of packing source; requires all three matching package files |
+| `--work-directory PATH` | A fresh directory; verifier-owned `consumer`, `domain-project`, `domain-feed`, `nuget-packages`, `http-cache`, `dotnet-home`, and `pinned-inventory.md`, `evidence.json`, and stage log paths must not exist, including dangling symlinks (also `packages` when packing sources) |
+| `--artifacts PATH` | Use an existing package directory instead of packing source; requires all three matching package files. The input directory is never created; missing paths, files, and dangling symlinks fail before any work directory or fixture output is created. A symlink to an existing directory is accepted. |
+
+The verifier rejects an existing inventory, evidence, or stage log file, directory,
+or symlink before creating fixture outputs. The [work-directory guard regressions](test_work_directory_guards.py)
+exercise the public CLI and check that rejection preserves caller-owned files,
+including symlink targets outside the proof directory. They also verify that invalid
+`--artifacts` inputs create neither an explicit work directory nor a default temporary
+work directory and preserve caller-owned input files. Run them locally with
+`python3 -m unittest discover -s tests/config-package-consumer -p 'test_*.py'`;
+the [.NET build workflow](../../.github/workflows/build.yml) also runs them before
+the packed proof on Linux and Windows.
 
 To verify an already packed candidate, pass its exact version and use a fresh work
 directory:

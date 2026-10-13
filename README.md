@@ -342,7 +342,19 @@ The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-r
 ### Focused and sharded coverage
 
 `scripts/coverage-solution.sh` accepts no arguments and exists only for this
-repository's full run-and-gate policy. Use the public CLI when selecting a subset,
+repository's full run-and-gate policy. It enables VSTest's
+`console;verbosity=normal` logger so completed tests reach the
+[output-sensitive watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog).
+A large suite can otherwise run healthy short tests for more than ten minutes
+while the minimal logger stays silent until its final summary. This keeps the
+existing ten-minute watchdog and nine-minute VSTest hang timer active; a hung
+test still produces no completion output. The
+[coverage progress fixture](./scripts/verify-coverage-progress-fixture.sh) proves
+that a quiet healthy sequence trips the watchdog, completion logging lets all
+tests finish, and a hung test still trips the same watchdog. Run it with
+`./scripts/verify-coverage-progress-fixture.sh`; its ten-second diagnostic budget
+keeps the probe short and does not change the full solution policy.
+Use the public CLI when selecting a subset,
 changing output, or merging shards:
 
 ```bash

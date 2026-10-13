@@ -40,6 +40,8 @@ jobs:
         run: dotnet run --project examples/config-key-contract --configuration Release
       - name: Run framework-neutral conformance package tests
         run: dotnet test Config/ForgeTrust.AppSurface.Config.Testing.Tests --configuration Release
+      - name: Test packed consumer work-directory guards
+        run: python -m unittest discover -s tests/config-package-consumer -p "test_*.py"
       - name: Verify packed Domain, Web, and staged worker contract
         run: python scripts/verify_config_package_consumer.py --work-directory "${{ runner.temp }}/config-package-contract"
       - name: Upload contract evidence

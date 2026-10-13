@@ -157,13 +157,25 @@ def main():
     parser.add_argument("--work-directory", type=Path)
     parser.add_argument("--configuration", default="Release")
     args = parser.parse_args()
+    # Supplied artifacts are caller-owned inputs; validate before allocating any proof outputs.
+    supplied_artifacts = args.artifacts.resolve() if args.artifacts is not None else None
+    if supplied_artifacts is not None and not supplied_artifacts.is_dir():
+        raise SystemExit("--artifacts must name an existing package directory.")
     repo = Path(__file__).resolve().parents[1]
     work = (args.work_directory or Path(tempfile.mkdtemp(prefix="appsurface-config-consumer-"))).resolve()
     work.mkdir(parents=True, exist_ok=True)
     consumer = work / "consumer"
     domain_project = work / "domain-project"
     domain_feed = work / "domain-feed"
-    owned_names = ["consumer", "domain-project", "domain-feed", "nuget-packages", "http-cache", "dotnet-home"]
+    package_ids = ["ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Config", "ForgeTrust.AppSurface.Config.Testing"]
+    log_stages = [
+        "checkout-head", "sdk", "domain-restore", "pack-domain-fixture", "restore", "build",
+        "baseline-run", "file-run", "override-run", *["pack-" + package_id for package_id in package_ids],
+    ]
+    owned_names = [
+        "consumer", "domain-project", "domain-feed", "nuget-packages", "http-cache", "dotnet-home",
+        "pinned-inventory.md", "evidence.json", *[stage + ".log" for stage in log_stages],
+    ]
     if args.artifacts is None:
         owned_names.append("packages")
     if any((work / name).exists() or (work / name).is_symlink() for name in owned_names):
@@ -171,8 +183,9 @@ def main():
     consumer.mkdir()
     domain_project.mkdir()
     domain_feed.mkdir()
-    artifacts = args.artifacts.resolve() if args.artifacts else work / "packages"
-    artifacts.mkdir(parents=True, exist_ok=True)
+    artifacts = supplied_artifacts if supplied_artifacts is not None else work / "packages"
+    if supplied_artifacts is None:
+        artifacts.mkdir()
     timings = {}
     environment = os.environ.copy()
     environment.update({
@@ -211,7 +224,6 @@ def main():
             raise RuntimeError(f"{stage} failed with exit {result.returncode}; inspect {work / (stage + '.log')}")
         return result.stdout
 
-    package_ids = ["ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Config", "ForgeTrust.AppSurface.Config.Testing"]
     evidence = {"os": platform.platform(), "packageVersion": args.package_version,
                 "baselineSkoolitRevision": "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e",
                 "baselineAppSurfaceRevision": "c2f062f2a22afeff972c5c6512f1f34dd182db90",

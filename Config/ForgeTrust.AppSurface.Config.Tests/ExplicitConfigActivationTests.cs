@@ -60,9 +60,13 @@ public sealed class ExplicitConfigActivationTests
             {
                 await Task.WhenAll(firstTasks).WaitAsync(BarrierTimeout);
             }
-            catch (Exception)
+            catch (TimeoutException)
             {
-                // Drain bounded worker tasks so a failed assertion cannot leave blocked thread-pool work behind.
+                // Preserve a barrier assertion failure; the normal-path await below still reports worker failures.
+            }
+            catch (OperationCanceledException)
+            {
+                // Preserve a barrier assertion failure; the normal-path await below still reports cancellation.
             }
         }
 
@@ -708,27 +712,42 @@ public sealed class ExplicitConfigActivationTests
     [ConfigKey("Explicit:OptionalDependency", root: true)]
     private sealed class OptionalDependencyConfig : Config<string>
     {
-        public OptionalDependencyConfig(OptionalActivationDependency? dependency = null) => Dependency = dependency;
+        public OptionalDependencyConfig(OptionalActivationDependency? dependency = null)
+        {
+            Dependency = dependency;
+        }
         public OptionalActivationDependency? Dependency { get; }
     }
 
     [ConfigKey("Explicit:MissingDependency", root: true)]
     private sealed class MissingDependencyConfig : Config<string>
     {
-        public MissingDependencyConfig(MissingActivationDependency dependency) => _ = dependency;
+        public MissingDependencyConfig(MissingActivationDependency dependency)
+        {
+            _ = dependency;
+        }
     }
 
     [ConfigKey("Explicit:AmbiguousDependency", root: true)]
     private sealed class AmbiguousDependencyConfig : Config<string>
     {
-        public AmbiguousDependencyConfig(AmbiguousDependencyA first, AmbiguousDependencyB second) => _ = (first, second);
-        public AmbiguousDependencyConfig(AmbiguousDependencyC first, AmbiguousDependencyD second) => _ = (first, second);
+        public AmbiguousDependencyConfig(AmbiguousDependencyA first, AmbiguousDependencyB second)
+        {
+            _ = (first, second);
+        }
+        public AmbiguousDependencyConfig(AmbiguousDependencyC first, AmbiguousDependencyD second)
+        {
+            _ = (first, second);
+        }
     }
 
     [ConfigKey("Explicit:ThrowingDependency", root: true)]
     private sealed class ThrowingDependencyConfig : Config<string>
     {
-        public ThrowingDependencyConfig(ThrowingActivationDependency dependency) => _ = dependency;
+        public ThrowingDependencyConfig(ThrowingActivationDependency dependency)
+        {
+            _ = dependency;
+        }
     }
 
     [ConfigKeyRequired]
@@ -736,7 +755,10 @@ public sealed class ExplicitConfigActivationTests
     private sealed class RequiredClassConfig : Config<string>
     {
         private readonly ActivationProbe _probe;
-        public RequiredClassConfig(ActivationProbe probe) => _probe = probe;
+        public RequiredClassConfig(ActivationProbe probe)
+        {
+            _probe = probe;
+        }
         internal override void Init(IConfigManager manager, IEnvironmentProvider environment, AppSurfaceConfigKey key)
         {
             _probe.Initialize();
@@ -758,7 +780,10 @@ public sealed class ExplicitConfigActivationTests
     private sealed class InvalidObjectConfig : Config<RequiredOptions>
     {
         private readonly ActivationProbe _probe;
-        public InvalidObjectConfig(ActivationProbe probe) => _probe = probe;
+        public InvalidObjectConfig(ActivationProbe probe)
+        {
+            _probe = probe;
+        }
         public override RequiredOptions? DefaultValue => new();
         internal override void Init(IConfigManager manager, IEnvironmentProvider environment, AppSurfaceConfigKey key)
         {
@@ -792,7 +817,10 @@ public sealed class ExplicitConfigActivationTests
     private sealed class ManagerFailureConfig : Config<string>
     {
         private readonly ActivationProbe _probe;
-        public ManagerFailureConfig(ActivationProbe probe) => _probe = probe;
+        public ManagerFailureConfig(ActivationProbe probe)
+        {
+            _probe = probe;
+        }
         internal override void Init(IConfigManager manager, IEnvironmentProvider environment, AppSurfaceConfigKey key)
         {
             _probe.Initialize();

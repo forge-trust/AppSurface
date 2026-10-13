@@ -501,7 +501,11 @@ public sealed class ConfigTypeRegistrationTests
         // Used only as a registration tripwire; tests compare snapshots rather than an absolute shared count.
         internal static int Constructions;
         public int Initializations { get; private set; }
-        public SelectedConfig() => Interlocked.Increment(ref Constructions);
+        public SelectedConfig()
+        {
+            RecordConstruction();
+        }
+        private static void RecordConstruction() => Interlocked.Increment(ref Constructions);
         public void Init(IConfigManager configManager, IEnvironmentProvider environmentProvider, AppSurfaceConfigKey key) =>
             Initializations++;
     }
