@@ -1,0 +1,20 @@
+{
+  "case": "N11",
+  "native_credit": false,
+  "native_execution": false,
+  "review_flags": {
+    "fixture": true,
+    "n03_independent": true,
+    "original_stop": true,
+    "python_trust": true,
+    "raw_transfer": true,
+    "root_terminal": true,
+    "source_capture": true
+  },
+  "schema": "issue779-n11-native-source-review-v1",
+  "source_capture_sha256": "b1e43764ca61d2430f4cfc6e77aa20c3504fcc1be226e1d8e59f21ef127953e7",
+  "source_commit": "a6933fa3dc2c7a88832abf337447f88527477703",
+  "source_count": 2869,
+  "source_parent": "0adef6032217b4181898a4d6d129e1248cb0eda3",
+  "source_tree": "867aec31f950052666275268f08fe1a7f7fa3c25"
+}
