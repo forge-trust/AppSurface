@@ -59,7 +59,7 @@ The fixture also verifies that the scenario selection does not change any of the
 PORTABLE_GRAPH_PROOF SkoolitSourceCommit=a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e ProviderAssembly=Microsoft.Extensions.DependencyInjection Aspire=13.4.4 Hosting=10.0.8 receiptsOn=true/SeededInternal/household_dev_billing receiptsOff=false/Disabled/
 ```
 
-For the Skoolit #866 consumer scenario, keep all four selectors in one consumer-owned immutable per-call value and inject it through `ConfigureActivationServices`. Preserve the existing parsing contract:
+For future Skoolit implementation tracked in [case #1259](https://github.com/forge-trust/skoolit/issues/1259), keep all four selectors in one consumer-owned immutable per-call value and inject it through `ConfigureActivationServices`. This is implementation guidance, not evidence of adoption. Preserve the existing parsing contract:
 
 | Selector | Selection semantics |
 | --- | --- |
@@ -104,7 +104,7 @@ Configured activation uses an internal Core host-builder factory seam to observe
 
 The aspirational onboarding target is 2–5 minutes for a project that already has the .NET 10 SDK, its AppHost/test project, and a selected package version. The packed test compiles and executes the example; the human walkthrough target remains unmeasured. When the maintainer performs the walk, record prerequisites, whether package restore was cold or warm, human elapsed time, and whether the constructor-to-graph result was understood; report restore/build automation time separately. First-time SDK setup and AppHost generation remain unmeasured and outside this prepared-project target.
 
-The Skoolit consumer migration still needs a named QA acceptance owner, a target consumer branch, the fresh packed feed, and maintainer QA. This portable package fixture is not evidence that the consumer migration is complete or unblocked.
+Skoolit implementation and consumer QA belong to the [open case #1259](https://github.com/forge-trust/skoolit/issues/1259). This portable package fixture is SDK proof only; it does not establish actual adoption, application startup, browser acceptance, or an unblocked QA claim. No Skoolit owner or branch assignment is required for this case-only handoff.
 
 ## Install
 

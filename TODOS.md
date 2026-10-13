@@ -111,6 +111,8 @@
 
 ## Issue 866 follow-ups — deferred by autoplan
 
+Skoolit consumer implementation/adoption is separate future work in the [open case #1259](https://github.com/forge-trust/skoolit/issues/1259). AppSurface SDK implementation, testing, coverage, and the draft PR remain in scope independently.
+
 ### C6: asynchronous preparation hooks
 
 **What:** Consider an async hook family only after a named consumer requires awaited setup.

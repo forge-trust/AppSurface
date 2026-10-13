@@ -11,6 +11,14 @@ Mode: Startup — internal company project
 Issue: [#866](https://github.com/forge-trust/AppSurface/issues/866)
 Supersedes: prior main-branch office-hours record for #255, dated 2026-10-07 (branch sequence only; that separate decision remains in force).
 
+## Scope amendment — 2026-10-12
+
+> Skoolit changes should end at a case only. Actually implementing will happen elsewhere
+
+Skoolit delivery is case-only: the [open case #1259](https://github.com/forge-trust/skoolit/issues/1259). Its scenario inventory and consumer acceptance remain future work there; no Skoolit adoption, application startup, or browser-QA pass is claimed. This supersedes the consumer implementation/adoption portions of C9, S1, N16, C-T4, and E-T4; retain prior approvals and review logs as history. No Skoolit owner or target branch is required for this handoff.
+
+AppSurface SDK full implementation, testing, coverage, and draft PR remain in scope. D-T3’s prepared-project human walkthrough remains a separate incomplete requirement and is still unmeasured.
+
 ## Problem Statement
 
 Skoolit QA needs per-test configuration and dependencies before AppSurface constructs the Aspire profile and composes its graph. The existing factory returns too late: changes to the returned builder cannot change constructor injection or composition decisions already made.
