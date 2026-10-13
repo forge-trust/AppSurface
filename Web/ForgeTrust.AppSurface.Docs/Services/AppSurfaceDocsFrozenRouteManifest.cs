@@ -28,6 +28,7 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     private readonly IReadOnlyDictionary<string, string> _canonicalRoutePathByAlias;
 
     /// <summary>Gets canonical, source-shaped recovery and declared routes captured from verified bytes.</summary>
+    /// <remarks>The snapshot owns a read-only copy; consumers cannot change the routes shared by mounted aliases.</remarks>
     internal IReadOnlyList<string> PublicRoutePaths { get; private set; } = [];
 
     private AppSurfaceDocsFrozenRouteManifest(IReadOnlyDictionary<string, string> canonicalRoutePathByAlias)
@@ -403,10 +404,10 @@ internal sealed class AppSurfaceDocsFrozenRouteManifest
     {
         return new AppSurfaceDocsFrozenRouteManifest(aliases)
         {
-            PublicRoutePaths = (document.Entries ?? []).SelectMany(entry =>
+            PublicRoutePaths = Array.AsReadOnly((document.Entries ?? []).SelectMany(entry =>
                 new[] { entry.CanonicalRoutePath, entry.SourcePath }.Concat(entry.RecoveryAliases ?? []).Concat(entry.DeclaredAliases ?? []))
                 .Where(path => path is not null && IsSafeRoutePath(NormalizeRoutePath(path)))
-                .Select(path => NormalizeRoutePath(path!)).ToArray()
+                .Select(path => NormalizeRoutePath(path!)).ToArray())
         };
     }
 

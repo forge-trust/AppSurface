@@ -119,27 +119,27 @@ public sealed class AppSurfaceDocsVersionAliasPublicApiConsumerTests
     [Fact]
     public async Task NamedAliasQuickstart_ShouldFinalizeTheConfiguredAliasEndpoint()
     {
-        var fixtureRoot = Path.Combine(Path.GetTempPath(), $"appsurface-docs-alias-quickstart-{Guid.NewGuid():N}");
-        var sourceRoot = Path.Combine(fixtureRoot, "source");
-        var trustedReleaseRoot = Path.Combine(fixtureRoot, "releases");
-        var exactTreeRoot = Path.Combine(trustedReleaseRoot, "1.2.3");
+        var fixtureRoot = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-docs-alias-quickstart-{Guid.NewGuid():N}");
+        var sourceRoot = TestPathUtils.PathUnder(fixtureRoot, "source");
+        var trustedReleaseRoot = TestPathUtils.PathUnder(fixtureRoot, "releases");
+        var exactTreeRoot = TestPathUtils.PathUnder(trustedReleaseRoot, "1.2.3");
         Directory.CreateDirectory(sourceRoot);
         Directory.CreateDirectory(exactTreeRoot);
 
         try
         {
-            File.WriteAllText(Path.Combine(exactTreeRoot, "index.html"), "<html>Quickstart release</html>");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "guide.html"), "<html>Guide</html>");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "search.html"), "<html>Search</html>");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "search-index.json"), "{\"documents\":[]}");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "search.css"), "body { color: black; }");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "search-client.js"), "window.searchReady = true;");
-            File.WriteAllText(Path.Combine(exactTreeRoot, "minisearch.min.js"), "window.MiniSearch = {};");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "index.html"), "<html>Quickstart release</html>");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "guide.html"), "<html>Guide</html>");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "search.html"), "<html>Search</html>");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "search-index.json"), "{\"documents\":[]}");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "search.css"), "body { color: black; }");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "search-client.js"), "window.searchReady = true;");
+            File.WriteAllText(TestPathUtils.PathUnder(exactTreeRoot, "minisearch.min.js"), "window.MiniSearch = {};");
             File.WriteAllText(
-                Path.Combine(exactTreeRoot, ".appsurface-docs-route-manifest.json"),
+                TestPathUtils.PathUnder(exactTreeRoot, ".appsurface-docs-route-manifest.json"),
                 "{\"schema\":\"appsurface-docs-route-manifest-v1\",\"entries\":[{\"sourcePath\":\"guide.md\",\"canonicalRoutePath\":\"guide\",\"recoveryAliases\":[\"guide.md\"],\"declaredAliases\":[]}]}");
 
-            var releaseManifestPath = Path.Combine(exactTreeRoot, ".appsurface-docs-release-manifest.json");
+            var releaseManifestPath = TestPathUtils.PathUnder(exactTreeRoot, ".appsurface-docs-release-manifest.json");
             var files = Directory.EnumerateFiles(exactTreeRoot, "*", SearchOption.AllDirectories)
                 .Select(path => new
                 {
@@ -157,7 +157,7 @@ public sealed class AppSurfaceDocsVersionAliasPublicApiConsumerTests
                 releaseManifestPath,
                 JsonSerializer.Serialize(new { schema = "appsurface-docs-release-manifest-v1", files }));
 
-            var catalogPath = Path.Combine(fixtureRoot, "catalog.json");
+            var catalogPath = TestPathUtils.PathUnder(fixtureRoot, "catalog.json");
             File.WriteAllText(
                 catalogPath,
                 JsonSerializer.Serialize(new
