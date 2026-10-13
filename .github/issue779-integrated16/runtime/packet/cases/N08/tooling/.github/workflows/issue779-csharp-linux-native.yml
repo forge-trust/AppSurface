@@ -1,0 +1,366 @@
+name: C# Linux native N08 original caller cancellation
+on:
+  push:
+    branches: [codex/issue779-csharp-linux-native-20261010-n08-cleanup-account-v1]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-csharp-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  native-bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      # Promotion requires frozen source reviews and a complete native handoff.
+      # Promote only after full source composition review; no native passing claim.
+      UBUNTU_RUNTIME_REVIEWED: 'true'
+      UBUNTU_RUNTIME_SCRIPT_SHA256: 64f93bf8f6c732857e68494ccaf810570e931a8dfbd50610a1338c12079c2ab6
+      N03_INDEPENDENT_REVIEW_CLEAR: 'true'
+      N03_SOURCE_REBIND_PENDING: 'false'
+      BUILD_REVIEWED: 'true'
+      BUILD_SCRIPT_SHA256: 867c3f159cad12bfc6c5ba295ea84a5a737dbf69118f0c68a8dfd6a78ae4ea87
+      ROOT_TRANSPORT_REVIEWED: 'true'
+      ROOT_TRANSPORT_SHA256: 56382ca7947fa7a9a8d488293c6aa0dbf4496f21c90e5b183a9e8ec5d6d30360
+      FIXTURE_REVIEWED: 'true'
+      FIXTURE_SHA256: 8098ba15c70b822aa5680b7d26b359920acf8a710e04c726a3216b7e72d3859a
+      OS_AUDIT_REVIEWED: 'true'
+      OS_AUDIT_SHA256: b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0
+      SOURCE_REVIEW_SHA256: 84bc3b711a0014af029aa2ba0fe9e8a16a6b231f5c62097b629b94f5f75850ba
+      NATIVE_HANDOFF_REVIEWED: 'true'
+      NATIVE_HANDOFF_IMPLEMENTED: 'true'
+      ACQUISITION_SHA256: 4c10141829b8b0329a3f07429de658f22b5b89806250b8285fa245ea60ac2f0e
+      RETENTION_SHA256: f1e1851742b098c92c03adda7588593b9b9efb80198e928dbf68ffa918d3074a
+      ORCHESTRATOR_SHA256: 6744dbdbf9bcc5fa41a46c6d9135454e71b26ec56b0f09efac09b6e737b65a61
+      CAPTURE_RECEIPT_SHA256: 4ad07802af3523a6e54cc63b3c5c073ccc11c7360bb05da4b9ffdb408e98ccaa
+      BATCH_PARSER_TEST_SHA256: 94cb67b53e57cb2fdd2c655254665d27cbb6b8c353ab88f1000ed4df447257d4
+      N03_HELPER_RECIPE_SHA256: 7bc0906967cfba542b3919e12855fb5f0e8946d0fe062a5d8371d4a5142101f4
+      N03_HELPER_PROGRAM_SHA256: 02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a
+      N03_HELPER_PROJECT_SHA256: 92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e
+      N03_HELPER_LOCK_SHA256: a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb
+      SOURCE_COMMIT: 07bd3a852f06172fc6168e21ff1c351690c6505c
+      HARNESS_PARENT: 07bd3a852f06172fc6168e21ff1c351690c6505c
+      CANCELLATION_MODULE_0_SHA256: 90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab
+      CANCELLATION_MODULE_1_SHA256: c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6
+      CANCELLATION_MODULE_2_SHA256: e9b8a2cfe0053f93df03006c727cc1c005be32b64897ea13340fb057e294ec70
+      CANCELLATION_MODULE_3_SHA256: fc9e57334ff18d854d8819524d2ceef9e5d5e04e464234285c978a0329d9b9cf
+      CANCELLATION_MODULE_4_SHA256: b40214fe5ffbe4ada214d832592985acfbae5a44af4d9e54b845dd56cd3a0eea
+      CANCELLATION_MODULE_5_SHA256: 53dd388058231fbc995328ac8ca47cf7b7e5e971f28ceba9f638ac5a429b6145
+    steps:
+      - name: Reject unreviewed or incomplete proposal before build
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          for flag in UBUNTU_RUNTIME_REVIEWED BUILD_REVIEWED ROOT_TRANSPORT_REVIEWED FIXTURE_REVIEWED OS_AUDIT_REVIEWED NATIVE_HANDOFF_REVIEWED NATIVE_HANDOFF_IMPLEMENTED N03_INDEPENDENT_REVIEW_CLEAR; do
+            test "${!flag}" = true
+          done
+          test "$N03_SOURCE_REBIND_PENDING" = false
+          for pin in CAPTURE_RECEIPT_SHA256 UBUNTU_RUNTIME_SCRIPT_SHA256 BUILD_SCRIPT_SHA256 ROOT_TRANSPORT_SHA256 FIXTURE_SHA256 OS_AUDIT_SHA256 SOURCE_REVIEW_SHA256 ACQUISITION_SHA256 RETENTION_SHA256 ORCHESTRATOR_SHA256 BATCH_PARSER_TEST_SHA256; do
+            [[ "${!pin}" =~ ^[0-9a-f]{64}$ ]]
+          done
+          # This original job clock must also bracket final native publication.
+          /usr/bin/python3 -B - <<'PY' >> "$GITHUB_ENV"
+          import time
+          print('JOB_DEADLINE_MONOTONIC_NS=' + str(time.monotonic_ns() + 2100 * 1000000000))
+          PY
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify all reviewed source bytes before interpreter use
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -B - <<'PY'
+          import hashlib, os, stat, sys, time
+          from pathlib import Path
+          pins = (
+              ('.github/issue779-csharp-native/build-helper.sh', 'N03_HELPER_RECIPE_SHA256', 131072),
+              ('.github/issue779-csharp-native/Program.cs', 'N03_HELPER_PROGRAM_SHA256', 131072),
+              ('.github/issue779-csharp-native/NativePeerBroker.csproj', 'N03_HELPER_PROJECT_SHA256', 131072),
+              ('.github/issue779-csharp-native/packages.lock.json', 'N03_HELPER_LOCK_SHA256', 131072),
+              ('.github/issue779-csharp-build/capture-receipt.json', 'CAPTURE_RECEIPT_SHA256', 4194304),
+              ('.github/issue779-csharp-native/prepare-ubuntu-runtime.py', 'UBUNTU_RUNTIME_SCRIPT_SHA256', 131072),
+              ('.github/issue779-csharp-build/build-fdd.sh', 'BUILD_SCRIPT_SHA256', 262144),
+              ('.github/issue779-csharp-native/prepare-root-inputs-v2.sh', 'ROOT_TRANSPORT_SHA256', 131072),
+              ('.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh', 'FIXTURE_SHA256', 131072),
+              ('.github/issue779-csharp-native/prepare-os-audit-v2.py', 'OS_AUDIT_SHA256', 131072),
+              ('.github/issue779-csharp-native/source-review.json', 'SOURCE_REVIEW_SHA256', 65536),
+              ('.github/issue779-csharp-native/acquire-inbound.sh', 'ACQUISITION_SHA256', 131072),
+              ('.github/issue779-csharp-native/retain-native.sh', 'RETENTION_SHA256', 131072),
+              ('.github/issue779-csharp-native/run-native.py', 'ORCHESTRATOR_SHA256', 131072),
+              ('.github/issue779-csharp-native/test_actual_batch_parser.py', 'BATCH_PARSER_TEST_SHA256', 65536),
+              ('.github/issue779-csharp-native/check_cancellation_archive.py', 'CANCELLATION_MODULE_5_SHA256', 131072),
+              ('.github/issue779-csharp-native/parser-pins.tsv', 'CANCELLATION_MODULE_4_SHA256', 131072),
+              ('.github/issue779-csharp-native/capture_cancellation.py', 'CANCELLATION_MODULE_3_SHA256', 131072),
+              ('.github/issue779-csharp-native/cancellation_adapter.py', 'CANCELLATION_MODULE_2_SHA256', 131072),
+              ('.github/issue779-csharp-native/check_cancellation_records.py', 'CANCELLATION_MODULE_1_SHA256', 131072),
+              ('.github/issue779-csharp-native/check_kernel_record.py', 'CANCELLATION_MODULE_0_SHA256', 131072),
+          )
+          try:
+              for relative, variable, maximum in pins:
+                  path = Path(os.environ['GITHUB_WORKSPACE']) / relative
+                  before = path.lstat()
+                  if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= maximum:
+                      raise ValueError()
+                  fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                  try:
+                      opened = os.fstat(fd)
+                      key = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+                      if key(before) != key(opened):
+                          raise ValueError()
+                      data = bytearray()
+                      while len(data) <= maximum:
+                          if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+                              raise ValueError()
+                          chunk = os.read(fd, min(65536, maximum + 1 - len(data)))
+                          if not chunk:
+                              break
+                          data.extend(chunk)
+                      if len(data) != before.st_size or len(data) > maximum or hashlib.sha256(data).hexdigest() != os.environ[variable]:
+                          raise ValueError()
+                      if key(os.fstat(fd)) != key(before) or key(path.lstat()) != key(before):
+                          raise ValueError()
+                  finally:
+                      os.close(fd)
+              if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+                  raise ValueError()
+          except Exception:
+              print('BOOTSTRAP_REJECTED:reviewed-source-pin', file=sys.stderr)
+              sys.exit(1)
+          PY
+      - name: Test actual Bash audit parser with unprivileged owned data
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          parser_bound=$(/usr/bin/python3 -B - <<'PYDATA'
+          import os, sys, time
+          remaining=(int(os.environ['JOB_DEADLINE_MONOTONIC_NS'])-time.monotonic_ns())//1000000000
+          if remaining <= 55:
+              sys.exit(1)
+          print(min(50,remaining-5))
+          PYDATA
+          )
+          script="$GITHUB_WORKSPACE/.github/issue779-csharp-native/test_actual_batch_parser.py"
+          printf '%s  %s\n' "$BATCH_PARSER_TEST_SHA256" "$script" | /usr/bin/sha256sum --check --strict --status
+          /usr/bin/timeout --signal=KILL "$parser_bound" /usr/bin/python3 -B "$script" \
+            --fixture "$GITHUB_WORKSPACE/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh" \
+            --sha256 "$FIXTURE_SHA256"
+          /usr/bin/python3 -B - <<'PYDATA'
+          import os, sys, time
+          if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+              sys.exit(1)
+          PYDATA
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+        with:
+          version: 11.1.3
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Fixed Ubuntu execution-runtime prerequisite under existing root bounds
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          script="$GITHUB_WORKSPACE/.github/issue779-csharp-native/prepare-ubuntu-runtime.py"
+          printf '%s  %s\n' "$UBUNTU_RUNTIME_SCRIPT_SHA256" "$script" | /usr/bin/sha256sum --check --strict
+          /usr/bin/python3 -B "$script" --execute \
+            --reviewed-script-sha256 "$UBUNTU_RUNTIME_SCRIPT_SHA256" \
+            --runner-sha256 "$ORCHESTRATOR_SHA256"
+      - name: Same-host unprivileged full normal CLI build
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # The builder owns its original 1200s interval and 5s cleanup reserve.
+          # Reserve the complete interval in the original outer job clock.
+          /usr/bin/python3 -B - <<'PY'
+          import os, sys, time
+          if int(os.environ['JOB_DEADLINE_MONOTONIC_NS']) - time.monotonic_ns() <= 1200 * 1000000000:
+              print('BOOTSTRAP_REJECTED:remaining-job-budget', file=sys.stderr)
+              sys.exit(1)
+          PY
+          script="$GITHUB_WORKSPACE/.github/issue779-csharp-build/build-fdd.sh"
+          printf '%s  %s\n' "$BUILD_SCRIPT_SHA256" "$script" | /usr/bin/sha256sum --check --strict
+          /usr/bin/bash --noprofile --norc "$script" --execute "$GITHUB_WORKSPACE" \
+            "$RUNNER_TEMP/issue779-csharp-native-build" \
+            "$GITHUB_WORKSPACE/.github/issue779-csharp-build/capture-receipt.json"
+      - name: Unprivileged locked FDD N03 broker build inside original job budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          helper_end=$(/usr/bin/python3 -B - <<'PYDATA'
+          import os, pathlib, time
+          remaining=(int(os.environ['JOB_DEADLINE_MONOTONIC_NS'])-time.monotonic_ns())//1000000
+          if remaining<=905000: raise SystemExit(1)
+          stamp=pathlib.Path('/proc/uptime').read_text().split()[0]; a,f=stamp.split('.')
+          now=int(a)*1000+int((f+'000')[:3])
+          print(now+remaining-905000-20)
+          PYDATA
+          )
+          host="$DOTNET_ROOT/dotnet"
+          sdk_hash=$(/usr/bin/sha256sum -- "$host"); sdk_hash=${sdk_hash:0:64}
+          script="$GITHUB_WORKSPACE/.github/issue779-csharp-native/build-helper.sh"
+          printf '%s  %s\n' "$N03_HELPER_RECIPE_SHA256" "$script" | /usr/bin/sha256sum --check --strict --status
+          /usr/bin/bash --noprofile --norc "$script" --execute "$GITHUB_WORKSPACE/.github/issue779-csharp-native" "$host" "$sdk_hash" "$RUNNER_TEMP/issue779-n03-helper-build" "$helper_end"
+      - name: Check current build terminal and complete map pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -B - <<'PY'
+          import hashlib, json, os, stat, sys, time
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'issue779-csharp-native-build'
+          def pairs(rows):
+              result = {}
+              for key, value in rows:
+                  if key in result:
+                      raise ValueError()
+                  result[key] = value
+              return result
+          def read(path, maximum):
+              before = path.lstat()
+              if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= maximum:
+                  raise ValueError()
+              key = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+              fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+              try:
+                  if key(before) != key(os.fstat(fd)):
+                      raise ValueError()
+                  data = bytearray()
+                  while len(data) <= maximum:
+                      if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+                          raise ValueError()
+                      chunk = os.read(fd, min(65536, maximum + 1 - len(data)))
+                      if not chunk:
+                          break
+                      data.extend(chunk)
+                  if len(data) != before.st_size or len(data) > maximum or key(os.fstat(fd)) != key(before) or key(path.lstat()) != key(before):
+                      raise ValueError()
+              finally:
+                  os.close(fd)
+              return bytes(data)
+          try:
+              if (root / 'receipts/late-publication-failure.json').exists():
+                  raise ValueError()
+              raw = read(root / 'receipts/build-receipt.json', 4194304)
+              receipt = json.loads(raw, object_pairs_hook=pairs)
+              if receipt['schema'] != 'issue779-csharp-fdd-build-v5' or type(receipt['exit']) is not int or receipt['exit'] != 0 or receipt.get('failure') is not None or receipt['diagnostics']:
+                  raise ValueError()
+              if receipt['harness_parent'] != os.environ['HARNESS_PARENT']:
+                  raise ValueError()
+              capture_path = Path(os.environ['GITHUB_WORKSPACE']) / '.github/issue779-csharp-build/capture-receipt.json'
+              capture_raw = read(capture_path, 4194304)
+              if hashlib.sha256(capture_raw).hexdigest() != os.environ['CAPTURE_RECEIPT_SHA256']:
+                  raise ValueError()
+              capture = json.loads(capture_raw, object_pairs_hook=pairs)
+              if (set(capture) != {'exit', 'previous_validation_commit', 'primary_head', 'source', 'source_count', 'validation_commit'}
+                  or type(capture['exit']) is not int or capture['exit'] != 0
+                  or capture['validation_commit'] != os.environ['SOURCE_COMMIT']
+                  or type(capture['source_count']) is not int or not 0 < capture['source_count'] <= 32768
+                  or type(capture['source']) is not dict or set(capture['source']) != {'sha256', 'modes'}
+                  or type(capture['source']['sha256']) is not dict or type(capture['source']['modes']) is not dict
+                  or set(capture['source']['sha256']) != set(capture['source']['modes'])
+                  or len(capture['source']['sha256']) != capture['source_count']):
+                  raise ValueError()
+              source_count = capture['source_count']
+              for phase in ('source_before', 'source_after_assets', 'source_after_build', 'source_final'):
+                  fact = receipt[phase]
+                  if fact['head'] != os.environ['SOURCE_COMMIT'] or fact['count'] != source_count or any(fact[k] is not True for k in ('index_tree_matches', 'physical_git_sha1', 'physical_sha256_modes')):
+                      raise ValueError()
+              if not receipt['commands']:
+                  raise ValueError()
+              for command in receipt['commands']:
+                  if type(command['exit']) is not int or command['exit'] != 0 or command['failure'] is not None or command['waited'] is not True or command['group_absent'] is not True or command['timed_out'] is not False or command['forced_cleanup'] is not False:
+                      raise ValueError()
+              if set(receipt['artifacts']) != {'source', 'tool', 'runtime'}:
+                  raise ValueError()
+              for name, fact in receipt['artifacts'].items():
+                  tsv = read(root / ('handoff/' + name + '.tsv'), 1048576)
+                  nodes = read(root / ('handoff/' + name + '-nodes.json'), 4194304)
+                  if hashlib.sha256(tsv).hexdigest() != fact['tsv_sha256'] or hashlib.sha256(nodes).hexdigest() != fact['nodes_sha256']:
+                      raise ValueError()
+                  inventory = json.loads(nodes, object_pairs_hook=pairs)
+                  if set(inventory) != {'schema', 'root_name', 'files', 'directories'} or inventory['schema'] != 'issue779-build-node-inventory-v1' or inventory['root_name'] != name:
+                      raise ValueError()
+                  if len(inventory['files']) != fact['file_count'] or len(inventory['files']) + len(inventory['directories']) != fact['node_count']:
+                      raise ValueError()
+                  if sum(row['bytes'] for row in inventory['files'].values()) != fact['total_bytes']:
+                      raise ValueError()
+              if receipt['artifacts']['source']['file_count'] != source_count:
+                  raise ValueError()
+              if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+                  raise ValueError()
+              print(f'BUILD_TERMINAL_VERIFIED:source{source_count}:no-native-execution', flush=True)
+              if time.monotonic_ns() >= int(os.environ['JOB_DEADLINE_MONOTONIC_NS']):
+                  raise ValueError()
+          except Exception:
+              print('BOOTSTRAP_REJECTED:build-terminal-or-map-pins', file=sys.stderr)
+              sys.exit(1)
+          PY
+      - name: Stage reviewed root inputs and execute fixed N08 cancellation control
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          script="$GITHUB_WORKSPACE/.github/issue779-csharp-native/run-native.py"
+          printf '%s  %s\n' "$ORCHESTRATOR_SHA256" "$script" | /usr/bin/sha256sum --check --strict
+          set +e
+          /usr/bin/python3 -B "$script" --execute --workspace "$GITHUB_WORKSPACE" \
+            --build-root "$RUNNER_TEMP/issue779-csharp-native-build" \
+            --helper-build-root "$RUNNER_TEMP/issue779-n03-helper-build" \
+            --output "$RUNNER_TEMP/issue779-csharp-native-run" \
+            --reviewed-script-sha256 "$ORCHESTRATOR_SHA256"
+          code=$?
+          set -e
+          /usr/bin/python3 -B - "$code" <<'PY'
+          import json, os, pathlib, sys, time
+          code = int(sys.argv[1])
+          folder = pathlib.Path(os.environ['RUNNER_TEMP']) / 'issue779-csharp-native-run'
+          deadline = int(os.environ['JOB_DEADLINE_MONOTONIC_NS'])
+          if time.monotonic_ns() >= deadline or not folder.is_dir() or folder.is_symlink():
+              sys.exit(1)
+          target = folder / 'outer-terminal.json'
+          with target.open('x') as output:
+              os.fchmod(output.fileno(), 0o600)
+              json.dump({'schema': 'issue779-csharp-native-outer-terminal-v1', 'exit': code}, output)
+              output.flush()
+              os.fsync(output.fileno())
+          if time.monotonic_ns() >= deadline:
+              sys.exit(1)
+          if code != 0 or (folder / 'native-late-failure.json').exists():
+              sys.exit(1)
+          receipt = json.loads((folder / 'native-receipt.json').read_bytes())
+          if receipt.get('exit') != 0 or receipt.get('native_case_receipt_verified') is not True:
+              sys.exit(1)
+          PY
+          test "$code" -eq 0
+      - name: Retain bounded build and private native evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-csharp-native-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/issue779-csharp-native-build/receipts/
+            ${{ runner.temp }}/issue779-csharp-native-build/handoff/
+            ${{ runner.temp }}/issue779-csharp-native-run/
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-build-receipt.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-build-receipt.pending.json
+            ${{ runner.temp }}/issue779-n03-helper-build/late-helper-publication-failure.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper-nodes.json
+            ${{ runner.temp }}/issue779-n03-helper-build/helper.tsv
+            ${{ runner.temp }}/issue779-n03-helper-build/build-00.log
+            ${{ runner.temp }}/issue779-n03-helper-build/build-01.log
+            ${{ runner.temp }}/issue779-n03-helper-build/build-02.log
+            ${{ runner.temp }}/issue779-csharp-ubuntu-runtime/

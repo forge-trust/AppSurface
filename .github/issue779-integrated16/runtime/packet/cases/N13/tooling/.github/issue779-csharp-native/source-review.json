@@ -1,0 +1,101 @@
+{
+  "capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "compact_source_map_sha256": "bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6",
+  "fixture_preparation_base64": "ewogICJkdXJhdGlvbl9wb2xpY3lfdXNlYyI6IHsKICAgICJuMTRfb3duZXJfYm91bmRfc2Vjb25kcyI6IDI0NSwKICAgICJvdXRlcl9vcmlnaW5hbF9yZXF1ZXN0X3NlY29uZHMiOiAyNDAsCiAgICAib3duZXJfcnVudGltZSI6IDI0MDAwMDAwMCwKICAgICJzdG9wIjogNTAwMDAwMAogIH0sCiAgImZpbGVzIjogewogICAgImNoZWNrX293bmVyX2RlYXRoX3JlY29yZC5weSI6IHsKICAgICAgImJ5dGVzIjogOTQ2MSwKICAgICAgIm1vZGUiOiAiMDY0NCIsCiAgICAgICJzaGEyNTYiOiAiMjc2ZGY2ZmRkNmNiOWY4ZTYyM2U5YjA5YzYyMzYyZDc1ZDJiMzFhZGMwN2E2YjJjYTA1ZTZhOGM4ZTZhZDRkMSIKICAgIH0sCiAgICAiY2hlY2twb2ludC1uMTMtb3duZXIta2lsbGVkLnNoIjogewogICAgICAiYnl0ZXMiOiAxMjUsCiAgICAgICJtb2RlIjogIjA2NDQiLAogICAgICAic2hhMjU2IjogImNkOWUzN2Q0ZjY0YTIzNDcxZWE2YzY0ZjYyODZiY2MzNjY1N2M5ZmNkZjc3MzE2NzhiZGRjMTA4YTk4NmFhZmMiCiAgICB9LAogICAgImNoZWNrcG9pbnQtbjE0LW93bmVyLXN0b3BwZWQuc2giOiB7CiAgICAgICJieXRlcyI6IDEyNSwKICAgICAgIm1vZGUiOiAiMDY0NCIsCiAgICAgICJzaGEyNTYiOiAiZDgyODYwYTJjMjFlYTFlNWM4MGQ2YTBkMzRkYjFlNWZlY2ZmMDNkYmJkZTRiYWQwODM1MGRkY2FiOWY0NTBhMiIKICAgIH0sCiAgICAiY2hlY2twb2ludC1vd25lci1kZWF0aC1jb21tb24uc2giOiB7CiAgICAgICJieXRlcyI6IDQzMDkzLAogICAgICAibW9kZSI6ICIwNjQ0IiwKICAgICAgInNoYTI1NiI6ICI0ZDY5MTMyMDM3MzA0MThmMTAwNTk2OWJjNzU0YjY2NGI3NThiOTU2NGEzN2ViNzRkMzAzNWU5M2E0ZDNiYjRmIgogICAgfQogIH0sCiAgIm5hdGl2ZV9jcmVkaXQiOiBmYWxzZSwKICAibmF0aXZlX2V4ZWN1dGlvbiI6IGZhbHNlLAogICJyZXZpZXdfY2xlYXIiOiBmYWxzZSwKICAicnVudGltZV9wb2xpY3lfbm90ZSI6ICJTdGF0aWMgc291cmNlIGhhbmRvZmYgb25seS4gVGhpcyByZWNvcmQgY29udGFpbnMgbm8gcnVudGltZSwgdGVzdCwgb3duZXItbGlmZWN5Y2xlLCBvciBuYXRpdmUgZXhlY3V0aW9uIGV2aWRlbmNlLiIsCiAgInNjaGVtYSI6ICJpc3N1ZTc3OS1vd25lci1kZWF0aC1maXh0dXJlLXY2LXNvdXJjZS1wcmVwYXJhdGlvbi12MSIsCiAgInNvdXJjZV9jYXB0dXJlX2NvdW50IjogMjg3MiwKICAic291cmNlX2NhcHR1cmVfaGVhZCI6ICJmYzU5YmIxMjU0Mjk0ZDYyNGY2Nzc5ZjkyODAyMGVkZmU5ODhkZDVlIiwKICAic291cmNlX2NhcHR1cmVfcGFyZW50IjogIjE3OTRhOTlmOWY5ODU3ZTkyM2ZkYjJjYzhjYzgxZmUwYmQ1YzhjMzgiCn0K",
+  "fixture_preparation_sha256": "544d884e20ab03886a568aa3b5c6da5f0fdae8854652eb93ddf38fb834d5c3ec",
+  "handoff_data_only": true,
+  "handoff_native_evidence": false,
+  "integrated_current_review_basis": [
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n01-n02-n03-current-source-review-followup.json",
+      "role": "common_peer",
+      "sha256": "78f20844973a6932c05ad1125dcedd39b49d160438f70b92134f26392d1ef093"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n05-n06-current-review.json",
+      "role": "slots",
+      "sha256": "763cb4f2385c331b4da3559e6bb5fff81f26dbf9b33b84a228faac62c3513d9a"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-current-fixture-review-main-support.json",
+      "role": "cancellation_fixture",
+      "sha256": "374637c87a7747366e5902bc3b065a6684b888c805160040edd02dd8737345d8"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-main-production-review.json",
+      "role": "cancellation_product",
+      "sha256": "f9583886b21bd533b3875b5b143025a600dd880fcdeea94ca5333b8d8e8d2fa9"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-current-source-review.json",
+      "role": "parent_and_progress_source",
+      "sha256": "51e848bc99e26be01217514deea25d56d804e3309486efa66b4adea6523e0dee"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-final-procedure-review.json",
+      "role": "parent_and_progress_procedure",
+      "sha256": "b496feb34d1a15edea99fe84754871ed9850973f6eb1a72e60c14c188e323358"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n09-n11-n12-current-source-review.json",
+      "role": "custody_stall_descendant",
+      "sha256": "4ac511905e103d76f615098072c5f2029a08ffbdfa0bcf0fcbb6434240190b14"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-current-source-review.json",
+      "role": "owner_death",
+      "sha256": "f33bb8657350c7c0e555f989f4ae36de59d6e5a56c97544858e57428feaf412f"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-staging-correction-review.json",
+      "role": "owner_death_staging_fix",
+      "sha256": "4c9b45728d2165635c376581edc238d13a40079067cbfc2b46c0ceeb7595cfa7"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-helper-root-schema-fix-main-20261013/review.json",
+      "role": "helper_schema_fix",
+      "sha256": "0ac685541315955386a02aa5b66a852d3095ccccd853877e962dc2a418905d38"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-n16-generation-fix-20261013/review-and-validation.json",
+      "role": "generation_fix",
+      "sha256": "06193fe8e020e6a4e42aa32df38c9ac92973e81e61205073cdb747ed82aeadc5"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-owner-death-pin-name-fix-20261013/receipts/terminal-receipt.json",
+      "role": "owner_death_pin_fix",
+      "sha256": "2bc594c5b2e7c32fd55c597773e8f52bc09dc6591d73c34076b9b11aaa5c9b12"
+    }
+  ],
+  "native_credit": false,
+  "native_execution": false,
+  "review_clear": true,
+  "review_flags": {
+    "fixture_review_clear": true,
+    "fixture_staging_clear": true,
+    "native_handoff_review_clear": true,
+    "retention_review_clear": true,
+    "root_transport_review_clear": true,
+    "source_review_clear": true
+  },
+  "review_receipts": [
+    {
+      "path": "/private/tmp/issue779-csharp-owner-death-current-common-candidate-v6/independent-review-v6-current.json",
+      "role": "full semantic/source-scope review; stale runtime pin resolved in v7",
+      "sha256": "a52090df959159411c23a931f27b7862c91b4052eefe2c0c31b223d446427e99"
+    },
+    {
+      "path": "/private/tmp/issue779-csharp-owner-death-current-common-candidate-v7/independent-review-v7.json",
+      "role": "current 22-input physical/mode/delta/workflow/pin-closure review and stale-pin resolution",
+      "sha256": "f6f3f12db70f95bd4915c0cd379bf5313dbc2a42337fa0b79fdbd919549c239f"
+    }
+  ],
+  "review_state": "CURRENT_STATIC_REVIEW_CLEAR",
+  "schema": "issue779-owner-death-source-review-v1",
+  "scope_note": "v13 N13/N14 pre-measurement cleanup correction is pending independent whole-packet review. This embedded payload is pinned data only; it confers no review, runtime, or native credit.",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_count": 2872,
+  "source_map_sha256": "f47737aaad2455132ae7f0a475babc9d3bc721c75140aaa7d1883779c6771f47",
+  "source_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
+  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86"
+}

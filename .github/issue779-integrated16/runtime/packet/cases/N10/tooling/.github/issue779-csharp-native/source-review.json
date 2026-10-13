@@ -1,0 +1,132 @@
+{
+  "case": "N10",
+  "integrated_current_review_basis": [
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n01-n02-n03-current-source-review-followup.json",
+      "role": "common_peer",
+      "sha256": "78f20844973a6932c05ad1125dcedd39b49d160438f70b92134f26392d1ef093"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n05-n06-current-review.json",
+      "role": "slots",
+      "sha256": "763cb4f2385c331b4da3559e6bb5fff81f26dbf9b33b84a228faac62c3513d9a"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-current-fixture-review-main-support.json",
+      "role": "cancellation_fixture",
+      "sha256": "374637c87a7747366e5902bc3b065a6684b888c805160040edd02dd8737345d8"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-main-production-review.json",
+      "role": "cancellation_product",
+      "sha256": "f9583886b21bd533b3875b5b143025a600dd880fcdeea94ca5333b8d8e8d2fa9"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-current-source-review.json",
+      "role": "parent_and_progress_source",
+      "sha256": "51e848bc99e26be01217514deea25d56d804e3309486efa66b4adea6523e0dee"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-final-procedure-review.json",
+      "role": "parent_and_progress_procedure",
+      "sha256": "b496feb34d1a15edea99fe84754871ed9850973f6eb1a72e60c14c188e323358"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n09-n11-n12-current-source-review.json",
+      "role": "custody_stall_descendant",
+      "sha256": "4ac511905e103d76f615098072c5f2029a08ffbdfa0bcf0fcbb6434240190b14"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-current-source-review.json",
+      "role": "owner_death",
+      "sha256": "f33bb8657350c7c0e555f989f4ae36de59d6e5a56c97544858e57428feaf412f"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-staging-correction-review.json",
+      "role": "owner_death_staging_fix",
+      "sha256": "4c9b45728d2165635c376581edc238d13a40079067cbfc2b46c0ceeb7595cfa7"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-helper-root-schema-fix-main-20261013/review.json",
+      "role": "helper_schema_fix",
+      "sha256": "0ac685541315955386a02aa5b66a852d3095ccccd853877e962dc2a418905d38"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-n16-generation-fix-20261013/review-and-validation.json",
+      "role": "generation_fix",
+      "sha256": "06193fe8e020e6a4e42aa32df38c9ac92973e81e61205073cdb747ed82aeadc5"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-owner-death-pin-name-fix-20261013/receipts/terminal-receipt.json",
+      "role": "owner_death_pin_fix",
+      "sha256": "2bc594c5b2e7c32fd55c597773e8f52bc09dc6591d73c34076b9b11aaa5c9b12"
+    }
+  ],
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "review_evidence": {
+    "complete_input_review": {
+      "closed_by_delta_review_sha256": "a7226bed0bee1a0841d9bf0ca831a9ba29c6b3e53910559f390b4e14de56ef9f",
+      "path": "/private/tmp/issue779-csharp-n10-native-candidate-v8/independent-input-review.json",
+      "previous_finding": "N10-PARSER-02",
+      "sha256": "8f0fc23b328051324f1a8f038f7adcdc8622ab4827f9d71a6909ef21b906f63a"
+    },
+    "pending_start_bool_identity": {
+      "review_sha256": "a7226bed0bee1a0841d9bf0ca831a9ba29c6b3e53910559f390b4e14de56ef9f",
+      "scope": "Exact booleans reject Python integer aliases;10data controls no nativeauthority",
+      "validation_receipt_sha256": "fa74afeea6956326965053dda4eb997af57796bfe8c458a3a088b9af0626c41a"
+    },
+    "pending_start_final_sample_parser": {
+      "path": "/private/tmp/issue779-csharp-n10-pending-start-parser-v7/independent-review.json",
+      "scope": "HasStopped and GroupEmpty exact terminal sample grammar; fixed failed N10 teardown remains deliberate",
+      "sha256": "8ad9f051297ab3cab6937ad064ad249779d62af10be6f0871664c35b3011c146"
+    },
+    "selected_capture_operand": {
+      "actual_command_controls": 3,
+      "correction": "quoted verified $capture instead of literal capture filename",
+      "native_credit": false,
+      "new_independent_review_pending": false,
+      "previous_run": 38108900943,
+      "review_provenance": {
+        "main_v10_pending_gate_rereview": {
+          "path": "/private/tmp/issue779-csharp-n10-reviewed-promotion-v11/reviews/main-v10-incremental-review.json",
+          "scope": "Clear v10 rereview carries the 14 byte-identical inputs and all eight reviewed gate assessments.",
+          "sha256": "70b650c63bca6352ca709aebc9dc710cf8517eec5463dfd4ca6ff8c00be0f7fc"
+        },
+        "prior_full_v9_review": {
+          "path": "/private/tmp/issue779-csharp-n10-reviewed-promotion-v11/reviews/full-v9-procedure-review.json",
+          "scope": "Full source/build/runtime/fixture/custody review; N10_SOURCE_CAPTURE_REVIEW_CLEAR is covered and clear.",
+          "sha256": "8abc3cbf1a4be2712a167eca6c3584312f319af9389833756aa588522a5438b5"
+        }
+      }
+    },
+    "terminal_loaded_unit_observation": {
+      "clear": true,
+      "data_validation_path": "/private/tmp/issue779-csharp-n10-postrun-terminal-v14/full-data-final-receipt.json",
+      "data_validation_sha256": "d5c05489fc159f6ec12b5375baadf0b6a0f23619c5c305a92b0b6f35523200c5",
+      "independent_review_path": "/private/tmp/issue779-csharp-n10-postrun-terminal-v14-independent-review-linnaeus.json",
+      "independent_review_sha256": "722739cba9a09c4f53398a26f94775da268278edb4122d84e4d399ea34d38e54",
+      "native_acceptance": false,
+      "native_credit": false,
+      "native_execution": false,
+      "released": true,
+      "scope": "independent v14 four-file semantic review"
+    }
+  },
+  "review_flags": {
+    "fixture": true,
+    "native_handoff": true,
+    "parser": true,
+    "retention": true,
+    "root_cleanup": true,
+    "root_transport": true,
+    "source_capture": true
+  },
+  "schema": "issue779-n10-native-source-review-v1",
+  "source_capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_count": 2872,
+  "source_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
+  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86"
+}

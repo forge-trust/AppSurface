@@ -1,0 +1,101 @@
+{
+  "installed_fixture_sha256": "24af052fbe335363d1bee9418f593ab52098a5a6c6088c45f23f2e854f80cc14",
+  "integrated_current_review_basis": [
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n01-n02-n03-current-source-review-followup.json",
+      "role": "common_peer",
+      "sha256": "78f20844973a6932c05ad1125dcedd39b49d160438f70b92134f26392d1ef093"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n05-n06-current-review.json",
+      "role": "slots",
+      "sha256": "763cb4f2385c331b4da3559e6bb5fff81f26dbf9b33b84a228faac62c3513d9a"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-current-fixture-review-main-support.json",
+      "role": "cancellation_fixture",
+      "sha256": "374637c87a7747366e5902bc3b065a6684b888c805160040edd02dd8737345d8"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-main-production-review.json",
+      "role": "cancellation_product",
+      "sha256": "f9583886b21bd533b3875b5b143025a600dd880fcdeea94ca5333b8d8e8d2fa9"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-current-source-review.json",
+      "role": "parent_and_progress_source",
+      "sha256": "51e848bc99e26be01217514deea25d56d804e3309486efa66b4adea6523e0dee"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-final-procedure-review.json",
+      "role": "parent_and_progress_procedure",
+      "sha256": "b496feb34d1a15edea99fe84754871ed9850973f6eb1a72e60c14c188e323358"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n09-n11-n12-current-source-review.json",
+      "role": "custody_stall_descendant",
+      "sha256": "4ac511905e103d76f615098072c5f2029a08ffbdfa0bcf0fcbb6434240190b14"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-current-source-review.json",
+      "role": "owner_death",
+      "sha256": "f33bb8657350c7c0e555f989f4ae36de59d6e5a56c97544858e57428feaf412f"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-staging-correction-review.json",
+      "role": "owner_death_staging_fix",
+      "sha256": "4c9b45728d2165635c376581edc238d13a40079067cbfc2b46c0ceeb7595cfa7"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-helper-root-schema-fix-main-20261013/review.json",
+      "role": "helper_schema_fix",
+      "sha256": "0ac685541315955386a02aa5b66a852d3095ccccd853877e962dc2a418905d38"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-n16-generation-fix-20261013/review-and-validation.json",
+      "role": "generation_fix",
+      "sha256": "06193fe8e020e6a4e42aa32df38c9ac92973e81e61205073cdb747ed82aeadc5"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-owner-death-pin-name-fix-20261013/receipts/terminal-receipt.json",
+      "role": "owner_death_pin_fix",
+      "sha256": "2bc594c5b2e7c32fd55c597773e8f52bc09dc6591d73c34076b9b11aaa5c9b12"
+    }
+  ],
+  "join_owned_followup": {
+    "review_receipt_sha256": "7e9b3d07e96bcac25d8b02a3ce683bf6fe8d054c11939a3a096e2647d6b72dd3",
+    "scope": "exact reviewed join_owned function only; N12 guards and diagnostics unchanged"
+  },
+  "native_control_credit": false,
+  "native_execution": false,
+  "reviews": [
+    {
+      "path": "/private/tmp/issue779-csharp-n12-descendant-peer-v1/review.json",
+      "released": true,
+      "result": "CLEAR",
+      "sha256": "c064ac23824bd239f89a9b3e741663f4bd1481334d45c1085f3c0b9dad6d4a54"
+    },
+    {
+      "path": "/private/tmp/issue779-csharp-n12-descendant-peer-v1/incremental-review.json",
+      "released": true,
+      "result": "CLEAR",
+      "sha256": "b65f0813a3587bc8fb3cfba98dacaa8267b5b2caf117924b9376b27225741082"
+    },
+    {
+      "followup_required": "review fixture-result digest extension and current 17-input composition",
+      "installed_fixture_sha256": "b6f003420f83357cac9156fa609852d60e0e0f44c84deac428e7268cfbb62ab5",
+      "path": "/private/tmp/issue779-csharp-n12-native-preparation-v1/data-peer-review.json",
+      "released": true,
+      "result": "CLEAR_FOR_PINNED_BASE_ONLY",
+      "reviewed_fixture_sha256": "8ff605ba54ada240b5bd4c10f328f877024aa8414c38212b8524833cc6d289c1",
+      "scope": "bounded data integration only; native execution/build/source binding pending",
+      "sha256": "76d4d3eeab4cc47eabe4c3e62acdab0f5346494785a628e1c0f3d5a0af36086d"
+    }
+  ],
+  "schema": "issue779-n12-scoped-source-review-binding-v1",
+  "scope_limit": "Scoped source/data evidence only. The data peer receipt binds the pinned base fixture; the installed fixture adds the bounded result digest and requires independent composition review. No build or native acceptance.",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_count": 2872,
+  "source_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
+  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86"
+}

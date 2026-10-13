@@ -1,0 +1,460 @@
+#!/usr/bin/env python3
+"""Fixed N15 live observer. It has no retry, fallback signal, or deadline renewal."""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import pwd
+import grp
+import re
+import signal
+import stat
+import subprocess
+import sys
+import time
+
+class Reject(ValueError):
+    """Fixed private rejection; raw source and input data are never echoed."""
+
+
+def require(condition, reason):
+    if not condition:
+        raise Reject(reason)
+
+
+def identity(st):
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid, st.st_nlink,
+            st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+PARSER_SHA256 = "5f0ead313fe2bc5f2109903fc362bfad56a37e7553c69aeddc733c45fd173b30"
+
+
+def load_pinned_parser():
+    path = Path(__file__).parent / "check_n15_records.py"
+    before = os.lstat(path)
+    require(stat.S_ISREG(before.st_mode) and before.st_uid == 0 and before.st_gid == 0
+            and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o444,
+            "parser-custody")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        raw = os.read(fd, 131073)
+        require(len(raw) <= 131072 and not os.read(fd, 1)
+                and hashlib.sha256(raw).hexdigest() == PARSER_SHA256
+                and identity(before) == identity(os.fstat(fd)) == identity(os.lstat(path)),
+                "parser-pin")
+    finally:
+        os.close(fd)
+    spec = importlib.util.spec_from_file_location("issue779_n15_records", path)
+    require(spec is not None and spec.loader is not None, "parser-loader")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_record_parser = None
+
+
+def record_parser():
+    global _record_parser
+    if _record_parser is None:
+        _record_parser = load_pinned_parser()
+    return _record_parser
+
+
+def validate_phase(raw, generation):
+    return record_parser().validate_phase(raw, generation)
+
+SYSTEMCTL = "/usr/bin/systemctl"
+WORKER_PREFIX = "appsurface-evidence-worker-"
+OWNER_PREFIX = "appsurface-evidence-owner-"
+
+
+def boot_ms():
+    return time.clock_gettime_ns(time.CLOCK_BOOTTIME) // 1_000_000
+
+
+def remaining(deadline):
+    left = deadline - boot_ms()
+    require(left > 0, "original-deadline-expired")
+    return left
+
+
+def read_fd(path, cap):
+    before = os.lstat(path)
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+            and stat.S_IMODE(before.st_mode) == 0o600 and before.st_uid == 0
+            and before.st_gid == 0 and 0 <= before.st_size <= cap, "phase-file-custody")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        require(identity(before) == identity(opened), "phase-open-substitution")
+        data = os.read(fd, cap + 1)
+        require(len(data) == before.st_size and len(data) <= cap and not os.read(fd, 1)
+                and identity(before) == identity(os.fstat(fd)) == identity(os.lstat(path)),
+                "phase-read-substitution")
+        return data
+    finally:
+        os.close(fd)
+
+
+def systemd(unit, properties, deadline):
+    require(re.fullmatch(r"appsurface-evidence-(?:owner|worker)-[0-9a-f]{32}\.service", unit)
+            is not None, "unit-syntax")
+    left = remaining(deadline)
+    try:
+        result = subprocess.run([SYSTEMCTL, "show", "--no-pager", "--property=" + ",".join(properties), unit],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            env={"PATH": "/usr/bin:/usr/sbin", "LANG": "C", "LC_ALL": "C"},
+            timeout=min(left / 1000, 1.0), check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        raise Reject("systemd-query-failed") from None
+    require(result.returncode == 0 and len(result.stdout) <= 4096, "systemd-query-failed")
+    try:
+        text = result.stdout.decode("ascii", "strict")
+    except UnicodeError:
+        raise Reject("systemd-output-encoding") from None
+    values = {}
+    for line in text.splitlines():
+        require("=" in line, "systemd-output-shape")
+        key, value = line.split("=", 1)
+        require(key in properties and key not in values, "systemd-output-key")
+        values[key] = value
+    require(set(values) == set(properties), "systemd-output-fields")
+    remaining(deadline)
+    return values
+
+
+def account_id(value, kind):
+    require(type(value) is str and value and len(value) <= 128, "unit-account-shape")
+    try:
+        if value.isascii() and value.isdecimal():
+            result = int(value)
+        elif kind == "uid":
+            result = pwd.getpwnam(value).pw_uid
+        else:
+            result = grp.getgrnam(value).gr_gid
+    except (KeyError, ValueError, OverflowError):
+        raise Reject("unit-account-lookup") from None
+    require(0 < result < 2**32 - 1, "unit-account-range")
+    return result
+
+
+def account_snapshot(worker_values, worker):
+    """Capture all five actual NSS identities while the selected worker is still pending."""
+    worker_name=worker_values["User"]
+    worker_group=worker_values["Group"]
+    match=re.fullmatch(r"evw([0-9a-f]{28})",worker_name)
+    require(match is not None and worker_group==worker_name,"generated-worker-account-name")
+    suffix=match.group(1)
+    names={"worker":worker_name,"subject":"evs"+suffix,"results":"evr"+suffix}
+    try:
+        worker_passwd=pwd.getpwnam(names["worker"])
+        subject_passwd=pwd.getpwnam(names["subject"])
+        worker_grp=grp.getgrnam(names["worker"])
+        subject_grp=grp.getgrnam(names["subject"])
+        results_grp=grp.getgrnam(names["results"])
+    except KeyError:
+        raise Reject("generated-account-nss-missing") from None
+    ids={"worker_uid":worker_passwd.pw_uid,"worker_gid":worker_grp.gr_gid,
+         "subject_uid":subject_passwd.pw_uid,"subject_gid":subject_grp.gr_gid,
+         "results_gid":results_grp.gr_gid}
+    require(ids["worker_uid"]==worker["uid"] and ids["worker_gid"]==worker["gid"]
+        and all(type(value) is int and 0<value<2**32-1 for value in ids.values())
+        and len(set(ids.values()))==5,"generated-account-identity")
+    require(worker_passwd.pw_gid==ids["worker_gid"]
+        and subject_passwd.pw_gid==ids["subject_gid"]
+        and not worker_grp.gr_mem and not subject_grp.gr_mem and not results_grp.gr_mem,
+        "generated-account-membership")
+    return {"names":names,"ids":ids}
+
+
+def proc_file(pid, name, cap=8192):
+    path = f"/proc/{pid}/{name}"
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        data = os.read(fd, cap + 1)
+        require(len(data) <= cap and not os.read(fd, 1), "proc-file-bound")
+        return data.decode("ascii", "strict")
+    except (UnicodeError, OSError):
+        raise Reject("proc-file-read") from None
+    finally:
+        os.close(fd)
+
+
+def proc_identity(pid):
+    statline = proc_file(pid, "stat")
+    close = statline.rfind(")")
+    require(close > 0, "proc-stat-shape")
+    tail = statline[close + 2:].split()
+    require(len(tail) >= 20 and tail[0] not in ("Z", "X"), "proc-process-state")
+    starttime = int(tail[19])
+    rows = {}
+    for line in proc_file(pid, "status").splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            rows[key] = value.strip()
+    try:
+        uids = [int(x) for x in rows["Uid"].split()]
+        gids = [int(x) for x in rows["Gid"].split()]
+    except (KeyError, ValueError):
+        raise Reject("proc-credentials") from None
+    require(len(uids) == 4 and len(gids) == 4, "proc-credential-fields")
+    cgroups = proc_file(pid, "cgroup").splitlines()
+    unified = [row[3:] for row in cgroups if row.startswith("0::")]
+    require(len(unified) == 1, "proc-cgroup-shape")
+    return {"starttime_ticks": starttime, "uids": uids, "gids": gids,
+            "cgroup": unified[0]}
+
+
+def unit_identity(unit, expected_kind, deadline):
+    fields = ["MainPID", "ControlGroup", "User", "Group", "Restart", "ActiveState", "SubState",
+              "ExecMainPID", "ExecMainCode", "ExecMainStatus", "Result"]
+    values = systemd(unit, fields, deadline)
+    try:
+        pid = int(values["MainPID"])
+    except ValueError:
+        raise Reject("unit-main-pid") from None
+    require(values["Restart"] == "no", "unit-restart-policy")
+    if pid == 0:
+        return values, None
+    expected_cgroup = "/system.slice/" + unit
+    require(values["ControlGroup"] == expected_cgroup, "unit-control-group")
+    proc = proc_identity(pid)
+    if expected_kind == "owner":
+        require(proc["uids"] == [0] * 4 and proc["gids"] == [0] * 4
+                and proc["cgroup"] == expected_cgroup, "owner-process-binding")
+    else:
+        uid = account_id(values["User"], "uid")
+        gid = account_id(values["Group"], "gid")
+        require(proc["uids"] == [uid] * 4 and proc["gids"] == [gid] * 4
+                and proc["cgroup"] == expected_cgroup, "worker-process-binding")
+        proc["uid"] = uid
+        proc["gid"] = gid
+    proc["pid"] = pid
+    proc["control_group"] = expected_cgroup
+    return values, proc
+
+
+def wait_phase(path, generation, deadline):
+    while True:
+        remaining(deadline)
+        try:
+            raw = read_fd(path, 8192)
+        except FileNotFoundError:
+            time.sleep(min(0.02, remaining(deadline) / 1000))
+            continue
+        if not raw:
+            time.sleep(min(0.02, remaining(deadline) / 1000))
+            continue
+        parsed = validate_phase(raw, generation)
+        return raw, parsed
+
+
+def cgroup_members(root, group, deadline):
+    root = Path(root)
+    require(root == Path("/sys/fs/cgroup") and not root.is_symlink(), "cgroup-root")
+    target = root / group.lstrip("/")
+    require(group.startswith("/system.slice/") and not target.is_symlink(), "cgroup-path")
+    if not target.exists():
+        return []
+    members = []
+    pending = [target]
+    while pending:
+        remaining(deadline)
+        current = pending.pop()
+        require(not current.is_symlink() and current.is_dir(), "cgroup-node")
+        for entry in os.scandir(current):
+            remaining(deadline)
+            if entry.is_symlink():
+                raise Reject("cgroup-symlink")
+            if entry.is_dir(follow_symlinks=False):
+                pending.append(Path(entry.path))
+            elif entry.name == "cgroup.procs":
+                fd = os.open(entry.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+                try:
+                    raw = os.read(fd, 65537)
+                    require(len(raw) <= 65536 and not os.read(fd, 1), "cgroup-procs-bound")
+                finally:
+                    os.close(fd)
+                for line in raw.splitlines():
+                    require(line.isdigit(), "cgroup-pid-syntax")
+                    members.append(int(line))
+    return sorted(set(members))
+
+
+def wait_worker_terminal(unit, original_pid, group, deadline):
+    last = None
+    while boot_ms() < deadline:
+        remaining(deadline)
+        values, proc = unit_identity(unit, "worker", deadline)
+        if proc is not None:
+            require(proc["pid"] == original_pid, "worker-replacement")
+        else:
+            try:
+                exec_pid = int(values["ExecMainPID"])
+                exec_code = int(values["ExecMainCode"])
+                exec_status = int(values["ExecMainStatus"])
+            except ValueError:
+                raise Reject("worker-terminal-fields") from None
+            if (values["ActiveState"] in ("inactive", "failed")
+                    and values["SubState"] in ("dead", "failed") and exec_pid == original_pid
+                    and exec_code in (1, 2) and exec_status > 0):
+                first = cgroup_members("/sys/fs/cgroup", group, deadline)
+                time.sleep(min(0.05, remaining(deadline) / 1000))
+                second = cgroup_members("/sys/fs/cgroup", group, deadline)
+                require(not first and not second, "worker-cgroup-not-empty")
+                last = {"main_pid": 0, "active_state": values["ActiveState"],
+                    "sub_state": values["SubState"], "exec_main_pid": exec_pid,
+                    "exec_main_code": exec_code, "exec_main_status": exec_status,
+                    "restart_policy": values["Restart"], "cgroup_populated": False,
+                    "cgroup_tree_empty_twice": True, "no_successful_completion": True,
+                    "same_unit_no_replacement": True}
+                break
+        time.sleep(min(0.025, remaining(deadline) / 1000))
+    require(last is not None, "worker-terminal-not-observed")
+    return last
+
+
+def consumed_guard(generation):
+    base = Path("/run/appsurface-evidence-owners")
+    target = base / generation
+    for path in (Path("/run"), Path("/run/appsurface-evidence-owners")):
+        st = os.lstat(path)
+        require(stat.S_ISDIR(st.st_mode) and st.st_uid == 0 and st.st_gid == 0
+                and (stat.S_IMODE(st.st_mode) & 0o022) == 0, "guard-ancestor-custody")
+    st = os.lstat(target)
+    require(stat.S_ISDIR(st.st_mode) and st.st_uid == 0 and st.st_gid == 0
+            and stat.S_IMODE(st.st_mode) == 0o700, "guard-directory-custody")
+    armed = target / "armed"
+    consumed = target / "consumed"
+    require(not armed.exists() and not armed.is_symlink(), "guard-armed-remains")
+    before = os.lstat(consumed)
+    require(stat.S_ISREG(before.st_mode) and before.st_uid == 0 and before.st_gid == 0
+            and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600
+            and before.st_size == 33, "guard-consumed-custody")
+    fd = os.open(consumed, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        raw = os.read(fd, 34)
+        require(raw == (generation + "\n").encode("ascii") and not os.read(fd, 1)
+                and identity(before) == identity(os.fstat(fd)) == identity(os.lstat(consumed)),
+                "guard-consumed-bytes")
+    finally:
+        os.close(fd)
+    return {"armed_absent": True, "consumed_root_owned_exact_marker": True,
+            "consumed_marker_same_generation": True}
+
+
+def observe_and_kill(args):
+    require(os.geteuid() == 0 and sys.platform == "linux", "root-linux-required")
+    require(re.fullmatch(r"[0-9a-f]{32}", args.case_generation) is not None, "generation-syntax")
+    require(args.startup_deadline_boot_ms <= args.job_deadline_boot_ms
+            and args.admission_deadline_boot_ms <= args.job_deadline_boot_ms
+            and args.work_deadline_boot_ms < args.job_deadline_boot_ms, "deadline-order")
+    phase_end = min(args.startup_deadline_boot_ms, args.admission_deadline_boot_ms,
+                    args.job_deadline_boot_ms, args.work_deadline_boot_ms)
+    raw, phase = wait_phase(args.phase_stderr, args.case_generation, phase_end)
+    owner = OWNER_PREFIX + args.case_generation + ".service"
+    require(phase["unit"] == WORKER_PREFIX + args.case_generation + ".service", "fixed-case-unit")
+    trigger_ms = boot_ms()
+    admission_remaining_ms = record_parser().admission_window_remaining(
+        args.admission_deadline_boot_ms, trigger_ms)
+    identity_end = min(trigger_ms + 5000, args.startup_deadline_boot_ms,
+                       args.admission_deadline_boot_ms, args.job_deadline_boot_ms,
+                       args.work_deadline_boot_ms)
+    worker_values = worker = owner_values = owner_proc = None
+    while boot_ms() < identity_end:
+        remaining(identity_end)
+        worker_values, worker = unit_identity(phase["unit"], "worker", identity_end)
+        owner_values, owner_proc = unit_identity(owner, "owner", identity_end)
+        if worker is not None and owner_proc is not None:
+            require(worker_values["ActiveState"] in ("activating", "active")
+                    and worker_values["SubState"] in ("start", "start-pre", "start-post", "running"),
+                    "worker-not-started")
+            break
+        time.sleep(min(0.02, remaining(identity_end) / 1000))
+    require(worker is not None and owner_proc is not None, "identity-window-expired")
+    require(worker_values["User"] and worker_values["Group"], "worker-account-contract")
+    account_data=account_snapshot(worker_values,worker)
+    members = cgroup_members("/sys/fs/cgroup", worker["control_group"], identity_end)
+    require(worker["pid"] in members, "worker-cgroup-membership")
+    # Recheck both units and the process starttime immediately before acquiring the pidfd.
+    worker_values_2, worker_2 = unit_identity(phase["unit"], "worker", identity_end)
+    owner_values_2, owner_2 = unit_identity(owner, "owner", identity_end)
+    require(worker_2 == worker and owner_2 == owner_proc, "pre-signal-identity-changed")
+    pidfd = os.pidfd_open(owner_proc["pid"], 0)
+    try:
+        owner_values_3, owner_3 = unit_identity(owner, "owner", identity_end)
+        require(owner_3 == owner_proc, "pidfd-owner-recheck")
+        signal.pidfd_send_signal(pidfd, signal.SIGKILL, None, 0)
+    finally:
+        os.close(pidfd)
+
+    # The helper waits only under the original work deadline supplied by the caller.
+    owner_terminal = None
+    while boot_ms() < args.work_deadline_boot_ms:
+        remaining(args.work_deadline_boot_ms)
+        values, proc = unit_identity(owner, "owner", args.work_deadline_boot_ms)
+        if proc is None:
+            owner_terminal = values
+            if values["ActiveState"] in ("inactive", "failed") and values["SubState"] in ("dead", "failed"):
+                break
+        time.sleep(min(0.025, remaining(args.work_deadline_boot_ms) / 1000))
+    require(owner_terminal is not None and owner_terminal["ExecMainPID"] == str(owner_proc["pid"])
+            and owner_terminal["ExecMainCode"] == "2" and owner_terminal["ExecMainStatus"] == "9",
+            "owner-kill-terminal")
+    worker_terminal = wait_worker_terminal(phase["unit"], worker["pid"],
+        worker["control_group"], args.work_deadline_boot_ms)
+    guard = consumed_guard(args.case_generation)
+    return {
+        "schema": record_parser().PARTIAL_SCHEMA,
+        "case_generation": args.case_generation,
+        "admission_remaining_ms_at_trigger": admission_remaining_ms,
+        "phase_sha256": phase["phase_sha256"],
+        "job_path": phase["job_path"],
+        "worker": {"unit": phase["unit"], "main_pid": worker["pid"],
+            "starttime_ticks": worker["starttime_ticks"], "uid": worker["uid"], "gid": worker["gid"],
+            "control_group": worker["control_group"], "cgroup_membership_matched": True,
+            "identity_rechecked_before_signal": True},
+        "owner": {"unit": owner, "main_pid": owner_proc["pid"],
+            "starttime_ticks": owner_proc["starttime_ticks"], "uid": 0, "gid": 0,
+            "control_group": owner_proc["control_group"], "pidfd_opened": True,
+            "identity_rechecked_before_signal": True},
+        "pidfd_signal": {"signal": 9, "syscall_succeeded": True},
+        "owner_terminal": {"main_pid": 0, "active_state": owner_terminal["ActiveState"],
+            "sub_state": owner_terminal["SubState"], "exec_main_pid": int(owner_terminal["ExecMainPID"]),
+            "exec_main_code": int(owner_terminal["ExecMainCode"]),
+            "exec_main_status": int(owner_terminal["ExecMainStatus"]),
+            "restart_policy": owner_terminal["Restart"], "same_unit_no_replacement": True},
+        "worker_terminal": worker_terminal,
+        "guard": guard,
+        "account_snapshot": account_data,
+        "observation_only": True, "native_authority": False,
+        "native_acceptance": False, "native_credit": False,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--case-generation", required=True)
+    parser.add_argument("--phase-stderr", required=True)
+    parser.add_argument("--startup-deadline-boot-ms", required=True, type=int)
+    parser.add_argument("--admission-deadline-boot-ms", required=True, type=int)
+    parser.add_argument("--job-deadline-boot-ms", required=True, type=int)
+    parser.add_argument("--work-deadline-boot-ms", required=True, type=int)
+    args = parser.parse_args()
+    require(args.execute, "explicit-execution-flag-required")
+    try:
+        result = observe_and_kill(args)
+    except (OSError, ValueError, KeyError, Reject, subprocess.SubprocessError, OverflowError):
+        print("N15_OBSERVER_REJECTED", file=sys.stderr)
+        return 2
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

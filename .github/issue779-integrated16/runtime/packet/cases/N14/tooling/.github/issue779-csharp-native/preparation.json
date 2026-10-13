@@ -1,0 +1,38 @@
+{
+  "duration_policy_usec": {
+    "n14_owner_bound_seconds": 245,
+    "outer_original_request_seconds": 240,
+    "owner_runtime": 240000000,
+    "stop": 5000000
+  },
+  "files": {
+    "check_owner_death_record.py": {
+      "bytes": 9461,
+      "mode": "0644",
+      "sha256": "276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1"
+    },
+    "checkpoint-n13-owner-killed.sh": {
+      "bytes": 125,
+      "mode": "0644",
+      "sha256": "cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc"
+    },
+    "checkpoint-n14-owner-stopped.sh": {
+      "bytes": 125,
+      "mode": "0644",
+      "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
+    },
+    "checkpoint-owner-death-common.sh": {
+      "bytes": 43093,
+      "mode": "0644",
+      "sha256": "4d6913203730418f1005969bc754b664b758b9564a37eb74d3035e93a4d3bb4f"
+    }
+  },
+  "native_credit": false,
+  "native_execution": false,
+  "review_clear": false,
+  "runtime_policy_note": "Static source handoff only. This record contains no runtime, test, owner-lifecycle, or native execution evidence.",
+  "schema": "issue779-owner-death-fixture-v6-source-preparation-v1",
+  "source_capture_count": 2872,
+  "source_capture_head": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_capture_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38"
+}

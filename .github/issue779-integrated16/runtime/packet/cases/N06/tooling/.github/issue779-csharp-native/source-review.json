@@ -1,0 +1,84 @@
+{
+  "capture_projection_sha256": "8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0",
+  "capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "case": "N06",
+  "clear": true,
+  "common_build_validator_review": "clear",
+  "helper_handoff_review": "clear",
+  "historical_review_is_current": false,
+  "historical_source_review_sha256": "cc2fff09a8a60bb69d4a1808ffdee1715bd1774331b716cf986ed4964b7a5de2",
+  "integrated_current_review_basis": [
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n01-n02-n03-current-source-review-followup.json",
+      "role": "common_peer",
+      "sha256": "78f20844973a6932c05ad1125dcedd39b49d160438f70b92134f26392d1ef093"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n05-n06-current-review.json",
+      "role": "slots",
+      "sha256": "763cb4f2385c331b4da3559e6bb5fff81f26dbf9b33b84a228faac62c3513d9a"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-current-fixture-review-main-support.json",
+      "role": "cancellation_fixture",
+      "sha256": "374637c87a7747366e5902bc3b065a6684b888c805160040edd02dd8737345d8"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n04-n08-n10-n15-main-production-review.json",
+      "role": "cancellation_product",
+      "sha256": "f9583886b21bd533b3875b5b143025a600dd880fcdeea94ca5333b8d8e8d2fa9"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-current-source-review.json",
+      "role": "parent_and_progress_source",
+      "sha256": "51e848bc99e26be01217514deea25d56d804e3309486efa66b4adea6523e0dee"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n07-n16-final-procedure-review.json",
+      "role": "parent_and_progress_procedure",
+      "sha256": "b496feb34d1a15edea99fe84754871ed9850973f6eb1a72e60c14c188e323358"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n09-n11-n12-current-source-review.json",
+      "role": "custody_stall_descendant",
+      "sha256": "4ac511905e103d76f615098072c5f2029a08ffbdfa0bcf0fcbb6434240190b14"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-current-source-review.json",
+      "role": "owner_death",
+      "sha256": "f33bb8657350c7c0e555f989f4ae36de59d6e5a56c97544858e57428feaf412f"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n13-n14-staging-correction-review.json",
+      "role": "owner_death_staging_fix",
+      "sha256": "4c9b45728d2165635c376581edc238d13a40079067cbfc2b46c0ceeb7595cfa7"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-helper-root-schema-fix-main-20261013/review.json",
+      "role": "helper_schema_fix",
+      "sha256": "0ac685541315955386a02aa5b66a852d3095ccccd853877e962dc2a418905d38"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-n16-generation-fix-20261013/review-and-validation.json",
+      "role": "generation_fix",
+      "sha256": "06193fe8e020e6a4e42aa32df38c9ac92973e81e61205073cdb747ed82aeadc5"
+    },
+    {
+      "path": "/private/tmp/issue779-integrated16-owner-death-pin-name-fix-20261013/receipts/terminal-receipt.json",
+      "role": "owner_death_pin_fix",
+      "sha256": "2bc594c5b2e7c32fd55c597773e8f52bc09dc6591d73c34076b9b11aaa5c9b12"
+    }
+  ],
+  "native_credit": false,
+  "native_execution": false,
+  "released": true,
+  "schema": "issue779-integrated16-current-source-review-v1",
+  "slot_production_source_review": "clear",
+  "slot_runtime_packet_review": "clear",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_count": 2872,
+  "source_map_sha256": "bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6",
+  "source_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
+  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86",
+  "status": "current-scoped-source-review-clear"
+}

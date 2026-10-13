@@ -1,0 +1,122 @@
+name: Issue 779 common source integrated Linux checkpoint
+on:
+  push:
+    branches: [codex/issue779-integrated16-native-artifacts-20261013]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: issue779-integrated16-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checkpoint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        selector: ['None', N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15, N16]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind the original finite job interval
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -B - <<'PY' >> "$GITHUB_ENV"
+          import os,time
+          print('JOB_DEADLINE_MONOTONIC_NS='+str(time.monotonic_ns()+1800*1_000_000_000))
+          print('CHECKPOINT_ROOT='+os.environ['RUNNER_TEMP']+'/issue779-integrated-checkpoint')
+          PY
+          mkdir -m 0700 "$RUNNER_TEMP/issue779-integrated-checkpoint"
+      - name: Verify the installed tooling and source-bound execution review
+        shell: bash
+        env:
+          IMAGE_SELECTOR: ${{ matrix.selector }}
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          chmod 0700 "$root"
+          python3 -B "$root/verify_installation.py" \
+            --root "$root" --review "$root/execution-review.json" \
+            --review-sha256 8d87e27f9da16178079aa881fa2dff29a8c0a85c04bad0974680d994c7f271d6
+          python3 -B "$root/packet_execution.py" \
+            --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
+            --job-root "$CHECKPOINT_ROOT" \
+            --review "$root/execution-review.json" --review-sha256 8d87e27f9da16178079aa881fa2dff29a8c0a85c04bad0974680d994c7f271d6 \
+            --plan --plan-file "$CHECKPOINT_ROOT/case-plan.json"
+      - name: Download and verify the exact already-built selected image
+        shell: bash
+        env:
+          IMAGE_SELECTOR: ${{ matrix.selector }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          python3 -B "$root/download_image.py" \
+            --selector "$IMAGE_SELECTOR" --job-root "$CHECKPOINT_ROOT"
+      - name: Install the fixed native runtime prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          python3 -B "$root/execute_plan.py" \
+            --stage runtime --plan "$CHECKPOINT_ROOT/case-plan.json" \
+            --job-root "$CHECKPOINT_ROOT"
+      - name: Build the selected fixed peer and coordinator helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          python3 -B "$root/execute_plan.py" \
+            --stage helpers --plan "$CHECKPOINT_ROOT/case-plan.json" \
+            --job-root "$CHECKPOINT_ROOT"
+      - name: Execute the genuine selected Linux checkpoint controls
+        shell: bash
+        env:
+          IMAGE_SELECTOR: ${{ matrix.selector }}
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          python3 -B "$root/packet_execution.py" \
+            --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
+            --job-root "$CHECKPOINT_ROOT" \
+            --review "$root/execution-review.json" --review-sha256 8d87e27f9da16178079aa881fa2dff29a8c0a85c04bad0974680d994c7f271d6 \
+            --execute --plan-file "$CHECKPOINT_ROOT/case-plan.json"
+      - name: Check bounded private retention
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/runtime"
+          python3 -B "$root/check_retention.py" --job-root "$CHECKPOINT_ROOT"
+      - name: Retain the exact case receipts and bounded private archive
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-integrated16-native-${{ matrix.selector }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.CHECKPOINT_ROOT }}/image-download.json
+            ${{ env.CHECKPOINT_ROOT }}/image/receipts/build-receipt.json
+            ${{ env.CHECKPOINT_ROOT }}/case-plan.json
+            ${{ env.CHECKPOINT_ROOT }}/preparation-runtime.json
+            ${{ env.CHECKPOINT_ROOT }}/preparation-helpers.json
+            ${{ env.CHECKPOINT_ROOT }}/preparation-runtime-0.log
+            ${{ env.CHECKPOINT_ROOT }}/preparation-helpers-0.log
+            ${{ env.CHECKPOINT_ROOT }}/preparation-helpers-1.log
+            ${{ env.CHECKPOINT_ROOT }}/native-runner-receipt.json
+            ${{ env.CHECKPOINT_ROOT }}/native-runner.log
+            ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-receipt.json
+            ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-late-failure.json
+            ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-private.tar
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 1

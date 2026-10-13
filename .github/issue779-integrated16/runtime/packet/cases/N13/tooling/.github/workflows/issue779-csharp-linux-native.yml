@@ -1,0 +1,162 @@
+name: C# Linux native N13/N14 owner death
+on:
+  push:
+    branches: [codex/issue779-csharp-linux-native-20261013-owner-death-premeasurement-cleanup-v25]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-csharp-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  owner-death:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    env:
+      OWNER_DEATH_SOURCE_REVIEW_CLEAR: 'false'
+      OWNER_DEATH_FIXTURE_REVIEW_CLEAR: 'false'
+      OWNER_DEATH_ROOT_TRANSPORT_REVIEW_CLEAR: 'false'
+      OWNER_DEATH_RETENTION_REVIEW_CLEAR: 'false'
+      OWNER_DEATH_NATIVE_HANDOFF_REVIEW_CLEAR: 'false'
+      SOURCE_COMMIT: a6933fa3dc2c7a88832abf337447f88527477703
+      SOURCE_PARENT: 0adef6032217b4181898a4d6d129e1248cb0eda3
+      BUILD_SCRIPT_SHA256: efdbbf008a0fcb5eacf036f9ae8b692227d13fa2210588bb62ac539196c06b6e
+      BUILD_N13_SHA256: a29785ac966973295a8f13dfefa2e0d75b076ac06060c98f1e06fc52144d6ba7
+      BUILD_N14_SHA256: 8c9a24ce76a2a47898b4f7eca17030d947f9c5679ed24b5cae6b09407e70f139
+      CAPTURE_RECEIPT_SHA256: b1e43764ca61d2430f4cfc6e77aa20c3504fcc1be226e1d8e59f21ef127953e7
+      NATIVE_README_SHA256: 1ad108e74e36b453f70088b6ebc553d47deba1911c017940094e812c0862a970
+      ACQUISITION_SHA256: 4e26f66533624116a2759dd3caf0a9f71e4303d4f1f13564ca1d4352a36bac77
+      PARSER_SHA256: 276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1
+      N13_FIXTURE_SHA256: cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc
+      N14_FIXTURE_SHA256: d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2
+      COMMON_FIXTURE_SHA256: ddbf132d417359660ca3281449e00cf8e5cd631a56644c13295b421f74efebf2
+      OS_AUDIT_SHA256: b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0
+      ROOT_TRANSPORT_SHA256: 3efa59b22b7e014e481f42faedd2086f7e5975488aac851583761ef682b42e93
+      UBUNTU_RUNTIME_SHA256: 5743be0afc7e63b35ab2e6b8fc4b8092106c22f0442f1f601a7e97b49faaf93d
+      RETENTION_SHA256: aaba301bcc99a491b9f46c970e829ed6abedece838341b88ff54dcb136f62cf8
+      ORCHESTRATOR_SHA256: 0c223a5feac2be0cb0cccefefe9a4dfd309417130004252965a04a6092ce2125
+      SOURCE_REVIEW_SHA256: 82fdcbe27850c104283fde534b9a045e797ab81276345b31e3f178898637d666
+      BATCH_PARSER_TEST_SHA256: 07fd5f062079d02238812141c04c5dda4c32f4cacaa937b6ab2147584e8e0029
+      OWNER_DATA_TEST_SHA256: 8a1c1f4cc9fc4112a70fe425458860a1fc088f1b29b9134c9aeef22bba93814f
+      CASE_WORKSPACE_SHA256: 25c42084b97e4ab0491fc1146d8c34bf56b10dc83aab8ce4d15cc1a56d8516cc
+      WORKSPACE_RECEIPT_TEST_SHA256: 0a926f3423df2235bd249dd5b7603d4993ed60e60c8a9d55a3a9fd38984732b2
+      WORKSPACE_ARGUMENT_TEST_SHA256: d494d4196c1a7431d11f239c8ea9fefa5aab8b8b2cb701df319a7ec35c2c7762
+    steps:
+      - name: Fail closed until all source reviews are complete
+        shell: bash
+        run: |
+          set -euo pipefail
+          for v in OWNER_DEATH_SOURCE_REVIEW_CLEAR OWNER_DEATH_FIXTURE_REVIEW_CLEAR OWNER_DEATH_ROOT_TRANSPORT_REVIEW_CLEAR OWNER_DEATH_RETENTION_REVIEW_CLEAR OWNER_DEATH_NATIVE_HANDOFF_REVIEW_CLEAR; do
+            test "${!v}" = true
+          done
+          for pin in BUILD_SCRIPT_SHA256 BUILD_N13_SHA256 BUILD_N14_SHA256 CAPTURE_RECEIPT_SHA256 NATIVE_README_SHA256 ACQUISITION_SHA256 PARSER_SHA256 N13_FIXTURE_SHA256 N14_FIXTURE_SHA256 COMMON_FIXTURE_SHA256 OS_AUDIT_SHA256 ROOT_TRANSPORT_SHA256 UBUNTU_RUNTIME_SHA256 RETENTION_SHA256 ORCHESTRATOR_SHA256 SOURCE_REVIEW_SHA256 BATCH_PARSER_TEST_SHA256 OWNER_DATA_TEST_SHA256 CASE_WORKSPACE_SHA256 WORKSPACE_RECEIPT_TEST_SHA256 WORKSPACE_ARGUMENT_TEST_SHA256; do
+            [[ "${!pin}" =~ ^[0-9a-f]{64}$ ]]
+          done
+      - uses: actions/checkout@3d3c42e5aac5ba805da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact installed input bytes before execution
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -B - <<'PY'
+          import hashlib, os, stat, time
+          from pathlib import Path
+          rows = (
+              ('.github/issue779-csharp-build/build-fdd.sh', 'BUILD_SCRIPT_SHA256', 262144),
+              ('.github/issue779-csharp-build/build-n13.sh', 'BUILD_N13_SHA256', 131072),
+              ('.github/issue779-csharp-build/build-n14.sh', 'BUILD_N14_SHA256', 131072),
+              ('.github/issue779-csharp-build/capture-receipt.json', 'CAPTURE_RECEIPT_SHA256', 4194304),
+              ('.github/issue779-csharp-native/README.md', 'NATIVE_README_SHA256', 131072),
+              ('.github/issue779-csharp-native/acquire-inbound.sh', 'ACQUISITION_SHA256', 131072),
+              ('.github/issue779-csharp-native/check_owner_death_record.py', 'PARSER_SHA256', 131072),
+              ('.github/issue779-csharp-native/checkpoint-n13-owner-killed.sh', 'N13_FIXTURE_SHA256', 131072),
+              ('.github/issue779-csharp-native/checkpoint-n14-owner-stopped.sh', 'N14_FIXTURE_SHA256', 131072),
+              ('.github/issue779-csharp-native/checkpoint-owner-death-common.sh', 'COMMON_FIXTURE_SHA256', 131072),
+              ('.github/issue779-csharp-native/prepare-os-audit-v2.py', 'OS_AUDIT_SHA256', 131072),
+              ('.github/issue779-csharp-native/prepare-root-inputs-v2.sh', 'ROOT_TRANSPORT_SHA256', 131072),
+              ('.github/issue779-csharp-native/prepare-ubuntu-runtime.py', 'UBUNTU_RUNTIME_SHA256', 131072),
+              ('.github/issue779-csharp-native/retain-native.sh', 'RETENTION_SHA256', 131072),
+              ('.github/issue779-csharp-native/run-native.py', 'ORCHESTRATOR_SHA256', 131072),
+              ('.github/issue779-csharp-native/source-review.json', 'SOURCE_REVIEW_SHA256', 65536),
+              ('.github/issue779-csharp-native/test_actual_batch_parser.py', 'BATCH_PARSER_TEST_SHA256', 131072),
+              ('.github/issue779-csharp-native/test_owner_death_data.py', 'OWNER_DATA_TEST_SHA256', 131072),
+              ('.github/issue779-csharp-native/prepare-case-workspace.py', 'CASE_WORKSPACE_SHA256', 131072),
+              ('.github/issue779-csharp-native/test_build_receipt_contracts.py', 'WORKSPACE_RECEIPT_TEST_SHA256', 131072),
+              ('.github/issue779-csharp-native/test_workspace_arguments.py', 'WORKSPACE_ARGUMENT_TEST_SHA256', 131072),
+          )
+          def ident(s):
+              return (s.st_dev, s.st_ino, s.st_mode, s.st_uid, s.st_gid, s.st_nlink, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+          root = Path(os.environ['GITHUB_WORKSPACE'])
+          for rel, variable, cap in rows:
+              path = root / rel
+              before = path.lstat()
+              if not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o644 or before.st_nlink != 1 or not 0 < before.st_size <= cap:
+                  raise SystemExit(1)
+              fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+              try:
+                  if ident(before) != ident(os.fstat(fd)): raise SystemExit(1)
+                  digest = hashlib.sha256(); size = 0
+                  while True:
+                      data = os.read(fd, min(65536, cap + 1 - size))
+                      if not data: break
+                      size += len(data)
+                      if size > cap or size > before.st_size: raise SystemExit(1)
+                      digest.update(data)
+                  if size != before.st_size or ident(before) != ident(os.fstat(fd)) or ident(before) != ident(path.lstat()) or digest.hexdigest() != os.environ[variable]:
+                      raise SystemExit(1)
+              finally:
+                  os.close(fd)
+          PY
+      - name: Establish original job deadline
+        shell: bash
+        run: |
+          /usr/bin/python3 -B - <<'PY' >> "$GITHUB_ENV"
+          import time
+          print('JOB_DEADLINE_MONOTONIC_NS=' + str(time.monotonic_ns() + 4800 * 1000000000))
+          PY
+      - name: Stage fixed reviewed inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/owner-death-reviewed"
+          install -d -m 0700 "$root"
+          cp .github/issue779-csharp-native/*.sh .github/issue779-csharp-native/*.py .github/issue779-csharp-native/*.json .github/issue779-csharp-native/README.md "$root/"
+          cp .github/issue779-csharp-build/capture-receipt.json "$root/source-capture.json"
+          /usr/bin/python3 -B - "$root" <<'PY'
+          import base64,json,pathlib,sys
+          root=pathlib.Path(sys.argv[1]); review=json.loads((root/'source-review.json').read_bytes())
+          data=base64.b64decode(review['fixture_preparation_base64'],validate=True)
+          if __import__('hashlib').sha256(data).hexdigest()!=review['fixture_preparation_sha256']:
+              raise SystemExit(1)
+          p=root/'preparation.json'
+          with p.open('xb') as f: f.write(data)
+          PY
+      - name: Prepare the fixed Ubuntu runtime prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -B .github/issue779-csharp-native/prepare-ubuntu-runtime.py --execute --reviewed-script-sha256 "$UBUNTU_RUNTIME_SHA256" --runner-sha256 "$ORCHESTRATOR_SHA256"
+      - name: N13 build then owner-death case
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/owner-death"
+          mkdir -m 0700 -p "$base"
+          /usr/bin/bash .github/issue779-csharp-build/build-n13.sh --execute "$GITHUB_WORKSPACE" "$base/build-n13" "$GITHUB_WORKSPACE/.github/issue779-csharp-build/capture-receipt.json"
+          sudo --preserve-env=JOB_DEADLINE_MONOTONIC_NS /usr/bin/python3 -B .github/issue779-csharp-native/run-native.py --execute --case N13 --workspace "$GITHUB_WORKSPACE" --build-root "$base/build-n13" --reviewed-root "$RUNNER_TEMP/owner-death-reviewed" --output "$base/run-n13" --reviewed-script-sha256 "$ORCHESTRATOR_SHA256"
+      - name: N14 build then owner-death case
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="$RUNNER_TEMP/owner-death"
+          /usr/bin/bash .github/issue779-csharp-build/build-n14.sh --execute "$GITHUB_WORKSPACE" "$base/build-n14" "$GITHUB_WORKSPACE/.github/issue779-csharp-build/capture-receipt.json"
+          sudo --preserve-env=JOB_DEADLINE_MONOTONIC_NS /usr/bin/python3 -B .github/issue779-csharp-native/run-native.py --execute --case N14 --workspace "$GITHUB_WORKSPACE" --build-root "$base/build-n14" --reviewed-root "$RUNNER_TEMP/owner-death-reviewed" --output "$base/run-n14" --reviewed-script-sha256 "$ORCHESTRATOR_SHA256"
+      - name: Retain bounded receipts and private records
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: issue779-owner-death-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: ${{ runner.temp }}/owner-death/

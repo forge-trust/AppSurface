@@ -1,0 +1,1448 @@
+#!/usr/bin/env bash
+set -euo pipefail
+export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+readonly FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
+readonly NEGATIVE_CASE=N04 NEGATIVE_SOURCE_COUNT=2872
+readonly NEGATIVE_CORE_BASE=5b5a2af696741203b1cb5ce200182452b5f1fcb7
+readonly NEGATIVE_SOURCE_REVISION='fc59bb1254294d624f6779f928020edfe988dd5e' NEGATIVE_SOURCE_CAPTURE_CLEAR=1
+readonly NEGATIVE_FIXTURE_REVIEW_CLEAR=1 N04_HELPER_BUILD_CLEAR=1 N04_HELPER_POLICY_CLEAR=1
+readonly NEGATIVE_PYTHON_TRUST_CLEAR=1 NEGATIVE_ROOT_TERMINAL_CLEAR=1 N04_KERNEL_PROVENANCE_CLEAR=1
+readonly NEGATIVE_KERNEL_PARSER_SHA256=90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab
+readonly MAX_MANIFEST_BYTES=8388608 MAX_ROWS=32768 MAX_NODES=65536
+readonly MAX_INPUT_FILE_BYTES=2147483648 MAX_INPUT_TREE_BYTES=4294967296
+readonly MAX_NODE_JSON_BYTES=4194304 CORE_FILE_BYTES=268435456 CORE_TREE_BYTES=1073741824 CORE_NODES=8192
+n04_helper_root= n04_helper_map= n04_helper_map_sha256= n04_helper_nodes= n04_helper_nodes_sha256= n04_helper_entry_sha256=
+mode=prepare-only; mode_selected=0; phase=work; diagnostic_stage=arguments; diagnostic_failure_reported=0
+source_root= source_manifest= source_manifest_sha256= payload_root= payload_manifest= payload_manifest_sha256=
+runtime_root= runtime_manifest= runtime_manifest_sha256= source_review= source_review_sha256=
+build_receipt= build_receipt_sha256= os_audit= os_audit_sha256= reviewed_script_sha256=
+source_revision= base_revision= workflow_identity= entry= runtime_host= entry_sha256= n02_uid= n02_gid=
+source_nodes= source_nodes_sha256= payload_nodes= payload_nodes_sha256= runtime_nodes= runtime_nodes_sha256=
+n03_helper_root= n03_helper_map= n03_helper_map_sha256= n03_helper_nodes= n03_helper_nodes_sha256= n03_helper_entry_sha256= n03_helper_generation=
+n03_exit= n03_result_sha256=
+readonly N03_INDEPENDENT_REVIEW_CLEAR=1
+readonly N03_BROKER_NAME=_apt N03_WORKER_NAME=nobody N03_SHARED_GROUP=nogroup N03_STARTUP_KIB=262144
+fail() { printf 'CHECKPOINT_REJECTED:%s\n' "$1" >&2; exit 1; }
+while (($#)); do
+ case "$1" in
+ --prepare-only|--execute) ((mode_selected==0)) || fail duplicate-mode; mode=${1#--}; mode_selected=1; shift ;;
+ --source-root|--source-manifest|--source-manifest-sha256|--source-nodes|--source-nodes-sha256|--payload-root|--payload-manifest|--payload-manifest-sha256|--payload-nodes|--payload-nodes-sha256|--runtime-root|--runtime-manifest|--runtime-manifest-sha256|--runtime-nodes|--runtime-nodes-sha256|--source-review|--source-review-sha256|--build-receipt|--build-receipt-sha256|--os-audit|--os-audit-sha256|--reviewed-script-sha256|--source-revision|--base-revision|--workflow-identity|--entry|--runtime-host|--entry-sha256|--n02-uid|--n02-gid|--n03-helper-root|--n03-helper-map|--n03-helper-map-sha256|--n03-helper-nodes|--n03-helper-nodes-sha256|--n03-helper-entry-sha256|--n03-helper-generation|--n04-helper-root|--n04-helper-map|--n04-helper-map-sha256|--n04-helper-nodes|--n04-helper-nodes-sha256|--n04-helper-entry-sha256)
+ (($#>=2)) || fail option-value; key=${1#--}; key=${key//-/_}; [[ -z ${!key} ]] || fail duplicate-option
+ printf -v "$key" '%s' "$2"; shift 2 ;;
+ *) fail unknown-option ;;
+ esac
+done
+if [[ $mode == prepare-only && -z $source_root ]]; then
+ printf '%s\n' 'PREPARATION_ONLY:NO_INPUTS_VERIFIED:N01_NOT_RUN:N02_NOT_RUN'; exit 0
+fi
+((NEGATIVE_SOURCE_CAPTURE_CLEAR==1 && NEGATIVE_FIXTURE_REVIEW_CLEAR==1 && N04_HELPER_BUILD_CLEAR==1 && N04_HELPER_POLICY_CLEAR==1 && NEGATIVE_PYTHON_TRUST_CLEAR==1 && NEGATIVE_ROOT_TERMINAL_CLEAR==1 && N04_KERNEL_PROVENANCE_CLEAR==1)) || fail negative-source-and-review-pending
+[[ $NEGATIVE_SOURCE_REVISION =~ ^[0-9a-f]{40}$ && $source_revision == "$NEGATIVE_SOURCE_REVISION" ]] || fail negative-source-pin
+((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail N03-integration-review-pending
+[[ $OSTYPE == linux* ]] || fail Linux-x64
+for t in dd sha256sum stat find timeout head jq readelf awk sort cmp cp chmod chown install systemd-run systemctl getent setpriv strace date sleep od tr cut cat grep wc readlink uname setsid ps bash mv; do command -v "$t" >/dev/null || fail missing-trusted-tool; done
+monotonic() { local up rest; IFS=' ' read -r up rest </proc/uptime || return 1; [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1; printf '%s' "${up%%.*}"; }
+fixture_start=$(monotonic) || fail monotonic-clock
+readonly fixture_start hard_end=$((fixture_start+FIXTURE_SECONDS)) work_end=$((fixture_start+FIXTURE_SECONDS-CLEANUP_RESERVE))
+left() {
+ local now stamp rest end=$work_end
+ [[ $phase != cleanup ]] || end=$hard_end
+ # Bash dynamic scope carries the private N03 startup bound through all nested helpers/substitutions.
+ if [[ $phase != cleanup && ${n03_startup_active:-0} == 1 ]]; then
+  [[ ${n03_startup_end:-} =~ ^[0-9]+$ ]] || return 1
+  ((n03_startup_end>=end)) || end=$n03_startup_end
+ fi
+ IFS=' ' read -r stamp rest </proc/uptime || return 1
+ [[ $stamp =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+ now=${stamp%%.*}
+ ((now<end)) || return 1
+ printf '%s' "$((end-now))"
+}
+remaining() { left || fail fixture-deadline; }
+try_bounded() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
+report_bounded_failure() {
+ local code=$1 tool=other stage=other
+ ((diagnostic_failure_reported==0)) || return 0
+ diagnostic_failure_reported=1
+ case "$diagnostic_stage" in
+  arguments|platform|source-input|tool-input|runtime-input|os-input|root-layout|tool-copy|runtime-copy|subject-copy|request-preparation|sealed-inputs|n02|n01) stage=$diagnostic_stage ;;
+ esac
+ case "${2##*/}" in
+  uname|stat|sha256sum|jq|head|find|readelf|readlink|install|cp|chown|chmod|date|getent|systemctl|sleep|ps|grep|mv|bash|strace|setpriv|setsid|timeout|awk|sort|cmp|od|tr|cut|cat|wc) tool=${2##*/} ;;
+ esac
+ [[ $code =~ ^[0-9]+$ ]] && ((code>=1 && code<=255)) || code=1
+ printf 'FIXTURE_BOUNDED_FAILURE:%s:%s:%d\n' "$stage" "$tool" "$code" >&2 || :
+}
+bounded() {
+ local code=0
+ try_bounded "$@" || code=$?
+ if ((code!=0)); then report_bounded_failure "$code" "${1:-}"; fail bounded-operation; fi
+ remaining >/dev/null
+}
+diagnostic_stage=platform
+[[ $(bounded uname -m) == x86_64 ]] || fail Linux-x64
+lexical() {
+ local path=$1 s; [[ $path == /* && $path != / && $path != *'//'* && $path != */ && ${#path} -le 4096 && ! $path =~ [[:cntrl:]] ]] || fail absolute-path
+ IFS=/ read -r -a components <<<"${path#/}"
+ for s in "${components[@]}"; do [[ -n $s && $s != . && $s != .. ]] || fail path-component; done
+}
+absolute() { local path=$1 s current=; lexical "$path"; for s in "${components[@]}"; do current+=/$s; [[ ! -L $current ]] || fail deployment-symlink; done; }
+sha() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail sha256-syntax; }
+pin_file() {
+ local p=$1 h=$2 limit=$3 before after size measured
+ absolute "$p"; sha "$h"; [[ -f $p && ! -L $p ]] || fail regular-file
+ before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p"); size=$(bounded stat -c %s -- "$p")
+ [[ $size =~ ^[0-9]+$ ]] && ((size<=limit)) || fail file-byte-bound
+ [[ $(bounded stat -c %h -- "$p") == 1 ]] || fail hardlink
+ measured=$(bounded sha256sum -- "$p"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p")
+ [[ $before == "$after" && ${measured:0:64} == "$h" ]] || fail file-pin-changed
+}
+ancestor() {
+ local p=$1 uid perms; absolute "$p"
+ while :; do
+  [[ -d $p && ! -L $p ]] || fail ancestor-type
+  uid=$(bounded stat -c %u -- "$p"); perms=$(bounded stat -c %a -- "$p")
+  [[ $uid == 0 ]] && (((8#$perms & 0022)==0)) || fail unsafe-root-ancestor
+  [[ $p == / ]] && break; p=${p%/*}; [[ -n $p ]] || p=/
+ done
+}
+validate_node_inventory() {
+ local file=$1 digest=$2 root_name=$3 canonical measured
+ pin_file "$file" "$digest" "$MAX_NODE_JSON_BYTES"
+ canonical=$(bounded jq -acS . "$file")
+ measured=$(printf '%s\n' "$canonical" | bounded sha256sum)
+ [[ ${measured:0:64} == "$digest" ]] || fail node-canonical-or-duplicate
+ bounded jq -e --arg root "$root_name" '
+  def rel: type=="string" and length>0 and utf8bytelength<=4096 and
+   (startswith("/")|not) and (split("/")|all(.!="" and .!="." and .!="..")) and
+   (explode|all(.>=32 and .!=127));
+  def mode: type=="string" and test("^0[0-7]{3}$");
+  def bytes: type=="number" and floor==. and .>=0 and .<=2147483648;
+  . as $r | keys==["directories","files","root_name","schema"] and
+  .schema=="issue779-build-node-inventory-v1" and .root_name==$root and
+  (.files|type=="object" and length>0 and length<=32768) and
+  (.directories|type=="object" and length>0) and
+  ((.files|length)+(.directories|length)<=65536) and (.directories|has(".")) and
+  all(.files|to_entries[]; (.key|rel) and (.value|type=="object" and
+   keys==["bytes","mode","sha256"] and (.bytes|bytes) and (.mode|mode) and
+   (.sha256|type=="string" and test("^[0-9a-f]{64}$")))) and
+  all(.directories|to_entries[]; (.key=="." or (.key|rel)) and
+   (.value|type=="object" and keys==["mode"] and (.mode|mode))) and
+  all(.files|keys[]; . as $p | ($r.directories|has($p)|not)) and
+  all(($r.files|keys[]),($r.directories|keys[]|select(.!="."));
+   split("/") as $parts | all(range(1;($parts|length));
+    . as $n | ($parts[0:$n]|join("/")) as $ancestor | $r.directories|has($ancestor))) and
+  (if $root=="source" then
+   all(.files[];.mode=="0644" or .mode=="0755") and
+   all(.directories[];.mode=="0700")
+  else all(.files[];.mode=="0444" or .mode=="0555") and
+   all(.directories[];.mode=="0555") end)
+ ' "$file" >/dev/null || fail node-schema
+ pin_file "$file" "$digest" "$MAX_NODE_JSON_BYTES"
+}
+verify_tree_unbatched() {
+ local root=$1 manifest=$2 expected=$3 node_file=$4 node_digest=$5 root_name=$6 sealed=${7:-0} policy_extra=${8:-0}
+ local line m h rel extra previous= p size before after measured actual desired nodes kind declared_bytes node_rows depth
+ local rows=0 total=0 root_before root_after ancestor_nodes
+ absolute "$root"; [[ -d $root && ! -L $root ]] || fail input-root
+ ancestor_nodes=${#components[@]}
+ root_before=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root"); pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ validate_node_inventory "$node_file" "$node_digest" "$root_name"
+ local -A wanted=() node_modes=() node_hashes=() node_bytes=() manifest_seen=()
+ node_rows=$(bounded jq -r '(.directories|to_entries|sort_by(.key)[]|["d",.key,.value.mode]|join("\t")),
+  (.files|to_entries|sort_by(.key)[]|["f",.key,.value.mode,.value.sha256,(.value.bytes|tostring)]|join("\t"))' "$node_file")
+ while IFS=$'\t' read -r kind rel m h declared_bytes extra; do
+  remaining >/dev/null
+  [[ -n $rel && -z $extra && ! ${wanted[$rel]+present} ]] || fail node-row
+  wanted[$rel]=$kind; node_modes[$rel]=$m
+  if [[ $kind == f ]]; then node_hashes[$rel]=$h; node_bytes[$rel]=$declared_bytes; fi
+ done <<<"$node_rows"
+ while IFS= read -r line || [[ -n $line ]]; do
+  remaining >/dev/null
+  IFS=$'\t' read -r m h rel extra <<<"$line"
+  [[ $line == "$m"$'\t'"$h"$'\t'"$rel" && -z $extra && $m =~ ^0[0-7]{3}$ ]] || fail manifest-shape
+  sha "$h"; [[ -n $rel && $rel != /* && ${#rel} -le 4096 && ! $rel =~ [[:cntrl:]] ]] || fail manifest-path
+  [[ -z $previous || $rel > $previous ]] || fail manifest-order
+  previous=$rel; rows=$((rows+1)); ((rows<=MAX_ROWS)) || fail manifest-row-bound
+  [[ ${wanted[$rel]:-} == f && ! ${manifest_seen[$rel]+present} && ${node_modes[$rel]} == "$m" && ${node_hashes[$rel]} == "$h" ]] || fail manifest-node-disagreement
+  manifest_seen[$rel]=1
+  p=$root/$rel; absolute "$p"; [[ -f $p && ! -L $p ]] || fail manifest-file
+  size=$(bounded stat -c %s -- "$p"); [[ $size =~ ^[0-9]+$ ]] && ((size<=MAX_INPUT_FILE_BYTES)) || fail input-file-bound
+  [[ $size == "${node_bytes[$rel]}" ]] || fail manifest-node-length
+  total=$((total+size)); ((total<=MAX_INPUT_TREE_BYTES)) || fail input-tree-bound
+  desired=${m#0}; if ((sealed)); then desired=444; (((8#$m & 0111)==0)) || desired=555; fi
+  actual=$(bounded stat -c %a -- "$p"); [[ $actual == "$desired" ]] || fail manifest-mode
+  [[ $(bounded stat -c %h -- "$p") == 1 ]] || fail manifest-hardlink
+  if ((sealed)); then [[ $(bounded stat -c '%u:%g' -- "$p") == 0:0 ]] || fail sealed-owner; fi
+  before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p"); measured=$(bounded sha256sum -- "$p"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p")
+  [[ $before == "$after" && ${measured:0:64} == "$h" ]] || fail manifest-content
+ done <"$manifest"
+ ((rows>0)) || fail empty-manifest
+ ((${#manifest_seen[@]}==${#node_hashes[@]})) || fail manifest-node-file-set
+ if ((policy_extra)); then
+  [[ ! ${wanted[fixture-policy.json]+present} ]] || fail policy-manifest-collision
+  wanted[fixture-policy.json]=f; pin_file "$root/fixture-policy.json" "$policy_sha" 4096
+  [[ $(bounded stat -c '%u:%g:%a:%h' -- "$root/fixture-policy.json") == 0:0:444:1 ]] || fail policy-custody
+  size=$(bounded stat -c %s -- "$root/fixture-policy.json"); node_bytes[fixture-policy.json]=$size
+  total=$((total+size)); ((total<=MAX_INPUT_TREE_BYTES)) || fail input-tree-bound
+ fi
+ ((${#wanted[@]}<=MAX_NODES)) || fail node-bound
+ # Bound the byte representation before command substitution; reject controls instead of decoding paths.
+ nodes=$(bounded bash -c 'set -euo pipefail; timeout --signal=KILL "$1" find -P "$2" -mindepth 1 -printf "%P\t%y\n" | head -c 16777217' -- "$(remaining)" "$root")
+ ((${#nodes}<=16777216)) || fail node-inventory-byte-bound
+ local -A seen=(); seen['.']=d
+ while IFS=$'\t' read -r rel actual extra; do
+  remaining >/dev/null
+  [[ -n $rel && $rel != . ]] || fail node-path
+  [[ -z $extra && ( $actual == f || $actual == d ) && ! $rel =~ [[:cntrl:]] && ${wanted[$rel]+present} && ${wanted[$rel]} == "$actual" && ! ${seen[$rel]+present} ]] || fail full-node-set
+  seen[$rel]=1
+  if [[ $actual == d ]]; then
+   absolute "$root/$rel"
+  fi
+ done <<<"$nodes"
+ # The root '.' is checked directly, descendants without a dot component.
+ ((${#seen[@]}==${#wanted[@]})) || fail full-node-count
+ for rel in "${!wanted[@]}"; do
+  remaining >/dev/null
+  [[ ${wanted[$rel]} == d ]] || continue
+  p=$root; [[ $rel == . ]] || p=$root/$rel
+  absolute "$p"; [[ -d $p && ! -L $p ]] || fail full-directory-type
+  actual=$(bounded stat -c %a -- "$p")
+  if ((sealed)); then [[ $(bounded stat -c '%u:%g:%a' -- "$p") == 0:0:555 ]] || fail full-directory-mode
+  elif [[ $actual != "${node_modes[$rel]#0}" ]]; then
+   # Only intentional root transport sealing may normalize build source directories.
+   [[ $root_name == source && $(bounded stat -c '%u:%g:%a' -- "$p") == 0:0:555 ]] || fail input-directory-mode
+  fi
+ done
+ if ((sealed)) && [[ $root_name != source ]]; then
+  ((total<=CORE_TREE_BYTES && ${#wanted[@]}+ancestor_nodes<=CORE_NODES)) || fail core-tree-envelope
+  for rel in "${!wanted[@]}"; do
+   remaining >/dev/null
+   if [[ $rel == . ]]; then depth=0; else IFS=/ read -r -a components <<<"$rel"; depth=${#components[@]}; fi
+   if [[ ${wanted[$rel]} == d ]]; then ((depth<=32)) || fail core-directory-depth
+   else size=${node_bytes[$rel]}; ((depth<=33 && size>0 && size<=CORE_FILE_BYTES)) || fail core-file-envelope; fi
+  done
+ fi
+ root_after=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root"); [[ $root_before == "$root_after" ]] || fail tree-root-changed
+ pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ pin_file "$node_file" "$node_digest" "$MAX_NODE_JSON_BYTES"
+ printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
+}
+batch_check_time() {
+ local stamp rest now end=$work_end
+ [[ $phase != cleanup ]] || end=$hard_end
+ IFS=' ' read -r stamp rest </proc/uptime || fail monotonic-clock
+ [[ $stamp =~ ^[0-9]+\.[0-9]+$ ]] || fail monotonic-clock
+ now=${stamp%%.*}; ((now<end)) || fail fixture-deadline
+}
+batch_root_pin() {
+ local root=$1 expected=$2 measured
+ absolute "$root"; [[ -d $root && ! -L $root ]] || fail input-root
+ measured=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root")
+ [[ $measured == "$expected" ]] || fail tree-root-changed
+}
+batch_create_scratch_leaf() {
+ local path=$1
+ [[ ! -e $path && ! -L $path ]] || fail audit-scratch-collision
+ bounded /usr/bin/dd of="$path" oflag=nofollow conv=excl count=0 status=none
+}
+batch_scratch_pin() {
+ local path=$1 fd=$2 cap=$3 named opened size
+ [[ -f $path && ! -L $path ]] || fail audit-scratch-type
+ named=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$path")
+ opened=$(bounded stat -L -c '%d:%i:%s:%f:%h:%u:%g' -- "/proc/$batch_fd_owner_pid/fd/$fd")
+ [[ $named == "$opened" ]] || fail audit-scratch-substitution
+ [[ $(bounded stat -c '%u:%g:%a:%h' -- "$path") == 0:0:600:1 ]] || fail audit-scratch-custody
+ size=$(bounded stat -c %s -- "$path")
+ [[ $size =~ ^[0-9]+$ ]] && ((size<=cap)) || fail audit-scratch-byte-bound
+}
+batch_snapshot() {
+ local root=$1 path=$2 fd=$3
+ # NUL fields preserve arbitrary find names until the parser explicitly rejects controls.
+ # The outer bounded task and inner timeout consume the SAME original remaining allowance.
+ bounded bash -c 'set -euo pipefail; timeout --signal=KILL "$1" find -P "$2" -printf "%P\0%y\0%D\0%i\0%s\0%m\0%n\0%U\0%G\0%T@\0%C@\0" | head -c 16777217' -- "$(remaining)" "$root" >&"$fd"
+ batch_scratch_pin "$path" "$fd" 16777216
+}
+batch_parse_snapshot() {
+ local pass=$1 read_fd=$2 root_name=$3 sealed=$4 field n rel kind record m desired size
+ local -a fields=()
+  while :; do
+   batch_check_time; fields=()
+   if ! IFS= read -r -d '' field <&"$read_fd"; then [[ -z $field ]] || fail full-node-set; break; fi
+   fields+=("$field")
+   for ((n=1;n<11;n++)); do IFS= read -r -d '' field <&"$read_fd" || fail full-node-set; fields+=("$field"); done
+   rel=${fields[0]}; [[ -n $rel ]] || rel=.
+   kind=${fields[1]}
+   [[ ! $rel =~ [[:cntrl:]] && $rel != *\\* && ${wanted[$rel]+present} && ${wanted[$rel]} == "$kind" && ! ${seen[$rel]+present} ]] || fail full-node-set
+   if [[ $rel == . ]]; then lexical "$root"; else lexical "$root/$rel"; fi
+   seen[$rel]=1
+   for ((n=2;n<9;n++)); do [[ ${fields[n]} =~ ^[0-9]+$ ]] || fail full-node-set; done
+   [[ ${fields[5]} =~ ^[0-7]{3,4}$ && ${fields[9]} =~ ^-?[0-9]+\.[0-9]+$ && ${fields[10]} =~ ^-?[0-9]+\.[0-9]+$ ]] || fail full-node-set
+   printf -v record '%s\t' "${fields[@]}"; record=${record%$'\t'}
+   if [[ $pass == post ]]; then [[ ${pre[$rel]:-} == "$record" ]] || fail manifest-content; continue; fi
+   pre[$rel]=$record
+   m=${node_modes[$rel]}; desired=${m#0}
+   if [[ $kind == f ]]; then
+    size=${fields[4]}; ((size<=MAX_INPUT_FILE_BYTES)) || fail input-file-bound
+    [[ $size == "${node_bytes[$rel]}" ]] || fail manifest-node-length
+    total=$((total+size)); ((total<=MAX_INPUT_TREE_BYTES)) || fail input-tree-bound
+    if ((sealed)); then desired=444; (((8#$m & 0111)==0)) || desired=555; fi
+    [[ ${fields[5]} == "$desired" ]] || fail manifest-mode
+    [[ ${fields[6]} == 1 ]] || fail manifest-hardlink
+    if ((sealed)); then [[ ${fields[7]}:${fields[8]} == 0:0 ]] || fail sealed-owner; fi
+   elif [[ $kind == d ]]; then
+    if ((sealed)); then [[ ${fields[7]}:${fields[8]}:${fields[5]} == 0:0:555 ]] || fail full-directory-mode
+    elif [[ ${fields[5]} != "$desired" ]]; then
+     [[ $root_name == source && ${fields[7]}:${fields[8]}:${fields[5]} == 0:0:555 ]] || fail input-directory-mode
+    fi
+   else fail full-node-set; fi
+  done
+}
+verify_tree() {
+ if [[ $mode == prepare-only ]]; then verify_tree_unbatched "$@"; return; fi
+ local -r batch_fd_owner_pid=$BASHPID # The actual shell that opens every scratch descriptor.
+ local root=$1 manifest=$2 expected=$3 node_file=$4 node_digest=$5 root_name=$6 sealed=${7:-0} policy_extra=${8:-0}
+ local line m h rel extra previous= kind declared_bytes node_rows depth desired size
+ local root_before
+ local rows=0 total=0 ancestor_nodes scratch uuid scratch_before scratch_after checksum_bytes=0
+ local pre_fd post_fd check_fd read_fd field n pass record named opened path
+ local -a fields=()
+ local -A wanted=() node_modes=() node_hashes=() node_bytes=() manifest_seen=() pre=() seen=()
+ absolute "$root"; [[ -d $root && ! -L $root ]] || fail input-root
+ # Old sha256sum's first-64-byte comparison already rejected escaped backslash names.
+ [[ $root != *\\* ]] || fail manifest-path
+ ancestor_nodes=${#components[@]}
+ root_before=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$root")
+ pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ validate_node_inventory "$node_file" "$node_digest" "$root_name"
+ node_rows=$(bounded jq -r '(.directories|to_entries|sort_by(.key)[]|["d",.key,.value.mode]|join("\t")),
+  (.files|to_entries|sort_by(.key)[]|["f",.key,.value.mode,.value.sha256,(.value.bytes|tostring)]|join("\t"))' "$node_file")
+ while IFS=$'\t' read -r kind rel m h declared_bytes extra; do
+  batch_check_time
+  [[ -n $rel && -z $extra && $rel != *\\* && ! ${wanted[$rel]+present} ]] || fail node-row
+  wanted[$rel]=$kind; node_modes[$rel]=$m
+  if [[ $kind == f ]]; then node_hashes[$rel]=$h; node_bytes[$rel]=$declared_bytes; fi
+ done <<<"$node_rows"
+ while IFS= read -r line || [[ -n $line ]]; do
+  batch_check_time
+  IFS=$'\t' read -r m h rel extra <<<"$line"
+  [[ $line == "$m"$'\t'"$h"$'\t'"$rel" && -z $extra && $m =~ ^0[0-7]{3}$ ]] || fail manifest-shape
+  sha "$h"; [[ -n $rel && $rel != /* && ${#rel} -le 4096 && ! $rel =~ [[:cntrl:]] && $rel != *\\* ]] || fail manifest-path
+  [[ -z $previous || $rel > $previous ]] || fail manifest-order
+  previous=$rel; rows=$((rows+1)); ((rows<=MAX_ROWS)) || fail manifest-row-bound
+  [[ ${wanted[$rel]:-} == f && ! ${manifest_seen[$rel]+present} && ${node_modes[$rel]} == "$m" && ${node_hashes[$rel]} == "$h" ]] || fail manifest-node-disagreement
+  manifest_seen[$rel]=1
+ done <"$manifest"
+ ((rows>0)) || fail empty-manifest
+ ((${#manifest_seen[@]}==${#node_hashes[@]})) || fail manifest-node-file-set
+ if ((policy_extra)); then
+  [[ ! ${wanted[fixture-policy.json]+present} ]] || fail policy-manifest-collision
+  pin_file "$root/fixture-policy.json" "$policy_sha" 4096
+  [[ $(bounded stat -c '%u:%g:%a:%h' -- "$root/fixture-policy.json") == 0:0:444:1 ]] || fail policy-custody
+  wanted[fixture-policy.json]=f; node_modes[fixture-policy.json]=0444; node_hashes[fixture-policy.json]=$policy_sha
+  node_bytes[fixture-policy.json]=$(bounded stat -c %s -- "$root/fixture-policy.json")
+ fi
+ ((${#wanted[@]}<=MAX_NODES)) || fail node-bound
+ # Authenticated-input batch execution is root-only. No-input prepare-only remains unchanged.
+ # A private fresh namespace has no untrusted writers; failure quarantines it, never deletes inputs.
+ ((EUID==0)) || fail root-fixture
+ ancestor /run
+ IFS= read -r uuid </proc/sys/kernel/random/uuid; uuid=${uuid//-/}
+ [[ $uuid =~ ^[0-9a-f]{32}$ ]] || fail generation
+ scratch=/run/appsurface-evidence-tree-audit-$uuid
+ [[ ! -e $scratch && ! -L $scratch && $scratch != "$root" && $scratch != "$root/"* ]] || fail audit-scratch-collision
+ bounded install -d -o 0 -g 0 -m 700 -- "$scratch"
+ [[ -d $scratch && ! -L $scratch && $(bounded stat -c '%u:%g:%a' -- "$scratch") == 0:0:700 ]] || fail audit-scratch-custody
+ scratch_before=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$scratch")
+ # Audited GNU dd explicitly creates each scratch leaf with O_NOFOLLOW/O_EXCL.
+ # Any existing leaf rejects before open; the root-0700 directory has no untrusted writer.
+ for path in "$scratch/pre" "$scratch/post" "$scratch/checks"; do
+  [[ ! -e $path && ! -L $path ]] || fail audit-scratch-collision
+ done
+ for path in "$scratch/pre" "$scratch/post" "$scratch/checks"; do
+  batch_create_scratch_leaf "$path"
+ done
+ # Reopen without truncation, retain every FD, then compare named/open identities before writes.
+ exec {pre_fd}<>"$scratch/pre" {post_fd}<>"$scratch/post" {check_fd}<>"$scratch/checks"
+ batch_scratch_pin "$scratch/pre" "$pre_fd" 16777216
+ batch_scratch_pin "$scratch/post" "$post_fd" 16777216
+ batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+ batch_root_pin "$root" "$root_before"
+ batch_snapshot "$root" "$scratch/pre" "$pre_fd"
+ # Exactly one checksum batch: expected hashes derive only from authenticated inputs.
+ for rel in "${!node_hashes[@]}"; do
+  batch_check_time
+  path=$root/$rel; checksum_bytes=$((checksum_bytes+67+${#path}))
+  ((checksum_bytes<=MAX_MANIFEST_BYTES)) || fail audit-checksum-byte-bound
+  printf '%s  %s\n' "${node_hashes[$rel]}" "$path" >&"$check_fd"
+ done
+ batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+ for pass in pre post; do
+  if [[ $pass == post ]]; then
+   # A failed/missing checksum is a fixed rejection, not a partial successful audit.
+   batch_root_pin "$root" "$root_before"
+   bounded sha256sum --check --strict --status -- "$scratch/checks" || fail manifest-content
+   batch_scratch_pin "$scratch/checks" "$check_fd" "$MAX_MANIFEST_BYTES"
+   batch_root_pin "$root" "$root_before"
+   batch_snapshot "$root" "$scratch/post" "$post_fd"
+  fi
+  seen=(); exec {read_fd}<"$scratch/$pass"
+  batch_scratch_pin "$scratch/$pass" "$read_fd" 16777216
+  batch_parse_snapshot "$pass" "$read_fd" "$root_name" "$sealed"
+  batch_scratch_pin "$scratch/$pass" "$read_fd" 16777216
+  exec {read_fd}<&-
+  ((${#seen[@]}==${#wanted[@]})) || fail full-node-count
+ done
+ if ((sealed)) && [[ $root_name != source ]]; then
+  ((total<=CORE_TREE_BYTES && ${#wanted[@]}+ancestor_nodes<=CORE_NODES)) || fail core-tree-envelope
+  for rel in "${!wanted[@]}"; do
+   batch_check_time
+   if [[ $rel == . ]]; then depth=0; else IFS=/ read -r -a components <<<"$rel"; depth=${#components[@]}; fi
+   if [[ ${wanted[$rel]} == d ]]; then ((depth<=32)) || fail core-directory-depth
+   else size=${node_bytes[$rel]}; ((depth<=33 && size>0 && size<=CORE_FILE_BYTES)) || fail core-file-envelope; fi
+  done
+ fi
+ scratch_after=$(bounded stat -c '%d:%i:%f:%u:%g' -- "$scratch")
+ [[ $scratch_before == "$scratch_after" && ! -L $scratch ]] || fail audit-scratch-substitution
+ exec {pre_fd}>&- {post_fd}>&- {check_fd}>&-
+ # Delete only the three retained leaves and their verified private parent after success.
+ bounded rm -- "$scratch/pre" "$scratch/post" "$scratch/checks"
+ bounded rm -d -- "$scratch"
+ pin_file "$manifest" "$expected" "$MAX_MANIFEST_BYTES"
+ pin_file "$node_file" "$node_digest" "$MAX_NODE_JSON_BYTES"
+ batch_root_pin "$root" "$root_before"
+ remaining >/dev/null
+ printf 'FULL_TREE_POINT_SAMPLES_MATCHED:%s:%s:%s\n' "$rows" "${#wanted[@]}" "$total"
+}
+normalize_os_target() {
+ local path=$1 s; local -a out=(); [[ $path == /* && ${#path}<=4096 && ! $path =~ [[:cntrl:]] ]] || fail alias-target
+ IFS=/ read -r -a pieces <<<"$path"
+ for s in "${pieces[@]}"; do case "$s" in ''|.) ;; ..) ((${#out[@]}>0)) || fail alias-root-escape; unset "out[$((${#out[@]}-1))]" ;; *) out+=("$s");; esac; done
+ ((${#out[@]}>0)) || fail alias-root-target
+ local joined; joined=$(IFS=/; printf '%s' "${out[*]}"); printf '/%s' "$joined"
+}
+# BEGIN N06 alias declaration cache candidate
+# Immutable DECLARATIONS only, never a cached filesystem check/result.
+os_alias_declarations_ready=0
+declare -a os_alias_resolved=() os_alias_hashes=() os_alias_starts=() os_alias_counts=()
+declare -a os_alias_link_paths=() os_alias_link_targets=() os_alias_link_metadata=()
+negative_os_alias_index() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 && $os_alias_declarations_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then printf '%s' "$mid"; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_alias_declarations_initialize() {
+ local rows kind ai ordinal path target metadata extra next=0 current=-1 seen=0 count=0 expected
+ [[ $os_alias_declarations_ready == 0 && ${#os_alias_resolved[@]} == 0 && ${#os_alias_link_paths[@]} == 0 ]] || fail alias-declaration-replay
+ rows=$(bounded jq -r '
+  .aliases|sort_by(.literal)|to_entries[] | .key as $i | .value as $a |
+  (["A",$i,$a.literal,$a.resolved_path,$a.resolved_sha256,($a.links|length)]|map(tostring)|join("\u001f")),
+  ($a.links|to_entries[] | ["L",$i,.key,.value.path,.value.target,
+   "\(.value.uid):\(.value.gid):\(.value.mode):\(.value.device):\(.value.inode)"]|map(tostring)|join("\u001f"))
+ ' "$os_audit")
+ [[ ${#rows} -le 1048576 ]] || fail alias-declaration-bytes
+ expected=${#os_cache_alias_paths[@]}
+ ((expected<=64)) || fail alias-declaration-count
+ if [[ -n $rows ]]; then
+  while IFS=$'\x1f' read -r kind ai ordinal path target metadata extra; do
+   [[ -z $extra && $ai =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-row
+   ai=$((10#$ai))
+   if [[ $kind == A ]]; then
+    ((current<0 || seen==count)) || fail alias-declaration-incomplete
+    ((ai==next && ai<expected)) || fail alias-declaration-order
+    # Header columns: tag, alias index, literal, resolved path, hash, link count.
+    [[ $ordinal == "${os_cache_alias_paths[$ai]}" && $metadata =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-header
+    lexical "$path"; sha "$target"
+    count=$((10#$metadata)); ((count>=1 && count<=16)) || fail alias-declaration-links
+    [[ $(negative_os_file_hash_during_initialize "$ordinal") == "$target" ]] || fail alias-declaration-hash
+    os_alias_resolved+=("$path"); os_alias_hashes+=("$target")
+    os_alias_starts+=("${#os_alias_link_paths[@]}"); os_alias_counts+=("$count")
+    current=$ai; next=$((next+1)); seen=0
+   elif [[ $kind == L ]]; then
+    ((current>=0 && ai==current && seen<count)) || fail alias-declaration-link-order
+    [[ $ordinal =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-link-index
+    ((10#$ordinal==seen)) || fail alias-declaration-link-index
+    lexical "$path"
+    [[ -n $target && ${#target}<=4096 && ! $target =~ [[:cntrl:]] && $metadata =~ ^0:0:777:[0-9]+:[1-9][0-9]*$ ]] || fail alias-declaration-link
+    os_alias_link_paths+=("$path"); os_alias_link_targets+=("$target"); os_alias_link_metadata+=("$metadata")
+    seen=$((seen+1))
+   else fail alias-declaration-kind; fi
+  done <<<"$rows"
+ fi
+ ((next==expected && (current<0 || seen==count) && ${#os_alias_resolved[@]}==expected && ${#os_alias_hashes[@]}==expected && ${#os_alias_starts[@]}==expected && ${#os_alias_counts[@]}==expected)) || fail alias-declaration-membership
+ ((${#os_alias_link_paths[@]}==${#os_alias_link_targets[@]} && ${#os_alias_link_paths[@]}==${#os_alias_link_metadata[@]} && ${#os_alias_link_paths[@]}<=1024)) || fail alias-declaration-link-membership
+ os_alias_declarations_ready=1
+ readonly os_alias_declarations_ready
+ readonly -a os_alias_resolved os_alias_hashes os_alias_starts os_alias_counts os_alias_link_paths os_alias_link_targets os_alias_link_metadata
+}
+# Initialization runs BEFORE os_cache_ready is published. Lookup is declaration-only.
+negative_os_file_hash_during_initialize() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_file_paths[@]}-1)) mid
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then printf '%s' "${os_cache_file_hashes[$mid]}"; return 0
+  elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+# END N06 alias declaration cache candidate
+alias_walk() {
+ local alias_id=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved slot
+ [[ $os_alias_declarations_ready == 1 && $alias_id =~ ^[0-9]{1,2}$ ]] || fail alias-declaration-index
+ alias_id=$((10#$alias_id)); ((alias_id<${#os_cache_alias_paths[@]})) || fail alias-declaration-index
+ literal=${os_cache_alias_paths[$alias_id]}; lexical "$literal"
+ local -a queue=("${components[@]}")
+ while ((${#queue[@]})); do
+  remaining >/dev/null; steps=$((steps+1)); ((steps<=256)) || fail alias-step-bound
+  seg=${queue[0]}; queue=("${queue[@]:1}"); current+=/$seg
+  if [[ -L $current ]]; then
+   ((index<os_alias_counts[alias_id])) || fail alias-unreviewed-link
+   slot=$((os_alias_starts[alias_id]+index)); lp=${os_alias_link_paths[$slot]}; [[ $lp == "$current" ]] || fail alias-unreviewed-link
+   metadata=$(bounded stat -c '%u:%g:%a:%d:%i' -- "$current")
+   expected=${os_alias_link_metadata[$slot]}
+   [[ $metadata == "$expected" ]] || fail alias-lstat-pin
+   target=$(bounded readlink -- "$current"); [[ $target == "${os_alias_link_targets[$slot]}" ]] || fail alias-target-pin
+   [[ $(bounded stat -c '%u:%g:%a:%d:%i' -- "$current") == "$metadata" ]] || fail alias-link-changed
+   [[ $target == /* ]] || target=${current%/*}/$target
+   resolved=$(normalize_os_target "$target"); lexical "$resolved"
+   queue=("${components[@]}" "${queue[@]}"); current=; index=$((index+1))
+  else
+   [[ -e $current && ! -L $current && $(bounded stat -c %u -- "$current") == 0 ]] || fail alias-node
+   local permissions; permissions=$(bounded stat -c %a -- "$current"); (((8#$permissions & 0022)==0)) || fail alias-writable-node
+   if ((${#queue[@]})); then [[ -d $current ]] || fail alias-parent; fi
+  fi
+ done
+ [[ $index == "${os_alias_counts[$alias_id]}" && $current == "${os_alias_resolved[$alias_id]}" ]] || fail alias-resolution
+ [[ -f $current && ! -L $current ]] || fail alias-final-file
+ printf '%s' "$current"
+}
+verify_os_path() {
+ local p=$1 h=$2 count row resolved first before after
+ if row=$(negative_os_alias_index "$p"); then count=1; else count=0; fi
+ if [[ $count == 1 ]]; then
+  [[ ${os_alias_hashes[$row]} == "$h" ]] || fail alias-hash-binding
+  first=$(alias_walk "$row"); before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$first")
+  pin_file "$first" "$h" "$MAX_INPUT_FILE_BYTES"
+  resolved=$(alias_walk "$row"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$resolved")
+  [[ $first == "$resolved" && $before == "$after" ]] || fail alias-before-after
+ else [[ $count == 0 ]] || fail duplicate-alias; ancestor "${p%/*}"; pin_file "$p" "$h" "$MAX_INPUT_FILE_BYTES"; fi
+}
+
+# BEGIN reviewed ordinary OS cache and batch definitions
+# Data tables are built once from the already completely validated, SHA-pinned
+# audit. They cache no filesystem results. Lookups use sorted indexed arrays and
+# integer subscripts, never eval or caller-supplied associative-array subscripts.
+os_cache_ready=0
+declare -a os_cache_file_paths=() os_cache_file_hashes=() os_cache_alias_paths=() os_cache_alias_rows=()
+negative_os_file_hash() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_file_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then printf '%s' "${os_cache_file_hashes[$mid]}"; return 0
+  elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_alias_record() {
+ local LC_ALL=C p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ [[ $os_cache_ready == 1 ]] || return 1
+ while ((low<=high)); do
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then printf '%s' "${os_cache_alias_rows[$mid]}"; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+ return 1
+}
+negative_os_cache_initialize() {
+ local LC_ALL=C rows p h row previous= expected_files expected_aliases file_hash
+ [[ $os_cache_ready == 0 && ${#os_cache_file_paths[@]} == 0 && ${#os_cache_alias_paths[@]} == 0 ]] || fail OS-cache-replay
+ expected_files=$(bounded jq -er '.files|length' "$os_audit")
+ expected_aliases=$(bounded jq -er '.aliases|length' "$os_audit")
+ [[ $expected_files =~ ^[0-9]+$ && $expected_aliases =~ ^[0-9]+$ ]] && ((expected_files>0 && expected_files<=4096 && expected_aliases<=64)) || fail OS-cache-count
+ rows=$(bounded jq -r '.files|sort_by(.path)|.[]|[.path,.sha256]|@tsv' "$os_audit")
+ [[ -n $rows && ${#rows} -le 1048576 ]] || fail OS-cache-file-bytes
+ while IFS=$'\t' read -r p h; do
+  lexical "$p"; sha "$h"
+  [[ -z $previous || $previous < "$p" ]] || fail OS-cache-file-order
+  previous=$p; os_cache_file_paths+=("$p"); os_cache_file_hashes+=("$h")
+ done <<<"$rows"
+ ((${#os_cache_file_paths[@]}==expected_files && ${#os_cache_file_hashes[@]}==expected_files)) || fail OS-cache-file-membership
+ rows=$(bounded jq -c '.aliases|sort_by(.literal)|.[]' "$os_audit")
+ [[ ${#rows} -le 1048576 ]] || fail OS-cache-alias-bytes
+ previous=
+ if [[ -n $rows ]]; then
+  while IFS= read -r row; do
+   p=$(bounded jq -er '.literal' <<<"$row"); lexical "$p"
+   h=$(bounded jq -er '.resolved_sha256' <<<"$row"); sha "$h"
+   [[ -z $previous || $previous < "$p" ]] || fail OS-cache-alias-order
+   previous=$p; os_cache_alias_paths+=("$p"); os_cache_alias_rows+=("$row")
+   # Alias metadata remains the exact validated row; require its literal file
+   # digest to match before it can be used by any physical audit operation.
+   local low=0 high=$((${#os_cache_file_paths[@]}-1)) mid found=0
+   while ((low<=high)); do
+    mid=$(((low+high)/2))
+    if [[ $p == "${os_cache_file_paths[$mid]}" ]]; then
+     [[ $h == "${os_cache_file_hashes[$mid]}" ]] || fail OS-cache-alias-file-hash
+     found=1; break
+    elif [[ $p < "${os_cache_file_paths[$mid]}" ]]; then high=$((mid-1))
+    else low=$((mid+1)); fi
+   done
+   ((found==1)) || fail OS-cache-alias-file-membership
+  done <<<"$rows"
+ fi
+ ((${#os_cache_alias_paths[@]}==expected_aliases && ${#os_cache_alias_rows[@]}==expected_aliases)) || fail OS-cache-alias-membership
+ negative_os_alias_declarations_initialize
+ os_cache_ready=1
+ readonly os_cache_ready
+ readonly -a os_cache_file_paths os_cache_file_hashes os_cache_alias_paths os_cache_alias_rows
+}
+
+ordinary_os_batch_alias_index() {
+ local p=$1 low=0 high=$((${#os_cache_alias_paths[@]}-1)) mid
+ osb_alias_index=-1
+ while ((low<=high)); do
+  remaining >/dev/null
+  mid=$(((low+high)/2))
+  if [[ $p == "${os_cache_alias_paths[$mid]}" ]]; then osb_alias_index=$mid; return 0
+  elif [[ $p < "${os_cache_alias_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+}
+ordinary_os_batch_leaf_index() {
+ local p=$1 low=0 high=$((${#osb_leaf_paths[@]}-1)) mid
+ osb_leaf_index=-1
+ while ((low<=high)); do
+  remaining >/dev/null
+  mid=$(((low+high)/2))
+  if [[ $p == "${osb_leaf_paths[$mid]}" ]]; then osb_leaf_index=$mid; return 0
+  elif [[ $p < "${osb_leaf_paths[$mid]}" ]]; then high=$((mid-1))
+  else low=$((mid+1)); fi
+ done
+}
+ordinary_os_batch_decimal_at_most() {
+ local value=$1 cap=$2
+ [[ $value =~ ^(0|[1-9][0-9]{0,19})$ && $cap =~ ^(0|[1-9][0-9]{0,19})$ ]] || return 1
+ ((${#value}<${#cap})) && return 0
+ ((${#value}==${#cap})) && [[ $value == "$cap" || $value < "$cap" ]]
+}
+ordinary_os_batch_parse_snapshot() {
+ local pass=$1 read_fd=$2 field n i=0 p record mode leaf
+ local -a fields=()
+ [[ $pass == pre || $pass == post ]] || fail OS-batch-pass
+ while :; do
+  remaining >/dev/null; fields=(); field=
+  if ! IFS= read -r -d '' field <&"$read_fd"; then [[ -z $field ]] || fail OS-batch-partial-row; break; fi
+  fields+=("$field")
+  for ((n=1;n<10;n++)); do field=; IFS= read -r -d '' field <&"$read_fd" || fail OS-batch-partial-row; fields+=("$field"); done
+  ((i<${#osb_node_paths[@]})) || fail OS-batch-node-count
+  p=${fields[0]}; [[ $p == "${osb_node_paths[$i]}" ]] || fail OS-batch-node-order
+  for n in 1 2 3 5 6 7; do [[ ${fields[$n]} =~ ^(0|[1-9][0-9]{0,19})$ ]] || fail OS-batch-stat-number; done
+  [[ ${fields[2]} != 0 && ${fields[4]} =~ ^[0-9a-f]{1,8}$ ]] || fail OS-batch-stat-mode
+  for n in 8 9; do [[ -n ${fields[$n]} && ${#fields[$n]} -le 64 && ! ${fields[$n]} =~ [[:cntrl:]] ]] || fail OS-batch-stat-time; done
+  mode=$((16#${fields[4]}))
+  [[ ${fields[6]} == 0 ]] && (( (mode & 0022)==0 )) || fail OS-batch-owner-mode
+  ordinary_os_batch_leaf_index "$p"; leaf=$osb_leaf_index
+  if ((leaf>=0)); then
+   (( (mode & 0170000)==0100000 )) && [[ ${fields[5]} == 1 ]] || fail OS-batch-file-type-links
+   ordinary_os_batch_decimal_at_most "${fields[3]}" "$MAX_INPUT_FILE_BYTES" || fail OS-batch-file-bytes
+  else (( (mode & 0170000)==0040000 )) || fail OS-batch-ancestor-type; fi
+  record=${fields[1]}
+  for ((n=2;n<10;n++)); do record+=$'\t'${fields[$n]}; done
+  if [[ $pass == pre ]]; then osb_pre_records+=("$record")
+  else [[ $record == "${osb_pre_records[$i]}" ]] || fail OS-batch-before-after; fi
+  ((i+=1))
+ done
+ ((i==${#osb_node_paths[@]})) || fail OS-batch-node-count
+}
+ordinary_os_batch_snapshot() {
+ local path=$1 fd=$2 i=0 arg_bytes row_bytes projected=0 n
+ local -a chunk=()
+ # GNU stat's fixed numeric/timestamp fields are bounded. Reserve 1024 bytes
+ # per row beyond its exact path bytes before dispatch; the parser additionally
+ # enforces each numeric/time field length and the retained-file 16 MiB cap.
+ for ((n=0;n<${#osb_node_paths[@]};n++)); do
+  remaining >/dev/null
+  ((projected+=${#osb_node_paths[$n]}+1024))
+  ((projected<=16777216)) || fail OS-batch-inventory-bytes
+ done
+ while ((i<${#osb_node_paths[@]})); do
+  remaining >/dev/null; chunk=(); arg_bytes=0
+  while ((i<${#osb_node_paths[@]} && ${#chunk[@]}<32)); do
+   row_bytes=$((${#osb_node_paths[$i]}+1))
+   ((arg_bytes+row_bytes<=16384)) || break
+   chunk+=("${osb_node_paths[$i]}"); ((arg_bytes+=row_bytes)); ((i+=1))
+  done
+  ((${#chunk[@]}>0)) || fail OS-batch-argument-bound
+  # No pipeline/function child inherits the fixture cleanup trap. The original
+  # bounded dispatcher joins this one trusted stat command before FD pinning.
+  bounded stat --printf '%n\0%d\0%i\0%s\0%f\0%h\0%u\0%g\0%y\0%z\0' -- "${chunk[@]}" >&"$fd"
+  batch_scratch_pin "$path" "$fd" 16777216
+  osb_snapshot_bytes=$(bounded stat -c %s -- "$path")
+  remaining >/dev/null
+ done
+}
+ordinary_os_batch_check_hashes() {
+ remaining >/dev/null
+ bounded sha256sum --check --strict --status -- "$1"
+ remaining >/dev/null
+}
+ordinary_os_batch_verify_aliases() {
+ local i p h
+ for ((i=0;i<${#os_cache_alias_paths[@]};i++)); do
+  remaining >/dev/null; p=${os_cache_alias_paths[$i]}; h=$(negative_os_file_hash "$p") || fail OS-cache-file-unpinned
+  verify_os_path "$p" "$h"
+ done
+}
+ordinary_os_batch_full_pass() {
+ local pass=$1 uuid scratch root_before root_after p h parent i bytes=0 rows=0 row_bytes previous=
+ local osb_alias_index=-1 osb_leaf_index=-1 osb_snapshot_bytes=0 ordinary_count=0 alias_count=0
+ local paths_fd sorted_fd pre_fd post_fd checks_fd read_fd
+ local -r batch_fd_owner_pid=$BASHPID
+ local -a osb_leaf_paths=() osb_leaf_hashes=() osb_node_paths=() osb_pre_records=()
+ [[ $pass == initial || $pass == final ]] || fail OS-batch-pass
+ [[ $os_cache_ready == 1 ]] || fail OS-cache-uninitialized
+ ((${#os_cache_file_paths[@]}>=1 && ${#os_cache_file_paths[@]}<=4096 && ${#os_cache_file_paths[@]}==${#os_cache_file_hashes[@]} && ${#os_cache_alias_paths[@]}<=64)) || fail OS-batch-cache-count
+ remaining >/dev/null
+ IFS= read -r uuid </proc/sys/kernel/random/uuid || fail OS-batch-scratch-name
+ [[ $uuid =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || fail OS-batch-scratch-name
+ scratch=/run/appsurface-evidence-os-audit-$uuid
+ ancestor /run; [[ ! -e $scratch && ! -L $scratch ]] || fail audit-scratch-collision
+ bounded install -d -o 0 -g 0 -m 700 -- "$scratch"
+ root_before=$(bounded stat -c '%d:%i:%f:%u:%g:%a' -- "$scratch")
+ [[ $(bounded stat -c '%u:%g:%a' -- "$scratch") == 0:0:700 ]] || fail audit-scratch-custody
+ for p in paths sorted pre post checks; do batch_create_scratch_leaf "$scratch/$p"; done
+ exec {paths_fd}<>"$scratch/paths"; exec {sorted_fd}<>"$scratch/sorted"
+ exec {pre_fd}<>"$scratch/pre"; exec {post_fd}<>"$scratch/post"; exec {checks_fd}<>"$scratch/checks"
+ for ((i=0;i<${#os_cache_file_paths[@]};i++)); do
+  remaining >/dev/null; p=${os_cache_file_paths[$i]}; h=${os_cache_file_hashes[$i]}
+  lexical "$p"; [[ $p != *\\* ]] || fail OS-batch-hash-name; sha "$h"
+  [[ -z $previous || $previous < "$p" ]] || fail OS-batch-cache-order; previous=$p
+  ordinary_os_batch_alias_index "$p"
+  if ((osb_alias_index>=0)); then ((alias_count+=1)); continue; fi
+  osb_leaf_paths+=("$p"); osb_leaf_hashes+=("$h"); ((ordinary_count+=1))
+  parent=$p
+  while :; do
+   remaining >/dev/null; row_bytes=$((${#parent}+1)); ((bytes+=row_bytes)); ((rows+=1))
+   ((bytes<=16777216 && rows<=65536)) || fail OS-batch-inventory-bound
+   printf '%s\n' "$parent" >&"$paths_fd"
+   [[ $parent != / ]] || break
+   parent=${parent%/*}; [[ -n $parent ]] || parent=/
+  done
+ done
+ ((ordinary_count+alias_count==${#os_cache_file_paths[@]} && alias_count==${#os_cache_alias_paths[@]})) || fail OS-batch-file-membership
+ batch_scratch_pin "$scratch/paths" "$paths_fd" 16777216
+ # Sorted output cannot exceed the already counted input bytes.
+ bounded sort --temporary-directory="$scratch" -u -- "$scratch/paths" >&"$sorted_fd"
+ batch_scratch_pin "$scratch/sorted" "$sorted_fd" 16777216
+ exec {read_fd}<"$scratch/sorted"; batch_scratch_pin "$scratch/sorted" "$read_fd" 16777216
+ previous=
+ while IFS= read -r p <&"$read_fd"; do
+  remaining >/dev/null; [[ -n $p && ! $p =~ [[:cntrl:]] && $p != *\\* && ${#p} -le 4096 && ( -z $previous || $previous < "$p" ) ]] || fail OS-batch-node-order
+  [[ $p == / ]] || lexical "$p"
+  osb_node_paths+=("$p"); previous=$p; ((${#osb_node_paths[@]}<=65536)) || fail OS-batch-node-count
+ done
+ exec {read_fd}<&-
+ ordinary_os_batch_snapshot "$scratch/pre" "$pre_fd"
+ exec {read_fd}<"$scratch/pre"; batch_scratch_pin "$scratch/pre" "$read_fd" 16777216
+ ordinary_os_batch_parse_snapshot pre "$read_fd"; exec {read_fd}<&-
+ bytes=0
+ for ((i=0;i<${#osb_leaf_paths[@]};i++)); do
+  remaining >/dev/null; row_bytes=$((64+2+${#osb_leaf_paths[$i]}+1)); ((bytes+=row_bytes))
+  ((bytes<=8388608)) || fail OS-batch-check-bytes
+  printf '%s  %s\n' "${osb_leaf_hashes[$i]}" "${osb_leaf_paths[$i]}" >&"$checks_fd"
+ done
+ batch_scratch_pin "$scratch/checks" "$checks_fd" 8388608
+ if ((ordinary_count>0)); then ordinary_os_batch_check_hashes "$scratch/checks"; fi
+ osb_snapshot_bytes=0; ordinary_os_batch_snapshot "$scratch/post" "$post_fd"
+ exec {read_fd}<"$scratch/post"; batch_scratch_pin "$scratch/post" "$read_fd" 16777216
+ ordinary_os_batch_parse_snapshot post "$read_fd"; exec {read_fd}<&-
+ # Alias literal membership was counted above; unchanged verify_os_path performs
+ # BOTH original alias walks and original resolved-file pin checks on each pass.
+ ordinary_os_batch_verify_aliases
+ for p in paths sorted pre post checks; do
+  case $p in paths) i=$paths_fd;; sorted) i=$sorted_fd;; pre) i=$pre_fd;; post) i=$post_fd;; checks) i=$checks_fd;; esac
+  if [[ $p == checks ]]; then batch_scratch_pin "$scratch/$p" "$i" 8388608
+  else batch_scratch_pin "$scratch/$p" "$i" 16777216; fi
+ done
+ root_after=$(bounded stat -c '%d:%i:%f:%u:%g:%a' -- "$scratch")
+ [[ $root_after == "$root_before" ]] || fail audit-scratch-substitution
+ exec {paths_fd}>&-; exec {sorted_fd}>&-; exec {pre_fd}>&-; exec {post_fd}>&-; exec {checks_fd}>&-
+ bounded rm -- "$scratch/paths" "$scratch/sorted" "$scratch/pre" "$scratch/post" "$scratch/checks"
+ bounded rm -d -- "$scratch"
+ remaining >/dev/null
+}
+# END reviewed ordinary OS cache and batch definitions
+
+for key in source_root source_manifest source_manifest_sha256 source_nodes source_nodes_sha256 payload_root payload_manifest payload_manifest_sha256 payload_nodes payload_nodes_sha256 runtime_root runtime_manifest runtime_manifest_sha256 runtime_nodes runtime_nodes_sha256 source_review source_review_sha256 build_receipt build_receipt_sha256 os_audit os_audit_sha256 source_revision base_revision workflow_identity entry runtime_host entry_sha256 n02_uid n02_gid; do [[ -n ${!key} ]] || fail missing-input; done
+[[ $source_revision =~ ^[0-9a-f]{40}$ && $base_revision =~ ^[0-9a-f]{40}$ ]] || fail revisions
+[[ $workflow_identity =~ ^[A-Za-z0-9/._:@-]{1,256}$ ]] || fail workflow
+[[ $entry != /* && $runtime_host != /* && $entry != *..* && $runtime_host != *..* && $runtime_host != *=* ]] || fail relative-entry-runtime
+[[ $n02_uid =~ ^[0-9]+$ && $n02_gid =~ ^[0-9]+$ ]] && ((n02_uid>0 && n02_gid>0 && n02_uid<4294967295 && n02_gid<4294967295)) || fail unprivileged-selection
+pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
+bounded /usr/bin/python3 -B - "$build_receipt" <<'INTEGRATED_BUILD_RECEIPT'
+import base64, hashlib, zlib
+REVIEWED_READER_PACKED = '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'
+REVIEWED_READER_LENGTH = 14103
+REVIEWED_READER_SHA256 = 'a1fe71cfde28f97237eec3c7d29a8b98e7ffcd1d6989f751168b419c3acc7422'
+if not 0 < REVIEWED_READER_LENGTH <= 32768 or len(REVIEWED_READER_PACKED) > 65536:
+    raise ValueError('adapter-reader-size')
+_packed = base64.b64decode(REVIEWED_READER_PACKED, validate=True)
+_decoder = zlib.decompressobj()
+_reader = _decoder.decompress(_packed, REVIEWED_READER_LENGTH + 1)
+if (len(_reader) != REVIEWED_READER_LENGTH or not _decoder.eof or
+        _decoder.unused_data or _decoder.unconsumed_tail):
+    raise ValueError('adapter-reader-compression')
+if hashlib.sha256(_reader).hexdigest() != REVIEWED_READER_SHA256:
+    raise ValueError('adapter-reader-pin')
+exec(compile(_reader, '<pinned-fixed-receipt-reader>', 'exec'), {})
+INTEGRATED_BUILD_RECEIPT
+bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
+ --arg approved "$NEGATIVE_SOURCE_REVISION" --argjson source_count "$NEGATIVE_SOURCE_COUNT" --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
+ .schema=="issue779-integrated16-build-v1" and .exit==0 and
+ .source_commit==$source and $source==$approved and
+ .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
+ (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
+ .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
+ .source_before.count==$source_count and .source_after_assets.count==$source_count and .source_after_build.count==$source_count and .source_final.count==$source_count and .artifacts.source.file_count==$source_count and
+ .artifacts.source.tsv_sha256==$st and .artifacts.tool.tsv_sha256==$pt and .artifacts.runtime.tsv_sha256==$rt
+' "$build_receipt" >/dev/null || fail build-node-receipt-binding
+diagnostic_stage=source-input
+verify_tree "$source_root" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source
+diagnostic_stage=tool-input
+verify_tree "$payload_root" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool
+diagnostic_stage=runtime-input
+verify_tree "$runtime_root" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime
+diagnostic_stage=os-input
+pin_file "$source_review" "$source_review_sha256" 65536
+pin_file "$os_audit" "$os_audit_sha256" 1048576; pin_file "$payload_root/$entry" "$entry_sha256" "$MAX_INPUT_FILE_BYTES"
+[[ -f $payload_root/${entry%.dll}.deps.json && -f $payload_root/${entry%.dll}.runtimeconfig.json && ! -e $runtime_root/sdk ]] || fail normal-FDD-input
+# All objects closed/typed, unique literal identities. Numeric lstat pins come from this actual OS image.
+bounded jq -e '
+ def hash: type=="string" and test("^[0-9a-f]{64}$");
+ def path: type=="string" and startswith("/") and length<=4096 and (explode|all(.>=32 and .!=127));
+ def uint: type=="number" and floor==. and .>=0 and .<=9007199254740991;
+ keys==["aliases","elf","files","schema"] and .schema=="issue779-fixture-os-elf-pins-v2" and
+ (.files|type=="array" and length>0 and length<=4096) and
+ (.elf|type=="array" and length>0 and length<=2048) and
+ (.aliases|type=="array" and length<=64) and
+ all(.files[]; keys==["path","sha256"] and (.path|path) and (.sha256|hash)) and
+ all(.elf[]; keys==["interpreter","path","resolved","sha256"] and (.path|path) and (.sha256|hash) and
+  (.interpreter==null or (.interpreter|path)) and (.resolved|type=="array" and length<=128) and
+  all(.resolved[];keys==["path","sha256","soname"] and (.path|path) and (.sha256|hash) and (.soname|type=="string" and test("^[A-Za-z0-9_.+-]{1,256}$")))) and
+ all(.aliases[];keys==["links","literal","resolved_path","resolved_sha256"] and (.literal|path) and (.resolved_path|path) and (.resolved_sha256|hash) and
+  (.links|type=="array" and length>0 and length<=16) and all(.links[]; keys==["device","gid","inode","mode","path","target","uid"] and
+  (.path|path) and (.target|type=="string" and length>0 and length<=4096 and (explode|all(.>=32 and .!=127))) and
+  .uid==0 and .gid==0 and .mode=="777" and (.device|uint) and (.inode|uint) and .inode>0)) and
+ ([.files[].path]|length== (unique|length)) and ([.elf[].path]|length== (unique|length)) and
+ ([.aliases[].literal]|length== (unique|length)) and
+ all(.elf[]; [.resolved[].soname]|length==(unique|length))
+' "$os_audit" >/dev/null || fail OS-audit-schema
+os_files=$(bounded jq -r '.files[]|[.path,.sha256]|@tsv' "$os_audit")
+negative_os_cache_initialize
+ordinary_os_batch_full_pass initial
+runtime_files=$(bounded find -P "$runtime_root" -type f -print)
+while IFS= read -r p; do
+ magic=$(bounded head -c 4 "$p" | od -An -tx1 | tr -d ' \n'); [[ $magic == 7f454c46 ]] || continue
+ bounded jq -e --arg p "$p" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail unaudited-runtime-ELF
+done <<<"$runtime_files"
+elf_records=$(bounded jq -c '.elf[]' "$os_audit")
+while IFS= read -r record; do
+ p=$(bounded jq -r .path <<<"$record"); h=$(bounded jq -r .sha256 <<<"$record"); verify_os_path "$p" "$h"
+ header=$(bounded readelf -h "$p"); [[ $header == *ELF64* && $header == *'Advanced Micro Devices X86-64'* ]] || fail native-ELF
+ needed=$(bounded readelf -d "$p" | awk '/\(NEEDED\)/{gsub(/.*\[/,"");gsub(/\].*/,"");print}' | sort)
+ expected=$(bounded jq -r '.resolved[].soname' <<<"$record" | sort); [[ $needed == "$expected" ]] || fail ELF-dependencies
+ interpreter=$(bounded readelf -l "$p" | awk '/Requesting program interpreter:/{gsub(/.*interpreter: /,"");gsub(/\].*/,"");print}')
+ [[ $interpreter == "$(bounded jq -r '.interpreter//""' <<<"$record")" ]] || fail ELF-interpreter
+ if [[ -n $interpreter ]]; then
+  bounded jq -e --arg p "$interpreter" '[.files[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail literal-loader-unpinned
+ fi
+ deps=$(bounded jq -r '.resolved[]|[.path,.sha256]|@tsv' <<<"$record")
+ while IFS=$'\t' read -r dep digest; do
+  [[ -n $dep ]] || continue; verify_os_path "$dep" "$digest"
+  bounded jq -e --arg p "$dep" --arg h "$digest" 'any(.files[];.path==$p and .sha256==$h) or any(.elf[];.path==$p and .sha256==$h)' "$os_audit" >/dev/null || fail dependency-unpinned
+ done <<<"$deps"
+done <<<"$elf_records"
+[[ $(bounded head -c 4 "$runtime_root/$runtime_host" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]] || fail runtime-not-ELF
+pin_file "$os_audit" "$os_audit_sha256" 1048576
+if [[ $mode == prepare-only ]]; then printf '%s\n' 'PREPARATION_INPUT_PINS_MATCHED:N01_NOT_RUN:N02_NOT_RUN'; exit 0; fi
+((EUID==0)) || fail root-fixture
+sha "$reviewed_script_sha256"; absolute "${BASH_SOURCE[0]}"; pin_file "${BASH_SOURCE[0]}" "$reviewed_script_sha256" 131072
+diagnostic_stage=root-layout
+ancestor /var/lib; ancestor /run; ancestor /sys/fs/cgroup/system.slice
+[[ $(bounded stat -f -c %t /sys/fs/cgroup/system.slice) == 63677270 ]] || fail cgroup2-parent
+for root in "$source_root" "$payload_root" "$runtime_root"; do ancestor "$root"; [[ -z $(bounded find -P "$root" \( ! -uid 0 -o -perm /022 \) -print -quit) ]] || fail mutable-input; done
+IFS= read -r G </proc/sys/kernel/random/uuid; G=${G//-/}; [[ $G =~ ^[0-9a-f]{32}$ ]] || fail generation
+owner=appsurface-evidence-owner-$G.service; worker=appsurface-evidence-worker-$G.service
+n04_unit=appsurface-evidence-n04-coordinator-$G.service
+names=("evw${G:0:28}" "evs${G:0:28}" "evr${G:0:28}")
+base=/var/lib/appsurface-evidence-fixture; request_base=/run/appsurface-evidence-fixture
+for base_dir in "$base" "$request_base" /run/appsurface-evidence-owners; do
+ if [[ ! -e $base_dir ]]; then permissions=700; [[ $base_dir != "$base" ]] || permissions=755; bounded install -d -o 0 -g 0 -m "$permissions" "$base_dir"; fi
+ ancestor "$base_dir"
+done
+stage=$base/$G; private=$request_base/$G; guard=/run/appsurface-evidence-owners/$G
+[[ ! -e $stage && ! -e $private && ! -e $guard && ! -e /run/appsurface-evidence-$G ]] || fail collision
+bounded install -d -m 700 "$stage" "$private" "$guard"
+log=$private/logs; bounded install -d -m 700 "$log"
+launched=0; launch_pid=; observer_pid=; n04_launch_pid=; n04_launched=0; success=0
+declare -A owned_start=()
+# Child PGs are registered immediately. Wait is called ONLY after its original PID has ceased to exist.
+pg_alive() { kill -0 -- "-$1" 2>/dev/null; }
+owned_identity() {
+ local pid=$1 text tail; local -a fields=()
+ left >/dev/null || return 124
+ [[ -r /proc/$pid/stat ]] || return 1
+ IFS= read -r text <"/proc/$pid/stat" || return 1
+ [[ ${#text} -le 4096 && ${text%% *} == "$pid" ]] || return 1
+ tail=${text##*) }; read -r -a fields <<<"$tail"
+ [[ ${fields[2]:-} == "$pid" && ${fields[3]:-} == "$pid" && ${fields[19]:-} =~ ^[1-9][0-9]*$ ]] || return 1
+ left >/dev/null || return 124
+ printf '%s' "${fields[19]}"
+}
+pin_owned_pg() {
+ local pid=$1 fields pg sid first second
+ while kill -0 "$pid" 2>/dev/null; do
+  fields=$(bounded ps -o pgid=,sid= -p "$pid"); read -r pg sid <<<"$fields"
+  if [[ $pg == "$pid" && $sid == "$pid" ]]; then
+   first=$(owned_identity "$pid") || fail owned-group-identity
+   second=$(owned_identity "$pid") || fail owned-group-identity
+   [[ $first == "$second" ]] || fail owned-group-identity
+   owned_start[$pid]=$first; return 0
+  fi
+  bounded sleep .01
+ done
+ fail owned-group-registration
+}
+signal_owned() {
+ local name=$1 pid=${!1} current
+ [[ -n $pid ]] || return 0
+ if ! kill -0 "$pid" 2>/dev/null; then ! pg_alive "$pid"; return; fi
+ [[ ${owned_start[$pid]+present} ]] || return 1
+ current=$(owned_identity "$pid") || return 1
+ [[ $current == "${owned_start[$pid]}" ]] || return 1
+ # The live original session/group leader is checked immediately before this signal.
+ kill -KILL -- "-$pid" 2>/dev/null || { ! kill -0 "$pid" 2>/dev/null && ! pg_alive "$pid"; }
+}
+join_owned() {
+ local name=$1 pid=${!1} status current
+ [[ -n $pid ]] || return 0
+ while kill -0 "$pid" 2>/dev/null; do
+  left >/dev/null || return 124
+  [[ ${owned_start[$pid]+present} ]] || return 125
+  current=$(owned_identity "$pid") || return 125
+  [[ $current == "${owned_start[$pid]}" ]] || return 125
+  try_bounded sleep .05 || return 124
+ done
+ status=0; wait "$pid" || status=$?
+ pg_alive "$pid" && return 125
+ # A fully settled registration is retired independently of its preserved exit status.
+ unset 'owned_start[$pid]'; printf -v "$name" '%s' ''
+ return "$status"
+}
+cleanup() {
+ local original=$? bad=0 name status=0 cg unit
+ trap - EXIT INT TERM; phase=cleanup
+ # Signals attempted even at the deadline; no new allowance is ever manufactured.
+ for name in observer_pid n04_launch_pid launch_pid; do signal_owned "$name" || bad=1; done
+ # Reap registered fixture processes before potentially slow systemd cleanup requests.
+ for name in observer_pid n04_launch_pid launch_pid; do join_owned "$name" || bad=1; done
+ if ((launched)); then
+  try_bounded systemctl kill --kill-whom=all --signal=KILL "$worker" "$owner" "$n04_unit" >"$log/kill.log" 2>&1 || :
+  try_bounded systemctl stop "$worker" "$owner" "$n04_unit" >"$log/stop.log" 2>&1 || :
+ fi
+ for unit in "$worker" "$owner" "$n04_unit"; do
+  cg=/sys/fs/cgroup/system.slice/$unit
+  if [[ -e $cg ]]; then
+   [[ ! -L $cg ]] && [[ $(try_bounded stat -f -c %t "$cg") == 63677270 ]] && try_bounded grep -qx 'populated 0' "$cg/cgroup.events" || bad=1
+  fi
+ done
+ left >/dev/null || bad=1
+ if ((original!=0 || bad!=0 || success!=1)); then printf '%s\n' 'NATIVE_FIXTURE_FAILED:PATHS_AND_ACCOUNTS_PRESERVED'; exit 1; fi
+ # Publication happens ONLY after joins/group checks and final original deadline check.
+ try_bounded jq -jcS -n --arg g "$G" --arg source "$source_revision" --arg base "$base_revision" --argjson root_exit "$negative_launch" --argjson helper_exit "$n04_helper_exit" --arg policy "$policy_sha" '{schema:"issue779-n04-peer-fixture-v1",generation:$g,source_revision:$source,base_revision:$base,control:"N04",root_launch_join_status:$root_exit,helper_launch_join_status:$helper_exit,root_stdout_bytes:0,account_disposition:"preserved-quarantined",native_acceptance:false,observation_only:true,policy_sha256:$policy,independent_raw_worker_capture:false,other_controls:"not-qualified-by-this-fixture"}' >"$private/fixture-result.pending" || status=1
+ left >/dev/null || status=1
+ ((status==0)) || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:PUBLICATION'; exit 1; }
+ try_bounded mv -T -- "$private/fixture-result.pending" "$private/fixture-result.json" || exit 1
+ left >/dev/null || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:LATE_PUBLICATION'; exit 1; }
+ printf '%s\n' 'N04_PEER_OBSERVATION_TERMINAL:NOT_ACCEPTANCE'
+ left >/dev/null || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:LATE_TERMINAL_OUTPUT'; exit 1; }
+ exit 0
+}
+trap cleanup EXIT; trap 'exit 1' INT TERM
+copy_tree() {
+ local input=$1 dest=$2
+ bounded install -d -m 700 "$dest"; bounded cp -a --no-preserve=ownership -- "$input/." "$dest/"
+ bounded chown -R 0:0 "$dest"
+ bounded find -P "$dest" -type f ! -perm /111 -exec chmod 444 {} +
+ bounded find -P "$dest" -type f -perm /111 -exec chmod 555 {} +
+ bounded find -P "$dest" -type d -exec chmod 555 {} +
+}
+diagnostic_stage=tool-copy; copy_tree "$payload_root" "$stage/tool"
+diagnostic_stage=runtime-copy; copy_tree "$runtime_root" "$stage/runtime"
+diagnostic_stage=subject-copy; copy_tree "$source_root" "$stage/subject"
+
+# Fixed private N04 helper. Pending offline build/policy/image reviews cannot be replaced by input JSON.
+for key in n04_helper_root n04_helper_map n04_helper_map_sha256 n04_helper_nodes n04_helper_nodes_sha256 n04_helper_entry_sha256; do [[ -n ${!key} ]] || fail N04-helper-missing-input; done
+ancestor "$n04_helper_root"
+verify_tree "$n04_helper_root" "$n04_helper_map" "$n04_helper_map_sha256" "$n04_helper_nodes" "$n04_helper_nodes_sha256" tool
+pin_file "$n04_helper_root/NativeRootCoordinator.dll" "$n04_helper_entry_sha256" "$CORE_FILE_BYTES"
+[[ -f $n04_helper_root/NativeRootCoordinator.deps.json && -f $n04_helper_root/NativeRootCoordinator.runtimeconfig.json ]] || fail N04-normal-helper-FDD
+copy_tree "$n04_helper_root" "$stage/n04-helper"
+verify_tree "$stage/n04-helper" "$n04_helper_map" "$n04_helper_map_sha256" "$n04_helper_nodes" "$n04_helper_nodes_sha256" tool 1 0
+n04_entry=$stage/n04-helper/NativeRootCoordinator.dll
+pin_file "$n04_entry" "$n04_helper_entry_sha256" "$CORE_FILE_BYTES"
+
+diagnostic_stage=request-preparation
+bounded chmod 555 "$stage"
+[[ $(bounded stat -c %a "$base") == 755 ]] || fail deployment-parent
+[[ -f $stage/subject/docs/designs/issue-779-csharp-supervision-core.md ]] || fail changed-path-source
+host=$stage/runtime/$runtime_host; managed=$stage/tool/$entry
+[[ $host != *'$'* && $host != *'%'* && $host != *'='* && $managed != *'$'* && $managed != *'%'* ]] || fail bootstrap-path
+pin_file "$managed" "$entry_sha256" "$MAX_INPUT_FILE_BYTES"
+[[ ! -e $stage/tool/fixture-policy.json ]] || fail policy-collision
+bounded chmod 755 "$stage/tool"
+bounded jq -jcS -n '{Id:"checkpoint-empty",Version:"1",ConservativeProfileId:"conservative",Profiles:[{Id:"empty",Scope:"Targeted",Resources:[],Producers:[],Obligations:[]},{Id:"conservative",Scope:"Release",Resources:[{Id:"build",Readiness:"completion",DeadlineSeconds:1,Requires:[]}],Producers:[],Obligations:[]}],Rules:[{Id:"docs",Pattern:"docs/**",ProfileId:"empty",Precedence:0}]}' >"$stage/tool/fixture-policy.json"
+bounded chmod 444 "$stage/tool/fixture-policy.json"; bounded chmod 555 "$stage/tool"
+policy_sha=$(bounded sha256sum "$stage/tool/fixture-policy.json"); policy_sha=${policy_sha:0:64}
+verify_tree "$stage/tool" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool 1 1
+verify_tree "$stage/runtime" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime 1 0
+verify_tree "$stage/subject" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source 1 0
+verify_tree "$source_root" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source
+verify_tree "$payload_root" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool
+verify_tree "$runtime_root" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime
+# UTC is sampled once and capped inside the SAME monotonic work interval, not reset after N02.
+job_deadline_epoch=$(( $(bounded date -u +%s) + $(remaining) - 1 ))
+job_deadline=$(bounded date -u -d "@$job_deadline_epoch" +%Y-%m-%dT%H:%M:%SZ)
+request=$private/request.json
+bounded jq -jcS -n --arg tool "$stage/tool" --arg runtime "$stage/runtime" --arg host "$host" --arg entry "$managed" --arg subject "$stage/subject" --arg base "$base_revision" --arg source "$source_revision" --arg workflow "$workflow_identity" --arg deadline "$job_deadline" '{schema:"evidence-supervisor-linux-v1",mode:"observation",tool_root:$tool,runtime_root:$runtime,runtime_host:$host,entry_path:$entry,policy_file:($tool+"/fixture-policy.json"),subject_root:$subject,base_revision:$base,subject_revision:$source,workflow_identity:$workflow,paths:["docs/designs/issue-779-csharp-supervision-core.md"],observation_profile_ids:["empty"],observation_producer_ids:[],job_deadline_utc:$deadline,admission_seconds:10,start_seconds:30,collection_seconds:10,cleanup_seconds:60,stopping_seconds:5}' >"$request"
+bounded chmod 600 "$request"; [[ $(bounded stat -c '%u:%g:%a:%h' "$request") == 0:0:600:1 && $(bounded stat -c %s "$request") -le 65536 ]] || fail request-shape
+bounded jq -e 'length==20' "$request" >/dev/null || fail request-fields
+bounded sha256sum "$request" "$stage/tool/fixture-policy.json" >"$private/request-policy.sha256"
+absent_accounts() {
+ local n code
+ for n in "${names[0]}" "${names[1]}"; do code=0; try_bounded getent passwd "$n" >/dev/null || code=$?; [[ $code == 2 ]] || fail NSS-passwd-not-absent; remaining >/dev/null; done
+ for n in "${names[@]}"; do code=0; try_bounded getent group "$n" >/dev/null || code=$?; [[ $code == 2 ]] || fail NSS-group-not-absent; remaining >/dev/null; done
+}
+unit_absent() { local state; state=$(bounded systemctl show "$1" -p LoadState --value); [[ $state == not-found ]] || fail unit-collision; }
+absent_accounts; unit_absent "$owner"; unit_absent "$worker"; unit_absent "$n04_unit"
+diagnostic_stage=n02
+set +e
+(ulimit -f 262144; ulimit -c 0; try_bounded strace -f -qq -e trace=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect -o "$log/n02.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp "$host" "$managed" evidence supervise --request "$request") >"$log/n02.stdout" 2>"$log/n02.stderr"
+n02=$?; set -e; remaining >/dev/null
+[[ $n02 == 1 && ! -s $log/n02.stdout ]] || fail N02-outcome
+bounded grep -q '^ASEVD402:' "$log/n02.stderr" || fail N02-error
+[[ $(bounded stat -c %s "$log/n02.stderr") -le 1024 && $(bounded stat -c %s "$log/n02.trace") -le 1048576 ]] || fail N02-log-bound
+if try_bounded grep -F -e "$private" -e "/run/appsurface-evidence-$G" -e "$guard" -e /run/dbus/system_bus_socket "$log/n02.trace" >/dev/null; then fail N02-protected-IO; else code=$?; [[ $code == 1 ]] || fail N02-trace-inspection; fi
+if try_bounded grep -F -e "$request" -e "$stage" "$log/n02.stderr" >/dev/null; then fail N02-path-leak; else code=$?; [[ $code == 1 ]] || fail N02-error-inspection; fi
+absent_accounts; [[ ! -e /run/appsurface-evidence-$G ]] || fail N02-workspace; unit_absent "$owner"; unit_absent "$worker"
+# Pure data guards use bounded reads; the original fixture owns all commands/deadlines.
+n03_validate_event_data() {
+ local count=$1 file=$2 event_keys
+ case "$count" in
+  1) event_keys='[["broker_gid","broker_pid","broker_start_ticks","broker_uid","schema","stage"]]' ;;
+  3) event_keys='[["broker_gid","broker_pid","broker_start_ticks","broker_uid","schema","stage"],["identity_kind","peer_gid","peer_pid","peer_uid","schema","stage"],["peer_pid","request_bytes","schema","sent_bytes","stage"]]' ;;
+  4) event_keys='[["broker_gid","broker_pid","broker_start_ticks","broker_uid","schema","stage"],["identity_kind","peer_gid","peer_pid","peer_uid","schema","stage"],["peer_pid","request_bytes","schema","sent_bytes","stage"],["native_acceptance","peer_pid","request_bytes","schema","sent_bytes","status"]]' ;;
+  *) return 1 ;;
+ esac
+ [[ $(bounded stat -c %s -- "$file") -le 4096 ]] || return 1
+ # ASCII is the fixed helper's JSON encoding; limits include each terminal LF.
+ bounded head -c 4097 -- "$file" | bounded jq -Rse --argjson count "$count" 'split("\n") as $lines | ($lines|length)==($count+1) and $lines[-1]=="" and all($lines[0:$count][]; length>0 and length<=1023 and startswith("{") and endswith("}") and (explode|all(.>=32 and .<=126)))' >/dev/null || return 1 # N03-raw-lines
+ # --stream preserves duplicate leaf paths before ordinary object parsing collapses them.
+ bounded head -c 4097 -- "$file" | bounded jq --stream -se --argjson keys "$event_keys" 'def flat($wanted): length==(($wanted|length)+1) and (.[-1]|length)==1 and (.[-1][0]|type)=="array" and (.[-1][0]|length)==1 and .[-1][0]==.[-2][0] and all(.[0:-1][]; length==2 and (.[0]|type)=="array" and (.[0]|length)==1 and (.[0][0]|type)=="string" and ((.[1]|type)=="string" or (.[1]|type)=="number" or (.[1]|type)=="boolean" or (.[1]|type)=="null")) and ([.[0:-1][]|.[0][0]]|sort)==$wanted; reduce .[] as $event ({done:[],pending:[]}; if ($event|length)==2 then .pending+=[$event] else .done+=[(.pending+[$event])] | .pending=[] end) | . as $state | ($state.pending|length)==0 and ($state.done|length)==($keys|length) and all(range(0;($keys|length)); . as $i | $state.done[$i] | flat($keys[$i]))' >/dev/null || return 1 # N03-flat-stream
+ [[ $(bounded stat -c %s -- "$file") -le 4096 ]] || return 1
+}
+n03_run() (
+ set -euo pipefail; umask 077
+ n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
+ [[ $# == 11 && $EUID == 0 && $source_revision == "$NEGATIVE_SOURCE_REVISION" ]] || fail N03-input
+ helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
+ broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
+ n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
+ n03_startup_active=0
+ broker_exit= worker_exit=0 sampled_pid= sampled_start= broker_actual_pid= trace_peer_seen=0 observed=0
+ broker_pw= worker_pw= group_row= bu= bg= wu= wg= gu= gid= peer_pid= candidate= broker_ready= peer_ready= eof_ready=
+ parent=/run/appsurface-evidence-n03-peers n03dir= n03log= sock= before_dir= after_dir= current_cgroup=
+ declare -gA owned_start=()
+ n03dir=$parent/$G; n03log=$log/n03; sock=$n03dir/broker/control.sock
+ n03_cleanup() {
+  local original=$? bad=0 s name code=0
+  trap - EXIT INT TERM; n03_startup_active=0; phase=cleanup
+  # Root release is never a verdict. Closing the previously empty anonymous pipe follows R+LF.
+  if [[ -n $release_fd ]]; then printf 'R\n' >&"$release_fd" || bad=1; exec {release_fd}>&- || bad=1; release_fd=; fi
+  for name in n03_worker_pid n03_broker_pid; do
+   if [[ -n ${!name} ]]; then signal_owned "$name" || bad=1; fi
+  done
+  for name in n03_worker_pid n03_broker_pid; do
+   if [[ -n ${!name} ]]; then join_owned "$name" || bad=1; fi
+  done
+  if [[ -n $dir_fd ]]; then
+   s=$(try_bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$n03_fd_owner_pid/fd/$dir_fd") || bad=1
+   [[ $s == "$before_dir" ]] || bad=1; exec {dir_fd}<&- || bad=1
+  fi
+  left >/dev/null || bad=1
+  if ((original!=0 || bad!=0 || observed!=1)); then
+   # Failure/quarantine: no account/socket/path deletion, no successful containment assertion.
+   try_bounded jq -jcS -n --arg status "$result_status" --argjson worker "${sampled_pid:-null}" --argjson broker "${broker_actual_pid:-null}" '{schema:"issue779-n03-peer-observation-v1",control:"N03",status:$status,worker_pid:$worker,broker_pid:$broker,worker_exit:null,broker_exit:null,request_bytes:null,sent_bytes:null,owned_process_groups_joined:null,native_acceptance:false,systemd_worker_authority:false}' >"$n03log/failure.pending" || :
+   if left >/dev/null; then try_bounded mv -T -- "$n03log/failure.pending" "$n03log/failure.json" || :; fi
+   printf 'N03_INCONCLUSIVE_OR_REJECTED:RETAINED\n' >&2; exit 1
+  fi
+  try_bounded jq -jcS -n --arg source "$source_revision" --argjson worker "$sampled_pid" --argjson broker "$broker_actual_pid" \
+   '{schema:"issue779-n03-peer-observation-v1",control:"N03",status:"observed",source_commit:$source,worker_pid:$worker,broker_pid:$broker,worker_exit:1,broker_exit:0,worker_stdout_bytes:0,asevd402_observed:true,kernel_peer_bound_to_owned_worker:true,request_bytes:0,sent_bytes:0,ready_request_observed:false,descriptor_supplied:false,owned_process_groups_joined:true,stream_custody:"private-files-after-original-process-reap",native_acceptance:false,systemd_worker_authority:false}' >"$n03log/result.pending" || code=1
+  left >/dev/null || code=1; ((code==0)) || exit 1
+  try_bounded mv -T -- "$n03log/result.pending" "$n03log/result.json" || exit 1
+  left >/dev/null || exit 1
+  printf 'N03_OBSERVATION_TERMINAL:NOT_NATIVE_ACCEPTANCE\n'
+  left >/dev/null || exit 1; exit 0
+ }
+ trap n03_cleanup EXIT; trap 'exit 1' INT TERM
+ [[ $startup_kib =~ ^[1-9][0-9]*$ ]] && ((startup_kib<=262144)) || fail N03-file-limit
+ # No expiry is created here. The helper uses work_end*1000, exactly the inherited uptime domain.
+ remaining >/dev/null; ((hard_end-work_end==30 && hard_end-fixture_start==600)) || fail N03-clock-binding
+ n03_startup_end=; n03_startup_end=$(monotonic) || fail N03-clock-binding
+ n03_startup_end=$((n03_startup_end+15)); ((n03_startup_end<=work_end)) || n03_startup_end=$work_end
+ n03_startup_check() { local now; now=$(monotonic) || fail N03-clock-binding; ((now<n03_startup_end && now<work_end)) || fail N03-startup-bound; }
+ n03_startup_active=1; n03_startup_check
+ [[ $broker_name == _apt && $worker_name == nobody && $shared_name == nogroup ]] || fail N03-fixed-NSS-names
+ [[ $broker_name != "$worker_name" ]] || fail N03-distinct-users
+ broker_pw=$(bounded getent passwd "$broker_name"); worker_pw=$(bounded getent passwd "$worker_name"); group_row=$(bounded getent group "$shared_name")
+ [[ $broker_pw != *$'\n'* && $worker_pw != *$'\n'* && $group_row != *$'\n'* ]] || fail N03-NSS-ambiguous
+ IFS=: read -r bn bx bu bg bge bh bs extra <<<"$broker_pw"; [[ $bn == "$broker_name" && -z ${extra:-} ]] || fail N03-NSS-broker
+ IFS=: read -r wn wx wu wg wge wh ws extra <<<"$worker_pw"; [[ $wn == "$worker_name" && -z ${extra:-} ]] || fail N03-NSS-worker
+ IFS=: read -r gn gx gid members extra <<<"$group_row"; [[ $gn == "$shared_name" && -z ${extra:-} ]] || fail N03-NSS-group
+ for x in "$bu" "$wu" "$bg" "$wg" "$gid"; do [[ $x =~ ^[1-9][0-9]*$ ]] && ((x<4294967295)) || fail N03-NSS-id; done
+ [[ $bu != "$wu" && $bg == 65534 && $wg == 65534 && $gid == 65534 ]] || fail N03-NSS-relationship
+ # Separate complete bundle. Root transport seals it; this procedure never copies into product/tool.
+ ancestor "$helper_root"; [[ $helper_generation =~ ^[0-9a-f]{32}$ && $helper_root == /var/lib/appsurface-evidence-n03-helpers/$helper_generation/bundle ]] || fail N03-helper-namespace
+ hentry=$helper_root/NativePeerBroker.dll
+ verify_tree "$helper_root" "$helper_map" "$helper_map_sha" "$helper_nodes" "$helper_nodes_sha" tool 1 0
+ pin_file "$hentry" "$helper_entry_sha" "$CORE_FILE_BYTES"
+ p=$helper_root perms=
+ while :; do
+  perms=$(bounded stat -c %a -- "$p"); (((8#$perms & 0001)!=0)) || fail N03-helper-not-searchable
+  [[ $p == / ]] && break; p=${p%/*}; [[ -n $p ]] || p=/
+ done
+ [[ ! -e $n03dir && ! -L $n03dir && ! -e $n03log && ! -L $n03log ]] || fail N03-collision
+ if [[ ! -e $parent ]]; then bounded install -d -o 0 -g 0 -m 755 "$parent"; fi
+ ancestor "$parent"; [[ $(bounded stat -c '%u:%g:%a' "$parent") == 0:0:755 ]] || fail N03-parent
+ bounded install -d -o 0 -g "$gid" -m 710 "$n03dir"
+ bounded install -d -o "$bu" -g "$gid" -m 710 "$n03dir/broker"
+ bounded install -d -o 0 -g 0 -m 700 "$n03log"
+ exec {dir_fd}<"$n03dir/broker"
+ before_dir=$(bounded stat -c '%d:%i:%u:%g:%a' "$n03dir/broker")
+ [[ $(bounded stat -Lc '%d:%i:%u:%g:%a' "/proc/$n03_fd_owner_pid/fd/$dir_fd") == "$before_dir" ]] || fail N03-retained-parent
+ current_cgroup=$(bounded cat /proc/self/cgroup)
+ [[ $current_cgroup =~ ^0::/system.slice/issue779-native-tool-[0-9a-f]{32}-[0-9]+\.service$ ]] || fail N03-root-containment
+ # Actual ELF/loader/entry/root before-interpreter audit belongs to reviewed root caller, not this JSON.
+ fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
+ [[ $(bounded getent passwd "$broker_name") == "$broker_pw" && $(bounded getent passwd "$worker_name") == "$worker_pw" && $(bounded getent group "$shared_name") == "$group_row" ]] || fail N03-NSS-drift
+ n03_startup_check
+ exec {release_fd}> >(
+  exec {dir_fd}<&-
+  ulimit -f "$startup_kib"; ulimit -c 0
+  exec setsid setpriv --no-new-privs --reuid="$bu" --regid="$gid" --clear-groups \
+   /usr/bin/env -i "${fixed_env[@]}" "$host" "$hentry" --socket "$sock" --broker-uid "$bu" --broker-gid "$gid" \
+   --worker-uid "$wu" --worker-gid "$gid" --deadline-uptime-ms "$((work_end*1000))" >"$n03log/broker.events.jsonl" 2>"$n03log/broker.stderr"
+ )
+ n03_broker_pid=$!; pin_owned_pg "$n03_broker_pid"
+ # Direct private file sinks: no pump task can be credited; actual reap and PG absence remain mandatory.
+ while :; do
+  n03_startup_check; remaining >/dev/null
+  if [[ -s $n03log/broker.events.jsonl ]]; then
+   [[ $(bounded stat -c %s -- "$n03log/broker.events.jsonl") -le 4096 ]] || fail N03-event-bound
+   broker_ready=$(bounded head -c 1025 -- "$n03log/broker.events.jsonl")
+   if [[ -n ${broker_ready:-} ]]; then break; fi
+  fi
+  kill -0 "$n03_broker_pid" 2>/dev/null || fail N03-broker-before-ready; bounded sleep .01
+ done
+ [[ ${#broker_ready} -le 1024 ]] || fail N03-event-bound
+ n03_validate_event_data 1 "$n03log/broker.events.jsonl" || fail N03-ready
+ bounded jq -e --argjson uid "$bu" --argjson gid "$gid" 'keys==["broker_gid","broker_pid","broker_start_ticks","broker_uid","schema","stage"] and .schema=="issue779-n03-managed-broker-event-v1" and .stage=="ready" and .broker_uid==$uid and .broker_gid==$gid and (.broker_pid|type)=="number" and .broker_pid>0 and .broker_pid<=2147483647 and (.broker_pid|floor)==.broker_pid and (.broker_start_ticks|type)=="number" and .broker_start_ticks>0 and .broker_start_ticks<=9007199254740991 and (.broker_start_ticks|floor)==.broker_start_ticks' <<<"$broker_ready" >/dev/null || fail N03-ready
+ broker_actual_pid=$(bounded jq -r .broker_pid <<<"$broker_ready")
+ [[ $broker_actual_pid == "$n03_broker_pid" ]] || fail N03-broker-exec-chain
+ n03_sample() {
+  local pid=$1 uid=$2 entry=$3 output=$4 parent_pid=$5 text tail s1 s2 u1 g1 u2 g2 cg1 cg2 exe1 groups argfile status1 status2 nnp1 nnp2 cap1 cap2
+  local -a f=() args=()
+  [[ -r /proc/$pid/stat && -r /proc/$pid/status ]] || return 1
+  IFS= read -r text <"/proc/$pid/stat" || return 1; [[ ${text%% *} == "$pid" ]] || return 1
+  tail=${text##*) }; read -r -a f <<<"$tail"; s1=${f[19]:-}
+  [[ $s1 =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ ${f[1]:-} == "$parent_pid" ]] || return 1
+  if [[ $entry == "$managed" ]]; then [[ ${f[2]:-} == "$parent_pid" && ${f[3]:-} == "$parent_pid" ]] || return 1; else [[ ${f[2]:-} == "$pid" && ${f[3]:-} == "$pid" ]] || return 1; fi
+  status1=$(bounded head -c 16385 "/proc/$pid/status"); ((${#status1}<=16384)) || return 1
+  u1=$(bounded awk '$1=="Uid:"{print $2":"$3":"$4":"$5}' <<<"$status1")
+  g1=$(bounded awk '$1=="Gid:"{print $2":"$3":"$4":"$5}' <<<"$status1")
+  groups=$(bounded awk '$1=="Groups:"{for(i=2;i<=NF;i++)print $i}' <<<"$status1")
+  nnp1=$(bounded awk '$1=="NoNewPrivs:"{print $2}' <<<"$status1")
+  cap1=$(bounded awk '$1=="CapEff:"{print $2}' <<<"$status1")
+  [[ $nnp1 == 1 && $cap1 =~ ^0{16}$ ]] || return 1
+  [[ $u1 == "$uid:$uid:$uid:$uid" && $g1 == "$gid:$gid:$gid:$gid" && -z $groups ]] || return 1
+  cg1=$(bounded cat "/proc/$pid/cgroup"); exe1=$(bounded readlink "/proc/$pid/exe")
+  [[ $cg1 == "$current_cgroup" && $exe1 == "$host" ]] || return 1
+  [[ $(bounded stat -Lc '%d:%i:%s:%f' "/proc/$pid/exe") == "$(bounded stat -c '%d:%i:%s:%f' "$host")" ]] || return 1
+  local actual_hash expected_hash
+  actual_hash=$(bounded sha256sum "/proc/$pid/exe"); expected_hash=$(bounded sha256sum "$host"); [[ ${actual_hash:0:64} == "${expected_hash:0:64}" ]] || return 1
+  argfile=$output.argv; bounded head -c 16385 "/proc/$pid/cmdline" >"$argfile"
+  (( $(bounded stat -c %s "$argfile")<=16384 )) || return 1
+  while IFS= read -r -d '' x; do args+=("$x"); ((${#args[@]}<=14)) || return 1; done <"$argfile"
+  if [[ $entry == "$managed" ]]; then
+   [[ ${#args[@]} == 6 && ${args[0]} == "$host" && ${args[1]} == "$managed" && ${args[2]} == evidence && ${args[3]} == worker && ${args[4]} == --control && ${args[5]} == "$sock" ]] || return 1
+  else
+   local -a expected=("$host" "$hentry" --socket "$sock" --broker-uid "$bu" --broker-gid "$gid" --worker-uid "$wu" --worker-gid "$gid" --deadline-uptime-ms "$((work_end*1000))")
+   [[ ${#args[@]} == ${#expected[@]} ]] || return 1
+   for ((x=0;x<${#args[@]};x++)); do [[ ${args[x]} == "${expected[x]}" ]] || return 1; done
+  fi
+  status2=$(bounded head -c 16385 "/proc/$pid/status"); ((${#status2}<=16384)) || return 1
+  u2=$(bounded awk '$1=="Uid:"{print $2":"$3":"$4":"$5}' <<<"$status2"); g2=$(bounded awk '$1=="Gid:"{print $2":"$3":"$4":"$5}' <<<"$status2"); cg2=$(bounded cat "/proc/$pid/cgroup")
+  nnp2=$(bounded awk '$1=="NoNewPrivs:"{print $2}' <<<"$status2")
+  cap2=$(bounded awk '$1=="CapEff:"{print $2}' <<<"$status2")
+  [[ $nnp2 == 1 && $cap2 =~ ^0{16}$ && $nnp1 == "$nnp2" && $cap1 == "$cap2" ]] || return 1
+  IFS= read -r text <"/proc/$pid/stat" || return 1; tail=${text##*) }; read -r -a f <<<"$tail"; s2=${f[19]:-}
+  [[ $s1 == "$s2" && $u1 == "$u2" && $g1 == "$g2" && $cg1 == "$cg2" && $(bounded readlink "/proc/$pid/exe") == "$host" ]] || return 1
+  bounded jq -jcS -n --argjson pid "$pid" --arg ticks "$s1" --arg uid "$u1" --arg gid "$g1" --arg cg "$cg1" '{schema:"issue779-n03-owned-image-sample-v1",pid:$pid,start_ticks:$ticks,uid4:$uid,gid4:$gid,cgroup:$cg,exact_managed_argv:true,image_pinned:true,empty_groups:true,no_new_privs:1,effective_capabilities_zero:true}' >"$output"
+  remaining >/dev/null
+ }
+ # Broker image has execed through env/setpriv in the original registered session.
+ broker_parent=; broker_parent=$(bounded awk '$1=="PPid:"{print $2}' "/proc/$broker_actual_pid/status")
+ [[ $broker_parent == "$BASHPID" ]] || fail N03-broker-parent
+ n03_sample "$broker_actual_pid" "$bu" "$hentry" "$n03log/broker-live.json" "$broker_parent" || fail N03-broker-live
+ [[ $(bounded jq -r .start_ticks "$n03log/broker-live.json") == "$(bounded jq -r .broker_start_ticks <<<"$broker_ready")" ]] || fail N03-broker-start
+ [[ -S $sock && ! -L $sock && $(bounded stat -c '%u:%g:%a:%h' "$sock") == "$bu:$gid:660:1" ]] || fail N03-socket
+ socket_pin=$(bounded stat -c '%d:%i:%u:%g:%a' "$sock")
+ n03_startup_check
+ (exec {dir_fd}<&-; exec {release_fd}>&-; ulimit -f "$startup_kib"; ulimit -c 0
+  exec setsid strace -ff -qq -s 16384 -e trace=execve,getsockopt,connect,setresuid,setresgid,getuid,getgid,geteuid,getegid \
+   -o "$n03log/worker.trace" setpriv --no-new-privs --reuid="$wu" --regid="$gid" --clear-groups /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence worker --control "$sock"
+ ) >"$n03log/worker.stdout" 2>"$n03log/worker.stderr" & n03_worker_pid=$!
+ pin_owned_pg "$n03_worker_pid"
+ # Discover ONLY the direct actual child of this owned tracer; no arbitrary PID or fallback tuple.
+ while kill -0 "$n03_worker_pid" 2>/dev/null; do
+  n03_startup_check; remaining >/dev/null
+  if [[ -r /proc/$n03_worker_pid/task/$n03_worker_pid/children ]]; then
+   children=; IFS= read -r children <"/proc/$n03_worker_pid/task/$n03_worker_pid/children" || :
+   read -r candidate extra <<<"$children"
+   if [[ $candidate =~ ^[1-9][0-9]*$ && -z ${extra:-} ]]; then
+    if n03_sample "$candidate" "$wu" "$managed" "$n03log/worker-live.json" "$n03_worker_pid"; then
+     sampled_pid=$candidate; sampled_start=$(bounded jq -r .start_ticks "$n03log/worker-live.json"); break
+    fi
+   fi
+  fi
+  bounded sleep .01
+ done
+ n03_startup_check
+ [[ -n $sampled_pid ]] || { result_status=inconclusive; fail N03-inconclusive-worker-live; }
+ worker_exit=0; join_owned n03_worker_pid || worker_exit=$?
+ [[ $worker_exit == 1 && -z $n03_worker_pid && ! -s $n03log/worker.stdout ]] || fail N03-worker-outcome
+ bounded grep -q '^ASEVD402:' "$n03log/worker.stderr" || fail N03-worker-diagnostic
+ [[ $(bounded stat -c %s "$n03log/worker.stderr") -le 1024 ]] || fail N03-worker-stderr-bound
+ bounded grep -Eq "getsockopt\\([0-9]+, SOL_SOCKET, SO_PEERCRED, \\{pid=$broker_actual_pid, uid=$bu, gid=$gid\\}, \\[12\\]\\) += 0" "$n03log/worker.trace.$sampled_pid" || fail N03-inconclusive-peer-trace
+ exec_line=; exec_line=$(bounded grep -F "execve(\"$host\", [\"$host\", \"$managed\", \"evidence\", \"worker\", \"--control\", \"$sock\"]," "$n03log/worker.trace.$sampled_pid")
+ [[ $exec_line != *$'\n'* && $exec_line == *' = 0' ]] || fail N03-inconclusive-exec-trace
+ trace_peer_seen=1
+ bounded cp --no-dereference -- "$n03log/worker.trace.$sampled_pid" "$n03log/worker-peer.trace"
+ t1= t2=; t1=$(bounded sha256sum "$n03log/worker-peer.trace"); t2=$(bounded sha256sum "$n03log/worker.trace.$sampled_pid"); [[ ${t1:0:64} == "${t2:0:64}" ]] || fail N03-trace-copy
+ [[ $(bounded stat -c %s "$n03log/worker.trace.$sampled_pid") -le 1048576 ]] || fail N03-trace-bound
+ # Closed exact four lines; extra event/keys/bytes are rejected. Helper exit is not authority.
+ while :; do
+  remaining >/dev/null
+  [[ $(bounded stat -c %s -- "$n03log/broker.events.jsonl") -le 4096 ]] || fail N03-event-bound
+  if (( $(bounded head -c 4097 -- "$n03log/broker.events.jsonl" | bounded wc -l)>=3 )); then break; fi
+  kill -0 "$n03_broker_pid" 2>/dev/null || fail N03-broker-before-EOF; bounded sleep .01
+ done
+ n03_validate_event_data 3 "$n03log/broker.events.jsonl" || fail N03-peer-binding
+ bounded jq -se --argjson peer "$sampled_pid" --argjson uid "$wu" --argjson gid "$gid" \
+  'length==3 and (.[1]|keys)==["identity_kind","peer_gid","peer_pid","peer_uid","schema","stage"] and .[1].schema=="issue779-n03-managed-broker-event-v1" and .[1].stage=="peer" and .[1].peer_pid==$peer and .[1].peer_uid==$uid and .[1].peer_gid==$gid and .[1].identity_kind=="kernel-so-peercred-sample" and (.[2]|keys)==["peer_pid","request_bytes","schema","sent_bytes","stage"] and .[2].schema=="issue779-n03-managed-broker-event-v1" and .[2].stage=="eof" and .[2].peer_pid==$peer and .[2].request_bytes==0 and .[2].sent_bytes==0' "$n03log/broker.events.jsonl" >/dev/null || fail N03-peer-binding
+ after_dir=$(bounded stat -c '%d:%i:%u:%g:%a' "$n03dir/broker"); [[ $after_dir == "$before_dir" && $(bounded stat -c '%d:%i:%u:%g:%a' "$sock") == "$socket_pin" ]] || fail N03-socket-substitution
+ n03_sample "$broker_actual_pid" "$bu" "$hentry" "$n03log/broker-live-after.json" "$broker_parent" || fail N03-broker-continuity
+ [[ $(bounded jq -r .start_ticks "$n03log/broker-live-after.json") == "$(bounded jq -r .start_ticks "$n03log/broker-live.json")" ]] || fail N03-broker-continuity
+ # Original work allowance resumes only after owned worker exit plus authenticated peer/EOF and broker continuity.
+ n03_startup_active=0
+ printf 'R\n' >&"$release_fd"; exec {release_fd}>&-; release_fd=
+ broker_exit=0; join_owned n03_broker_pid || broker_exit=$?
+ [[ $broker_exit == 0 && -z $n03_broker_pid && ! -s $n03log/broker.stderr ]] || fail N03-broker-outcome
+ n03_validate_event_data 4 "$n03log/broker.events.jsonl" || fail N03-broker-result
+ bounded jq -se --argjson peer "$sampled_pid" 'length==4 and (.[3]|keys)==["native_acceptance","peer_pid","request_bytes","schema","sent_bytes","status"] and .[3].schema=="issue779-n03-managed-broker-result-v1" and .[3].status=="observed" and .[3].peer_pid==$peer and .[3].request_bytes==0 and .[3].sent_bytes==0 and .[3].native_acceptance==false' "$n03log/broker.events.jsonl" >/dev/null || fail N03-broker-result
+ [[ $(bounded stat -c %s "$n03log/broker.events.jsonl") -le 4096 ]] || fail N03-event-bound
+ [[ $(bounded getent passwd "$broker_name") == "$broker_pw" && $(bounded getent passwd "$worker_name") == "$worker_pw" && $(bounded getent group "$shared_name") == "$group_row" ]] || fail N03-NSS-after
+ verify_tree "$helper_root" "$helper_map" "$helper_map_sha" "$helper_nodes" "$helper_nodes_sha" tool 1 0
+ observed=1
+)
+
+for key in n03_helper_root n03_helper_map n03_helper_map_sha256 n03_helper_nodes n03_helper_nodes_sha256 n03_helper_entry_sha256 n03_helper_generation; do [[ -n ${!key} ]] || fail N03-missing-input; done
+n03_run "$n03_helper_root" "$n03_helper_map" "$n03_helper_map_sha256" "$n03_helper_nodes" "$n03_helper_nodes_sha256" "$n03_helper_entry_sha256" "$N03_BROKER_NAME" "$N03_WORKER_NAME" "$N03_SHARED_GROUP" "$N03_STARTUP_KIB" "$n03_helper_generation"
+n03_exit=0
+n03_result_sha256=$(bounded sha256sum "$log/n03/result.json"); n03_result_sha256=${n03_result_sha256:0:64}
+remaining >/dev/null
+# Existing N01 owner recipe follows unchanged.
+
+printf '%s\n' "$G" >"$guard/armed"; bounded chmod 600 "$guard/armed"
+[[ $(bounded stat -c '%u:%g:%a:%h' "$guard/armed") == 0:0:600:1 ]] || fail armed-guard
+fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
+unsafe='DOTNET_STARTUP_HOOKS DOTNET_ADDITIONAL_DEPS DOTNET_SHARED_STORE DOTNET_ROOT DOTNET_ROOT_X64 DOTNET_HOST_PATH DOTNET_ROLL_FORWARD DOTNET_ROLL_FORWARD_TO_PRERELEASE DOTNET_MULTILEVEL_LOOKUP CORECLR_ENABLE_PROFILING CORECLR_PROFILER CORECLR_PROFILER_PATH CORECLR_PROFILER_PATH_64 COR_ENABLE_PROFILING COR_PROFILER COR_PROFILER_PATH COMPlus_ReadyToRun COMPlus_ZapDisable'
+props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=240s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
+diagnostic_stage=sealed-inputs
+# Full destination and alias checks immediately before native dispatch. No extra nodes are skipped.
+verify_tree "$stage/tool" "$payload_manifest" "$payload_manifest_sha256" "$payload_nodes" "$payload_nodes_sha256" tool 1 1
+verify_tree "$stage/runtime" "$runtime_manifest" "$runtime_manifest_sha256" "$runtime_nodes" "$runtime_nodes_sha256" runtime 1 0
+verify_tree "$stage/subject" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source 1 0
+pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
+ordinary_os_batch_full_pass final
+pin_file "$os_audit" "$os_audit_sha256" 1048576
+(( $(remaining)>246 && job_deadline_epoch-$(bounded date -u +%s)>245 )) || fail native-life-outside-fixture
+for alternate_python_path in /usr/lib/python312.zip /usr/bin/pyvenv.cfg /usr/pyvenv.cfg; do
+ [[ ! -e $alternate_python_path && ! -L $alternate_python_path ]] || fail negative-python-alternate-prefix
+done
+# Existing OS audit schema must contain this fixed interpreter and COMPLETE fixed stdlib graph.
+# Current donor producer does not populate it; promotion remains false until that source-owned gap is reviewed.
+bounded jq -e 'any(.files[];.path=="/usr/bin/python3.12") and any(.elf[];.path=="/usr/bin/python3.12")' "$os_audit" >/dev/null || fail negative-python-audit-pending
+ancestor /usr/lib/python3.12
+# Exact complete audited membership is rechecked before and after individual pins.
+negative_stdlib_exact() {
+ [[ -n $1 && ${#1} -le 1048576 && ${#2} -le 1048576 && $1 == "$2" ]]
+}
+negative_stdlib_inventory() {
+ ancestor /usr/lib/python3.12
+ [[ $(bounded find -P /usr/lib/python3.12 ! -type d ! -type f ! -type l -print -quit) == '' ]] || fail negative-stdlib-special-node
+ [[ $(bounded find -P /usr/lib/python3.12 \( ! -uid 0 -o ! -gid 0 -o \( ! -type l -a -perm /022 \) \) -print -quit) == '' ]] || fail negative-stdlib-mutable
+ bounded /usr/bin/bash -o pipefail -c '/usr/bin/find -P /usr/lib/python3.12 \( -type f -o -type l \) -print | LC_ALL=C /usr/bin/sort | /usr/bin/head -c 1048577'
+}
+stdlib_expected=$(bounded jq -er '[.files[]|select(.path|startswith("/usr/lib/python3.12/"))|.path]|sort|if length>0 then join("\n") else error("empty-fixed-stdlib") end' "$os_audit")
+stdlib_files=$(negative_stdlib_inventory)
+negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib-membership
+# Literal file aliases use the exact recorded root-owned chain; directory aliases reject.
+while IFS= read -r python_file; do
+ [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
+ python_hash=$(bounded jq -er --arg p "$python_file" '[.files[]|select(.path==$p)] as $rows | if ($rows|length)==1 then $rows[0].sha256 else error("missing-fixed-pin") end' "$os_audit")
+ verify_os_path "$python_file" "$python_hash"
+ if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
+  python_resolved=$python_file
+  if python_alias=$(negative_os_alias_index "$python_file"); then
+   python_resolved=$(alias_walk "$python_alias")
+  fi
+  bounded jq -e --arg p "$python_resolved" '[.elf[]|select(.path==$p)]|length==1' "$os_audit" >/dev/null || fail negative-stdlib-elf-unreviewed
+ fi
+done <<<"$stdlib_files"
+stdlib_after=$(negative_stdlib_inventory)
+negative_stdlib_exact "$stdlib_expected" "$stdlib_after" || fail negative-stdlib-membership-after
+pin_file "$os_audit" "$os_audit_sha256" 1048576
+remaining >/dev/null
+
+# One root-selected BOOTTIME end; helper receives this same end, never a new stage allowance.
+monotonic_ms() { local up rest frac; IFS=" " read -r up rest </proc/uptime || return 1; [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1; frac=${up#*.}000; frac=${frac:0:3}; printf "%s" "$((10#${up%%.*}*1000+10#$frac))"; }
+n04_root_start_ms=$(monotonic_ms) || fail N04-clock
+n04_end_ms=$((n04_root_start_ms+240000)); ((n04_end_ms<work_end*1000)) || fail N04-original-root-bound
+readonly n04_root_start_ms n04_end_ms
+diagnostic_stage=n01
+launched=1
+(ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence supervise --request "$request" >"$log/n01.stdout" 2>"$log/n01.stderr") & launch_pid=$!
+pin_owned_pg "$launch_pid"
+
+
+# The root checkpoint writes the descriptor and separate root-private rendezvous before READY_PREPARED.
+workspace=/run/appsurface-evidence-$G
+descriptor=$workspace/worker/worker-control.json
+checkpoint=/run/appsurface-evidence-n04-$G/checkpoint.sock
+while [[ ! -f $descriptor || ! -S $checkpoint ]]; do
+ (( $(monotonic_ms)<n04_end_ms )) || fail N04-checkpoint-deadline
+ kill -0 "$launch_pid" 2>/dev/null || fail N04-root-ended-before-checkpoint
+ bounded sleep .01
+done
+ancestor "$workspace/worker"; ancestor "/run/appsurface-evidence-n04-$G"
+[[ $(bounded stat -c '%u:%g:%a:%h:%s' "$checkpoint") == 0:0:600:1:0 ]] || fail N04-checkpoint-root-name
+[[ $(bounded stat -c '%u:%a:%h' "$descriptor") == 0:440:1 ]] || fail N04-descriptor-owner
+request_sha=$(bounded sha256sum "$request");request_sha=${request_sha:0:64}
+descriptor_sha=$(bounded sha256sum "$descriptor");descriptor_sha=${descriptor_sha:0:64}
+pin_file "$request" "$request_sha" 65536;pin_file "$descriptor" "$descriptor_sha" 65536
+verify_tree "$stage/n04-helper" "$n04_helper_map" "$n04_helper_map_sha256" "$n04_helper_nodes" "$n04_helper_nodes_sha256" tool 1 0
+ordinary_os_batch_full_pass final
+# This fixed separate policy is PENDING actual image/syscall/capability review. No caller capability input exists.
+helper_remaining_ms=$((n04_end_ms-$(monotonic_ms)))
+((helper_remaining_ms>0)) || fail N04-helper-original-clock
+helper_seconds=$((helper_remaining_ms/1000)); ((helper_seconds>0)) || fail N04-helper-original-clock
+n04_props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 "--property=RuntimeMaxSec=${helper_seconds}s" --property=TimeoutStopSec=5s --property=NoNewPrivileges=yes --property=CapabilityBoundingSet=CAP_KILL\ CAP_CHOWN\ CAP_DAC_READ_SEARCH\ CAP_FOWNER\ CAP_SYS_PTRACE --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
+n04_args=(--execute --generation "$G" --descriptor "$descriptor" --descriptor-sha256 "$descriptor_sha" --request "$request" --request-sha256 "$request_sha" --deadline-monotonic-ms "$n04_end_ms")
+((${#n04_args[@]}==13)) || fail N04-helper-argv-shape
+n04_launched=1
+(ulimit -f 8192; ulimit -c 0; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$n04_unit" "${n04_props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$n04_entry" "${n04_args[@]}" >"$log/n04-helper.stdout" 2>"$log/n04-helper.stderr") & n04_launch_pid=$!
+pin_owned_pg "$n04_launch_pid"
+# Actual helper ExecMainPID sample is mandatory; a fast exit is inconclusive, never copied from result JSON.
+n04_helper_pid=
+while kill -0 "$n04_launch_pid" 2>/dev/null; do
+ candidate=$(bounded systemctl show "$n04_unit" --property=ExecMainPID --value)
+ if [[ $candidate =~ ^[1-9][0-9]*$ ]]; then n04_helper_pid=$candidate;break;fi
+ (( $(monotonic_ms)<n04_end_ms )) || fail N04-helper-sample-deadline
+ bounded sleep .01
+done
+[[ $n04_helper_pid =~ ^[1-9][0-9]*$ ]] || fail N04-helper-live-sample-inconclusive
+bounded /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.12 -I -S -B - "$private" "$n04_helper_pid" "$n04_unit" "$host" "$n04_entry" "${n04_args[@]}" <<'N04_LIVE_PY'
+import base64 as _issue779_b64, hashlib as _issue779_hash, zlib as _issue779_zlib
+_issue779_fixed_len=4661
+_issue779_fixed_sha='daa550bd9a1b96e3fbf81e927c3b09aadea5df7094f0ad180f69da4c6ad00138'
+_issue779_fixed_data='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'
+if not 0 < _issue779_fixed_len <= 262144 or len(_issue779_fixed_data)>524288:
+    raise ValueError('fixed-python-bound')
+_issue779_decoder=_issue779_zlib.decompressobj()
+_issue779_code=_issue779_decoder.decompress(_issue779_b64.b64decode(_issue779_fixed_data,validate=True),_issue779_fixed_len+1)
+if (len(_issue779_code)!=_issue779_fixed_len or not _issue779_decoder.eof or
+        _issue779_decoder.unused_data or _issue779_decoder.unconsumed_tail or
+        _issue779_hash.sha256(_issue779_code).hexdigest()!=_issue779_fixed_sha):
+    raise ValueError('fixed-python-pin')
+exec(compile(_issue779_code,'<stdin>','exec'),globals())
+N04_LIVE_PY
+# Both original launch registrations are joined, irrespective of the other's nonzero terminal result.
+set +e
+join_owned n04_launch_pid; n04_helper_exit=$?
+join_owned launch_pid; negative_launch=$?
+set -e
+[[ $n04_helper_exit == 0 && $negative_launch == 1 && -z $n04_launch_pid && -z $launch_pid && ! -s $log/n01.stdout ]] || fail N04-owned-outcomes
+[[ $(bounded stat -c '%u:%g:%a:%h' "$log/n01.stderr") == 0:0:600:1 && $(bounded stat -c %s "$log/n01.stderr") -le 6144 ]] || fail N04-root-stream
+[[ $(bounded stat -c '%u:%g:%a:%h' "$log/n04-helper.stdout") == 0:0:600:1 && $(bounded stat -c %s "$log/n04-helper.stdout") -le 4096 && ! -s $log/n04-helper.stderr ]] || fail N04-helper-stream
+pin_file "$descriptor" "$descriptor_sha" 65536;pin_file "$request" "$request_sha" 65536
+bounded /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.12 -I -S -B - "$private" "$workspace" "$G" "$request_sha" "$n04_unit" <<'N04_RECORD_PY'
+import base64 as _issue779_b64, hashlib as _issue779_hash, zlib as _issue779_zlib
+_issue779_fixed_len=27044
+_issue779_fixed_sha='67f48915dbd5b24f6129ca6959569c1decc65c0ca5b254b64532efb09c4c5fb5'
+_issue779_fixed_data='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'
+if not 0 < _issue779_fixed_len <= 262144 or len(_issue779_fixed_data)>524288:
+    raise ValueError('fixed-python-bound')
+_issue779_decoder=_issue779_zlib.decompressobj()
+_issue779_code=_issue779_decoder.decompress(_issue779_b64.b64decode(_issue779_fixed_data,validate=True),_issue779_fixed_len+1)
+if (len(_issue779_code)!=_issue779_fixed_len or not _issue779_decoder.eof or
+        _issue779_decoder.unused_data or _issue779_decoder.unconsumed_tail or
+        _issue779_hash.sha256(_issue779_code).hexdigest()!=_issue779_fixed_sha):
+    raise ValueError('fixed-python-pin')
+exec(compile(_issue779_code,'<stdin>','exec'),globals())
+N04_RECORD_PY
+[[ $(bounded stat -c '%u:%g:%a:%h' "$private/n04-account-ids.tsv") == 0:0:600:1 ]] || fail negative-account-data
+IFS=$'\t' read -r wu wg su sg rg extra <"$private/n04-account-ids.tsv"
+[[ -z ${extra:-} ]] || fail negative-account-data
+for value in "$wu" "$wg" "$su" "$sg" "$rg"; do [[ $value =~ ^[1-9][0-9]*$ ]] && ((value<4294967295)) || fail negative-account-id; done
+for index in 0 1; do
+ n=${names[$index]}; uid=$wu; gid=$wg; ((index==0)) || { uid=$su; gid=$sg; }
+ forward=$(bounded getent passwd "$n"); reverse=$(bounded getent passwd "$uid")
+ [[ $forward == "$reverse" && $forward != *$'\n'* ]] || fail negative-user-NSS
+ IFS=: read -r pn px pu pg rest <<<"$forward"
+ [[ $pn == "$n" && $pu == "$uid" && $pg == "$gid" ]] || fail negative-user-identity
+done
+for index in 0 1 2; do
+ n=${names[$index]}; gid=$wg; ((index!=1)) || gid=$sg; ((index!=2)) || gid=$rg
+ forward=$(bounded getent group "$n"); reverse=$(bounded getent group "$gid")
+ [[ $forward == "$reverse" && $forward != *$'\n'* ]] || fail negative-group-NSS
+ IFS=: read -r gn gx gg members extra <<<"$forward"
+ [[ $gn == "$n" && $gg == "$gid" && -z $members && -z ${extra:-} ]] || fail negative-group-identity
+done
+# Original process-group cleanup and deadlines still run through the original EXIT trap.
+
+verify_tree "$stage/n04-helper" "$n04_helper_map" "$n04_helper_map_sha256" "$n04_helper_nodes" "$n04_helper_nodes_sha256" tool 1 0
+remaining >/dev/null
+(( $(monotonic_ms)<n04_end_ms )) || fail N04-original-end
+success=1
