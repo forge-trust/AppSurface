@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Testing;
 using Npgsql;
@@ -912,7 +913,10 @@ public sealed class DurableDoctorInstalledToolTests
         TimeSpan? staleAfter)
     {
         Assert.False(run.TimedOut, "The installed doctor child process exceeded its finite timeout and was terminated.");
-        Assert.Equal(row.ExitCode, run.ExitCode);
+        Assert.True(
+            row.ExitCode == run.ExitCode,
+            $"Installed doctor scenario '{row.Id}' ({format}) expected exit code {row.ExitCode}, got {run.ExitCode}. "
+                + $"Sanitized diagnostics: {SafeDiagnosticSummary(run.StandardOutput, format)}");
         AssertOutputDoesNotExposeSecrets(run, connectionString);
         Assert.True(string.IsNullOrWhiteSpace(run.StandardError), "The installed doctor emitted unexpected stderr output.");
         Assert.True(run.StandardOutput.EndsWith('\n'), "The installed doctor output must end with a newline.");
@@ -952,6 +956,71 @@ public sealed class DurableDoctorInstalledToolTests
         if (row.TerminalCategories.Count != 0)
         {
             AssertTerminalCategories(run.StandardOutput, row);
+        }
+    }
+
+    private static string SafeDiagnosticSummary(string output, string format)
+    {
+        if (format != "json")
+        {
+            return $"findingCodes=[{string.Join(',', Regex.Matches(output, "ASDUR[0-9]{3}").Select(static match => match.Value).Distinct(StringComparer.Ordinal))}]";
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return "json=non-object";
+            }
+
+            var status = root.TryGetProperty("status", out var statusElement)
+                && statusElement.ValueKind == JsonValueKind.String
+                && statusElement.GetString() is { } candidateStatus
+                && candidateStatus is "passed" or "findings" or "failed" or "unavailable" or "canceled" or "invalid-input"
+                    ? candidateStatus
+                    : "unknown";
+            var checkStatuses = new List<string>();
+            if (root.TryGetProperty("requestedChecks", out var checksElement)
+                && checksElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var check in checksElement.EnumerateArray())
+                {
+                    var checkStatus = check.ValueKind == JsonValueKind.Object
+                        && check.TryGetProperty("status", out var value)
+                        && value.ValueKind == JsonValueKind.String
+                            ? value.GetString()
+                            : null;
+                    checkStatuses.Add(checkStatus is "passed" or "finding" or "not-checked" or "not-requested"
+                        ? checkStatus
+                        : "unknown");
+                }
+            }
+
+            var findingCodes = new List<string>();
+            if (root.TryGetProperty("findings", out var findingsElement)
+                && findingsElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var finding in findingsElement.EnumerateArray())
+                {
+                    var code = finding.ValueKind == JsonValueKind.Object
+                        && finding.TryGetProperty("code", out var codeElement)
+                        && codeElement.ValueKind == JsonValueKind.String
+                            ? codeElement.GetString()
+                            : null;
+                    if (code is not null && Regex.IsMatch(code, "\\AASDUR[0-9]{3}\\z", RegexOptions.CultureInvariant))
+                    {
+                        findingCodes.Add(code);
+                    }
+                }
+            }
+            return $"status={status}; checkStatuses=[{string.Join(',', checkStatuses)}]; "
+                + $"findingCodes=[{string.Join(',', findingCodes)}]";
+        }
+        catch (JsonException)
+        {
+            return "json=unparseable";
         }
     }
 
