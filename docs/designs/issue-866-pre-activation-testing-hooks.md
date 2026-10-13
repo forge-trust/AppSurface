@@ -29,7 +29,7 @@ The current SDK delivery is a configured factory with three ordered hooks, prese
 
 The stated purpose is “internal company project to unblock Skoolit QA.” The immediate users are engineers authoring Skoolit QA fixtures and scenarios. The [filed specification](https://github.com/forge-trust/AppSurface/issues/866) and pinned consumer source show the concrete integration gap. No named adopter, measured time savings, revenue, or runtime reproduction was supplied; those are not claimed.
 
-Evidence is source inspection against AppSurface commit `40de2ef62ad9e697929ef4bd56f0bfda2d813d72` and Skoolit commit `a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e`. The filed spec used AppSurface commit `c2f062f2a22afeff972c5c6512f1f34dd182db90`. This document proposes behavior; it does not report implementation, passing tests, or a published package.
+Evidence is source inspection against AppSurface commit `40de2ef62ad9e697929ef4bd56f0bfda2d813d72` and Skoolit commit `a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e`. The filed spec used AppSurface commit `c2f062f2a22afeff972c5c6512f1f34dd182db90`. At the original October 10 planning baseline, this document proposed behavior and did not report implementation, passing tests, or a published package. Current SDK delivery is recorded in the Problem Statement above.
 
 ## Status Quo
 
