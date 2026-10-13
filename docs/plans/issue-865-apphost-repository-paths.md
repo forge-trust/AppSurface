@@ -870,3 +870,7 @@ Visual inspection found an existing main-branch release outline entry, `Structur
 **VERDICT:** Execution plan APPROVED by user A, including E0. CEO + DX CLEAR for planning. Eng findings are mapped to future work; no runtime/shipping clearance claimed; eng review required after implementation.
 
 NO UNRESOLVED DECISIONS
+
+### D7 — Remaining release-page visual baselines
+
+On 2026-10-12, the user approved refreshing exactly the three remaining Graphite release-page baselines: `system-dark`, `preference-light`, and `preference-dark`, each at 1440 × 1000. The D6 owning-test rerun passed the Light test and reached the Graphite system-dark release comparison, which still lacked the existing main-branch “Structural coverage classifier pilot” outline entry. The three reviewed captures were bound to before/after SHA-256 digests in the private proposal. This is an explicitly approved validation correction; visual tolerances, test logic, and coverage thresholds remain unchanged. Both owning tests and the unchanged full solution gate must pass on the committed candidate before draft PR creation.
