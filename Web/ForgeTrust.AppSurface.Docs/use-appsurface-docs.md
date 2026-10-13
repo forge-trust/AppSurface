@@ -781,7 +781,6 @@ Read the three existing Markdown sources and paired metadata before editing. Mer
    summary: Run the RazorWire MVC sample and inspect its interactive server-rendered flows.
    page_type: example
    component: ForgeTrust.RazorWire
-   sequence_key: razorwire-proof
    order: 20
    related_pages:
      - Web/ForgeTrust.RazorWire/README.md
@@ -798,7 +797,6 @@ Read the three existing Markdown sources and paired metadata before editing. Mer
    title: Security & Anti-Forgery
    page_type: troubleshooting
    component: ForgeTrust.RazorWire
-   sequence_key: razorwire-proof
    order: 30
    related_pages:
      - Web/ForgeTrust.RazorWire/README.md
