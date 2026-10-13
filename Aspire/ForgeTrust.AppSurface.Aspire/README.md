@@ -18,6 +18,8 @@ It also does not configure application-side OpenTelemetry exporters. Use [`Forge
 
 For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Native AppHosts that build directly from [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) should continue using [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
 
+For files stored in the source repository, see [Repository-relative assets](#repository-relative-assets) for the root-selection contract and a component example.
+
 <!-- appsurface-release-guidance: begin -->
 ## Release Guidance
 
@@ -50,6 +52,59 @@ aspire run --apphost examples/aspire-apphost/AspireAppHostExample.csproj -- loca
 
 The `-- local` token selects the AppSurface `AspireProfile` command. Aspire opens the dashboard and shows the `web` project resource.
 The web example registers `ForgeTrust.AppSurface.Observability`, so hitting the web app should produce app-side telemetry in the Aspire dashboard when Aspire supplies `OTEL_EXPORTER_OTLP_ENDPOINT`.
+
+## Repository-relative assets
+
+Use `AspireStartupContext.GetPathFromRoot(relativePath)` when a component needs a trusted asset stored in the source repository, such as an import file or a directory mounted into a resource. The context snapshots its root once when constructed: by default it searches upward from `builder.AppHostDirectory` and selects the nearest ancestor containing a `.git` directory or a regular `.git` file. A `.git` file is treated as a discovery marker; its contents are not read and Git is not invoked. Nested repositories therefore use the nearest marker. The AppHost directory is the search anchor, not automatically the repository root.
+
+An explicit `applicationRoot` takes precedence over discovery. It must be nonblank and fully qualified; it is normalized to a full path but does not need to exist. Validation happens before discovery. If discovery has no usable root (including missing metadata or a missing/nonabsolute AppHost anchor), context construction and path-free components remain usable; the first `GetPathFromRoot` call throws an actionable `InvalidOperationException` directing the caller to repository metadata or an explicit root. The helper computes a path only: the component must check that its file or directory exists and report an actionable asset-specific error. It preserves `Path.Combine` behavior for empty, rooted, and `..` inputs and does not enforce containment, so supply trusted repository-relative paths.
+
+For a component in a normal profile or factory, recover from missing metadata by running it from a valid AppHost checkout. There is no profile, CLI, or factory root option. An explicit root is available only to a caller that constructs and owns an `AspireStartupContext` directly. Project-local files that should travel with the AppHost should instead be resolved from Aspire's `builder.AppHostDirectory`.
+
+Prerequisites are the .NET SDK, the existing AppHost project using the Aspire AppHost SDK, and Git checkout metadata (a `.git` directory or file) for default discovery. Add the package to the AppHost project with the existing command:
+
+```bash
+dotnet add package ForgeTrust.AppSurface.Aspire
+```
+
+The following component resolves the exact realm file and theme directory used by the pinned Skoolit consumer. Given a checkout rooted at `/work/skoolit`, the expected absolute paths are `/work/skoolit/src/Skoolit.AppHost/keycloak/skoolit-realm.json` and `/work/skoolit/src/Skoolit.KeycloakTheme/theme/skoolit`. Check each asset separately before returning the parameter/resource, and do so during graph generation before the AppHost builds or starts containers:
+
+```csharp
+using System.IO;
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using ForgeTrust.AppSurface.Aspire;
+
+public sealed class KeycloakAssetsComponent : IAspireComponent<ParameterResource>
+{
+    public IResourceBuilder<ParameterResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        var realmPath = context.GetPathFromRoot(
+            "src/Skoolit.AppHost/keycloak/skoolit-realm.json");
+        var themePath = context.GetPathFromRoot(
+            "src/Skoolit.KeycloakTheme/theme/skoolit");
+
+        if (!File.Exists(realmPath))
+        {
+            throw new FileNotFoundException(
+                $"Keycloak realm file was not found at '{realmPath}'. Check the repository checkout and asset path.",
+                realmPath);
+        }
+
+        if (!Directory.Exists(themePath))
+        {
+            throw new DirectoryNotFoundException(
+                $"Keycloak theme directory was not found at '{themePath}'. Check the repository checkout and asset path.");
+        }
+
+        return appBuilder.AddParameter("keycloak-realm-path", realmPath);
+    }
+}
+```
+
+The returned parameter illustrates a valid resource shape; a consumer can instead use these already-validated paths to configure its existing resource. Path resolution is independent of process working directory and executable output location, but it does not create or validate the assets for you.
 
 ## Minimal Shape
 

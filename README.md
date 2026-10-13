@@ -132,6 +132,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 ### [Aspire](./Aspire/README.md)
 
 - [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
+- [Aspire repository-relative assets](./Aspire/ForgeTrust.AppSurface.Aspire/README.md#repository-relative-assets) – Resolve checked-out asset paths independently of process working directory and test output.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Test/CI-only explicit EvidenceHost lifecycle for consumer-owned Aspire readiness and E2E producers, separate from the normal AppHost.
 
 ### [Deployment](./Deployment/README.md)
