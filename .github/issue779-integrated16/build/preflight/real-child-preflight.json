@@ -1,0 +1,72 @@
+{
+  "actual_group_leader_launches": [
+    {
+      "expected_pgid": 2080,
+      "leader_pid": 2080,
+      "new_session_requested": true,
+      "observed_pgid": 2080,
+      "pgid_matches_leader": true
+    },
+    {
+      "expected_pgid": 2083,
+      "leader_pid": 2083,
+      "new_session_requested": true,
+      "observed_pgid": 2083,
+      "pgid_matches_leader": true
+    },
+    {
+      "expected_pgid": 2087,
+      "leader_pid": 2087,
+      "new_session_requested": true,
+      "observed_pgid": 2087,
+      "pgid_matches_leader": true
+    },
+    {
+      "expected_pgid": 2090,
+      "leader_pid": 2090,
+      "new_session_requested": true,
+      "observed_pgid": 2090,
+      "pgid_matches_leader": true
+    }
+  ],
+  "build_or_compile_started": false,
+  "builder_dir": "/home/runner/work/AppSurface/AppSurface/.github/issue779-integrated16/preflight",
+  "deadline_seconds": 45,
+  "detail": null,
+  "elapsed_seconds": 0.699086,
+  "errors": 0,
+  "failures": 0,
+  "group_launches_with_matching_pgid": 4,
+  "group_launches_with_new_session": 4,
+  "input_sha256": {
+    "integrated16_build.py": "f9500143e2d554de51e03f9ff9d3899287369394a6689c381599f22541d4b9c7",
+    "integrated16_build_contract.py": "4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8",
+    "test_integrated16_build.py": "4d37c8944a26ada6e2d4550359310dfbe2d3701a7b867b1bfd64ae6d807a7815"
+  },
+  "log": {
+    "bytes": 548,
+    "limit_bytes": 1048576,
+    "overflow": false,
+    "path": "/home/runner/work/_temp/issue779-integrated16-preflight/real-child-preflight.log",
+    "sha256": "80dcd18b1a3254bcfe4aa1e47a741821e8722244e2d62bd1786b2f5ccbf8f64c"
+  },
+  "native_or_ci_result_claimed": false,
+  "platform": "linux",
+  "python": "3.12.3",
+  "required_control_tests": 3,
+  "required_existing_tests": [
+    "test_real_recipe_signals_while_leader_is_still_owned",
+    "test_real_descendant_cleanup_and_combined_pipe_cap"
+  ],
+  "required_group_leader_launches": 4,
+  "schema": "issue779-integrated16-linux-real-child-preflight-v1",
+  "selected_tests": [
+    "test_integrated16_build.IntegratedBuildTests.test_real_recipe_signals_while_leader_is_still_owned",
+    "test_integrated16_build.IntegratedBuildTests.test_real_descendant_cleanup_and_combined_pipe_cap",
+    "__main__.CombinedLogCapControl.test_combined_log_cap_joins_real_process_group"
+  ],
+  "skipped": 0,
+  "status": "passed",
+  "successful_control_tests": 3,
+  "tests_run": 3
+}
