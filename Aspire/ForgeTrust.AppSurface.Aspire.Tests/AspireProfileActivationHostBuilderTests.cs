@@ -140,6 +140,67 @@ public sealed class AspireProfileActivationHostBuilderTests
         Assert.Equal(0, factory.Returned.SyncDisposeCount);
     }
 
+    // Value: protects=one cleanup for a returned provider under reentry and concurrent callers;
+    // fails_when=cleanup starts before its completion task is published or reentry joins itself;
+    // why_new=existing concurrent cleanup covers provider leases, not ownership-scope reentry;
+    // seam=none; no_claim=custom providers that fail before returning remain caller-owned.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealHost_FailedHostResolutionReentrantCleanupDisposesProviderOnce(bool cleanupFails)
+    {
+        var ownership = new AspireProfileActivationHostBuilder();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var primary = new InvalidOperationException("reentrant-host-resolution-failure");
+        var cleanup = new InvalidOperationException("reentrant-provider-cleanup-failure");
+        var factory = new ProbeFactory();
+        factory.BeforeDisposal = async () =>
+        {
+            if (factory.Returned!.AsyncDisposeCount == 1)
+            {
+                await ownership.DisposeAsync();
+            }
+
+            entered.TrySetResult();
+            await release.Task;
+            if (cleanupFails) throw cleanup;
+        };
+        var builder = ownership.ConfigureDefaults([]).UseServiceProviderFactory(factory);
+        builder.ConfigureServices((_, services) => services.AddSingleton<IHost>(_ => throw primary));
+        Assert.Same(primary, Assert.Throws<InvalidOperationException>(() => builder.Build()));
+
+        var first = ownership.DisposeAsync().AsTask();
+        Task? second = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            second = ownership.DisposeAsync().AsTask();
+            Assert.False(first.IsCompleted);
+            Assert.False(second.IsCompleted);
+            Assert.Equal(1, factory.Returned!.AsyncDisposeCount);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        if (cleanupFails)
+        {
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => first.WaitAsync(TimeSpan.FromSeconds(5))));
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => second!.WaitAsync(TimeSpan.FromSeconds(5))));
+            Assert.Same(cleanup, await Assert.ThrowsAsync<InvalidOperationException>(() => ownership.DisposeAsync().AsTask()));
+        }
+        else
+        {
+            await Task.WhenAll(first, second!).WaitAsync(TimeSpan.FromSeconds(5));
+            await ownership.DisposeAsync();
+        }
+
+        Assert.Equal(1, factory.Returned!.AsyncDisposeCount);
+        Assert.Equal(0, factory.Returned.SyncDisposeCount);
+    }
+
     [Fact]
     public async Task RealHost_SuccessRetainsSelectedProviderObjectAndHostDisposalPolicy()
     {
@@ -673,18 +734,30 @@ public sealed class AspireProfileActivationHostBuilderTests
     private sealed class ProbeFactory : IServiceProviderFactory<IServiceCollection>
     {
         public ProbeServiceProvider? Returned { get; private set; }
+        public Func<ValueTask>? BeforeDisposal { get; set; }
         public IServiceCollection CreateBuilder(IServiceCollection services) => services;
         public IServiceProvider CreateServiceProvider(IServiceCollection containerBuilder) =>
-            Returned = new ProbeServiceProvider(containerBuilder.BuildServiceProvider());
+            Returned = new ProbeServiceProvider(containerBuilder.BuildServiceProvider(), BeforeDisposal);
     }
 
-    private sealed class ProbeServiceProvider(ServiceProvider inner) : IServiceProvider, IDisposable, IAsyncDisposable
+    private sealed class ProbeServiceProvider(ServiceProvider inner, Func<ValueTask>? beforeDisposal = null) : IServiceProvider, IDisposable, IAsyncDisposable
     {
         public int SyncDisposeCount { get; private set; }
         public int AsyncDisposeCount { get; private set; }
         public object? GetService(Type serviceType) => inner.GetService(serviceType);
         public void Dispose() { SyncDisposeCount++; inner.Dispose(); }
-        public async ValueTask DisposeAsync() { AsyncDisposeCount++; await inner.DisposeAsync(); }
+        public async ValueTask DisposeAsync()
+        {
+            AsyncDisposeCount++;
+            try
+            {
+                if (beforeDisposal is not null) await beforeDisposal();
+            }
+            finally
+            {
+                await inner.DisposeAsync();
+            }
+        }
     }
 
     private sealed class CallerSingleton : IDisposable

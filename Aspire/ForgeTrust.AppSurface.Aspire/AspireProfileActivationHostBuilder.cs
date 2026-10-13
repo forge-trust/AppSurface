@@ -33,7 +33,8 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
     private IFileProvider? _defaultFileProvider;
     private IServiceProvider? _serviceProvider;
     private IHost? _host;
-    private Task? _disposeTask;
+    private TaskCompletionSource? _disposeCompletion;
+    private readonly AsyncLocal<bool> _insideDisposal = new();
     private bool _disposing;
 
     /// <summary>
@@ -124,15 +125,46 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
     /// </summary>
     /// <returns>A value task that completes after every acquired ownership lease has been attempted.</returns>
     /// <remarks>
+    /// A shared completion is published before cleanup starts. Calls from that cleanup flow return immediately;
+    /// independent callers join its completion and observe the same first error.
     /// Cleanup continues after secondary errors and rethrows the first error. The activation factory suppresses these
     /// errors only when it already has a primary creation failure. Once a host exists, file/provider cleanup follows
     /// the host's disposal policy; configuration leases additionally drain detached and partially constructed trees.
     /// </remarks>
     public ValueTask DisposeAsync()
     {
+        if (_insideDisposal.Value)
+        {
+            return ValueTask.CompletedTask;
+        }
+
         lock (_ownershipLock)
         {
-            return new ValueTask(_disposeTask ??= DisposeOwnedAsync());
+            if (_disposeCompletion is null)
+            {
+                _disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _ = CompleteOwnedDisposalAsync(_disposeCompletion);
+            }
+
+            return new ValueTask(_disposeCompletion.Task);
+        }
+    }
+
+    private async Task CompleteOwnedDisposalAsync(TaskCompletionSource completion)
+    {
+        _insideDisposal.Value = true;
+        try
+        {
+            await DisposeOwnedAsync().ConfigureAwait(false);
+            completion.TrySetResult();
+        }
+        catch (Exception error)
+        {
+            completion.TrySetException(error);
+        }
+        finally
+        {
+            _insideDisposal.Value = false;
         }
     }
 
