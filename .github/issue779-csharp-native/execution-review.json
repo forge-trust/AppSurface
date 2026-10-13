@@ -1,0 +1,99 @@
+{
+  "branch": "codex/issue779-csharp-linux-native-20261013-n10-workflow-review-binding-v12",
+  "clear": true,
+  "findings": [],
+  "input_bindings": {
+    ".github/issue779-csharp-build/build-fdd.sh": {
+      "bytes": 44836,
+      "mode": "0644",
+      "sha256": "695457f69720419b6301f7c45eac10477ed5a6cec15659c6f448c332e8763280"
+    },
+    ".github/issue779-csharp-build/capture-receipt.json": {
+      "bytes": 656713,
+      "mode": "0644",
+      "sha256": "653d30169f6fc3aed53274349304dfebc3aff2b529e42bf3a4524a37fa546fd2"
+    },
+    ".github/issue779-csharp-native/README.md": {
+      "bytes": 9650,
+      "mode": "0644",
+      "sha256": "affef8b83f893b6623ad99c2df7b1ccaa259b2230a1ece86b4ae300dd81ab4ef"
+    },
+    ".github/issue779-csharp-native/acquire-inbound.sh": {
+      "bytes": 20740,
+      "mode": "0644",
+      "sha256": "6ce3cee6a9224a869c12e15e55b46af2e54cb353443b449da3ce6b75a9765ef2"
+    },
+    ".github/issue779-csharp-native/check_n10_pending_start.py": {
+      "bytes": 10460,
+      "mode": "0644",
+      "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
+    },
+    ".github/issue779-csharp-native/checkpoint-n10-pending-start.sh": {
+      "bytes": 85534,
+      "mode": "0644",
+      "sha256": "43c4493e34ed34d129a2c020364bbc21363408651262736457eb15efb9bb7878"
+    },
+    ".github/issue779-csharp-native/prepare-os-audit-v2.py": {
+      "bytes": 33200,
+      "mode": "0644",
+      "sha256": "b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0"
+    },
+    ".github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
+      "bytes": 25059,
+      "mode": "0644",
+      "sha256": "f3333d1c11db8f5515635e71cf20fce5a2deb5bec27694dc49d234df130388f5"
+    },
+    ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
+      "bytes": 9046,
+      "mode": "0644",
+      "sha256": "42dc7af2404664354b9e734824c07c9b7b3f051a66551c69ee8614d4fcdf7ef5"
+    },
+    ".github/issue779-csharp-native/retain-native.sh": {
+      "bytes": 11724,
+      "mode": "0644",
+      "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
+    },
+    ".github/issue779-csharp-native/run-native.py": {
+      "bytes": 60287,
+      "mode": "0644",
+      "sha256": "80598bcce7f3edd6fd63fff9eeef4fa5218fa558ce5ef82a61483fb2375cf49a"
+    },
+    ".github/issue779-csharp-native/source-review.json": {
+      "bytes": 2806,
+      "mode": "0644",
+      "sha256": "44943f3db92dbc350279b6c989476f560aac3127f1de7f038228eae6f165483d"
+    },
+    ".github/issue779-csharp-native/test_actual_batch_parser.py": {
+      "bytes": 16628,
+      "mode": "0644",
+      "sha256": "94cb67b53e57cb2fdd2c655254665d27cbb6b8c353ab88f1000ed4df447257d4"
+    },
+    ".github/issue779-csharp-native/test_n10_pending_start.py": {
+      "bytes": 34501,
+      "mode": "0644",
+      "sha256": "9c898821ba09ac1fb15655734341b81e6ef9cc02d9568afc93ceb4d33bc8c182"
+    },
+    ".github/workflows/issue779-csharp-linux-native.yml": {
+      "bytes": 25456,
+      "mode": "0644",
+      "sha256": "93abc674c117506e57a723d5a0d62fad5ccb2ee735884bd531e6e04c3aaa7089"
+    }
+  },
+  "native_acceptance": false,
+  "native_credit": false,
+  "native_execution": false,
+  "released": true,
+  "review_gates": {
+    "BUILD_REVIEWED": true,
+    "N10_FIXTURE_REVIEW_CLEAR": true,
+    "N10_NATIVE_HANDOFF_REVIEWED": true,
+    "N10_ROOT_CLEANUP_REVIEW_CLEAR": true,
+    "N10_SOURCE_CAPTURE_REVIEW_CLEAR": true,
+    "OS_AUDIT_REVIEWED": true,
+    "ROOT_TRANSPORT_REVIEWED": true,
+    "UBUNTU_RUNTIME_REVIEWED": true
+  },
+  "schema": "issue779-n10-workflow-execution-review-v1",
+  "source_capture_sha256": "653d30169f6fc3aed53274349304dfebc3aff2b529e42bf3a4524a37fa546fd2",
+  "source_commit": "0c100a94d93f82fd633e5674009a41659940d010"
+}
