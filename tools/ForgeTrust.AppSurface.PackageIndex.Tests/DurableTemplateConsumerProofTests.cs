@@ -244,6 +244,10 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
     [InlineData(4, "native-authentication")]
     [InlineData(5, "native-smoke-execution")]
     [InlineData(6, "native-cleanup")]
+    [InlineData(7, "native-initdb-exit")]
+    [InlineData(8, "native-initdb-timeout")]
+    [InlineData(9, "native-initdb-adapter")]
+    [InlineData(10, "native-initdb-termination")]
     [InlineData(99, "native-smoke")]
     public async Task NativeFailureReceiptProjectsOnlyClosedStagesAndNeverCallbackDiagnostics(int stage, string expectedPhase)
     {

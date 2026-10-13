@@ -249,7 +249,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 }
                 throw;
             }
-            catch
+            catch (Exception setupException)
             {
                 var failedPhase = cluster._failurePhase;
                 try
@@ -265,6 +265,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 }
 
                 var failure = new PackageIndexException($"Native PostgreSQL setup failed during {failedPhase}; child diagnostics were suppressed.");
+                NativePostgreSqlFailure.CopyAnnotation(setupException, failure);
                 NativePostgreSqlFailure.Annotate(failure, failedPhase switch
                 {
                     "initdb" => NativePostgreSqlFailureStage.InitDb,
@@ -396,21 +397,30 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         catch (NativePostgreSqlBootstrapTerminationException)
         {
             _bootstrapProcessTerminationVerified = false;
-            throw new PackageIndexException("Native PostgreSQL initdb process termination could not be verified; child diagnostics were suppressed.");
+            throw BootstrapFailure("Native PostgreSQL initdb process termination could not be verified; child diagnostics were suppressed.",
+                NativePostgreSqlFailureStage.InitDbTermination);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            NativePostgreSqlFailure.Annotate(exception, NativePostgreSqlFailureStage.InitDbAdapter);
+            throw;
         }
 
         _bootstrapProcessTerminationVerified = initResult.ProcessTerminationVerified;
         if (!_bootstrapProcessTerminationVerified)
         {
-            throw new PackageIndexException("Native PostgreSQL initdb process termination could not be verified; child diagnostics were suppressed.");
+            throw BootstrapFailure("Native PostgreSQL initdb process termination could not be verified; child diagnostics were suppressed.",
+                NativePostgreSqlFailureStage.InitDbTermination);
         }
         if (initResult.TimedOut)
         {
-            throw new PackageIndexException("Native PostgreSQL initdb timed out; child diagnostics were suppressed.");
+            throw BootstrapFailure("Native PostgreSQL initdb timed out; child diagnostics were suppressed.",
+                NativePostgreSqlFailureStage.InitDbTimeout);
         }
         if (initResult.ExitCode != 0)
         {
-            throw new PackageIndexException($"Native PostgreSQL initdb failed with exit code {initResult.ExitCode}; child diagnostics were suppressed.");
+            throw BootstrapFailure($"Native PostgreSQL initdb failed with exit code {initResult.ExitCode}; child diagnostics were suppressed.",
+                NativePostgreSqlFailureStage.InitDbExit);
         }
 
         _failurePhase = "post-initdb validation and configuration";
@@ -510,6 +520,13 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
 
             await Task.Delay(Math.Min(100, remaining), cancellationToken);
         }
+    }
+
+    private static PackageIndexException BootstrapFailure(string message, NativePostgreSqlFailureStage stage)
+    {
+        var failure = new PackageIndexException(message);
+        NativePostgreSqlFailure.Annotate(failure, stage);
+        return failure;
     }
 
     private void ConfigurePrivateCluster()
@@ -1722,7 +1739,15 @@ internal enum NativePostgreSqlFailureStage
     /// <summary>The generated ordinary-startup smoke did not complete its required proof.</summary>
     Smoke,
     /// <summary>Owned cluster cleanup could not be verified.</summary>
-    Cleanup
+    Cleanup,
+    /// <summary>initdb returned a nonzero exit status after verified termination.</summary>
+    InitDbExit,
+    /// <summary>initdb exceeded its original setup deadline and was verified stopped.</summary>
+    InitDbTimeout,
+    /// <summary>The bootstrap adapter failed before a structured result was available.</summary>
+    InitDbAdapter,
+    /// <summary>initdb or its output streams could not be verified stopped.</summary>
+    InitDbTermination
 }
 
 /// <summary>Attaches and projects closed native stages without inspecting or retaining exception diagnostics.</summary>
@@ -1741,6 +1766,15 @@ internal static class NativePostgreSqlFailure
         if (!exception.Data.Contains(StageKey)) exception.Data[StageKey] = stage;
     }
 
+    /// <summary>Copies only a supported private stage annotation to a sanitized setup wrapper.</summary>
+    /// <param name="source">Original failure; its message and other metadata are never read.</param>
+    /// <param name="target">Sanitized wrapper; an existing annotation is preserved.</param>
+    internal static void CopyAnnotation(Exception source, Exception target)
+    {
+        if (source.Data[StageKey] is NativePostgreSqlFailureStage stage && ReadReceiptPhase(source) is not null)
+            Annotate(target, stage);
+    }
+
     /// <summary>Returns a fixed receipt identifier, or null when no supported native annotation exists.</summary>
     /// <param name="exception">Failure to inspect without reading its message or other metadata.</param>
     /// <returns>A bounded native stage identifier, or null for an unannotated or unsupported category.</returns>
@@ -1754,6 +1788,10 @@ internal static class NativePostgreSqlFailure
         NativePostgreSqlFailureStage.Authentication => "native-authentication",
         NativePostgreSqlFailureStage.Smoke => "native-smoke-execution",
         NativePostgreSqlFailureStage.Cleanup => "native-cleanup",
+        NativePostgreSqlFailureStage.InitDbExit => "native-initdb-exit",
+        NativePostgreSqlFailureStage.InitDbTimeout => "native-initdb-timeout",
+        NativePostgreSqlFailureStage.InitDbAdapter => "native-initdb-adapter",
+        NativePostgreSqlFailureStage.InitDbTermination => "native-initdb-termination",
         _ => null
     };
 }

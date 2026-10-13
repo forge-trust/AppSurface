@@ -268,8 +268,16 @@ The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/m
 
 For a failed native callback, `FailurePhase` projects a closed observation stage: `native-acquisition`,
 `native-initdb`, `native-startup`, `native-ownership`, `native-authentication`, `native-smoke-execution`, or
-`native-cleanup`. Unannotated or unsupported stages retain `native-smoke`. The internal `NativePostgreSqlFailure`
-helper preserves the first typed annotation on an exception and reads only its private stage key; it never projects
+`native-cleanup`. Initialization results further distinguish `native-initdb-exit` (verified nonzero exit),
+`native-initdb-timeout` (deadline exceeded with verified termination), `native-initdb-adapter` (no structured
+bootstrap result), and `native-initdb-termination` (termination or stream settlement unverified). The last
+outcome normally becomes `native-cleanup` when uncertain termination prevents safe removal of the owned root.
+Legacy or otherwise unclassified initialization failures retain `native-initdb`. These labels identify observed
+outcomes, not underlying causes; for example, an exit label does not diagnose a credential or console problem.
+Unannotated or unsupported stages retain `native-smoke`. The internal `NativePostgreSqlFailure`
+helper preserves the first typed annotation on an exception and copies only supported stages into sanitized
+setup wrappers through `CopyAnnotation(source, target)`. Existing target annotations take precedence; missing
+or undefined source stages and unrelated metadata are ignored. The helper reads only its private stage key; it never projects
 exception text or arbitrary metadata. Use the stage to choose the next target-host diagnostic, rather than infer a
 root cause from it. `NativeTools` is absent after any failed native callback, including smoke or cleanup failure, so
 its absence does not establish that setup failed. Every failed receipt remains rejected by the

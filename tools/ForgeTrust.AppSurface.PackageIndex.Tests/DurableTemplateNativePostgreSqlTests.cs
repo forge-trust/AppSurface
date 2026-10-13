@@ -277,7 +277,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
-        Assert.Equal("native-initdb", NativePostgreSqlFailure.ReadReceiptPhase(error));
+        Assert.Equal("native-initdb-exit", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("initdb", error.Message, StringComparison.OrdinalIgnoreCase);
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -294,7 +294,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
-        Assert.Equal("native-initdb", NativePostgreSqlFailure.ReadReceiptPhase(error));
+        Assert.Equal("native-initdb-timeout", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains("initdb", error.Message, StringComparison.OrdinalIgnoreCase);
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
@@ -320,6 +320,61 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         Assert.True(Directory.Exists(fixture.OwnedRoot));
         Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
         Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BootstrapAdapterFailureHasSafeOutcomeAndCancellationRemainsCancellation(bool cancelled)
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        const string diagnostic = "private-bootstrap-adapter-detail";
+        fixture.Bootstrap.AfterInitialize = _ =>
+        {
+            if (cancelled) throw new OperationCanceledException(diagnostic);
+            throw new IOException(diagnostic);
+        };
+
+        if (cancelled)
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() => fixture.StartAsync());
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+            Assert.Equal("native-initdb-adapter", NativePostgreSqlFailure.ReadReceiptPhase(error));
+            Assert.DoesNotContain(diagnostic, error.ToString(), StringComparison.Ordinal);
+        }
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData(99, null)]
+    [InlineData(7, "native-initdb-exit")]
+    [InlineData(8, "native-initdb-timeout")]
+    [InlineData(9, "native-initdb-adapter")]
+    [InlineData(10, "native-initdb-termination")]
+    public void NativeAnnotationCopyRetainsOnlySupportedPrivateStage(int? stage, string? expected)
+    {
+        var source = new IOException("private-detail");
+        source.Data["untrusted-stage"] = "private-bootstrap-detail";
+        if (stage is { } value) NativePostgreSqlFailure.Annotate(source, (NativePostgreSqlFailureStage)value);
+        var target = new PackageIndexException("sanitized");
+
+        NativePostgreSqlFailure.CopyAnnotation(source, target);
+
+        Assert.Equal(expected, NativePostgreSqlFailure.ReadReceiptPhase(target));
+        Assert.DoesNotContain("private", target.ToString(), StringComparison.Ordinal);
+        NativePostgreSqlFailure.Annotate(target, NativePostgreSqlFailureStage.Cleanup);
+        NativePostgreSqlFailure.CopyAnnotation(source, target);
+        Assert.Equal(expected ?? "native-cleanup", NativePostgreSqlFailure.ReadReceiptPhase(target));
+
+        var cleanupFailure = new PackageIndexException("sanitized cleanup");
+        NativePostgreSqlFailure.Annotate(cleanupFailure, NativePostgreSqlFailureStage.Cleanup);
+        NativePostgreSqlFailure.CopyAnnotation(source, cleanupFailure);
+        Assert.Equal("native-cleanup", NativePostgreSqlFailure.ReadReceiptPhase(cleanupFailure));
     }
 
     [Fact]
