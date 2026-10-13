@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.ExceptionServices;
-using Microsoft.Extensions.FileProviders;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Eventing;
@@ -8,6 +7,7 @@ using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Aspire.Testing;
