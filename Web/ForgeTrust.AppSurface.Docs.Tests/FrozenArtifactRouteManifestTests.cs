@@ -58,6 +58,9 @@ public sealed class FrozenArtifactRouteManifestTests : IDisposable
         Assert.True(loaded, issue);
         Assert.True(manifest.HtmlUsesExportRootUrls);
         Assert.Equal(
+            new[] { "guide#overview", "guide.md", "guide.md", "legacy-guide", "", "README.md", "README.md" },
+            manifest.PublicRoutePaths);
+        Assert.Equal(
             new[] { "docs/guide.html", "index.html" },
             manifest.CanonicalArtifactPaths.OrderBy(path => path, StringComparer.Ordinal));
         Assert.True(manifest.TryResolveAlias("legacy-guide", out var canonicalRoute));
@@ -67,6 +70,19 @@ public sealed class FrozenArtifactRouteManifestTests : IDisposable
         Assert.True(manifest.TryResolveCanonicalArtifactPath(string.Empty, out var rootArtifact));
         Assert.Equal("index.html", rootArtifact);
         Assert.False(manifest.TryResolveCanonicalArtifactPath("missing", out _));
+    }
+
+    [Fact]
+    public void Load_ShouldRetainExportRootMappingsAlongsideAliasNamespaceRoutes()
+    {
+        var manifest = Load(CreateManifest(
+            "export-root",
+            new EntrySpec("guide", "docs/guide.html", ["guide.md"], ["legacy-guide"])));
+
+        Assert.True(manifest.HtmlUsesExportRootUrls);
+        Assert.Equal(new[] { "guide", "guide.md", "guide.md", "legacy-guide" }, manifest.PublicRoutePaths);
+        Assert.True(manifest.TryResolveCanonicalArtifactPath("guide", out var artifact));
+        Assert.Equal("docs/guide.html", artifact);
     }
 
     [Fact]

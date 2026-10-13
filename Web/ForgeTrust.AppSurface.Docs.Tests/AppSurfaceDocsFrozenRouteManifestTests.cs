@@ -160,6 +160,42 @@ public sealed class AppSurfaceDocsFrozenRouteManifestTests : IDisposable
         Assert.False(manifest.TryResolveAlias("README.md", out _));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Load_ShouldPreventMutationOfThePublicRouteSnapshot(bool verified)
+    {
+        const string json = """
+                            {
+                              "schema": "appsurface-docs-route-manifest-v1",
+                              "entries": [
+                                {
+                                  "sourcePath": "guide.md",
+                                  "canonicalRoutePath": "guide",
+                                  "recoveryAliases": [ "guide.md.html" ],
+                                  "declaredAliases": [ "old-guide" ]
+                                }
+                              ]
+                            }
+                            """;
+        AppSurfaceDocsFrozenRouteManifest manifest;
+        if (verified)
+        {
+            Assert.True(AppSurfaceDocsFrozenRouteManifest.TryLoadVerified(
+                System.Text.Encoding.UTF8.GetBytes(json), out manifest, out var issue), issue);
+        }
+        else
+        {
+            manifest = LoadFrozenManifest(json);
+        }
+
+        var routes = Assert.IsAssignableFrom<IList<string>>(manifest.PublicRoutePaths);
+        Assert.Throws<NotSupportedException>(() => routes[0] = "changed-route");
+        Assert.Equal(["guide", "guide.md", "guide.md.html", "old-guide"], manifest.PublicRoutePaths);
+        Assert.True(manifest.TryResolveAlias("old-guide", out var canonicalRoutePath));
+        Assert.Equal("guide", canonicalRoutePath);
+    }
+
     [Fact]
     public void Load_ShouldIgnoreUnsafeCanonicalRoutes_AndContinueUsingValidEntries()
     {

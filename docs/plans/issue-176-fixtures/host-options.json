@@ -1,0 +1,10 @@
+{
+  "AppSurfaceDocs": {
+    "Versioning": {
+      "Enabled": true,
+      "CatalogPath": "acceptance-catalog.json",
+      "TrustedReleaseRootPath": "/private/tmp/issue176-fixture-verification",
+      "MaxRewrittenFileSizeBytes": 16777216
+    }
+  }
+}

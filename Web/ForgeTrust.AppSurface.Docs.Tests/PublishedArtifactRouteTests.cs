@@ -62,6 +62,42 @@ public sealed class PublishedArtifactRouteTests : IDisposable
     [Theory]
     [InlineData("GET")]
     [InlineData("HEAD")]
+    public async Task HandleOwnedAliasAsync_ShouldRedirectAndServeTheVerifiedWholeExportArtifact(string method)
+    {
+        var tree = CreateMappedGuideTree("owned-alias-modern");
+        var handler = CreateHandler(
+            [CreateVerifiedMount(tree, "/docs/a/stable", canonicalRootPath: "/docs/v/1.0.0", aliasName: "stable")],
+            "/docs");
+        var selection = new AppSurfaceDocsAliasRequest("/docs/a", "stable", true);
+        var redirectRequest = CreateContext(method, "/docs/a/stable/legacy-guide", "/app", "?view=full");
+        redirectRequest.Features.Set(selection);
+
+        await handler.HandleOwnedAliasAsync(redirectRequest, selection);
+
+        Assert.Equal(StatusCodes.Status301MovedPermanently, redirectRequest.Response.StatusCode);
+        Assert.Equal("/app/docs/a/stable/docs/guide.html?view=full#overview", redirectRequest.Response.Headers.Location);
+        Assert.Empty(ReadBody(redirectRequest));
+
+        var followRequest = CreateContext(method, "/docs/a/stable/docs/guide.html", "/app", "?view=full");
+        followRequest.Features.Set(selection);
+        await handler.HandleOwnedAliasAsync(followRequest, selection);
+
+        Assert.Equal(StatusCodes.Status200OK, followRequest.Response.StatusCode);
+        Assert.False(followRequest.Response.Headers.ContainsKey("Location"));
+        if (method == "GET")
+        {
+            Assert.Contains("canonical artifact body", ReadBody(followRequest), StringComparison.Ordinal);
+            Assert.Contains("href=\"/app/docs/a/stable/docs/inside.html\"", ReadBody(followRequest), StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Empty(ReadBody(followRequest));
+        }
+    }
+
+    [Theory]
+    [InlineData("GET")]
+    [InlineData("HEAD")]
     public async Task TryHandleAsync_ShouldRedirectLogicalCanonicalRouteToItsMappedArtifact(string method)
     {
         var tree = CreateMappedGuideTree("canonical-redirect");
@@ -530,7 +566,9 @@ public sealed class PublishedArtifactRouteTests : IDisposable
         string archiveRootPath,
         string mountRootPath,
         string? providerRootPath = null,
-        string? exactTreeRootPath = null)
+        string? exactTreeRootPath = null,
+        string? canonicalRootPath = null,
+        string? aliasName = null)
     {
         var releaseManifestSha256 = WriteReleaseManifest(archiveRootPath);
         Assert.True(
@@ -550,7 +588,9 @@ public sealed class PublishedArtifactRouteTests : IDisposable
             exactTreeRootPath ?? archiveRootPath,
             new AppSurfaceDocsFrozenRouteManifestCache(archive!.FrozenRouteManifest, archiveRootPath),
             AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified,
-            archive);
+            archive,
+            canonicalRootPath,
+            aliasName);
     }
 
     private static AppSurfaceDocsPublishedTreeHandler CreateHandler(
