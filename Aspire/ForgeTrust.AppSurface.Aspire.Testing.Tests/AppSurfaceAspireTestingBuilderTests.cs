@@ -1241,7 +1241,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     {
         var disposalOrder = new List<string>();
         var configurationProvider = new TrackingConfigurationProvider("configuration", disposalOrder);
-        var configuration = new ConfigurationManager();
+        using var configuration = new ConfigurationManager();
         configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
         var creationFileProvider = new AsyncOnlyTrackingFileProvider("creation-file-provider", disposalOrder);
         TrackingFileProvider currentFileProvider = replaceCurrentFileProvider
@@ -1314,7 +1314,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             "configuration",
             disposalOrder,
             configurationFailure);
-        var configuration = new ConfigurationManager();
+        using var configuration = new ConfigurationManager();
         configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
         var creationFileProvider = new AsyncOnlyTrackingFileProvider(
             "creation-file-provider",
@@ -1396,7 +1396,7 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             "configuration",
             disposalOrder,
             new CleanupException());
-        var configuration = new ConfigurationManager();
+        using var configuration = new ConfigurationManager();
         configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
         var creationFileProvider = new AsyncOnlyTrackingFileProvider(
             "creation-file-provider",
