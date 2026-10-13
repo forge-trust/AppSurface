@@ -2510,6 +2510,11 @@ routing, authentication, authorization, or any response writer. Then map all han
 builder. Repeated calls on one builder are idempotent; an active named alias without the hook fails finalization with
 `ASDOCSALIAS011`. Alias-free named hosts need no hook.
 
+At the first ownership selection, the hook freezes namespace roots and their fully built endpoints in one
+snapshot, then publishes it to concurrent requests. Classification and endpoint lookup use that same snapshot;
+endpoint conventions and authorization metadata remain attached to the original endpoints. Finish all mapping and
+finalization before serving requests: rebinding after ownership selection begins is rejected.
+
 <!-- appsurface:snippet id="docs-alias-named-host" file="Web/ForgeTrust.AppSurface.Docs.Tests/AppSurfaceDocsVersionAliasPublicApiConsumerTests.cs" marker="docs-alias-named-host" lang="csharp" -->
 ```csharp
 private static WebApplication ConfigureNamedAliasHost(WebApplicationBuilder builder)

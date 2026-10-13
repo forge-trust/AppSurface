@@ -214,6 +214,44 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
             });
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AliasProjection_ShouldRequireNonblankRootUrlEvenWhenResolvedAliasClaimsAvailable(string? rootUrl)
+    {
+        var target = new AppSurfaceDocsResolvedVersion(
+            "1.0.0",
+            "1.0.0",
+            "target summary",
+            "/trusted/1.0.0",
+            "/docs/v/1.0.0",
+            AppSurfaceDocsVersionSupportState.Current,
+            AppSurfaceDocsVersionVisibility.Public,
+            AppSurfaceDocsVersionAdvisoryState.None,
+            true,
+            null);
+        var alias = new AppSurfaceDocsResolvedVersionAlias
+        {
+            Name = "preview",
+            Label = "Preview",
+            Summary = "alias summary",
+            Visibility = AppSurfaceDocsVersionVisibility.Public,
+            TargetVersion = target,
+            RootUrl = rootUrl,
+            IsAvailable = true
+        };
+
+        var projected = DocsController.ProjectAliasArchiveEntry(
+            alias,
+            "This release entry is not currently available.");
+
+        Assert.False(projected.IsAvailable);
+        Assert.Null(projected.Href);
+        Assert.Equal("This release entry is not currently available.", projected.AvailabilityMessage);
+        Assert.Equal("1.0.0", projected.TargetVersion);
+    }
+
     [Fact]
     public void Versions_ShouldDefaultAliasesToAnEmptyArchiveProjection_WhenNoneAreDeclared()
     {
@@ -662,7 +700,7 @@ public sealed class AppSurfaceDocsVersionArchiveControllerTests : IDisposable
         }
 
         json["aliases"] = JsonNode.Parse(aliasesJson);
-        var path = Path.Combine(_tempDirectory, "catalog-with-aliases.json");
+        var path = TestPathUtils.PathUnder(_tempDirectory, "catalog-with-aliases.json");
         File.WriteAllText(path, json.ToJsonString());
         return path;
     }

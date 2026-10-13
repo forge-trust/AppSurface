@@ -88,14 +88,17 @@ public static class AppSurfaceDocsApplicationBuilderExtensions
 internal sealed record AppSurfaceDocsAliasOwnershipMetadata(string NamespaceRoot);
 
 /// <summary>Freezes the actual mapped endpoint references once, after all host conventions have been applied.</summary>
-/// <remarks>Catalog → active namespace endpoint → immutable endpoint dictionary → raw classification → host auth.</remarks>
+/// <remarks>
+/// Catalog → active namespace endpoint → immutable ownership snapshot → raw classification → host auth.
+/// The roots and their convention-bearing endpoints are published together. Each request acquires one snapshot so
+/// concurrent first requests cannot classify against a different root list from the selected endpoint table.
+/// </remarks>
 internal sealed class AppSurfaceDocsAliasOwnershipState
 {
     private readonly object _gate = new();
     private readonly ILogger<AppSurfaceDocsAliasOwnershipState> _logger;
     private IEndpointRouteBuilder? _endpoints;
-    private IReadOnlyDictionary<string, Endpoint>? _owners;
-    private IReadOnlyList<string> _roots = [];
+    private OwnerTable? _table;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _unsafeWarnings = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets or sets the default module handler shared by middleware setup and endpoint mapping.</summary>
@@ -111,7 +114,7 @@ internal sealed class AppSurfaceDocsAliasOwnershipState
     {
         lock (_gate)
         {
-            if (_owners is not null)
+            if (_table is not null)
             {
                 throw new InvalidOperationException("Docs alias endpoints cannot be changed after ownership selection begins.");
             }
@@ -123,14 +126,19 @@ internal sealed class AppSurfaceDocsAliasOwnershipState
     /// <summary>Selects the real owner's endpoint and returns sticky received-path state, without writing a body.</summary>
     internal AppSurfaceDocsAliasRequest? Select(HttpContext context)
     {
-        EnsureOwners();
-        var request = AppSurfaceDocsAliasRequestClassifier.Classify(context, _roots);
+        var table = EnsureOwners();
+        if (table is null)
+        {
+            return null;
+        }
+
+        var request = AppSurfaceDocsAliasRequestClassifier.Classify(context, table.Roots);
         if (request is null)
         {
             return null;
         }
 
-        var endpoint = _owners![request.NamespaceRoot];
+        var endpoint = table.Owners[request.NamespaceRoot];
         context.SetEndpoint(endpoint);
         var instanceName = endpoint.Metadata.GetMetadata<AppSurfaceDocsEndpointMetadata>()?.Name ?? "Default";
         if (!request.IsSafe && _unsafeWarnings.TryAdd(instanceName, 0))
@@ -146,18 +154,19 @@ internal sealed class AppSurfaceDocsAliasOwnershipState
         return request;
     }
 
-    private void EnsureOwners()
+    private OwnerTable? EnsureOwners()
     {
-        if (_owners is not null)
+        var existing = Volatile.Read(ref _table);
+        if (existing is not null)
         {
-            return;
+            return existing;
         }
 
         lock (_gate)
         {
-            if (_owners is not null || _endpoints is null)
+            if (_table is not null || _endpoints is null)
             {
-                return;
+                return _table;
             }
 
             var owners = new Dictionary<string, Endpoint>(StringComparer.OrdinalIgnoreCase);
@@ -169,8 +178,11 @@ internal sealed class AppSurfaceDocsAliasOwnershipState
                 }
             }
 
-            _roots = owners.Keys.ToArray();
-            Volatile.Write(ref _owners, owners);
+            var table = new OwnerTable(owners, owners.Keys.ToArray());
+            Volatile.Write(ref _table, table);
+            return table;
         }
     }
+
+    private sealed record OwnerTable(IReadOnlyDictionary<string, Endpoint> Owners, IReadOnlyList<string> Roots);
 }

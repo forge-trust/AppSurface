@@ -104,10 +104,17 @@ public sealed class AppSurfaceDocsVersionArchiveUiTests
         Assert.Contains("This release entry has conflicting definitions.", unavailableRow.TextContent, StringComparison.Ordinal);
         Assert.Empty(unavailableRow.QuerySelectorAll("a"));
 
-        var exactSection = Assert.Single(document.QuerySelectorAll("#docs-exact-releases-heading"));
-        Assert.Equal("Exact releases", exactSection.TextContent.Trim());
-        Assert.Equal("Release 1.2.3", document.QuerySelector(".docs-version-card h2")?.TextContent.Trim());
-        Assert.Equal("/docs/v/1.2.3", document.QuerySelector(".docs-version-card a")?.GetAttribute("href"));
+        var exactSectionHeading = Assert.Single(document.QuerySelectorAll("#docs-exact-releases-heading"));
+        Assert.Equal("H2", exactSectionHeading.TagName);
+        Assert.Equal("Exact releases", exactSectionHeading.TextContent.Trim());
+
+        var exactSection = Assert.IsAssignableFrom<AngleSharp.Dom.IElement>(exactSectionHeading.ParentElement);
+        Assert.Equal("SECTION", exactSection.TagName);
+        var exactReleaseCards = exactSection.QuerySelectorAll(".docs-version-card");
+        var exactReleaseCard = Assert.Single(exactReleaseCards);
+        Assert.Empty(exactReleaseCard.QuerySelectorAll("h2"));
+        Assert.Equal("Release 1.2.3", exactReleaseCard.QuerySelector("h3")?.TextContent.Trim());
+        Assert.Equal("/docs/v/1.2.3", exactReleaseCard.QuerySelector("a")?.GetAttribute("href"));
     }
 
     private static ServiceProvider CreateServiceProvider()

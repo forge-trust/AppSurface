@@ -129,6 +129,33 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
         Assert.Equal("host-fallback", apple);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConcurrentFirstUnsafeRequestsRetainOwnershipAndHostAuthorization(bool named, bool protect)
+    {
+        await using var app = BuildHost(Catalog(), named, "/docs", "/base", protect: protect);
+        await app.StartAsync();
+        var responses = await Task.WhenAll(Enumerable.Range(0, 24).Select(_ =>
+            RawRequest(app, "/base/docs/a/stable/../guide", "GET", authenticated: false)));
+
+        foreach (var response in responses)
+        {
+            Assert.Contains(protect ? "401" : "404", response.Split('\n')[0]);
+            Assert.Contains("no-store", response, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("host-fallback", response);
+            if (protect)
+            {
+                Assert.DoesNotContain("Documentation page not found", response);
+            }
+            else
+            {
+                Assert.Contains("Documentation page not found", response);
+            }
+        }
+    }
+
     [Fact]
     public async Task NamedRawOwnershipKeepsEveryHostPolicyAndDoesNotWriteRecoveryBeforeAuthorization()
     {

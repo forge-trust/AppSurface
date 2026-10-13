@@ -2677,27 +2677,7 @@ public class DocsController : Controller
                 continue;
             }
 
-            var target = alias.TargetVersion is { Visibility: AppSurfaceDocsVersionVisibility.Public } publicTarget
-                ? publicTarget
-                : null;
-            var targetIsKnownPublic = target is not null;
-            projectedAliases.Add(
-                new AppSurfaceDocsVersionAliasArchiveEntryViewModel
-                {
-                    Name = alias.Name,
-                    Label = string.IsNullOrWhiteSpace(alias.Label) ? alias.Name : alias.Label,
-                    Summary = alias.Summary,
-                    TargetVersion = target?.Version,
-                    SupportStateLabel = targetIsKnownPublic ? GetSupportStateLabel(target!.SupportState) : null,
-                    AdvisoryLabel = targetIsKnownPublic ? GetAdvisoryLabel(target!.AdvisoryState) : null,
-                    Href = alias.IsAvailable && targetIsKnownPublic ? alias.RootUrl : null,
-                    AvailabilityMessage = alias.IsAvailable
-                        ? null
-                        : targetIsKnownPublic
-                            ? alias.AvailabilityIssue ?? unavailableAliasMessage
-                            : unavailableAliasMessage,
-                    IsAvailable = alias.IsAvailable && targetIsKnownPublic && !string.IsNullOrWhiteSpace(alias.RootUrl)
-                });
+            projectedAliases.Add(ProjectAliasArchiveEntry(alias, unavailableAliasMessage));
         }
 
         return new AppSurfaceDocsVersionArchiveViewModel
@@ -2714,6 +2694,44 @@ public class DocsController : Controller
             VersionsHref = _docsUrlBuilder.BuildVersionsUrl(),
             Versions = versions,
             Aliases = projectedAliases
+        };
+    }
+
+    /// <summary>Projects resolved alias state into the reader-facing archive model.</summary>
+    /// <param name="alias">A public resolved alias already selected for the archive.</param>
+    /// <param name="unavailableAliasMessage">The safe fallback explanation for an unavailable alias.</param>
+    /// <returns>A row whose link, availability flag and explanation agree.</returns>
+    /// <remarks>
+    /// A row is linkable only when the alias reports availability, its target is public, and its root URL is nonblank.
+    /// Unavailable rows omit the link and explain why; hidden or unknown targets omit target metadata and use the safe
+    /// fallback message. Internal so tests can verify inconsistent resolved state without mocking the catalog loader.
+    /// </remarks>
+    internal static AppSurfaceDocsVersionAliasArchiveEntryViewModel ProjectAliasArchiveEntry(
+        AppSurfaceDocsResolvedVersionAlias alias,
+        string unavailableAliasMessage)
+    {
+        var publicTarget = alias.TargetVersion is { Visibility: AppSurfaceDocsVersionVisibility.Public } target
+            ? target
+            : null;
+        var targetIsKnownPublic = publicTarget is { Visibility: AppSurfaceDocsVersionVisibility.Public };
+        var linkable = alias.IsAvailable
+                       && targetIsKnownPublic
+                       && !string.IsNullOrWhiteSpace(alias.RootUrl);
+        return new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+        {
+            Name = alias.Name ?? string.Empty,
+            Label = string.IsNullOrWhiteSpace(alias.Label) ? alias.Name ?? string.Empty : alias.Label,
+            Summary = alias.Summary,
+            TargetVersion = targetIsKnownPublic ? publicTarget!.Version : null,
+            SupportStateLabel = targetIsKnownPublic ? GetSupportStateLabel(publicTarget!.SupportState) : null,
+            AdvisoryLabel = targetIsKnownPublic ? GetAdvisoryLabel(publicTarget!.AdvisoryState) : null,
+            Href = linkable ? alias.RootUrl : null,
+            AvailabilityMessage = linkable
+                ? null
+                : targetIsKnownPublic
+                    ? alias.AvailabilityIssue ?? unavailableAliasMessage
+                    : unavailableAliasMessage,
+            IsAvailable = linkable
         };
     }
 
