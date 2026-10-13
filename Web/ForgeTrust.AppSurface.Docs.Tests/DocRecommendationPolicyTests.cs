@@ -466,6 +466,56 @@ public sealed class DocRecommendationPolicyTests
     }
 
     [Fact]
+    public void Build_ResetsOwnerExclusionsForEachSourceAndKeepsAuthoredRowsUncapped()
+    {
+        var authoredRows = Enumerable.Range(0, 5).Select(index => Link($"curated-{index:D2}#section")).ToArray();
+        var pages = new[]
+        {
+            Page("source-previous", "guide", component: "runtime", previousTargetId: "alpha#part"),
+            Page("source-next", "guide", component: "runtime", nextTargetId: "beta#part"),
+            Page("source-authored", "guide", component: "runtime", authored: authoredRows),
+            Page("alpha", "example", component: "runtime", autoRelatedPages: false),
+            Page("beta", "example", component: "runtime", autoRelatedPages: false),
+            Page("gamma", "example", component: "runtime", autoRelatedPages: false),
+            Page("delta", "example", component: "runtime", autoRelatedPages: false)
+        };
+
+        var result = DocRecommendationPolicy.Build(pages);
+
+        Assert.Collection(result.Pages["source-previous"],
+            row => AssertRecommendation(row, "beta"),
+            row => AssertRecommendation(row, "delta"),
+            row => AssertRecommendation(row, "gamma"));
+        Assert.Collection(result.Pages["source-next"],
+            row => AssertRecommendation(row, "alpha"),
+            row => AssertRecommendation(row, "delta"),
+            row => AssertRecommendation(row, "gamma"));
+        Assert.Equal(authoredRows.Select(link => link.TargetId)
+                .Concat(new[] { "alpha", "beta", "delta" }),
+            result.Pages["source-authored"].Select(row => row.TargetId));
+        Assert.All(result.Pages["source-authored"].Take(authoredRows.Length), row =>
+        {
+            Assert.False(row.IsAutomatic);
+            Assert.Equal("authored", row.PrimaryReasonCode);
+            Assert.Equal(new[] { "authored" }, row.ReasonCodes);
+            Assert.Equal("Selected by the author", row.ReasonText);
+        });
+        Assert.Collection(result.Pages["source-authored"].Skip(authoredRows.Length),
+            row => AssertRecommendation(row, "alpha"),
+            row => AssertRecommendation(row, "beta"),
+            row => AssertRecommendation(row, "delta"));
+    }
+
+    private static void AssertRecommendation(DocRecommendation row, string targetId)
+    {
+        Assert.Equal(targetId, row.TargetId);
+        Assert.True(row.IsAutomatic);
+        Assert.Equal("try-example", row.PrimaryReasonCode);
+        Assert.Equal(new[] { "try-example", "shared-component" }, row.ReasonCodes);
+        Assert.Equal("Try an example for this component", row.ReasonText);
+    }
+
+    [Fact]
     public void Build_ReportsCandidateMeasurementsBeforeSourceSpecificExclusions()
     {
         var source = Page("source", "guide", component: "runtime", previousTargetId: "previous#part",

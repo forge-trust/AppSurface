@@ -2875,7 +2875,8 @@ public class DocAggregator
 
     /// <summary>
     /// Resolves all legacy wayfinding and new recommendations once after merge, canonical collision resolution and
-    /// section landing selection. Results publish atomically with the search projection in the same cached generation.
+    /// section landing selection. Canonical page links are built once and shared only within the snapshot; response
+    /// projections detach them. Results publish atomically with the search projection in the same cached generation.
     /// </summary>
     private (IReadOnlyDictionary<string, DocWayfindingSnapshot> Wayfinding, DocRecommendationPolicyResult Recommendations)
         BuildWayfindingSnapshot(IReadOnlyList<DocNode> docs, DocPathResolver resolver,
@@ -2884,6 +2885,7 @@ public class DocAggregator
         var ordered = docs.OrderBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase).ToArray();
         var canonical = ordered.Where(doc => doc.CanonicalPath is not null)
             .GroupBy(GetSnapshotCanonicalPath, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToArray();
+        var linksByPath = canonical.ToDictionary(doc => doc.Path, CreatePageLink, StringComparer.Ordinal);
         var previous = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
         var next = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
         var groups = canonical.Where(doc => doc.Metadata?.SequenceKey is { } key && CanJoinSequence(doc, key.Trim()))
@@ -2895,8 +2897,8 @@ public class DocAggregator
                 .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase).ToArray();
             for (var i = 0; i < sequence.Length; i++)
             {
-                if (i > 0) previous[sequence[i].Path] = CreatePageLink(sequence[i - 1]);
-                if (i + 1 < sequence.Length) next[sequence[i].Path] = CreatePageLink(sequence[i + 1]);
+                if (i > 0) previous[sequence[i].Path] = linksByPath[sequence[i - 1].Path];
+                if (i + 1 < sequence.Length) next[sequence[i].Path] = linksByPath[sequence[i + 1].Path];
             }
         }
 
@@ -2904,7 +2906,7 @@ public class DocAggregator
             .ToDictionary(pair => pair.Path, pair => pair.Section, StringComparer.Ordinal);
         var wayfinding = new Dictionary<string, DocWayfindingSnapshot>(StringComparer.Ordinal);
         var facts = new List<DocRecommendationPageFacts>();
-        var idsByHref = canonical.ToDictionary(doc => CreatePageLink(doc).Href,
+        var idsByHref = canonical.ToDictionary(doc => linksByPath[doc.Path].Href,
             GetSnapshotCanonicalPath, StringComparer.OrdinalIgnoreCase);
         foreach (var doc in canonical)
         {
@@ -2913,7 +2915,7 @@ public class DocAggregator
             var related = ResolveRelatedPages(doc, ordered, resolver, prev, following);
             wayfinding[doc.Path] = new DocWayfindingSnapshot(prev, following, related);
             sectionByPath.TryGetValue(doc.Path, out var section);
-            facts.Add(new DocRecommendationPageFacts(doc, GetSnapshotCanonicalPath(doc), CreatePageLink(doc), section?.Section,
+            facts.Add(new DocRecommendationPageFacts(doc, GetSnapshotCanonicalPath(doc), linksByPath[doc.Path], section?.Section,
                 section?.LandingDoc?.Path == doc.Path,
                 prev is null ? null : idsByHref[prev.Href], following is null ? null : idsByHref[following.Href],
                 related.Select(page => new DocRecommendationLink(idsByHref[page.Href], page)).ToArray()));

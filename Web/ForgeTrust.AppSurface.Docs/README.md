@@ -3196,6 +3196,8 @@ A resolved section landing uses the orientation priority after ordinary task pag
 
 Candidates are ordered by target-role priority, exact shared component, number of shared informative topics (capped at three), forward sequence, exact shared audience, same resolved section, then sequence order when both candidates are in the source's same ordered sequence. Final ties use display title ordinal-ignore-case, canonical identity ordinal-ignore-case, and canonical identity ordinal. Harvest order and current culture do not affect the result. At most three automatic rows follow the complete authored prefix; fewer qualifying rows remain fewer, and no authored rows are truncated.
 
+Construction reuses build-local candidate and owner-exclusion buffers between sources and creates each canonical page link once. Only detached recommendation rows and response projections leave the snapshot. These buffers belong to one build; they are neither shared across concurrent generations nor retained for request-time ranking. The candidate union and full ordering still run for every eligible source, so large shared components can require many evaluations even though only three automatic rows are returned.
+
 #### Public API and explanation contract
 
 `DocPageRecommendationViewModel` exposes a resolved `Page` (`DocPageLinkViewModel`), `Source` (`DocRecommendationSource.Authored = 0` or `.Automatic = 1`), `PrimaryReasonCode`, ordered `ReasonCodes`, and the default `ReasonText`. `DocDetailsViewModel.RecommendedPages` is the combined result; `RelatedPages` remains authored-only. The built-in view uses the combined list and preserves legacy authored-only custom models when the combined list is empty. Empty is valid and the built-in “Read next” section is omitted.

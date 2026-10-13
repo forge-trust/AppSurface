@@ -62,7 +62,7 @@ internal static class DocRecommendationPolicy
         HashSet<string> Topics,
         bool IsInternal);
 
-    private sealed record Candidate(
+    private readonly record struct Candidate(
         Facts Target,
         int RolePriority,
         bool SharedComponent,
@@ -105,6 +105,9 @@ internal static class DocRecommendationPolicy
             .ToDictionary(group => group.Key, group => group.ToArray());
         var results = new Dictionary<string, IReadOnlyList<DocRecommendation>>(StringComparer.OrdinalIgnoreCase);
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        // These are build-local scratch collections. Clear them between sources; only detached result rows escape.
+        var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var candidates = new List<Candidate>();
         long evaluated = 0;
         var resultCount = 0;
         foreach (var source in facts)
@@ -114,6 +117,8 @@ internal static class DocRecommendationPolicy
             if (IsSource(source))
             {
                 var union = new HashSet<Facts>(ReferenceEqualityComparer.Instance);
+                excluded.Clear();
+                candidates.Clear();
                 AddMatches(components, source.Component, union);
                 foreach (var topic in source.Topics)
                 {
@@ -128,7 +133,7 @@ internal static class DocRecommendationPolicy
 
                 evaluated += union.Count;
                 counts[source.Input.TargetId] = union.Count;
-                var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Owner(source.Input.TargetId) };
+                excluded.Add(Owner(source.Input.TargetId));
                 foreach (var id in new[] { source.Input.PreviousTargetId, source.Input.NextTargetId })
                 {
                     if (id is not null)
@@ -142,7 +147,6 @@ internal static class DocRecommendationPolicy
                     excluded.Add(Owner(row.TargetId));
                 }
 
-                var candidates = new List<Candidate>();
                 foreach (var target in union)
                 {
                     if (excluded.Contains(Owner(target.Input.TargetId)))
@@ -152,7 +156,11 @@ internal static class DocRecommendationPolicy
 
                     var sharedComponent = source.Component is not null &&
                                           StringComparer.OrdinalIgnoreCase.Equals(source.Component, target.Component);
-                    var sharedTopics = source.Topics.Count(target.Topics.Contains);
+                    var sharedTopics = 0;
+                    foreach (var topic in source.Topics)
+                    {
+                        if (target.Topics.Contains(topic)) sharedTopics++;
+                    }
                     var sameSection = source.Input.Section is not null && source.Input.Section == target.Input.Section;
                     if (!(sharedComponent || sharedTopics >= 2 || target.Input.IsSectionLanding && sameSection))
                     {
@@ -291,7 +299,11 @@ internal static class DocRecommendationPolicy
         if (key is not null && index.TryGetValue(key, out var matches)) union.UnionWith(matches);
     }
 
-    private static string Owner(string id) => id.Split('#', 2)[0];
+    private static string Owner(string id)
+    {
+        var fragment = id.IndexOf('#');
+        return fragment < 0 ? id : id[..fragment];
+    }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null :
         string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
