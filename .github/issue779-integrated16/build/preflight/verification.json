@@ -1,0 +1,9 @@
+{
+  "exit": 0,
+  "run_id": 38423600303,
+  "head": "b0c1bf72f99c6ea5b76426a40b9feba34f1a2eb4",
+  "receipt_sha256": "fb04c1eb7c6e77fe7cb57274ae028eead8fd627c930d16b61d9c73554713b895",
+  "actual_control_count": 3,
+  "actual_group_count": 4,
+  "native_checkpoint_credit": false
+}
