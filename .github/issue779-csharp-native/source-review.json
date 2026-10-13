@@ -1,0 +1,29 @@
+{
+  "builder_product_source_map_sha256": "1436ddaa0842f6ab1a8c398b2d5d335dfca83d7b6f82358b08f2b56e197dda1f",
+  "canonical_capture_source_map_sha256": "1436ddaa0842f6ab1a8c398b2d5d335dfca83d7b6f82358b08f2b56e197dda1f",
+  "capture_projection_sha256": "83aee4c79b2b6f9ffba3f747d348e1ce560569ed1f5678fcacabcc770384eccd",
+  "capture_receipt_sha256": "fd0a3b937bc8f184ca43d7ae5bb3446226a2a69f09b917da1cf88bdc0ea86d04",
+  "capture_schema": "issue779-csharp-common-source-capture-v4",
+  "current_full_suite_executed": false,
+  "current_source_capture_review_clear": true,
+  "historical_review_note": "Earlier source-bound review remains in the immutable v8 basis; it is not current-source clearance.",
+  "native_credit": false,
+  "native_execution": false,
+  "parent_commit": "3002a69b8b54c5c9e8955782e34006e0db8e02bf",
+  "production_registry_enabled": false,
+  "root_trust_issuer": false,
+  "schema": "issue779-reviewed-csharp-candidate-v1",
+  "source_capture_evidence": {
+    "clean": true,
+    "historical_native_credit": false,
+    "index_checksum_verified": true,
+    "index_tree_blob_modes_equal": true,
+    "no_alternates": true,
+    "validation_command_count": 12
+  },
+  "source_commit": "03ff51b361d686e6e2590a27e9a4f43529cdbaf2",
+  "source_count": 2865,
+  "source_maps_independently_derived_equal": true,
+  "source_rebind_review_pending": false,
+  "source_tree": "e2860d8ef477f455d2e1e27b623b463f14d12365"
+}
