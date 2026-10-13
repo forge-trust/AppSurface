@@ -132,3 +132,7 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 **Effort:** human L / agent M
 **Priority:** P3
 **Depends on:** current provider proof and at least two consumer needs.
+
+## Documentation alias publication preflight (#176 follow-up)
+
+- **What:** Consider a publish-time catalog validation command only when an adopter needs to reject an invalid alias before deploying. **Why:** #176 validates once in the host; a release pipeline may eventually need earlier feedback. **Pros:** Could reduce deploy-time configuration mistakes. **Cons:** Adds a public CLI contract and risks parser/verification drift. **Context:** Reuse the [#176 alias design](docs/designs/issue-176-version-aliases.md) and [implementation plan](docs/plans/issue-176-version-aliases.md), with the same normalization, duplicate, visibility and verified-target rules; do not build another parser. **Effort:** M human (1 day) / S agent (2–3 hours). **Priority:** P3. **Depends on / blocked by:** #176 runtime adoption and a concrete publication workflow requiring offline feedback. Deferred by autoplan CEO C5; no command implementation in #176.
