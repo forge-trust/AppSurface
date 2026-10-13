@@ -677,18 +677,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #endif
         if (RequireRootPeer(socket) != _brokerPid)
         {
-            // Fixed private N04 image: the actual root replacement must finish its live peer sample
-            // and shut down its write side before this original rejection closes the worker socket.
-            // Reuse the original I/O token; neither application bytes nor request JSON are sent.
-            uint length = 12;
-            if (GetPeerCredentials(socket.SafeHandle, 1, 17, out var replacement, ref length) != 0
-                || length != 12 || replacement.Pid <= 0 || replacement.Pid == _brokerPid
-                || replacement.Uid != 0 || replacement.Gid != 0)
-                throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
-            var oneByte = new byte[1];
-            if (await socket.ReceiveAsync(oneByte.AsMemory(), SocketFlags.None, cancellationToken).ConfigureAwait(false) != 0)
-                throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
-            throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+            await RejectChangedRootPeerAsync(socket, _brokerPid, cancellationToken).ConfigureAwait(false);
         }
 #if EVIDENCE_PRIVATE_N16
         n16Exit?.Mark(2);
@@ -703,6 +692,42 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
 #endif
             ).ConfigureAwait(false);
     }
+
+    /// <summary>Rejects an already detected peer replacement without sending request bytes or granting authority.</summary>
+    /// <param name="socket">The original connected socket whose root peer no longer matches the pinned PID.</param>
+    /// <param name="pinnedBrokerPid">The original authenticated broker PID, retained by the supervisor.</param>
+    /// <param name="cancellationToken">The original request token; no replacement allowance is created.</param>
+    /// <returns>An immediate ASEVD402 failure in ordinary builds. Only the private N04 build first waits for the replacement's write-side closure.</returns>
+    /// <remarks>
+    /// The caller performs the real root credential and pinned PID comparison before invoking this negative
+    /// operation. It constructs no supervisor, admission or workload capability. Ordinary rejection performs
+    /// no socket read, even if the replacement keeps its connection open. The N04-only read lets its root
+    /// fixture finish sampling the actual worker peer before the socket closes and still sends zero bytes.
+    /// </remarks>
+    internal static ValueTask RejectChangedRootPeerAsync(Socket socket, int pinnedBrokerPid, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(socket);
+#if EVIDENCE_PRIVATE_N04
+        return RejectQualificationPeerAsync(socket, pinnedBrokerPid, cancellationToken);
+#else
+        return ValueTask.FromException(new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed."));
+#endif
+    }
+
+#if EVIDENCE_PRIVATE_N04
+    private static async ValueTask RejectQualificationPeerAsync(Socket socket, int pinnedBrokerPid, CancellationToken cancellationToken)
+    {
+        uint length = 12;
+        if (GetPeerCredentials(socket.SafeHandle, 1, 17, out var replacement, ref length) != 0
+            || length != 12 || replacement.Pid <= 0 || replacement.Pid == pinnedBrokerPid
+            || replacement.Uid != 0 || replacement.Gid != 0)
+            throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+        var oneByte = new byte[1];
+        if (await socket.ReceiveAsync(oneByte.AsMemory(), SocketFlags.None, cancellationToken).ConfigureAwait(false) != 0)
+            throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+        throw new EvidenceAdmissionException("ASEVD402", "The protected broker identity changed.");
+    }
+#endif
 
     private static async Task<JsonElement> ExchangeAsync<T>(Socket socket, T request, CancellationToken cancellationToken
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK

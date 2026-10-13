@@ -445,6 +445,12 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
                 handles.Add(_n09AllocationSlot.Parent);
                 _n09AllocationSlot = null;
             }
+            if (_slotNegativeFixture is not null)
+            {
+                handles.Add(_slotNegativeFixture.Occupied);
+                handles.Add(_slotNegativeFixture.Sentinel);
+                _slotNegativeFixture = null;
+            }
             if (!Close(handles)) { _quarantined = true; throw LinuxWorkspaceLayout.Invalid(); }
     }
 

@@ -6,6 +6,42 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Build-selection and original callback controls; no native owner, lease or accepted proof.</summary>
 public sealed class EvidenceNativeQualificationTests
 {
+#if !EVIDENCE_PRIVATE_N04
+    [Fact]
+    public async Task OrdinaryChangedPeerRejectionDoesNotWaitForAnOpenSocketOrSendRequestBytes()
+    {
+        // This negative operation seam grants no root authentication, supervisor or admission.
+        // A live peer deliberately keeps its write side open; ordinary rejection must not read it.
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        using var client = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+        var accepted = listener.AcceptSocketAsync(deadline.Token).AsTask();
+        await client.ConnectAsync(listener.LocalEndpoint, deadline.Token);
+        using var peer = await accepted;
+
+        var rejection = EvidenceLinuxWorkerSupervisor.RejectChangedRootPeerAsync(client, 1, deadline.Token);
+        Assert.True(rejection.IsCompleted, "Ordinary peer rejection must not wait for replacement socket input.");
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => rejection.AsTask());
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.Contains("The protected broker identity changed.", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, peer.Available);
+        Assert.False(peer.Poll(0, System.Net.Sockets.SelectMode.SelectRead));
+    }
+
+    [Fact]
+    public void OrdinaryChangedPeerRejectionRequiresItsOriginalSocket()
+    {
+        var error = Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = EvidenceLinuxWorkerSupervisor.RejectChangedRootPeerAsync(null!, 1, CancellationToken.None);
+        });
+        Assert.Equal("socket", error.ParamName);
+    }
+#endif
+
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
     [Fact]
     public void PrivateAcceptancePhaseIsOnlyDetachedDataWithAnExactClosedShape()
@@ -39,6 +75,10 @@ public sealed class EvidenceNativeQualificationTests
     {
 #if EVIDENCE_PRIVATE_N04
         var expected = EvidenceNativeQualificationKind.PeerReplacement;
+#elif EVIDENCE_PRIVATE_N05
+        var expected = EvidenceNativeQualificationKind.OccupiedWorkerOutputSlot;
+#elif EVIDENCE_PRIVATE_N06
+        var expected = EvidenceNativeQualificationKind.SymlinkWorkerOutputSlot;
 #elif EVIDENCE_PRIVATE_N07
         var expected = EvidenceNativeQualificationKind.ParentIdentitySubstitution;
 #elif EVIDENCE_PRIVATE_N08
@@ -65,6 +105,8 @@ public sealed class EvidenceNativeQualificationTests
         Assert.Equal(expected, EvidenceNativeQualification.Current);
         Assert.Equal(expected == EvidenceNativeQualificationKind.PeerReplacement,
             EvidenceNativeQualification.PeerReplacementEnabled);
+        Assert.Equal(expected is EvidenceNativeQualificationKind.OccupiedWorkerOutputSlot
+            or EvidenceNativeQualificationKind.SymlinkWorkerOutputSlot, EvidenceNativeQualification.SlotNegativeEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.ParentIdentitySubstitution,
             EvidenceNativeQualification.ParentReplacementEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.LeaderExitWithDescendant,

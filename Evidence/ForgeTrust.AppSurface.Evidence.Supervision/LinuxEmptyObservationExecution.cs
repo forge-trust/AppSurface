@@ -91,6 +91,12 @@ internal static class LinuxEmptyObservationExecution
             accounts = await LinuxRunAccounts.CreateAsync(owner, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkspaceCreate;
             workspace = LinuxRunWorkspace.Create(owner, accounts, job.Token);
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
+            // The compile-time case seeds this exact retained worker output parent before the worker starts.
+            // Ordinary images do not compile or call the fixture setup.
+            var slotSetup = workspace.PrepareSlotNegativeFixture(owner, accounts, job.Token);
+            await WriteSlotObservationAsync([slotSetup], owner, job.Token).ConfigureAwait(false);
+#endif
             phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
@@ -152,6 +158,22 @@ internal static class LinuxEmptyObservationExecution
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
+            if ((failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    // The original holder checks physical group/monitor/pump and server joins before any fixture capture.
+                    var kernel = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
+                    var caseId = EvidenceNativeQualification.Current == EvidenceNativeQualificationKind.SymlinkWorkerOutputSlot ? "N06" : "N05";
+                    var joined = LinuxSlotNegativeObservation.EncodeJoinedOutput(caseId,
+                        worker.Output ?? throw Rejected());
+                    var inspection = workspace.CloseAndCaptureSlotNegativeFixture(cleanupToken);
+                    await WriteSlotObservationAsync([inspection, joined.Projection, kernel.Bytes, joined.Raw],
+                        owner, cleanupToken).ConfigureAwait(false);
+                }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
             if (EvidenceNativeQualification.ParentReplacementEnabled && failed && !cleanupFailed
                 && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
@@ -450,6 +472,22 @@ internal static class LinuxEmptyObservationExecution
         }
         return manifest;
     }
+
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
+    private static async Task WriteSlotObservationAsync(byte[][] records, LinuxOwnerActivation owner, CancellationToken token)
+    {
+        owner.RequireControlIdentity(token);
+        using var stderr = Console.OpenStandardError();
+        foreach (var record in records)
+        {
+            token.ThrowIfCancellationRequested();
+            await stderr.WriteAsync(record.AsMemory(), token).ConfigureAwait(false);
+            await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), token).ConfigureAwait(false);
+        }
+        await stderr.FlushAsync(token).ConfigureAwait(false);
+        owner.RequireControlIdentity(token);
+    }
+#endif
 
     /// <summary>Encodes fixed private cancellation cleanup data; it creates no native ownership or completion capability.</summary>
     /// <param name="generation">Original generation data; native composition supplies the actual owner generation.</param>

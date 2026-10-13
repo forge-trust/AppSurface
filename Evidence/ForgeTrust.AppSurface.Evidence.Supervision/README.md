@@ -1526,3 +1526,37 @@ Endpoint inspection and irreversible socket disposal share the listener gate thr
 the socket between its open-state sample and endpoint read. Close attempts stay latched
 even when disposal throws. The close dispatch occurs outside the accept-ownership gate;
 the original accept and handler tasks still require their separate joins.
+
+## Occupied and linked allocation-slot qualification
+
+The compile-owned `EvidencePrivateQualification=N05` or `N06` image exercises the
+real worker's [exclusive allocator](../ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+in the actual generated output parent. Arguments, environment and descriptor JSON
+cannot select either fixture. The ordinary image defaults to `None`; private images
+cannot be packed. Each selector must build the complete same-source dependency graph.
+
+`LinuxRunWorkspace.PrepareSlotNegativeFixture(owner, accounts, token)` is internal
+and requires the original native owner/accounts before listener or worker startup.
+N05 exclusively creates the fixed `evidence` directory with worker ownership and
+0700 permissions, then writes a fixed 0600 `allocation-sentinel`. N06 exclusively
+creates the `evidence` symlink to the existing `../raw-results` sibling and writes
+its fixed root-owned 0600 sentinel through the retained sibling handle. It never
+adopts, follows, deletes or changes a preexisting collision. No supplied path or
+callback selects fixture content, and the allocator's original rejection is preserved.
+
+`CloseAndCaptureSlotNegativeFixture(token)` runs only after the original worker
+holder verifies server, process, output and selected cgroup joins. It rechecks
+retained and named identities, exact policies and sentinel bytes, closes inspection
+handles, and returns bounded diagnostic data. The same handles are also retained
+for workspace teardown if setup or capture fails. Unknown occupied/link nodes still
+fail ordinary root custody and quarantine; this control does not grant account
+reuse or successful Observation completion.
+
+`LinuxSlotNegativeObservation` encodes the fixed setup/post-join schemas and strictly
+parses the original complete two-line allocation failure. Output must have zero
+stdout, at most 2048 stderr bytes, both actual EOFs, no errors/discards, exact charged
+bytes, and the existing allocation-stage `ASEVD409`. Its detached tests check only
+metadata/codec behavior. Neither matching JSON nor successful local compilation
+proves Linux ownership, syscall rejection, containment or any Trusted eligibility.
+See the [sixteen-case migration gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker)
+for the required fresh native evidence.
