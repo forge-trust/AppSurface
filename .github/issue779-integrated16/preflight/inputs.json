@@ -1,0 +1,31 @@
+{
+  "files": {
+    "build-fdd.sh": {
+      "bytes": 67388,
+      "mode": "0644",
+      "sha256": "bd7b008c335565fea893543c10c01f22207b40cec7a7d26297f1fdff69dd3c37"
+    },
+    "integrated16_build.py": {
+      "bytes": 45833,
+      "mode": "0644",
+      "sha256": "f9500143e2d554de51e03f9ff9d3899287369394a6689c381599f22541d4b9c7"
+    },
+    "integrated16_build_contract.py": {
+      "bytes": 9911,
+      "mode": "0644",
+      "sha256": "4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8"
+    },
+    "run_linux_real_child_preflight.py": {
+      "bytes": 19667,
+      "mode": "0644",
+      "sha256": "d878e022ed4a470e2e84b933b2383b12e601b9ec1fe8c003f0f653336d9a1989"
+    },
+    "test_integrated16_build.py": {
+      "bytes": 29974,
+      "mode": "0644",
+      "sha256": "4d37c8944a26ada6e2d4550359310dfbe2d3701a7b867b1bfd64ae6d807a7815"
+    }
+  },
+  "schema": "issue779-integrated16-process-preflight-inputs-v1",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e"
+}

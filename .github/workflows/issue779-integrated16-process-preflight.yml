@@ -1,0 +1,63 @@
+name: Issue 779 C# integrated image process preflight
+on:
+  push:
+    branches: [codex/issue779-integrated16-process-preflight-20261013]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-integrated16-process-preflight-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  real-child-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Provision Linux test-only sticky temporary parent
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -e /private ]]; then sudo -n /usr/bin/install -d -o root -g root -m 0755 /private; fi
+          [[ -d /private && ! -L /private && $(stat -c '%u:%g' /private) == 0:0 ]]
+          if [[ ! -e /private/tmp ]]; then sudo -n /usr/bin/install -d -o root -g root -m 1777 /private/tmp; fi
+          [[ -d /private/tmp && ! -L /private/tmp && $(stat -c '%u:%g:%a' /private/tmp) == 0:0:1777 ]]
+      - name: Verify reviewed preflight inputs and exercise real process groups
+        shell: bash
+        env:
+          PREFLIGHT_INPUT_MANIFEST_SHA256: c2654236ad6eadd432469b89d5fc044a1d6d7cee557148366f3f60e69c99efee
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -m 0700 "$RUNNER_TEMP/issue779-integrated16-preflight"
+          root="$GITHUB_WORKSPACE/.github/issue779-integrated16/preflight"
+          export root
+          python3 -B - <<'PY'
+          import hashlib,json,os,stat
+          from pathlib import Path
+          root=Path(os.environ['root'])
+          manifest=root/'inputs.json'
+          raw=manifest.read_bytes()
+          assert hashlib.sha256(raw).hexdigest()==os.environ['PREFLIGHT_INPUT_MANIFEST_SHA256']
+          data=json.loads(raw)
+          assert data['source_commit']=='fc59bb1254294d624f6779f928020edfe988dd5e'
+          assert set(data['files'])=={'run_linux_real_child_preflight.py','integrated16_build.py','test_integrated16_build.py','integrated16_build_contract.py','build-fdd.sh'}
+          for name,row in data['files'].items():
+              path=root/name
+              st=path.lstat()
+              assert stat.S_ISREG(st.st_mode) and st.st_nlink==1 and stat.S_IMODE(st.st_mode)==0o644
+              assert st.st_size==row['bytes'] and hashlib.sha256(path.read_bytes()).hexdigest()==row['sha256']
+          PY
+          python3 -B "$root/run_linux_real_child_preflight.py" \
+            --builder-dir "$root" \
+            --receipt "$RUNNER_TEMP/issue779-integrated16-preflight/real-child-preflight.json" \
+            --log "$RUNNER_TEMP/issue779-integrated16-preflight/real-child-preflight.log"
+      - name: Retain bounded prerequisite diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-integrated16-real-child-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-integrated16-preflight/
+          if-no-files-found: error
+          retention-days: 7
