@@ -5,6 +5,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Testing;
 using CliFx.Binding;
+using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Aspire.Testing;
 using ForgeTrust.AppSurface.Core;
@@ -469,6 +470,7 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
             key => key,
             Environment.GetEnvironmentVariable,
             StringComparer.Ordinal);
+        var stopwatch = Stopwatch.StartNew();
         var receiptsOn = new OverlapWorker(
             "receipts-on",
             new ConfiguredGraphScenario(true, false, true, false),
@@ -477,7 +479,6 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
             "receipts-off",
             new ConfiguredGraphScenario(false, true, false, true),
             "overlap-off");
-        var stopwatch = Stopwatch.StartNew();
         AppSurfaceAspireProfileTestingBuilder? receiptsOnBuilder = null;
         AppSurfaceAspireProfileTestingBuilder? receiptsOffBuilder = null;
         var receiptsOnJoined = false;
@@ -495,7 +496,7 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
 
             var first = receiptsOnCompletesFirst ? receiptsOn : receiptsOff;
             var second = receiptsOnCompletesFirst ? receiptsOff : receiptsOn;
-            first.Release.Set();
+            first.SignalRelease();
             var firstBuilder = await WaitForCompletionAsync(first, stopwatch, "after releasing its hook");
             if (receiptsOnCompletesFirst)
             {
@@ -509,7 +510,7 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
             Assert.False(
                 second.Completion.Task.IsCompleted,
                 $"{second.Name} completed before its ConfigureAspireBuilder release gate was opened.");
-            second.Release.Set();
+            second.SignalRelease();
             var secondBuilder = await WaitForCompletionAsync(second, stopwatch, "after releasing its hook");
             if (receiptsOnCompletesFirst)
             {
@@ -539,12 +540,14 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
         }
         finally
         {
-            receiptsOn.Release.Set();
-            receiptsOff.Release.Set();
+            receiptsOn.SignalRelease();
+            receiptsOff.SignalRelease();
+            var receiptsOnAbandonedBuilder = receiptsOn.AbandonAndTakeCompletedBuilder();
+            receiptsOnBuilder ??= receiptsOnAbandonedBuilder;
+            var receiptsOffAbandonedBuilder = receiptsOff.AbandonAndTakeCompletedBuilder();
+            receiptsOffBuilder ??= receiptsOffAbandonedBuilder;
             receiptsOnJoined = receiptsOn.WorkerThread.Join(CleanupBudget(stopwatch, TimeSpan.FromSeconds(5)));
             receiptsOffJoined = receiptsOff.WorkerThread.Join(CleanupBudget(stopwatch, TimeSpan.FromSeconds(5)));
-            receiptsOnBuilder ??= receiptsOn.GetCompletedBuilder();
-            receiptsOffBuilder ??= receiptsOff.GetCompletedBuilder();
             Exception? cleanupFailure = null;
             try
             {
@@ -564,9 +567,16 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
                 cleanupFailure ??= error;
             }
 
-            if (receiptsOnJoined && receiptsOffJoined)
+            cleanupFailure ??= receiptsOn.AbandonedCleanupFailure;
+            cleanupFailure ??= receiptsOff.AbandonedCleanupFailure;
+
+            if (receiptsOnJoined)
             {
                 receiptsOn.Dispose();
+            }
+
+            if (receiptsOffJoined)
+            {
                 receiptsOff.Dispose();
             }
 
@@ -579,6 +589,225 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
         Assert.True(receiptsOnJoined, "Worker 'receipts-on' did not join within the bounded cleanup wait.");
         Assert.True(receiptsOffJoined, "Worker 'receipts-off' did not join within the bounded cleanup wait.");
     }
+
+    [Fact]
+    public async Task OverlapWorker_DisposesBuilderProducedAfterOwnershipIsAbandoned()
+    {
+        var builderSource = new TaskCompletionSource<AppSurfaceAspireProfileTestingBuilder>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var createStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var activation = new AsyncOnlyDisposalProbe();
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        var services = new ServiceCollection();
+        services.AddSingleton<IHost>(_ => A.Fake<IHost>());
+        A.CallTo(() => inner.Services).Returns(services);
+        var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+        var worker = new OverlapWorker(
+            "late-result",
+            new ConfiguredGraphScenario(false, false, false, false),
+            "late-result",
+            () =>
+            {
+                createStarted.TrySetResult();
+                return builderSource.Task;
+            });
+        var workerStarted = false;
+        try
+        {
+            worker.Start();
+            workerStarted = true;
+            await createStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Null(worker.AbandonAndTakeCompletedBuilder());
+            builderSource.SetResult(builder);
+
+            Assert.True(worker.WorkerThread.Join(TimeSpan.FromSeconds(5)), "Late-result worker did not finish cleanup.");
+            Assert.Equal(1, activation.DisposeCount);
+            Assert.Null(worker.TakeCompletedBuilder());
+            Assert.Null(worker.AbandonedCleanupFailure);
+        }
+        finally
+        {
+            worker.SignalRelease();
+            var unclaimedBuilder = worker.AbandonAndTakeCompletedBuilder();
+            if (unclaimedBuilder is not null)
+            {
+                await unclaimedBuilder.DisposeAsync();
+            }
+
+            builderSource.TrySetResult(builder);
+            if (workerStarted)
+            {
+                if (worker.WorkerThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    worker.Dispose();
+                }
+            }
+            else
+            {
+                worker.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OverlapWorker_RetainsFailureFromAbandonedBuilderCleanup()
+    {
+        var builderSource = new TaskCompletionSource<AppSurfaceAspireProfileTestingBuilder>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var createStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var activation = new AsyncOnlyDisposalProbe(throwOnDispose: true);
+        var builder = CreateOwnershipProbeBuilder(activation);
+        var worker = CreateOwnershipProbeWorker(() =>
+        {
+            createStarted.TrySetResult();
+            return builderSource.Task;
+        });
+        var workerStarted = false;
+
+        try
+        {
+            worker.Start();
+            workerStarted = true;
+            await createStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Null(worker.AbandonAndTakeCompletedBuilder());
+            builderSource.SetResult(builder);
+
+            Assert.True(worker.WorkerThread.Join(TimeSpan.FromSeconds(5)), "Failing-cleanup worker did not finish cleanup.");
+            Assert.Equal(1, activation.DisposeCount);
+            Assert.IsType<CleanupException>(worker.AbandonedCleanupFailure);
+        }
+        finally
+        {
+            worker.SignalRelease();
+            var unclaimedBuilder = worker.AbandonAndTakeCompletedBuilder();
+            if (unclaimedBuilder is not null)
+            {
+                await unclaimedBuilder.DisposeAsync();
+            }
+
+            builderSource.TrySetResult(builder);
+            if (workerStarted)
+            {
+                if (worker.WorkerThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    worker.Dispose();
+                }
+            }
+            else
+            {
+                worker.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OverlapWorker_AbandonDrainsBuilderCompletedBeforeOwnershipTransfer()
+    {
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = CreateOwnershipProbeBuilder(activation);
+        var worker = CreateOwnershipProbeWorker(() => Task.FromResult(builder));
+        var workerStarted = false;
+
+        try
+        {
+            worker.Start();
+            workerStarted = true;
+            await worker.Completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var abandonedBuilder = worker.AbandonAndTakeCompletedBuilder();
+            Assert.Same(builder, abandonedBuilder);
+            Assert.Null(worker.TakeCompletedBuilder());
+
+            await abandonedBuilder!.DisposeAsync();
+            Assert.Equal(1, activation.DisposeCount);
+        }
+        finally
+        {
+            worker.SignalRelease();
+            var unclaimedBuilder = worker.AbandonAndTakeCompletedBuilder();
+            if (unclaimedBuilder is not null)
+            {
+                await unclaimedBuilder.DisposeAsync();
+            }
+
+            if (workerStarted)
+            {
+                if (worker.WorkerThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    worker.Dispose();
+                }
+            }
+            else
+            {
+                worker.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task OverlapWorker_TakenBuilderRemainsOwnedByCallerWhenWorkerIsAbandoned()
+    {
+        var activation = new AsyncOnlyDisposalProbe();
+        var builder = CreateOwnershipProbeBuilder(activation);
+        var worker = CreateOwnershipProbeWorker(() => Task.FromResult(builder));
+        var workerStarted = false;
+
+        try
+        {
+            worker.Start();
+            workerStarted = true;
+            await worker.Completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var callerOwnedBuilder = worker.TakeCompletedBuilder();
+            Assert.Same(builder, callerOwnedBuilder);
+            Assert.Null(worker.AbandonAndTakeCompletedBuilder());
+            Assert.Null(worker.TakeCompletedBuilder());
+
+            await callerOwnedBuilder!.DisposeAsync();
+            Assert.Equal(1, activation.DisposeCount);
+        }
+        finally
+        {
+            worker.SignalRelease();
+            var unclaimedBuilder = worker.AbandonAndTakeCompletedBuilder();
+            if (unclaimedBuilder is not null)
+            {
+                await unclaimedBuilder.DisposeAsync();
+            }
+
+            if (workerStarted)
+            {
+                if (worker.WorkerThread.Join(TimeSpan.FromSeconds(5)))
+                {
+                    worker.Dispose();
+                }
+            }
+            else
+            {
+                worker.Dispose();
+            }
+        }
+    }
+
+    private static AppSurfaceAspireProfileTestingBuilder CreateOwnershipProbeBuilder(
+        AsyncOnlyDisposalProbe activation)
+    {
+        var inner = A.Fake<IDistributedApplicationBuilder>();
+        var services = new ServiceCollection();
+        services.AddSingleton<IHost>(_ => A.Fake<IHost>());
+        A.CallTo(() => inner.Services).Returns(services);
+        return new AppSurfaceAspireProfileTestingBuilder(inner, activation);
+    }
+
+    private static OverlapWorker CreateOwnershipProbeWorker(
+        Func<Task<AppSurfaceAspireProfileTestingBuilder>> createBuilder) =>
+        new(
+            "ownership-probe",
+            new ConfiguredGraphScenario(false, false, false, false),
+            "ownership-probe",
+            createBuilder);
 
     [Theory]
     [InlineData(false)]
@@ -884,7 +1113,9 @@ public sealed class ConfiguredAspireTestingBuilderTests : IDisposable
         var timeout = RemainingBudget(stopwatch, TimeSpan.FromSeconds(10));
         try
         {
-            return await worker.Completion.Task.WaitAsync(timeout);
+            await worker.Completion.Task.WaitAsync(timeout);
+            return worker.TakeCompletedBuilder() ??
+                throw new InvalidOperationException($"Worker '{worker.Name}' completed without a transferable builder.");
         }
         catch (TimeoutException error)
         {
@@ -1222,8 +1453,18 @@ internal sealed class ConfiguredHostedServiceSentinel : IHostedService
 internal sealed class OverlapWorker : IDisposable
 {
     private readonly AppSurfaceAspireTestingOptions _options;
+    private readonly Func<Task<AppSurfaceAspireProfileTestingBuilder>> _createBuilder;
+    private readonly object _ownershipSync = new();
+    private AppSurfaceAspireProfileTestingBuilder? _completedBuilder;
+    private Exception? _abandonedCleanupFailure;
+    private bool _abandoned;
+    private bool _signalsDisposed;
 
-    public OverlapWorker(string name, ConfiguredGraphScenario scenario, string configurationValue)
+    public OverlapWorker(
+        string name,
+        ConfiguredGraphScenario scenario,
+        string configurationValue,
+        Func<Task<AppSurfaceAspireProfileTestingBuilder>>? createBuilder = null)
     {
         Name = name;
         Scenario = scenario;
@@ -1254,6 +1495,10 @@ internal sealed class OverlapWorker : IDisposable
                 }
             }
         };
+        _createBuilder = createBuilder ?? (() => AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+            ConfiguredTestAppHost,
+            ConfiguredTestModule,
+            ConfiguredGraphProfile>(_options));
 
         WorkerThread = new System.Threading.Thread(Run)
         {
@@ -1276,34 +1521,89 @@ internal sealed class OverlapWorker : IDisposable
 
     public ManualResetEventSlim Finished { get; } = new(false);
 
-    public TaskCompletionSource<AppSurfaceAspireProfileTestingBuilder> Completion { get; } =
+    public TaskCompletionSource Completion { get; } =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public System.Threading.Thread WorkerThread { get; }
 
     public void Start() => WorkerThread.Start();
 
-    public AppSurfaceAspireProfileTestingBuilder? GetCompletedBuilder() =>
-        Completion.Task.IsCompletedSuccessfully ? Completion.Task.Result : null;
+    public void SignalRelease()
+    {
+        lock (_ownershipSync)
+        {
+            if (!_signalsDisposed)
+            {
+                Release.Set();
+            }
+        }
+    }
+
+    public Exception? AbandonedCleanupFailure
+    {
+        get
+        {
+            lock (_ownershipSync)
+            {
+                return _abandonedCleanupFailure;
+            }
+        }
+    }
+
+    public AppSurfaceAspireProfileTestingBuilder? TakeCompletedBuilder()
+    {
+        lock (_ownershipSync)
+        {
+            if (_abandoned)
+            {
+                return null;
+            }
+
+            var builder = _completedBuilder;
+            _completedBuilder = null;
+            return builder;
+        }
+    }
+
+    public AppSurfaceAspireProfileTestingBuilder? AbandonAndTakeCompletedBuilder()
+    {
+        lock (_ownershipSync)
+        {
+            _abandoned = true;
+            var builder = _completedBuilder;
+            _completedBuilder = null;
+            return builder;
+        }
+    }
 
     public void Dispose()
     {
-        Arrived.Dispose();
-        Release.Dispose();
-        Finished.Dispose();
+        DisposeSignals();
     }
 
     private void Run()
     {
         try
         {
-            var builder = AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
-                    ConfiguredTestAppHost,
-                    ConfiguredTestModule,
-                    ConfiguredGraphProfile>(_options)
-                .GetAwaiter()
-                .GetResult();
-            Completion.TrySetResult(builder);
+            var builder = _createBuilder().GetAwaiter().GetResult();
+            var disposeAsAbandoned = false;
+            lock (_ownershipSync)
+            {
+                if (_abandoned)
+                {
+                    disposeAsAbandoned = true;
+                }
+                else
+                {
+                    _completedBuilder = builder;
+                }
+            }
+
+            Completion.TrySetResult();
+            if (disposeAsAbandoned)
+            {
+                DisposeAbandonedBuilder(builder);
+            }
         }
         catch (Exception error)
         {
@@ -1312,6 +1612,49 @@ internal sealed class OverlapWorker : IDisposable
         finally
         {
             Finished.Set();
+            if (IsAbandoned())
+            {
+                DisposeSignals();
+            }
+        }
+    }
+
+    private bool IsAbandoned()
+    {
+        lock (_ownershipSync)
+        {
+            return _abandoned;
+        }
+    }
+
+    private void DisposeAbandonedBuilder(AppSurfaceAspireProfileTestingBuilder builder)
+    {
+        try
+        {
+            builder.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception error)
+        {
+            lock (_ownershipSync)
+            {
+                _abandonedCleanupFailure ??= error;
+            }
+        }
+    }
+
+    private void DisposeSignals()
+    {
+        lock (_ownershipSync)
+        {
+            if (_signalsDisposed)
+            {
+                return;
+            }
+
+            _signalsDisposed = true;
+            Arrived.Dispose();
+            Release.Dispose();
+            Finished.Dispose();
         }
     }
 }
