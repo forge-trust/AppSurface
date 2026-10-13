@@ -12,6 +12,62 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public sealed class RecommendationSnapshotTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task AuthoredTitleLookup_ShouldPreserveVisibilityOrderPathAndRoutePrecedence(
+        bool reverseHarvest,
+        bool preferLaterPathByOrder)
+    {
+        using var fixture = new Fixture();
+        var sources = new[] { "source-one", "source-two" }.Select(id => Page(id, id + ".md", "guide",
+            new DocMetadata { AutoRelatedPages = false, RelatedPages = ["  DUPLICATE TITLE  ", "route-target.md", "Missing title"] }));
+        var destinations = new[]
+        {
+            Page("Duplicate Title", "a-hidden.md", "example", new DocMetadata { HideFromPublicNav = true, Order = -10 }),
+            Page("Duplicate Title", "b-empty.md", "example", new DocMetadata { Order = -9 }) with { Content = "" },
+            Page("Duplicate Title", "c-first.md", "example", new DocMetadata { Order = 5, HideFromSearch = true }),
+            Page("Duplicate Title", "d-later.md", "example", new DocMetadata { Order = preferLaterPathByOrder ? 4 : 5 }),
+            Page("Route winner", "route-target.md", "example"),
+            Page("route-target.md", "title-only.md", "example", new DocMetadata { Order = -20 }),
+            new DocNode(null!, "null-title.md", "<p>Readable</p>", Metadata: new DocMetadata { AutoRelatedPages = false })
+        };
+        var docs = sources.Concat(destinations).ToArray();
+        fixture.Set(reverseHarvest ? docs.Reverse().ToArray() : docs);
+        var expected = preferLaterPathByOrder ? "d-later" : "c-first";
+
+        foreach (var sourceId in new[] { "source-one", "source-two" })
+        {
+            var details = Assert.IsType<DocDetailsViewModel>(await fixture.Aggregator.GetDocDetailsAsync(sourceId));
+            Assert.Equal(["/docs/" + expected, "/docs/route-target"], details.RelatedPages.Select(page => page.Href));
+            Assert.Equal(["Duplicate Title", "Route winner"], details.RecommendedPages.Select(row => row.Page.Title));
+            Assert.All(details.RecommendedPages, row => Assert.Equal(DocRecommendationSource.Authored, row.Source));
+            var indexed = Assert.Single((await fixture.Aggregator.GetSearchIndexPayloadAsync()).Documents, doc => doc.Id == sourceId);
+            Assert.Equal([expected, "route-target"], indexed.RecommendedPages.Select(row => row.TargetId));
+        }
+    }
+
+    [Fact]
+    public async Task AuthoredTitleLookup_ShouldRebuildWhenTheCachedGenerationChanges()
+    {
+        using var fixture = new Fixture();
+        var source = Page("Source", "source.md", "guide",
+            new DocMetadata { AutoRelatedPages = false, RelatedPages = ["Selected destination"] });
+        fixture.Set([source, Page("Selected destination", "old.md", "example")]);
+        var oldDetails = Assert.IsType<DocDetailsViewModel>(await fixture.Aggregator.GetDocDetailsAsync("source"));
+        Assert.Equal("/docs/old", Assert.Single(oldDetails.RelatedPages).Href);
+
+        fixture.Set([source, Page("Selected destination", "new.md", "example")]);
+        fixture.Aggregator.InvalidateCache();
+        var newDetails = Assert.IsType<DocDetailsViewModel>(await fixture.Aggregator.GetDocDetailsAsync("source"));
+        Assert.Equal("/docs/new", Assert.Single(newDetails.RelatedPages).Href);
+        Assert.Equal("new", Assert.Single((await fixture.Aggregator.GetSearchIndexPayloadAsync()).Documents,
+            doc => doc.Id == "source").RecommendedPages[0].TargetId);
+        Assert.Equal("/docs/old", Assert.Single(oldDetails.RelatedPages).Href);
+    }
+
     [Fact]
     public async Task CompleteRows_ShouldPreserveAuthoredNonsearchAndRawReferences_BeforeAutomaticReads()
     {

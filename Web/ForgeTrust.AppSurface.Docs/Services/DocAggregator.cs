@@ -2875,8 +2875,9 @@ public class DocAggregator
 
     /// <summary>
     /// Resolves all legacy wayfinding and new recommendations once after merge, canonical collision resolution and
-    /// section landing selection. Canonical page links are built once and shared only within the snapshot; response
-    /// projections detach them. Results publish atomically with the search projection in the same cached generation.
+    /// section landing selection. A shared canonical link map supplies sequence neighbors and policy facts; authored
+    /// destinations are projected separately. Their title fallback index is created once on demand within this build.
+    /// Response projections detach links. Results publish atomically with the search projection in the cached generation.
     /// </summary>
     private (IReadOnlyDictionary<string, DocWayfindingSnapshot> Wayfinding, DocRecommendationPolicyResult Recommendations)
         BuildWayfindingSnapshot(IReadOnlyList<DocNode> docs, DocPathResolver resolver,
@@ -2886,6 +2887,7 @@ public class DocAggregator
         var canonical = ordered.Where(doc => doc.CanonicalPath is not null)
             .GroupBy(GetSnapshotCanonicalPath, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToArray();
         var linksByPath = canonical.ToDictionary(doc => doc.Path, CreatePageLink, StringComparer.Ordinal);
+        var relatedDocsByTitle = new Lazy<IReadOnlyDictionary<string, DocNode>>(() => BuildRelatedTitleLookup(ordered));
         var previous = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
         var next = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
         var groups = canonical.Where(doc => doc.Metadata?.SequenceKey is { } key && CanJoinSequence(doc, key.Trim()))
@@ -2912,7 +2914,7 @@ public class DocAggregator
         {
             var prev = previous.GetValueOrDefault(doc.Path);
             var following = next.GetValueOrDefault(doc.Path);
-            var related = ResolveRelatedPages(doc, ordered, resolver, prev, following);
+            var related = ResolveRelatedPages(doc, relatedDocsByTitle, resolver, prev, following);
             wayfinding[doc.Path] = new DocWayfindingSnapshot(prev, following, related);
             sectionByPath.TryGetValue(doc.Path, out var section);
             facts.Add(new DocRecommendationPageFacts(doc, GetSnapshotCanonicalPath(doc), linksByPath[doc.Path], section?.Section,
@@ -2983,7 +2985,7 @@ public class DocAggregator
 
     private IReadOnlyList<DocPageLinkViewModel> ResolveRelatedPages(
         DocNode currentDoc,
-        IReadOnlyList<DocNode> docs,
+        Lazy<IReadOnlyDictionary<string, DocNode>> relatedDocsByTitle,
         DocPathResolver pathResolver,
         DocPageLinkViewModel? previousPage,
         DocPageLinkViewModel? nextPage)
@@ -3022,7 +3024,7 @@ public class DocAggregator
                                  _docsUrlBuilder.CurrentDocsRootPath,
                                  _docsUrlBuilder.RouteRootPath,
                                  DocsUrlBuilder.DocsEntryPath)
-                             ?? ResolveDocByTitle(normalizedEntry, docs);
+                             ?? relatedDocsByTitle.Value.GetValueOrDefault(normalizedEntry);
             if (relatedDoc is null || relatedDoc.Metadata?.HideFromPublicNav == true
                 || relatedDoc.CanonicalPath is null
                 || !(relatedDoc.HasReaderContent || relatedDoc.IsFragmentStub))
@@ -3042,16 +3044,23 @@ public class DocAggregator
         return relatedPages;
     }
 
-    private static DocNode? ResolveDocByTitle(string title, IReadOnlyList<DocNode> docs)
+    /// <summary>
+    /// Indexes readable authored destinations by display title, preserving the related-page resolver's order/title/path
+    /// winner and stable input ordering for ties. The build-local lookup is populated only when route resolution fails.
+    /// </summary>
+    private static IReadOnlyDictionary<string, DocNode> BuildRelatedTitleLookup(IReadOnlyList<DocNode> docs)
     {
-        return docs
-            .Where(doc => doc.Metadata?.HideFromPublicNav != true && doc.CanonicalPath is not null
-                          && (doc.HasReaderContent || doc.IsFragmentStub))
+        var byTitle = new Dictionary<string, DocNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (var doc in docs.Where(doc => doc.Metadata?.HideFromPublicNav != true && doc.CanonicalPath is not null
+                                            && (doc.HasReaderContent || doc.IsFragmentStub))
             .OrderBy(doc => doc.Metadata?.Order ?? int.MaxValue)
             .ThenBy(doc => GetDisplayTitle(doc), StringComparer.OrdinalIgnoreCase)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(
-                doc => string.Equals(GetDisplayTitle(doc), title, StringComparison.OrdinalIgnoreCase));
+            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (GetDisplayTitle(doc) is { } title) byTitle.TryAdd(title, doc);
+        }
+
+        return byTitle;
     }
 
     private DocPageLinkViewModel CreatePageLink(DocNode doc)

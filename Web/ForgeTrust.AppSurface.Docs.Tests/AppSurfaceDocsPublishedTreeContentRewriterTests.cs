@@ -363,6 +363,26 @@ public sealed class AppSurfaceDocsPublishedTreeContentRewriterTests
     }
 
     [Fact]
+    public void RewriteSearchIndexJson_ShouldPreserveMalformedJsonForDefaultStableMount()
+    {
+        const string malformedJson = "{";
+
+        var unchanged = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(malformedJson, "/docs");
+
+        Assert.Same(malformedJson, unchanged);
+    }
+
+    [Fact]
+    public void RewriteSearchIndexJson_ShouldReturnOriginalPayload_WhenStableDocumentPathsNeedNoRewrite()
+    {
+        const string json = "{\"documents\":[{\"path\":\"/docs/guide.html\",\"title\":\"Guide\"}]}";
+
+        var unchanged = AppSurfaceDocsPublishedTreeContentRewriter.RewriteSearchIndexJson(json, "/docs");
+
+        Assert.Same(json, unchanged);
+    }
+
+    [Fact]
     public void RewriteSearchIndexJson_ShouldRebaseDocumentPathsToCustomRouteRoot()
     {
         const string json = """

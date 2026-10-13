@@ -68,6 +68,21 @@ public sealed class AppSurfaceDocsPublishedTreeHandlerTests : IDisposable
     }
 
     [Fact]
+    public void BuildHtmlDocumentCandidatePaths_ShouldUseIndexForRoot_RejectWhitespaceAndHiddenPaths_AndAppendHtmlCandidates()
+    {
+        Assert.Equal(new[] { "index.html" }, AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths(string.Empty));
+        Assert.Empty(AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths(" "));
+        Assert.Empty(AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths(".drafts/guide"));
+        Assert.Equal(new[] { "guide.html" }, AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths("guide.html"));
+        Assert.Equal(
+            new[] { "assets/search.css.html", "assets/search.css/index.html" },
+            AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths("assets/search.css"));
+        Assert.Equal(
+            new[] { "guide.html", "guide/index.html" },
+            AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths("guide"));
+    }
+
+    [Fact]
     public async Task TryHandleAsync_ShouldExhaustRootTrailingSlashAndExtensionCandidates_WhenFilesAreMissing()
     {
         var tree = CreatePublishedTree("missing-candidates");

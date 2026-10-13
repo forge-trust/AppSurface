@@ -360,6 +360,21 @@ public sealed class DocRecommendationPolicyTests
     }
 
     [Fact]
+    public void Build_UnorderedSourceShouldNotExcludeOrderedTargetsInItsSequence()
+    {
+        var source = Page("source", "guide", component: "runtime", sequence: "walkthrough");
+        var earlier = Page("earlier", "example", component: "runtime", sequence: "walkthrough", order: 1,
+            autoRelatedPages: false);
+        var later = Page("later", "example", component: "runtime", sequence: "walkthrough", order: 2,
+            autoRelatedPages: false);
+
+        var rows = DocRecommendationPolicy.Build([source, later, earlier]).Pages["source"];
+
+        Assert.Equal(["earlier", "later"], rows.Select(row => row.TargetId));
+        Assert.All(rows, row => Assert.DoesNotContain("shared-sequence", row.ReasonCodes));
+    }
+
+    [Fact]
     public void Build_UsesSharedComponentBeforeTopicCountAndCapsTopicEvidenceAtThree()
     {
         var componentSource = Page("component-source", "guide", component: "runtime",

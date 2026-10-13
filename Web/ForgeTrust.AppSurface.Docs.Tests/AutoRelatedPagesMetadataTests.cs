@@ -23,7 +23,10 @@ public sealed class AutoRelatedPagesMetadataTests
     [InlineData("true", true)]
     [InlineData("false", false)]
     [InlineData("null", null)]
+    [InlineData("NULL", null)]
     [InlineData("~", null)]
+    [InlineData("!!str null", null)]
+    [InlineData("", null)]
     public void ExtractWithDiagnostics_ShouldParseNullableAutoRelatedPagesBoolean(string value, bool? expected)
     {
         var markdown = $"---\nauto_related_pages: {value}\n---\n# Guide";
@@ -38,6 +41,8 @@ public sealed class AutoRelatedPagesMetadataTests
     [InlineData("true", true)]
     [InlineData("false", false)]
     [InlineData("null", null)]
+    [InlineData("!!str null", null)]
+    [InlineData("", null)]
     public void ParseMetadataYamlWithDiagnostics_ShouldParseNullableSidecarAutoRelatedPagesBoolean(
         string value,
         bool? expected)
@@ -133,6 +138,10 @@ public sealed class AutoRelatedPagesMetadataTests
     [InlineData("not-a-boolean")]
     [InlineData("\"false\"")]
     [InlineData("!!str false")]
+    [InlineData("!!bool true")]
+    [InlineData("!!bool false")]
+    [InlineData("!!null null")]
+    [InlineData("\"\"")]
     [InlineData("1")]
     [InlineData("!!bool maybe")]
     public void ExtractWithDiagnostics_ShouldUseInvalidYamlDiagnosticForMalformedAutoRelatedPages(string value)
@@ -150,12 +159,23 @@ public sealed class AutoRelatedPagesMetadataTests
     [InlineData("not-a-boolean")]
     [InlineData("\"false\"")]
     [InlineData("!!str false")]
+    [InlineData("!!bool true")]
+    [InlineData("!!bool false")]
+    [InlineData("!!null null")]
     [InlineData("1")]
     [InlineData("!!bool maybe")]
     public void ParseMetadataYamlWithDiagnostics_ShouldThrowForMalformedSidecarAutoRelatedPages(string value)
     {
         Assert.Throws<YamlException>(
             () => MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics($"auto_related_pages: {value}\n"));
+    }
+
+    [Fact]
+    public void ParseMetadataYamlWithDiagnostics_ShouldRejectCollectionAutoRelatedPagesValue()
+    {
+        Assert.Throws<YamlException>(
+            () => MarkdownFrontMatterParser.ParseMetadataYamlWithDiagnostics(
+                "auto_related_pages: { enabled: true }\n"));
     }
 
     private static async Task<DocMetadata?> HarvestMetadataAsync(string markdown, string sidecar)
