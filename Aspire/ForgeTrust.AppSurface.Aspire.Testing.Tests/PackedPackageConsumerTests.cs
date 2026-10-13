@@ -621,7 +621,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         Assert.True(process.Start(), $"Expected the '{stage}' child process to start.");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
-        var effectiveTimeout = timeout ?? TimeSpan.FromMinutes(5);
+        var effectiveTimeout = timeout ?? TimeSpan.FromMinutes(2);
         using var timeoutSource = new CancellationTokenSource(effectiveTimeout);
         try
         {
@@ -700,7 +700,8 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             throw new TimeoutException($"The shared packed proof exceeded its eight-minute budget before '{stage}'.");
         }
 
-        return remaining;
+        // Each child retains the original two-minute bound within the expanded proof's total deadline.
+        return remaining < TimeSpan.FromMinutes(2) ? remaining : TimeSpan.FromMinutes(2);
     }
 
     private static void TryDeleteDirectory(string directory, Action<string> warning)

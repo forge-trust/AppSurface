@@ -974,8 +974,10 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Equal(1, activation.DisposeCount);
     }
 
-    [Fact]
-    public async Task BuildAsync_PostBuildCancellationDisposesUnreturnedApplication()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuildAsync_PostBuildCancellationDisposesUnreturnedApplication(bool configured)
     {
         using var cancellation = new CancellationTokenSource();
         var actualBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
@@ -985,9 +987,33 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             ProjectDirectory = TestAppHost.ProjectPath,
             DisableDashboard = true
         });
+        // Value: protects=post-build cancellation preserves application ownership and native disposal policy;
+        // fails_when=configured cleanup leaks or double-disposes resources after ownership transfer;
+        // why_new=the configured creation branch was absent from the legacy cancellation case;
+        // seam=none; no_claim=application startup is not exercised.
+        var nativeFileProvider = new SynchronousTrackingFileProvider("native-file-provider", new List<string>());
+        var nativeBuilder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
+        {
+            Args = [],
+            AssemblyName = typeof(TestAppHost).Assembly.GetName().Name,
+            ProjectDirectory = TestAppHost.ProjectPath,
+            DisableDashboard = true
+        });
+        nativeBuilder.Environment.ContentRootFileProvider = nativeFileProvider;
+        await nativeBuilder.Build().DisposeAsync();
+        Assert.True(nativeFileProvider.DisposeCount > 0);
+
+        var disposalOrder = new List<string>();
+        var configurationProvider = new TrackingConfigurationProvider("configuration", disposalOrder);
+        actualBuilder.Configuration.Sources.Add(new TrackingConfigurationSource(configurationProvider));
+        var fileProvider = new SynchronousTrackingFileProvider("file-provider", disposalOrder);
+        actualBuilder.Environment.ContentRootFileProvider = fileProvider;
         actualBuilder.Services.AddSingleton<OwnedBuildProbe>();
         OwnedBuildProbe? ownedProbe = null;
         var inner = A.Fake<IDistributedApplicationBuilder>();
+        A.CallTo(() => inner.Configuration).Returns(actualBuilder.Configuration);
+        A.CallTo(() => inner.Environment).Returns(actualBuilder.Environment);
+        A.CallTo(() => inner.Services).Returns(actualBuilder.Services);
         A.CallTo(() => inner.Build()).ReturnsLazily(() =>
         {
             var application = actualBuilder.Build();
@@ -996,11 +1022,24 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
             return application;
         });
         var activation = new AsyncOnlyDisposalProbe();
-        var builder = CreateTestingBuilder(inner, activation, actualBuilder.Services);
+        var builder = new AppSurfaceAspireProfileTestingBuilder(inner, activation, isPreparing: configured);
+        if (configured)
+        {
+            builder.CompletePreparation();
+        }
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => builder.BuildAsync(cancellation.Token));
 
-        Assert.True(Assert.IsType<OwnedBuildProbe>(ownedProbe).IsDisposed);
+        Assert.Equal(1, Assert.IsType<OwnedBuildProbe>(ownedProbe).DisposeCount);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(nativeFileProvider.DisposeCount, fileProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+
+        await builder.DisposeAsync();
+
+        Assert.Equal(1, ownedProbe.DisposeCount);
+        Assert.Equal(1, configurationProvider.DisposeCount);
+        Assert.Equal(nativeFileProvider.DisposeCount, fileProvider.DisposeCount);
         Assert.Equal(1, activation.DisposeCount);
     }
 
