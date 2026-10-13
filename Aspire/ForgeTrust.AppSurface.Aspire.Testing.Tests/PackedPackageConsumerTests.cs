@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
 
 public sealed class PackedPackageConsumerTests
@@ -517,7 +518,7 @@ public sealed class PackedPackageConsumerTests
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
-            currentPath = Path.Join(currentPath, segment);
+            currentPath = TestPathUtils.PathUnder(currentPath, segment);
             var linkTarget = new DirectoryInfo(currentPath).ResolveLinkTarget(returnFinalTarget: true);
             if (linkTarget is not null)
             {

@@ -2,6 +2,7 @@ using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
+using ForgeTrust.AppSurface.Testing;
 
 public class AspireStartupContextTests
 {
@@ -56,9 +57,12 @@ public class AspireStartupContextTests
 
         Assert.False(tree.AppHost.StartsWith(AppContext.BaseDirectory, StringComparison.Ordinal));
         Assert.Equal(tree.Root, context.GetPathFromRoot(string.Empty));
-        foreach (var relativePath in RepositoryTree.AssetPaths)
+        foreach (var (relativePath, expected) in new[]
+                 {
+                     (RepositoryTree.AssetPaths[0], Path.Combine(tree.Root, "src/Skoolit.AppHost/keycloak/skoolit-realm.json")),
+                     (RepositoryTree.AssetPaths[1], Path.Combine(tree.Root, "src/Skoolit.KeycloakTheme/theme/skoolit"))
+                 })
         {
-            var expected = Path.Combine(tree.Root, relativePath);
             var actual = context.GetPathFromRoot(relativePath);
             Assert.True(Path.IsPathFullyQualified(actual));
             Assert.Equal(expected, actual);
@@ -214,7 +218,14 @@ public class AspireStartupContextTests
         using var tree = new RepositoryTree();
         var context = new AspireStartupContext(tree.CreateBuilder(), tree.Root);
 
-        Assert.Equal(Path.Combine(tree.Root, relativePath), context.GetPathFromRoot(relativePath));
+        var expected = relativePath switch
+        {
+            "" => tree.Root,
+            "../sibling" => Path.Combine(tree.Root, "../sibling"),
+            "missing/asset" => Path.Combine(tree.Root, "missing/asset"),
+            _ => throw new InvalidOperationException("Unexpected combination test input.")
+        };
+        Assert.Equal(expected, context.GetPathFromRoot(relativePath));
     }
 
     [Fact]
@@ -289,8 +300,8 @@ public class AspireStartupContextTests
         public RepositoryTree()
         {
             Directory.CreateDirectory(Path.Combine(AppHost, "keycloak"));
-            File.WriteAllText(Path.Combine(Root, AssetPaths[0]), "{}");
-            Directory.CreateDirectory(Path.Combine(Root, AssetPaths[1]));
+            File.WriteAllText(TestPathUtils.PathUnder(Root, AssetPaths[0]), "{}");
+            Directory.CreateDirectory(TestPathUtils.PathUnder(Root, AssetPaths[1]));
         }
 
         public void AddMarker(string directory, bool gitFile)
