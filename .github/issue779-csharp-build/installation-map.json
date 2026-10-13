@@ -1,0 +1,63 @@
+{
+  "capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "files": {
+    ".github/issue779-csharp-build/capture-receipt.json": {
+      "mode": "0644",
+      "sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1"
+    },
+    ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
+      "mode": "0644",
+      "sha256": "2962b893b617ff6d2e3e6846df4ea8b170da74ad9b3cd4848b4a0405c4b6daff"
+    },
+    ".github/issue779-csharp-native/run-native.py": {
+      "mode": "0644",
+      "sha256": "ad1ffed5685c4a9af8de2d9923cad6d4b3476bf7fed5d82607b05460276fdac2"
+    },
+    ".github/issue779-integrated16/build/build-fdd.sh": {
+      "mode": "0644",
+      "sha256": "bd7b008c335565fea893543c10c01f22207b40cec7a7d26297f1fdff69dd3c37"
+    },
+    ".github/issue779-integrated16/build/execution-review.json": {
+      "mode": "0644",
+      "sha256": "24bda2350679e7f39b71dfc23a70415955593349fe5ab14756c468d1f1cea8d4"
+    },
+    ".github/issue779-integrated16/build/imports/prepare-ubuntu-runtime.py": {
+      "mode": "0644",
+      "sha256": "2962b893b617ff6d2e3e6846df4ea8b170da74ad9b3cd4848b4a0405c4b6daff"
+    },
+    ".github/issue779-integrated16/build/imports/run-native.py": {
+      "mode": "0644",
+      "sha256": "ad1ffed5685c4a9af8de2d9923cad6d4b3476bf7fed5d82607b05460276fdac2"
+    },
+    ".github/issue779-integrated16/build/integrated16_build.py": {
+      "mode": "0644",
+      "sha256": "f9500143e2d554de51e03f9ff9d3899287369394a6689c381599f22541d4b9c7"
+    },
+    ".github/issue779-integrated16/build/integrated16_build_contract.py": {
+      "mode": "0644",
+      "sha256": "4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8"
+    },
+    ".github/issue779-integrated16/build/preflight/real-child-preflight.json": {
+      "mode": "0644",
+      "sha256": "fb04c1eb7c6e77fe7cb57274ae028eead8fd627c930d16b61d9c73554713b895"
+    },
+    ".github/issue779-integrated16/build/preflight/real-child-preflight.log": {
+      "mode": "0644",
+      "sha256": "80dcd18b1a3254bcfe4aa1e47a741821e8722244e2d62bd1786b2f5ccbf8f64c"
+    },
+    ".github/issue779-integrated16/build/preflight/verification.json": {
+      "mode": "0644",
+      "sha256": "8f6eaae665deed139a848b0cbc87b45612ce89f8f452a1a13e66ff7c4808dc2e"
+    },
+    ".github/issue779-integrated16/build/run_image.py": {
+      "mode": "0644",
+      "sha256": "b685ea4d3dd110125d7ae6ee37f290daa527a355ee1fc64ceb86e7b47eea08ba"
+    },
+    ".github/workflows/issue779-csharp-linux-native.yml": {
+      "mode": "0644",
+      "sha256": "07253e818de30a6526ba2873e3802172ec85227a743355277e0ebd1c1bb2548c"
+    }
+  },
+  "schema": "issue779-integrated16-installation-map-v1",
+  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e"
+}
