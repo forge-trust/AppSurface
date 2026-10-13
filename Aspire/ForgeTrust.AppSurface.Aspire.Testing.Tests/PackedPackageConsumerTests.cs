@@ -44,6 +44,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             consumerPackagesDirectory,
             consumerHttpCacheDirectory);
 
+        var proofSucceeded = false;
         try
         {
             var packedPackageVersion = packageRun.PackageVersion;
@@ -175,10 +176,19 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 $"Legacy override proof passed: AppSurfaceSourceCommit={packageRun.SourceCommit}; " +
                 $"PackageVersion={packageRun.PackageVersion}; ConsumerAspireVersion={AspireOverrideVersion}; " +
                 $"Feed={packageRun.FeedDirectory}; PartialProviderDisposed=true.");
+            proofSucceeded = true;
         }
         finally
         {
-            TryDeleteDirectory(consumerDirectory, _output.WriteLine);
+            if (proofSucceeded)
+            {
+                DeleteDirectory(consumerDirectory);
+            }
+            else
+            {
+                // Preserve an existing proof failure while still attempting cleanup.
+                TryDeleteDirectory(consumerDirectory, _output.WriteLine);
+            }
         }
     }
 
@@ -195,6 +205,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             consumerPackagesDirectory,
             consumerHttpCacheDirectory);
 
+        var proofSucceeded = false;
         try
         {
             var fixtureDirectory = Path.Join(
@@ -254,10 +265,19 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 $"AspireVersion={AspireBaselineVersion}; HostingVersion={HostingBaselineVersion}; " +
                 $"Provider=Microsoft.Extensions.DependencyInjection; Feed={packageRun.FeedDirectory}.");
             _output.WriteLine(output);
+            proofSucceeded = true;
         }
         finally
         {
-            TryDeleteDirectory(consumerDirectory, _output.WriteLine);
+            if (proofSucceeded)
+            {
+                DeleteDirectory(consumerDirectory);
+            }
+            else
+            {
+                // Preserve an existing proof failure while still attempting cleanup.
+                TryDeleteDirectory(consumerDirectory, _output.WriteLine);
+            }
         }
     }
 
@@ -704,11 +724,17 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         return remaining < TimeSpan.FromMinutes(2) ? remaining : TimeSpan.FromMinutes(2);
     }
 
+    private static void DeleteDirectory(string directory)
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+    }
+
+    // This best-effort path is used only when a primary proof/setup failure already exists.
     private static void TryDeleteDirectory(string directory, Action<string> warning)
     {
         try
         {
-            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            DeleteDirectory(directory);
         }
         catch (Exception error)
         {
@@ -729,7 +755,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         public async Task InitializeAsync() => Packages = await CreatePackedProducerPackagesAsync();
         public Task DisposeAsync()
         {
-            if (Packages is not null) TryDeleteDirectory(Packages.WorkDirectory, Console.Error.WriteLine);
+            if (Packages is not null) DeleteDirectory(Packages.WorkDirectory);
             return Task.CompletedTask;
         }
     }

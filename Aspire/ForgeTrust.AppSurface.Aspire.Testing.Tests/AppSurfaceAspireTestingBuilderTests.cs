@@ -777,6 +777,53 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.Equal(0, activation.AsyncDisposeCount);
     }
 
+    // Test value: protects=configured factory retains partial Aspire and activation ownership after fatal Build until disposal;
+    // fails_when=either provider is released early or leaked after synchronous/asynchronous builder disposal;
+    // why_new=existing fatal Build tests directly construct ready wrappers; seam=none;
+    // no_claim=actual process exhaustion or Skoolit application startup.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BuildAsync_ConfiguredFactoryFatalFailureRetainsOwnershipUntilDisposal(bool synchronousDispose)
+    {
+        OwnedBuildProbe? partialHostProbe = null;
+        await using var builder = await AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+            TestAppHost, TestModule, EmptyProfile>(new AppSurfaceAspireTestingOptions
+            {
+                ConfigureAspireBuilder = aspire =>
+                {
+                    aspire.Services.AddSingleton<OwnedBuildProbe>();
+                    aspire.Services.AddSingleton<IHostLifetime>(services =>
+                    {
+                        partialHostProbe = services.GetRequiredService<OwnedBuildProbe>();
+                        throw new OutOfMemoryException("fatal configured host construction failure");
+                    });
+                }
+            });
+        var activation = Assert.IsType<DisposalProbe>(TestModule.LastProbe);
+
+        var exception = await Assert.ThrowsAsync<OutOfMemoryException>(() => builder.BuildAsync());
+
+        Assert.Equal("fatal configured host construction failure", exception.Message);
+        var partialProvider = Assert.IsType<OwnedBuildProbe>(partialHostProbe);
+        Assert.False(partialProvider.IsDisposed);
+        Assert.Equal(0, activation.DisposeCount);
+        if (synchronousDispose)
+        {
+            builder.Dispose();
+        }
+        else
+        {
+            await builder.DisposeAsync();
+        }
+
+        Assert.Equal(1, partialProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+        await builder.DisposeAsync();
+        Assert.Equal(1, partialProvider.DisposeCount);
+        Assert.Equal(1, activation.DisposeCount);
+    }
+
     [Fact]
     public async Task DisposeAsync_DeferredPartialProviderFailureStillDisposesActivation()
     {
