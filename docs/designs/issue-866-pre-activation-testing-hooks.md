@@ -23,7 +23,7 @@ AppSurface SDK full implementation, testing, coverage, and draft PR remain in sc
 
 Skoolit QA needs per-test configuration and dependencies before AppSurface constructs the Aspire profile and composes its graph. The existing factory returns too late: changes to the returned builder cannot change constructor injection or composition decisions already made.
 
-The smallest useful delivery is a configured factory with three ordered hooks, preserving the existing factory and its lifecycle. Completion requires a demonstrated Skoolit migration, not just a new package API.
+The current SDK delivery is a configured factory with three ordered hooks, preserving the existing factory and its lifecycle, verified through the focused suites and isolated packed consumer. Skoolit implementation and adoption acceptance belong to [case #1259](https://github.com/forge-trust/skoolit/issues/1259), under the scope amendment above.
 
 ## Demand Evidence and Target User
 
@@ -44,7 +44,7 @@ The user approved these decisions:
 - Graph selection belongs to each factory call. Process-wide runtime switches may still require serialized tests.
 - Hook order is activation configuration, activation services after module registrations, profile construction, Aspire builder customization, then graph composition.
 - Preserve public validation, the unstarted activation host, one-build behavior, and cleanup ownership. Callbacks must not bypass lifecycle guards.
-- Completion includes overlapping on/off graphs, removal of scenario environment save/set/restore, a packed consumer, API and ordering documentation, and recorded source/package identities.
+- SDK completion includes overlapping on/off fixture graphs, a packed consumer, API and ordering documentation, and recorded source/package identities. Removal of scenario environment save/set/restore in Skoolit is future consumer work in [case #1259](https://github.com/forge-trust/skoolit/issues/1259).
 - Choose approach A: `CreateConfiguredAsync` with guarded preparation, reusing the existing wrapper and activation lease.
 
 Approach B, a separate borrowed builder facade plus creation plan, was rejected because it adds another forwarding surface and lifetime mechanism without improving the agreed first delivery.
@@ -119,6 +119,8 @@ Check cancellation before and after each hook, before profile resolution, and ar
 
 ## Skoolit Migration and Observable Proof
 
+The consumer migration described in this section is historical approved scope, superseded by the case-only amendment and retained for [case #1259](https://github.com/forge-trust/skoolit/issues/1259). Its graph annotation contract remains the source for the SDK fixture proof; no real Skoolit migration is required or claimed by this SDK change.
+
 Introduce a consumer-owned immutable QA scenario value and inject it into the component that selects graph settings. Register it through `ConfigureActivationServices`, or derive it from per-call activation configuration before registering it. Preserve direct-run defaults through the consumer's existing runtime path; QA explicitly supplies its own scenario.
 
 Migrate scenario selection away from process environment save/set/restore. Environment values emitted into child resource configuration remain legitimate output. Unrelated process runtime defaults in the fixture remain explicitly documented and serialized where required.
@@ -152,7 +154,7 @@ Run focused Aspire/core suites, the packed-consumer check, repository formatting
 
 Update public XML reference documentation, the [testing package guide](https://github.com/forge-trust/AppSurface/blob/40de2ef62ad9e697929ef4bd56f0bfda2d813d72/Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md), internal activation/wrapper lifecycle documentation, and repository discovery links. Include signatures, defaults, ordering, provider boundaries, failure behavior, ownership, and a Skoolit-style example. Link the named lifecycle and configuration concepts to their canonical reference.
 
-Deliver through the repository's existing package build/release workflow and a coordinated Skoolit dependency update. This plan does not publish packages or assign a release version. The packed-consumer test precedes release; record actual versions after they are chosen. Keep Aspire 13.4.4 and Hosting 10.0.8 compatibility; no SDK upgrade is required by this design.
+Deliver the SDK through the repository's existing package build/release workflow. A coordinated Skoolit dependency update belongs to [case #1259](https://github.com/forge-trust/skoolit/issues/1259). This plan does not publish packages or assign a release version. The packed-consumer test precedes release; record actual versions after they are chosen. Keep Aspire 13.4.4 and Hosting 10.0.8 compatibility; no SDK upgrade is required by this design.
 
 Exclude CLI/Program invocation, profile argument binding, automatic host/application startup, per-test interception of all runtime environment switches, and a general provider-override abstraction. The original factory remains a migration fallback; consumer rollback restores its prior fixture and pinned package versions together.
 
@@ -160,9 +162,11 @@ Exclude CLI/Program invocation, profile argument binding, automatic host/applica
 
 There are no unresolved product choices. Engineering review must select the narrow startup seam that places both activation hooks after module callbacks, and verify configuration ownership before host construction. If public host context cannot expose enough ownership for the stated failure contract, stop and revise that mechanism before implementation rather than claiming cleanup without evidence.
 
-The consumer patch location and package release version remain coordination inputs. They do not prevent a pinned fixture from proving the package contract, but they must be resolved before declaring Skoolit unblocked.
+The SDK fixture proves the package contract independently of the later consumer patch location and released package version. Those consumer coordination inputs remain in [case #1259](https://github.com/forge-trust/skoolit/issues/1259); this SDK run makes no Skoolit-unblocked claim.
 
 ## The Assignment
+
+This original consumer assignment is retained as historical context for [case #1259](https://github.com/forge-trust/skoolit/issues/1259), not as a current SDK delivery obligation.
 
 Before implementation, inventory every scenario environment read/write in the pinned QA fixture and component. Record each monitoring-receipt annotation key, its on/off value, default, and constructor dependency. Use that inventory as the acceptance checklist for the first pair of independently parameterized graphs, then identify the Skoolit owner who will run the package-backed migration.
 
@@ -182,6 +186,8 @@ No unresolved findings.
 <!-- gstack:office-hours:concerns:end -->
 
 <!-- autoplan-accepted:ceo -->
+
+The approval records and review logs below are preserved as history. Apply the scope amendment above when reading consumer implementation, adoption, owner, and target-branch requirements.
 - C1: Compile a canonical old/new usage example against the packed testing package, including legacy no-argument, token and default call forms, configured options, all three synchronous hooks, null-hook defaults, cancellation and await-using ownership. Link it from testing-package and repository discovery docs.
 - C2: Every new nonfatal hook failure identifies its activation-configuration, activation-services or Aspire-builder phase and marker/module/profile types, preserves the original exception and offers the phase-specific corrective action. Do not include configuration values or credentials. Preserve OperationCanceledException and existing fatal-exception handling; secondary cleanup failures cannot replace the primary creation failure.
 - C3: Use per-call probes and bounded pause/release points to prove factories for receipts-on and receipts-off actually overlap; exercise both completion orders. Both graphs contain skoolit-web and emit the three exact receipt settings in the original table. Assert no scenario selection writes the test-process environment, and release barriers in finally to avoid a hanging failure.

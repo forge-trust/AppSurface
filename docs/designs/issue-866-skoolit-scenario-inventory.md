@@ -1,5 +1,7 @@
 # Issue866: pinned Skoolit scenario acceptance inventory
 
+Historical/reference inventory: current Skoolit implementation and consumer acceptance belong to [case #1259](https://github.com/forge-trust/skoolit/issues/1259). This source snapshot informs the SDK fixture contract; it is not a current consumer migration deliverable or runtime QA result.
+
 This inventory was prepared before consumer code changes for the [approved configured testing design](issue-866-pre-activation-testing-hooks.md). Source is the complete Skoolit tree at [a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e](https://github.com/forge-trust/skoolit/tree/a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e), retrieved as a commit-bound archive. These are source contracts, not passing runtime evidence. AppSurface baseline:40de2ef62ad9e697929ef4bd56f0bfda2d813d72; Hosting10.0.8; Aspire13.4.4.
 
 ## Scenario inputs and observable behavior
