@@ -8,6 +8,7 @@ WORK_DIR="${WORK_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/appsurface-coverage-progress.
 mkdir -p "$WORK_DIR"
 
 dotnet restore "$FIXTURE_PROJECT" --locked-mode
+dotnet restore "$CLI_PROJECT" --locked-mode
 dotnet build "$FIXTURE_PROJECT" --configuration Release --no-restore -v quiet
 dotnet build "$CLI_PROJECT" --configuration Release --no-restore -v quiet
 
