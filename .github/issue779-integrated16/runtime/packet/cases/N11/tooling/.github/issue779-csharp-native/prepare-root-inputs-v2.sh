@@ -320,7 +320,7 @@ copy_pinned "${values[cancellation-parser-root]}/root_stall_frame.py" "$output/r
 copy_pinned "${values[cancellation-parser-root]}/check_stall_record.py" "$output/reviewed/check_stall_record.py" 237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487 131072 0444
 copy_pinned "${values[cancellation-parser-root]}/stall_capture.py" "$output/reviewed/stall_capture.py" 96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79 131072 0444
 copy_pinned "${values[cancellation-parser-root]}/capture_stall.py" "$output/reviewed/capture_stall.py" 3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0 131072 0444
-copy_pinned "${values[cancellation-parser-root]}/parser-pins.tsv" "$output/reviewed/parser-pins.tsv" 344c53996cf0382d796bb64098a483cbb6a96e5a4318fd6800e10bb2111b0b55 131072 0444
+copy_pinned "${values[cancellation-parser-root]}/parser-pins.tsv" "$output/reviewed/parser-pins.tsv" a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684 131072 0444
 bounded /usr/bin/chmod 0555 -- "$output/reviewed"
 phase=final
 for kind in source tool runtime helper; do

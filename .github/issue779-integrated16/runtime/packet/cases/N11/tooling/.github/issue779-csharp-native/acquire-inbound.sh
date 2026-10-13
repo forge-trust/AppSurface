@@ -29,7 +29,7 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 source-capture-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[source-capture-sha256]} == 6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1 && ${v[transport-sha256]} == c5100e613be3434a5007e02d63e33ba236a5a0c6b75a4d30994c42f023c16315 &&
+[[ ${v[source-capture-sha256]} == 6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1 && ${v[transport-sha256]} == ef25abbd5160fb48282407e739e200a0f12ddcba0bb5bfd54727e0dffb8ad35e &&
    ${v[fixture-sha256]} == 29f7896a4f8936f7ddc7eaf1daf156b099536d4d69086b38fea92d953ecef6bf &&
    ${v[audit-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 &&
    ${v[source-review-sha256]} == 89305df560156c231825ef2f11d5b035869afe786d3cfa290f1e00007048c601 ]] || fail frozen-input-pins
@@ -168,8 +168,8 @@ trusted_pin "${v[reviewed-root]}/stall_capture.py" 96387049383159bca19cae4b6852f
 copy_file "${v[reviewed-root]}/stall_capture.py" "$output/scripts/stall_capture.py" 96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79 131072 0444
 trusted_pin "${v[reviewed-root]}/capture_stall.py" 3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0 131072
 copy_file "${v[reviewed-root]}/capture_stall.py" "$output/scripts/capture_stall.py" 3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0 131072 0444
-trusted_pin "${v[reviewed-root]}/parser-pins.tsv" 344c53996cf0382d796bb64098a483cbb6a96e5a4318fd6800e10bb2111b0b55 131072
-copy_file "${v[reviewed-root]}/parser-pins.tsv" "$output/scripts/parser-pins.tsv" 344c53996cf0382d796bb64098a483cbb6a96e5a4318fd6800e10bb2111b0b55 131072 0444
+trusted_pin "${v[reviewed-root]}/parser-pins.tsv" a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684 131072
+copy_file "${v[reviewed-root]}/parser-pins.tsv" "$output/scripts/parser-pins.tsv" a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684 131072 0444
 
 pin "$helper_receipt" "${v[helper-build-receipt-sha256]}" 1048576
 copy_file "$helper_receipt" "$work/helper-build-receipt.json" "${v[helper-build-receipt-sha256]}" 1048576 0600

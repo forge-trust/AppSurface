@@ -823,7 +823,6 @@ def validate_integrated_artifact_metadata(receipt):
 
 def validate_build(receipt, maps, expected_case):
     require(expected_case in ('N13', 'N14'), 'build-selector')
-    require(receipt.get('case') == expected_case, 'build-case')
     validate_integrated_build(receipt, expected_case)
     require(set(receipt.get('artifacts',{}))=={'source','tool','runtime'}, 'build-artifact-set')
     for name,fact in receipt['artifacts'].items():

@@ -938,6 +938,20 @@ def parse_runner_arguments(argv):
     return ap.parse_args(argv)
 
 
+def create_os_audit_directory(generation):
+    """Keep the fresh caller-owned audit leaf below root-owned sticky /tmp.
+
+    The audit publisher rejects caller-owned intermediate ancestors. The CI
+    artifact directory under /home/runner therefore cannot hold this input.
+    Root copies only the separately verified audit bytes into its control root.
+    """
+    require(type(generation) is str and re.fullmatch('[0-9a-f]{32}', generation) is not None,
+            'audit-generation')
+    path = Path('/tmp/issue779-os-audit-' + generation)
+    path.mkdir(mode=0o700)
+    return path
+
+
 def main():
     args=parse_runner_arguments(sys.argv[1:]); start=time.monotonic(); start_utc=datetime.now(timezone.utc)
     start_boot_ms=time.clock_gettime_ns(time.CLOCK_BOOTTIME)//1_000_000
@@ -977,7 +991,7 @@ def main():
         inbound=Path('/var/lib/appsurface-evidence-inbound-'+generation); build_sha=sha(raw)
         runner.run(ROOT_PREFIX+[str(bootstrap/'prepare-root-inputs-v2.sh')]+transport_arguments(generation,inbound,receipt,build_sha,acq_ms),acquisition_end)
         runner.phase='same-host-unprivileged-os-audit'
-        audit_dir=output/'os-audit'; audit_dir.mkdir(mode=0o700)
+        audit_dir=create_os_audit_directory(generation)
         audit_end=min(final-5,time.monotonic()+60)
         try:
             runner.run(['/usr/bin/python3','-I','-S','-B',str(root/'reviewed/prepare-os-audit-v2.py'),

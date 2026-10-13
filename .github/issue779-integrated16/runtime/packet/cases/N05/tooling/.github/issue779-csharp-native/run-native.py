@@ -1284,7 +1284,7 @@ def main():
         for name, pin in PINS.items():
             require(re.fullmatch('[0-9a-f]{64}', pin) and sha(read(reviewed / name, 131072, final)) == pin, 'reviewed-pin')
         helper_receipt_adapter = load_verified_helper_adapter(reviewed, final)
-        capture_raw=read(reviewed / 'capture-receipt.json', 2097152, final)
+        capture_raw=read(workspace / '.github/issue779-csharp-build/capture-receipt.json', 2097152, final)
         capture=decode(capture_raw)
         require(sha(capture_raw)==CAPTURE_SHA and capture.get('schema')=='issue779-csharp-common-source-capture-v4'
                 and capture.get('validation_commit')==SOURCE and capture.get('previous_validation_commit')==PARENT

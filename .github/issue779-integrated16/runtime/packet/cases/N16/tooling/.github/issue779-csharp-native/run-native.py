@@ -837,6 +837,23 @@ def parse_runner_arguments(argv):
     return ap.parse_args(argv)
 
 
+def validate_capture(capture):
+    """Bind the parsed capture to the full JSON map, separate from TSV bytes."""
+    require(capture.get('schema')=='issue779-csharp-common-source-capture-v4'
+            and capture.get('validation_commit')==SOURCE
+            and capture.get('previous_validation_commit')==SOURCE_PARENT
+            and capture.get('source_count')==INTEGRATED_SOURCE_BINDING['count']
+            and capture.get('source_tree')==INTEGRATED_SOURCE_BINDING['tree']
+            and type(capture.get('source')) is dict
+            and set(capture['source'])=={'sha256','modes'}
+            and type(capture['source']['sha256']) is dict
+            and type(capture['source']['modes']) is dict
+            and len(capture['source']['sha256'])==INTEGRATED_SOURCE_BINDING['count']
+            and len(capture['source']['modes'])==INTEGRATED_SOURCE_BINDING['count']
+            and sha(json.dumps(capture['source'],sort_keys=True,separators=(',',':')).encode())
+                ==INTEGRATED_SOURCE_BINDING['map'], 'capture-identity')
+
+
 def main():
     args=parse_runner_arguments(sys.argv[1:]); start=time.monotonic(); job_end=int(os.environ['JOB_DEADLINE_MONOTONIC_NS'])/1_000_000_000; final=min(job_end,start+900)
     require(N16_SOURCE_REVIEW_CLEAR and N16_FIXTURE_REVIEW_CLEAR and N16_ROOT_CLEANUP_REVIEW_CLEAR,'n16-independent-review-pending')
@@ -849,7 +866,7 @@ def main():
         require(re.fullmatch('[0-9a-f]{64}',args.reviewed_script_sha256) and sha(read(Path(__file__),131072,final))==args.reviewed_script_sha256,'orchestrator-pin')
         reviewed=workspace/'.github/issue779-csharp-native'; cap_path=workspace/'.github/issue779-csharp-build/capture-receipt.json'
         capture_raw=read(cap_path,4*1024*1024,final); require(sha(capture_raw)==CAPTURE_SHA,'capture-pin'); capture=decode(capture_raw)
-        require(capture.get('schema')=='issue779-csharp-common-source-capture-v4' and capture.get('validation_commit')==SOURCE and capture.get('previous_validation_commit')==SOURCE_PARENT and capture.get('source_count')==2872 and capture.get('source_tree')=='c9ed8adcc08d050dc70af6885d31171038a36f86' and type(capture.get('source')) is dict and set(capture['source'])=={'sha256','modes'} and len(capture['source']['sha256']) == INTEGRATED_SOURCE_BINDING['count'] and len(capture['source']['modes']) == INTEGRATED_SOURCE_BINDING['count'] and sha(json.dumps(capture['source'],sort_keys=True,separators=(',',':')).encode())==SOURCE_MAP,'capture-identity')
+        validate_capture(capture)
         runner.phase='reviewed-inputs'
         for name,pin in REVIEWED_FILES.items():
             require(re.fullmatch('[0-9a-f]{64}',pin) is not None and sha(read(reviewed/name,131072,final))==pin,'reviewed-pin')

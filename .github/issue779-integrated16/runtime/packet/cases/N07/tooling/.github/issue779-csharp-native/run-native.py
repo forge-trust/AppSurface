@@ -525,7 +525,7 @@ done
 while (($#)); do
  diagnostic_stage=source-shape
  source=$1; name=$2; hash=$3; shift 3
- [[ $name =~ ^[a-zA-Z0-9.-]+$ && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
+ [[ $name =~ ^[a-zA-Z0-9._-]+$ && $name != . && $name != .. && ${#name} -le 255 && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
  [[ $(/usr/bin/stat -c %h -- "$source") == 1 && $(/usr/bin/stat -c %s -- "$source") -le 131072 ]]
  diagnostic_stage=source-digest
  printf '%s  %s\n' "$hash" "$source" | /usr/bin/sha256sum --check --strict --status
