@@ -179,7 +179,7 @@ bounded /usr/bin/jq -acS . "$work/helper-build-receipt.json" >"$work/helper-rece
 bounded /usr/bin/cmp -- "$work/helper-build-receipt.json" "$work/helper-receipt-canonical.json"
 adapter_path="${BASH_SOURCE[0]%/*}/helper_receipt_adapter.py"
 validator_path="${BASH_SOURCE[0]%/*}/helper_receipt_validator.py"
-trusted_pin "$adapter_path" "c2a20a8a6b4e4fed45563211013d8109174beec103baf685e60bd6cd6d93dd02" 32768
+trusted_pin "$adapter_path" "603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844" 32768
 trusted_pin "$validator_path" "106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630" 16384
 bounded /usr/bin/python3.12 -I -S -B "$validator_path" N03 "$work/helper-build-receipt.json" "$work/helper-build-private-diagnostics.json" "a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e" >/dev/null
 for kind in source tool runtime helper; do

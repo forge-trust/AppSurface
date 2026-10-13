@@ -30,7 +30,7 @@ CAPTURE_SHA = '6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1'
 CAPTURE_PROJECTION_SHA = '8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0'
 SOURCE_COUNT = 2872
 SOURCE_TREE = 'c9ed8adcc08d050dc70af6885d31171038a36f86'
-PINS = {'build-helper.sh': 'a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e', 'helper_receipt_adapter.py': 'c2a20a8a6b4e4fed45563211013d8109174beec103baf685e60bd6cd6d93dd02', 'helper_receipt_validator.py': '106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630', 'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a', 'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb', 'prepare-root-inputs-v2.sh': '987d629db03b6fa7991107bd2acb0c22f3ecdfd4a39fd718d0d8dcd5e7eb60f1', 'checkpoint-n01-n02-v5.sh': '593c1935ae61a07c6ed6ab043bbbcd3f831f851f7fed43f0ea1fb88bbae71842', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'source-review.json': 'b84977a7bdb1839a498d7ba50888342a6984efdcc6e7a231500e10f79ee5f96b', 'acquire-inbound.sh': 'f572be529390327ad58065c8f800552e17d7d564a4224ffa4c94898e99cff52b', 'retain-native.sh': 'a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e'}
+PINS = {'build-helper.sh': 'a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e', 'helper_receipt_adapter.py': '603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844', 'helper_receipt_validator.py': '106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630', 'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a', 'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb', 'prepare-root-inputs-v2.sh': '987d629db03b6fa7991107bd2acb0c22f3ecdfd4a39fd718d0d8dcd5e7eb60f1', 'checkpoint-n01-n02-v5.sh': '593c1935ae61a07c6ed6ab043bbbcd3f831f851f7fed43f0ea1fb88bbae71842', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'source-review.json': 'b84977a7bdb1839a498d7ba50888342a6984efdcc6e7a231500e10f79ee5f96b', 'acquire-inbound.sh': 'd106469bd4d781a09fa29158a73f142bb0678f64790012fc2baf55ee65e13c43', 'retain-native.sh': 'a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e'}
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
 LOG_CAP = 40 * 1024 * 1024
@@ -496,7 +496,7 @@ done
 while (($#)); do
  diagnostic_stage=source-shape
  source=$1; name=$2; hash=$3; shift 3
- [[ $name =~ ^[a-zA-Z0-9.-]+$ && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
+ [[ $name =~ ^[a-zA-Z0-9._-]+$ && $name != . && $name != .. && ${#name} -le 255 && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
  [[ $(/usr/bin/stat -c %h -- "$source") == 1 && $(/usr/bin/stat -c %s -- "$source") -le 131072 ]]
  diagnostic_stage=source-digest
  printf '%s  %s\n' "$hash" "$source" | /usr/bin/sha256sum --check --strict --status

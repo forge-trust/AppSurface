@@ -957,10 +957,13 @@ def main():
                 _, after_sha = runner.run(ROOT_PREFIX + ['-c', ROOT_ARCHIVE_SHA, '--', generation], retain_end)
                 archive_hash = sha(archive)
                 require(before_sha.decode('ascii').strip() == after_sha.decode('ascii').strip() == archive_hash, 'root-archive-digest')
-                values = inspect_archive(archive)
+                # Preserve bounded, digest-verified raw evidence even when the case frame is invalid.
+                # Saving diagnostics grants no case credit; semantic validation remains mandatory below.
+                require(0 < len(archive) <= 33619968, 'archive-size')
                 save(output / 'native-private.tar', archive, retain_end)
                 result['private_archive_sha256'] = archive_hash
                 result['private_archive_bytes'] = len(archive)
+                values = inspect_archive(archive)
                 result['retention_selection'] = values['retention-selection.json']
                 if not failure:
                     require(result.get('fixture_exit') == 0 and 'fixture-result.json' in values, 'successful-native-receipt-missing')

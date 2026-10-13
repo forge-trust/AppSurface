@@ -718,15 +718,25 @@ def validate_fixture_output(stdout, stderr, build_artifacts):
 def validate_n16_archive(values, parser_bytes, generation, build_sha, workflow, build_artifacts):
     require(all(name in values for name in ('fixture-stdout.log','fixture-stderr.log','retention-selection.json','logs/n16.stdout','logs/n16.stderr','n16-record-summary.json','n16-fixture-result.json','request.json','request-policy.sha256')), 'n16-retained-required-files')
     require(values['logs/n16.stdout']==b'', 'n16-worker-stdout')
-    result=decode_data(values['n16-fixture-result.json']); validate_fixture_result(result,generation,build_sha)
+    # generation identifies the bootstrap/input and retention container. The
+    # protected retained root result owns a separately created fixture generation.
+    # Neither label alone grants acceptance: parser/kernel, summary, unit identity
+    # and exact request/checksum paths below must all bind that fixture generation.
+    require(type(generation) is str and re.fullmatch('[0-9a-f]{32}',generation) is not None,
+        'n16-bootstrap-generation')
+    result=decode_data(values['n16-fixture-result.json'])
+    fixture_generation=result.get('generation') if type(result) is dict else None
+    require(type(fixture_generation) is str and re.fullmatch('[0-9a-f]{32}',fixture_generation) is not None,
+        'n16-fixture-generation')
+    validate_fixture_result(result,fixture_generation,build_sha)
     validate_fixture_output(values['fixture-stdout.log'], values['fixture-stderr.log'], build_artifacts)
     require(type(parser_bytes) is bytes and sha(parser_bytes)==PARSER_SHA, 'parser-pin')
     parser=types.ModuleType('n16_pinned_parser'); exec(compile(parser_bytes,'<pinned-N16-record-parser>','exec',dont_inherit=True),parser.__dict__)
-    summary=parser.validate_bytes(values['logs/n16.stderr'],generation,1,SOURCE,CAPTURE_SHA,build_sha)
+    summary=parser.validate_bytes(values['logs/n16.stderr'],fixture_generation,1,SOURCE,CAPTURE_SHA,build_sha)
     retained_summary=decode_data(values['n16-record-summary.json'])
-    require(retained_summary==summary and summary.get('stderr_sha256')==result['stderr_sha256'] and summary.get('generation')==generation, 'n16-record-summary-binding')
+    require(retained_summary==summary and summary.get('stderr_sha256')==result['stderr_sha256'] and summary.get('generation')==fixture_generation, 'n16-record-summary-binding')
     require(all(summary.get(k)==result[k] for k in ('worker_unit','worker_pid','worker_uid','worker_gid','results_gid')), 'n16-record-identities')
-    validate_request_binding(values['request.json'],values['request-policy.sha256'],generation,workflow)
+    validate_request_binding(values['request.json'],values['request-policy.sha256'],fixture_generation,workflow)
     return result,summary,values.get('fixture-stdout.log',b'')
 
 

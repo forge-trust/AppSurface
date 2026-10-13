@@ -25,7 +25,7 @@ PARENT = '4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe'
 SOURCE_PARENT = '1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38'
 SOURCE_MAP = '02b833b330267cafc6e12e75ac82439c6ee80a7e839f7fad27d7097fac8da843'
 PINS = {
-    'build-helper.sh': 'a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e', 'helper_receipt_adapter.py': 'c2a20a8a6b4e4fed45563211013d8109174beec103baf685e60bd6cd6d93dd02', 'helper_receipt_validator.py': '106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630',
+    'build-helper.sh': 'a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e', 'helper_receipt_adapter.py': '603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844', 'helper_receipt_validator.py': '106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630',
     'Program.cs': '02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a',
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
@@ -34,7 +34,7 @@ PINS = {
     'checkpoint-n01-n02-v5.sh': '88310a03c6cf8a6ed82c672653485a09d83897e9157cc76d5a2e7f9392a2ecdd',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
     'source-review.json': 'bcfb86361efee9215f10755d375ebf914bf4087b491fd542d34d9d4fa5012fba',
-    'acquire-inbound.sh': '8e094151c9158ef6940985397890fe220168c94fbd6273b6061182d28f828afa',
+    'acquire-inbound.sh': '0ab1c4460f67d059d3ffdb4bc37722993a40d36e823bbf922d299e7a5c690992',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',

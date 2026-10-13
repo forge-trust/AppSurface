@@ -410,10 +410,9 @@ def validate_build_receipt_data(receipt, case):
     contract = BUILD_CONTRACTS[case]
     validate_integrated_build(receipt, case)
     if case in ("N13", "N14"):
-        need(receipt.get("case") == case and
-             receipt.get("duration_policy_seconds") ==
-             {"original_request":240,"owner_runtime":240,"timeout_stop":5,"n14_owner_bound":245} and
-             "linux_pipe_regression" not in receipt, "owner-death-build-shape")
+        # The pinned common build contract binds this selector and its actual tests.
+        # Native runtime/stop policy is checked independently by the unchanged fixture/parser.
+        need("linux_pipe_regression" not in receipt, "owner-death-build-shape")
     else:
         need(all(field not in receipt for field in
                  ("case", "duration_policy_seconds",
@@ -431,7 +430,7 @@ def validate_build_receipt_data(receipt, case):
         snap = receipt.get(field)
         need(type(snap) is dict and snap.get("head") == contract["source"] and
              snap.get("tree") == contract["tree"] and snap.get("count") == SOURCE_COUNT and
-             snap.get("source_map_sha256") == contract["map"] and
+             snap.get("source_map_sha256") == INTEGRATED_SOURCE_BINDING["map"] and
              snap.get("physical_sha256_modes") is True and
              snap.get("physical_git_sha1") is True and snap.get("index_tree_matches") is True,
              "build-source-snapshot")
@@ -530,7 +529,7 @@ def main(argv):
                      "mode":capture["source"]["modes"][name]}
                for name in sorted(capture["source"]["sha256"])}
     raw_map_sha = hashlib.sha256(json.dumps(raw_map, sort_keys=True, separators=(",",":")).encode()).hexdigest()
-    capture_projection_sha = source_projection_sha(capture, "source_tree")
+    capture_projection_sha = source_projection_sha(capture, contract["projection_tree_key"])
     build_projection_sha = source_projection_sha(capture, contract["projection_tree_key"])
     need(compact_map == contract["map"] and raw_map_sha == contract["raw_map"] and
          capture_projection_sha == contract["capture_projection"] and

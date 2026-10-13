@@ -36,7 +36,7 @@ SOURCE_PINS = {
         "packages.lock.json": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb",
     },
     "N07": {
-        "Program.cs": "059246aa8acb0feb5c1172990661fc83cd1631f07ff34a1bfe8de736414a4a5d",
+        "Program.cs": "4e8c2061709539613d85d8c062417e691fe12e66b46df3fb178c52ef65311625",
         "PossibleStopRegistration.cs": "3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af",
         "N07CoordinatorData.cs": "6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d",
         "NativeRootCoordinator.csproj": "9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1",
@@ -45,7 +45,7 @@ SOURCE_PINS = {
 }
 RECIPE_SHA256 = {
     "N03": "a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e",
-    "N07": "cd470cbac05a4913e46828344ad54ef477926c63ec5ceea55921386ba00fa334",
+    "N07": "2be07a2ec1480903cb44ebe8296cec37c09073ffe5f6382d32d99ba27132ef0b",
 }
 
 

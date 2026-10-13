@@ -431,7 +431,7 @@ def validate_build_receipt_data(receipt, case):
         snap = receipt.get(field)
         need(type(snap) is dict and snap.get("head") == contract["source"] and
              snap.get("tree") == contract["tree"] and snap.get("count") == SOURCE_COUNT and
-             snap.get("source_map_sha256") == contract["map"] and
+             snap.get("source_map_sha256") == INTEGRATED_SOURCE_BINDING["map"] and
              snap.get("physical_sha256_modes") is True and
              snap.get("physical_git_sha1") is True and snap.get("index_tree_matches") is True,
              "build-source-snapshot")

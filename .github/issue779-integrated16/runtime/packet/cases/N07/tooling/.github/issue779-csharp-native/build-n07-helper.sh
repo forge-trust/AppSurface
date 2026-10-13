@@ -9,7 +9,7 @@ import hashlib,json,os,pathlib,re,resource,signal,stat,subprocess,sys,time
 SOURCE,SDK,SDK_SHA,OUT,END,PROCESS=sys.argv[1:]
 SOURCE,SDK,OUT=map(pathlib.Path,(SOURCE,SDK,OUT));END=int(END)
 sys.path.insert(0,str(pathlib.Path(PROCESS).parent));import n07_helper_process as helper_process
-PINS={'Program.cs': '059246aa8acb0feb5c1172990661fc83cd1631f07ff34a1bfe8de736414a4a5d', 'PossibleStopRegistration.cs': '3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af', 'N07CoordinatorData.cs': '6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d', 'NativeRootCoordinator.csproj': '9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb'}
+PINS={'Program.cs': '4e8c2061709539613d85d8c062417e691fe12e66b46df3fb178c52ef65311625', 'PossibleStopRegistration.cs': '3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af', 'N07CoordinatorData.cs': '6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d', 'NativeRootCoordinator.csproj': '9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1', 'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb'}
 MAX_LOG_BYTES=8*1024*1024
 RECORDS=[];PRIVATE_RECORDS=[];FINAL=END;WORK=END-5000;RESULT={'schema':'issue779-n07-helper-build-handoff-v1','exit':1,'native_execution':False,'authority':False,'commands':RECORDS,'source_pins':PINS,'sdk_required':'10.0.401','runtime_required':'10.0.12','recipe_sha256':os.environ['N07_HELPER_RECIPE_SHA256']}
 def now():
