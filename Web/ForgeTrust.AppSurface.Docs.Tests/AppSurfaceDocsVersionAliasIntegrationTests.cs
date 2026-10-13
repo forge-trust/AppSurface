@@ -65,7 +65,8 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
         Assert.Equal(HttpStatusCode.MovedPermanently, redirect.StatusCode);
         Assert.Equal(root + "/guide?source=test", redirect.Headers.Location!.OriginalString);
         Assert.Equal("no-store", redirect.Headers.CacheControl!.ToString());
-        var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, root + "/guide"));
+        using var headRequest = new HttpRequestMessage(HttpMethod.Head, root + "/guide");
+        var head = await client.SendAsync(headRequest);
         Assert.Equal(HttpStatusCode.OK, head.StatusCode);
         Assert.Empty(await head.Content.ReadAsByteArrayAsync());
         var asset = await client.GetAsync(root + "/search.css");
@@ -101,7 +102,8 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
             Assert.DoesNotContain("host-fallback", body);
             Assert.DoesNotContain("preview-page", body);
             Assert.Equal("no-store", response.Headers.CacheControl!.ToString());
-            var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, path));
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, path);
+            var head = await client.SendAsync(headRequest);
             Assert.Equal(HttpStatusCode.NotFound, head.StatusCode);
             Assert.Empty(await head.Content.ReadAsByteArrayAsync());
             Assert.Equal("no-store", head.Headers.CacheControl!.ToString());
@@ -109,7 +111,8 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
 
         foreach (var method in new[] { HttpMethod.Post, HttpMethod.Put, HttpMethod.Delete, HttpMethod.Options })
         {
-            var response = await client.SendAsync(new HttpRequestMessage(method, "/docs/a/stable/guide"));
+            using var request = new HttpRequestMessage(method, "/docs/a/stable/guide");
+            var response = await client.SendAsync(request);
             Assert.Equal(HttpStatusCode.MethodNotAllowed, response.StatusCode);
             Assert.Equal(new[] { "GET", "HEAD" }, response.Content.Headers.Allow);
             Assert.Empty(await response.Content.ReadAsByteArrayAsync());
@@ -407,7 +410,8 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
         var response = await client.GetAsync("/docs/a/stable/guide");
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Contains("Documentation page not found", await response.Content.ReadAsStringAsync());
-        var head = await client.SendAsync(new HttpRequestMessage(HttpMethod.Head, "/docs/a/stable/guide"));
+        using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/docs/a/stable/guide");
+        var head = await client.SendAsync(headRequest);
         Assert.Equal(HttpStatusCode.NotFound, head.StatusCode);
         Assert.Empty(await head.Content.ReadAsByteArrayAsync());
     }
@@ -759,13 +763,13 @@ public sealed class AppSurfaceDocsVersionAliasIntegrationTests : IDisposable
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
-            if (!Request.Headers.ContainsKey("X-Test-Auth")
+            if (!Request.Headers.TryGetValue("X-Test-Auth", out var testAuthHeader)
                 || Scheme.Name == "alternate" && Request.Headers["X-Test-Scheme"] != "alternate")
             {
                 return Task.FromResult(AuthenticateResult.NoResult());
             }
             var claims = new List<Claim> { new(ClaimTypes.Name, "reader"), new("second", "yes") };
-            if (Request.Headers["X-Test-Auth"] == "yes") claims.Add(new Claim(ClaimTypes.Role, "reader"));
+            if (testAuthHeader == "yes") claims.Add(new Claim(ClaimTypes.Role, "reader"));
             var identity = new ClaimsIdentity(claims, Scheme.Name);
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), Scheme.Name)));
         }
