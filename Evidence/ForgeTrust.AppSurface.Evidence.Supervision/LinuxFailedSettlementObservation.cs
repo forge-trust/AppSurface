@@ -22,6 +22,8 @@ internal enum LinuxFailedSettlementScenario
     WorkerStall,
     /// <summary>Original caller cancellation with unavailable successful negative-kernel projection.</summary>
     OriginalCancellation,
+    /// <summary>Original private parent-replacement failure, including a rejected first worker frame.</summary>
+    ParentReplacement,
 }
 
 /// <summary>Original joined lifetime and finalization facts; these flags grant no native authority.</summary>
@@ -36,13 +38,14 @@ internal sealed record LinuxFailedSettlementState(bool StartupJoined, bool StopJ
 
 /// <summary>Encodes bounded failure-only facts from the original joined worker; never a success receipt.</summary>
 /// <remarks>
-/// Only <see cref="LinuxWorkerProcess.CaptureFailedSettlementObservation"/> supplies native provenance.
+/// Only the original <see cref="LinuxWorkerProcess"/> holder supplies native provenance.
 /// <see cref="CreateDetached"/> is metadata-only and grants no identity, admission, custody, proof or acceptance.
 /// Full raw streams and their digests are included only when both pumps reached EOF with exact retained and
 /// received byte counts, no discard or error, and a combined size within the raw bound. Otherwise raw and
 /// digest values are null while the actual closed pump failure and count metadata remains. The producer emits
-/// this record only for compile-selected N11 or the N08/N09 failure fallback, after original joins and
-/// before custody/account closure. Its scenario changes only the fixed schema label.
+/// this record only for compile-selected N11, the N08/N09 failure fallback or the private N07
+/// rejected-frame fallback, after original joins and before custody/account closure. Its scenario
+/// changes only the fixed schema label.
 /// </remarks>
 internal sealed class LinuxFailedSettlementObservation
 {
@@ -126,9 +129,13 @@ internal sealed class LinuxFailedSettlementObservation
             using var timingJson = stopTiming is null ? null : JsonDocument.Parse(stopTiming.Encode());
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
-                schema = scenario == LinuxFailedSettlementScenario.WorkerStall
-                    ? "issue779-n11-original-failed-settlement-v1"
-                    : "issue779-cancellation-original-failed-settlement-v1",
+                schema = scenario switch
+                {
+                    LinuxFailedSettlementScenario.WorkerStall => "issue779-n11-original-failed-settlement-v1",
+                    LinuxFailedSettlementScenario.OriginalCancellation => "issue779-cancellation-original-failed-settlement-v1",
+                    LinuxFailedSettlementScenario.ParentReplacement => "issue779-n07-original-failed-settlement-v1",
+                    _ => throw Rejected(),
+                },
                 generation = generation.ToString("N"),
                 worker_unit = unit.Value,
                 process = new { pid = identity.Stat.Pid, starttime_ticks = identity.Stat.StartTimeTicks,

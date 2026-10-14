@@ -1449,15 +1449,53 @@ finished; `PhysicallySettled` may remain false. A missing join, READY event or a
 capture. Neither this descriptor data nor the observation releases custody or accounts.
 
 `CreateDetached(..., token, scenario)` accepts the internal closed `LinuxFailedSettlementScenario` values
-`WorkerStall` (the default) and `OriginalCancellation`. The first preserves
+`WorkerStall` (the default), `OriginalCancellation` and `ParentReplacement`. The first preserves
 `issue779-n11-original-failed-settlement-v1`; the second uses
-`issue779-cancellation-original-failed-settlement-v1` with identical members and bounds. An unknown enum
+`issue779-cancellation-original-failed-settlement-v1` with identical members and bounds. The third uses
+`issue779-n07-original-failed-settlement-v1`, as described below. An unknown enum
 rejects with the fixed ASEVD410 data error. Native callers select the family from compile-owned image
 metadata; neither the argument nor a detached call selects a runtime operation or grants ownership.
 
 Focused local checks passed 87 executions: 59 codec/lifetime/pending-start controls, one N11 build-selection
 control and 27 ordinary qualification/protected CLI controls. These checks establish local data and
 procedure behavior; the deliberate stall and actual Linux stop/group/pump/custody evidence remain unverified.
+
+#### Private N07 rejected-frame transfer
+
+The compile-selected N07 [root composition](LinuxEmptyObservationExecution.cs) separately attempts
+`LinuxWorkerProcess.CaptureN07RejectedFrameObservation` after the original server and worker join
+attempts, including when an earlier stop or monitor failure already set `cleanupFailed`. It uses only
+the reference-equal retained input, owner, accounts, workspace and server, the original root teardown
+token, completed startup/stop/pending-start/original monitor tasks and the assigned original pump receipt.
+The [server's failed-READY guard](LinuxEmptyObservationControlServer.cs) additionally requires committed
+READY, completed original checkpoint/I/O joins and no active controls. It supports the intentionally
+substituted workspace without granting successful filesystem custody. Missing original prerequisites
+reject capture; this API dispatches no timer, reader, stop, native sampler or replacement owner.
+
+Use this failure-only transfer when a rejected first stderr frame prevents the existing
+[strict N07 settlement](LinuxN07FailureSettlement.cs) from forming. The strict observer, valid-prefix
+requirement, `CaptureFailureSettlement`, settlement state and acceptance predicates are unchanged.
+The new schema copies actual lifetime failure, physical settlement, pending-start, closed monitor,
+final unit/group and output facts; null final samples remain null. It does not infer the rejecting
+frame's cause or supply any missing join, READY, root custody or account-release fact.
+
+The [shared encoder](LinuxFailedSettlementObservation.cs) retains its 64 KiB JSON and 32 KiB combined
+raw bounds. Both raw streams and hashes are present only for successful, exact, undiscarded paired
+EOF receipts. Otherwise all raw/hash values are null and recorded closed errors/counts remain.
+Base64 is reversible **private evidence**, not redaction: never echo it in public logs. The root awaits
+the token-bound `Console.Error` line and flush before account-close attempts. Any strict write attempt
+suppresses the fallback, including a partial write; fallback errors cannot replace the first failure,
+clear sticky cleanup failure or release quarantined accounts. WorkerStall and cancellation serialized
+members/labels retain their previous shape and behavior; N11-only stop timing is rejected for N07.
+
+The currently installed N07 retainer and fixture cap root `logs/n01.stderr` at 114,688 bytes. A single
+fallback of at most 65,536 JSON bytes plus LF and the existing bounded ordinary failure line fits that
+cap. The write-attempt latch forbids adding it after the strict raw/settlement pair; no cap is raised.
+The new [detached data controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs)
+cover schema-only family selection, exact rejected bytes/digests, defensive copies, all lifetime flag
+combinations, incomplete/oversized null exports, unavailable joins/samples, cancellation and foreign
+timing. They are defined and unexecuted at source preparation. They provide no Linux provenance,
+N07 pass, lifetime repair, cleanup permission or native acceptance.
 
 
 ### Private pre-READY worker failure diagnostics

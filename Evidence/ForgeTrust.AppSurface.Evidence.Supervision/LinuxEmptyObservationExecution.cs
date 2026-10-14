@@ -58,6 +58,9 @@ internal static class LinuxEmptyObservationExecution
         }
         var failed = false;
         var cleanupFailed = false;
+#if EVIDENCE_PRIVATE_N07
+        var n07FailureProjectionWriteAttempted = false;
+#endif
         var cancellationProjectionWritten = false;
         var cancellationProjectionWriteAttempted = false;
         var cancellationProjectionStage = LinuxCancellationProjectionStage.Unknown;
@@ -180,10 +183,35 @@ internal static class LinuxEmptyObservationExecution
                 try
                 {
                     var evidence = worker.CaptureFailureSettlement(input, owner, accounts, workspace, server, cleanupToken);
+#if EVIDENCE_PRIVATE_N07
+                    n07FailureProjectionWriteAttempted = true; // A partial strict write forbids a second large record.
+#endif
                     await LinuxN07FailureEmitter.WriteAsync(evidence.Settlement, evidence.ReadyDescriptorSha256,
                         server.N07ExecutionStatus, cleanupToken).ConfigureAwait(false);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N07
+            // Earlier failed stop/monitor joins must not suppress the separate failure-only transfer.
+            // The original-holder guard still rejects missing actual joins or committed READY.
+            if (EvidenceNativeQualification.ParentReplacementEnabled && (failed || cleanupFailed)
+                && !n07FailureProjectionWriteAttempted
+                && input is not null && owner is not null && accounts is not null
+                && workspace is not null && worker is not null && server is not null)
+                try
+                {
+                    var observation = worker.CaptureN07RejectedFrameObservation(input, owner, accounts,
+                        workspace, server, cleanupToken);
+                    owner.RequireControlIdentity(cleanupToken);
+                    cleanupToken.ThrowIfCancellationRequested();
+                    n07FailureProjectionWriteAttempted = true;
+                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observation.Bytes).AsMemory(),
+                        cleanupToken).ConfigureAwait(false);
+                    await Console.Error.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    owner.RequireControlIdentity(cleanupToken);
+                    cleanupToken.ThrowIfCancellationRequested();
+                }
+                catch (Exception error) when (Recoverable(error)) { } // Preserve the original first fault and sticky failure.
+#endif
 #if EVIDENCE_PRIVATE_N10
             // Emit only after the original worker lifetime returned from its joined two-stop/finalization path.
             // The record retains sticky cancellation and reports its physical-settlement projection verbatim.
