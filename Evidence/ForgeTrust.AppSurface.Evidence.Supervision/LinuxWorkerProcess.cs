@@ -132,6 +132,52 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         return (data, ready);
     }
 
+#if EVIDENCE_PRIVATE_N07
+    /// <summary>Copies failure-only N07 data without accepting a rejected worker precleanup frame.</summary>
+    /// <param name="input">Reference-equal original protected launch input.</param>
+    /// <param name="owner">Original authenticated owner and teardown token source.</param>
+    /// <param name="accounts">Reference-equal retained accounts.</param>
+    /// <param name="workspace">Original workspace, which may have its named parent substituted.</param>
+    /// <param name="server">Original server with committed READY and completed original N07 joins.</param>
+    /// <param name="token">Original root teardown token; no new allowance is created.</param>
+    /// <returns>Detached joined failure data; no success, custody or account release is granted.</returns>
+    /// <exception cref="EvidenceAdmissionException">An original owner, READY or join prerequisite is unavailable.</exception>
+    /// <exception cref="OperationCanceledException">The original teardown token is cancelled.</exception>
+    /// <remarks>
+    /// The strict N07 observer and CaptureFailureSettlement remain required for their existing receipt.
+    /// This fallback uses the failed-READY reference/join guard because substituted workspace custody
+    /// cannot pass a successful-custody guard. It reads only the original retained process sample,
+    /// assigned joined-pump receipt and existing finalization samples. Missing joins or READY reject;
+    /// incomplete streams have null raw bytes/hashes. Lifetime and settlement flags remain literal data.
+    /// </remarks>
+    internal LinuxFailedSettlementObservation CaptureN07RejectedFrameObservation(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
+        LinuxEmptyObservationControlServer server, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!EvidenceNativeQualification.ParentReplacementEnabled
+            || !ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || token != owner.RootTeardownToken)
+            throw LinuxSystemdBackend.InvalidControl();
+        var descriptor = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
+        var pending = _pending.Snapshot;
+        if (!_lifetime.StartJoined || !_lifetime.StopJoined || !pending.StartReserved
+            || !pending.StartJoined || !pending.Closed || !pending.StopJoined
+            || _exit?.IsCompleted != true || _output is null || _worker is null)
+            throw LinuxSystemdBackend.InvalidControl();
+        var state = new LinuxFailedSettlementState(_lifetime.StartJoined, _lifetime.StopJoined,
+            _lifetime.Failed, PhysicallySettled, LinuxFailedSettlementObservation.ClosedTaskState(_exit),
+            _failedSettlementGroupAfterPumps);
+        var observation = LinuxFailedSettlementObservation.CreateDetached(owner.RunId, _worker.SampledFacts,
+            descriptor, state, pending, _failedSettlementUnit, _failedSettlementGroup, _output, token,
+            LinuxFailedSettlementScenario.ParentReplacement);
+        owner.RequireControlIdentity(token);
+        token.ThrowIfCancellationRequested();
+        return observation;
+    }
+#endif
+
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener,

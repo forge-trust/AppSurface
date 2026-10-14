@@ -35,6 +35,171 @@ public sealed class LinuxFailedSettlementObservationTests
         LinuxFailedSettlementObservation.CreateDetached(value.Generation, value.Identity, Digest, value.State,
             value.Pending, value.Terminal, value.Group, value.Output, token);
 
+    private static LinuxFailedSettlementObservation EncodeParentReplacement(Data value,
+        CancellationToken token = default) =>
+        LinuxFailedSettlementObservation.CreateDetached(value.Generation, value.Identity, Digest, value.State,
+            value.Pending, value.Terminal, value.Group, value.Output, token,
+            LinuxFailedSettlementScenario.ParentReplacement);
+
+    /// <summary>The rejected-frame family changes only a closed label; neither existing family changes bytes.</summary>
+    [Fact]
+    public void ParentReplacementChangesOnlySchemaAndPreservesExistingFamilies()
+    {
+        var data = Valid();
+        var original = Encoding.UTF8.GetString(Encode(data).Bytes);
+        var replacement = Encoding.UTF8.GetString(EncodeParentReplacement(data).Bytes);
+        Assert.Equal(original.Replace("issue779-n11-original-failed-settlement-v1",
+            "issue779-n07-original-failed-settlement-v1", StringComparison.Ordinal), replacement);
+        using var json = JsonDocument.Parse(replacement);
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+        Assert.False(json.RootElement.TryGetProperty("stop_timing", out _));
+    }
+
+    /// <summary>Failed or settled lifetime metadata stays literal, without creating a positive settlement.</summary>
+    [Theory]
+    [InlineData(true, false)][InlineData(false, false)][InlineData(true, true)][InlineData(false, true)]
+    public void ParentReplacementDoesNotInventLifetimeFlags(bool failed, bool settled)
+    {
+        var data = Valid();
+        using var json = JsonDocument.Parse(EncodeParentReplacement(data with
+        {
+            State = data.State with { LifetimeFailed = failed, PhysicallySettled = settled },
+        }).Bytes);
+        Assert.Equal(failed, json.RootElement.GetProperty("lifetime").GetProperty("failed").GetBoolean());
+        Assert.Equal(settled, json.RootElement.GetProperty("lifetime").GetProperty("physically_settled").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    /// <summary>Exact rejected bytes are private diagnostic data, without accepting any N07 prefix.</summary>
+    [Fact]
+    public void RejectedFirstFrameExportsExactPrivateRawAndHashes()
+    {
+        var data = Valid();
+        var bytes = Encoding.UTF8.GetBytes("not-an-n07-precleanup-frame\nprivate-rejected-frame-canary");
+        var stderr = data.Output.Stderr with { Prefix = ImmutableArray.CreateRange(bytes), ReceivedBytes = bytes.Length };
+        var observation = EncodeParentReplacement(data with
+        {
+            Output = data.Output with { Stderr = stderr, ReceivedBytes = bytes.Length },
+        });
+        var encoded = observation.Bytes;
+        using var json = JsonDocument.Parse(encoded);
+        var pumps = json.RootElement.GetProperty("pumps");
+        Assert.True(pumps.GetProperty("export_complete").GetBoolean());
+        Assert.Equal(bytes, Convert.FromBase64String(pumps.GetProperty("stderr").GetProperty("raw_base64").GetString()!));
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)),
+            pumps.GetProperty("stderr").GetProperty("sha256").GetString());
+        Assert.DoesNotContain("private-rejected-frame-canary", Encoding.UTF8.GetString(encoded));
+        Array.Fill(observation.Bytes, (byte)0);
+        Assert.Equal(encoded, observation.Bytes);
+        Assert.InRange(encoded.Length, 1, LinuxFailedSettlementObservation.MaximumJsonBytes);
+    }
+
+    /// <summary>Incomplete or oversized rejected streams omit both raw streams and hashes, retaining honest counters.</summary>
+    [Theory]
+    [InlineData("stdout-eof")][InlineData("stderr-eof")][InlineData("read-failed")]
+    [InlineData("cancelled")][InlineData("signal-failed")][InlineData("quota")]
+    [InlineData("stdout-truncated")][InlineData("stderr-truncated")][InlineData("oversized")]
+    public void ParentReplacementIncompleteOrOversizedDataHasNoRawExport(string condition)
+    {
+        var data = Valid();
+        var output = data.Output;
+        output = condition switch
+        {
+            "stdout-eof" => output with { Stdout = output.Stdout with { EndOfStream = false } },
+            "stderr-eof" => output with { Stderr = output.Stderr with { EndOfStream = false } },
+            "read-failed" => output with { Failure = SupervisionOutputFailure.ReadFailed,
+                Stderr = output.Stderr with { Failure = SupervisionOutputFailure.ReadFailed } },
+            "cancelled" => output with { Failure = SupervisionOutputFailure.Cancelled },
+            "signal-failed" => output with { StopSignalFailed = true },
+            "quota" => output with { QuotaExceeded = true, Failure = SupervisionOutputFailure.QuotaExceeded },
+            "stdout-truncated" => output with { Stdout = output.Stdout with { ReceivedBytes = 1 },
+                ReceivedBytes = output.ReceivedBytes + 1 },
+            "stderr-truncated" => output with { Stderr = output.Stderr with { ReceivedBytes = output.Stderr.ReceivedBytes + 1 },
+                ReceivedBytes = output.ReceivedBytes + 1 },
+            "oversized" => output with
+            {
+                Stderr = output.Stderr with
+                {
+                    Prefix = ImmutableArray.CreateRange(new byte[LinuxFailedSettlementObservation.MaximumRawBytes + 1]),
+                    ReceivedBytes = LinuxFailedSettlementObservation.MaximumRawBytes + 1,
+                },
+                ReceivedBytes = LinuxFailedSettlementObservation.MaximumRawBytes + 1,
+                ReceivedByteLimit = LinuxFailedSettlementObservation.MaximumRawBytes + 1,
+            },
+            _ => throw new InvalidOperationException(),
+        };
+        using var json = JsonDocument.Parse(EncodeParentReplacement(data with { Output = output }).Bytes);
+        var pumps = json.RootElement.GetProperty("pumps");
+        Assert.False(pumps.GetProperty("export_complete").GetBoolean());
+        Assert.Equal(output.ReceivedBytes, pumps.GetProperty("received_bytes").GetInt64());
+        Assert.Equal(output.DiscardedBytes, pumps.GetProperty("discarded_bytes").GetInt64());
+        Assert.Equal(output.Failure.ToString(), pumps.GetProperty("failure").GetString());
+        foreach (var name in new[] { "stdout", "stderr" })
+        {
+            Assert.Equal(JsonValueKind.Null, pumps.GetProperty(name).GetProperty("raw_base64").ValueKind);
+            Assert.Equal(JsonValueKind.Null, pumps.GetProperty(name).GetProperty("sha256").ValueKind);
+        }
+    }
+
+    /// <summary>The failure family still rejects every unavailable original join.</summary>
+    [Theory]
+    [InlineData("startup")][InlineData("stop")][InlineData("pending-start")]
+    [InlineData("pending-stop")][InlineData("pending-open")][InlineData("pending-unreserved")]
+    public void ParentReplacementMissingOriginalJoinsReject(string field)
+    {
+        var data = Valid();
+        data = field switch
+        {
+            "startup" => data with { State = data.State with { StartupJoined = false } },
+            "stop" => data with { State = data.State with { StopJoined = false } },
+            "pending-start" => data with { Pending = data.Pending with { StartJoined = false } },
+            "pending-stop" => data with { Pending = data.Pending with { StopJoined = false } },
+            "pending-open" => data with { Pending = data.Pending with { Closed = false } },
+            "pending-unreserved" => data with { Pending = data.Pending with { StartReserved = false } },
+            _ => throw new InvalidOperationException(),
+        };
+        var error = Assert.Throws<InvalidOperationException>(() => EncodeParentReplacement(data));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    /// <summary>Missing final samples stay null, and cancellation or an N11-only timing input still rejects.</summary>
+    [Fact]
+    public void ParentReplacementMissingSamplesCancellationAndForeignTimingStayClosed()
+    {
+        var data = Valid();
+        using var json = JsonDocument.Parse(EncodeParentReplacement(data with
+        {
+            Terminal = null, Group = null, State = data.State with { CgroupAfterPumps = false },
+        }).Bytes);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("terminal").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("cgroup").ValueKind);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var error = Assert.Throws<OperationCanceledException>(() => EncodeParentReplacement(data, cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        var timing = new LinuxWorkerStopTimingSnapshot(20_000, 5000, 15_000_000,
+            0, 1, 2, null, null, 3, 4, 5, 6, null, 7);
+        Assert.Throws<InvalidOperationException>(() => LinuxFailedSettlementObservation.CreateDetached(
+            data.Generation, data.Identity, Digest, data.State, data.Pending, data.Terminal, data.Group,
+            data.Output, scenario: LinuxFailedSettlementScenario.ParentReplacement, stopTiming: timing));
+    }
+
+    /// <summary>Adding the parent-replacement family does not open arbitrary private diagnostic selectors.</summary>
+    [Theory]
+    [InlineData(-1)][InlineData(3)][InlineData(999)]
+    public void ExpandedFamilyStillRejectsEveryUnrecognizedScenario(int scenario)
+    {
+        var data = Valid();
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest, data.State,
+                data.Pending, data.Terminal, data.Group, data.Output,
+                scenario: (LinuxFailedSettlementScenario)scenario));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
     private static void Reject(Data data)
     {
         var error = Assert.Throws<InvalidOperationException>(() => Encode(data));
