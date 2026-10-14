@@ -37,7 +37,7 @@ public sealed class DurableDoctorInstalledToolTests
         var packagesPath = TestPathUtils.PathUnder(temporaryRoot, "packages");
         var cliHomePath = TestPathUtils.PathUnder(temporaryRoot, "cli-home");
         var nuGetConfigPath = TestPathUtils.PathUnder(temporaryRoot, "NuGet.Config");
-        var candidateVersion = $"0.1.0-issue801.{Guid.NewGuid():N}";
+        var candidateVersion = $"0.1.0-issue801.g{Guid.NewGuid():N}";
         Directory.CreateDirectory(temporaryRoot);
         Directory.CreateDirectory(feedPath);
         Directory.CreateDirectory(toolPath);

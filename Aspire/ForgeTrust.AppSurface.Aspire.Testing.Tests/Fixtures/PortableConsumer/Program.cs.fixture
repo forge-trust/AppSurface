@@ -1,0 +1,305 @@
+// Portable reproduction of the QA graph contract from Skoolit commit
+// a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e. This fixture proves the packed AppSurface API;
+// it does not claim that the Skoolit repository has migrated.
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using CliFx.Binding;
+using ForgeTrust.AppSurface.Aspire;
+using ForgeTrust.AppSurface.Aspire.Testing;
+using ForgeTrust.AppSurface.Core;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace AppSurface.Issue866.PortableConsumer;
+
+public static class Program
+{
+    public const string ActivationConfigurationKey = "portable-consumer:activation";
+    public const string AspireHookConfigurationKey = "portable-consumer:aspire-hook";
+    private const string WebResourceName = "skoolit-web";
+    private const string ReceiptsEnabledKey = "Skoolit__Inbox__MonitoringReceipt__Enabled";
+    private const string ReceiptsCohortKey = "Skoolit__Inbox__MonitoringReceipt__Cohort";
+    private const string SeededHouseholdKey = "Skoolit__Inbox__MonitoringReceipt__SeededInternalHouseholdIds__0";
+    private const string SkoolitSourceCommit = "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e";
+
+    public static async Task<int> Main()
+    {
+        CompileLegacyCallForms(CancellationToken.None);
+        var originalScenarioEnvironment = CaptureScenarioEnvironment();
+
+        await VerifyReceiptGraphAsync(new ConsumerScenario(true));
+        AssertScenarioEnvironmentUnchanged(originalScenarioEnvironment);
+        await VerifyReceiptGraphAsync(new ConsumerScenario(false));
+        AssertScenarioEnvironmentUnchanged(originalScenarioEnvironment);
+
+        Console.WriteLine(
+            "PORTABLE_GRAPH_PROOF " +
+            $"SkoolitSourceCommit={SkoolitSourceCommit} " +
+            "ProviderAssembly=Microsoft.Extensions.DependencyInjection " +
+            "Aspire=13.4.4 Hosting=10.0.8 " +
+            "receiptsOn=true/SeededInternal/household_dev_billing " +
+            "receiptsOff=false/Disabled/");
+        return 0;
+    }
+
+    private static void CompileLegacyCallForms(CancellationToken cancellationToken)
+    {
+        Func<Task<AppSurfaceAspireProfileTestingBuilder>> noArgumentCall =
+            () => AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>();
+        Func<Task<AppSurfaceAspireProfileTestingBuilder>> tokenCall =
+            () => AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>(
+                cancellationToken);
+        Func<Task<AppSurfaceAspireProfileTestingBuilder>> defaultCall =
+            () => AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>(default);
+
+        GC.KeepAlive(noArgumentCall);
+        GC.KeepAlive(tokenCall);
+        GC.KeepAlive(defaultCall);
+    }
+
+    private static async Task VerifyReceiptGraphAsync(ConsumerScenario scenario)
+    {
+        var probe = new ConsumerProfileProbe();
+        var options = new AppSurfaceAspireTestingOptions
+        {
+            ConfigureActivationConfiguration = configuration =>
+                configuration.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        [ActivationConfigurationKey] = "observed-before-profile-construction"
+                    }),
+            ConfigureActivationServices = services =>
+            {
+                services.RemoveAll<ConsumerScenario>();
+                services.AddSingleton(_ => scenario);
+                services.AddSingleton(_ => probe);
+            },
+            ConfigureAspireBuilder = builder =>
+            {
+                probe.AssertProfileObserved(scenario);
+                probe.AspireHookCount++;
+                builder.Configuration[AspireHookConfigurationKey] = "observed-before-composition";
+            }
+        };
+
+        await using (var builder = await AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+            ConsumerAppHost,
+            ConsumerModule,
+            ConsumerProfile>(options))
+        {
+            var resource = builder.Resources.Single(candidate => candidate.Name == WebResourceName);
+            if (resource is not IResourceWithEnvironment resourceWithEnvironment)
+            {
+                throw new InvalidOperationException($"'{WebResourceName}' did not expose resource environment annotations.");
+            }
+
+            var execution = await ExecutionConfigurationBuilder.Create(resourceWithEnvironment)
+                .WithEnvironmentVariablesConfig()
+                .BuildAsync(builder.ExecutionContext, NullLogger.Instance);
+            if (execution.Exception is not null)
+            {
+                throw new InvalidOperationException("Resource environment evaluation failed.", execution.Exception);
+            }
+
+            var environment = execution.EnvironmentVariables.ToDictionary(pair => pair.Key, pair => pair.Value);
+            AssertValue(environment, ReceiptsEnabledKey, scenario.MonitoringReceiptsEnabled ? "true" : "false");
+            AssertValue(environment, ReceiptsCohortKey, scenario.ReceiptCohort);
+            AssertValue(environment, SeededHouseholdKey, scenario.SeededInternalHouseholdId);
+            AssertValue(environment, "PortableConsumer__ActivationConfiguration", "observed-before-profile-construction");
+            AssertValue(environment, "PortableConsumer__AspireBuilderHook", "observed-before-composition");
+            probe.AssertProfileObserved(scenario);
+            if (probe.AspireHookCount != 1)
+            {
+                throw new InvalidOperationException("The Aspire builder hook did not run exactly once before composition.");
+            }
+        }
+
+        if (probe.DisposeCount != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected await-using cleanup to dispose the activation probe once; actual count was {probe.DisposeCount}.");
+        }
+    }
+
+    private static void AssertValue<TValue>(
+        IReadOnlyDictionary<string, TValue> environment,
+        string key,
+        string expected)
+    {
+        if (!environment.TryGetValue(key, out var actual) ||
+            !string.Equals(Convert.ToString(actual, System.Globalization.CultureInfo.InvariantCulture), expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Resource environment '{key}' expected '{expected}' but was '{actual}'.");
+        }
+    }
+
+    private static Dictionary<string, string?> CaptureScenarioEnvironment()
+    {
+        var variables = new[]
+        {
+            "SKOOLIT_QA_MONITORING_RECEIPT_ENABLED",
+            "SKOOLIT_QA_FORWARDING_SENDER_SCENARIO",
+            "SKOOLIT_QA_SOURCE_ONLY_EVIDENCE",
+            "SKOOLIT_QA_STRIPE_SANDBOX_ENABLED"
+        };
+        return variables.ToDictionary(
+            name => name,
+            Environment.GetEnvironmentVariable,
+            StringComparer.Ordinal);
+    }
+
+    private static void AssertScenarioEnvironmentUnchanged(IReadOnlyDictionary<string, string?> before)
+    {
+        foreach (var (name, originalValue) in before)
+        {
+            if (!string.Equals(Environment.GetEnvironmentVariable(name), originalValue, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Per-call graph selection changed the test-process environment variable '{name}'.");
+            }
+        }
+    }
+}
+
+public sealed class ConsumerAppHost
+{
+    public static string ProjectPath => AppContext.BaseDirectory;
+}
+
+public sealed class ConsumerModule : IAppSurfaceHostModule
+{
+    public void ConfigureServices(StartupContext context, IServiceCollection services) =>
+        services.AddSingleton(_ => new ConsumerScenario(false));
+
+    public void RegisterDependentModules(ModuleDependencyBuilder builder)
+    {
+    }
+
+    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+}
+
+[Command("portable-consumer")]
+public sealed partial class ConsumerProfile : AspireProfile
+{
+    private readonly IEnumerable<IAspireComponent> _components;
+
+    public ConsumerProfile(
+        ILogger<ConsumerProfile> logger,
+        IConfiguration configuration,
+        ConsumerScenario scenario,
+        ConsumerProfileProbe probe,
+        IServiceProvider serviceProvider)
+        : base(logger)
+    {
+        probe.RecordProfileConstruction(configuration, scenario, serviceProvider);
+        _components = [new ConsumerWebComponent(configuration, scenario, probe)];
+    }
+
+    public override IEnumerable<IAspireComponent> GetComponents() => _components;
+}
+
+public sealed record ConsumerScenario(bool MonitoringReceiptsEnabled)
+{
+    public string ReceiptCohort => MonitoringReceiptsEnabled ? "SeededInternal" : "Disabled";
+
+    public string SeededInternalHouseholdId => MonitoringReceiptsEnabled ? "household_dev_billing" : string.Empty;
+}
+
+public sealed class ConsumerProfileProbe : IDisposable
+{
+    public string? ActivationConfigurationValue { get; private set; }
+
+    public ConsumerScenario? Scenario { get; private set; }
+
+    public bool UsesDefaultProvider { get; private set; }
+
+    public int ProfileConstructionCount { get; private set; }
+
+    public int AspireHookCount { get; set; }
+
+    public int DisposeCount { get; private set; }
+
+    public void RecordProfileConstruction(
+        IConfiguration configuration,
+        ConsumerScenario scenario,
+        IServiceProvider serviceProvider)
+    {
+        ActivationConfigurationValue = configuration[Program.ActivationConfigurationKey];
+        Scenario = scenario;
+        UsesDefaultProvider = serviceProvider.GetType().Assembly == typeof(ServiceProvider).Assembly &&
+            ReferenceEquals(serviceProvider.GetRequiredService<ConsumerProfileProbe>(), this);
+        ProfileConstructionCount++;
+    }
+
+    public void AssertProfileObserved(ConsumerScenario expectedScenario)
+    {
+        if (ProfileConstructionCount != 1 ||
+            !ReferenceEquals(Scenario, expectedScenario) ||
+            ActivationConfigurationValue != "observed-before-profile-construction" ||
+            !UsesDefaultProvider)
+        {
+            throw new InvalidOperationException(
+                "The configured activation values or selected Microsoft.Extensions.DependencyInjection provider " +
+                "were not observed by the profile constructor.");
+        }
+    }
+
+    public void Dispose() => DisposeCount++;
+}
+
+public sealed class ConsumerWebComponent : IAspireComponent<ContainerResource>
+{
+    private readonly IConfiguration _activationConfiguration;
+    private readonly ConsumerScenario _scenario;
+    private readonly ConsumerProfileProbe _probe;
+
+    public ConsumerWebComponent(
+        IConfiguration activationConfiguration,
+        ConsumerScenario scenario,
+        ConsumerProfileProbe probe)
+    {
+        _activationConfiguration = activationConfiguration;
+        _scenario = scenario;
+        _probe = probe;
+    }
+
+    public IResourceBuilder<ContainerResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        _probe.AssertProfileObserved(_scenario);
+        if (_probe.AspireHookCount != 1 ||
+            _activationConfiguration[Program.ActivationConfigurationKey] != "observed-before-profile-construction" ||
+            appBuilder.Configuration[Program.AspireHookConfigurationKey] != "observed-before-composition")
+        {
+            throw new InvalidOperationException(
+                "The Aspire hook did not customize the same builder before profile composition.");
+        }
+
+        return appBuilder.AddContainer("skoolit-web", "mcr.microsoft.com/dotnet/aspnet", "10.0")
+            .WithEnvironment(
+                "Skoolit__Inbox__MonitoringReceipt__Enabled",
+                _scenario.MonitoringReceiptsEnabled ? "true" : "false")
+            .WithEnvironment("Skoolit__Inbox__MonitoringReceipt__Cohort", _scenario.ReceiptCohort)
+            .WithEnvironment(
+                "Skoolit__Inbox__MonitoringReceipt__SeededInternalHouseholdIds__0",
+                _scenario.SeededInternalHouseholdId)
+            .WithEnvironment(
+                "PortableConsumer__ActivationConfiguration",
+                _activationConfiguration[Program.ActivationConfigurationKey]!)
+            .WithEnvironment(
+                "PortableConsumer__AspireBuilderHook",
+                appBuilder.Configuration[Program.AspireHookConfigurationKey]!);
+    }
+}

@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Core.Tests"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire"/>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests"/>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tests"/>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Config.Tests"/>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tailwind.Tests"/>
