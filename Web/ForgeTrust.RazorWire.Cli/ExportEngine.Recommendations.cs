@@ -30,12 +30,12 @@ public partial class ExportEngine
         var sourceRoot = route[..^"/search-index.json".Length].TrimEnd('/');
         for (var i = 0; i < documents.Count; i++)
         {
-            if (documents[i] is not JsonObject document || !document.ContainsKey("recommendedPages")) continue;
+            if (documents[i] is not JsonObject document || !document.TryGetPropertyValue("recommendedPages", out var recommendationNode)) continue;
             var location = $"documents[{i}].recommendedPages";
-            if (document["recommendedPages"] is not JsonArray)
+            if (recommendationNode is not JsonArray)
                 ThrowRecommendationFailure(context, route, location, "expected an array");
             // The throw helper never returns, but pattern-local definite assignment is intentionally explicit.
-            var recommendations = (JsonArray)document["recommendedPages"]!;
+            var recommendations = (JsonArray)recommendationNode!;
             for (var j = 0; j < recommendations.Count; j++)
             {
                 var rowLocation = $"{location}[{j}]";

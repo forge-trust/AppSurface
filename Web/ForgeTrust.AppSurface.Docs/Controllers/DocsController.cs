@@ -2219,7 +2219,8 @@ public class DocsController : Controller
             RelatedPages = details.RelatedPages.Select(page => ProjectLink(page)!).ToArray(),
             RecommendedPages = details.RecommendedPages.Select(row => row with
             {
-                Page = ProjectLink(row.Page)!, ReasonCodes = row.ReasonCodes.ToArray()
+                Page = ProjectLink(row.Page)!,
+                ReasonCodes = row.ReasonCodes.ToArray()
             }).ToArray(),
             Title = resolvedTitle,
             CanonicalUrl = currentHref,

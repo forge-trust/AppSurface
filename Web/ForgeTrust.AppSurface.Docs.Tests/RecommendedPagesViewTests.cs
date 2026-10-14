@@ -27,6 +27,23 @@ public sealed class RecommendedPagesViewTests
     private static readonly HtmlParser HtmlParser = new();
 
     [Fact]
+    public void ServiceProvider_ShouldDisposeDiagnosticListener_AndCompleteItsSubscription()
+    {
+        using var services = CreateServiceProvider();
+        var listener = services.GetRequiredService<DiagnosticListener>();
+        var observer = new DiagnosticCompletionObserver();
+        using var subscription = listener.Subscribe(observer);
+
+        Assert.Same(listener, services.GetRequiredService<DiagnosticSource>());
+        Assert.True(listener.IsEnabled("test-event"));
+
+        services.Dispose();
+
+        Assert.True(observer.Completed);
+        Assert.False(listener.IsEnabled("test-event"));
+    }
+
+    [Fact]
     public async Task DetailsView_ShouldRenderCombinedRecommendationsAsOneAccessibleList_AfterSequenceNavigation()
     {
         using var services = CreateServiceProvider();
@@ -337,10 +354,9 @@ public sealed class RecommendedPagesViewTests
             .Build();
 
         var services = new ServiceCollection();
-        var diagnosticListener = new DiagnosticListener(nameof(RecommendedPagesViewTests));
         services.AddLogging();
-        services.AddSingleton<DiagnosticSource>(diagnosticListener);
-        services.AddSingleton(diagnosticListener);
+        services.AddSingleton<DiagnosticListener>(_ => new DiagnosticListener(nameof(RecommendedPagesViewTests)));
+        services.AddSingleton<DiagnosticSource>(provider => provider.GetRequiredService<DiagnosticListener>());
         services.AddSingleton<IWebHostEnvironment>(_ => new TestWebHostEnvironment(webRoot));
         services.AddSingleton<IConfiguration>(_ => configuration);
         services.AddMemoryCache();
@@ -380,6 +396,17 @@ public sealed class RecommendedPagesViewTests
         httpContext.Response.Body.Position = 0;
         using var reader = new StreamReader(httpContext.Response.Body);
         return await reader.ReadToEndAsync();
+    }
+
+    private sealed class DiagnosticCompletionObserver : IObserver<KeyValuePair<string, object?>>
+    {
+        public bool Completed { get; private set; }
+
+        public void OnCompleted() => Completed = true;
+
+        public void OnError(Exception error) { }
+
+        public void OnNext(KeyValuePair<string, object?> value) { }
     }
 
     private sealed class TestWebHostEnvironment(string contentRootPath) : IWebHostEnvironment, IDisposable
