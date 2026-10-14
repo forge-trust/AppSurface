@@ -47,11 +47,27 @@ Provider I/O never occurs while a database transaction or connection is held.
 | Renew lease | Short scoped transaction; canonical lock order | Exact revision, attempt, lease/scope generation, epoch, owner, lifetime | Extends exact active lease; stale renewal changes nothing. |
 | Prepare | No store transaction | Registry decodes immutable contract/payload/safety | Produces landed prepared invocation; unavailable history suspends `ASDUR109` before permit. |
 | Acquire permit | Short scoped transaction; canonical lock order | Exact current claim, active scope/epoch, no pre-effect cancellation | Commits one immutable exact-fence permit before provider I/O. |
+| Prepare application handoff | Caller ReadCommitted transaction; shared migration fence then scope -> Work -> dispatch -> exact permit, followed by app locks | Active exact invocation, target/schema/StoreId/epoch, scope generation, claim/lease owner/activity, live lease/deadline, granted exact permit and opt-in admission | Application-owned callback once; provisional preparation until caller commit. Denial/exception/refusal removes callback writes; native locks remain through caller completion for callback outcomes. No native transition or provider I/O. See [handoff contract](handoff-fence.md). |
 | Complete | Short scoped transaction; canonical lock order | Exact permit/claim; result matches registration | Commits terminal fact, retry, or suspension; stale result is quarantined only. |
 | Cancel | Short scoped transaction; canonical lock order | Fingerprint and current state | Before permit terminalizes canceled-before-effect; after permit records intent and follows safety. |
 | Disable scope | One scoped transaction; canonical lock order | Active generation and actor/reason | Permanent tombstone and atomic suspension of nonterminal Work. |
 | Recover expired permits | Payload-free discovery then scoped candidate transaction | Every expired permit and exact Work fence | Safe classes may reclaim; unsafe classes suspend without repeating effects. |
 | Reconcile/resolve/release | Short scoped transaction; canonical lock order | Host authorization, command fingerprint, state/evidence/audit | Applies only the safety transition supported by evidence and appends history; recovery release moves exact ambiguous evidence with the authorized epoch and rolls back if an expected exact move fails. Legacy Work selects its current attempt; opted-in Work selects the most recent unresolved admitted permit, including an earlier attempt. Recovery releases with no uncertain effect retain ordinary timing checks. |
+
+## Prepare application handoff
+
+The [handoff fence](handoff-fence.md) validates an existing exact native invocation in the application's caller-owned
+`ReadCommitted` transaction. It acquires the shared migration fence before schema/StoreId/epoch checks, then the
+scope, Work, dispatch and exact permit rows in the global order. Application authority and ledger locks follow those
+native locks inside the callback. The validator handles legacy Work and opted-in invocation admission explicitly,
+uses current locked renewal facts, and never creates scope, grants another permit, consumes admission, or writes history.
+
+Successful preparation is provisional until caller commit. Callback denial, exception and post-callback refusal remove
+callback writes while retaining acquired native locks through caller completion; cancellation observed at the final
+check removes operation writes using the enclosing savepoint. Pre-callback refusal may release operation locks.
+The host owns finite lock, statement and idle-transaction limits and total transaction duration. Caller rollback grants
+no handoff; failed or ambiguous commit requires ledger reconciliation. Provider I/O follows resource release inside the
+current invocation and the existing [provider safety rules](#provider-effect-safety).
 
 ## Acceptance identity matrix
 

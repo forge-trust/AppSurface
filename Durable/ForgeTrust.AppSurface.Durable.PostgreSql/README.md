@@ -145,6 +145,45 @@ tests under the reconciled roles. A pre-`0009` binary is not a supported rollbac
 broad dispatcher access. See the [adoption guide](../operational-assessments.md#migration-and-role-reconciliation)
 for the complete rollout boundary and local-proof behavior.
 
+## Prepare an application handoff
+
+Resolve `IDurableWorkHandoffFence` through [PostgreSQL composition](#composition-requirement) in an actual active Work
+executor. Supply the exact caller-owned PostgreSQL `ReadCommitted` transaction targeting the configured store. The
+callback revalidates application authority and writes a conditional ledger entry using only that transaction and its
+connection, after the native locks are held. It runs at most once per call; sequential calls rely on application
+conditional writes to prevent duplicates.
+
+```text
+active native invocation
+  -> caller ReadCommitted transaction
+  -> native epoch / scope / Work / dispatch / exact permit locks
+  -> application authorization and conditional ledger write
+  -> final lifetime, cancellation, database lease / deadline check
+  -> HandoffPrepared (provisional)
+  -> caller commits and disposes transaction and connection
+  -> provider attempted -> accepted / rejected / ambiguous under existing provider safety
+```
+
+| Outcome | Caller action |
+| --- | --- |
+| Success, `HandoffPrepared=true` | Check cancellation, commit promptly, release resources, then apply existing provider-safety policy inside the invocation. |
+| Success, `HandoffPrepared=false` | Callback writes were removed; earlier unrelated writes may be committed. Do not send. |
+| Failed result | Use its bounded native problem code; no handoff is authorized. Stop provider I/O. |
+| Callback, SQL or cancellation exception | Exception propagates after feasible savepoint cleanup. Do not send. |
+| Cleanup failure | Roll back/dispose the outer transaction. Both causes are retained when applicable. |
+| Failed or uncertain commit | Reconcile the application ledger and existing native/provider safety before any send; an absent row can be inconclusive. |
+
+The service never completes or disposes the caller transaction, changes isolation or role, or retries the callback.
+Provider I/O belongs after transaction and connection disposal. The host supplies finite nonzero `lock_timeout`,
+`statement_timeout` and `idle_in_transaction_session_timeout`, with lock timeout below statement timeout, and bounds total
+transaction duration. Audit all authority/ledger writers for native-before-application lock ordering, including implicit
+foreign-key locks and [transactional enqueue](#accept-work). Only unrelated earlier writes can safely precede the fence.
+
+Start with the [complete handoff contract](../handoff-fence.md), including the application writer audit, safe refusal
+reference, uncertain-commit handling, and ready/cold verification prerequisites. The [public package consumer](https://github.com/forge-trust/AppSurface/tree/main/Durable/packed-consumers/PostgreSqlPolicyConsumer)
+is the executable integration entry, including [the complete database/commit/provider flow](../handoff-fence.md#internal-contracts-and-verification); [the #869 test plan](https://github.com/forge-trust/AppSurface/blob/main/docs/plans/issue-869-handoff-test-plan.md) tracks its
+required proof. Local package validation, published-package adoption, and deployment are separate milestones.
+
 ## First proof
 
 Run the source-evaluator [`slice 3 reference workload`](../slice3-reference-workload.md) and
@@ -757,8 +796,11 @@ and never replace authoritative discovery.
 
 ## Failure and effect safety
 
-Local preflight and expected domain outcomes leave an otherwise active transaction usable. PostgreSQL errors, timeout,
-network loss, server cancellation, or an aborting SQLSTATE require caller rollback. Savepoints are unsupported.
+For [transactional Work acceptance](#accept-work), local preflight and expected domain outcomes leave an otherwise
+active transaction usable. PostgreSQL errors, timeout, network loss, server cancellation, or an aborting SQLSTATE require
+caller rollback; the transaction writer does not provide savepoint recovery. The [handoff fence](../handoff-fence.md)
+has its own operation and callback savepoints and attempts cleanup before propagating errors. If handoff cleanup fails,
+the caller must roll back or dispose its outer transaction.
 The API method being called is the operation context: failures are not wrapped in a generic provider exception that
 would hide the concrete Npgsql type. Missing or incompatible schema failures expose safe `Status`; when PostgreSQL
 reveals missing schema during Work acceptance, `InnerException` preserves the original `PostgresException`, stack, and

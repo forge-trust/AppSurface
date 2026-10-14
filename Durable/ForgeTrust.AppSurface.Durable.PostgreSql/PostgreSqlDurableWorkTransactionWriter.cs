@@ -1,4 +1,3 @@
-using System.Data;
 using ForgeTrust.AppSurface.Durable;
 using Npgsql;
 
@@ -34,29 +33,7 @@ public sealed class PostgreSqlDurableWorkTransactionWriter : IDurableWorkTransac
     {
         ArgumentNullException.ThrowIfNull(transaction);
         ArgumentNullException.ThrowIfNull(request);
-        NpgsqlConnection? connection;
-        try
-        {
-            connection = transaction.Connection;
-        }
-        catch (ObjectDisposedException exception)
-        {
-            throw new InvalidOperationException(
-                "The supplied Npgsql transaction is not active on an open connection. Pass the exact uncommitted domain transaction.",
-                exception);
-        }
-
-        if (connection is not { State: ConnectionState.Open })
-        {
-            throw new InvalidOperationException(
-                "The supplied Npgsql transaction is not active on an open connection. Pass the exact uncommitted domain transaction.");
-        }
-
-        if (!_storeTarget.Matches(connection))
-        {
-            throw new InvalidOperationException(
-                $"{DurableProblemCodes.StoreIdentityMismatch}: The caller transaction does not target the configured durable PostgreSQL host, port, and database.");
-        }
+        _ = PostgreSqlDurableTransactionResources.RequireActive(transaction, _storeTarget);
 
         var registration = _workRegistry.GetRequired(request.WorkName, request.WorkVersion);
         if (registration.ProviderSafety != request.ProviderSafety)

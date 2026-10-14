@@ -97,6 +97,15 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
                 provider.GetRequiredService<IDurableWorkRegistry>(),
                 runtime.WorkOptions);
         });
+        services.TryAddSingleton(static _ => PostgreSqlDurableHandoffCheckpointHook.NoOp);
+        services.TryAddScoped<PostgreSqlDurableWorkHandoffFence>(static provider =>
+        {
+            var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
+            return new PostgreSqlDurableWorkHandoffFence(runtime.RuntimeDataSource, runtime.WorkOptions,
+                provider.GetRequiredService<PostgreSqlDurableHandoffCheckpointHook>());
+        });
+        services.TryAddScoped<IDurableWorkHandoffFence>(static provider =>
+            provider.GetRequiredService<PostgreSqlDurableWorkHandoffFence>());
         services.TryAddSingleton<IDurableWorkClient>(static provider =>
         {
             var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
