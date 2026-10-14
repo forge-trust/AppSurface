@@ -49,6 +49,84 @@ public sealed record AppSurfaceDocsVersionArchiveViewModel
     /// Gets the available published versions shown in the archive.
     /// </summary>
     public IReadOnlyList<AppSurfaceDocsVersionArchiveEntryViewModel> Versions { get; init; } = [];
+
+    /// <summary>
+    /// Gets the safely projected moving labels shown before the exact-release archive.
+    /// </summary>
+    /// <remarks>
+    /// This collection is independent of the operator-facing resolved alias records. It contains only reader-safe
+    /// fields and never carries configured targets for hidden or invalid entries.
+    /// </remarks>
+    public IReadOnlyList<AppSurfaceDocsVersionAliasArchiveEntryViewModel> Aliases { get; init; } = [];
+}
+
+/// <summary>
+/// Represents one reader-safe moving label in the public AppSurface Docs version archive.
+/// </summary>
+/// <remarks>
+/// A moving label may link to its selected exact release while that target is healthy, or remain informational when
+/// its definition or target cannot be served. This is a deliberate safe projection: it has no configured-target
+/// property and must never be populated from an operator-only configured target when the target is hidden or unknown.
+/// Invalid and conflicting definitions use only <see cref="Name"/> and <see cref="AvailabilityMessage"/>.
+/// </remarks>
+public sealed record AppSurfaceDocsVersionAliasArchiveEntryViewModel
+{
+    /// <summary>
+    /// Gets the normalized public label name used in the alias URL.
+    /// </summary>
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the reader-facing label for a valid public definition.
+    /// </summary>
+    /// <remarks>
+    /// This is empty for invalid or conflicting rows, whose only display identity is <see cref="Name"/>.
+    /// </remarks>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets optional summary copy for a valid public definition.
+    /// </summary>
+    /// <remarks>Invalid and conflicting definitions never expose recovered summary text.</remarks>
+    public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets the exact public target identifier when that target is itself known and public.
+    /// </summary>
+    /// <remarks>Unknown and hidden targets are represented as <see langword="null"/>.</remarks>
+    public string? TargetVersion { get; init; }
+
+    /// <summary>
+    /// Gets the target release support label when a public target is known.
+    /// </summary>
+    public string? SupportStateLabel { get; init; }
+
+    /// <summary>
+    /// Gets the target release advisory label when a public target has an advisory.
+    /// </summary>
+    public string? AdvisoryLabel { get; init; }
+
+    /// <summary>
+    /// Gets the alias URL when the exact public target is available.
+    /// </summary>
+    /// <remarks>
+    /// Unavailable, invalid, conflicting, hidden-target, and unknown-target entries have no link.
+    /// </remarks>
+    public string? Href { get; init; }
+
+    /// <summary>
+    /// Gets a reader-safe explanation when the entry cannot link to an available exact release.
+    /// </summary>
+    /// <remarks>
+    /// This may contain only the approved generic explanation for invalid/conflicting definitions or a sanitized
+    /// availability explanation for a valid public alias; it must not disclose a hidden target or filesystem path.
+    /// </remarks>
+    public string? AvailabilityMessage { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether this entry links to its selected target.
+    /// </summary>
+    public bool IsAvailable { get; init; }
 }
 
 /// <summary>

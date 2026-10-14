@@ -56,6 +56,35 @@ public sealed class DocsUrlBuilderTests
     }
 
     [Fact]
+    public void BuildAliasUrls_ShouldUseConfiguredRouteFamilyAndEncodeDocumentPath()
+    {
+        var builder = new DocsUrlBuilder(
+            new AppSurfaceDocsOptions
+            {
+                Routing = new AppSurfaceDocsRoutingOptions { RouteRootPath = "/foo/bar", DocsRootPath = "/foo/bar/next" },
+                Versioning = new AppSurfaceDocsVersioningOptions { Enabled = true, CatalogPath = "catalog.json" }
+            });
+
+        Assert.Equal("/foo/bar/a/stable", builder.BuildAliasRootUrl(" STABLE "));
+        Assert.Equal("/foo/bar/a/v2/agents%20guide#overview%20one", builder.BuildAliasDocUrl("V2", "agents guide#overview one"));
+    }
+
+    [Fact]
+    public void BuildAliasRootUrl_ShouldSupportRootMountAndRejectUnsafeNames()
+    {
+        var builder = new DocsUrlBuilder(new AppSurfaceDocsOptions
+        {
+            Routing = new AppSurfaceDocsRoutingOptions { RouteRootPath = "/" },
+            Versioning = new AppSurfaceDocsVersioningOptions { Enabled = true, CatalogPath = "catalog.json" }
+        });
+
+        Assert.Equal("/a/x", builder.BuildAliasRootUrl("X"));
+        Assert.Throws<ArgumentNullException>(() => builder.BuildAliasRootUrl(null!));
+        Assert.Throws<ArgumentException>(() => builder.BuildAliasRootUrl("../stable"));
+        Assert.Throws<ArgumentException>(() => builder.BuildAliasRootUrl("%73table"));
+    }
+
+    [Fact]
     public void Constructor_ShouldDefaultRoots_WhenRoutingOptionsAreMissing()
     {
         var builder = new DocsUrlBuilder(

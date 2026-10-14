@@ -22,6 +22,9 @@ If your CI gate should distinguish an explicit low-risk change from an incomplet
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
+If a shared typed wrapper lives in a Domain assembly outside normal module
+discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 
 For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
 
@@ -110,7 +113,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
 - [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
-- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, and [independently configured named Docs products in one host](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
+- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces and [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers fixture-backed setup and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
 - [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
 - [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI when both Scalar and OpenAPI exposure gates allow it.
 
@@ -340,7 +343,19 @@ The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-r
 ### Focused and sharded coverage
 
 `scripts/coverage-solution.sh` accepts no arguments and exists only for this
-repository's full run-and-gate policy. Use the public CLI when selecting a subset,
+repository's full run-and-gate policy. It enables VSTest's
+`console;verbosity=normal` logger so completed tests reach the
+[output-sensitive watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog).
+A large suite can otherwise run healthy short tests for more than ten minutes
+while the minimal logger stays silent until its final summary. This keeps the
+existing ten-minute watchdog and nine-minute VSTest hang timer active; a hung
+test still produces no completion output. The
+[coverage progress fixture](./scripts/verify-coverage-progress-fixture.sh) proves
+that a quiet healthy sequence trips the watchdog, completion logging lets all
+tests finish, and a hung test still trips the same watchdog. Run it with
+`./scripts/verify-coverage-progress-fixture.sh`; its ten-second diagnostic budget
+keeps the probe short and does not change the full solution policy.
+Use the public CLI when selecting a subset,
 changing output, or merging shards:
 
 ```bash
