@@ -20026,7 +20026,7 @@
         ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
           "bytes": 9090,
           "mode": "0644",
-          "sha256": "271fdc440636ffe3dcdff35dd60997183c4f8afcf2a40059c1ebc4c393094cfd"
+          "sha256": "94e50bdadb93813bf398e7aed5f6df9f2bf269eef524b2d915eb7a5bfb197e9b"
         },
         ".github/issue779-csharp-native/retain-native.sh": {
           "bytes": 11658,
@@ -20034,9 +20034,9 @@
           "sha256": "aaba301bcc99a491b9f46c970e829ed6abedece838341b88ff54dcb136f62cf8"
         },
         ".github/issue779-csharp-native/run-native.py": {
-          "bytes": 75984,
+          "bytes": 79699,
           "mode": "0644",
-          "sha256": "028dd2b887cc99ad88fb056434b7ea0d5dc980c3e270c5fee9fa457a6b94a814"
+          "sha256": "376b587bc3e60739f06cce69d5bc2f141e183db0f68dcfd5a06804d33f196e16"
         },
         ".github/issue779-csharp-native/source-capture.json": {
           "bytes": 666077,
@@ -21844,7 +21844,7 @@
         ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
           "bytes": 9090,
           "mode": "0644",
-          "sha256": "a229dbba2a4df1505a086021f2ea0ecc27343f4a1f7f922ab330a14951c41a4a"
+          "sha256": "6a806d81136dc2cf99c379bdc89325985db6ecdb009b4eab9c4dfcf79168fff4"
         },
         ".github/issue779-csharp-native/retain-native.sh": {
           "bytes": 11658,
@@ -21852,9 +21852,9 @@
           "sha256": "aaba301bcc99a491b9f46c970e829ed6abedece838341b88ff54dcb136f62cf8"
         },
         ".github/issue779-csharp-native/run-native.py": {
-          "bytes": 75984,
+          "bytes": 79699,
           "mode": "0644",
-          "sha256": "56748c1435abe5deabacf66ddbb48967b339ec528aa7a39053cbe526d23887f3"
+          "sha256": "205c1f2bbfb3aef8014b7df03f72d5167d795373cdf42c6f37bfaaa3ff31a642"
         },
         ".github/issue779-csharp-native/source-capture.json": {
           "bytes": 666077,
@@ -23652,7 +23652,7 @@
         ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
           "bytes": 9046,
           "mode": "0644",
-          "sha256": "2c01525c5e6ae338acd26b260145f12fd20027ccbe10c0beed36e82d44d66a46"
+          "sha256": "cd45e9021ffdcf7ddc4d3dcc44e7083a724e24f34eca77c62228b27b1c472e1a"
         },
         ".github/issue779-csharp-native/retain-native.sh": {
           "bytes": 12118,
@@ -23660,9 +23660,9 @@
           "sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c"
         },
         ".github/issue779-csharp-native/run-native.py": {
-          "bytes": 77268,
+          "bytes": 80983,
           "mode": "0644",
-          "sha256": "0391797251e19493e50491e26fb3d647344dc75488cdc7a4b23e3eb73c099454"
+          "sha256": "dbcbf1d191de8feeec6cda1a4efb2697aff7d380e133332b6c34ea7aa3555503"
         },
         ".github/issue779-csharp-native/source-review.json": {
           "bytes": 5581,

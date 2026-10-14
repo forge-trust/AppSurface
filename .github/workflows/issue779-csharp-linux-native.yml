@@ -46,11 +46,11 @@ jobs:
           chmod 0700 "$root"
           python3 -B "$root/verify_installation.py" \
             --root "$root" --review "$root/execution-review.json" \
-            --review-sha256 3402168c1484e3dee437dc02fe39d244ab3631616fcdadac821fe7ba23166cfc
+            --review-sha256 b6e7fa0347694c5c665f094ebb9a0e7d1e9c32f7cb5c8c8fbc2e2fb68c3a60ca
           python3 -B "$root/packet_execution.py" \
             --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
             --job-root "$CHECKPOINT_ROOT" \
-            --review "$root/execution-review.json" --review-sha256 3402168c1484e3dee437dc02fe39d244ab3631616fcdadac821fe7ba23166cfc \
+            --review "$root/execution-review.json" --review-sha256 b6e7fa0347694c5c665f094ebb9a0e7d1e9c32f7cb5c8c8fbc2e2fb68c3a60ca \
             --plan --plan-file "$CHECKPOINT_ROOT/case-plan.json"
       - name: Download and verify the exact already-built selected image
         shell: bash
@@ -88,7 +88,7 @@ jobs:
           python3 -B "$root/packet_execution.py" \
             --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
             --job-root "$CHECKPOINT_ROOT" \
-            --review "$root/execution-review.json" --review-sha256 3402168c1484e3dee437dc02fe39d244ab3631616fcdadac821fe7ba23166cfc \
+            --review "$root/execution-review.json" --review-sha256 b6e7fa0347694c5c665f094ebb9a0e7d1e9c32f7cb5c8c8fbc2e2fb68c3a60ca \
             --execute --plan-file "$CHECKPOINT_ROOT/case-plan.json"
       - name: Check bounded private retention
         id: retention
@@ -117,6 +117,7 @@ jobs:
             ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-receipt.json
             ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-late-failure.json
             ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-private.tar
+            ${{ env.CHECKPOINT_ROOT }}/issue779-csharp-native-run/native-command-failure.tar
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 1

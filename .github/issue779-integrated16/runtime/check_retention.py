@@ -20,8 +20,10 @@ FILES = {
     'issue779-csharp-native-run/native-receipt.json': 4 * 1024 * 1024,
     'issue779-csharp-native-run/native-late-failure.json': 65536,
     'issue779-csharp-native-run/native-private.tar': 33_619_968,
+    'issue779-csharp-native-run/native-command-failure.tar': 143_360,
 }
-TOTAL_LIMIT = sum(FILES.values())
+# The new diagnostic shares the original total artifact budget.
+TOTAL_LIMIT = sum(FILES.values()) - FILES['issue779-csharp-native-run/native-command-failure.tar']
 
 
 def check(root):

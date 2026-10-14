@@ -911,6 +911,68 @@ def fixture_dispatched(dispatch_row, fixture_stdout):
     return b'N15_CSHARP_OWNER_DISPATCHED\n' in fixture_stdout.splitlines(keepends=True)
 
 
+
+def retain_failed_command_logs(runner, deadline):
+    """Retain the first settled failed command's private logs without changing its failure.
+
+    Only fixed recorder filenames and their recorded byte/digest identities are accepted.
+    This diagnostic archive is separate from fixture evidence and confers no native credit.
+    Unjoined commands, replacement files and an expired retention deadline are rejected.
+    """
+    failed = next((row for row in runner.records if row.get('failure') is not None
+                   or row.get('exit') not in (None, 0)), None)
+    if failed is None:
+        return None
+    require(time.monotonic() < deadline, 'failure-log-retention-deadline')
+    require(failed.get('waited') is True and failed.get('group_absent') is True
+            and (failed.get('root_utility_unit') is None
+                 or failed.get('root_utility_cgroup_empty') is True), 'failure-log-command-unjoined')
+    ordinal = failed.get('ordinal')
+    require(type(ordinal) is int and 0 <= ordinal <= 99, 'failure-log-command-ordinal')
+    expected = [f'{ordinal:02d}-stdout.log', f'{ordinal:02d}-stderr.log']
+    rows = failed.get('logs')
+    require(type(rows) is list and len(rows) == 2
+            and [item.get('name') for item in rows] == expected, 'failure-log-recorder-shape')
+    directory = runner.output.lstat()
+    require(stat.S_ISDIR(directory.st_mode) and not stat.S_ISLNK(directory.st_mode)
+            and directory.st_uid == os.geteuid() and stat.S_IMODE(directory.st_mode) == 0o700,
+            'failure-log-output-private')
+    retained_logs = []
+    stream = io.BytesIO()
+    with tarfile.open(fileobj=stream, mode='w', format=tarfile.USTAR_FORMAT) as archive:
+        for row, member in zip(rows, ('stdout.log', 'stderr.log')):
+            path = runner.output / row['name']
+            fact = path.lstat()
+            require(stat.S_ISREG(fact.st_mode) and fact.st_nlink == 1
+                    and fact.st_uid == os.geteuid() and stat.S_IMODE(fact.st_mode) == 0o600,
+                    'failure-log-private-file')
+            raw = read(path, LOG_CAP, deadline)
+            require(ident(fact) == ident(path.lstat()) and type(row.get('bytes')) is int
+                    and row['bytes'] == len(raw) and row.get('sha256') == sha(raw),
+                    'failure-log-recorder-identity')
+            prefix = raw[:65536]
+            retained_logs.append({'name': member, 'original_bytes': len(raw), 'original_sha256': sha(raw),
+                                  'retained_bytes': len(prefix), 'truncated': len(prefix) < len(raw)})
+            entry = tarfile.TarInfo(member)
+            entry.size, entry.mode, entry.uid, entry.gid, entry.mtime = len(prefix), 0o600, 0, 0, 0
+            entry.uname = entry.gname = ''
+            archive.addfile(entry, io.BytesIO(prefix))
+    raw = stream.getvalue()
+    require(len(raw) <= 143360 and time.monotonic() < deadline,
+            'failure-log-archive-bound')
+    save(runner.output / 'native-command-failure.tar', raw, deadline)
+    return {'command_ordinal': ordinal, 'bytes': len(raw), 'sha256': sha(raw), 'logs': retained_logs, 'native_credit': False}
+
+
+def record_failed_command_logs(runner, result, deadline):
+    """Contain retention errors; the original failed result remains failed and printable data stays closed."""
+    try:
+        value = retain_failed_command_logs(runner, deadline)
+        result['command_failure_logs'] = {'status': 'retained', 'archive': value} if value else {'status': 'unavailable'}
+    except BaseException:
+        result['command_failure_logs'] = {'status': 'rejected'}
+
+
 def publish_terminal(output, result, deadline):
     """Publication failure always returns failure; it cannot leave a zero exit without a receipt."""
     try:
@@ -1035,6 +1097,8 @@ def main():
     except BaseException as caught: failure=caught
     finally:
         result['failure']={'category':getattr(failure,'category','native-operation'),'error_class':type(failure).__name__} if failure else None
+        if failure is not None:
+            record_failed_command_logs(runner,result,min(final-5,time.monotonic()+5))
         result['elapsed_seconds']=time.monotonic()-start; result['exit']=0 if not failure and retained and result['fixture_result_verified'] else 1
     return publish_terminal(output,result,final-5)
 
