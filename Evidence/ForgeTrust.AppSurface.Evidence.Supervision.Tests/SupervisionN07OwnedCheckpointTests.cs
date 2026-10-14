@@ -7,7 +7,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Portable actual-task/pump bookkeeping and closed-data controls; no native owner or lease is created.</summary>
 public sealed class SupervisionN07OwnedCheckpointTests
 {
-    internal const string Frame = "{\"schema\":\"issue779-n07-precleanup-allocation-fault-v1\",\"phase\":\"Allocation\",\"operation\":\"CheckParentIdentity\",\"error_family\":\"Admission\",\"capture_point\":\"AllocateCatchBeforeCallbackRethrow\",\"terminal_observed\":false,\"observation_only\":true,\"native_authority\":false,\"native_acceptance\":false}";
+    internal const string Frame = "{\"schema\":\"issue779-n07-precleanup-allocation-fault-v1\",\"phase\":\"Allocation\",\"operation\":\"CheckParentIdentity\",\"error_family\":\"Io\",\"capture_point\":\"AllocateCatchBeforeCallbackRethrow\",\"terminal_observed\":false,\"observation_only\":true,\"native_authority\":false,\"native_acceptance\":false}";
     private static readonly TimeSpan Bound = TimeSpan.FromSeconds(10);
     private static TaskCompletionSource Source() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static TaskCompletionSource<byte[]> Bytes() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -108,5 +108,30 @@ public sealed class SupervisionN07OwnedCheckpointTests
             Encoding.UTF8.GetBytes(Frame + "\n" + Frame + "\n")));
         Assert.Throws<InvalidOperationException>(() => SupervisionN07PrecleanupObservation.Validate(
             Encoding.UTF8.GetBytes(Frame.Replace("\"native_authority\":false", "\"native_authority\":true", StringComparison.Ordinal))));
+    }
+    [Theory]
+    [InlineData("Admission")]
+    [InlineData("Unknown")]
+    [InlineData("AccessDenied")]
+    public async Task WrongFamilyCannotReleaseOriginalObserver(string family)
+    {
+        var observation = new SupervisionN07PrecleanupObservation();
+        var frame = Frame.Replace("\"error_family\":\"Io\"", "\"error_family\":\"" + family + "\"", StringComparison.Ordinal);
+        observation.Feed(Encoding.UTF8.GetBytes(frame + "\n"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => observation.Task.WaitAsync(Bound));
+        observation.Complete(true);
+        Assert.True(observation.Failed);
+    }
+
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{}")]
+    [InlineData("null")]
+    public async Task MalformedOrIncompleteObjectCannotReleaseOriginalObserver(string frame)
+    {
+        var observation = new SupervisionN07PrecleanupObservation();
+        observation.Feed(Encoding.UTF8.GetBytes(frame + "\n"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => observation.Task.WaitAsync(Bound));
+        Assert.True(observation.Failed);
     }
 }

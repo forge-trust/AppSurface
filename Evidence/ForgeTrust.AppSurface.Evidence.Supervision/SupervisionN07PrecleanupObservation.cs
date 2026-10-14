@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// <remarks>
 /// The native pipe factory reserves this task before pump dispatch. Only its original stderr pump
 /// feeds bytes after the existing shared quota charge. The first complete line must be the exact
-/// CheckParentIdentity/Admission allocation-catch frame. EOF, cancellation and read failure without
+/// CheckParentIdentity/Io allocation-catch frame. EOF, cancellation and read failure without
 /// that line reject. A later pump failure remains sticky and prevents final diagnostic projection.
 /// Pure Feed controls exercise data bookkeeping only; they cannot construct LinuxOutputPipes.
 /// </remarks>
@@ -63,7 +63,7 @@ internal sealed class SupervisionN07PrecleanupObservation
         if (seen.Count != keys.Length || value.GetProperty("schema").GetString() != "issue779-n07-precleanup-allocation-fault-v1"
             || value.GetProperty("phase").GetString() != "Allocation"
             || value.GetProperty("operation").GetString() != "CheckParentIdentity"
-            || value.GetProperty("error_family").GetString() != "Admission"
+            || value.GetProperty("error_family").GetString() != "Io"
             || value.GetProperty("capture_point").GetString() != "AllocateCatchBeforeCallbackRethrow"
             || value.GetProperty("terminal_observed").GetBoolean() || !value.GetProperty("observation_only").GetBoolean()
             || value.GetProperty("native_authority").GetBoolean() || value.GetProperty("native_acceptance").GetBoolean())
