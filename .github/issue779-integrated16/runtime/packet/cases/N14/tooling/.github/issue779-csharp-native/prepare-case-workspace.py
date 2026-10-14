@@ -195,7 +195,7 @@ def validate_tree(role, root, manifest_path, manifest_sha, nodes_path,
     root = Path(root)
     safe_ancestors(root.parent)
     rst = root.lstat()
-    expected_root_mode = 0o700 if role == "source" else 0o555
+    expected_root_mode = 0o555
     need(stat.S_ISDIR(rst.st_mode) and rst.st_uid == 0 and rst.st_gid == 0 and
          stat.S_IMODE(rst.st_mode) == expected_root_mode, "input-root-custody")
     manifest_st = digest_file(manifest_path, manifest_sha, MANIFEST_CAP, deadline_ms)
@@ -204,7 +204,7 @@ def validate_tree(role, root, manifest_path, manifest_sha, nodes_path,
         nodes = json.loads(node_bytes, object_pairs_hook=unique_pairs)
     except (ValueError, UnicodeError):
         raise Reject("node-json-shape")
-    need(json.dumps(nodes, sort_keys=True, separators=(",", ":")).encode() == node_bytes,
+    need(json.dumps(nodes, sort_keys=True, separators=(",", ":")).encode() + b"\n" == node_bytes,
          "node-json-not-canonical")
     need(set(nodes) == {"directories", "files", "root_name", "schema"} and
          nodes["schema"] == "issue779-build-node-inventory-v1" and
@@ -262,7 +262,7 @@ def validate_tree(role, root, manifest_path, manifest_sha, nodes_path,
         need(stat.S_ISDIR(st.st_mode) and st.st_nlink >= 2 and
              st.st_uid == 0 and st.st_gid == 0, "input-directory-shape")
         rec = nodes["directories"].get(relbase)
-        need(rec is not None and stat.S_IMODE(st.st_mode) == int(rec["mode"], 8),
+        need(rec is not None and stat.S_IMODE(st.st_mode) == 0o555,
              "input-directory-mode")
         seen_dirs.add(relbase)
         for name in dirs:

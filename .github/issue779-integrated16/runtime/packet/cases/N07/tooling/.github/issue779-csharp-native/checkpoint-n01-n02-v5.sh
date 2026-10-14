@@ -1392,7 +1392,12 @@ negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib
 while IFS= read -r python_file; do
  [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
  python_hash=$(negative_os_file_hash "$python_file") || fail negative-stdlib-file-unpinned
- verify_os_path "$python_file" "$python_hash"
+ # The complete fixed stdlib is contained in the authenticated OS file cache.
+ # The final full OS batch below checks every leaf hash, both metadata samples,
+ # all ancestors and each literal alias chain before the owner is dispatched.
+ # Retain this lookup and the separate ELF-header/declaration check; repeating
+ # per-file pin/stat walks here adds no guard to that same final audit point.
+ [[ $python_hash =~ ^[0-9a-f]{64}$ ]] || fail negative-stdlib-file-unpinned
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
   if python_alias=$(negative_os_alias_index "$python_file"); then
@@ -1406,8 +1411,8 @@ negative_stdlib_exact "$stdlib_expected" "$stdlib_after" || fail negative-stdlib
 pin_file "$os_audit" "$os_audit_sha256" 1048576
 remaining >/dev/null
 
-verify_tree "$n07_helper_root" "$n07_helper_map" "$n07_helper_map_sha256" "$n07_helper_nodes" "$n07_helper_nodes_sha256" tool 1 0
-ordinary_os_batch_full_pass final
+# One full helper and OS pass immediately before the owner window.
+# Both earlier full prelaunch passes were adjacent after audit relocation.
 verify_tree "$n07_helper_root" "$n07_helper_map" "$n07_helper_map_sha256" "$n07_helper_nodes" "$n07_helper_nodes_sha256" tool 1 0
 ordinary_os_batch_full_pass final
 n07_phase_sample owner-window

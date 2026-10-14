@@ -30,8 +30,8 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256 n07-helper-build-receipt-sha256 n07-parser-sha256 n07-live-parser-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == caa7c63c32b9900e6cd7c7352273e26ddb76ef95385d7f7c198d7c72a7a65a69 &&
-   ${v[fixture-sha256]} == 4bf046a2f29775fb0163e32fe69be548b6d0bf3f495bc73c8339dbaec743f699 &&
+[[ ${v[transport-sha256]} == e31a288ca6e4ae1aba440f403fb464defdfdbe4a8d4006ecc65bd4145cf6147a &&
+   ${v[fixture-sha256]} == 8ac416ba46f2619ec04ce7a16675aec155fb17fa6ea483001bcc7869f2355357 &&
    ${v[audit-sha256]} == 6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08 &&
    ${v[source-review-sha256]} == de012d44beeee8531c8b0e19de6bf8fc61fdeb517e82d4d804281bb868c8ba5d ]] || fail frozen-input-pins
 [[ ${v[n07-parser-sha256]} == 96d01d088300aeffb5fa7eab7387c3b4be319d249e796edcb189aceb441548e7 ]] || fail n07-parser-pin

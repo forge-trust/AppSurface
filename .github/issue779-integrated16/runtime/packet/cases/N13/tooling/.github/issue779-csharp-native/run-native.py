@@ -29,7 +29,7 @@ PREPARATION_SHA = '544d884e20ab03886a568aa3b5c6da5f0fdae8854652eb93ddf38fb834d5c
 WRAPPERS = {'N13': ('checkpoint-n13-owner-killed.sh','cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc'),
             'N14': ('checkpoint-n14-owner-stopped.sh','d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2')}
 # Zero slots are deliberate fail-closed external integration gates until the final input DAG is reviewed.
-REVIEWED_FILES = {'acquire-inbound.sh':'3fb673aa42ca7cbb12804b8d92a87a35ee684152117fcf15468de4d57e8f6212','prepare-root-inputs-v2.sh':'050a73a76494574b96abc0c170d29c791f3645765dda7922171ccdc11834757f',
+REVIEWED_FILES = {'acquire-inbound.sh':'3fb673aa42ca7cbb12804b8d92a87a35ee684152117fcf15468de4d57e8f6212','prepare-root-inputs-v2.sh':'9560afa077987cb3fe94312e146cb5756ac6e79113b674f2bdb428d920ebce4f',
  'checkpoint-n13-owner-killed.sh':'cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc',
  'checkpoint-n14-owner-stopped.sh':'d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2',
  'checkpoint-owner-death-common.sh':'4d6913203730418f1005969bc754b664b758b9564a37eb74d3035e93a4d3bb4f','check_owner_death_record.py':'276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1',
@@ -37,7 +37,7 @@ REVIEWED_FILES = {'acquire-inbound.sh':'3fb673aa42ca7cbb12804b8d92a87a35ee684152
  'test_owner_death_data.py':'4b6075ddcf232a534f6451000f5c670c4b48495e0d506ba969a917964ee1e99f',
  'prepare-os-audit-v2.py':'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
  'source-review.json':'a52dba81e8062175241d08a471cb87b15718dfcba5f8b08c679260685951812d',
- 'prepare-case-workspace.py':'c52e8b5f2e08d281f8dafa50e770c5406bd7df1fc6a1537e2165c7fe12c56558',
+ 'prepare-case-workspace.py':'1fa5b84ec9c8c8df53c5942142b6e51a48431916d7eb3f4157dff87c71c0b27f',
  'test_build_receipt_contracts.py':'0a926f3423df2235bd249dd5b7603d4993ed60e60c8a9d55a3a9fd38984732b2',
  'test_workspace_arguments.py':'5b3996f098bffef13a9858ac08004d3c130af3b432f79904e1a72758c91183b6'}
 SOURCE_REVIEW_SHA = REVIEWED_FILES['source-review.json']
@@ -1076,17 +1076,17 @@ def main():
         boottime_ms=int(time.clock_gettime(time.CLOCK_BOOTTIME)*1000)+240000
         helper_path=bootstrap/'prepare-case-workspace.py'
         helper_args=['--generation',generation,'--case',args.case,
-            '--source-root',str(inbound/'source'),'--source-map',str(inbound/'control/source.tsv'),
+            '--source-root',str(root/'source'),'--source-map',str(root/'control/source.tsv'),
             '--source-map-sha256',receipt['artifacts']['source']['tsv_sha256'],
-            '--source-nodes',str(inbound/'control/source-nodes.json'),'--source-nodes-sha256',receipt['artifacts']['source']['nodes_sha256'],
-            '--tool-root',str(inbound/'tool'),'--tool-map',str(inbound/'control/tool.tsv'),
+            '--source-nodes',str(root/'control/source-nodes.json'),'--source-nodes-sha256',receipt['artifacts']['source']['nodes_sha256'],
+            '--tool-root',str(root/'tool'),'--tool-map',str(root/'control/tool.tsv'),
             '--tool-map-sha256',receipt['artifacts']['tool']['tsv_sha256'],
-            '--tool-nodes',str(inbound/'control/tool-nodes.json'),'--tool-nodes-sha256',receipt['artifacts']['tool']['nodes_sha256'],
-            '--runtime-root',str(inbound/'runtime'),'--runtime-map',str(inbound/'control/runtime.tsv'),
+            '--tool-nodes',str(root/'control/tool-nodes.json'),'--tool-nodes-sha256',receipt['artifacts']['tool']['nodes_sha256'],
+            '--runtime-root',str(root/'runtime'),'--runtime-map',str(root/'control/runtime.tsv'),
             '--runtime-map-sha256',receipt['artifacts']['runtime']['tsv_sha256'],
-            '--runtime-nodes',str(inbound/'control/runtime-nodes.json'),'--runtime-nodes-sha256',receipt['artifacts']['runtime']['nodes_sha256'],
-            '--build-receipt',str(inbound/'control/build-receipt.json'),'--build-receipt-sha256',build_sha,
-            '--source-capture',str(inbound/'control/source-capture.json'),'--source-capture-sha256',CAPTURE_SHA,
+            '--runtime-nodes',str(root/'control/runtime-nodes.json'),'--runtime-nodes-sha256',receipt['artifacts']['runtime']['nodes_sha256'],
+            '--build-receipt',str(root/'control/build-receipt.json'),'--build-receipt-sha256',build_sha,
+            '--source-capture',str(root/'control/source-capture.json'),'--source-capture-sha256',CAPTURE_SHA,
             '--job-deadline-utc',deadline_utc,'--job-deadline-boottime-ms',str(boottime_ms),
             '--workflow-identity',workflow]
         runner.phase='case-workspace-materialization'

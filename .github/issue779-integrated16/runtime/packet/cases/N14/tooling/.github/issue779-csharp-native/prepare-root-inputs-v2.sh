@@ -245,7 +245,7 @@ for kind in source tool runtime; do
   def mode: type=="string" and test("^0[0-7]{3}$");
   . as $m | type=="object" and keys==["directories","files","root_name","schema"] and
   .schema=="issue779-build-node-inventory-v1" and .root_name==$kind and
-  (.files|type=="object" and length>0) and (.directories|type=="object" and .directories["."]!=null) and
+  (.files|type=="object" and length>0) and (.directories|type=="object" and .["."]!=null) and
   ((.files|length)+(.directories|length))==$receipt[0].artifacts[$kind].node_count and
   ((.files|length)+(.directories|length))<=8192 and
   (.files|length)==$receipt[0].artifacts[$kind].file_count and
