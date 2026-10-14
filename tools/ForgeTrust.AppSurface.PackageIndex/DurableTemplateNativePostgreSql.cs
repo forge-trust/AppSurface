@@ -106,7 +106,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
     /// <summary>Gets the bootstrap administrator connection string while the owned cluster is running.</summary>
     internal string AdminConnectionString => ConnectionString;
 
-    /// <summary>Gets the remaining portion of the shared 90-second native setup budget in milliseconds.</summary>
+    /// <summary>Gets the remaining portion of the shared native setup budget, which defaults to 90 seconds.</summary>
     internal int SetupBudgetRemainingMilliseconds
     {
         get
@@ -300,7 +300,11 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
     /// <param name="password">Password to test; it is projected only into this psql child's environment.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True only when PostgreSQL accepts the password and returns the expected probe value.</returns>
-    internal async Task<bool> TryAuthenticateAsync(string password, CancellationToken cancellationToken = default)
+    /// <remarks>Standalone probes have a five-second limit; setup additionally caps its probe by the shared deadline.</remarks>
+    internal Task<bool> TryAuthenticateAsync(string password, CancellationToken cancellationToken = default)
+        => TryAuthenticateAsync(password, 5_000, cancellationToken);
+
+    private async Task<bool> TryAuthenticateAsync(string password, int timeoutMilliseconds, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -313,7 +317,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 ["-w", "-X", "-A", "-t", "-h", "127.0.0.1", "-p", _port.ToString(CultureInfo.InvariantCulture), "-U", BootstrapUser, "-d", BootstrapDatabase, "-c", "SELECT 1"],
                 "psql authentication probe",
                 "checking native PostgreSQL authentication",
-                5_000,
+                timeoutMilliseconds,
                 password,
                 cancellationToken);
         }
@@ -388,7 +392,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
             ["-D", _dataDirectory, "--username=postgres", "--encoding=UTF8", "--locale=C", "--auth-local=scram-sha-256", "--auth-host=scram-sha-256", "--pwprompt"],
             _rootDirectory,
             $"{password}{Environment.NewLine}{password}{Environment.NewLine}",
-            RemainingMilliseconds(setupClock, SetupTimeoutMilliseconds, "native cluster setup"));
+            RemainingMilliseconds(setupClock, _setupTimeoutMilliseconds, "native cluster setup"));
         NativePostgreSqlBootstrapResult initResult;
         try
         {
@@ -468,7 +472,9 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         _observedPostmaster = process;
 
         _failurePhase = "SCRAM authentication";
-        if (!await TryAuthenticateAsync(password, cancellationToken))
+        if (!await TryAuthenticateAsync(password,
+                Math.Min(5_000, RemainingMilliseconds(setupClock, _setupTimeoutMilliseconds, "native cluster setup")),
+                cancellationToken))
         {
             throw new PackageIndexException("Native PostgreSQL rejected the generated bootstrap credential; child diagnostics were suppressed.");
         }
@@ -480,7 +486,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
             ["-w", "-X", "-A", "-t", "-h", "127.0.0.1", "-p", _port.ToString(CultureInfo.InvariantCulture), "-U", BootstrapUser, "-d", BootstrapDatabase, "-c", "SELECT current_setting('server_version') || '|' || current_setting('server_version_num')"],
             "psql server version probe",
             "verifying the native PostgreSQL server version",
-            RemainingMilliseconds(setupClock, SetupTimeoutMilliseconds, "native cluster setup"),
+            RemainingMilliseconds(setupClock, _setupTimeoutMilliseconds, "native cluster setup"),
             password,
             cancellationToken);
         if (serverVersionResult.ExitCode != 0 || serverVersionResult.StandardOutputTruncated)
@@ -1157,7 +1163,11 @@ internal sealed record NativePostgreSqlToolIdentity(
     IReadOnlyDictionary<string, string> Sha256);
 
 /// <summary>Injectable setup and cleanup limits, always bounded by the approved production ceilings.</summary>
-/// <remarks>Tool acquisition remains fixed at five minutes and is outside the cluster setup budget.</remarks>
+/// <remarks>
+/// Setup uses one elapsed clock across initdb, pg_ctl startup, ownership checks, authentication and server-version
+/// verification. Lower test limits apply to every setup request; a later phase receives only the remaining time,
+/// never a fresh phase budget. Tool acquisition remains fixed at five minutes and is outside this setup budget.
+/// </remarks>
 internal sealed record NativePostgreSqlBudgets(int SetupTimeoutMilliseconds, int CleanupTimeoutMilliseconds)
 {
     /// <summary>The production native smoke budgets: ninety seconds for setup and twenty for cleanup.</summary>

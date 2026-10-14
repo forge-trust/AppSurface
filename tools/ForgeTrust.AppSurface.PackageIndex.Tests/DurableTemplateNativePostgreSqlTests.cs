@@ -75,6 +75,36 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         await cluster.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData(3_000)]
+    [InlineData(5_000)]
+    public async Task EveryNativeSetupRequestHonorsTheInjectedSharedBudget(int setupMilliseconds)
+    {
+        using var fixture = new NativeClusterFixture(_root, setupMilliseconds);
+        var cluster = await fixture.StartAsync();
+        try
+        {
+            var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
+            Assert.InRange(bootstrap.TimeoutMilliseconds, 1, setupMilliseconds);
+            var requests = fixture.Runner.Requests
+                .Where(request => request.OperationName is "pg_ctl start" or "psql authentication probe" or "psql server version probe")
+                .ToArray();
+            Assert.Equal(3, requests.Length);
+            Assert.All(requests, request => Assert.InRange(request.TimeoutMilliseconds, 1, setupMilliseconds));
+            Assert.True(requests[0].TimeoutMilliseconds <= bootstrap.TimeoutMilliseconds);
+            Assert.True(requests[1].TimeoutMilliseconds <= requests[0].TimeoutMilliseconds);
+            Assert.True(requests[2].TimeoutMilliseconds <= requests[1].TimeoutMilliseconds);
+            Assert.True(await cluster.TryAuthenticateAsync(fixture.Runtime.BootstrapPassword!));
+            Assert.Equal(5_000, fixture.Runner.Requests.Last().TimeoutMilliseconds);
+        }
+        finally
+        {
+            await cluster.DisposeAsync();
+        }
+
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
     [Fact]
     public async Task FixedDirectoryResolverUsesProvidedPathWithoutLaunchingAnotherResolverCommand()
     {
