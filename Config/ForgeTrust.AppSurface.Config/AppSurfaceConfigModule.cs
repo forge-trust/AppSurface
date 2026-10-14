@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,8 +15,8 @@ namespace ForgeTrust.AppSurface.Config;
 /// diagnostics, sanitized diff comparison, diff rendering, and command-runner helpers, then defers typed
 /// <see cref="IConfig"/> discovery through <see cref="StartupContext.CustomRegistrations"/> so all module
 /// dependencies are known first. The deferred scan inspects dependency module assemblies, the entry assembly, and the
-/// root module assembly. Pitfall: config dependencies should be registered before the custom registration callback
-/// runs; otherwise discovered config objects may activate before their supporting services are available.
+/// root module assembly. Discovery records lazy singletons without activating wrappers. Register singleton-safe
+/// constructor dependencies before building the final provider; they resolve when a wrapper is first requested.
 /// </remarks>
 public class AppSurfaceConfigModule : IAppSurfaceModule
 {
@@ -30,7 +30,8 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     /// <see cref="ConfigAuditReportDiffer"/> for pure typed snapshot comparison, <see cref="ConfigAuditDiffTextRenderer"/>
     /// for deterministic operator output, and <see cref="ConfigAuditDiffCommandRunner"/> for command-framework-agnostic
     /// same-host and captured-snapshot workflows. The custom callback scans dependency, entry, and root-module assemblies
-    /// for concrete <see cref="IConfig"/> implementations and registers each as a singleton initialized from
+    /// for concrete <see cref="IConfig"/> implementations through the same registrar as
+    /// <see cref="AppSurfaceConfigServiceCollectionExtensions.AddAppSurfaceConfig{TConfig}"/>. Each lazy singleton initializes from
     /// <see cref="IConfigManager"/> and <see cref="IEnvironmentProvider"/>. Wrappers decorated with
     /// <see cref="ConfigAuditCollectionTraversalAttribute"/> also contribute audit traversal options for their key.
     /// Each assembly is checked against the
@@ -98,7 +99,7 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
     {
         ConfigPackageCompatibility.ValidateAssemblies([assembly]);
         var configTypes = assembly.DefinedTypes
-            .Where(t => !t.IsAbstract && !t.IsInterface && !t.ContainsGenericParameters)
+            .Where(t => t.IsClass && !t.IsAbstract && !t.ContainsGenericParameters)
             .Where(t => typeof(IConfig).IsAssignableFrom(t.AsType()))
             .Select(t => t.AsType())
             .Distinct()
@@ -106,46 +107,8 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
 
         foreach (var type in configTypes)
         {
-            services.AddSingleton(
-                type,
-                sp =>
-                {
-                    var key = sp.GetRequiredService<ConfigDeclarationRegistry>().GetForConfigType(type).LogicalKey;
-                    var instance = (IConfig)ActivatorUtilities.CreateInstance(sp, type);
-                    instance.Init(
-                        sp.GetRequiredService<IConfigManager>(),
-                        sp.GetRequiredService<IEnvironmentProvider>(),
-                        key);
-
-                    return instance;
-                });
-            var auditOptions = type.GetCustomAttribute<ConfigAuditCollectionTraversalAttribute>(inherit: true)
-                ?.ToOptions();
-            services.AddSingleton(new ConfigAuditRawDeclaration(
-                RawKey: null,
-                ConfigType: type,
-                ValueType: GetConfigValueType(type),
-                Options: new ConfigAuditEntryOptions(auditOptions),
-                IsAttributeDeclaration: true));
+            ConfigTypeRegistration.Register(services, type);
         }
-    }
-
-    private static Type GetConfigValueType(Type type)
-    {
-        var current = type;
-        while (current != null)
-        {
-            if (current.IsGenericType
-                && (current.GetGenericTypeDefinition() == typeof(Config<>)
-                    || current.GetGenericTypeDefinition() == typeof(ConfigStruct<>)))
-            {
-                return current.GetGenericArguments()[0];
-            }
-
-            current = current.BaseType;
-        }
-
-        return typeof(object);
     }
 
     /// <inheritdoc />

@@ -166,6 +166,31 @@ the deployment. Record operating system, SDK, coordinated package version, cache
 state, and source/consumer timings in release evidence. These are local diagnostics
 and test artifacts; no configuration usage telemetry is sent automatically.
 
+## Explicit registration and rollback
+
+`IServiceCollection.AddAppSurfaceConfig<TConfig>()` is an additive way to select one
+wrapper from a compatible Domain or other assembly that is outside the host's normal
+module-discovery inputs. It does not change logical-key grammar, provider precedence,
+persisted identities, or the release-train behavior of string inputs. The
+[three-step Config package example](../Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+contains the canonical `.NET 10` existing-host example; the
+[packed consumer](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md) verifies the external
+Domain and coordinated-package boundary.
+
+| Phase | Adoption action | Recovery boundary |
+| --- | --- | --- |
+| Before candidate acceptance | Keep the existing manual `Init`/key registration available. Select the same wrappers and keys in the packed Domain and staged-host proofs, and confirm the attributed declaration appears in audit. | Registration does not migrate persisted keys or secret identities. |
+| Candidate adoption | Upgrade the complete coordinated AppSurface package set and rebuild external providers and wrappers. Add the explicit call before host build; let the finalized host parser resolve attributes using its configured release-train options. | Do not mix previous and candidate Config/Core/provider binaries. Existing caller singleton overrides retain caller ownership of initialization and key agreement. |
+| Rollback | Remove the explicit call and restore the previous registration path together with the previously supported coordinated package set. | Keep the old path available until candidate acceptance; do not downgrade only the Config package or assume a wrapper binary built against a candidate SPI remains compatible. |
+
+This is a pre-1.0 additive API, not a migration command or an automatic fallback.
+The explicit API has no key or lifetime overload and does not compose providers for
+the host. Invalid declared keys and existing case/legacy collisions keep their
+current parser/registry behavior. Public
+`ConfigKeyAttribute.GetLogicalKey(Type)` is strict canonical syntax; host discovery
+and explicit registration use finalized host options for legacy translation as
+described in the [logical-key reference](config-logical-keys.md#explicit-type-registration).
+
 ## Diagnostic repairs
 
 `config-key-invalid`: correct a segment or use valid literal segments.

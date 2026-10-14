@@ -97,6 +97,158 @@ test-framework-neutral [conformance package](../ForgeTrust.AppSurface.Config.Tes
 to verify the contract. Upgrade all AppSurface packages and rebuild third-party
 providers and wrappers together before adopting this SPI.
 
+## Explicitly register one typed wrapper
+
+Use `IServiceCollection.AddAppSurfaceConfig<TConfig>()` when an application already
+composes AppSurface Config but wants to select one wrapper from a Domain or other
+assembly outside normal module discovery. It selects one type per call; it does not
+scan an assembly or replace the normal lazy discovery performed by
+[`AppSurfaceConfigModule`](#key-types). For the package-consumer proof, including
+the fixture-only Domain assembly boundary, see the
+[packed Config consumer](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
+
+The API is available to `.NET 10` hosts using one coordinated candidate version of
+the AppSurface packages, including `ForgeTrust.AppSurface.Core` and
+`ForgeTrust.AppSurface.Config`. Keep the same version across the package family and
+rebuild external providers and wrappers together; the
+[migration guide](../../guides/config-key-migration.md#explicit-registration-and-rollback)
+describes the pre-1.0 compatibility and rollback boundary. This is an incremental
+registration inside an existing AppSurface host: the host still composes
+[`IConfigManager`](#logical-key-quickstart), Core's
+[`IEnvironmentProvider`](../../ForgeTrust.AppSurface.Core/README.md#environment-resolution),
+its environment and ordinary [`IConfigProvider`](../../guides/config-provider-authors.md)
+services, and dependencies of the selected wrapper. The method does not compose the
+whole module, add a provider, or introduce another environment contract.
+
+```csharp
+public static IServiceCollection AddAppSurfaceConfig<TConfig>(
+    this IServiceCollection services)
+    where TConfig : class, IConfig;
+```
+
+Call it before the final host `Build()`. The selected wrapper is registered as a
+singleton through the final service provider, so constructor dependencies use
+ordinary DI resolution. Registration records the declaration and a lazy factory;
+it does not build a provider, construct the wrapper, call `IConfig.Init`, resolve a
+provider, or read a configuration value. Host key options configured after this
+call are still used when the finalized declaration registry resolves the key.
+
+### Three-step Domain example
+
+The package-consumer example starts from an existing `.NET 10` Generic Host. Its
+[host composition](../../tests/config-package-consumer/Program.cs) registers the
+normal `AppSurfaceConfigModule` for `IConfigManager` and its file/environment
+providers, plus Core's `IEnvironmentProvider` using `DefaultEnvironmentProvider`.
+The proof's `PackageProofProvider` and `PublicOnlyProvider` are ordinary
+`IConfigProvider` registrations. The [version-bound consumer](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md)
+uses candidate version `0.1.0-config-contract.local` consistently for
+`ForgeTrust.AppSurface.Core`, `ForgeTrust.AppSurface.Config`,
+`ForgeTrust.AppSurface.Config.Testing`, and the separately packed
+`ForgeTrust.AppSurface.Config.PackageConsumer.DomainFixture`. It is a local test
+identity, not a published or suggested release version.
+
+1. Confirm that the existing host targets `.NET 10` and uses the same coordinated
+   candidate package version for `ForgeTrust.AppSurface.Core`,
+   `ForgeTrust.AppSurface.Config`, and `ForgeTrust.AppSurface.Config.Testing`. The
+   packed Domain fixture also references that exact Core/Config version. The host's
+   `AppSurfaceConfigModule` supplies `IConfigManager` and file/environment
+   providers; Core's `DefaultEnvironmentProvider` is registered as
+   `IEnvironmentProvider`, and proof providers use the ordinary `IConfigProvider`
+   contract. The helper's usings and the complete host usings are in the linked
+   source files copied into the generated consumer and built by the verifier.
+2. In the separate Domain assembly, define
+   [`PaymentsEndpointConfig`](../../tests/config-package-consumer/fixtures/domain/DomainConfigs.cs)
+   with `[ConfigKey("Payments:Endpoint", root: true)]`. It derives from
+   `Config<PaymentsEndpointValue>` and receives
+   `IPaymentsEndpointFixtureDependency` through its public constructor. The example
+   uses the non-secret value `https://payments.example.test`.
+3. Before `Build()`, register the dependency and call
+   `services.AddAppSurfaceConfig<PaymentsEndpointConfig>()` as shown in the
+   [canonical example source](../../tests/config-package-consumer/ExplicitRegistrationExample.cs).
+   The [host integration](../../tests/config-package-consumer/Program.cs) resolves
+   `PaymentsEndpointConfig` from the final provider. Its value resolves through
+   the already-registered `IConfigManager` and `PackageProofProvider`, while the
+   constructor dependency resolves through ordinary DI. Then check for exactly one
+   resolved audit entry at `Payments:Endpoint` whose declared type is
+   `ConfigPackageConsumer.Domain.PaymentsEndpointValue`. The asserted candidate
+   marker is `Explicit Domain registration: PASS`; the endpoint value is never
+   printed. The baseline manual-`Init` path asserts `Baseline manual Domain
+   selection: Missing declaration` for this otherwise-unique audit identity.
+
+The focused example source supplies `using ConfigPackageConsumer.Domain;`,
+`using ForgeTrust.AppSurface.Config;`, `using ForgeTrust.AppSurface.Core;`, and
+`using Microsoft.Extensions.DependencyInjection;`. The host source includes the
+Core, Core.Defaults, Configuration, DI, and Hosting usings and calls
+`AddAppSurfaceConfig` before the final `Build()`. The verifier packs the three
+AppSurface packages and Domain fixture, copies these exact sources into a fresh
+consumer, and compiles/runs the package-only candidate. The existing
+`Payments:ApiKey` file/environment cases remain separate compatibility coverage;
+the manual `ConsumerPaymentConfig.Init` path is not evidence for explicit
+registration. See the [packed consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md)
+for its package graph and expected markers.
+
+### Singleton ownership and ordering
+
+| Situation | Registration and ownership | Ordering or boundary |
+| --- | --- | --- |
+| No exact unkeyed wrapper descriptor | The framework adds one lazy singleton factory; the final provider owns the created wrapper. | Select it before `Build()` and register its constructor dependencies as singletons. |
+| One exact unkeyed caller singleton (instance, factory, or implementation type) | The descriptor is preserved unchanged. The caller owns initialization, key agreement, and validation; the framework does not call `Init` on that object. | The attributed declaration is still registered for audit. |
+| Keyed wrapper descriptor | It is independent of unkeyed selection and can coexist. | A keyed-only descriptor does not satisfy the unkeyed wrapper registration. |
+| Duplicate unkeyed descriptors or a non-singleton descriptor | The current registration call fails with `InvalidOperationException` and `config-registration-conflict`. | Repair the collection before calling discovery or explicit registration again; the check applies to current descriptors at each call. |
+| `Replace` after valid registration | A later singleton replacement is supported and retains the declaration metadata. | `Replace` does not repair a collection that already has duplicates; arbitrary later appends are outside the contract. |
+| Cloned service collections | Factory and implementation-type singletons are created once per built provider. An instance descriptor copied into two collections refers to the same caller-supplied object. | Registration adds no captured mutable marker, so selecting a type in one clone does not add it to another. |
+
+Discovery and the public extension share the internal
+`ConfigTypeRegistration.Register(IServiceCollection, Type)` path. The helper checks
+the current exact unkeyed wrapper descriptors on every call, then adds one
+wrapper-specific attributed metadata instance if that identity is not already
+present. It deduplicates only known unkeyed attributed instances by selected type
+and declaration kind; it preserves manual declarations and never invokes an opaque
+factory to identify metadata. The helper does not keep a mutable selected-type set
+or probe a built provider. Expected shape, package-compatibility, conflict, and
+metadata failures occur before its own descriptor additions; a custom collection's
+`Add` failure is not a transactional rollback guarantee. The public constraints
+require an `IConfig` reference type. The registrar additionally requires a closed,
+concrete class with a public instance constructor; an interface such as `IConfig`
+therefore fails its runtime shape check. The internal type seam validates those
+same requirements.
+
+If application request state must be scoped, keep the wrapper singleton-safe and
+place request-specific state in a scoped application service or use the existing
+host-manager contract directly. There is no lifetime overload, key overload,
+options overload, or assembly-wide selection API.
+
+### Registration and resolution failures
+
+The new conflict diagnostic uses `config-registration-conflict` and the canonical
+documentation URI from `ConfigDiagnosticCatalog.Reference`:
+[`https://appsurface.dev/guides/config-logical-keys`](../../guides/config-logical-keys.md).
+Conflict text includes the problem, cause, repair action, safe wrapper identifier,
+actual exact-unkeyed descriptor count/lifetime, and canonical link. It must not
+invoke a caller factory or disclose configuration values. Existing key,
+compatibility, DI, value, factory, and cancellation behavior continues through its
+existing boundary.
+
+| Failure | Existing exception or diagnostic family | Cause and next action | Reference |
+| --- | --- | --- | --- |
+| Null service collection or null internal selected-type input | `ArgumentNullException` | Pass non-null inputs. The generic public API cannot express a null selected type. | [Registration contract](#explicitly-register-one-typed-wrapper) |
+| Abstract, open, non-class, non-`IConfig`, or no-public-instance-constructor type | `ArgumentException` | Select a closed concrete `IConfig` wrapper with a public instance constructor. A non-public enclosing type is allowed when its constructor is public. | [Logical-key and declaration contract](../../guides/config-logical-keys.md#application-strings-and-declarations) |
+| Duplicate or non-singleton exact unkeyed wrapper descriptor | `InvalidOperationException`, `config-registration-conflict` | Keep one unkeyed singleton or remove the conflicting descriptors before registration. Keyed descriptors are independent. | [Conflict diagnostic](../../guides/config-logical-keys.md#explicit-type-registration) |
+| Incompatible Config/Core/provider package family | `AppSurfacePackageCompatibilityException` | Upgrade the coordinated package set and rebuild external providers and wrappers together. | [Compatibility and rollback](../../guides/config-key-migration.md#compatibility-and-downgrade-boundaries) |
+| Invalid declared key grammar | `ArgumentException` from the default finalized `ConfigKeyInputParser`; strict `AppSurfaceConfigKey.Parse` raises `FormatException` | Correct the key. Parsing remains deferred to the host's finalized key options; registration does not normalize or pre-parse it. A custom parser's exception behavior remains its own. | [Logical-key grammar and collision domains](../../guides/config-logical-keys.md#application-strings-and-declarations) |
+| Case-only or canonical/legacy identity collision | `InvalidOperationException` with `config-key-collision` at finalized declaration-registry construction | Use one spelling for each logical identity; explicit registration does not bypass collision checks. | [Logical-key grammar and collision domains](../../guides/config-logical-keys.md#application-strings-and-declarations) |
+| Missing or ambiguous constructor dependency | Ordinary DI activation exception at resolution | Register the required dependency or make constructor selection unambiguous. Registration does not probe the final provider. | [Microsoft DI registration guidance](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/service-registration) |
+| Missing required value, conversion, or validation failure | Existing `ConfigurationResolutionException` or `ConfigurationValidationException` behavior | Repair the provider value or declared type/validation rule; the new registration path does not translate it. | [Config validation](#validation) |
+| Caller factory, provider, or initializer throws | Original existing exception behavior | Diagnose the original component at the normal resolution boundary; registration does not invoke or wrap it early. | [Provider-author guide](../../guides/config-provider-authors.md) |
+| Cancellation during an existing provider operation | Existing `OperationCanceledException` behavior | Let cancellation propagate to the caller; registration adds no cancellation translation. | [Provider-author guide](../../guides/config-provider-authors.md#source-projection-and-concurrency) |
+
+Audit remains a separate inspection operation. The reporter can resolve providers
+and construct an inspection wrapper to produce the attributed declaration's report;
+it does not resolve or mirror an arbitrary caller-owned runtime singleton, and it
+does not promise zero provider reads during reporting. Measure registration,
+selected runtime resolution, and audit inspection/read counts separately. See the
+[audit reference](#configuration-audit-reports) for report and redaction behavior.
+
 ## Key Types
 
 - **`AppSurfaceConfigModule`**: Registers the configuration services for an AppSurface application.
