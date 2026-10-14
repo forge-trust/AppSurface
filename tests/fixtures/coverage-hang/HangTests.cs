@@ -4,6 +4,27 @@ namespace CoverageHang.Tests;
 
 public sealed class HangTests
 {
+    // Together these outlast the progress probe's watchdog; each completion must be observed.
+    [Theory]
+    [Trait("Category", "HealthySequence")]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(10)]
+    [InlineData(11)]
+    [InlineData(12)]
+    public async Task ShortHealthyTest(int row)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        Assert.InRange(row, 1, 12);
+    }
+
     [Fact]
     [Trait("Category", "Hang")]
     public void NeverCompletes()

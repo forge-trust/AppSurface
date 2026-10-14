@@ -70,6 +70,66 @@ case-only declarations and legacy/canonical declarations for one identity fail
 startup with `config-key-collision`. Direct obsolete `ConfigAuditKnownEntry(string, …)`
 construction is strict because it cannot consult DI options.
 
+### Explicit type registration
+
+[`AddAppSurfaceConfig<TConfig>()`](../Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+selects one concrete `IConfig` wrapper from any compatible assembly, including a
+Domain assembly outside the normal discovery inputs. It uses the same declaration
+registry and finalized key parser as module discovery. It does not scan an assembly,
+accept a caller key, or parse an attribute while services are being registered.
+Without `ConfigKeyAttribute`, the existing type-name and declaring-type hierarchy
+convention supplies the declaration. With an attribute, nested fragments compose
+under the same `Root` rule as discovered wrappers.
+
+`ConfigKeyAttribute.GetLogicalKey(Type)` remains a strict public helper: it parses
+attribute fragments with canonical colon syntax regardless of host compatibility
+options. Host discovery and explicit registration instead resolve those fragments
+through the finalized `AppSurfaceConfigKeyOptions`, so release-train legacy handling
+and origin tracking remain host-owned. Do not call the strict helper to predict a
+legacy-translated host key. The [migration guide](config-key-migration.md) documents
+the package and rollback constraints for adopting this API.
+
+Malformed fragments keep the parser's existing exception boundary: strict
+`AppSurfaceConfigKey.Parse` throws `FormatException`, while the default finalized
+`ConfigKeyInputParser` throws `ArgumentException` for invalid input after its
+configured dot-only translation. A custom input parser retains its own exception
+behavior. Canonical/case-only and legacy/canonical identity collisions still fail
+with `InvalidOperationException` and `config-key-collision` when the finalized
+declaration registry is constructed.
+
+Registration contributes an attributed declaration even when the wrapper assembly
+is not scanned. That record identifies the selected wrapper for normal audit
+reporting; it is not evidence that the runtime singleton has been activated. Normal
+module discovery remains lazy. An audit report may separately construct an
+inspection wrapper and resolve providers, so keep report-time inspection and reads
+separate from runtime singleton activation in counters and troubleshooting.
+
+Invalid attribute grammar and key collisions still fail through the existing
+finalized parser/registry boundary. Invalid audit traversal bounds also retain their
+existing later audit diagnostic and safe fallback; explicit registration does not
+turn them into an earlier key-registration failure.
+
+The registration conflict code is `config-registration-conflict`. Its canonical
+documentation URI is
+[`https://appsurface.dev/guides/config-logical-keys`](https://appsurface.dev/guides/config-logical-keys),
+the same target as `ConfigDiagnosticCatalog.Reference`. Messages identify the
+problem and cause, safe wrapper identifier, actual exact-unkeyed descriptor count
+or lifetime, repair action, and canonical link. They never invoke opaque factories
+or include configuration values.
+
+| Registration failure | Family and recovery |
+| --- | --- |
+| Null collection/type | `ArgumentNullException`; provide the required value before registration. |
+| Unsupported selected type shape | `ArgumentException`; select a closed concrete class implementing `IConfig` with a public instance constructor. |
+| Multiple exact unkeyed descriptors or a non-singleton | `InvalidOperationException` with `config-registration-conflict`; retain one unkeyed singleton or repair descriptors before another registration call. Keyed descriptors are independent. |
+| Incompatible package family | `AppSurfacePackageCompatibilityException`; upgrade the coordinated package set and rebuild external providers and wrappers together. |
+| Invalid declared key grammar | `ArgumentException` from the default finalized `ConfigKeyInputParser`; strict `AppSurfaceConfigKey.Parse` throws `FormatException`. Correct the declaration; custom parser exceptions retain their existing behavior. |
+| Case-only or canonical/legacy identity collision | `InvalidOperationException` with `config-key-collision` when the finalized registry is constructed; use one spelling for each logical identity. |
+
+The canonical [packed consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md)
+demonstrates that a package-only Domain wrapper gains its attributed audit identity
+without broadening discovery.
+
 ## Resolution and collision domains
 
 The environment provider runs first. Other providers run in descending priority,
