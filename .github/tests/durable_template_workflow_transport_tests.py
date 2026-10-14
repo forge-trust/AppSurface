@@ -12,6 +12,18 @@ WORKFLOW = ROOT / '.github/workflows/durable-template-evidence.yml'
 MAC_ACQUISITION = ROOT / '.github/scripts/resolve-macos-native-postgresql.sh'
 
 class DurableTemplateTransportTests(unittest.TestCase):
+    def test_package_diagnostics_retain_only_the_bounded_durable_receipt(self):
+        for name, directory in [('package-artifacts.yml', 'package-artifacts'),
+                                ('package-gate.yml', 'package-gate-artifacts')]:
+            with self.subTest(workflow=name):
+                source = (WORKFLOW.parent / name).read_text()
+                upload = source.split('      - name: Upload package validation diagnostics\n', 1)[1]
+                upload = upload.split('      - name:', 1)[0]
+                paths = upload.split('          path: |\n', 1)[1].split('          if-no-files-found:', 1)[0]
+                durable_paths = [line.strip() for line in paths.splitlines() if 'durable-template' in line]
+                self.assertEqual(durable_paths,
+                                 ['${{ runner.temp }}/' + directory + '/durable-template-consumer-proof.json'])
+
     def test_all_five_receipts_are_required_and_prior_attempts_cannot_fill_a_gap(self):
         source = WORKFLOW.read_text()
         start = source.index('      - name: Resolve exact receipt IDs')
