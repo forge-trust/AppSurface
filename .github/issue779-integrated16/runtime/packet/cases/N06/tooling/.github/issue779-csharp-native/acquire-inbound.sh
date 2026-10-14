@@ -28,8 +28,8 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 987d629db03b6fa7991107bd2acb0c22f3ecdfd4a39fd718d0d8dcd5e7eb60f1 &&
-   ${v[fixture-sha256]} == 593c1935ae61a07c6ed6ab043bbbcd3f831f851f7fed43f0ea1fb88bbae71842 &&
+[[ ${v[transport-sha256]} == 9dc2be1e271acd278bf26ecaf302e55686281e39982b90ca00dd84421c0915ca &&
+   ${v[fixture-sha256]} == 2a54fa9141c062e9ed8fd1d81a27638114e0d896b610d41a738793d956864770 &&
    ${v[audit-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 &&
    ${v[source-review-sha256]} == b84977a7bdb1839a498d7ba50888342a6984efdcc6e7a231500e10f79ee5f96b ]] || fail frozen-input-pins
 mono() {
@@ -179,7 +179,7 @@ bounded /usr/bin/jq -acS . "$work/helper-build-receipt.json" >"$work/helper-rece
 bounded /usr/bin/cmp -- "$work/helper-build-receipt.json" "$work/helper-receipt-canonical.json"
 adapter_path="${BASH_SOURCE[0]%/*}/helper_receipt_adapter.py"
 validator_path="${BASH_SOURCE[0]%/*}/helper_receipt_validator.py"
-trusted_pin "$adapter_path" "603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844" 32768
+trusted_pin "$adapter_path" "04e5f6c5a2a388ced1df983520371ac03cdadf1fdb0c185537625b13bd43165c" 32768
 trusted_pin "$validator_path" "106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630" 16384
 bounded /usr/bin/python3.12 -I -S -B "$validator_path" N03 "$work/helper-build-receipt.json" "$work/helper-build-private-diagnostics.json" "a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e" >/dev/null
 for kind in source tool runtime helper; do

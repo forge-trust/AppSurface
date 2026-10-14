@@ -34,6 +34,19 @@ internal static class N07CoordinatorData
         uint newMajor, uint newMinor, ulong newInode) =>
         oldMajor == newMajor && oldMinor == newMinor && oldInode != 0 && newInode != 0 && oldInode != newInode;
 
+    /// <summary>Returns only a bounded error from the fixed openat2 call; other failures remain unknown.</summary>
+    /// <remarks>No exception message, path, process identity or nested exception is inspected. The number
+    /// is private diagnostic data and cannot establish ownership, admission or a successful control.</remarks>
+    internal static int? OpenFailureErrno(Exception? error) =>
+        error is NativeOpenFailure failure ? failure.NativeErrno : null;
+
+    /// <summary>Fixed private failure category that carries no path or exception text from the syscall.</summary>
+    internal sealed class NativeOpenFailure(int nativeErrno) : IOException("n07-openat2-rejected")
+    {
+        /// <summary>Linux kernel errno range only; missing or out-of-range values stay unknown.</summary>
+        internal int? NativeErrno { get; } = nativeErrno is > 0 and <= 4095 ? nativeErrno : null;
+    }
+
     /// <summary>Fixed derived names, never user-selected paths or production permission.</summary>
     internal sealed record ParentNames(string Root, string Original, string Quarantine);
 }

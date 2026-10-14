@@ -31,6 +31,7 @@ internal static class Program
         var owned = new Owned();
         string stage = "Bootstrap";
         bool failed = false;
+        int? nativeErrno = null;
         Observation? observation = null;
         try
         {
@@ -46,7 +47,11 @@ internal static class Program
             dispatch.SetResult();
             observation = await original.ConfigureAwait(false);
         }
-        catch (Exception) { failed = true; }
+        catch (Exception error)
+        {
+            failed = true;
+            nativeErrno = N07CoordinatorData.OpenFailureErrno(error);
+        }
         finally
         {
             // A stopped original may be resumed only through its retained pidfd and unchanged live sample.
@@ -68,7 +73,8 @@ internal static class Program
             Require(selected is not null && Clock.Now() < selected.End);
             var result = failed || observation is null
                 ? JsonSerializer.SerializeToUtf8Bytes(new { schema = "issue779-n07-root-coordinator-result-v1",
-                    status = "inconclusive", stage, native_authority = false, native_acceptance = false })
+                    status = "inconclusive", stage, native_errno = nativeErrno,
+                    native_authority = false, native_acceptance = false })
                 : JsonSerializer.SerializeToUtf8Bytes(observation);
             Require(result.Length is > 0 and <= 4095);
             Native.RequireOutput(1);
@@ -824,7 +830,9 @@ internal static class Program
         internal static SafeFileHandle Open(int parent, string path, ulong flags, ulong resolve)
         {
             var how = new OpenHow { Flags = flags, Resolve = resolve };
-            long fd = OpenAt2(437, parent, path, ref how, 24); Require(fd >= 0 && fd <= int.MaxValue);
+            long fd = OpenAt2(437, parent, path, ref how, 24);
+            if (fd < 0) throw new N07CoordinatorData.NativeOpenFailure(Marshal.GetLastPInvokeError());
+            Require(fd <= int.MaxValue);
             return new SafeFileHandle((IntPtr)fd, true);
         }
         internal static Metadata Stat(SafeFileHandle fd) => Stat(Fd(fd));

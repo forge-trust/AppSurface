@@ -620,7 +620,7 @@ while (($#)); do
  diagnostic_stage=source-shape
  source=$1; name=$2; hash=$3; shift 3
  [[ $name =~ ^[a-zA-Z0-9._-]+$ && $name != . && $name != .. && ${#name} -le 255 && $hash =~ ^[0-9a-f]{64}$ && -f $source && ! -L $source ]]
- cap=131072; [[ $name != capture-receipt.json ]] || cap=2097152
+ cap=131072; [[ $name != source-capture.json ]] || cap=2097152
  [[ $(/usr/bin/stat -c %h -- "$source") == 1 && $(/usr/bin/stat -c %s -- "$source") -le $cap ]]
  diagnostic_stage=source-digest
  printf '%s  %s\n' "$hash" "$source" | /usr/bin/sha256sum --check --strict --status

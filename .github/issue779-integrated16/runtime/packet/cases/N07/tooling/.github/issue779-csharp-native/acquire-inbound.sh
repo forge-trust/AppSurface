@@ -30,7 +30,7 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256 n07-helper-build-receipt-sha256 n07-parser-sha256 n07-live-parser-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 25131bcd948089e8ac36ad0a417dc6e844376ad02d30063d444dc4183f2ec2a9 &&
+[[ ${v[transport-sha256]} == 87751e90fdcbea8073bdec13239989fb594f6e18bf3e42709eaaa8663c037b50 &&
    ${v[fixture-sha256]} == d81cfee0e36762c902156355c789c0d2260ed0d10634773402172940edc8af6e &&
    ${v[audit-sha256]} == 6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08 &&
    ${v[source-review-sha256]} == de012d44beeee8531c8b0e19de6bf8fc61fdeb517e82d4d804281bb868c8ba5d ]] || fail frozen-input-pins
@@ -175,7 +175,7 @@ pin "$helper_diagnostics" "$helper_diagnostics_sha" 1048576
 copy_file "$helper_diagnostics" "$work/helper-build-private-diagnostics.json" "$helper_diagnostics_sha" 1048576 0600
 adapter_path="${BASH_SOURCE[0]%/*}/helper_receipt_adapter.py"
 validator_path="${BASH_SOURCE[0]%/*}/helper_receipt_validator.py"
-trusted_pin "$adapter_path" "603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844" 32768
+trusted_pin "$adapter_path" "04e5f6c5a2a388ced1df983520371ac03cdadf1fdb0c185537625b13bd43165c" 32768
 trusted_pin "$validator_path" "106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630" 16384
 bounded /usr/bin/python3.12 -I -S -B "$validator_path" N03 "$work/helper-build-receipt.json" "$work/helper-build-private-diagnostics.json" "a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e" >/dev/null
 absolute "${v[n07-helper-build-root]}"; [[ -d ${v[n07-helper-build-root]} && ! -L ${v[n07-helper-build-root]} ]] || fail n07-helper-build-root
@@ -186,8 +186,8 @@ copy_file "$n07_helper_receipt" "$work/n07-helper-build-receipt.json" "${v[n07-h
 bounded /usr/bin/jq -e 'def integer: type=="number" and floor==. and .>=0;
 def digest: type=="string" and test("^[0-9a-f]{64}$");
 keys==["authority","commands","exit","helper_bytes","helper_directories","helper_entry_sha256","helper_files","helper_nodes_sha256","helper_root","helper_tsv_sha256","native_execution","private_diagnostics_sha256","recipe_sha256","runtime_required","schema","sdk_required","sdk_sha256","source_pins"] and .schema=="issue779-n07-helper-build-handoff-v1" and .exit==0 and .authority==false and .native_execution==false and
-.recipe_sha256=="2be07a2ec1480903cb44ebe8296cec37c09073ffe5f6382d32d99ba27132ef0b" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and (.private_diagnostics_sha256|digest) and
-.source_pins=={"Program.cs":"4e8c2061709539613d85d8c062417e691fe12e66b46df3fb178c52ef65311625","PossibleStopRegistration.cs":"3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af","N07CoordinatorData.cs":"6edf029c097f1e6bf902936d7418a7622d2654ad97483a88ea5f2ec10323679d","NativeRootCoordinator.csproj":"9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
+.recipe_sha256=="f5f2e4696568d207e6e340d80c14a78410c21ae0427a4bde9787aa091586d4bf" and .sdk_required=="10.0.401" and .runtime_required=="10.0.12" and (.sdk_sha256|digest) and (.private_diagnostics_sha256|digest) and
+.source_pins=={"Program.cs":"20ddf7f54bf335ec49ab0d221b3b49bb2695f1c61d959786a585806ace332d9d","PossibleStopRegistration.cs":"3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af","N07CoordinatorData.cs":"f85d30a95b2bbe66ae8b21ff66ea812aee1c0e801fa03f49b8246d91a202d91a","NativeRootCoordinator.csproj":"9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1","packages.lock.json":"a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"} and
 (.helper_files|integer) and .helper_files>0 and (.helper_directories|integer) and .helper_directories>0 and (.helper_files+.helper_directories)<=8192 and
 (.helper_bytes|integer) and .helper_bytes<=1073741824 and (.helper_tsv_sha256|digest) and (.helper_nodes_sha256|digest) and (.helper_entry_sha256|digest) and
 (.commands|type=="array" and length==3)' "$work/n07-helper-build-receipt.json" >/dev/null
@@ -197,7 +197,7 @@ n07_helper_diagnostics=${v[n07-helper-build-root]}/helper-build-private-diagnost
 n07_helper_diagnostics_sha=$(bounded /usr/bin/jq -r .private_diagnostics_sha256 "$work/n07-helper-build-receipt.json")
 pin "$n07_helper_diagnostics" "$n07_helper_diagnostics_sha" 1048576
 copy_file "$n07_helper_diagnostics" "$work/n07-helper-build-private-diagnostics.json" "$n07_helper_diagnostics_sha" 1048576 0600
-bounded /usr/bin/python3.12 -I -S -B "$validator_path" N07 "$work/n07-helper-build-receipt.json" "$work/n07-helper-build-private-diagnostics.json" "2be07a2ec1480903cb44ebe8296cec37c09073ffe5f6382d32d99ba27132ef0b" >/dev/null
+bounded /usr/bin/python3.12 -I -S -B "$validator_path" N07 "$work/n07-helper-build-receipt.json" "$work/n07-helper-build-private-diagnostics.json" "f5f2e4696568d207e6e340d80c14a78410c21ae0427a4bde9787aa091586d4bf" >/dev/null
 for kind in source tool runtime helper n07helper; do
  roots[$kind]=${v[build-root]}/handoff/$kind
  [[ $kind != helper ]] || roots[$kind]=${v[helper-build-root]}/helper

@@ -17,16 +17,16 @@ PARENT = '1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38'
 SOURCE_TREE = 'c9ed8adcc08d050dc70af6885d31171038a36f86'
 SOURCE_COUNT = 2872
 CAPTURE_SHA = '6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1'
-CAPTURE_MAP_SHA = "c541eb54bce090149404e8a3c0c4036e684096f0170e669aed65453a69ad894a"
-CAPTURE_RAW_MAP_SHA = "66566e2243da54a4cc34266a7652c35bf58de73e73892fdffd10fb4518ab9a38"
-N15_BUILD_PROJECTION_SHA = "5aa7188c4dbe5632d7602271eff23837fc49f098a3ae46b9e06d1157a2cc476a"
+CAPTURE_MAP_SHA = "bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6"
+CAPTURE_RAW_MAP_SHA = "02b833b330267cafc6e12e75ac82439c6ee80a7e839f7fad27d7097fac8da843"
+N15_BUILD_PROJECTION_SHA = "8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0"
 OWNER_SOURCE = SOURCE
 OWNER_PARENT = PARENT
 OWNER_SOURCE_TREE = SOURCE_TREE
 OWNER_CAPTURE_SHA = CAPTURE_SHA
 OWNER_CAPTURE_MAP_SHA = CAPTURE_MAP_SHA
 OWNER_CAPTURE_RAW_MAP_SHA = CAPTURE_RAW_MAP_SHA
-OWNER_BUILD_PROJECTION_SHA = "0c5f9605840c134d9b21866f2eb813111884a431540f0da2eb516ff0146e0c8c"
+OWNER_BUILD_PROJECTION_SHA = "8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0"
 OWNER_CAPTURE_FIVE_FIELD_SHA = OWNER_BUILD_PROJECTION_SHA
 BUILD_CONTRACTS = {
     "N13": {"source": OWNER_SOURCE, "parent": OWNER_PARENT, "tree": OWNER_SOURCE_TREE,
@@ -43,7 +43,7 @@ BUILD_CONTRACTS = {
             "capture": CAPTURE_SHA, "map": CAPTURE_MAP_SHA,
             "raw_map": CAPTURE_RAW_MAP_SHA, "capture_projection": N15_BUILD_PROJECTION_SHA,
             "build_projection": N15_BUILD_PROJECTION_SHA,
-            "projection_tree_key": "source_tree", "shape": "linux-pipe"},
+            "projection_tree_key": "tree", "shape": "linux-pipe"},
 }
 FIXTURE_ROOT = Path("/var/lib/appsurface-evidence-fixture")
 PRIVATE_ROOT = Path("/run/appsurface-evidence-fixture")
@@ -530,7 +530,7 @@ def main(argv):
                      "mode":capture["source"]["modes"][name]}
                for name in sorted(capture["source"]["sha256"])}
     raw_map_sha = hashlib.sha256(json.dumps(raw_map, sort_keys=True, separators=(",",":")).encode()).hexdigest()
-    capture_projection_sha = source_projection_sha(capture, "source_tree")
+    capture_projection_sha = source_projection_sha(capture, "tree")
     build_projection_sha = source_projection_sha(capture, contract["projection_tree_key"])
     need(compact_map == contract["map"] and raw_map_sha == contract["raw_map"] and
          capture_projection_sha == contract["capture_projection"] and

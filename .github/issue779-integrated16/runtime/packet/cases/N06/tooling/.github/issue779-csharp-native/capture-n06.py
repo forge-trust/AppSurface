@@ -38,9 +38,9 @@ def read_private(path,limit,uid=0,gid=0,mode=0o600):
                 and fingerprint(os.lstat(path))==fingerprint(before))
         return data
     finally: os.close(fd)
-def save(name,data):
+def save(privateDir,name,data):
     require('/' not in name and name not in ('.','..'))
-    p=private+'/'+name; require(not os.path.lexists(p))
+    p=privateDir+'/'+name; require(not os.path.lexists(p))
     fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
     try:
         s=os.fstat(fd); require(stat.S_ISREG(s.st_mode) and s.st_nlink==1 and s.st_uid==s.st_gid==0)
@@ -583,7 +583,7 @@ def body():
     # Preserve actual frame bytes, including their one LF. No serializer/splitter may change them.
     for name in (*SLOT_FRAME_MEMBERS, 'negative-descriptor.json', 'negative-account-ids.tsv',
                  CASE.lower() + '-worker.stdout', CASE.lower() + '-worker.stderr'):
-        save(name, values[name])
+        save(private, name, values[name])
 
 if __name__ == '__main__':
     try:

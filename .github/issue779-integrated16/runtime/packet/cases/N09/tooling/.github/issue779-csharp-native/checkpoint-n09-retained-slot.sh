@@ -931,7 +931,13 @@ join_owned() {
  while kill -0 "$pid" 2>/dev/null; do
   left >/dev/null || return 124
   [[ ${owned_start[$pid]+present} ]] || return 125
-  current=$(owned_identity "$pid") || return 125
+  if ! current=$(owned_identity "$pid"); then
+   # The original leader may exit between the live probe and its proc read.
+   # Recheck absence; a live unreadable or substituted process still rejects.
+   left >/dev/null || return 124
+   ! kill -0 "$pid" 2>/dev/null || return 125
+   break
+  fi
   [[ $current == "${owned_start[$pid]}" ]] || return 125
   try_bounded sleep .05 || return 124
  done
@@ -1132,7 +1138,12 @@ pin_owned_pg "$launch_pid"
 negative_launch=0
 join_owned launch_pid || negative_launch=$?
 remaining >/dev/null
-[[ $negative_launch == 1 && ! -s $log/n01.stdout ]] || fail cancellation-root-outcome
+if [[ $negative_launch != 1 || -n $launch_pid || -s $log/n01.stdout ]]; then
+ launch_retired=0; [[ -n $launch_pid ]] || launch_retired=1
+ root_stdout_empty=0; [[ -s $log/n01.stdout ]] || root_stdout_empty=1
+ printf 'NEGATIVE_LAUNCH_JOIN:%d:%d:%d\n' "$negative_launch" "$launch_retired" "$root_stdout_empty" >&2
+ fail cancellation-root-outcome
+fi
 [[ $(bounded stat -c '%u:%g:%a:%h' "$log/n01.stderr") == 0:0:600:1 && $(bounded stat -c %s "$log/n01.stderr") -le 114688 ]] || fail cancellation-root-log-bound
 # systemd-run --wait returned after original root exit and pipe EOF; join_owned also
 # confirms the registered launch process group is absent. Check source units before parsing.

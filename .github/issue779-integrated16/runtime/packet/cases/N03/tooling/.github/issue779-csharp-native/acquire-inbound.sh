@@ -171,7 +171,7 @@ pin "$helper_diagnostics" "$helper_diagnostics_sha" 1048576
 copy_file "$helper_diagnostics" "$work/helper-build-private-diagnostics.json" "$helper_diagnostics_sha" 1048576 0600
 adapter_path="${BASH_SOURCE[0]%/*}/helper_receipt_adapter.py"
 validator_path="${BASH_SOURCE[0]%/*}/helper_receipt_validator.py"
-trusted_pin "$adapter_path" "603e2cf0047a39783f96fc8b2978d33237a58e4849868d6e7a44b3be92c6c844" 32768
+trusted_pin "$adapter_path" "04e5f6c5a2a388ced1df983520371ac03cdadf1fdb0c185537625b13bd43165c" 32768
 trusted_pin "$validator_path" "106c6b5202f4795a351ef76b259177571d1a0691bf9f2e908ad145155104b630" 16384
 bounded /usr/bin/python3.12 -I -S -B "$validator_path" N03 "$work/helper-build-receipt.json" "$work/helper-build-private-diagnostics.json" "a0188f106b75e1320aefac501c1057e66da973bda8c9e08a862bfebddd65390e" >/dev/null
 for kind in source tool runtime helper; do
