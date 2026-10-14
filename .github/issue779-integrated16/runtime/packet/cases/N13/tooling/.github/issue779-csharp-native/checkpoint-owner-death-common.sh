@@ -6,8 +6,8 @@ umask 077
 : "${OWNER_DEATH_CASE:?fixed wrapper must set OWNER_DEATH_CASE}"
 [[ $OWNER_DEATH_CASE == N13 || $OWNER_DEATH_CASE == N14 ]] || exit 64
 readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30 FIXTURE_REVIEW_CLEAR=1 SOURCE_REVIEW_CLEAR=1 ROOT_REVIEW_CLEAR=1
-readonly EXPECTED_HEAD=fc59bb1254294d624f6779f928020edfe988dd5e EXPECTED_PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1
+readonly EXPECTED_HEAD=957da1f23ff743778fa39e3e559511ccdb281345 EXPECTED_PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4
 mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation=
 fail(){ printf 'OWNER_DEATH_FIXTURE_REJECTED:%s\n' "$1" >&2; exit 1; }
 while (($#)); do
@@ -34,7 +34,7 @@ for v in capture capture_sha request request_sha host host_sha entry entry_sha b
 [[ $capture_sha == "$EXPECTED_CAPTURE_SHA" ]] || fail capture-pin
 pin "$capture" "$capture_sha" 8388608; pin "$request" "$request_sha" 65536; pin "$host" "$host_sha" 2147483648; pin "$entry" "$entry_sha" 2147483648; pin "$build" "$build_sha" 4194304; pin "$parser" "$parser_sha" 131072
 [[ $generation =~ ^[0-9a-f]{32}$ ]] || fail generation
-jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "c9ed8adcc08d050dc70af6885d31171038a36f86" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
+jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "51a3f946d42f4141af1cc8d297161dd362b79fd0" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
 jq -e --arg c "$OWNER_DEATH_CASE" --arg h "$EXPECTED_HEAD" --argjson n "$EXPECTED_COUNT" '.source_revision==$h and .source_count==$n and .private_qualification==$c' "$build" >/dev/null || fail build-variant-binding
 [[ $host != *'$'* && $host != *'%'* && $host != *'='* && $entry != *'$'* && $entry != *'%'* ]] || fail bootstrap-path
 if [[ $mode == prepare-only ]]; then printf 'PREPARATION_PINS_MATCHED:%s:NOT_RUN\n' "$OWNER_DEATH_CASE"; exit 0; fi

@@ -155,8 +155,8 @@
     "operation": null,
     "source": "77e1e1fbb83357df92e15fc6213d8a6dfa369fd8"
   },
-  "capture_projection_sha256": "8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0",
-  "capture_receipt_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "capture_projection_sha256": "c3ec77a29d9a12b6e58f7acd3ae14a0454582a3f296eefb34f7e05f602d153b2",
+  "capture_receipt_sha256": "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4",
   "composition_review_pending_at_preparation": true,
   "current_full_suite_executed": true,
   "current_publication_promotion": {
@@ -719,7 +719,7 @@
     "trx_sha256": "0c908c7b38ee7d0df9f1e4b737d833e4ab9b80312b2b55d75003adf6606d6e2f",
     "validation_receipt_sha256": "629139bb576bd4568ba9e92af9f5a6d63809d90f24a5b22c527d9d1ed917522a"
   },
-  "parent_commit": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
+  "parent_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
   "phase_diagnostic": {
     "command_exits": [
       0,
@@ -897,10 +897,10 @@
   "projection_receipt_sha256": "682f3bb7d6d99240199b2a2c2da1bea30642192d3c4d182ccc3b4333762650a0",
   "root_trust_issuer": false,
   "schema": "issue779-reviewed-csharp-candidate-v1",
-  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_commit": "957da1f23ff743778fa39e3e559511ccdb281345",
   "source_count": 2872,
-  "source_map_sha256": "02b833b330267cafc6e12e75ac82439c6ee80a7e839f7fad27d7097fac8da843",
-  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86",
+  "source_map_sha256": "2a410e9e0ff3d2472088e455d7cefe7d5e91b2653a5e1f28407d0837db4b46df",
+  "source_tree": "51a3f946d42f4141af1cc8d297161dd362b79fd0",
   "startup_limit_diagnostic": {
     "additional_fixed_retention_names": [
       "logs/n02.file-limit",

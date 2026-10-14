@@ -4,9 +4,9 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=fc59bb1254294d624f6779f928020edfe988dd5e
-readonly PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly SOURCE_PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
+readonly SOURCE=957da1f23ff743778fa39e3e559511ccdb281345
+readonly PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly SOURCE_PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
 readonly SOURCE_MAP=c541eb54bce090149404e8a3c0c4036e684096f0170e669aed65453a69ad894a
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
@@ -29,7 +29,7 @@ readonly N16_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 source-capture-sha256 n16-parser-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[source-capture-sha256]} == 6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1 && ${v[n16-parser-sha256]} == 97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3 ]] || fail n16-source-parser-pins
+[[ ${v[source-capture-sha256]} == 6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4 && ${v[n16-parser-sha256]} == 97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3 ]] || fail n16-source-parser-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -113,7 +113,7 @@ for spec in prepare-root-inputs-v2.sh:transport checkpoint-n16-accepted-work.sh:
 done
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
-bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .source_count==2872 and .clean==true and .index_tree_blob_modes_equal==true and .native_credit==false and .draft_pr_created==false and (.source|type=="object" and (.sha256|type=="object" and length==2872) and (.modes|type=="object" and length==2872))' "$capture" >/dev/null
+bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .source_count==2872 and .clean==true and .index_tree_blob_modes_equal==true and .native_credit==false and .draft_pr_created==false and (.source|type=="object" and (.sha256|type=="object" and length==2872) and (.modes|type=="object" and length==2872))' "$capture" >/dev/null
 output=/var/lib/appsurface-evidence-inbound-${v[generation]}
 protected_parent /var/lib; [[ ! -e $output && ! -L $output ]] || fail destination-exists
 for input in "${v[build-root]}" "${v[reviewed-root]}"; do
@@ -154,7 +154,7 @@ copy_file "$receipt" "$work/build-receipt.json" "$receipt_hash" 1048576 0600
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
 bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '
- .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .source_count==2872 and .clean==true and .index_tree_blob_modes_equal==true and .native_credit==false and .draft_pr_created==false and (.source|type=="object" and (.sha256|type=="object" and length==2872) and (.modes|type=="object" and length==2872))
+ .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .source_count==2872 and .clean==true and .index_tree_blob_modes_equal==true and .native_credit==false and .draft_pr_created==false and (.source|type=="object" and (.sha256|type=="object" and length==2872) and (.modes|type=="object" and length==2872))
 ' "$capture" >/dev/null
 trusted_pin "${v[reviewed-root]}/check_n16_records.py" "${v[n16-parser-sha256]}" 131072
 copy_file "$capture" "$work/source-capture.json" "${v[source-capture-sha256]}" 2097152 0600

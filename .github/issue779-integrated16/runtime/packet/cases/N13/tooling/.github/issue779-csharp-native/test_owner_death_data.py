@@ -57,8 +57,8 @@ class PreparationBindingControls(unittest.TestCase):
         raw = base64.b64decode(review["fixture_preparation_base64"], validate=True)
         self.assertEqual(hashlib.sha256(raw).hexdigest(), review["fixture_preparation_sha256"])
         preparation = json.loads(raw)
-        self.assertEqual(preparation["source_capture_head"], "fc59bb1254294d624f6779f928020edfe988dd5e")
-        self.assertEqual(preparation["source_capture_parent"], "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38")
+        self.assertEqual(preparation["source_capture_head"], "957da1f23ff743778fa39e3e559511ccdb281345")
+        self.assertEqual(preparation["source_capture_parent"], "fc59bb1254294d624f6779f928020edfe988dd5e")
         self.assertEqual(preparation["source_capture_count"], 2872)
         expected = {}
         for name in ("checkpoint-n13-owner-killed.sh", "checkpoint-n14-owner-stopped.sh",
@@ -163,7 +163,7 @@ class SourceOrderControls(unittest.TestCase):
 
 
 class PreparationCallerChainControls(unittest.TestCase):
-    EXPECTED_PREPARATION_SHA = "544d884e20ab03886a568aa3b5c6da5f0fdae8854652eb93ddf38fb834d5c3ec"
+    EXPECTED_PREPARATION_SHA = "cad6643b4f264365bd63586912c383a303fd1c04c3d1925086c84cbe53a12b69"
 
     def test_embedded_preparation_digest_is_shared_by_workflow_runner_and_root_chain(self):
         folder = Path(__file__).parent

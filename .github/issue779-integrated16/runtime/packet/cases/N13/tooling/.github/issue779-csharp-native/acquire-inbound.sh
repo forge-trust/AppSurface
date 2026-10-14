@@ -3,15 +3,15 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=fc59bb1254294d624f6779f928020edfe988dd5e
-readonly PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly SOURCE_MAP=02b833b330267cafc6e12e75ac82439c6ee80a7e839f7fad27d7097fac8da843
-readonly CANONICAL_MAP=bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6
-readonly CAPTURE=6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1
+readonly SOURCE=957da1f23ff743778fa39e3e559511ccdb281345
+readonly PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly SOURCE_MAP=2a410e9e0ff3d2472088e455d7cefe7d5e91b2653a5e1f28407d0837db4b46df
+readonly CANONICAL_MAP=c505fba8f435cc5041b549a8d55421430850f14f2b96a16d2bde7053e8b00ba3
+readonly CAPTURE=6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4
 readonly COUNT=2872
-readonly COMMON=4d6913203730418f1005969bc754b664b758b9564a37eb74d3035e93a4d3bb4f
+readonly COMMON=4e3452b31d620aba7c735d44a9d08ef7fcc81a76b8eef8bdce9ad9e612340793
 readonly PARSER=276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1
-readonly PREPARATION=544d884e20ab03886a568aa3b5c6da5f0fdae8854652eb93ddf38fb834d5c3ec
+readonly PREPARATION=cad6643b4f264365bd63586912c383a303fd1c04c3d1925086c84cbe53a12b69
 readonly N13=cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc
 readonly N14=d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2
 readonly RESERVE_MS=5000 FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192
@@ -89,7 +89,7 @@ capture_query='
  ($r.source.sha256|keys)==($r.source.modes|keys) and
  all($r.source.sha256|to_entries[]; (.value|digest) and ($r.source.modes[.key]=="0644" or $r.source.modes[.key]=="0755"))
 '
-bounded /usr/bin/jq -e --arg h "$SOURCE" --arg p "$PARENT" --arg t "c9ed8adcc08d050dc70af6885d31171038a36f86" --argjson n "$COUNT" "$capture_query" "$capture" >/dev/null
+bounded /usr/bin/jq -e --arg h "$SOURCE" --arg p "$PARENT" --arg t "51a3f946d42f4141af1cc8d297161dd362b79fd0" --argjson n "$COUNT" "$capture_query" "$capture" >/dev/null
 output=/var/lib/appsurface-evidence-inbound-${v[generation]}; protected_parent /var/lib; [[ ! -e $output && ! -L $output ]] || fail destination-exists
 for input in "${v[build-root]}" "${v[reviewed-root]}"; do [[ $input != "$output" && $input != "$output/"* && $output != "$input/"* ]] || fail input-output-overlap; done
 success=0; outer_pin=; work=

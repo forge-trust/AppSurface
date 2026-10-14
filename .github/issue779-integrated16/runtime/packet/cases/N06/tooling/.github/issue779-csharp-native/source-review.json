@@ -1,6 +1,6 @@
 {
-  "capture_projection_sha256": "8457d006fa5061f7249afd6038107907557732e6a51de3d8ba151923007e3ea0",
-  "capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "capture_projection_sha256": "c3ec77a29d9a12b6e58f7acd3ae14a0454582a3f296eefb34f7e05f602d153b2",
+  "capture_sha256": "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4",
   "case": "N06",
   "clear": true,
   "common_build_validator_review": "clear",
@@ -75,10 +75,10 @@
   "schema": "issue779-integrated16-current-source-review-v1",
   "slot_production_source_review": "clear",
   "slot_runtime_packet_review": "clear",
-  "source_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_commit": "957da1f23ff743778fa39e3e559511ccdb281345",
   "source_count": 2872,
-  "source_map_sha256": "bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6",
-  "source_parent": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
-  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86",
+  "source_map_sha256": "c505fba8f435cc5041b549a8d55421430850f14f2b96a16d2bde7053e8b00ba3",
+  "source_parent": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "source_tree": "51a3f946d42f4141af1cc8d297161dd362b79fd0",
   "status": "current-scoped-source-review-clear"
 }

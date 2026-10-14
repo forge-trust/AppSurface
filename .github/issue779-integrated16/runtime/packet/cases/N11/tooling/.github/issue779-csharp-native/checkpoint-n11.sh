@@ -4,9 +4,9 @@ export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
 umask 077
 readonly FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
 readonly NEGATIVE_CASE=N11 NEGATIVE_SOURCE_COUNT=2872
-readonly NEGATIVE_CORE_BASE=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly NEGATIVE_CAPTURE_SHA256=6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1
-readonly NEGATIVE_SOURCE_REVISION=fc59bb1254294d624f6779f928020edfe988dd5e NEGATIVE_SOURCE_CAPTURE_CLEAR=1
+readonly NEGATIVE_CORE_BASE=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly NEGATIVE_CAPTURE_SHA256=6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4
+readonly NEGATIVE_SOURCE_REVISION=957da1f23ff743778fa39e3e559511ccdb281345 NEGATIVE_SOURCE_CAPTURE_CLEAR=1
 readonly NEGATIVE_FIXTURE_REVIEW_CLEAR=1 STALL_RAW_TRANSFER_REVIEW_CLEAR=1
 readonly NEGATIVE_PYTHON_TRUST_CLEAR=1 NEGATIVE_ROOT_TERMINAL_CLEAR=1 STALL_ORIGINAL_STOP_REVIEW_CLEAR=1
 readonly MAX_MANIFEST_BYTES=8388608 MAX_ROWS=32768 MAX_NODES=65536
@@ -809,7 +809,7 @@ for key in source_capture source_capture_sha256 source_root source_manifest sour
 pin_file "$source_capture" "$source_capture_sha256" "$MAX_NODE_JSON_BYTES"
 [[ $source_capture_sha256 == "$NEGATIVE_CAPTURE_SHA256" ]] || fail source-capture-pin
 bounded jq -e --arg source "$source_revision" --arg parent "$NEGATIVE_CORE_BASE" --argjson count "$NEGATIVE_SOURCE_COUNT" --slurpfile nodes "$source_nodes" '
- . as $c | $c.source as $s | ($c.schema=="issue779-csharp-common-source-capture-v4" and $c.validation_commit==$source and $c.previous_validation_commit==$parent and $c.source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and ($c.source_count|type)=="number" and $c.source_count==$count and $c.clean==true and $c.index_tree_blob_modes_equal==true and $c.native_credit==false and $c.draft_pr_created==false and ($s|type)=="object" and ($s|keys)==["modes","sha256"] and ($s.sha256|type)=="object" and ($s.sha256|length)==$count and ($s.modes|type)=="object" and ($s.modes|length)==$count and ($s.sha256|keys)==($s.modes|keys) and ($s.sha256|keys)==($nodes[0].files|keys) and all($s.sha256|to_entries[]; . as $e | (.value|type)=="string" and (.value|test("^[0-9a-f]{64}$")) and $nodes[0].files[$e.key].sha256==$e.value and $nodes[0].files[$e.key].mode==$s.modes[$e.key]) and all($s.modes[]; .=="0644" or .=="0755"))
+ . as $c | $c.source as $s | ($c.schema=="issue779-csharp-common-source-capture-v4" and $c.validation_commit==$source and $c.previous_validation_commit==$parent and $c.source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and ($c.source_count|type)=="number" and $c.source_count==$count and $c.clean==true and $c.index_tree_blob_modes_equal==true and $c.native_credit==false and $c.draft_pr_created==false and ($s|type)=="object" and ($s|keys)==["modes","sha256"] and ($s.sha256|type)=="object" and ($s.sha256|length)==$count and ($s.modes|type)=="object" and ($s.modes|length)==$count and ($s.sha256|keys)==($s.modes|keys) and ($s.sha256|keys)==($nodes[0].files|keys) and all($s.sha256|to_entries[]; . as $e | (.value|type)=="string" and (.value|test("^[0-9a-f]{64}$")) and $nodes[0].files[$e.key].sha256==$e.value and $nodes[0].files[$e.key].mode==$s.modes[$e.key]) and all($s.modes[]; .=="0644" or .=="0755"))
 ' "$source_capture" >/dev/null || fail actual-source-capture-full-binding
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded /usr/bin/python3 -B - "$build_receipt" <<'INTEGRATED_BUILD_RECEIPT'

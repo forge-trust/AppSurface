@@ -1,16 +1,10 @@
 {
   "all16_final_integrated_native_verified": false,
   "changed_paths": [
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceNativeQualificationTests.cs",
-    "Directory.Build.props",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSlotNegativeObservationTests.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs",
     "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxFailedSettlementObservation.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs",
     "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
   ],
   "clean": true,
@@ -27,7 +21,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "288ac44a61dd32ec09cb5743b64ed4e6894e0769916642167ee5007d0166fb09"
+      "stdout_sha256": "f1227c535e8247ed725a05f54065de5fc3d319050c1f0c67d1904a2d8783e1e3"
     },
     {
       "argv": [
@@ -42,7 +36,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "c406bce3ecdd2161289fb52a69bb9e8e473e858696c823ffd1eab645c0809032"
+      "stdout_sha256": "c343dc9564c9781aaf70793c20d1e269fb8fe75774f293fc4b62194e88835198"
     },
     {
       "argv": [
@@ -67,16 +61,10 @@
         "core.fsmonitor=false",
         "add",
         "--",
-        "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceNativeQualificationTests.cs",
-        "Directory.Build.props",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxWorkerSupervisor.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSlotNegativeObservationTests.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxFailedSettlementObservation.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
       ],
       "exit": 0,
@@ -96,11 +84,11 @@
         "user.email=issue779-fixture@localhost",
         "commit",
         "-m",
-        "feat(evidence): qualify occupied and linked slots in shared C# images"
+        "fix(evidence): retain rejected N07 frame diagnostics after original joins"
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "8ea2919888161101c6f2d89ec9bfd1f2b2b837309965f89ede772f83e61c5ba2"
+      "stdout_sha256": "c68d9728079cff5d62358c1ecc335e142e75ee5b1190d3a8b30ed9180a904941"
     },
     {
       "argv": [
@@ -114,7 +102,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "f1227c535e8247ed725a05f54065de5fc3d319050c1f0c67d1904a2d8783e1e3"
+      "stdout_sha256": "8595a948566ed535e0cc289da5a219a1f4515163d7b4c1670f18ecf13935e000"
     },
     {
       "argv": [
@@ -128,7 +116,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "288ac44a61dd32ec09cb5743b64ed4e6894e0769916642167ee5007d0166fb09"
+      "stdout_sha256": "f1227c535e8247ed725a05f54065de5fc3d319050c1f0c67d1904a2d8783e1e3"
     },
     {
       "argv": [
@@ -158,7 +146,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "a9f8a98d6196895e826653abae465a0a4dc58b8f484199eba6e28ac17adcd3e8"
+      "stdout_sha256": "43a93280481d6cffc56eb6912a7a7dbf41ec1f5b20c90981f87d0be046b37a36"
     },
     {
       "argv": [
@@ -174,7 +162,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "68e435302a7973caa74b9a63427e42aa094c66aaa8b6712aa6cdac2f8a434b6f"
+      "stdout_sha256": "e4218d0715028d8c9ccee8262bd2191ce140c3ad149cae57230153894b00c999"
     },
     {
       "argv": [
@@ -188,34 +176,28 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "77dbfb95348ecee852ff4cd7b212232f126bcdc1a351b60d3337fd5c4e5801d8"
+      "stdout_sha256": "528a7eb7d59bf7bb85d6bfb660fd99f3867050960a1622009b63fac3bd24090d"
     }
   ],
   "draft_pr_created": false,
-  "elapsed_seconds": 0.6181592090000001,
+  "elapsed_seconds": 1.9248843329260126,
   "exit": 0,
+  "historical_attempt2_group_closure_verified": false,
+  "historical_attempt2_logs": {
+    "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/validation-2/1.log": "968f3bc8702574ff04bed9fd8fa4a0b3d4705d8b055c38db565a5bd5e0547e44",
+    "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/validation-2/2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
   "independent_capture_review_pending": true,
   "index_checksum_verified": true,
-  "index_sha256": "ee41bb7c9c07aff28d2ce6c06dfb15aa85b44242fdb26acfb4adcf1aad2aacf4",
+  "index_sha256": "4c7b11cc36f3bf7f23944021a94f79ae490009cca7c22d3dc6f32ac468085471",
   "index_tree_blob_modes_equal": true,
   "native_credit": false,
-  "new_source_files": [
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSlotNegativeObservationTests.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs"
-  ],
+  "new_source_files": [],
   "no_alternates": true,
-  "previous_validation_commit": "1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38",
-  "prior_capture_sha256": "5ba3bb7f637242a8a550b3c55d7ba54757639e7e4ba51b37a261033efa03cbff",
-  "repository": "/private/tmp/issue779-csharp-slot-controls-20261013/repo",
+  "previous_validation_commit": "fc59bb1254294d624f6779f928020edfe988dd5e",
+  "prior_capture_sha256": "6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1",
+  "repository": "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/repo",
   "schema": "issue779-csharp-common-source-capture-v4",
-  "slot_source_review": {
-    "clear": true,
-    "evidence": "Retained terminal agent review; not an executed native proof",
-    "findings": [],
-    "reviewer": "Locke 01a132a3-03e1-7762-9f41-51e405e2c58f",
-    "scope": "six slot-production/build files"
-  },
   "source": {
     "modes": {
       ".agent/rules.md": "0644",
@@ -4124,7 +4106,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxControlListenerTests.cs": "f4033104a8b70ab101cbd47d63d0748dcf3d49a284025198b85c263cc4d52ec1",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodyDataTests.cs": "2e7d20703c7b8f0ad1c1d38457838a437f7477173beee7a9f54a2647605d4950",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxEmptyObservationExecutionTests.cs": "af2a5382388c93731fad874e7c5aff135bac7113ae5595fa787bdc42136b1ba9",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs": "1f1a0b55322183e4d79f7bde2940af4206bd4fef398185985312c80ebc5a4f85",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs": "341d73906eb91d33471753e4cea4e4d57e368885c372d299718d82b73b00c1c1",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxJoinedWorkerOutputDiagnosticTests.cs": "5c6abce5bfe217b7cf642f06c1167c1d6ff1196927b7426416ba3e0b94beba45",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04CheckpointOrderTests.cs": "c94b9bc301e73060146a60a06b22038afdcb6e55bba365434bf36f60453db5d8",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs": "8ee3f49ebee0f643fed5974d8b081840bcc7d6455bd0c8ce1db261b67b25902c",
@@ -4177,8 +4159,8 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxControlListener.cs": "3ef15f3fe39344eb2a94499499e8eff93b3ce3a103dd0d51ce96ee7f68b2ca2b",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxCustodyData.cs": "2be7661665319806864bc4be94ad94439311ec16e2e6d72f61d0012740e271a7",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationControlServer.cs": "16a20df662b50eb687bbdc4fabd0948c7b0692902a4d1a11ab4f80d7bb5111fa",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": "26b1f8bf6d2339a0fdf768775bf5a338c46a978cf63174440dead80d2e6745e2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxFailedSettlementObservation.cs": "76f12f55823666f869bf2faced60024617edfa51510fe90bd0212f1274976492",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.cs": "89b20fa32ec858c8351344ca3cd91d10aeae0b2753e6061b714df7445a1d745a",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxFailedSettlementObservation.cs": "41580c0b0796cb39ed86cf887795817c6f660182cc2c089deeda472a29d48aeb",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxJoinedWorkerOutputDiagnostic.cs": "32759f6874f5f72d3fc30decc9f4ea4d4be9073525d3c766b1c94d8a909b0ba6",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN04CheckpointOwner.cs": "7186dd905e9a0d1cd9ee1e0c18ce4c3090f2c4ec76f19d734b457c6cbf4262fc",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07CheckpointOwner.cs": "5aed75b4b3f5785ffaa7ae68b7b6678a2bc8f22996fb4ff1a40bf334e4db46b3",
@@ -4206,10 +4188,10 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Owner.cs": "83ad342ccdcd0dcf44e5f08cee80a1cd9450fe589f87d8be1492bc59fe86f8f3",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Start.cs": "2ce7568a895e1e4dd3ade5435cffa5be14a8f2292feceba5ca87eb21548b898a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.cs": "44db74e6e59d771781814076ed9e45dddf1516813da90ca5359f6260c04e1bf6",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "30e0177370f0a02cc35e8708aae297c8d2fa950c3f6274623c0527efc9e3b6c2",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "b299413414fa12f8b434b9795ac901d4647565dd7e3510399ebd41b394d41221",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerStopTiming.cs": "71844d7e0f26f141bfb0a6b8c2662a2d264281c3e84fb72f8aa24729278bc21f",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerUnit.cs": "50065d2353864f5e066eadc985b372143e7946937536874a62bdbabfa3891de2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "afc6e8b996c988daae0019416af6bdc6925a9fa21216a24a7bc0dc7f72a0b1eb",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "eadc5127c898a8a6d204319af06c87e338873b44c70bcafe46682d42c25a1c86",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptOwnership.cs": "55af1758e34acf839e5d800f511e2b841f7f2f3d19f5d27b692bfa7193cd1ad0",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptedResource.cs": "4ad20dd550df785d4307f341a795c1284ae869495f414ac28ba0acf839bac130",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionCancellationPhaseObservation.cs": "adc2aaea1cd07f6633a8455995ead2ac1817222efabc451173324c43d816cc6c",
@@ -5967,12 +5949,13 @@
     }
   },
   "source_count": 2872,
-  "source_tree": "c9ed8adcc08d050dc70af6885d31171038a36f86",
+  "source_tree": "51a3f946d42f4141af1cc8d297161dd362b79fd0",
   "validation_and_reviews": {
-    "/private/tmp/issue779-csharp-slot-controls-20261013/doc-anchor-followup.json": "d918c753367e31d3936328559cf8ad3aa301a4d70f8ae323ff0513694072e48f",
-    "/private/tmp/issue779-csharp-slot-controls-20261013/merged-cli-validation-1/receipt.json": "4cafb98c01cb4aa474b9b3e67b7b52e0788b801bfc3b814cc8a6b8eabee970b3",
-    "/private/tmp/issue779-csharp-slot-controls-20261013/validation-2/receipt.json": "ebe626af230c0fce640db89632f2abee9abfd7e4ebbcbcf57281238ee42ab387",
-    "/private/tmp/issue779-csharp-slot-peer-integration-review-20261013/review.json": "ac75f92488adf06f37a9cc15b63ce266bbe32bb8dc57765e69c30e8ef2adfda5"
+    "/private/tmp/issue779-n07-independent-review-linnaeus-20261014/peer-review.json": "428fec96e639106e255fe9a4bb32f620df53c14419d5d31b317728aa881976b5",
+    "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/source-ready.json": "7aa561754a9ecd078160c40092a3857317671a8de76f6ade46ee27f2b6504b9a",
+    "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/validation-2/terminal-harness-failure.json": "29a36401b9d16213003319232c880893d759a090831c7c3767394f0e1de4fb3d",
+    "/private/tmp/issue779-n07-rejected-frame-diagnostic-20261014/validation-3/receipt.json": "20c6cfd9a50f2799d637b0c3004f675a6a5112add106573f7eb824334874da45"
   },
-  "validation_commit": "fc59bb1254294d624f6779f928020edfe988dd5e"
+  "validation_commit": "957da1f23ff743778fa39e3e559511ccdb281345",
+  "validation_scope": "recorded restore/format numeric exits from failed attempt2; clean test/build attempt3"
 }

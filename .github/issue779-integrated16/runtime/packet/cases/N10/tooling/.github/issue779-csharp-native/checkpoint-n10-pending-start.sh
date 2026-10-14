@@ -6,7 +6,7 @@ readonly FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
 readonly NEGATIVE_CASE=N10
 readonly NEGATIVE_CORE_BASE=a358d47ef36939718536b13c27b038faf307299b
 readonly N10_SOURCE_CAPTURE_REVIEW_CLEAR=1 N10_FIXTURE_REVIEW_CLEAR=1 N10_ROOT_CLEANUP_REVIEW_CLEAR=1
-readonly N10_EXPECTED_SOURCE_PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
+readonly N10_EXPECTED_SOURCE_PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
 readonly MAX_MANIFEST_BYTES=8388608 MAX_ROWS=32768 MAX_NODES=65536
 readonly MAX_INPUT_FILE_BYTES=2147483648 MAX_INPUT_TREE_BYTES=4294967296
 readonly MAX_NODE_JSON_BYTES=4194304 CORE_FILE_BYTES=268435456 CORE_TREE_BYTES=1073741824 CORE_NODES=8192
@@ -791,7 +791,7 @@ bounded jq -e --arg source "$source_revision" --arg parent "$N10_EXPECTED_SOURCE
  --argjson count "$source_count" --slurpfile nodes "$source_nodes" '
  .schema=="issue779-csharp-common-source-capture-v4" and .clean==true and
  .native_credit==false and .draft_pr_created==false and .all16_final_integrated_native_verified==false and
- .validation_commit==$source and .previous_validation_commit==$parent and .source_count==$count and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and
+ .validation_commit==$source and .previous_validation_commit==$parent and .source_count==$count and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and
  .no_alternates==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and
  (.source.sha256|type=="object" and length==$count) and (.source.modes|type=="object" and length==$count) and
  (.source.sha256|keys)==($nodes[0].files|keys) and (.source.modes|keys)==($nodes[0].files|keys) and

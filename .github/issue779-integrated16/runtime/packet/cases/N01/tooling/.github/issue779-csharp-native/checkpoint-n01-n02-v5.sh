@@ -488,7 +488,7 @@ INTEGRATED_BUILD_RECEIPT
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-integrated16-build-v1" and .exit==0 and
- .source_commit==$source and $source=="fc59bb1254294d624f6779f928020edfe988dd5e" and
+ .source_commit==$source and $source=="957da1f23ff743778fa39e3e559511ccdb281345" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
@@ -728,7 +728,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == fc59bb1254294d624f6779f928020edfe988dd5e ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == 957da1f23ff743778fa39e3e559511ccdb281345 ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected

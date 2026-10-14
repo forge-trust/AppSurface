@@ -488,7 +488,7 @@ INTEGRATED_BUILD_RECEIPT
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-integrated16-build-v1" and .exit==0 and
- .source_commit==$source and $source=="fc59bb1254294d624f6779f928020edfe988dd5e" and
+ .source_commit==$source and $source=="957da1f23ff743778fa39e3e559511ccdb281345" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
@@ -733,7 +733,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == fc59bb1254294d624f6779f928020edfe988dd5e ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == 957da1f23ff743778fa39e3e559511ccdb281345 ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
@@ -974,14 +974,19 @@ pin_owned_pg "$launch_pid"
 # Observer is its own retained process group. It can only inspect this generated worker/path tuple.
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" bash -c '
  set -euo pipefail; export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ diagnostic_stage=initial
+ trap '\''code=$?; if ((code!=0)); then printf "N12_OBSERVER_FAILURE:%s:%d\n" "$diagnostic_stage" "$code" >&2; fi'\'' EXIT
  end=$1; worker=$2; host=$3; managed=$4; control=$5; account=$6; sample=$7
  now() { local u x; IFS=" " read -r u x </proc/uptime; printf "%s" "${u%%.*}"; }
  left() { local n; n=$(now); ((n<end)) || return 124; printf "%s" "$((end-n))"; }
  run() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
  start() { local text tail; text=$(run cat "/proc/$1/stat"); [[ ${text%% *} == "$1" ]]; tail=${text##*) }; read -r -a f <<<"$tail"; [[ ${f[19]:-} =~ ^[1-9][0-9]*$ ]]; printf "%s" "${f[19]}"; }
+ diagnostic_stage=host-pin
  host_pin=$(run stat -c "%d:%i:%s:%f" "$host"); host_hash=$(run sha256sum "$host"); host_hash=${host_hash:0:64}
  while left >/dev/null; do
+  diagnostic_stage=selected-unit-query
   code=0; facts=$(run systemctl show "$worker" -p LoadState -p MainPID) || code=$?
+  diagnostic_stage=selected-unit-shape
   ((${#facts}<=4096)) || exit 1
   pid=; load=; seen_pid=0; seen_load=0
   while IFS="=" read -r key value; do
@@ -992,38 +997,46 @@ pin_owned_pg "$launch_pid"
   if [[ $load == not-found && $pid == 0 ]]; then run sleep .02; continue; fi
   [[ $code == 0 && $load == loaded ]] || exit 1
   if [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/status ]]; then
+   diagnostic_stage=process-first-sample
    s1=$(start "$pid") || exit 1
    uid1=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid1=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg1=$(run cat "/proc/$pid/cgroup")
    exe1=$(run readlink "/proc/$pid/exe") || exit 1
+   diagnostic_stage=post-exec-image
    if [[ $exe1 != "$host" ]]; then
     # env -i and the exec transition are pending, NEVER positive observations.
     [[ $exe1 == /usr/bin/env ]] || exit 1; run sleep .02; continue
    fi
    [[ $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
    image=$(run sha256sum "/proc/$pid/exe"); [[ ${image:0:64} == "$host_hash" ]] || exit 1
+   diagnostic_stage=worker-argv
    argv_file=${sample%.json}.argv
    run head -c 16385 "/proc/$pid/cmdline" >"$argv_file"
    size=$(run stat -c %s "$argv_file"); ((size>0 && size<=16384)) || exit 1
    args=(); while IFS= read -r -d "" a; do args+=("$a"); ((${#args[@]}<=6)) || exit 1; done <"$argv_file"
    [[ ${#args[@]} == 6 && ${args[0]} == "$host" && ${args[1]} == "$managed" && ${args[2]} == evidence && ${args[3]} == worker && ${args[4]} == --control && ${args[5]} == "$control" ]] || exit 1
+   diagnostic_stage=process-recheck
    uid2=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid2=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg2=$(run cat "/proc/$pid/cgroup"); exe2=$(run readlink "/proc/$pid/exe"); s2=$(start "$pid")
    [[ $s1 == "$s2" && $uid1 == "$uid2" && $gid1 == "$gid2" && $cg1 == "$cg2" && $cg1 == "0::/system.slice/$worker" && $exe2 == "$host" && $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
+   diagnostic_stage=identity-shape
    IFS=: read -r -a us <<<"$uid1"; IFS=: read -r -a gs <<<"$gid1"
    [[ ${#us[@]} == 4 && ${#gs[@]} == 4 ]] || exit 1
    for v in "${us[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${us[0]}" ]] || exit 1; done
    for v in "${gs[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${gs[0]}" ]] || exit 1; done
+   diagnostic_stage=account-binding
    pw=$(run getent passwd "$account"); gr=$(run getent group "$account")
    IFS=: read -r pn px pu rest <<<"$pw"; IFS=: read -r gn gx gg rest <<<"$gr"
    [[ $pn == "$account" && $gn == "$account" && $pu == "${us[0]}" && $gg == "${gs[0]}" ]] || exit 1
+   diagnostic_stage=sample-write
    run jq -jcS -n --argjson pid "$pid" --arg uid "$uid1" --arg gid "$gid1" --arg cg "$cg1" --arg ticks "$s1" '\''{pid:$pid,uid4:$uid,gid4:$gid,cgroup:$cg,start_time_ticks:$ticks,post_exec_image_pinned:true,exact_worker_arguments:true,ready_protocol_observed:false}'\'' >"$sample"
+   diagnostic_stage=final-deadline
    left >/dev/null; exit 0
   fi
   run sleep .02
- done; exit 1
+ done; diagnostic_stage=worker-not-observed; exit 1
 ' -- "$work_end" "$worker" "$host" "$managed" "/run/appsurface-evidence-$G/worker/broker/control.sock" "${names[0]}" "$private/worker-live.json" >"$log/observer.stdout" 2>"$log/observer.stderr") & observer_pid=$!
 pin_owned_pg "$observer_pid"
 set +e; join_owned launch_pid; n01=$?; set -e

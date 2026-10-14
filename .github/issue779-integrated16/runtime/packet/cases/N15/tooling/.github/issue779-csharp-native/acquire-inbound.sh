@@ -4,9 +4,9 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=fc59bb1254294d624f6779f928020edfe988dd5e
-readonly PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly SOURCE_PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
+readonly SOURCE=957da1f23ff743778fa39e3e559511ccdb281345
+readonly PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly SOURCE_PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
 readonly SOURCE_MAP=c541eb54bce090149404e8a3c0c4036e684096f0170e669aed65453a69ad894a
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
@@ -29,7 +29,7 @@ readonly N15_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 source-capture-sha256 n15-parser-sha256 n15-observer-sha256 n15-retry-sha256 n15-finalizer-sha256 case-workspace-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[source-capture-sha256]} == 6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1 && ${v[n15-parser-sha256]} == 5f0ead313fe2bc5f2109903fc362bfad56a37e7553c69aeddc733c45fd173b30 && ${v[n15-finalizer-sha256]} == 05d53c3d3f6161e1629c053c95064d94aad0736b7a5bb89982ebf68d5c28df5c ]] || fail n15-source-parser-pins
+[[ ${v[source-capture-sha256]} == 6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4 && ${v[n15-parser-sha256]} == 52fdaf3a770c1e22ae8758253c3d43deb330b19c30f513262e734d60b376dd3d && ${v[n15-finalizer-sha256]} == a8efef674c19acfb1b09d0c4a52d804d803c0694e698d1fa619d2e1905dfe3bb ]] || fail n15-source-parser-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -113,7 +113,7 @@ for spec in prepare-root-inputs-v2.sh:transport checkpoint-n15-pending-start-dea
 done
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
-bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .all16_final_integrated_native_verified==false and (.source.sha256|type=="object" and length==2872) and (.source.modes|type=="object" and length==2872)' "$capture" >/dev/null
+bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .all16_final_integrated_native_verified==false and (.source.sha256|type=="object" and length==2872) and (.source.modes|type=="object" and length==2872)' "$capture" >/dev/null
 output=/var/lib/appsurface-evidence-inbound-${v[generation]}
 protected_parent /var/lib; [[ ! -e $output && ! -L $output ]] || fail destination-exists
 for input in "${v[build-root]}" "${v[reviewed-root]}"; do
@@ -154,7 +154,7 @@ copy_file "$receipt" "$work/build-receipt.json" "$receipt_hash" 1048576 0600
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
 bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '
- .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .all16_final_integrated_native_verified==false and (.source.sha256|type=="object" and length==2872) and (.source.modes|type=="object" and length==2872)
+ .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .all16_final_integrated_native_verified==false and (.source.sha256|type=="object" and length==2872) and (.source.modes|type=="object" and length==2872)
 ' "$capture" >/dev/null
 trusted_pin "${v[reviewed-root]}/check_n15_records.py" "${v[n15-parser-sha256]}" 131072
 trusted_pin "${v[reviewed-root]}/observe_n15_pending_start.py" "${v[n15-observer-sha256]}" 131072

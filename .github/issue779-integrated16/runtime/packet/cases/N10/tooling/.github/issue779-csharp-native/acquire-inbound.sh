@@ -4,11 +4,11 @@
 set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
-readonly SOURCE=fc59bb1254294d624f6779f928020edfe988dd5e
-readonly PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
-readonly SOURCE_PARENT=1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38
+readonly SOURCE=957da1f23ff743778fa39e3e559511ccdb281345
+readonly PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
+readonly SOURCE_PARENT=fc59bb1254294d624f6779f928020edfe988dd5e
 readonly SOURCE_MAP=99bded40ed2bb2a31b1a8ac5a87ce225e60ea886d341873467a94fd6a54a356d
-readonly BUILD_SOURCE_MAP=bf7334e8a273dc5693bb9f2226c4b44c90c988fb2f2c8d56ddb0b840adc494c6
+readonly BUILD_SOURCE_MAP=c505fba8f435cc5041b549a8d55421430850f14f2b96a16d2bde7053e8b00ba3
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192 RESERVE_MS=5000
 declare -A v=() roots=() maps=() nodes=() map_hash=() node_hash=()
 output=; work=; success=0
@@ -30,7 +30,7 @@ readonly N10_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 source-capture-sha256 n10-parser-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[source-capture-sha256]} == 6e46183742801e864802ab8a7f3e64cd320139a500b7b215b17befe96616d2c1 && ${v[n10-parser-sha256]} == 504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d ]] || fail n10-source-parser-pins
+[[ ${v[source-capture-sha256]} == 6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4 && ${v[n10-parser-sha256]} == 504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d ]] || fail n10-source-parser-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -114,7 +114,7 @@ for spec in prepare-root-inputs-v2.sh:transport checkpoint-n10-pending-start.sh:
 done
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
-bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .draft_pr_created==false and .all16_final_integrated_native_verified==false and (.source.sha256|type)=="object" and (.source.sha256|length)==2872 and (.source.modes|type)=="object" and (.source.modes|length)==2872 and ((.source.sha256|keys)==(.source.modes|keys))' "$capture" >/dev/null
+bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '.schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .draft_pr_created==false and .all16_final_integrated_native_verified==false and (.source.sha256|type)=="object" and (.source.sha256|length)==2872 and (.source.modes|type)=="object" and (.source.modes|length)==2872 and ((.source.sha256|keys)==(.source.modes|keys))' "$capture" >/dev/null
 capture_map=$(bounded /usr/bin/jq -cSj '{source_sha256:.source.sha256,source_modes:.source.modes}' "$capture") || fail capture-map-projection
 capture_map_sha=$(printf '%s' "$capture_map" | bounded /usr/bin/sha256sum); capture_map_sha=${capture_map_sha:0:64}
 [[ $capture_map_sha == "$SOURCE_MAP" ]] || fail canonical-source-map-digest
@@ -158,7 +158,7 @@ copy_file "$receipt" "$work/build-receipt.json" "$receipt_hash" 1048576 0600
 capture=${v[reviewed-root]}/capture-receipt.json
 pin "$capture" "${v[source-capture-sha256]}" 2097152
 bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" --arg source_parent "$SOURCE_PARENT" '
- .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="c9ed8adcc08d050dc70af6885d31171038a36f86" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .draft_pr_created==false and .all16_final_integrated_native_verified==false and (.source.sha256|type)=="object" and (.source.sha256|length)==2872 and (.source.modes|type)=="object" and (.source.modes|length)==2872 and ((.source.sha256|keys)==(.source.modes|keys))
+ .schema=="issue779-csharp-common-source-capture-v4" and .validation_commit==$head and .previous_validation_commit==$source_parent and .source_count==2872 and .source_tree=="51a3f946d42f4141af1cc8d297161dd362b79fd0" and .clean==true and .index_checksum_verified==true and .index_tree_blob_modes_equal==true and .no_alternates==true and .native_credit==false and .draft_pr_created==false and .all16_final_integrated_native_verified==false and (.source.sha256|type)=="object" and (.source.sha256|length)==2872 and (.source.modes|type)=="object" and (.source.modes|length)==2872 and ((.source.sha256|keys)==(.source.modes|keys))
 ' "$capture" >/dev/null
 trusted_pin "${v[reviewed-root]}/check_n10_pending_start.py" "${v[n10-parser-sha256]}" 131072
 copy_file "$capture" "$work/source-capture.json" "${v[source-capture-sha256]}" 2097152 0600
