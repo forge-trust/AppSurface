@@ -1,0 +1,97 @@
+@model RazorWireWebExample.Models.SkoolitV4CollectionDateModel
+@using Microsoft.AspNetCore.Mvc.Rendering
+@{
+    var prefix = $"Actions[{Model.ActionClientIndex}].Dates[{Model.ClientIndex}]";
+    var dateCollectionPrefix = $"Actions[{Model.ActionClientIndex}].Dates";
+    var id = Model.DomId;
+    var actionPosition = Convert.ToString(ViewData["ActionPosition"], System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+    var datePosition = Convert.ToString(ViewData["DatePosition"], System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+    var isDiscrete = string.Equals(Model.Shape, "Discrete", StringComparison.Ordinal);
+    var kinds = new[]
+    {
+        new SelectListItem("Select", ""),
+        new SelectListItem("eventStart", "eventStart"),
+        new SelectListItem("dueBy", "dueBy"),
+        new SelectListItem("overdueSince", "overdueSince")
+    };
+    var shapes = new[]
+    {
+        new SelectListItem("Select", ""),
+        new SelectListItem("Discrete", "Discrete"),
+        new SelectListItem("Range", "Range")
+    };
+    var months = new[] { new SelectListItem("Month", "") }
+        .Concat(Enumerable.Range(1, 12).Select(month => new SelectListItem(
+            System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetMonthName(month),
+            month.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+}
+<fieldset rw-form-collection-row
+          rw-form-index="@Model.ClientIndex"
+          data-v4-date-row
+          data-rw-form-collection-row-state="@(Model.Delete ? "removed" : "active")"
+          hidden="@Model.Delete">
+    <legend>Date and time</legend>
+    <input type="hidden" name="@(dateCollectionPrefix).index" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).ClientIndex" value="@Model.ClientIndex" />
+    @Html.Hidden($"{prefix}.Id", Model.Id, new { data_rw_form_collection_preserve = "true" })
+    @Html.Hidden($"{prefix}.ConcurrencyToken", Model.ConcurrencyToken)
+    <input type="hidden" name="@(prefix).Delete" value="@Model.Delete.ToString().ToLowerInvariant()" data-rw-form-collection-delete-field />
+
+    <label for="@(id)-kind">Date kind</label>
+    @Html.DropDownList($"{prefix}.Kind", new SelectList(kinds, "Value", "Text", Model.Kind), new { id = $"{id}-kind" })
+    @Html.ValidationMessage($"{prefix}.Kind", null, new { @class = "field-validation-error" })
+
+    <label for="@(id)-shape">Shape</label>
+    @Html.DropDownList($"{prefix}.Shape", new SelectList(shapes, "Value", "Text", Model.Shape), new { id = $"{id}-shape", data_v4_date_shape = "true" })
+    @Html.ValidationMessage($"{prefix}.Shape", null, new { @class = "field-validation-error" })
+
+    <div data-date-endpoint="start">
+        <label for="@(id)-start-month">Start month</label>
+        @Html.DropDownList($"{prefix}.StartMonth", new SelectList(months, "Value", "Text", Model.StartMonth), new { id = $"{id}-start-month" })
+        @Html.ValidationMessage($"{prefix}.StartMonth", null, new { @class = "field-validation-error" })
+
+        <label for="@(id)-start-day">Start day</label>
+        @Html.TextBox($"{prefix}.StartDay", Model.StartDay, new { id = $"{id}-start-day", inputmode = "numeric", pattern = "[0-9]*" })
+        @Html.ValidationMessage($"{prefix}.StartDay", null, new { @class = "field-validation-error" })
+
+        <label for="@(id)-start-year">Year (if stated)</label>
+        @Html.TextBox($"{prefix}.StartYear", Model.StartYear, new { id = $"{id}-start-year", inputmode = "numeric", pattern = "[0-9]*", placeholder = "Leave blank if the source omits it" })
+        @Html.ValidationMessage($"{prefix}.StartYear", null, new { @class = "field-validation-error" })
+    </div>
+
+    <fieldset data-date-endpoint="end" hidden="@isDiscrete" disabled="@isDiscrete" aria-hidden="@isDiscrete">
+        <legend>Range end</legend>
+        <label for="@(id)-end-month">End month</label>
+        @Html.DropDownList($"{prefix}.EndMonth", new SelectList(months, "Value", "Text", Model.EndMonth), new { id = $"{id}-end-month" })
+        @Html.ValidationMessage($"{prefix}.EndMonth", null, new { @class = "field-validation-error" })
+
+        <label for="@(id)-end-day">End day</label>
+        @Html.TextBox($"{prefix}.EndDay", Model.EndDay, new { id = $"{id}-end-day", inputmode = "numeric", pattern = "[0-9]*" })
+        @Html.ValidationMessage($"{prefix}.EndDay", null, new { @class = "field-validation-error" })
+
+        <label for="@(id)-end-year">Year (if stated)</label>
+        @Html.TextBox($"{prefix}.EndYear", Model.EndYear, new { id = $"{id}-end-year", inputmode = "numeric", pattern = "[0-9]*", placeholder = "Leave blank if the source omits it" })
+        @Html.ValidationMessage($"{prefix}.EndYear", null, new { @class = "field-validation-error" })
+    </fieldset>
+
+    <label for="@(id)-start-time">Start time</label>
+    @Html.TextBox($"{prefix}.StartTime", Model.StartTime, new { id = $"{id}-start-time", type = "time" })
+    @Html.ValidationMessage($"{prefix}.StartTime", null, new { @class = "field-validation-error" })
+
+    <label for="@(id)-end-time">End time</label>
+    @Html.TextBox($"{prefix}.EndTime", Model.EndTime, new { id = $"{id}-end-time", type = "time" })
+    @Html.ValidationMessage($"{prefix}.EndTime", null, new { @class = "field-validation-error" })
+
+    <label for="@(id)-timezone">Time zone</label>
+    @Html.TextBox($"{prefix}.TimeZone", Model.TimeZone, new { id = $"{id}-timezone", placeholder = "America/New_York" })
+    @Html.ValidationMessage($"{prefix}.TimeZone", null, new { @class = "field-validation-error" })
+
+    <p data-date-resolution aria-live="polite">@Model.TemporalFeedback</p>
+    <div class="commands">
+        <button type="button" rw-form-collection-duplicate>Duplicate date</button>
+        <button type="button" data-rw-form-collection-remove="true">Remove date</button>
+    </div>
+    <noscript>
+        <button type="submit" name="draftIntent" value="remove-date|@actionPosition|@datePosition" formnovalidate>Remove date on server</button>
+    </noscript>
+</fieldset>

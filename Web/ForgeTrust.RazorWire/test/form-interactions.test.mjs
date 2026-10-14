@@ -215,7 +215,7 @@ test('collection duplicate aborts when the source sparse index cannot be resolve
     true);
 });
 
-test('collection duplicate copies controls before inserting a missing index marker', () => {
+test('[G05] legacy one-level duplicate copies controls before inserting a missing index marker', () => {
   const { context, document } = loadRuntime();
   const { root, duplicate } = buildCollection(document);
   const sourceRow = root.querySelector('[data-rw-form-collection-row]');
@@ -467,6 +467,1103 @@ test('manager diagnoses cross-form targets and invalid collection indices', () =
   assert.equal(messages.some(message => /file input that duplicate cannot clone/.test(message)), true);
 });
 
+test('[G01] nested owners isolate child rows, templates, markers, delete controls, and status', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const actionRow = fixture.row;
+  const tagPath = 'Actions[0].Tags';
+  const tags = makeCollectionRoot(document, tagPath, '__tag_index__',
+    (index, isTemplate) => makeSimpleNestedRow(document, tagPath, index, isTemplate), ['0'], {
+      label: 'tag',
+      deleteSelector: '[data-tag-delete]'
+    });
+  actionRow.appendChild(tags.root);
+  tags.rows[0].querySelector('input[name="Actions[0].Tags[0].Id"]').setAttribute('data-tag-delete', 'true');
+
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+
+  const datesRoot = actionRow.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+  datesRoot.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+
+  assert.equal(ownedRows(fixture.root).length, 1);
+  assert.equal(datesRoot.querySelectorAll('[data-rw-form-collection-row]').length, 2);
+  assert.equal(tags.root.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+  assert.equal(fixture.status.textContent, '');
+  assert.equal(datesRoot.querySelector('[data-rw-form-collection-status]').textContent, 'Added date.');
+  assert.equal(tags.status.textContent, '');
+  assert.equal(ownedRows(datesRoot)[1].querySelector('input[name="Actions[0].Dates.index"]').value, '1');
+});
+
+test('[G02] collection commands stay inside visible, enabled, live owners and forms', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const disabledAncestor = document.createElement('fieldset');
+  disabledAncestor.disabled = true;
+  disabledAncestor.appendChild(fixture.root);
+  const form = document.createElement('form');
+  form.appendChild(disabledAncestor);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+
+  const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+  const add = datesRoot.querySelector('[data-rw-form-collection-add]');
+  const disabledClick = createEvent('click');
+  add.dispatchEvent(disabledClick);
+  assert.equal(disabledClick.defaultPrevented, false);
+  assert.equal(datesRoot.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+
+  disabledAncestor.disabled = false;
+  fixture.row.setAttribute('data-rw-form-collection-row-state', 'removed');
+  const removedClick = createEvent('click');
+  add.dispatchEvent(removedClick);
+  assert.equal(removedClick.defaultPrevented, false);
+  assert.equal(datesRoot.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+  fixture.row.removeAttribute('data-rw-form-collection-row-state');
+
+  const outside = document.createElement('button');
+  outside.setAttribute('data-rw-form-collection-add', 'true');
+  document.body.appendChild(outside);
+  const outsideClick = createEvent('click');
+  outside.dispatchEvent(outsideClick);
+  assert.equal(outsideClick.defaultPrevented, false);
+  assert.equal(ownedRows(fixture.root).length, 1);
+});
+
+test('[G03] local placeholder defaults, custom tokens, ancestor distinction, and sibling reuse', () => {
+  for (const blankMode of ['absent', 'blank']) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, { childIndexToken: '__index__' });
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    if (blankMode === 'absent') datesRoot.removeAttribute('data-rw-form-collection-index-token');
+    else datesRoot.setAttribute('data-rw-form-collection-index-token', '   ');
+    context.window.RazorWire.formInteractionsManager.scan();
+    datesRoot.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+    assert.equal(ownedRows(datesRoot)[1].querySelector('input[name="Actions[0].Dates.index"]').value, '1');
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, { childIndexToken: '__date_index__' });
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    datesRoot.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+    assert.equal(datesRoot.querySelector('input[name="Actions[0].Dates[1].Kind"]').name, 'Actions[0].Dates[1].Kind');
+    assert.equal(ownedRows(datesRoot)[1].querySelector('input[name="Actions[0].Dates.index"]').value, '1');
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, { childIndexToken: '__date_index__' });
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    datesRoot.setAttribute('data-rw-form-collection-index-token', 'date-index');
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    datesRoot.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+    assert.equal(datesRoot.querySelectorAll('[data-rw-form-collection-row]').length, 1);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /invalid template index token/.test(diagnostic.message)), true);
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, { parentIndices: [], childIndexToken: '__index__' });
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    fixture.add.dispatchEvent(createEvent('click'));
+    assert.equal(ownedRows(fixture.root).length, 0);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /ancestor and child template tokens must differ/.test(diagnostic.message)), true);
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, { parentIndices: [], childIndexToken: '__line_index__' });
+    const templateAction = fixture.template.content.querySelector('[data-rw-form-collection-row]');
+    const tagsPath = 'Actions[__index__].Tags';
+    const tags = makeCollectionRoot(document, tagsPath, '__line_index__',
+      (index, isTemplate) => makeSimpleNestedRow(document, tagsPath, index, isTemplate), []);
+    templateAction.appendChild(tags.root);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    fixture.add.dispatchEvent(createEvent('click'));
+
+    const copiedAction = fixture.root.querySelector('[data-rw-form-collection-row]');
+    const datesRoot = copiedAction.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    const tagsRoot = copiedAction.querySelector('[data-rw-form-collection="Actions[0].Tags"]');
+    assert.ok(datesRoot);
+    assert.ok(tagsRoot);
+    assert.equal(datesRoot.getAttribute('data-rw-form-collection-index-token'), '__line_index__');
+    assert.equal(tagsRoot.getAttribute('data-rw-form-collection-index-token'), '__line_index__');
+    assert.equal(datesRoot.querySelector('template').content.querySelector('input[name="Actions[0].Dates.index"]').value, '__line_index__');
+    assert.equal(tagsRoot.querySelector('template').content.querySelector('input[name="Actions[0].Tags.index"]').value, '__line_index__');
+  }
+});
+
+test('[G04] nested canonical markers reject missing, blank, disabled, multiple, duplicate, and mismatched keys', () => {
+  const invalidators = [
+    ['missing', row => row.querySelectorAll('input').find(input => input.name.endsWith('.index')).remove()],
+    ['blank', row => { row.querySelectorAll('input').find(input => input.name.endsWith('.index')).value = '   '; }],
+    ['disabled', row => { row.querySelectorAll('input').find(input => input.name.endsWith('.index')).disabled = true; }],
+    ['multiple', (row, root, document) => {
+      const marker = row.querySelectorAll('input').find(input => input.name.endsWith('.index'));
+      row.appendChild(hidden(document, marker.name, marker.value));
+    }],
+    ['duplicate', (row, root, document) => {
+      root.appendChild(makeDateRow(document, 'Actions[0].Dates', '0', false));
+    }],
+    ['mismatch', row => { row.setAttribute('data-rw-form-index', 'different'); }]
+  ];
+
+  for (const [name, invalidate] of invalidators) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    const dateRow = datesRoot.querySelector('[data-rw-form-collection-row]');
+    invalidate(dateRow, datesRoot, document);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    assert.equal(ownedRows(fixture.root).length, 1, name);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => diagnostic.message.includes('Actions[0].Dates')), true, name);
+  }
+
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const datesRoot = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+  const validMarker = datesRoot.querySelector('input[name="Actions[0].Dates.index"]');
+  assert.equal(validMarker.type, 'hidden');
+  assert.equal(validMarker.disabled, false);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+  const copy = ownedRows(fixture.root)[1];
+  assert.equal(copy.querySelector('input[name="Actions[1].Dates.index"]').value, '1');
+});
+
+test('[G18] add and duplicate before-events expose their preparation stages and cancellation retains listener edits', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildCollection(document);
+  const templateTitle = fixture.template.content.querySelector('input[name="Actions[__index__].Title"]');
+  templateTitle.value = 'template draft';
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  let afterAdd = 0;
+  let beforeAddSnapshot;
+  form.addEventListener('razorwire:form-collection:before-add', event => {
+    const row = event.detail.row;
+    beforeAddSnapshot = {
+      metadata: row.getAttribute('data-rw-form-index'),
+      markerName: row.querySelector('input[name="Actions.index"]').name,
+      markerValue: row.querySelector('input[name="Actions.index"]').value,
+      title: row.querySelector('input[name="Actions[1].Title"]').value,
+      validationTarget: row.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-for')
+    };
+  });
+  form.addEventListener('razorwire:form-collection:add', () => afterAdd++);
+  context.window.RazorWire.formInteractionsManager.scan();
+  fixture.add.dispatchEvent(createEvent('click'));
+
+  assert.deepEqual(beforeAddSnapshot, {
+    metadata: null,
+    markerName: 'Actions.index',
+    markerValue: '__index__',
+    title: 'template draft',
+    validationTarget: 'Actions[1].Title'
+  });
+  const added = ownedRows(fixture.root)[1];
+  assert.equal(added.getAttribute('data-rw-form-index'), '1');
+  assert.equal(added.querySelector('input[name="Actions.index"]').value, '1');
+  assert.equal(added.querySelector('input[name="Actions[1].Title"]').value, '');
+  assert.equal(afterAdd, 1);
+
+  const sourceTitle = fixture.row.querySelector('input[name="Actions[0].Title"]');
+  sourceTitle.value = 'copied draft';
+  let duplicateSnapshot;
+  let afterDuplicate = 0;
+  form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+    const row = event.detail.row;
+    duplicateSnapshot = {
+      metadata: row.getAttribute('data-rw-form-index'),
+      marker: row.querySelector('input[name="Actions.index"]').value,
+      title: row.querySelector('input[name="Actions[2].Title"]').value,
+      identity: row.querySelector('input[name="Actions[2].Id"]').value,
+      validationTarget: row.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-for')
+    };
+    sourceTitle.value = 'listener edit retained';
+    event.preventDefault();
+  });
+  form.addEventListener('razorwire:form-collection:duplicate', () => afterDuplicate++);
+  fixture.row.querySelector('[data-rw-form-collection-duplicate]').dispatchEvent(createEvent('click'));
+
+  assert.deepEqual(duplicateSnapshot, {
+    metadata: '2', marker: '2', title: 'copied draft', identity: '',
+    validationTarget: 'Actions[2].Title'
+  });
+  assert.equal(sourceTitle.value, 'listener edit retained');
+  assert.equal(ownedRows(fixture.root).length, 2);
+  assert.equal(afterDuplicate, 0);
+
+  const liveRow = fixture.row;
+  let beforeRemoveDetail;
+  let afterRemove = 0;
+  form.addEventListener('razorwire:form-collection:before-remove', event => {
+    beforeRemoveDetail = { row: event.detail.row, index: event.detail.index };
+    sourceTitle.value = 'remove listener edit';
+    event.preventDefault();
+  });
+  form.addEventListener('razorwire:form-collection:remove', () => afterRemove++);
+  liveRow.querySelector('[data-rw-form-collection-remove]').dispatchEvent(createEvent('click'));
+  assert.equal(beforeRemoveDetail.row, liveRow);
+  assert.equal(beforeRemoveDetail.index, '0');
+  assert.equal(sourceTitle.value, 'remove listener edit');
+  assert.equal(ownedRows(fixture.root).length, 2);
+  assert.equal(afterRemove, 0);
+});
+
+test('[G19] before-listener structural interference aborts only RazorWire mutation and preserves listener work', () => {
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const form = document.createElement('form');
+    const movedTo = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.append(form, movedTo);
+    context.window.RazorWire.formInteractionsManager.scan();
+    let afterDuplicate = 0;
+    form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+      if (event.detail.root === fixture.root) movedTo.appendChild(fixture.root);
+    });
+    form.addEventListener('razorwire:form-collection:duplicate', () => afterDuplicate++);
+
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    assert.equal(form.contains(fixture.root), false);
+    assert.equal(movedTo.contains(fixture.root), true);
+    assert.equal(ownedRows(fixture.root).length, 1);
+    assert.equal(afterDuplicate, 0);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /ownership changed/.test(diagnostic.message)), true);
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    const sourceMarker = fixture.row.querySelector('input[name="Actions.index"]');
+    let afterDuplicate = 0;
+    form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+      if (event.detail.root === fixture.root) sourceMarker.value = 'listener-key';
+    });
+    form.addEventListener('razorwire:form-collection:duplicate', () => afterDuplicate++);
+
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    assert.equal(sourceMarker.value, 'listener-key');
+    assert.equal(ownedRows(fixture.root).length, 1);
+    assert.equal(afterDuplicate, 0);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /marker|ownership changed/.test(diagnostic.message)), true);
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    let afterAdd = 0;
+    form.addEventListener('razorwire:form-collection:before-add', event => {
+      if (event.detail.root !== fixture.root) return;
+      const listenerRow = makeActionRow(document, '1', false, { childIndices: [], childIndexToken: '__date_index__' });
+      listenerRow.querySelector('input[name="Actions.index"]').value = '1';
+      listenerRow.querySelector('input[name="Actions[1].Title"]').value = 'listener-created';
+      fixture.root.appendChild(listenerRow);
+    });
+    form.addEventListener('razorwire:form-collection:add', () => afterAdd++);
+
+    fixture.add.dispatchEvent(createEvent('click'));
+
+    assert.deepEqual(ownedRows(fixture.root).map(row => row.querySelector('input[name="Actions.index"]').value), ['0', '1']);
+    assert.equal(fixture.root.querySelector('input[name="Actions[1].Title"]').value, 'listener-created');
+    assert.equal(afterAdd, 0);
+    assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /index conflict|duplicate index/.test(diagnostic.message)), true);
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    let afterParentAdd = 0;
+    let afterChildAdd = 0;
+    const existingDates = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    form.addEventListener('razorwire:form-collection:before-add', event => {
+      if (event.detail.root === fixture.root) existingDates.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+    });
+    form.addEventListener('razorwire:form-collection:add', event => {
+      if (event.detail.root === fixture.root) afterParentAdd++;
+      else if (event.detail.root === existingDates) afterChildAdd++;
+    });
+
+    fixture.add.dispatchEvent(createEvent('click'));
+
+    assert.equal(ownedRows(fixture.root).length, 2);
+    assert.equal(ownedRows(existingDates).length, 2);
+    assert.equal(afterParentAdd, 1);
+    assert.equal(afterChildAdd, 1);
+  }
+});
+
+test('[G06] opaque concrete parent and child keys survive duplication and child allocation', () => {
+  const opaqueKeys = [
+    '__index__',
+    '__date_index__',
+    'quoted"\\key',
+    'closing]delimiter',
+    'snow-雪-☃'
+  ];
+
+  for (const key of opaqueKeys) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const oldPrefix = 'Actions[0]';
+    const newPrefix = `Actions[${key}]`;
+    const rebaseFixture = element => {
+      for (const attribute of ['name', 'data-valmsg-for', 'data-rw-form-collection']) {
+        const value = element.getAttribute(attribute);
+        if (value === oldPrefix || value?.startsWith(`${oldPrefix}.`) || value?.startsWith(`${oldPrefix}[`)) {
+          element.setAttribute(attribute, newPrefix + value.slice(oldPrefix.length));
+        }
+      }
+      if (element.localName === 'template') {
+        for (const child of element.content.children) rebaseFixture(child);
+      }
+      for (const child of element.children) rebaseFixture(child);
+    };
+    rebaseFixture(fixture.row);
+
+    const findInput = (root, name) => Array.from(root.querySelectorAll('input')).find(element => element.name === name);
+    const parentMarker = findInput(fixture.row, 'Actions.index');
+    parentMarker.value = key;
+    fixture.row.setAttribute('data-rw-form-index', key);
+    const sourceDates = Array.from(fixture.row.querySelectorAll('[data-rw-form-collection]'))
+      .find(root => root.getAttribute('data-rw-form-collection') === `${newPrefix}.Dates`);
+    const sourceDate = ownedRows(sourceDates)[0];
+    const childMarker = findInput(sourceDate, `${newPrefix}.Dates.index`);
+    childMarker.value = key;
+    sourceDate.setAttribute('data-rw-form-index', key);
+    rebaseOwnedPath(sourceDate, `${newPrefix}.Dates[0]`, `${newPrefix}.Dates[${key}]`);
+    const sourceKind = Array.from(sourceDate.querySelectorAll('input')).find(element => element.name.endsWith('.Kind'));
+    sourceKind.value = `submitted:${key}`;
+
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    const copy = ownedRows(fixture.root).find(row => row !== fixture.row);
+    const copiedParentKey = findInput(copy, 'Actions.index').value;
+    assert.ok(copiedParentKey);
+    assert.notEqual(copiedParentKey, key);
+    assert.equal(parentMarker.value, key);
+    const copiedDates = Array.from(copy.querySelectorAll('[data-rw-form-collection]'))
+      .find(root => root.getAttribute('data-rw-form-collection') === `Actions[${copiedParentKey}].Dates`);
+    const copiedDate = ownedRows(copiedDates)[0];
+    const copiedChildMarker = findInput(copiedDate, `Actions[${copiedParentKey}].Dates.index`);
+    const copiedChildKey = copiedChildMarker.value;
+    assert.ok(copiedChildKey);
+    assert.notEqual(copiedChildKey, key);
+    assert.equal(childMarker.value, key);
+    assert.equal(copiedDate.getAttribute('data-rw-form-index'), copiedChildKey);
+    const copiedKind = Array.from(copiedDate.querySelectorAll('input')).find(element => element.name.endsWith('.Kind'));
+    assert.equal(copiedKind.name, `Actions[${copiedParentKey}].Dates[${copiedChildKey}].Kind`);
+    assert.equal(copiedKind.value, `submitted:${key}`);
+
+    const copiedDateTemplate = ownedTemplate(copiedDates);
+    const prototypeKind = Array.from(copiedDateTemplate.content.querySelectorAll('input'))
+      .find(element => element.name.endsWith('.Kind'));
+    const prototypeMarker = Array.from(copiedDateTemplate.content.querySelectorAll('input'))
+      .find(element => element.name.endsWith('.Dates.index'));
+    assert.equal(prototypeKind.name, `Actions[${copiedParentKey}].Dates[__date_index__].Kind`);
+    assert.equal(prototypeMarker.value, '__date_index__');
+
+    copiedDates.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+    const copiedDatesAfterAdd = ownedRows(copiedDates);
+    const childKeysAfterAdd = copiedDatesAfterAdd.map(row => findInput(row, `Actions[${copiedParentKey}].Dates.index`).value);
+    assert.equal(childKeysAfterAdd.length, 2);
+    assert.equal(new Set(childKeysAfterAdd).size, 2);
+    const addedDate = copiedDatesAfterAdd.find(row => row !== copiedDate);
+    const addedKey = findInput(addedDate, `Actions[${copiedParentKey}].Dates.index`).value;
+    assert.notEqual(addedKey, '__date_index__');
+    assert.equal(Array.from(addedDate.querySelectorAll('input')).find(element => element.name.endsWith('.Kind')).name,
+      `Actions[${copiedParentKey}].Dates[${addedKey}].Kind`);
+    assert.equal(prototypeKind.name, `Actions[${copiedParentKey}].Dates[__date_index__].Kind`);
+    assert.equal(findInput(sourceDate, `${newPrefix}.Dates.index`).value, key);
+  }
+});
+
+test('[G07] allocator handles numeric boundaries and reserves nested descendant keys', () => {
+  const cases = [
+    { label: 'empty', indices: [], expected: '0' },
+    { label: 'full decimal', indices: ['0', '7'], expected: '8' },
+    { label: 'leading zeros', indices: ['00', '07'], expected: '8' },
+    { label: 'mixed opaque', indices: ['0', 'opaque'], fallback: true },
+    { label: 'numeric prefix', indices: ['1x'], fallback: true },
+    { label: 'maximum safe integer', indices: [String(Number.MAX_SAFE_INTEGER)], fallback: true },
+    { label: 'tombstone reservation', indices: ['0', '7'], tombstone: '7', expected: '8' }
+  ];
+
+  for (const allocation of cases) {
+    const { context, document } = loadRuntime();
+    const collection = makeCollectionRoot(document, 'Actions', '__index__',
+      (index, isTemplate) => makeSimpleNestedRow(document, 'Actions', index, isTemplate), allocation.indices);
+    if (allocation.tombstone) {
+      collection.rows.find(row => row.getAttribute('data-rw-form-index') === allocation.tombstone)
+        .setAttribute('data-rw-form-collection-row-state', 'removed');
+    }
+    const form = document.createElement('form');
+    form.appendChild(collection.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    collection.add.dispatchEvent(createEvent('click'));
+
+    const keys = ownedRows(collection.root).map(row => row.querySelectorAll('input').find(input => input.name === 'Actions.index').value);
+    const allocated = keys.at(-1);
+    assert.ok(allocated, allocation.label);
+    assert.equal(new Set(keys).size, keys.length, allocation.label);
+    assert.equal(allocation.indices.includes(allocated), false, allocation.label);
+    if (allocation.expected) assert.equal(allocated, allocation.expected, allocation.label);
+    if (allocation.fallback) assert.equal(/^\d+$/.test(allocated), false, allocation.label);
+  }
+
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  // Seed two descendant keys in the existing owner; parent duplication reserves both before assigning copies.
+  const dates = Array.from(fixture.row.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection') === 'Actions[0].Dates');
+  dates.appendChild(makeDateRow(document, 'Actions[0].Dates', '7', false));
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+  const copy = ownedRows(fixture.root).find(row => row !== fixture.row);
+  const copiedDates = Array.from(copy.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection') === `Actions[${copy.getAttribute('data-rw-form-index')}].Dates`);
+  const copiedKeys = ownedRows(copiedDates).map(row => row.querySelectorAll('input')
+    .find(input => input.name.endsWith('.Dates.index')).value);
+  assert.deepEqual(copiedKeys, ['8', '9']);
+  assert.deepEqual(ownedRows(dates).map(row => row.querySelectorAll('input')
+    .find(input => input.name.endsWith('.Dates.index')).value), ['0', '7']);
+});
+
+test('[G14] recursive duplicate applies control, identity, delete, file, and copyable policies', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document, {
+    includeGrandchildren: true,
+    grandchildIndicesByDate: { 0: ['0'] }
+  });
+  const findInput = (root, name) => Array.from(root.querySelectorAll('input')).find(element => element.name === name);
+  const dateRoot = Array.from(fixture.row.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection') === 'Actions[0].Dates');
+  const date = ownedRows(dateRoot)[0];
+  const reminderRoot = Array.from(date.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection') === 'Actions[0].Dates[0].Reminders');
+  const reminder = ownedRows(reminderRoot)[0];
+
+  findInput(fixture.row, 'Actions[0].Id').value = 'source-action-id';
+  findInput(fixture.row, 'Actions[0].ConcurrencyStamp').value = 'source-action-stamp';
+  findInput(date, 'Actions[0].Dates[0].Id').value = 'source-date-id';
+  findInput(date, 'Actions[0].Dates[0].ConcurrencyToken').value = 'source-date-token';
+  findInput(reminder, 'Actions[0].Dates[0].Reminders[0].Id').value = 'source-reminder-id';
+  const copyable = hidden(document, 'Actions[0].Related.Id', 'copyable-domain-id');
+  copyable.setAttribute('data-rw-form-collection-copyable', 'true');
+  fixture.row.appendChild(copyable);
+  const customIdentity = hidden(document, 'Actions[0].LegacyRecordKey', 'consumer-owned-key');
+  fixture.row.appendChild(customIdentity);
+
+  const title = findInput(fixture.row, 'Actions[0].Title');
+  title.value = 'preserved read-only value';
+  title.readOnly = true;
+  const select = document.createElement('select');
+  select.setAttribute('name', 'Actions[0].Dates[0].Schedule');
+  select.value = 'late';
+  select.selectedIndex = 2;
+  date.appendChild(select);
+  const checkbox = input(document, 'Actions[0].Dates[0].Enabled', 'checkbox');
+  checkbox.checked = true;
+  date.appendChild(checkbox);
+  const file = input(document, 'Actions[0].Dates[0].Attachment', 'file');
+  file.value = 'C:\\fakepath\\evidence.pdf';
+  date.appendChild(file);
+  const actionDelete = findInput(fixture.row, 'Actions[0].IsDeleted');
+  actionDelete.value = 'true';
+  const dateDelete = findInput(date, 'Actions[0].Dates[0].Delete');
+  dateDelete.value = 'true';
+  const dateTemplate = ownedTemplate(dateRoot);
+  const prototypeIdentity = Array.from(dateTemplate.content.querySelectorAll('input'))
+    .find(element => element.name.endsWith('.ConcurrencyToken'));
+  prototypeIdentity.value = 'stale-prototype-token';
+
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+    const cloneCustomIdentity = Array.from(event.detail.row.querySelectorAll('input'))
+      .find(element => element.name.endsWith('.LegacyRecordKey'));
+    assert.equal(cloneCustomIdentity.value, 'consumer-owned-key');
+    cloneCustomIdentity.value = '';
+  });
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+  const clone = ownedRows(fixture.root).find(row => row !== fixture.row);
+  const cloneDates = Array.from(clone.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection').endsWith('.Dates'));
+  const cloneDate = ownedRows(cloneDates)[0];
+  const cloneReminders = Array.from(cloneDate.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection').endsWith('.Reminders'));
+  const cloneReminder = ownedRows(cloneReminders)[0];
+  const clonePrefix = clone.getAttribute('data-rw-form-index');
+  const cloneDateKey = cloneDate.getAttribute('data-rw-form-index');
+  const cloneReminderKey = cloneReminder.getAttribute('data-rw-form-index');
+
+  assert.equal(findInput(fixture.row, 'Actions[0].Id').value, 'source-action-id');
+  assert.equal(findInput(fixture.row, 'Actions[0].ConcurrencyStamp').value, 'source-action-stamp');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].Id`).value, '');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].ConcurrencyStamp`).value, '');
+  assert.equal(findInput(cloneDate, `Actions[${clonePrefix}].Dates[${cloneDateKey}].Id`).value, '');
+  assert.equal(findInput(cloneDate, `Actions[${clonePrefix}].Dates[${cloneDateKey}].ConcurrencyToken`).value, '');
+  assert.equal(findInput(cloneReminder, `Actions[${clonePrefix}].Dates[${cloneDateKey}].Reminders[${cloneReminderKey}].Id`).value, '');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].Related.Id`).value, 'copyable-domain-id');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].LegacyRecordKey`).value, '');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].IsDeleted`).value, 'false');
+  assert.equal(findInput(cloneDate, `Actions[${clonePrefix}].Dates[${cloneDateKey}].Delete`).value, 'false');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].Title`).value, 'preserved read-only value');
+  assert.equal(findInput(clone, `Actions[${clonePrefix}].Title`).readOnly, true);
+  const cloneSelect = Array.from(cloneDate.querySelectorAll('select')).find(element => element.name.endsWith('.Schedule'));
+  assert.equal(cloneSelect.value, 'late');
+  assert.equal(cloneSelect.selectedIndex, 2);
+  assert.equal(findInput(cloneDate, `Actions[${clonePrefix}].Dates[${cloneDateKey}].Enabled`).checked, true);
+  assert.equal(findInput(cloneDate, `Actions[${clonePrefix}].Dates[${cloneDateKey}].Attachment`).value, '');
+  assert.equal(file.value, 'C:\\fakepath\\evidence.pdf');
+  const clonePrototypeIdentity = Array.from(ownedTemplate(cloneDates).content.querySelectorAll('input'))
+    .find(element => element.name.endsWith('.ConcurrencyToken'));
+  assert.equal(clonePrototypeIdentity.value, '');
+});
+
+test('[G15] marked nested payload remains submitted while parent duplication omits tombstones', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document, {
+    childIndicesByParent: { 0: ['0', '7'] },
+    includeGrandchildren: true,
+    grandchildIndicesByDate: { 0: ['0', '7'] }
+  });
+  const findInput = (root, name) => Array.from(root.querySelectorAll('input')).find(element => element.name === name);
+  const findCollection = (root, name) => Array.from(root.querySelectorAll('[data-rw-form-collection]'))
+    .find(element => element.getAttribute('data-rw-form-collection') === name);
+  const dates = findCollection(fixture.row, 'Actions[0].Dates');
+  dates.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  const reminderRoot = findCollection(ownedRows(dates)[0], 'Actions[0].Dates[0].Reminders');
+  reminderRoot.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  const addReminderDeleteField = root => {
+    const prefix = root.getAttribute('data-rw-form-collection');
+    for (const row of ownedRows(root)) {
+      const key = row.getAttribute('data-rw-form-index');
+      const deletion = hidden(document, `${prefix}[${key}].Delete`, 'false');
+      deletion.setAttribute('data-reminder-delete', 'true');
+      deletion.setAttribute('value', 'false');
+      row.appendChild(deletion);
+    }
+  };
+  addReminderDeleteField(reminderRoot);
+
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  const markedDate = ownedRows(dates).find(row => row.getAttribute('data-rw-form-index') === '7');
+  ownedCommand(markedDate, 'remove').dispatchEvent(createEvent('click'));
+  const markedReminder = ownedRows(reminderRoot).find(row => row.getAttribute('data-rw-form-index') === '0');
+  ownedCommand(markedReminder, 'remove').dispatchEvent(createEvent('click'));
+
+  const sourceDateMarker = findInput(markedDate, 'Actions[0].Dates.index');
+  const sourceDateDelete = findInput(markedDate, 'Actions[0].Dates[7].Delete');
+  const sourceReminderMarker = findInput(markedReminder, 'Actions[0].Dates[0].Reminders.index');
+  const sourceReminderDelete = findInput(markedReminder, 'Actions[0].Dates[0].Reminders[0].Delete');
+  assert.equal(sourceDateMarker.value, '7');
+  assert.equal(sourceDateDelete.value, 'true');
+  assert.equal(sourceDateMarker.disabled, false);
+  assert.equal(sourceDateDelete.disabled, false);
+  assert.equal(sourceReminderMarker.value, '0');
+  assert.equal(sourceReminderDelete.value, 'true');
+  assert.equal(sourceReminderMarker.disabled, false);
+  assert.equal(sourceReminderDelete.disabled, false);
+
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+  const copy = ownedRows(fixture.root).find(row => row !== fixture.row);
+  const copiedDates = findCollection(copy, `Actions[${copy.getAttribute('data-rw-form-index')}].Dates`);
+  assert.deepEqual(ownedRows(copiedDates).map(row => row.getAttribute('data-rw-form-index')), ['8']);
+  const copiedDate = ownedRows(copiedDates)[0];
+  const copiedReminderRoot = findCollection(copiedDate,
+    `Actions[${copy.getAttribute('data-rw-form-index')}].Dates[8].Reminders`);
+  assert.deepEqual(ownedRows(copiedReminderRoot).map(row => row.getAttribute('data-rw-form-index')), ['8']);
+  assert.equal(ownedRows(dates).length, 2);
+  assert.equal(ownedRows(reminderRoot).length, 2);
+});
+
+test('[G16/G17] clone IDs reserve document-wide and rewrite every supported ID reference', () => {
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const sourceTitle = Array.from(fixture.row.querySelectorAll('input')).find(element => element.name === 'Actions[0].Title');
+    const sourceTitleId = sourceTitle.id;
+    const secondForm = document.createElement('form');
+    const collision = document.createElement('span');
+    collision.id = 'Actions_1__Title';
+    secondForm.appendChild(collision);
+    const outsideReference = document.createElement('span');
+    outsideReference.id = 'external-status';
+    const labelElement = label(document, sourceTitleId);
+    fixture.row.appendChild(labelElement);
+    const list = document.createElement('datalist');
+    list.id = 'schedule-options';
+    fixture.row.appendChild(list);
+    const error = document.createElement('span');
+    error.id = 'schedule-error';
+    fixture.row.appendChild(error);
+    const controls = document.createElement('div');
+    controls.id = 'schedule-controls';
+    fixture.row.appendChild(controls);
+    const description = document.createElement('span');
+    description.id = 'schedule-description';
+    fixture.row.appendChild(description);
+    const heading = document.createElement('span');
+    heading.id = 'schedule-heading';
+    fixture.row.appendChild(heading);
+    const owner = document.createElement('div');
+    owner.id = 'schedule-owner';
+    fixture.row.appendChild(owner);
+    const listInput = input(document, 'Actions[0].ScheduledAt');
+    listInput.setAttribute('list', 'schedule-options');
+    listInput.setAttribute('aria-errormessage', 'schedule-error');
+    fixture.row.appendChild(listInput);
+    const output = document.createElement('output');
+    output.setAttribute('for', `${sourceTitleId} external-status`);
+    fixture.row.appendChild(output);
+    const references = document.createElement('div');
+    references.setAttribute('aria-controls', `${sourceTitleId} external-status`);
+    references.setAttribute('aria-describedby', `${description.id} external-status`);
+    references.setAttribute('aria-labelledby', `${heading.id} external-status`);
+    references.setAttribute('aria-owns', `${owner.id} external-status`);
+    fixture.row.appendChild(references);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    form.appendChild(outsideReference);
+    document.body.append(form, secondForm);
+    context.window.RazorWire.formInteractionsManager.scan();
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    const clone = ownedRows(fixture.root).find(row => row !== fixture.row);
+    const cloneTitle = Array.from(clone.querySelectorAll('input')).find(element => element.name === 'Actions[1].Title');
+    assert.notEqual(cloneTitle.id, sourceTitleId);
+    assert.notEqual(cloneTitle.id, collision.id);
+    assert.equal(sourceTitle.id, sourceTitleId);
+    const cloneLabel = clone.querySelector('label');
+    assert.equal(cloneLabel.getAttribute('for'), cloneTitle.id);
+    const cloneList = Array.from(clone.querySelectorAll('[id]')).find(element => element.id.startsWith('schedule-options'));
+    const cloneError = Array.from(clone.querySelectorAll('[id]')).find(element => element.id.startsWith('schedule-error'));
+    const cloneDescription = Array.from(clone.querySelectorAll('[id]')).find(element => element.id.startsWith('schedule-description'));
+    const cloneHeading = Array.from(clone.querySelectorAll('[id]')).find(element => element.id.startsWith('schedule-heading'));
+    const cloneOwner = Array.from(clone.querySelectorAll('[id]')).find(element => element.id.startsWith('schedule-owner'));
+    const cloneListInput = Array.from(clone.querySelectorAll('input')).find(element => element.name === 'Actions[1].ScheduledAt');
+    assert.equal(cloneListInput.getAttribute('list'), cloneList.id);
+    assert.equal(cloneListInput.getAttribute('aria-errormessage'), cloneError.id);
+    const cloneOutput = clone.querySelector('output');
+    assert.deepEqual(cloneOutput.getAttribute('for').split(' '), [cloneTitle.id, 'external-status']);
+    assert.deepEqual(referencesIn(clone, 'aria-controls'), [cloneTitle.id, 'external-status']);
+    assert.deepEqual(referencesIn(clone, 'aria-describedby'), [cloneDescription.id, 'external-status']);
+    assert.deepEqual(referencesIn(clone, 'aria-labelledby'), [cloneHeading.id, 'external-status']);
+    assert.deepEqual(referencesIn(clone, 'aria-owns'), [cloneOwner.id, 'external-status']);
+    const documentIds = Array.from(document.querySelectorAll('[id]')).map(element => element.id).filter(Boolean);
+    assert.equal(new Set(documentIds).size, documentIds.length);
+    assert.equal(collision.id, 'Actions_1__Title');
+  }
+
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const first = document.createElement('span');
+    const second = document.createElement('span');
+    first.id = 'ambiguous-private-source-id';
+    second.id = 'ambiguous-private-source-id';
+    fixture.row.append(first, second);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+    assert.equal(ownedRows(fixture.root).length, 1);
+    assert.equal(fixture.row.querySelectorAll('[id]').filter(element => element.id === 'ambiguous-private-source-id').length, 2);
+    const diagnostic = context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .find(item => item.message.includes('duplicate source IDs'));
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.message.includes('ambiguous-private-source-id'), false);
+    assert.equal(diagnostic.message.includes('Actions[0]'), false);
+    assert.equal(diagnostic.impact, 'Aborted; values retained.');
+  }
+});
+
+test('[G20] nested template token text cannot replace an owned marker or correctly prefixed field', () => {
+  {
+    const { context, document } = loadRuntime();
+    const fixture = buildCollection(document);
+    fixture.template.content.querySelector('input[name="Actions.index"]').remove();
+    // The root-level legacy fallback is allowed when the template has a real owned field.
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    fixture.add.dispatchEvent(createEvent('click'));
+    const added = ownedRows(fixture.root)[1];
+    assert.equal(added.querySelector('input[name="Actions.index"]').value, '1');
+    assert.equal(added.querySelector('input[name="Actions[1].Title"]').name, 'Actions[1].Title');
+  }
+
+  for (const malformed of ['missing-marker', 'wrong-prefix']) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const dates = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    const template = ownedTemplate(dates);
+    const prototype = template.content.querySelector('[data-rw-form-collection-row]');
+    if (malformed === 'missing-marker') {
+      prototype.querySelector('input[name="Actions[0].Dates.index"]').remove();
+      template.innerHTML = '<!-- __date_index__ -->';
+    } else {
+      for (const control of prototype.querySelectorAll('input')) {
+        if (control.name.startsWith('Actions[0].Dates[__date_index__]')) control.name = control.name.replace('Actions[0].Dates[__date_index__]', 'Elsewhere[__date_index__]');
+      }
+      template.innerHTML = 'text containing __date_index__';
+    }
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    dates.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+
+    assert.equal(ownedRows(dates).length, 1, malformed);
+    const diagnostic = context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .find(item => /template binding:.*missing/.test(item.message) && item.message.includes('Actions[0].Dates'));
+    assert.ok(diagnostic, malformed);
+    assert.equal(diagnostic.impact, 'Aborted; values retained.', malformed);
+    assert.equal(diagnostic.docs, 'Web/ForgeTrust.RazorWire/Docs/form-interactions.md#troubleshooting', malformed);
+  }
+});
+
+test('[G21] duplicate aborts when before-duplicate changes a planned field binding name', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  let detachedClone;
+  let afterDuplicate = 0;
+  form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+    detachedClone = event.detail.row;
+    const title = Array.from(detachedClone.querySelectorAll('input')).find(input => input.name.endsWith('.Title'));
+    title.name = 'Elsewhere[1].Title';
+  });
+  form.addEventListener('razorwire:form-collection:duplicate', () => afterDuplicate++);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+  assert.equal(ownedRows(fixture.root).length, 1);
+  assert.equal(detachedClone.querySelector('input[name="Elsewhere[1].Title"]').name, 'Elsewhere[1].Title');
+  assert.equal(afterDuplicate, 0);
+  assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+    .some(item => /ownership changed|binding paths changed|markers changed/.test(item.message)
+      && item.impact === 'Aborted; values retained.'));
+});
+
+test('[G21] duplicate aborts when before-duplicate changes an owned collection root', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  let detachedClone;
+  let afterDuplicate = 0;
+  form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+    detachedClone = event.detail.row;
+    detachedClone.querySelector('[data-rw-form-collection="Actions[1].Dates"]')
+      .setAttribute('data-rw-form-collection', 'Elsewhere[1].Dates');
+  });
+  form.addEventListener('razorwire:form-collection:duplicate', () => afterDuplicate++);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+  assert.equal(ownedRows(fixture.root).length, 1);
+  assert.ok(detachedClone.querySelector('[data-rw-form-collection="Elsewhere[1].Dates"]'));
+  assert.equal(afterDuplicate, 0);
+  assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+    .some(item => /ownership changed|binding paths changed|markers changed/.test(item.message)
+      && item.impact === 'Aborted; values retained.'));
+});
+
+test('[G22] physical remove event reaches listeners through its connected collection owner', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  let afterRemove;
+  form.addEventListener('razorwire:form-collection:remove', event => { afterRemove = event; });
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'remove').dispatchEvent(createEvent('click'));
+
+  assert.ok(afterRemove);
+  assert.equal(afterRemove.target, fixture.root);
+  assert.equal(afterRemove.detail.root, fixture.root);
+  assert.equal(afterRemove.detail.row, fixture.row);
+  assert.equal(fixture.row.isConnected, false);
+  assert.equal(fixture.root.isConnected, true);
+});
+
+test('[G23] mark removal requires its selected delete field to be a hidden input', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  fixture.root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  const title = fixture.row.querySelector('input[name="Actions[0].Title"]');
+  const deleteField = fixture.row.querySelector('input[name="Actions[0].IsDeleted"]');
+  deleteField.removeAttribute('data-action-delete');
+  title.setAttribute('data-action-delete', 'true');
+  title.value = 'keep this value';
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  let afterRemove = 0;
+  form.addEventListener('razorwire:form-collection:remove', () => afterRemove++);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'remove').dispatchEvent(createEvent('click'));
+
+  assert.equal(fixture.row.hidden, false);
+  assert.equal(fixture.row.getAttribute('data-rw-form-collection-row-state'), null);
+  assert.equal(title.value, 'keep this value');
+  assert.equal(title.disabled, false);
+  assert.equal(deleteField.value, 'false');
+  assert.equal(afterRemove, 0);
+  assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+    .some(item => /no app-owned delete field/.test(item.message) && item.impact === 'Aborted; values retained.'));
+});
+
+test('[G08/G13] parent Add preserves seeded child keys and clears textarea, radio and select values', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document, { parentTemplateChildIndices: ['seeded'] });
+  const prototype = fixture.template.content.querySelector('[data-rw-form-collection-row]');
+  const textarea = document.createElement('textarea');
+  textarea.setAttribute('name', 'Actions[__index__].Notes');
+  textarea.value = 'prototype notes';
+  const radio = input(document, 'Actions[__index__].Selected', 'radio');
+  radio.checked = true;
+  const select = document.createElement('select');
+  select.setAttribute('name', 'Actions[__index__].Choice');
+  select.selectedIndex = 2;
+  select.value = 'prototype choice';
+  prototype.append(textarea, radio, select);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  fixture.add.dispatchEvent(createEvent('click'));
+
+  const added = ownedRows(fixture.root)[1];
+  const dates = findCollection(added, 'Actions[1].Dates');
+  assert.deepEqual(ownedRows(dates).map(row => row.getAttribute('data-rw-form-index')), ['seeded']);
+  assert.equal(findInput(ownedRows(dates)[0], 'Actions[1].Dates.index').value, 'seeded');
+  assert.equal(added.querySelector('textarea').value, '');
+  assert.equal(findInput(added, 'Actions[1].Selected').checked, false);
+  assert.equal(added.querySelector('select').selectedIndex, -1);
+  assert.ok(ownedTemplate(dates).content.querySelector('input[name="Actions[1].Dates[__date_index__].Kind"]'));
+});
+
+test('[G13] parent Duplicate copies edited textarea and radio state without changing its source', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const textarea = document.createElement('textarea');
+  textarea.setAttribute('name', 'Actions[0].Notes');
+  textarea.value = 'live notes';
+  const radio = input(document, 'Actions[0].Selected', 'radio');
+  radio.checked = true;
+  fixture.row.append(textarea, radio);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+  const copied = ownedRows(fixture.root)[1];
+  assert.equal(copied.querySelector('textarea').name, 'Actions[1].Notes');
+  assert.equal(copied.querySelector('textarea').value, 'live notes');
+  assert.equal(findInput(copied, 'Actions[1].Selected').checked, true);
+  assert.equal(textarea.value, 'live notes');
+  assert.equal(radio.checked, true);
+});
+
+test('[G22] toggle refresh never restores editable descendants beneath a marked parent', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  fixture.root.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+  const dates = findCollection(fixture.row, 'Actions[0].Dates');
+  const date = ownedRows(dates)[0];
+  const editable = findInput(date, 'Actions[0].Dates[0].Kind');
+  const target = document.createElement('fieldset');
+  target.setAttribute('data-rw-form-toggle-target', 'date-details');
+  target.setAttribute('data-rw-form-toggle-disable-when-hidden', 'true');
+  target.appendChild(editable);
+  date.appendChild(target);
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.checked = true;
+  toggle.setAttribute('data-rw-form-toggle', 'date-details');
+  toggle.setAttribute('data-rw-form-toggle-invert', 'true');
+  const form = document.createElement('form');
+  form.append(toggle, fixture.root);
+  document.body.appendChild(form);
+  const manager = context.window.RazorWire.formInteractionsManager;
+  manager.scan();
+  assert.equal(editable.getAttribute('data-rw-disabled-by-form-toggle'), 'true');
+
+  ownedCommand(fixture.row, 'remove').dispatchEvent(createEvent('click'));
+  toggle.checked = false;
+  toggle.dispatchEvent(createEvent('change'));
+  manager.scan();
+
+  assert.equal(fixture.row.hidden, true);
+  assert.equal(editable.disabled, true);
+  assert.equal(findInput(date, 'Actions[0].Dates.index').disabled, false);
+  assert.equal(findInput(fixture.row, 'Actions[0].IsDeleted').value, 'true');
+  const count = ownedRows(dates).length;
+  dates.querySelector('[data-rw-form-collection-add]').dispatchEvent(createEvent('click'));
+  assert.equal(ownedRows(dates).length, count);
+});
+
+test('[G24] late clone failures identify owner, cause, impact, fix and docs without editable values', () => {
+  for (const cause of ['ownership changed', 'markers changed', 'index conflict', 'ID conflict']) {
+    for (const developmentDiagnostics of [false, true]) {
+      const { context, document } = loadRuntime({ developmentDiagnostics });
+      const warnings = [];
+      context.console = { warn: message => warnings.push(message) };
+      const fixture = buildNestedFixture(document);
+      const form = document.createElement('form');
+      const otherForm = document.createElement('form');
+      form.appendChild(fixture.root);
+      document.body.append(form, otherForm);
+      const manager = context.window.RazorWire.formInteractionsManager;
+      manager.scan();
+      manager.clearDiagnostics();
+      warnings.length = 0;
+      const title = findInput(fixture.row, 'Actions[0].Title');
+      title.value = 'private editable fixture value';
+      const initialStatus = fixture.status.textContent;
+      let after = 0;
+      form.addEventListener('razorwire:form-collection:duplicate', () => after++);
+      form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+        title.value = 'listener retains private fixture value';
+        if (cause === 'ownership changed') otherForm.appendChild(fixture.root);
+        if (cause === 'markers changed') findInput(event.detail.row, 'Actions.index').value = 'changed-by-listener';
+        if (cause === 'index conflict') fixture.root.appendChild(makeActionRow(document, '1'));
+        if (cause === 'ID conflict') {
+          const collision = document.createElement('span');
+          collision.id = findInput(event.detail.row, 'Actions[1].Title').id;
+          otherForm.appendChild(collision);
+        }
+      });
+      ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+      const diagnostic = manager.getDiagnostics().find(item => item.message.includes(cause));
+      assert.ok(diagnostic, cause);
+      assert.match(diagnostic.message, /Collection "Actions"/);
+      assert.equal(diagnostic.impact, 'Aborted; values retained.');
+      assert.ok(diagnostic.fix.length > 0);
+      assert.equal(diagnostic.docs, 'Web/ForgeTrust.RazorWire/Docs/form-interactions.md#troubleshooting');
+      assert.equal(JSON.stringify(diagnostic).includes('private fixture value'), false);
+      assert.equal(after, 0);
+      assert.equal(fixture.status.textContent, initialStatus);
+      assert.equal(title.value, 'listener retains private fixture value');
+      assert.equal(warnings.length, developmentDiagnostics ? 1 : 0);
+    }
+  }
+});
+
+function findInput(root, name) {
+  return Array.from(root.querySelectorAll('input')).find(element => element.name === name);
+}
+
+function findCollection(root, name) {
+  return Array.from(root.querySelectorAll('[data-rw-form-collection]'))
+    .find(element => element.getAttribute('data-rw-form-collection') === name);
+}
+
+function referencesIn(root, attribute) {
+  const element = Array.from(root.querySelectorAll('*')).find(candidate => candidate.hasAttribute(attribute));
+  return element.getAttribute(attribute).split(/\s+/);
+}
+
+function ownedTemplate(root) {
+  return Array.from(root.querySelectorAll('template'))
+    .find(template => template.closest('[data-rw-form-collection]') === root);
+}
+
+function rebaseOwnedPath(root, oldPrefix, newPrefix) {
+  const visit = element => {
+    for (const attribute of ['name', 'data-valmsg-for', 'data-rw-form-collection']) {
+      const value = element.getAttribute(attribute);
+      if (value === oldPrefix || value?.startsWith(`${oldPrefix}.`) || value?.startsWith(`${oldPrefix}[`)) {
+        element.setAttribute(attribute, newPrefix + value.slice(oldPrefix.length));
+      }
+    }
+    if (element.localName === 'template') {
+      for (const child of element.content.children) visit(child);
+    }
+    for (const child of element.children) visit(child);
+  };
+  visit(root);
+}
+
 function buildCollection(document) {
   const root = document.createElement('div');
   root.setAttribute('data-rw-form-collection', 'Actions');
@@ -520,6 +1617,143 @@ function buildCollection(document) {
   return { root, row, template, add, duplicate, remove };
 }
 
+function buildNestedFixture(document, {
+  parentIndices = ['0'],
+  childIndicesByParent = { 0: ['0'] },
+  parentTemplateChildIndices = [],
+  childIndexToken = '__date_index__',
+  includeGrandchildren = false,
+  grandchildIndicesByDate = {}
+} = {}) {
+  const makeAction = (index, isTemplate) => makeActionRow(document, index, isTemplate, {
+    childIndices: isTemplate ? parentTemplateChildIndices : childIndicesByParent[index] ?? [],
+    childIndexToken,
+    includeGrandchildren,
+    grandchildIndicesByDate
+  });
+  const collection = makeCollectionRoot(document, 'Actions', '__index__', makeAction, parentIndices, {
+    label: 'action',
+    deleteSelector: '[data-action-delete]'
+  });
+  return { ...collection, row: collection.rows[0] ?? null };
+}
+
+function makeCollectionRoot(document, name, indexToken, makeRow, rowIndices, { label: collectionLabel = name, deleteSelector } = {}) {
+  const root = document.createElement('div');
+  root.setAttribute('data-rw-form-collection', name);
+  root.setAttribute('data-rw-form-collection-label', collectionLabel);
+  if (indexToken !== null) root.setAttribute('data-rw-form-collection-index-token', indexToken);
+  if (deleteSelector) root.setAttribute('data-rw-form-collection-delete-field', deleteSelector);
+
+  const rows = rowIndices.map(index => makeRow(index, false));
+  root.append(...rows);
+
+  const template = document.createElement('template');
+  template.setAttribute('data-rw-form-collection-template', 'true');
+  template.innerHTML = `${name}[${indexToken}].Value`;
+  template.content.appendChild(makeRow(indexToken, true));
+  const add = document.createElement('button');
+  add.setAttribute('data-rw-form-collection-add', 'true');
+  const status = document.createElement('span');
+  status.setAttribute('data-rw-form-collection-status', 'true');
+  status.setAttribute('aria-live', 'polite');
+  root.append(template, add, status);
+  return { root, rows, template, add, status };
+}
+
+function makeActionRow(document, index, isTemplate, {
+  childIndices = [],
+  childIndexToken = '__date_index__',
+  includeGrandchildren = false,
+  grandchildIndicesByDate = {}
+} = {}) {
+  const row = makeCollectionRow(document, 'Actions', index, isTemplate);
+  row.append(
+    hidden(document, `Actions[${index}].Id`, 'action-id'),
+    hidden(document, `Actions[${index}].ConcurrencyStamp`, 'action-stamp'),
+    hidden(document, `Actions[${index}].ClientIndex`, index),
+    hidden(document, `Actions[${index}].RowIndex`, index),
+    input(document, `Actions[${index}].Title`, 'text', `Actions_${index}__Title`),
+    hidden(document, `Actions[${index}].IsDeleted`, 'false'),
+  );
+  row.querySelector(`input[name="Actions[${index}].IsDeleted"]`).setAttribute('data-action-delete', 'true');
+
+  const childPath = `Actions[${index}].Dates`;
+  const dates = makeCollectionRoot(document, childPath, childIndexToken,
+    (childIndex, childIsTemplate) => makeDateRow(document, childPath, childIndex, childIsTemplate, {
+      includeGrandchildren,
+      grandchildIndices: grandchildIndicesByDate[childIndex] ?? []
+    }), childIndices, { label: 'date', deleteSelector: '[data-date-delete]' });
+  row.appendChild(dates.root);
+
+  const duplicate = document.createElement('button');
+  duplicate.setAttribute('data-rw-form-collection-duplicate', 'true');
+  const remove = document.createElement('button');
+  remove.setAttribute('data-rw-form-collection-remove', 'true');
+  row.append(duplicate, remove);
+  return row;
+}
+
+function makeDateRow(document, collection, index, isTemplate, { includeGrandchildren = false, grandchildIndices = [] } = {}) {
+  const row = makeCollectionRow(document, collection, index, isTemplate);
+  row.append(
+    hidden(document, `${collection}[${index}].Id`, 'date-id'),
+    hidden(document, `${collection}[${index}].ConcurrencyToken`, 'date-token'),
+    hidden(document, `${collection}[${index}].ClientIndex`, index),
+    hidden(document, `${collection}[${index}].RowIndex`, index),
+    input(document, `${collection}[${index}].Kind`, 'text', `${collection.replaceAll(/[^A-Za-z0-9]/g, '_')}_${index}__Kind`),
+    hidden(document, `${collection}[${index}].Delete`, 'false'),
+  );
+  row.querySelector(`input[name="${collection}[${index}].Delete"]`).setAttribute('data-date-delete', 'true');
+
+  if (includeGrandchildren) {
+    const grandchildPath = `${collection}[${index}].Reminders`;
+    const reminders = makeCollectionRoot(document, grandchildPath, '__reminder_index__',
+      (grandchildIndex, grandchildIsTemplate) => makeSimpleNestedRow(document, grandchildPath, grandchildIndex, grandchildIsTemplate),
+      grandchildIndices, { label: 'reminder', deleteSelector: '[data-reminder-delete]' });
+    row.appendChild(reminders.root);
+  }
+
+  const duplicate = document.createElement('button');
+  duplicate.setAttribute('data-rw-form-collection-duplicate', 'true');
+  const remove = document.createElement('button');
+  remove.setAttribute('data-rw-form-collection-remove', 'true');
+  row.append(duplicate, remove);
+  return row;
+}
+
+function makeSimpleNestedRow(document, collection, index, isTemplate) {
+  const row = makeCollectionRow(document, collection, index, isTemplate);
+  row.append(
+    hidden(document, `${collection}[${index}].Id`, 'reminder-id'),
+    input(document, `${collection}[${index}].Text`, 'text')
+  );
+  const duplicate = document.createElement('button');
+  duplicate.setAttribute('data-rw-form-collection-duplicate', 'true');
+  const remove = document.createElement('button');
+  remove.setAttribute('data-rw-form-collection-remove', 'true');
+  row.append(duplicate, remove);
+  return row;
+}
+
+function makeCollectionRow(document, collection, index, isTemplate) {
+  const row = document.createElement('fieldset');
+  row.setAttribute('data-rw-form-collection-row', 'true');
+  if (!isTemplate) row.setAttribute('data-rw-form-index', index);
+  row.appendChild(hidden(document, `${collection}.index`, index));
+  return row;
+}
+
+function ownedRows(root) {
+  return Array.from(root.querySelectorAll('[data-rw-form-collection-row]'))
+    .filter(row => row.closest('[data-rw-form-collection]') === root);
+}
+
+function ownedCommand(row, action) {
+  return Array.from(row.querySelectorAll(`[data-rw-form-collection-${action}]`))
+    .find(command => command.closest('[data-rw-form-collection-row]') === row);
+}
+
 function input(document, name, type = 'text', id = '') {
   const element = document.createElement('input');
   element.setAttribute('name', name);
@@ -556,10 +1790,10 @@ function validation(document, target) {
   return element;
 }
 
-function loadRuntime() {
+function loadRuntime({ developmentDiagnostics = true } = {}) {
   const document = new FakeDocument();
   const window = {
-    RazorWire: { config: { developmentDiagnostics: true } },
+    RazorWire: { config: { developmentDiagnostics } },
     document,
     CustomEvent: FakeCustomEvent,
     addEventListener() {},
@@ -572,10 +1806,10 @@ function loadRuntime() {
     Element: FakeElement,
     HTMLElement: FakeElement,
     HTMLFormElement: FakeElement,
-    HTMLInputElement: FakeElement,
-    HTMLSelectElement: FakeElement,
-    HTMLTextAreaElement: FakeElement,
-    HTMLButtonElement: FakeElement,
+    HTMLInputElement: FakeInputElement,
+    HTMLSelectElement: FakeSelectElement,
+    HTMLTextAreaElement: FakeTextAreaElement,
+    HTMLButtonElement: FakeButtonElement,
     DocumentFragment: FakeFragment,
     CustomEvent: FakeCustomEvent,
     console,
@@ -611,6 +1845,7 @@ class FakeDocument {
   constructor() {
     this.readyState = 'complete';
     this.documentElement = new FakeElement('html', this);
+    this.documentElement.isConnected = true;
     this.body = new FakeElement('body', this);
     this.documentElement.appendChild(this.body);
     this.activeElement = null;
@@ -618,9 +1853,14 @@ class FakeDocument {
   }
 
   createElement(tagName) {
-    return tagName.toLowerCase() === 'template'
-      ? new FakeTemplateElement(this)
-      : new FakeElement(tagName, this);
+    switch (tagName.toLowerCase()) {
+      case 'template': return new FakeTemplateElement(this);
+      case 'input': return new FakeInputElement(this);
+      case 'select': return new FakeSelectElement(this);
+      case 'textarea': return new FakeTextAreaElement(this);
+      case 'button': return new FakeButtonElement(this);
+      default: return new FakeElement(tagName, this);
+    }
   }
 
   querySelector(selector) {
@@ -642,8 +1882,12 @@ class FakeFragment {
   constructor(ownerDocument) {
     this.ownerDocument = ownerDocument;
     this.children = [];
-    this.parentElement = null;
-    this.isConnected = true;
+    this.parentNode = null;
+    this.isConnected = false;
+  }
+
+  get parentElement() {
+    return null;
   }
 
   get firstElementChild() {
@@ -651,8 +1895,12 @@ class FakeFragment {
   }
 
   appendChild(node) {
-    node.parentElement = this;
+    if (node.parentNode?.children) {
+      node.parentNode.children = node.parentNode.children.filter(child => child !== node);
+    }
+    node.parentNode = this;
     node.ownerDocument = this.ownerDocument;
+    setConnected(node, false);
     this.children.push(node);
     return node;
   }
@@ -685,10 +1933,10 @@ class FakeElement {
     this.ownerDocument = ownerDocument;
     this._attributes = new Map();
     this.children = [];
-    this.parentElement = null;
+    this.parentNode = null;
     this.listeners = new Map();
     this.textContent = '';
-    this.isConnected = true;
+    this.isConnected = false;
     this.hidden = false;
     this.disabled = false;
     this.value = '';
@@ -696,6 +1944,11 @@ class FakeElement {
     this.type = tagName.toLowerCase() === 'button' ? 'submit' : 'text';
     this.name = '';
     this.selectedIndex = 0;
+    this.readOnly = false;
+  }
+
+  get parentElement() {
+    return this.parentNode instanceof FakeElement ? this.parentNode : null;
   }
 
   get attributes() {
@@ -715,6 +1968,8 @@ class FakeElement {
     if (name === 'id') this.idValue = String(value);
     if (name === 'name') this.name = String(value);
     if (name === 'type') this.type = String(value);
+    if (name === 'disabled') this.disabled = true;
+    if (name === 'readonly') this.readOnly = true;
   }
 
   getAttribute(name) {
@@ -727,6 +1982,8 @@ class FakeElement {
   removeAttribute(name) {
     this._attributes.delete(name);
     if (name === 'id') this.idValue = '';
+    if (name === 'disabled') this.disabled = false;
+    if (name === 'readonly') this.readOnly = false;
   }
 
   hasAttribute(name) {
@@ -738,12 +1995,16 @@ class FakeElement {
   }
 
   appendChild(node) {
-    if (node.parentElement?.children) {
-      node.parentElement.children = node.parentElement.children.filter(child => child !== node);
+    if (node instanceof FakeFragment) {
+      for (const child of [...node.children]) this.appendChild(child);
+      return node;
     }
-    node.parentElement = this;
+    if (node.parentNode?.children) {
+      node.parentNode.children = node.parentNode.children.filter(child => child !== node);
+    }
+    node.parentNode = this;
     node.ownerDocument = this.ownerDocument;
-    node.isConnected = true;
+    setConnected(node, this.isConnected);
     this.children.push(node);
     return node;
   }
@@ -754,25 +2015,30 @@ class FakeElement {
     }
 
     if (position === 'afterbegin') {
-      element.parentElement = this;
+      if (element.parentNode?.children) element.parentNode.children = element.parentNode.children.filter(child => child !== element);
+      element.parentNode = this;
+      element.ownerDocument = this.ownerDocument;
+      setConnected(element, this.isConnected);
       this.children.unshift(element);
       return element;
     }
 
-    const siblings = this.parentElement.children;
+    const siblings = this.parentNode.children;
     const index = siblings.indexOf(this);
-    element.parentElement = this.parentElement;
+    if (element.parentNode?.children) element.parentNode.children = element.parentNode.children.filter(child => child !== element);
+    element.parentNode = this.parentNode;
     element.ownerDocument = this.ownerDocument;
+    setConnected(element, this.parentNode.isConnected);
     siblings.splice(position === 'beforebegin' ? index : index + 1, 0, element);
     return element;
   }
 
   remove() {
-    if (this.parentElement?.children) {
-      this.parentElement.children = this.parentElement.children.filter(child => child !== this);
+    if (this.parentNode?.children) {
+      this.parentNode.children = this.parentNode.children.filter(child => child !== this);
     }
-    this.parentElement = null;
-    this.isConnected = false;
+    this.parentNode = null;
+    setConnected(this, false);
   }
 
   contains(node) {
@@ -834,9 +2100,7 @@ class FakeElement {
   }
 
   cloneNode(deep) {
-    const clone = this instanceof FakeTemplateElement
-      ? new FakeTemplateElement(this.ownerDocument)
-      : new FakeElement(this.localName, this.ownerDocument);
+    const clone = this.ownerDocument.createElement(this.localName);
     for (const { name, value } of this.attributes) clone.setAttribute(name, value);
     clone.textContent = this.textContent;
     clone.hidden = this.hidden;
@@ -846,6 +2110,7 @@ class FakeElement {
     clone.type = this.type;
     clone.name = this.name;
     clone.selectedIndex = this.selectedIndex;
+    clone.readOnly = this.readOnly;
     if (deep) {
       for (const child of this.children) clone.appendChild(child.cloneNode(true));
       if (this instanceof FakeTemplateElement) {
@@ -865,7 +2130,29 @@ class FakeTemplateElement extends FakeElement {
   }
 }
 
+class FakeInputElement extends FakeElement {
+  constructor(ownerDocument) { super('input', ownerDocument); }
+}
+
+class FakeSelectElement extends FakeElement {
+  constructor(ownerDocument) { super('select', ownerDocument); }
+}
+
+class FakeTextAreaElement extends FakeElement {
+  constructor(ownerDocument) { super('textarea', ownerDocument); }
+}
+
+class FakeButtonElement extends FakeElement {
+  constructor(ownerDocument) { super('button', ownerDocument); }
+}
+
+function setConnected(element, connected) {
+  element.isConnected = connected;
+  for (const child of element.children ?? []) setConnected(child, connected);
+}
+
 function queryAll(root, selector) {
+  validateFakeSelector(selector);
   const selectors = selector.split(',').map(part => part.trim()).filter(Boolean);
   const matches = [];
   const visit = element => {
@@ -876,4 +2163,19 @@ function queryAll(root, selector) {
   };
   visit(root);
   return matches;
+}
+
+function validateFakeSelector(selector) {
+  let brackets = 0;
+  let quote = null;
+  for (const character of selector) {
+    if (quote) {
+      if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") quote = character;
+    else if (character === '[') brackets++;
+    else if (character === ']' && --brackets < 0) throw new Error('invalid selector');
+  }
+  if (quote || brackets !== 0) throw new Error('invalid selector');
 }
