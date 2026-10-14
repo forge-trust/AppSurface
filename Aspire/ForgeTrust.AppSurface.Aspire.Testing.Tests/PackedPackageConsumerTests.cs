@@ -281,6 +281,14 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         }
     }
 
+    /// <summary>Creates a unique producer version bound to the first twelve source-commit digits and run ID.</summary>
+    /// <remarks>Prefixes keep both identifiers alphanumeric; numeric SemVer prerelease identifiers cannot have leading zeroes.</remarks>
+    /// <param name="sourceCommit">The forty-character source commit verified by the producer fixture.</param>
+    /// <param name="runId">The per-fixture identity that prevents reuse of cached package bytes.</param>
+    /// <returns>A valid prerelease version, including for all-numeric hexadecimal identifiers.</returns>
+    internal static string CreatePackageVersion(string sourceCommit, Guid runId) =>
+        $"0.0.0-issue866.s{sourceCommit[..12]}.g{runId:N}";
+
     private static async Task<PackageRun> CreatePackedProducerPackagesAsync()
     {
         var budget = Stopwatch.StartNew();
@@ -306,7 +314,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                     timeout: TimeSpan.FromSeconds(15)))
                 .Trim();
             Assert.Equal(40, sourceCommit.Length);
-            var packageVersion = $"0.0.0-issue866.{sourceCommit[..12]}.{Guid.NewGuid():N}";
+            var packageVersion = CreatePackageVersion(sourceCommit, Guid.NewGuid());
             var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
             var packageProperties = new[]
             {
@@ -329,7 +337,9 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 "--artifacts-path",
                 producerArtifactsDirectory,
                 "--nologo",
-                $"/p:RestoreConfigFile={producerConfig}"
+                $"/p:RestoreConfigFile={producerConfig}",
+                // An isolated artifacts path does not relocate source packages.lock.json files.
+                "/p:RestoreLockedMode=true"
             };
             buildArguments.AddRange(packageProperties);
             await RunDotNetAsync(
@@ -594,7 +604,9 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         Assert.Equal(expectedPackageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
     }
 
-    private static async Task<string> RunDotNetAsync(
+    /// <summary>Runs a shell-free, bounded dotnet command shared by packed proofs and version regressions.</summary>
+    /// <remarks>A nonzero exit or timeout fails the proof after capturing output and terminating owned child processes.</remarks>
+    internal static async Task<string> RunDotNetAsync(
         string workingDirectory,
         IReadOnlyList<string> arguments,
         string stage,
