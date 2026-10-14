@@ -1,6 +1,6 @@
 # Issue #869 handoff fence test plan
 
-Status: **PLANNED / GAP** for every scenario below until a fresh terminal receipt records its result. Test source, a local build, or an earlier unrelated green suite does not mark a row passed. This plan preserves the approved 44 scenario IDs and all required parameterized and supplemental executions from the [approved implementation plan](issue-869-transaction-bound-handoff-fence.md).
+Status: **PASSED** for the 44 minimum IDs and mandatory supplemental executions, using the final committed-source native and fresh packed receipts recorded below. Test source, a local build, or an earlier unrelated green suite does not mark a row passed. This plan preserves the approved 44 scenario IDs and all required parameterized and supplemental executions from the [approved implementation plan](issue-869-transaction-bound-handoff-fence.md).
 
 The first proof is the public-only PostgreSQL path under restrictive runtime/application roles: exact caller transaction, both row-level security policies, two-savepoint behavior, prior unrelated caller marker preservation, and both application authority race orders. Stop and revise if that proof fails. Only then complete the full matrix. No private-type access or reflection is allowed in consumer tests.
 
@@ -17,7 +17,7 @@ The first proof is the public-only PostgreSQL path under restrictive runtime/app
 
 ## Branch map
 
-Every branch below is a new handoff behavior and remains a proof gap until its linked scenarios have terminal evidence.
+Every branch below maps to executed scenarios through the [completion audit](issue-869-plan-completion-audit.md); terminal evidence is recorded under Current evidence.
 
 | Implementation decision or branch | Planned scenario coverage | Primary evidence surface |
 | --- | --- | --- |
@@ -35,72 +35,72 @@ Every branch below is a new handoff behavior and remains a proof gap until its l
 
 ## Minimum scenario matrix: 44 IDs
 
-The `Status` for every row is **Planned**. Parameterized executions listed below are additional runs, not additional minimum IDs. Refused outcomes must be checked by a fresh database reader wherever a handoff row could have been written.
+The `Status` for every row is **Passed** against the final source and package inputs below. Parameterized executions listed below are additional runs, not additional minimum IDs. Refused outcomes must be checked by a fresh database reader wherever a handoff row could have been written.
 
 | ID | Setup | Required assertion | Status |
 | --- | --- | --- | --- |
-| U1 | Call with no active native invocation. | `ClaimLost`; callback count is zero. | Planned |
-| U2 | Retain the service and call after its invocation exits. | `ClaimLost`; callback count is zero. | Planned |
-| U3 | Invocation A borrows B's scoped service/reference. | A cannot use B's binding; callback count is zero. | Planned |
-| U4 | Overlap or reenter a call on one scoped service. | `InvalidOperationException` before the second callback. | Planned |
-| U5 | Null, closed, completed, wrong-target, or unsupported-isolation transaction. | Documented exception before callback; caller ownership and isolation stay unchanged. | Planned |
-| U6 | Callback returns false or throws after entry. | False is successful denial with callback writes removed; thrown exception propagates after cleanup; callback runs once. | Planned |
-| U7 | Supply a parameterized stale native fact. | Exact existing bounded Durable problem code; no unauthorized handoff. | Planned |
-| U8 | Resolve interface and concrete service in one scope and separate scopes; inspect public API snapshot. | Interface/concrete resolve to the same scoped instance; scopes differ; signature is exact with no public binder. | Planned |
-| CT1 | Callback succeeds and caller commits. | Fresh reader sees the handoff only after caller commit. | Planned |
-| CT2 | Callback succeeds and caller rolls back. | Fresh reader never sees the handoff. | Planned |
-| CT3 | Write unrelated marker before fence; callback stages ledger write then denies. | Caller may commit the earlier marker; callback write is absent. | Planned |
-| R1 | Scope disable commits before handoff obtains its fence. | Handoff refuses; no ledger row survives. | Planned |
-| R2 | Handoff takes native locks before scope disable. | Disable is observed blocked after method return until caller completion. | Planned |
-| R3 | Native cancellation commits before handoff. | Handoff refuses; no ledger row survives. | Planned |
-| R4 | Handoff takes native locks before native cancellation. | Cancellation is observed blocked until caller completion. | Planned |
-| R5 | Epoch rotation commits before handoff. | Handoff receives existing epoch refusal; no ledger row survives. | Planned |
-| R6 | Handoff takes shared epoch fence before rotation. | Rotation is observed blocked until caller completion. | Planned |
-| R7 | Lease reclaim commits before handoff. | Stale claim is refused; no ledger row survives. | Planned |
-| R8 | Handoff locks the claim before reclaim. | Reclaim is observed blocked until caller completion. | Planned |
-| R9 | Application revocation commits before callback can lock authority. | Callback observes denial; no ledger row survives. | Planned |
-| R10 | Handoff callback locks authority before revocation. | Revocation is observed blocked until caller completion; handoff state follows the winning transaction. | Planned |
-| N1 | Transaction targets another physical PostgreSQL host, port, or database. | `InvalidOperationException` before callback. | Planned |
-| N2 | Configured StoreId does not match. | Existing coded exception; callback is not run. | Planned |
-| N3 | Runtime schema is unsupported. | Safe `DurableRuntimeSchemaException`; callback is not run. | Planned |
-| N4 | Active epoch differs from the configured runtime epoch. | Existing coded exception; callback is not run. | Planned |
-| N5 | Scope generation is stale. | `ScopeGenerationConflict`; callback is not run. | Planned |
-| N6 | Activity identity differs. | `ClaimLost`; callback is not run. | Planned |
-| N7 | Attempt number is stale. | `ClaimLost`; callback is not run. | Planned |
-| N8 | Lease generation or owner differs. | `ClaimLost` for each parameterized mismatch; callback is not run. | Planned |
-| N9 | Current lease is expired or absent. | `LeaseLost`; callback is not run or callback writes are removed. | Planned |
-| N10 | Parameterize missing/noncurrent permit, terminal/canceled/missing Work, and missing scope. | Applicable `WorkNotFound`, `ScopeNotFound`, `AlreadyTerminal`, or `ClaimLost`; no handoff. | Planned |
-| B1 | Lease expires during a native lock wait or callback. | Final `LeaseLost`; callback writes are removed. | Planned |
-| B2 | Opted-in deadline is reached before or during callback/lock waits. | `ExecutionDeadlineReached`; callback count matches whether entry occurred; no handoff. | Planned |
-| B3 | Caller token is canceled during callback or after callback return but before the final check. | `OperationCanceledException` after cleanup; no handoff. | Planned |
-| B4 | Callback stages writes then throws while the caller token remains active. | Original callback exception after successful cleanup; callback writes do not survive; native locks remain held until caller ends the outer transaction, demonstrated by a competing transition blocked until then. | Planned |
-| B5 | Parameterize SQL, permission, deadlock, lock/statement timeout, and serialization errors. | Original database exception after feasible cleanup; prior caller writes follow documented savepoint semantics. | Planned |
-| B6 | Parameterize transport and rollback/release/scope-restore cleanup failure. | Throws; outer rollback/disposal required; retain both causes when cleanup follows another failure. | Planned |
-| B7 | Escaped work attempts use after invocation exit. | Reject before callback or before final success; no handoff. | Planned |
-| B8 | Use sequential calls and retry-prone failures. | Callback runs at most once per call, with no framework retry; application conditional write governs duplicate logical handoffs. | Planned |
-| P1 | Actual executor uses required restrictive native/application grants and both RLS policies. | Authorized same-scope handoff commits. | Planned |
-| P2 | Remove a required native or application grant, parameterized. | Permission failure; no handoff and no role escalation. | Planned |
-| P3 | Callback attempts cross-scope application/native access. | RLS rejects access and prior effective scope is restored. | Planned |
-| K1 | Run the actual executor from a fresh packed package-only consumer. | Exact transaction handoff works with no framework project reference or private-type access. | Planned |
-| K2 | Exercise stale/unbound refusal and valid provider flow. | Refused call cannot send; valid flow releases transaction and connection before fake-provider invocation. | Planned |
+| U1 | Call with no active native invocation. | `ClaimLost`; callback count is zero. | Passed |
+| U2 | Retain the service and call after its invocation exits. | `ClaimLost`; callback count is zero. | Passed |
+| U3 | Invocation A borrows B's scoped service/reference. | A cannot use B's binding; callback count is zero. | Passed |
+| U4 | Overlap or reenter a call on one scoped service. | `InvalidOperationException` before the second callback. | Passed |
+| U5 | Null, closed, completed, wrong-target, or unsupported-isolation transaction. | Documented exception before callback; caller ownership and isolation stay unchanged. | Passed |
+| U6 | Callback returns false or throws after entry. | False is successful denial with callback writes removed; thrown exception propagates after cleanup; callback runs once. | Passed |
+| U7 | Supply a parameterized stale native fact. | Exact existing bounded Durable problem code; no unauthorized handoff. | Passed |
+| U8 | Resolve interface and concrete service in one scope and separate scopes; inspect public API snapshot. | Interface/concrete resolve to the same scoped instance; scopes differ; signature is exact with no public binder. | Passed |
+| CT1 | Callback succeeds and caller commits. | Fresh reader sees the handoff only after caller commit. | Passed |
+| CT2 | Callback succeeds and caller rolls back. | Fresh reader never sees the handoff. | Passed |
+| CT3 | Write unrelated marker before fence; callback stages ledger write then denies. | Caller may commit the earlier marker; callback write is absent. | Passed |
+| R1 | Scope disable commits before handoff obtains its fence. | Handoff refuses; no ledger row survives. | Passed |
+| R2 | Handoff takes native locks before scope disable. | Disable is observed blocked after method return until caller completion. | Passed |
+| R3 | Native cancellation commits before handoff. | Handoff refuses; no ledger row survives. | Passed |
+| R4 | Handoff takes native locks before native cancellation. | Cancellation is observed blocked until caller completion. | Passed |
+| R5 | Epoch rotation commits before handoff. | Handoff receives existing epoch refusal; no ledger row survives. | Passed |
+| R6 | Handoff takes shared epoch fence before rotation. | Rotation is observed blocked until caller completion. | Passed |
+| R7 | Lease reclaim commits before handoff. | Stale claim is refused; no ledger row survives. | Passed |
+| R8 | Handoff locks the claim before reclaim. | Reclaim is observed blocked until caller completion. | Passed |
+| R9 | Application revocation commits before callback can lock authority. | Callback observes denial; no ledger row survives. | Passed |
+| R10 | Handoff callback locks authority before revocation. | Revocation is observed blocked until caller completion; handoff state follows the winning transaction. | Passed |
+| N1 | Transaction targets another physical PostgreSQL host, port, or database. | `InvalidOperationException` before callback. | Passed |
+| N2 | Configured StoreId does not match. | Existing coded exception; callback is not run. | Passed |
+| N3 | Runtime schema is unsupported. | Safe `DurableRuntimeSchemaException`; callback is not run. | Passed |
+| N4 | Active epoch differs from the configured runtime epoch. | Existing coded exception; callback is not run. | Passed |
+| N5 | Scope generation is stale. | `ScopeGenerationConflict`; callback is not run. | Passed |
+| N6 | Activity identity differs. | `ClaimLost`; callback is not run. | Passed |
+| N7 | Attempt number is stale. | `ClaimLost`; callback is not run. | Passed |
+| N8 | Lease generation or owner differs. | `ClaimLost` for each parameterized mismatch; callback is not run. | Passed |
+| N9 | Current lease is expired or absent. | `LeaseLost`; callback is not run or callback writes are removed. | Passed |
+| N10 | Parameterize missing/noncurrent permit, terminal/canceled/missing Work, and missing scope. | Applicable `WorkNotFound`, `ScopeNotFound`, `AlreadyTerminal`, or `ClaimLost`; no handoff. | Passed |
+| B1 | Lease expires during a native lock wait or callback. | Final `LeaseLost`; callback writes are removed. | Passed |
+| B2 | Opted-in deadline is reached before or during callback/lock waits. | `ExecutionDeadlineReached`; callback count matches whether entry occurred; no handoff. | Passed |
+| B3 | Caller token is canceled during callback or after callback return but before the final check. | `OperationCanceledException` after cleanup; no handoff. | Passed |
+| B4 | Callback stages writes then throws while the caller token remains active. | Original callback exception after successful cleanup; callback writes do not survive; native locks remain held until caller ends the outer transaction, demonstrated by a competing transition blocked until then. | Passed |
+| B5 | Parameterize SQL, permission, deadlock, lock/statement timeout, and serialization errors. | Original database exception after feasible cleanup; prior caller writes follow documented savepoint semantics. | Passed |
+| B6 | Parameterize transport and rollback/release/scope-restore cleanup failure. | Throws; outer rollback/disposal required; retain both causes when cleanup follows another failure. | Passed |
+| B7 | Escaped work attempts use after invocation exit. | Reject before callback or before final success; no handoff. | Passed |
+| B8 | Use sequential calls and retry-prone failures. | Callback runs at most once per call, with no framework retry; application conditional write governs duplicate logical handoffs. | Passed |
+| P1 | Actual executor uses required restrictive native/application grants and both RLS policies. | Authorized same-scope handoff commits. | Passed |
+| P2 | Remove a required native or application grant, parameterized. | Permission failure; no handoff and no role escalation. | Passed |
+| P3 | Callback attempts cross-scope application/native access. | RLS rejects access and prior effective scope is restored. | Passed |
+| K1 | Run the actual executor from a fresh packed package-only consumer. | Exact transaction handoff works with no framework project reference or private-type access. | Passed |
+| K2 | Exercise stale/unbound refusal and valid provider flow. | Refused call cannot send; valid flow releases transaction and connection before fake-provider invocation. | Passed |
 
 ## Mandatory supplemental executions
 
-These are additional acceptance cases and do not change the 44-ID floor. Each remains **Planned**.
+These are additional acceptance cases and do not change the 44-ID floor. Each has **Passed** against the same final inputs.
 
 | Family | Required variants and decisive check | Status |
 | --- | --- | --- |
-| Isolation | Exercise every unsupported level the installed Npgsql version can create, including `ReadUncommitted`, `RepeatableRead`, `Serializable`, `Snapshot`, `Chaos`, and `Unspecified` where constructible. The fence rejects before callback and never changes the caller's level. | Planned |
-| Invocation/context | Simultaneous borrowed references across async contexts; expired/retained binding; recursive and concurrent same-instance calls; sequential calls; pump binding occurs only after permit commit/admission and is deactivated in `finally`. | Planned |
-| Savepoints | Unique operation/callback names; coexist with caller savepoints; SQL-aborted transaction recovery; callback false/throw/cancel; operation rollback removes callback writes even after callback-savepoint release; fresh cleanup token. Verify against repository-pinned Npgsql 10.0.3 that `NpgsqlTransaction.SaveAsync` completes synchronously without a round trip and queues each `SAVEPOINT` with the next command on that exact transaction; do not count `SaveAsync` completion alone as server acknowledgement. Prove lock retention for a callback exception with an active caller token separately from cancellation-driven operation rollback, which may release operation-acquired locks. | Planned |
-| Scope/pooling | Restore a prior nonempty transaction-local scope and the no-scope state on success, denial, refusal, and error; prove pooled connection reuse does not leak scope. | Planned |
-| Time/renewal | Renewal changes revision/expiry while preserving current identity; read fresh locked facts, not cached revision/expiry. Test expiry during lock wait/callback and expiry after final validation with delayed caller commit. | Planned |
-| Final check | Controlled cancellation immediately before and after the final check; the former rolls back and throws, while a later signal cannot retroactively change the result and must follow caller pre-commit/ambiguous-commit handling. Invocation deactivation before the check refuses. | Planned |
-| Native compatibility | Both legacy and opted-in Work; retain admission, renewal, completion, retry, reconciliation, and stable ActivityId/ProviderKey regressions. Opted-in Work requires existing admission facts; do not call mutating admission again. | Planned |
-| Query shape | Representative long permit history proves constant-per-call exact permit lookup, with existing keyed access paths and no history scan or new schema/index. | Planned |
-| Callback misuse | Callback attempts commit, rollback, dispose, replace resources, use another connection, provider I/O, or escaped work. Verify detection and documented limits; never claim an improper commit can be undone. | Planned |
-| Host bounds | Record effective finite nonzero `lock_timeout`, `statement_timeout`, and `idle_in_transaction_session_timeout`; require lock timeout below statement timeout. Prove lock/statement timeout propagation and that terminating a returned-success idle transaction rolls back the handoff and releases epoch, native, and application locks. Verify the dead connection is not reused as healthy. | Planned |
-| Commit/provider ambiguity | Committed-but-ack-lost, established rollback, and unresolved commit; use a stable application-ledger key and fresh scoped read. Absence is inconclusive while the original transaction may still commit. Provider calls stay suppressed until reconciled. Pause after commit, release resources, deliver executor cancellation, then resume; verify suppression and retained ledger without inferring `ProvenNoEffect`. | Planned |
+| Isolation | Exercise every unsupported level the installed Npgsql version can create, including `ReadUncommitted`, `RepeatableRead`, `Serializable`, `Snapshot`, `Chaos`, and `Unspecified` where constructible. The fence rejects before callback and never changes the caller's level. | Passed |
+| Invocation/context | Simultaneous borrowed references across async contexts; expired/retained binding; recursive and concurrent same-instance calls; sequential calls; pump binding occurs only after permit commit/admission and is deactivated in `finally`. | Passed |
+| Savepoints | Unique operation/callback names; coexist with caller savepoints; SQL-aborted transaction recovery; callback false/throw/cancel; operation rollback removes callback writes even after callback-savepoint release; fresh cleanup token. Verify against repository-pinned Npgsql 10.0.3 that `NpgsqlTransaction.SaveAsync` completes synchronously without a round trip and queues each `SAVEPOINT` with the next command on that exact transaction; do not count `SaveAsync` completion alone as server acknowledgement. Prove lock retention for a callback exception with an active caller token separately from cancellation-driven operation rollback, which may release operation-acquired locks. | Passed |
+| Scope/pooling | Restore a prior nonempty transaction-local scope and the no-scope state on success, denial, refusal, and error; prove pooled connection reuse does not leak scope. | Passed |
+| Time/renewal | Renewal changes revision/expiry while preserving current identity; read fresh locked facts, not cached revision/expiry. Test expiry during lock wait/callback and expiry after final validation with delayed caller commit. | Passed |
+| Final check | Controlled cancellation immediately before and after the final check; the former rolls back and throws, while a later signal cannot retroactively change the result and must follow caller pre-commit/ambiguous-commit handling. Invocation deactivation before the check refuses. | Passed |
+| Native compatibility | Both legacy and opted-in Work; retain admission, renewal, completion, retry, reconciliation, and stable ActivityId/ProviderKey regressions. Opted-in Work requires existing admission facts; do not call mutating admission again. | Passed |
+| Query shape | Representative long permit history proves constant-per-call exact permit lookup, with existing keyed access paths and no history scan or new schema/index. | Passed |
+| Callback misuse | Callback attempts commit, rollback, dispose, replace resources, use another connection, provider I/O, or escaped work. Verify detection and documented limits; never claim an improper commit can be undone. | Passed |
+| Host bounds | Record effective finite nonzero `lock_timeout`, `statement_timeout`, and `idle_in_transaction_session_timeout`; require lock timeout below statement timeout. Prove lock/statement timeout propagation and that terminating a returned-success idle transaction rolls back the handoff and releases epoch, native, and application locks. Verify the dead connection is not reused as healthy. | Passed |
+| Commit/provider ambiguity | Committed-but-ack-lost, established rollback, and unresolved commit; use a stable application-ledger key and fresh scoped read. Absence is inconclusive while the original transaction may still commit. Provider calls stay suppressed until reconciled. Pause after commit, release resources, deliver executor cancellation, then resume; verify suppression and retained ledger without inferring `ProvenNoEffect`. | Passed |
 
 The callback is database-only and must be short. Host timeouts bound waits/statements and idle abandonment, not arbitrary callback CPU or a cooperative transaction that remains actively extended. The API does not guarantee a universal maximum lock duration.
 
@@ -114,7 +114,7 @@ Ready/equipped path (the exact pinned image is cached):
 dotnet --version
 docker info
 docker image inspect 'postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877' >/dev/null
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ```
 
 Cold-image path (same .NET/Docker/repository prerequisites, pinned image absent):
@@ -122,7 +122,7 @@ Cold-image path (same .NET/Docker/repository prerequisites, pinned image absent)
 ```bash
 dotnet --version
 docker info
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ```
 
 There is no supported handoff-only command-line selector: this packed command includes the public consumer in the complete package rail. The strict PostgreSQL command below is the full provider suite, not a handoff-only selection. Run it after the first restrictive-role proof and consumer source are ready. Record actual image/database identity and the runtime role's effective timeout settings; do not invent verifier flags or expected output.
@@ -131,7 +131,7 @@ Run the strict PostgreSQL rail and the packed consumer rail only after the first
 
 ```bash
 ./Durable/verify-postgresql.sh --ci
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ```
 
 The packed verifier takes no positional case selector. Keep its package version explicit and capture the generated package identity and bytes from the actual run. Then run the unchanged solution coverage workflow with its defaults, 95% line and 85% branch coverage:
@@ -144,4 +144,8 @@ Capture for each run: source revision and dirty-tree status, exact command, star
 
 ## Current evidence
 
-The [progress record](../issue-869-progress.md) holds the current evidence snapshot. At creation of this plan, every row above is planned; the first packed-consumer execution is pending. Do not change status to passed without a fresh terminal receipt for the exact source and package consumed.
+The [progress record](../issue-869-progress.md) holds the current evidence snapshot and limitations. Final source: `092730aa3742aad2de94e2c724c11b92e5b98627`, tree `357177ded4e526d1c849286dd994157140c4fcb4`, with a clean worktree during acceptance. The strict `./Durable/verify-postgresql.sh --ci` completed with exit 0, 969 passed, zero skips/failures, including 128 native handoff executions. `CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh` completed with exit 0, 311 passed, zero skips/failures, including 12 handoff executions in 15 policy-consumer tests and all eight expected negative fixtures. The PostgreSQL package SHA-256 is `c791a6df5a4b18af6365de55fde7c6bbbda36d7cfb0849d85103b8217bb8381e`.
+
+Ignored evidence includes `artifacts/issue-869/strict-native-frozen.log`, `pregate-native.log`, `packed-issue869.4-final-summary.json`, package hashes, before/after input manifests, and the public QA capture receipt. The [completion audit](issue-869-plan-completion-audit.md) maps all 44 IDs and supplements to named tests; the strict run covers all nine native handoff classes. The unchanged solution coverage command passed with 96.2728% aggregate line / 88.9468% aggregate branch and 99.3671% patch line / 98.6486% patch branch coverage. These runtime and coverage receipts, rather than authored source alone, support the updated status.
+
+Commit-uncertainty scenarios use the documented consumer adapter, and the provider is synthetic; those limits remain part of the evidence. The human first-use timing/comprehension aspiration, package publication and downstream adopter feasibility are unmeasured or separately owned and are not marked passed here. Further production or test changes invalidate the affected receipts.

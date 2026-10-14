@@ -130,14 +130,14 @@ For the public handoff consumer's first run, use the same supported packed comma
 dotnet --version
 docker info
 docker image inspect 'postgres:16.5@sha256:53f3e608f9475ce120ced2d0f430b89458d7faa28530e0b0977a6af64d294877' >/dev/null
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ```
 
 ```bash
 # Cold image: .NET 10 and Docker are ready; the exact PostgreSQL image is not cached.
 dotnet --version
 docker info
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ```
 
 Do not pre-pull the image when measuring the cold path; count its download and all package restore/build waits. These are verifier commands, not a handoff-only case selector.
@@ -146,7 +146,7 @@ The supported commands are the existing script interfaces; use the exact package
 
 ```bash
 ./Durable/verify-postgresql.sh --ci
-CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.1 ./Durable/verify-packed-consumers.sh
+CI=true APP_SURFACE_PACKAGE_VERSION=0.2.0-issue869.4 ./Durable/verify-packed-consumers.sh
 ./scripts/coverage-solution.sh
 ```
 
