@@ -21,7 +21,7 @@
     ".github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 20740,
       "mode": "0644",
-      "sha256": "f80357ccbab65a8f7450b27b0e95ea5433d33d38f43353a80a5b370afbdfd15e"
+      "sha256": "031dc96a9316615206449a16fbdce04f293452775f888aacdca59b60cbb90899"
     },
     ".github/issue779-csharp-native/check_n10_pending_start.py": {
       "bytes": 10460,
@@ -31,7 +31,7 @@
     ".github/issue779-csharp-native/checkpoint-n10-pending-start.sh": {
       "bytes": 89890,
       "mode": "0644",
-      "sha256": "03441250b704dc6e608dd11eefdcd2d26e1ec10ee384eb425e2d7a9e6987f94e"
+      "sha256": "cc08911fe4489417b43bc4a288fca76fd73317b8bd05efb4faa3d9d2f2bfd19c"
     },
     ".github/issue779-csharp-native/prepare-os-audit-v2.py": {
       "bytes": 33200,
@@ -41,12 +41,12 @@
     ".github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 25059,
       "mode": "0644",
-      "sha256": "dbd2843a0f60aaacfadf2a15652e9ac050fc9916aa756b11db40366a99da6bb1"
+      "sha256": "2602bf6e73832e7423e6e8a6dccdf72e99f4121d4032281ba6db69120444fab5"
     },
     ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9046,
       "mode": "0644",
-      "sha256": "1dc6127076df11504b22306552eac4c30533437139140b671f64ade1643f3678"
+      "sha256": "63d9ac4b107f623976d96e92cb88969d12ca6fa72459e5b3becd8e9308d0dcf4"
     },
     ".github/issue779-csharp-native/retain-native.sh": {
       "bytes": 11724,
@@ -56,7 +56,7 @@
     ".github/issue779-csharp-native/run-native.py": {
       "bytes": 62162,
       "mode": "0644",
-      "sha256": "c011bdc1e9bcce96a39241bd28b9c4982472f11b9a196db89a6a9df81a02e3a6"
+      "sha256": "3db1d23201d7db0d8823faaa86bf8a3e48c5af4a896777c2f2373d0fa4a0dd08"
     },
     ".github/issue779-csharp-native/source-review.json": {
       "bytes": 3498,

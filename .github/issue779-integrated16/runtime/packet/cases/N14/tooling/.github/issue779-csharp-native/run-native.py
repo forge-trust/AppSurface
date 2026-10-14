@@ -29,14 +29,14 @@ PREPARATION_SHA = 'cad6643b4f264365bd63586912c383a303fd1c04c3d1925086c84cbe53a12
 WRAPPERS = {'N13': ('checkpoint-n13-owner-killed.sh','cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc'),
             'N14': ('checkpoint-n14-owner-stopped.sh','d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2')}
 # Zero slots are deliberate fail-closed external integration gates until the final input DAG is reviewed.
-REVIEWED_FILES = {'acquire-inbound.sh':'1f8d9b1e5dc62c9c375c6f3a4bdfabca8585a18277643af09264c2ba564fc613','prepare-root-inputs-v2.sh':'9088e5457ee32f3483a1334eda522e7141380ea24187e793358173678387aa15',
+REVIEWED_FILES = {'acquire-inbound.sh':'7f7e88faa1a8c8e4d43bbbbe7a57b95e6645d05819def08afc032fdf3c033528','prepare-root-inputs-v2.sh':'d02b1712eb4a5d94802263e1c4a7f5ba1f79b20c23a8513c5bf6d08579c8db34',
  'checkpoint-n13-owner-killed.sh':'cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc',
  'checkpoint-n14-owner-stopped.sh':'d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2',
  'checkpoint-owner-death-common.sh':'4e3452b31d620aba7c735d44a9d08ef7fcc81a76b8eef8bdce9ad9e612340793','check_owner_death_record.py':'276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1',
  'preparation.json':PREPARATION_SHA,'README.md':'b731fd4d3ee12b17453a858c7f69d0fb8a20f315867c5f13d4871167aad8093c',
  'test_owner_death_data.py':'d6ed2a10feb3643304d9d7a1bcfbf74886dd3df7455e8dabe1b657fe40e5b02d',
  'prepare-os-audit-v2.py':'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
- 'source-review.json':'5403e023c3531fcf9ef575af7a31ecaa6b18a90a05f6602bcf5545e0327a45af',
+ 'source-review.json':'65ab011840997afb473c4cd0e9271e601ae8d3b08761c4d09a508ff12b2caf42',
  'prepare-case-workspace.py':'35c800b257bc046042871b34f46e7b74a088847cbc2d0b6a91856e1a8429bbe3',
  'test_build_receipt_contracts.py':'0a926f3423df2235bd249dd5b7603d4993ed60e60c8a9d55a3a9fd38984732b2',
  'test_workspace_arguments.py':'90aa4924ee2c2a068c4304654d23a70e3aa4a6b241f07fa69dbe06c029054767'}

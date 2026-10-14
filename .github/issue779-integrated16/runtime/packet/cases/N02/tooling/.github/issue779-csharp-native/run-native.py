@@ -27,11 +27,11 @@ PINS = {
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': 'b072ab925ef797f0664d5fb88f2f704a12d14173d19924de28a3f522a34b928d',
-    'checkpoint-n01-n02-v5.sh': 'e2879a97039dae265c515ad663cb4dcaaa2f468855590e1f5036c6a1f4b16829',
+    'prepare-root-inputs-v2.sh': '0501a8a4986cd417e17a77f36eaac62a8664c432a94930ee5cd584a11e1c5d93',
+    'checkpoint-n01-n02-v5.sh': 'bc26acfbc2728b367b110534bf4acc2b9f21759c8a596a80640787802fc9fee6',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
     'source-review.json': '09fef890ed350fbcb64d62bc41d442695218584f00707b87a7268ca063d6b9b3',
-    'acquire-inbound.sh': '9b959f98bd9a24144795b7e6c5cbb3a1c5d639279012e66b607897f5ddfbeeb8',
+    'acquire-inbound.sh': '4254ef0f141ea6a75ca680dae84cc79260a41b9fdb8b06c334bb3358f00fa550',
     'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',

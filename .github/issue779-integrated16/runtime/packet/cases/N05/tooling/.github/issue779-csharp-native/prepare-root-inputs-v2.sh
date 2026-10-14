@@ -33,7 +33,7 @@ done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
 [[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 957da1f23ff743778fa39e3e559511ccdb281345 ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == 22e1c7fb9237786c7cc80aa504a2306f1f442e5e004cd46f9d50478950ad6187 && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
+[[ ${values[fixture-sha256]} == cb4a81979eb6e47056a5adf9b4255660998cd8f90dbe1dc0411dcdbf54bdc563 && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
