@@ -125,8 +125,9 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
     /// </summary>
     /// <returns>A value task that completes after every acquired ownership lease has been attempted.</returns>
     /// <remarks>
-    /// A shared completion is published before cleanup starts. Calls from that cleanup flow return immediately;
-    /// independent callers join its completion and observe the same first error.
+    /// A shared completion is published under the ownership lock before cleanup starts outside that lock,
+    /// so user disposal code can coordinate with reload registrations on other threads. Calls from that cleanup
+    /// flow return immediately; independent callers join its completion and observe the same first error.
     /// Cleanup continues after secondary errors and rethrows the first error. The activation factory suppresses these
     /// errors only when it already has a primary creation failure. Once a host exists, file/provider cleanup follows
     /// the host's disposal policy; configuration leases additionally drain detached and partially constructed trees.
@@ -138,16 +139,25 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
             return ValueTask.CompletedTask;
         }
 
+        TaskCompletionSource? start = null;
+        Task completion;
         lock (_ownershipLock)
         {
             if (_disposeCompletion is null)
             {
-                _disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                _ = CompleteOwnedDisposalAsync(_disposeCompletion);
+                start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _disposeCompletion = start;
             }
 
-            return new ValueTask(_disposeCompletion.Task);
+            completion = _disposeCompletion.Task;
         }
+
+        if (start is not null)
+        {
+            _ = CompleteOwnedDisposalAsync(start);
+        }
+
+        return new ValueTask(completion);
     }
 
     private async Task CompleteOwnedDisposalAsync(TaskCompletionSource completion)
@@ -336,16 +346,25 @@ internal sealed class AspireProfileActivationHostBuilder : IHostBuilder, IAsyncD
                 return ValueTask.CompletedTask;
             }
 
+            TaskCompletionSource? start = null;
+            Task completion;
             lock (_disposeLock)
             {
                 if (_disposeCompletion is null)
                 {
-                    _disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                    _ = DisposeInnerAsync(_disposeCompletion);
+                    start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _disposeCompletion = start;
                 }
 
-                return new ValueTask(_disposeCompletion.Task);
+                completion = _disposeCompletion.Task;
             }
+
+            if (start is not null)
+            {
+                _ = DisposeInnerAsync(start);
+            }
+
+            return new ValueTask(completion);
         }
 
         private async Task DisposeInnerAsync(TaskCompletionSource completion)

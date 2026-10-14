@@ -201,6 +201,104 @@ public sealed class AspireProfileActivationHostBuilderTests
         Assert.Equal(0, factory.Returned.SyncDisposeCount);
     }
 
+    // Value: protects=cross-thread reload registration during synchronous provider cleanup;
+    // fails_when=the activation owner invokes user disposal while holding its ownership lock;
+    // why_new=existing reentry tests stay on the cleanup flow and cannot expose lock inversion.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RealHost_ProviderCleanupAllowsCrossThreadReloadRegistration(bool hostResolutionFails)
+    {
+        using var registered = new ManualResetEventSlim();
+        var provider = new ProbeProvider();
+        provider.Seed("cross-thread-registration", "available");
+        var factory = new ProbeFactory();
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]).UseServiceProviderFactory(factory);
+        IConfigurationRoot? configuration = null;
+        builder.ConfigureAppConfiguration((_, config) => config.Add(new ProbeSource(provider)));
+        builder.ConfigureServices((context, services) =>
+        {
+            configuration = Assert.IsAssignableFrom<IConfigurationRoot>(context.Configuration);
+            if (hostResolutionFails)
+            {
+                services.AddSingleton<IHost>(_ => throw new InvalidOperationException("cross-thread-host-failure"));
+            }
+        });
+
+        Task? registrationWork = null;
+        var registrationCompletedDuringCleanup = false;
+        factory.BeforeDisposal = () =>
+        {
+            var observedProvider = Assert.Single(configuration!.Providers,
+                candidate => candidate.TryGet("cross-thread-registration", out var value) && value == "available");
+            registrationWork = Task.Run(() =>
+            {
+                using var registration = observedProvider.GetReloadToken().RegisterChangeCallback(_ => { }, null);
+                registered.Set();
+            });
+            registrationCompletedDuringCleanup = registered.Wait(TimeSpan.FromSeconds(5));
+            return ValueTask.CompletedTask;
+        };
+
+        if (hostResolutionFails)
+        {
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+        else
+        {
+            builder.Build();
+        }
+
+        await ownership.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await registrationWork!.WaitAsync(TimeSpan.FromSeconds(5));
+        await ownership.DisposeAsync();
+
+        Assert.True(registrationCompletedDuringCleanup, "Reload registration was blocked until provider cleanup released the ownership lock.");
+        Assert.Equal(1, factory.Returned!.AsyncDisposeCount);
+        Assert.Equal(1, provider.DisposeCount);
+        Assert.Equal(0, provider.ActiveRegistrations);
+    }
+
+    // Value: protects=independent callers joining host cleanup before synchronous disposal returns;
+    // fails_when=the host invokes user disposal while holding its disposal lock;
+    // why_new=the independent execution context avoids the same-flow reentry shortcut.
+    [Fact]
+    public async Task RealHost_ProviderCleanupAllowsIndependentHostDisposalToJoin()
+    {
+        using var joined = new ManualResetEventSlim();
+        var factory = new ProbeFactory();
+        var ownership = new AspireProfileActivationHostBuilder();
+        var builder = ownership.ConfigureDefaults([]).UseServiceProviderFactory(factory);
+        IHost? host = null;
+        Task? independentCleanup = null;
+        var joinedDuringCleanup = false;
+        factory.BeforeDisposal = () =>
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                independentCleanup = Task.Run(async () =>
+                {
+                    var completion = Assert.IsAssignableFrom<IAsyncDisposable>(host).DisposeAsync().AsTask();
+                    joined.Set();
+                    await completion;
+                });
+            }
+
+            joinedDuringCleanup = joined.Wait(TimeSpan.FromSeconds(5));
+            return ValueTask.CompletedTask;
+        };
+        host = builder.Build();
+
+        await Assert.IsAssignableFrom<IAsyncDisposable>(host).DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+        await independentCleanup!.WaitAsync(TimeSpan.FromSeconds(5));
+        await ownership.DisposeAsync();
+
+        Assert.True(joinedDuringCleanup, "An independent caller could not join until host cleanup released the disposal lock.");
+        Assert.Equal(1, factory.Returned!.AsyncDisposeCount);
+        Assert.Equal(0, factory.Returned.SyncDisposeCount);
+    }
+
     [Fact]
     public async Task RealHost_SuccessRetainsSelectedProviderObjectAndHostDisposalPolicy()
     {
