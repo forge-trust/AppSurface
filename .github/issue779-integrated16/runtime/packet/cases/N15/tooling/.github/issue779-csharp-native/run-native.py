@@ -357,7 +357,13 @@ class Runner:
         require(started < work_end, 'phase-cleanup-reserve')
         try:
             for path in logs:
-                handles.append(path.open('xb', buffering=0))
+                # Diagnostic streams are private from creation, independent of caller umask.
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+                try:
+                    handles.append(os.fdopen(fd, 'wb', buffering=0))
+                except BaseException:
+                    os.close(fd)
+                    raise
             selected = argv
             if root_operation:
                 row['root_start_guard_created'] = True

@@ -1408,6 +1408,8 @@ remaining >/dev/null
 
 verify_tree "$n07_helper_root" "$n07_helper_map" "$n07_helper_map_sha256" "$n07_helper_nodes" "$n07_helper_nodes_sha256" tool 1 0
 ordinary_os_batch_full_pass final
+verify_tree "$n07_helper_root" "$n07_helper_map" "$n07_helper_map_sha256" "$n07_helper_nodes" "$n07_helper_nodes_sha256" tool 1 0
+ordinary_os_batch_full_pass final
 n07_phase_sample owner-window
 n07_owner_start_ms=$(monotonic_ms) || fail N07-original-clock
 n07_end_ms=$((n07_owner_start_ms+240000))
@@ -1433,8 +1435,6 @@ ancestor "$workspace/worker"; ancestor "/run/appsurface-evidence-n07-$G"
 request_sha=$(bounded sha256sum "$request"); request_sha=${request_sha:0:64}
 descriptor_sha=$(bounded sha256sum "$descriptor"); descriptor_sha=${descriptor_sha:0:64}
 pin_file "$request" "$request_sha" 65536; pin_file "$descriptor" "$descriptor_sha" 65536
-verify_tree "$n07_helper_root" "$n07_helper_map" "$n07_helper_map_sha256" "$n07_helper_nodes" "$n07_helper_nodes_sha256" tool 1 0
-ordinary_os_batch_full_pass final
 helper_remaining_ms=$((n07_end_ms-$(monotonic_ms)))
 ((helper_remaining_ms>5000)) || fail N07-original-helper-work-expired
 helper_seconds=$((helper_remaining_ms/1000)); ((helper_seconds>5)) || fail N07-helper-original-bound
