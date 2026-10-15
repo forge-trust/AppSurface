@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fixed N15 live observer. It has no signal retry, fallback signal, or deadline renewal."""
 import argparse
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -34,7 +35,7 @@ def require(condition, reason):
 
 DIAGNOSTIC_STAGE = "preflight"
 DIAGNOSTIC_STAGES = ('preflight', 'phase-read', 'admission-window', 'process-identities', 'account-snapshot', 'worker-membership', 'pre-signal-recheck', 'pidfd-signal', 'owner-terminal', 'worker-terminal', 'consumed-guard', 'result')
-DIAGNOSTIC_REASONS = ("phase-generation-syntax", "phase-record-byte-bound", "phase-record-json", "phase-phase-shape", "phase-phase-binding", "phase-worker-unit-generation", "phase-job-path-shape", "phase-parser-rejected", 'cgroup-node', 'cgroup-path', 'cgroup-pid-syntax', 'cgroup-procs-bound', 'cgroup-root', 'cgroup-symlink', 'deadline-order', 'explicit-execution-flag-required', 'fixed-case-unit', 'generated-account-identity', 'generated-account-membership', 'generated-account-nss-missing', 'generated-worker-account-name', 'generation-syntax', 'guard-ancestor-custody', 'guard-armed-remains', 'guard-consumed-bytes', 'guard-consumed-custody', 'guard-directory-custody', 'identity-window-expired', 'original-deadline-expired', 'owner-kill-terminal', 'owner-process-binding', 'parser-custody', 'parser-loader', 'parser-pin', 'phase-file-custody', 'phase-open-substitution', 'phase-read-substitution', 'pidfd-owner-recheck', 'pre-signal-identity-changed', 'proc-cgroup-shape', 'proc-credential-fields', 'proc-credentials', 'proc-file-bound', 'proc-file-read', 'proc-process-state', 'proc-stat-shape', 'root-linux-required', 'systemd-output-encoding', 'systemd-output-fields', 'systemd-output-key', 'systemd-output-shape', 'systemd-query-failed', 'unit-account-lookup', 'unit-account-range', 'unit-account-shape', 'unit-control-group', 'unit-main-pid', 'unit-restart-policy', 'unit-syntax', 'worker-account-contract', 'worker-cgroup-membership', 'worker-cgroup-not-empty', 'worker-not-started', 'worker-process-binding', 'worker-replacement', 'worker-terminal-fields', 'worker-terminal-not-observed')
+DIAGNOSTIC_REASONS = ("unit-reference-binding", "unit-reference-open", "unit-reference-timeout", "unit-reference-call", "reference-marker-custody", "reference-marker-write", "reference-marker-release", "phase-generation-syntax", "phase-record-byte-bound", "phase-record-json", "phase-phase-shape", "phase-phase-binding", "phase-worker-unit-generation", "phase-job-path-shape", "phase-parser-rejected", 'cgroup-node', 'cgroup-path', 'cgroup-pid-syntax', 'cgroup-procs-bound', 'cgroup-root', 'cgroup-symlink', 'deadline-order', 'explicit-execution-flag-required', 'fixed-case-unit', 'generated-account-identity', 'generated-account-membership', 'generated-account-nss-missing', 'generated-worker-account-name', 'generation-syntax', 'guard-ancestor-custody', 'guard-armed-remains', 'guard-consumed-bytes', 'guard-consumed-custody', 'guard-directory-custody', 'identity-window-expired', 'original-deadline-expired', 'owner-kill-terminal', 'owner-process-binding', 'parser-custody', 'parser-loader', 'parser-pin', 'phase-file-custody', 'phase-open-substitution', 'phase-read-substitution', 'pidfd-owner-recheck', 'pre-signal-identity-changed', 'proc-cgroup-shape', 'proc-credential-fields', 'proc-credentials', 'proc-file-bound', 'proc-file-read', 'proc-process-state', 'proc-stat-shape', 'root-linux-required', 'systemd-output-encoding', 'systemd-output-fields', 'systemd-output-key', 'systemd-output-shape', 'systemd-query-failed', 'unit-account-lookup', 'unit-account-range', 'unit-account-shape', 'unit-control-group', 'unit-main-pid', 'unit-restart-policy', 'unit-syntax', 'worker-account-contract', 'worker-cgroup-membership', 'worker-cgroup-not-empty', 'worker-not-started', 'worker-process-binding', 'worker-replacement', 'worker-terminal-fields', 'worker-terminal-not-observed')
 
 
 def failure_diagnostic(stage, error):
@@ -475,7 +476,93 @@ def consumed_guard(generation):
             "consumed_marker_same_generation": True}
 
 
-def observe_and_kill(args):
+class UnitReference:
+    """Keep only selected worker-unit metadata loaded; never starts/stops a unit."""
+    def __init__(self):
+        self.lib = None
+        self.bus = ctypes.c_void_p()
+        self.unit = None
+
+    def acquire(self, unit, deadline):
+        require(self.lib is None and re.fullmatch(r"appsurface-evidence-worker-[0-9a-f]{32}\.service", unit) is not None, "unit-reference-binding")
+        remaining(deadline)
+        self.lib = ctypes.CDLL("/usr/lib/x86_64-linux-gnu/libsystemd.so.0")
+        self.lib.sd_bus_open_system.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+        self.lib.sd_bus_open_system.restype = ctypes.c_int
+        self.lib.sd_bus_set_method_call_timeout.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+        self.lib.sd_bus_set_method_call_timeout.restype = ctypes.c_int
+        self.lib.sd_bus_call_method.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p]
+        self.lib.sd_bus_call_method.restype = ctypes.c_int
+        self.lib.sd_bus_message_unref.argtypes = [ctypes.c_void_p]
+        self.lib.sd_bus_message_unref.restype = ctypes.c_void_p
+        self.lib.sd_bus_close_unref.argtypes = [ctypes.c_void_p]
+        self.lib.sd_bus_close_unref.restype = ctypes.c_void_p
+        try:
+            require(self.lib.sd_bus_open_system(ctypes.byref(self.bus)) >= 0 and self.bus.value is not None, "unit-reference-open")
+            self._call(b"RefUnit", unit, deadline)
+            self.unit = unit
+        except BaseException:
+            self.close_now()
+            raise
+
+    def _call(self, method, unit, deadline):
+        require(method in (b"RefUnit", b"UnrefUnit") and self.bus.value is not None, "unit-reference-binding")
+        left = remaining(deadline)
+        require(self.lib.sd_bus_set_method_call_timeout(self.bus, min(left, 1000) * 1000) >= 0, "unit-reference-timeout")
+        reply = ctypes.c_void_p()
+        try:
+            code = self.lib.sd_bus_call_method(self.bus, b"org.freedesktop.systemd1", b"/org/freedesktop/systemd1", b"org.freedesktop.systemd1.Manager", method, None, ctypes.byref(reply), b"s", ctypes.c_char_p(unit.encode("ascii")))
+            require(code >= 0, "unit-reference-call")
+            remaining(deadline)
+        finally:
+            if reply.value is not None:
+                self.lib.sd_bus_message_unref(reply)
+
+    def close(self, deadline):
+        try:
+            if self.unit is not None:
+                self._call(b"UnrefUnit", self.unit, deadline)
+        finally:
+            self.close_now()
+
+    def close_now(self):
+        if self.lib is not None and self.bus.value is not None:
+            self.lib.sd_bus_close_unref(self.bus)
+        self.bus = ctypes.c_void_p()
+        self.unit = None
+
+
+def reference_markers(generation):
+    require(re.fullmatch(r"[0-9a-f]{32}", generation) is not None, "generation-syntax")
+    root = Path("/run/appsurface-evidence-fixture") / generation
+    st = root.lstat()
+    require(stat.S_ISDIR(st.st_mode) and st.st_uid == st.st_gid == 0 and stat.S_IMODE(st.st_mode) == 0o700, "reference-marker-custody")
+    return root / "unit-reference.ready", root / "unit-reference.release"
+
+
+def hold_reference_until_release(generation, deadline):
+    """Announce complete partial JSON, then keep the bus connection through replay/finalization."""
+    ready, release = reference_markers(generation)
+    remaining(deadline)
+    fd = os.open(ready, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        require(os.write(fd, b"ready\n") == 6, "reference-marker-write")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    while True:
+        remaining(deadline)
+        try:
+            raw = read_fd(release, 8)
+        except FileNotFoundError:
+            time.sleep(min(.02, remaining(deadline) / 1000))
+            continue
+        require(raw == b"release\n", "reference-marker-release")
+        remaining(deadline)
+        return
+
+
+def observe_and_kill(args, reference):
     global DIAGNOSTIC_STAGE
     DIAGNOSTIC_STAGE = "preflight"
     require(os.geteuid() == 0 and sys.platform == "linux", "root-linux-required")
@@ -487,6 +574,7 @@ def observe_and_kill(args):
                     args.job_deadline_boot_ms, args.work_deadline_boot_ms)
     DIAGNOSTIC_STAGE = 'phase-read'
     raw, phase = wait_phase(args.phase_stderr, args.case_generation, phase_end)
+    reference.acquire(phase["unit"], phase_end)
     owner = OWNER_PREFIX + args.case_generation + ".service"
     require(phase["unit"] == WORKER_PREFIX + args.case_generation + ".service", "fixed-case-unit")
     DIAGNOSTIC_STAGE = 'admission-window'
@@ -598,13 +686,18 @@ def main():
     parser.add_argument("--work-deadline-boot-ms", required=True, type=int)
     args = parser.parse_args()
     require(args.execute, "explicit-execution-flag-required")
+    reference = UnitReference()
     try:
-        result = observe_and_kill(args)
+        result = observe_and_kill(args, reference)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")), flush=True)
+        hold_reference_until_release(args.case_generation, args.job_deadline_boot_ms)
+        reference.close(args.job_deadline_boot_ms)
     except (OSError, ValueError, KeyError, Reject, subprocess.SubprocessError, OverflowError) as error:
         print(failure_diagnostic(DIAGNOSTIC_STAGE, error), file=sys.stderr)
         print("N15_OBSERVER_REJECTED", file=sys.stderr)
         return 2
-    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    finally:
+        reference.close_now()
     return 0
 
 

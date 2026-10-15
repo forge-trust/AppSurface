@@ -3,7 +3,7 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly HERE=${BASH_SOURCE[0]%/*}
-readonly OBSERVER_SHA256=e339e34189b940660163c4c22ef9168c78d79e76a9fa57ad374df1a9e04f3b42
+readonly OBSERVER_SHA256=6215ea0bf33d24e8fc1547bcf7614ac0657b781cf4dd07738e069c6ecc3bee58
 readonly PARSER_SHA256=fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877
 readonly RETRY_SHA256=9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6
 readonly FINALIZER_SHA256=af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507
@@ -76,10 +76,38 @@ systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i 
 launch_pid=$!
 printf 'N15_CSHARP_OWNER_DISPATCHED\n'
 observer_status=0
+observer_pid=
+release_observer(){
+  [[ -n $observer_pid ]] || return 0
+  if [[ ! -e $result_dir/unit-reference.release && ! -L $result_dir/unit-reference.release ]]; then
+    local pending=$result_dir/unit-reference.release.pending
+    (set -o noclobber; printf 'release\n' >"$pending") || return 1
+    mv -n -- "$pending" "$result_dir/unit-reference.release" || return 1
+    [[ ! -e $pending && ! -L $pending ]] || return 1
+  fi
+  local status=0
+  wait "$observer_pid" || status=$?
+  observer_pid=
+  observer_status=$status
+  return "$status"
+}
+trap 'original_status=$?; release_observer || true; exit "$original_status"' EXIT
+[[ ! -e $result_dir/unit-reference.ready && ! -L $result_dir/unit-reference.ready \
+   && ! -e $result_dir/unit-reference.release && ! -L $result_dir/unit-reference.release \
+   && ! -e $result_dir/unit-reference.release.pending && ! -L $result_dir/unit-reference.release.pending ]] || fail reference-marker-reuse
 /usr/bin/env -i PATH=/usr/bin:/usr/sbin LANG=C LC_ALL=C PYTHONHASHSEED=0 /usr/bin/python3.12 -I -S -B "$HERE/observe_n15_pending_start.py" --execute \
   --case-generation "$generation" --phase-stderr "$phase_stderr" \
   --startup-deadline-boot-ms "$startup_deadline" --admission-deadline-boot-ms "$admission_deadline" \
-  --job-deadline-boot-ms "$job_deadline" --work-deadline-boot-ms "$work_deadline" >"$partial" || observer_status=$?
+  --job-deadline-boot-ms "$job_deadline" --work-deadline-boot-ms "$work_deadline" >"$partial" &
+observer_pid=$!
+while [[ ! -s $result_dir/unit-reference.ready ]]; do
+  (( $(boot_ms)<work_deadline )) || fail reference-ready-deadline
+  kill -0 "$observer_pid" 2>/dev/null || fail reference-observer-ended
+  sleep 0.02
+done
+[[ ! -L $result_dir/unit-reference.ready \
+   && $(stat -Lc '%u:%g:%a:%h:%s' -- "$result_dir/unit-reference.ready") == 0:0:600:1:6 \
+   && $(cat -- "$result_dir/unit-reference.ready") == ready ]] || fail reference-ready-custody
 wait "$launch_pid" || launch_status=$?
 [[ ! -e /proc/$launch_pid && ! -L /proc/$launch_pid ]] || fail original-owner-launch-not-joined
 [[ $(stat -Lc %s -- "$phase_stderr") -le 8192 && $(stat -Lc %s -- "$partial") -le 65536 \
@@ -89,6 +117,7 @@ wait "$launch_pid" || launch_status=$?
    && $(stat -Lc '%u:%g:%a:%h' -- "$result_dir/owner-launch.stdout") == 0:0:600:1 \
    && $(stat -Lc '%u:%g:%a:%h' -- "$result_dir/owner-launch.stderr") == 0:0:600:1 ]] || fail joined-file-custody
 [[ $observer_status == 0 && -s $phase_stderr && -s $partial ]] || fail source-phase-observation
+kill -0 "$observer_pid" 2>/dev/null || fail reference-observer-ended
 retry_out=$result_dir
 bounded "$work_deadline" /usr/bin/bash --noprofile --norc "$HERE/n15-guard-reactivation-retry.sh" --execute \
   --generation "$generation" --owner-unit "$owner" --worker-unit "$worker" \
@@ -99,6 +128,7 @@ bounded "$work_deadline" /usr/bin/bash --noprofile --norc "$HERE/n15-guard-react
 [[ -s $retry_out/reactivation-measurement.json && ! -L $retry_out/reactivation-measurement.json \
    && $(stat -Lc '%u:%g:%a:%h' -- "$retry_out/reactivation-measurement.json") == 0:0:600:1 ]] || fail replay-measurement-missing
 if grep -Fq '"phase":"start-transient-unit-reply"' "$retry_out/retry.stderr"; then fail replay-reemitted-start-phase; fi
+kill -0 "$observer_pid" 2>/dev/null || fail reference-observer-ended
 /usr/bin/timeout --foreground --signal=KILL --kill-after=1 "$(awk -v ms="$((job_deadline-$(boot_ms)))" 'BEGIN{if(ms<1)exit 1;printf "%.3f",ms/1000}')" \
   /usr/bin/python3.12 -I -S -B "$HERE/finalize_n15_observation.py" --execute \
   --generation "$generation" --result-directory "$result_dir" --joined-launch-pid "$launch_pid" \
@@ -107,4 +137,6 @@ for file in account-cleanup.json n15-final-record.json n15-record-summary.json; 
   [[ -f $result_dir/$file && ! -L $result_dir/$file \
      && $(stat -Lc '%u:%g:%a:%h' -- "$result_dir/$file") == 0:0:600:1 ]] || fail final-record-custody
 done
+release_observer || fail reference-observer-final-join
+[[ $observer_status == 0 ]] || fail reference-observer-final-status
 printf 'N15_OWNER_LAUNCH_JOIN_MEASURED:launch=%s:observer=%s:stdout=%s:phase_stderr=%s\n' "$launch_status" "$observer_status" "$(stat -Lc %s -- "$result_dir/owner-launch.stdout")" "$(stat -Lc %s -- "$phase_stderr")"
