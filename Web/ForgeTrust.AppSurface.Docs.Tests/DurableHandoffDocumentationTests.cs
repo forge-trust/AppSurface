@@ -11,6 +11,51 @@ public sealed class DurableHandoffDocumentationTests
     private const string HandoffReadmeHref =
         "ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff";
 
+    [Theory]
+    [InlineData(GuidePath)]
+    [InlineData("docs/plans/issue-869-plan-completion-audit.md")]
+    [InlineData("docs/plans/issue-869-transaction-bound-handoff-fence.md")]
+    public async Task HandoffDocumentation_RepositoryLinksTargetExportableSources(string documentPath)
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var sourceRoot = Path.Join(Path.GetTempPath(), "AppSurfaceDocsHandoffLinks", Guid.NewGuid().ToString("N"));
+        try
+        {
+            CopySourceDocument(repository, sourceRoot, documentPath);
+            var harvester = new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance);
+            var docs = await harvester.HarvestAsync(sourceRoot);
+            var document = new HtmlParser().ParseDocument(Assert.Single(docs).Content);
+            var anchors = document.QuerySelectorAll("a[href]");
+            Assert.NotEmpty(anchors);
+            foreach (var anchor in anchors)
+            {
+                var href = anchor.GetAttribute("href")!;
+                if (href.StartsWith('#') || Uri.TryCreate(href, UriKind.Absolute, out var external)
+                    && external.Scheme is "https" or "http" or "mailto")
+                {
+                    continue;
+                }
+
+                // These authored pages link harvested Markdown/C# sources relatively. Raw repository artifacts
+                // must use external source URLs; local workspace paths cannot be served by the docs exporter.
+                Assert.False(Path.IsPathRooted(href), $"{documentPath} links a local absolute path: {href}");
+                var path = href.Split('#', '?')[0];
+                Assert.True(Path.GetExtension(path) is ".md" or ".cs",
+                    $"{documentPath} links a source the docs exporter does not harvest: {href}");
+                var documentDirectory = TestPathUtils.PathUnder(repository, Path.GetDirectoryName(documentPath)!);
+                var relativeTarget = Path.GetRelativePath(repository, Path.GetFullPath(path, documentDirectory));
+                Assert.False(relativeTarget.StartsWith("..", StringComparison.Ordinal),
+                    $"{documentPath} links outside the repository: {href}");
+                var target = TestPathUtils.PathUnder(repository, relativeTarget);
+                Assert.True(File.Exists(target), $"{documentPath} links a missing source: {href}");
+            }
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task HandoffFenceGuide_ShouldResolvePackageLinkAndRenderCanonicalConsumerSnippet()
     {

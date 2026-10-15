@@ -167,6 +167,8 @@ public sealed class PostgreSqlDurableHandoffRejectionTests
     [InlineData(true, "expired-lease", DurableProblemCodes.LeaseLost)]
     [InlineData(false, "missing-lease", DurableProblemCodes.LeaseLost)]
     [InlineData(true, "missing-lease", DurableProblemCodes.LeaseLost)]
+    [InlineData(false, "missing-lease-owner", DurableProblemCodes.ClaimLost)]
+    [InlineData(true, "missing-lease-owner", DurableProblemCodes.ClaimLost)]
     [InlineData(false, "missing-permit", DurableProblemCodes.ClaimLost)]
     [InlineData(true, "missing-permit", DurableProblemCodes.ClaimLost)]
     [InlineData(false, "permit-status", DurableProblemCodes.ClaimLost)]
@@ -193,6 +195,9 @@ public sealed class PostgreSqlDurableHandoffRejectionTests
                 break;
             case "missing-lease":
                 await fixture.UpdateWorkAsync("lease_expires_at=NULL");
+                break;
+            case "missing-lease-owner":
+                await fixture.UpdateWorkAsync("lease_owner=NULL");
                 break;
             case "missing-permit":
                 permit = permit with { PermitId = Guid.NewGuid() };

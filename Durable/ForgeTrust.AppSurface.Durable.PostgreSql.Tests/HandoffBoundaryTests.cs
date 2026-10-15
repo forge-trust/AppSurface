@@ -227,7 +227,7 @@ public sealed class HandoffBoundaryTests
         await PostgreSqlDurableHandoffTestSupport.CreateLedgerAsync(lab);
         await using var connection = await lab.Database.DataSource.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-        var invocation = lab.Fence.EnterInvocation(lab.Permit);
+        using var invocation = lab.Fence.EnterInvocation(lab.Permit);
         var callbackEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseCallback = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var callbackCount = 0;
@@ -255,7 +255,6 @@ public sealed class HandoffBoundaryTests
         }
         finally
         {
-            invocation.Dispose();
             releaseCallback.TrySetResult();
         }
 
@@ -486,10 +485,12 @@ public sealed class HandoffBoundaryTests
         Assert.Equal(newEpoch, rotated.ActiveEpoch);
         await appUpdate.WaitAsync(TimeSpan.FromSeconds(8));
 
-        var staleConnection = new NpgsqlCommand("SELECT 1;", ownerConnection);
-        await Assert.ThrowsAnyAsync<NpgsqlException>(async () => await staleConnection.ExecuteScalarAsync());
-        Assert.True(ownerConnection.State is ConnectionState.Broken or ConnectionState.Closed);
-        await staleConnection.DisposeAsync();
+        await using (var staleConnection = new NpgsqlCommand("SELECT 1;", ownerConnection))
+        {
+            await Assert.ThrowsAnyAsync<NpgsqlException>(async () => await staleConnection.ExecuteScalarAsync());
+            Assert.True(ownerConnection.State is ConnectionState.Broken or ConnectionState.Closed);
+        }
+
         await ownerTransaction.DisposeAsync();
         await ownerConnection.DisposeAsync();
         await using (var replacement = await ownerDataSource.OpenConnectionAsync())

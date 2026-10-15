@@ -259,7 +259,7 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
     private const string DispatcherPassword = "handoff-dispatcher-test-password";
     private const string RuntimePassword = "handoff-runtime-test-password";
     private const string TestConnectionOptions = "-c lock_timeout=20s -c statement_timeout=30s -c idle_in_transaction_session_timeout=45s";
-    private static long _nextTestId;
+    private long _nextTestId;
 
     private HandoffPostgreSqlFixture(
         PostgreSqlIntegrationTestDatabase database,

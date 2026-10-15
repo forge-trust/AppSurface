@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/Projects/forge-trust/runnable__mars/.gstack/tmp/autoplan/main-autoplan-restore-20261013-230708.md" -->
+<!-- Historical autoplan restore point is retained in local review evidence. -->
 ## URGENT, outside this plan
 
 None.
@@ -594,7 +594,7 @@ Pre-release reversibility is 5/5 (additive source with no conversion); after pub
 
 ### Section 11: Design & UX Review
 
-Scope detection matched external HTML documentation URLs, with no application screen, component, visual noun or rendering requirement. Evaluate the reader journey as discoverability -> contract -> runnable example -> failures -> proof; docs must clearly label planned versus supported behavior and provisional versus committed results. Loading/empty/error/success/partial application-screen states, responsive breakpoints, contrast and touch controls are not applicable to this API-only change. Required journey: `issue -> package README -> compiled consumer -> refusal guide -> verification receipts`; the dedicated Design phase will confirm applicability rather than fabricate visual scores.
+Scope detection matched external HTML documentation URLs, with no application screen, component, visual noun or rendering requirement. Evaluate the reader journey as discoverability -> contract -> executable example -> failures -> proof; docs must clearly label planned versus supported behavior and provisional versus committed results. Loading/empty/error/success/partial application-screen states, responsive breakpoints, contrast and touch controls are not applicable to this API-only change. Required journey: `issue -> package README -> compiled consumer -> refusal guide -> verification receipts`; the dedicated Design phase will confirm applicability rather than fabricate visual scores.
 
 ### NOT in scope
 
@@ -789,7 +789,7 @@ Methodology read: `autoplan-dx-methodology-fv6u90/methodology.md`, SHA-256 `ce18
 | Product | Documented start → useful result | Time/evidence | Relevant DX choice and source |
 | --- | --- | --- | --- |
 | Wolverine | Configured application database/message storage → durable messaging | Unmeasured here; official docs | Explicit storage, durable endpoints and transaction integration steps; [durability guide](https://wolverinefx.io/guide/durability/). |
-| NServiceBus | Quickstart prerequisites → sending and processing messages; outbox separately configured | Unmeasured here; different endpoint | Runnable tutorial plus separate persistence/outbox guidance; [quickstart](https://docs.particular.net/tutorials/quickstart/), [outbox](https://docs.particular.net/nservicebus/outbox/). |
+| NServiceBus | Quickstart prerequisites → sending and processing messages; outbox separately configured | Unmeasured here; different endpoint | Executable tutorial plus separate persistence/outbox guidance; [quickstart](https://docs.particular.net/tutorials/quickstart/), [outbox](https://docs.particular.net/nservicebus/outbox/). |
 | MassTransit | Configured persistence/application → transactional outbox | Unmeasured here; different endpoint | Decision table separates consumer and application-scope outboxes; [official outbox configuration](https://masstransit.massient.com/configuration/middleware/outbox). |
 | AppSurface #869 | Equipped machine, first visit to handoff entry point → public-only example run and understood commit/denial result | Unknown; plan only. Cold setup plausibly tens of minutes, reviewer estimate | Existing strict packed rail and disposable local PostgreSQL setup reused, with explicit eligibility and outcome timeline. |
 
@@ -1157,7 +1157,7 @@ Completion Summary:
 - Parallelization: 1 sequential authority lane, 0 independent implementation lanes; watcher/review support only.
 - Lake Score: N/A, 0 scored user answers during auto-decisions.
 - Four-section issues_found: 10, with overlapping sources; scope issues separate, native issues 2.
-- Test plan: [saved engineering artifact](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261014-003415.md) read back before close; no tests executed.
+- Test plan: the saved engineering artifact was read back before close; no tests executed during this review. The repository's [handoff test plan](issue-869-handoff-test-plan.md) records the implementation scenarios and later execution evidence.
 
 Suppressed findings: none. No native finding was silently suppressed.
 
@@ -1175,7 +1175,7 @@ Disposition: original scope retained; mechanical refinements applied; host polic
 
 ### Final autoplan gate prepared
 
-Review complete with concerns; gate_rev=1, final approval pending. Full synthesis/tasks: [review record](/Users/andrew/Projects/forge-trust/runnable__mars/.gstack/tmp/autoplan/review-record.md). [Owner brief](/Users/andrew/Projects/forge-trust/runnable__mars/.gstack/tmp/autoplan/brief.md). Three provisional Taste choices retained. Historical design approval is unchanged; no implementation/runtime proof or outside consensus is claimed.
+Review complete with concerns; gate_rev=1, final approval pending. Full synthesis/tasks and the owner brief were retained in local review evidence; the approval below records the selected directions. Three provisional Taste choices retained. Historical design approval is unchanged; no implementation/runtime proof or outside consensus is claimed.
 
 ### Final autoplan approval — 2026-10-14
 
