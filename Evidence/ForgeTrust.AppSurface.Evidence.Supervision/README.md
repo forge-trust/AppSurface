@@ -1541,6 +1541,25 @@ its pump observer is absent, and the allocation-fault writer is not used. The sh
 complete compile/test/native qualification remain pending integration review; this source merge is not
 a native acceptance claim.
 
+### N07 parent identity failure family
+
+The [original stderr observer](SupervisionN07PrecleanupObservation.cs) accepts exactly the fixed
+`Allocation` / `CheckParentIdentity` / `Io` / `AllocateCatchBeforeCallbackRethrow` frame, with no
+terminal, authority or acceptance claim. The [artifact root identity check](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceLinuxArtifactRoot.cs)
+throws `IOException` when its retained parent identity or policy fails; the [existing CLI classifier](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs)
+and [precleanup encoder](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceN07PrecleanupFault.cs) preserve that `Io` family.
+`Admission`, another operation, malformed or duplicate fields, an incomplete line and later pump failure
+remain rejected. This fixed diagnostic family does not change allocation, identity, custody or admission policy.
+
+The observer should be used only for the existing private N07 original-pump checkpoint. Its frame is
+detached data and cannot substitute for authenticated READY, original process/task ownership, two EOFs,
+post-pump group sampling, or the [strict failed settlement](LinuxN07FailureSettlement.cs). The
+[rejected-frame transfer](#private-n07-rejected-frame-transfer) remains available when framing fails;
+neither path clears lifetime failure or grants physical settlement, account release or native acceptance.
+A synthetic `Admission` frame previously hid the producer/consumer mismatch, so the [CLI producer control](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceN07PrecleanupFaultTests.cs)
+now binds the actual `IOException` classifier and encoder to exact bytes consumed by the [observer controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionN07OwnedCheckpointTests.cs).
+The existing friend graph is preserved; these are split portable controls, not one cross-assembly call or Linux execution proof.
+
 ### Accepted socket cancellation boundary
 
 [LinuxControlListener](LinuxControlListener.cs) uses its accept token solely to interrupt
