@@ -236,6 +236,44 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
         Assert.False(Directory.Exists(runner.ProofRoot));
     }
 
+    [Fact]
+    public async Task Failed_native_setup_retains_validated_acquisition_without_certifying_server_or_smoke()
+    {
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive);
+        var identity = SafeNativeIdentity() with { ServerVersion = null, ServerVersionNumber = null };
+        var path = Path.Join(_root, "native-acquisition-failure.json");
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(CreateRequest(path, runNativeSmoke: true),
+            CandidateArtifacts(), nativeSmoke: (_, _, _) =>
+            {
+                var failure = new PackageIndexException(SecretSentinel);
+                NativePostgreSqlFailure.Annotate(failure, NativePostgreSqlFailureStage.InitDbTimeout);
+                throw failure;
+            }, nativeAcquisitionIdentity: () => identity);
+
+        Assert.False(receipt.Succeeded);
+        Assert.False(receipt.NativeSmoke);
+        Assert.Null(receipt.NativeTools);
+        Assert.Equal(identity, receipt.NativeAcquisition);
+        Assert.Null(receipt.NativeAcquisition!.ServerVersion);
+        Assert.Equal("native-initdb-timeout", receipt.FailurePhase);
+        Assert.True(receipt.CleanupComplete);
+        Assert.DoesNotContain(SecretSentinel, File.ReadAllText(path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Native_acquisition_observer_is_not_called_when_consumer_fails_before_native_attempt()
+    {
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, failOperation: "archive-tests");
+        var calls = 0;
+        var path = Path.Join(_root, "before-native-acquisition.json");
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(CreateRequest(path, runNativeSmoke: true),
+            CandidateArtifacts(), nativeSmoke: (_, _, _) => Task.CompletedTask,
+            nativeAcquisitionIdentity: () => { calls++; return SafeNativeIdentity(); });
+        Assert.False(receipt.Succeeded);
+        Assert.Null(receipt.NativeAcquisition);
+        Assert.Equal(0, calls);
+    }
+
     [Theory]
     [InlineData(0, "native-acquisition")]
     [InlineData(1, "native-initdb")]
@@ -309,6 +347,54 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
             Assert.Contains(runner.Requests, command => command.OperationName == "uninstall");
             Assert.Contains(runner.Requests, command => command.OperationName == "absence");
         }
+    }
+
+    [Theory]
+    [InlineData("authored-tests")]
+    [InlineData("archive-tests")]
+    [InlineData("feed-tests")]
+    [InlineData("replacement-tests")]
+    [InlineData("first-work")]
+    [InlineData("replacement-first-work")]
+    public async Task Failed_test_phases_retain_only_safe_observation_after_deleting_raw_results(string operation)
+    {
+        string? rawPath = null;
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, failOperation: operation,
+            afterCommand: command =>
+            {
+                if (command.OperationName != operation) return;
+                var arguments = command.Arguments.ToList();
+                var results = arguments[arguments.IndexOf("--results-directory") + 1];
+                Assert.Contains("trx;LogFileName=proof.trx", arguments);
+                if (!OperatingSystem.IsWindows())
+                    Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(results));
+                rawPath = Path.Join(results, "proof.trx");
+                File.WriteAllText(rawPath, """
+                    <TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+                      <Results><UnitTestResult testId="failed" outcome="Failed" testName="consumer-proof-secret-must-not-be-retained" /></Results>
+                      <TestDefinitions><UnitTest id="failed"><TestMethod className="Known.Tests" name="Fails" /></UnitTest></TestDefinitions>
+                      <ResultSummary><Counters total="1" executed="1" passed="0" failed="1" /></ResultSummary>
+                    </TestRun>
+                    """);
+            });
+        var receiptPath = Path.Join(_root, operation + "-observation.json");
+
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(CreateRequest(receiptPath), CandidateArtifacts());
+
+        Assert.False(receipt.Succeeded);
+        Assert.Equal(operation, receipt.FailurePhase);
+        Assert.True(receipt.CleanupComplete);
+        var phase = Assert.Single(receipt.Phases, item => item.Id == operation);
+        var observation = Assert.IsType<DurableTemplateTestObservation>(phase.TestRun);
+        Assert.Equal("observed", observation.Status);
+        Assert.Equal(1, observation.Failed);
+        Assert.Equal("0bf784bd5ab562aaeb78b5a8c621e86d55c04d7d4c198cac795c4132fad29fdc", Assert.Single(observation.FailedMethodSha256));
+        Assert.NotNull(rawPath);
+        Assert.False(File.Exists(rawPath));
+        Assert.False(Directory.Exists(runner.ProofRoot));
+        var json = File.ReadAllText(receiptPath);
+        Assert.DoesNotContain(SecretSentinel, json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Known.Tests", json, StringComparison.Ordinal);
     }
 
     [Theory]

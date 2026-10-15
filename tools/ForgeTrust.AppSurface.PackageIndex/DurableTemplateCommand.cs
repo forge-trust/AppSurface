@@ -30,10 +30,12 @@ internal static class DurableTemplateCommand
             options.PackageVersion, options.Report, SourceCommit: options.SourceCommit,
             RunFirstWork: OperatingSystem.IsLinux(), RunNativeSmoke: options.NativePgBin is not null);
         NativePostgreSqlToolIdentity? nativeIdentity = null;
+        NativePostgreSqlToolIdentity? acquiredIdentity = null;
         return await new DurableTemplateConsumerProof(runner).RunAsync(request, rows,
             options.NativePgBin is null ? null : (root, environment, token) =>
-                RunNativeSmokeAsync(options.NativePgBin, root, environment, runner, identity => nativeIdentity = identity, token),
-            cancellationToken, nativeToolIdentity: () => nativeIdentity);
+                RunNativeSmokeAsync(options.NativePgBin, root, environment, runner, identity => nativeIdentity = identity, token,
+                    acquisitionIdentitySink: identity => acquiredIdentity = identity),
+            cancellationToken, nativeToolIdentity: () => nativeIdentity, nativeAcquisitionIdentity: () => acquiredIdentity);
     }
 
     /// <summary>Runs the generated ordinary-startup smoke against one privately owned native PostgreSQL cluster.</summary>
@@ -44,22 +46,24 @@ internal static class DurableTemplateCommand
     /// <param name="identitySink">Receives the validated tool and server identity for the proof receipt.</param>
     /// <param name="cancellationToken">Cancels setup and smoke execution; bounded cluster cleanup still runs.</param>
     /// <param name="startClusterAsync">Optional test seam that returns an owned cluster. Production uses
-    /// <see cref="DurableTemplateNativePostgreSql.StartAsync(string, IExternalCommandRunner, CancellationToken, INativePostgreSqlToolDirectoryResolver?, INativePostgreSqlBootstrapRunner?, INativePostgreSqlRuntime?, NativePostgreSqlBudgets?)"/>
+    /// <see cref="DurableTemplateNativePostgreSql"/>
     /// with the fixed resolver for <paramref name="bin"/>.</param>
     /// <param name="disposeClusterAsync">Optional test seam observing the owned cluster's exact shared cleanup
     /// allowance. Production disposes the cluster using that allowance; the callback must also dispose its cluster.</param>
+    /// <param name="acquisitionIdentitySink">Optional observation of validated tools before cluster setup; this does not certify a running server.</param>
     /// <exception cref="PackageIndexException">Thrown when the generated smoke or its required output markers fail validation.</exception>
     internal static async Task RunNativeSmokeAsync(string bin, string root, IReadOnlyDictionary<string, string?> environment,
         IExternalCommandRunner runner, Action<NativePostgreSqlToolIdentity> identitySink, CancellationToken cancellationToken,
         Func<string, IExternalCommandRunner, CancellationToken, Task<DurableTemplateNativePostgreSql>>? startClusterAsync = null,
-        Func<DurableTemplateNativePostgreSql, int, ValueTask>? disposeClusterAsync = null)
+        Func<DurableTemplateNativePostgreSql, int, ValueTask>? disposeClusterAsync = null,
+        Action<NativePostgreSqlToolIdentity>? acquisitionIdentitySink = null)
     {
         // macOS user temp paths can exceed PostgreSQL's Unix-domain socket path limit.
         var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
         var ownedRoot = Path.Join(temporary, "appsurface-native-template-" + Guid.NewGuid().ToString("N"));
         var cluster = startClusterAsync is null
             ? await DurableTemplateNativePostgreSql.StartAsync(ownedRoot, runner, cancellationToken,
-                toolDirectoryResolver: new FixedNativeToolDirectory(bin))
+                toolDirectoryResolver: new FixedNativeToolDirectory(bin), toolIdentityObserved: acquisitionIdentitySink)
             : await startClusterAsync(ownedRoot, runner, cancellationToken);
         ExternalCommandResult? result = null;
         var cleanupRemaining = 20_000;

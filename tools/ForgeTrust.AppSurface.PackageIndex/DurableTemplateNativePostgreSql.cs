@@ -134,6 +134,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
     /// <param name="bootstrapRunner">Optional redirected-stdin initdb seam for tests.</param>
     /// <param name="runtime">Optional operating-system/process seam for tests.</param>
     /// <param name="budgets">Optional lower setup and cleanup limits for deterministic tests; production ceilings cannot be raised.</param>
+    /// <param name="toolIdentityObserved">Optional observer called once after tool paths, versions, and hashes are validated and before the private cluster root is created. The identity contains acquired-tool evidence only; server-version fields remain null until server verification succeeds. Observer exceptions are not suppressed.</param>
     /// <returns>An owned running cluster. The caller must dispose it.</returns>
     /// <exception cref="PackageIndexException">Thrown when tools are missing/mixed/old, setup fails, or cleanup is uncertain.</exception>
     internal static async Task<DurableTemplateNativePostgreSql> StartAsync(
@@ -143,7 +144,8 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         INativePostgreSqlToolDirectoryResolver? toolDirectoryResolver = null,
         INativePostgreSqlBootstrapRunner? bootstrapRunner = null,
         INativePostgreSqlRuntime? runtime = null,
-        NativePostgreSqlBudgets? budgets = null)
+        NativePostgreSqlBudgets? budgets = null,
+        Action<NativePostgreSqlToolIdentity>? toolIdentityObserved = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(ownedRoot);
         ArgumentNullException.ThrowIfNull(commandRunner);
@@ -172,6 +174,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 commandRunner,
                 acquisitionClock,
                 cancellationToken);
+            toolIdentityObserved?.Invoke(toolIdentity);
 
             failureStage = NativePostgreSqlFailureStage.Ownership;
             RequireFreshOwnedRoot(ownedRoot);
@@ -340,31 +343,44 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         => DisposeWithBudgetAsync(_cleanupTimeoutMilliseconds);
 
     /// <summary>
-    /// Stops and removes this cluster using a caller-shared cleanup allowance, capped by the fixture's 20-second
-    /// maximum. Callers coordinating generated-host and cluster teardown should pass the time remaining from their
-    /// single cleanup clock.
+    /// Stops and removes this cluster using one caller-shared allowance that includes waiting for another disposal
+    /// and is capped by the fixture's 20-second maximum. Callers coordinating generated-host and cluster teardown
+    /// should pass the time remaining from their single cleanup clock.
     /// </summary>
-    /// <param name="cleanupBudgetRemainingMilliseconds">Remaining milliseconds in the caller's shared cleanup budget.</param>
+    /// <param name="cleanupBudgetRemainingMilliseconds">Remaining milliseconds for both disposal-lock acquisition and cleanup in the caller's shared budget.</param>
     /// <returns>A task that completes after verified stop and owned-root removal.</returns>
+    /// <exception cref="PackageIndexException">The shared allowance expired before the disposal lock became available or before cleanup completed. The already-disposed case remains a no-op.</exception>
     internal async ValueTask DisposeWithBudgetAsync(int cleanupBudgetRemainingMilliseconds)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(cleanupBudgetRemainingMilliseconds);
-        await _disposeLock.WaitAsync();
+        var cleanupAllowanceMilliseconds = Math.Min(cleanupBudgetRemainingMilliseconds, _cleanupTimeoutMilliseconds);
+        var cleanupClock = Stopwatch.StartNew();
+        if (!await _disposeLock.WaitAsync(TimeSpan.FromMilliseconds(cleanupAllowanceMilliseconds)))
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            throw new PackageIndexException(
+                $"Native PostgreSQL shared cleanup budget expired while waiting for disposal; the owned root was retained at '{_rootDirectory}'.");
+        }
+
         try
         {
             if (_disposed)
             {
                 return;
             }
-            if (cleanupBudgetRemainingMilliseconds == 0)
+            var elapsedMilliseconds = checked((int)Math.Ceiling(cleanupClock.Elapsed.TotalMilliseconds));
+            var remainingCleanupMilliseconds = cleanupAllowanceMilliseconds - elapsedMilliseconds;
+            if (remainingCleanupMilliseconds <= 0)
             {
                 throw new PackageIndexException(
                     $"Native PostgreSQL shared cleanup budget expired; the owned root was retained at '{_rootDirectory}'.");
             }
 
-            await CleanupAsync(
-                allowLateStart: false,
-                Math.Min(cleanupBudgetRemainingMilliseconds, _cleanupTimeoutMilliseconds));
+            await CleanupAsync(allowLateStart: false, remainingCleanupMilliseconds);
             _bootstrapPassword = null;
             _disposed = true;
         }
@@ -1039,6 +1055,20 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
             {
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // This invocation created the marker with CreateNew; remove any incomplete bytes so the caller can
+            // safely remove the otherwise-empty partial root before returning the original cancellation.
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+                // The caller's ownership-checked partial-root cleanup reports any marker that could not be removed.
+            }
+            throw;
         }
         catch
         {

@@ -2,6 +2,10 @@
 
 This generated .NET 10 solution is an application-owned, public-preview example of a PostgreSQL-backed Durable Work host with an authenticated external wake. It contains no AppSurface source checkout or repository-test-project dependency. You own the generated host, Work contracts, authentication, deployment, and future upgrades.
 
+The generated test project copies its `xunit.runner.json` beside the test assembly on every build. That file disables assembly and collection parallelism so the deadline, cleanup and real transport probes run with the reviewed scheduling policy. Keep the copy rule when changing the test project; merely retaining the JSON in source does not configure the test runner. See the [generated-project upgrade checklist](https://github.com/forge-trust/AppSurface/blob/main/releases/durable-worker-template-shape-v1.md) when updating an existing project.
+
+Blocking setup and cleanup adapters are invoked on dedicated threads before their returned tasks are observed. This keeps a synchronous Docker adapter from occupying the thread-pool workers needed for cancellation and deadline continuations. The dedicated thread ends when the adapter returns its task; the full asynchronous operation remains tracked. This isolation does not abort a blocked adapter or certify cleanup: pending work still withholds success, and all operations share the existing cleanup deadline. See the [cleanup and recovery contract](https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md#recovery-and-release-evidence).
+
 ## Install, create, and run the first proof
 
 The template package version below is the authored coordinated baseline in this source tree. Use the exact compatible version published to your selected feed, retaining the prerelease suffix:

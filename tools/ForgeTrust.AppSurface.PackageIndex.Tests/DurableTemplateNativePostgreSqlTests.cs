@@ -317,6 +317,54 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     }
 
     [Fact]
+    public async Task OwnerMarkerWriteCancellationRemainsCancellationAndCleansPartialRoot()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        using var cancellation = new CancellationTokenSource();
+        NativePostgreSqlToolIdentity? observed = null;
+
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => fixture.StartAsync(
+            cancellation.Token,
+            identity =>
+            {
+                observed = identity;
+                cancellation.Cancel();
+            }));
+
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.NotNull(observed);
+        Assert.Null(observed.ServerVersion);
+        Assert.True(observed.Sha256.Count == 4);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
+    [Fact]
+    public async Task AcquiredToolIdentityIsObservedBeforeBootstrapFailureWithoutServerVersion()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Bootstrap.Result = new NativePostgreSqlBootstrapResult(1, TimedOut: false);
+        NativePostgreSqlToolIdentity? observed = null;
+        var observations = 0;
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync(
+            toolIdentityObserved: identity =>
+            {
+                observations++;
+                observed = identity;
+            }));
+
+        Assert.Equal("native-initdb-exit", NativePostgreSqlFailure.ReadReceiptPhase(error));
+        Assert.Equal(1, observations);
+        Assert.NotNull(observed);
+        Assert.Equal("16.5", observed.Version);
+        Assert.Null(observed.ServerVersion);
+        Assert.Null(observed.ServerVersionNumber);
+        Assert.Equal(4, observed.Sha256.Count);
+        Assert.All(observed.Sha256.Values, hash => Assert.Matches("\\A[0-9a-fA-F]{64}\\z", hash));
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+    }
+
+    [Fact]
     public async Task TimedOutInitdbIsCleanedAndFailureDiagnosticOmitsBootstrapSecret()
     {
         using var fixture = new NativeClusterFixture(_root);
@@ -994,6 +1042,35 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
 
         fixture.Runner.ThrowOnStop = false;
         await cluster.DisposeWithBudgetAsync(1_000);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(cluster.OwnedRoot));
+    }
+
+    [Fact]
+    public async Task ConcurrentDisposalWaitConsumesItsSharedBudgetWithoutReleasingTheActiveLock()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        var cluster = await fixture.StartAsync();
+        fixture.Runner.BlockStopCommand = true;
+
+        var firstDisposal = cluster.DisposeWithBudgetAsync(2_000).AsTask();
+        await fixture.Runner.StopCommandEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            var secondDisposal = cluster.DisposeWithBudgetAsync(75).AsTask();
+            var error = await Assert.ThrowsAsync<PackageIndexException>(
+                () => secondDisposal.WaitAsync(TimeSpan.FromSeconds(1)));
+
+            Assert.Contains("shared cleanup budget expired", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.True(fixture.Runtime.ServerRunning);
+            Assert.True(Directory.Exists(cluster.OwnedRoot));
+        }
+        finally
+        {
+            fixture.Runner.ReleaseStopCommand.TrySetResult();
+        }
+        await firstDisposal.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.False(fixture.Runtime.ServerRunning);
         Assert.False(Directory.Exists(cluster.OwnedRoot));
     }
@@ -2235,7 +2312,9 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         internal FakeCommandRunner Runner { get; }
         internal FakeBootstrapRunner Bootstrap { get; }
 
-        internal Task<DurableTemplateNativePostgreSql> StartAsync(CancellationToken cancellationToken = default)
+        internal Task<DurableTemplateNativePostgreSql> StartAsync(
+            CancellationToken cancellationToken = default,
+            Action<NativePostgreSqlToolIdentity>? toolIdentityObserved = null)
             => DurableTemplateNativePostgreSql.StartAsync(
                 OwnedRoot,
                 Runner,
@@ -2243,7 +2322,8 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 new FixedNativePostgreSqlToolDirectoryResolver(BinDirectory),
                 Bootstrap,
                 Runtime,
-                new NativePostgreSqlBudgets(_setupMilliseconds, _cleanupMilliseconds));
+                new NativePostgreSqlBudgets(_setupMilliseconds, _cleanupMilliseconds),
+                toolIdentityObserved);
 
         public void Dispose()
         {
@@ -2297,6 +2377,9 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         };
         internal bool StopSucceeds { get; set; } = true;
         internal bool ThrowOnStop { get; set; }
+        internal bool BlockStopCommand { get; set; }
+        internal TaskCompletionSource StopCommandEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseStopCommand { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool RejectAuthentication { get; set; }
         internal Func<ExternalCommandRequest, ExternalCommandResult>? AuthenticationProbeHandler { get; set; }
         internal int StartExitCode { get; set; }
@@ -2350,6 +2433,10 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
                 {
                     throw new InvalidOperationException("fake runner exception detail");
                 }
+                if (BlockStopCommand)
+                {
+                    return CompleteBlockedStopCommandAsync(cancellationToken);
+                }
                 if (StopSucceeds)
                 {
                     runtime.ServerRunning = false;
@@ -2374,6 +2461,17 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             }
 
             return Task.FromResult(new ExternalCommandResult(1, string.Empty, "unexpected command"));
+        }
+
+        private async Task<ExternalCommandResult> CompleteBlockedStopCommandAsync(CancellationToken cancellationToken)
+        {
+            StopCommandEntered.TrySetResult();
+            await ReleaseStopCommand.Task.WaitAsync(cancellationToken);
+            if (StopSucceeds)
+            {
+                runtime.ServerRunning = false;
+            }
+            return new ExternalCommandResult(StopSucceeds ? 0 : 1, string.Empty, "secret-safe fake failure");
         }
     }
 

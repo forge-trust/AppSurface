@@ -28,13 +28,22 @@ internal sealed record DurableTemplateConsumerProofRequest(
 internal sealed record DurableTemplateProofArtifact(string PackageId, string Version, string Sha512);
 
 /// <summary>A bounded phase observation; command arguments and captured output are never retained in receipts.</summary>
-internal sealed record DurableTemplateProofPhase(string Id, double ElapsedSeconds, int ExitCode, bool Truncated);
+/// <param name="Id">Fixed proof command identifier.</param>
+/// <param name="ElapsedSeconds">Monotonic elapsed command duration.</param>
+/// <param name="ExitCode">Observed command exit code, including a negative launch or timeout result.</param>
+/// <param name="Truncated">Whether either bounded child stream exceeded its capture limit.</param>
+/// <param name="TestRun">Optional diagnostic-only TRX counters and failed-method hashes for test phases; omitted on other commands.</param>
+internal sealed record DurableTemplateProofPhase(string Id, double ElapsedSeconds, int ExitCode, bool Truncated,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    DurableTemplateTestObservation? TestRun = null);
 
 /// <summary>The version-one local receipt, emitted successfully only after assertions and owned cleanup finish.</summary>
 /// <remarks>Local receipts reuse trusted workflow provenance; this format asserts no portable authenticity.
 /// RunnerImage contains the hosted runner's ImageOS/ImageVersion identity, or is empty for a local diagnostic
 /// without those observations. An empty identity cannot authorize publication. Failed native proofs use a fixed
-/// native stage identifier in FailurePhase; raw exception messages and child output are never projected.</remarks>
+/// native stage identifier in FailurePhase. NativeAcquisition independently records validated tools before setup,
+/// without certifying a running server; absent validation leaves it unset. Raw exception messages and child
+/// output are never projected.</remarks>
 internal sealed record DurableTemplateProofReceipt(
     int SchemaVersion, string SourceCommit, string PackageVersion, string RuntimeIdentifier, string SdkVersion,
     string Image, string Mode, IReadOnlyList<DurableTemplateProofArtifact> Artifacts,
@@ -42,7 +51,9 @@ internal sealed record DurableTemplateProofReceipt(
     bool NativeSmoke, bool AuthorizedActivation, bool TerminalWork, bool ReadinessTransition, bool ExportedActivity,
     bool CleanupComplete, bool Succeeded, string FailureCode, string FailurePhase = "",
     string GeneratedContentSha256 = "", NativePostgreSqlToolIdentity? NativeTools = null,
-    bool SampleReplacement = false, string RunnerImage = "");
+    bool SampleReplacement = false, string RunnerImage = "",
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    NativePostgreSqlToolIdentity? NativeAcquisition = null);
 
 /// <summary>Verifies the installed artifact in fresh CLI/cache/output roots and emits bounded safe evidence.</summary>
 /// <remarks>
@@ -76,12 +87,14 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
     /// <param name="nativeSmoke">Optional separately owned native smoke callback; required when requested.</param>
     /// <param name="cancellationToken">Cancels work; independent bounded cleanup is still attempted.</param>
     /// <param name="nativeToolIdentity">Optional safe native tool observation, collected only after native smoke finishes.</param>
+    /// <param name="nativeAcquisitionIdentity">Optional validated acquisition observation, collected after a native attempt even when setup fails; server identity may be absent.</param>
     /// <returns>Successful or failed safe receipt. Callers must require Succeeded before advancing release.</returns>
     internal async Task<DurableTemplateProofReceipt> RunAsync(
         DurableTemplateConsumerProofRequest request, IReadOnlyList<PackageArtifactValidationReportEntry> artifacts,
         Func<string, IReadOnlyDictionary<string, string?>, CancellationToken, Task>? nativeSmoke = null,
         CancellationToken cancellationToken = default,
-        Func<NativePostgreSqlToolIdentity?>? nativeToolIdentity = null)
+        Func<NativePostgreSqlToolIdentity?>? nativeToolIdentity = null,
+        Func<NativePostgreSqlToolIdentity?>? nativeAcquisitionIdentity = null)
     {
         PackageVersionValidator.Require(request.PackageVersion, PackageVersionPolicy.StableOrPrereleaseNoBuildMetadata);
         DurableTemplateStaging.RequireRegularPath(request.ReceiptPath);
@@ -109,6 +122,7 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
         var feedInstalled = false;
         var authored = false;
         var native = false;
+        var nativeAttempted = false;
         var replacementVerified = false;
         var checkpointFlags = new bool[4];
         var inCleanup = false;
@@ -190,6 +204,7 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
             {
                 if (nativeSmoke is null) throw new PackageIndexException("Native smoke owner is required.");
                 currentPhase = "native-smoke";
+                nativeAttempted = true;
                 await nativeSmoke(generatedRoot, feedEnvironment, cancellationToken);
                 native = true;
             }
@@ -246,7 +261,8 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
         var receipt = new DurableTemplateProofReceipt(1, source, request.PackageVersion, RuntimeInformation.RuntimeIdentifier, sdk,
             PostgreSqlImage, request.Mode, identities, phases, pathInstalled, feedInstalled, authored, native,
             checkpointFlags[0], checkpointFlags[1], checkpointFlags[2], checkpointFlags[3], cleanup, succeeded && cleanup, failure, failurePhase, contentHash, native ? nativeToolIdentity?.Invoke() : null,
-            replacementVerified, ReadRunnerImage(Environment.GetEnvironmentVariable("ImageOS"), Environment.GetEnvironmentVariable("ImageVersion")));
+            replacementVerified, ReadRunnerImage(Environment.GetEnvironmentVariable("ImageOS"), Environment.GetEnvironmentVariable("ImageVersion")),
+            nativeAttempted ? nativeAcquisitionIdentity?.Invoke() : null);
         WriteReceipt(request.ReceiptPath, receipt);
         return receipt;
 
@@ -255,11 +271,21 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
         {
             currentPhase = id;
             if (phases.Count >= 32 && !inCleanup) throw new PackageIndexException("Template correctness command-record budget exceeded.");
+            var testResults = arguments[0] == "test" ? Path.Join(root, "test-results", id) : null;
+            if (testResults is not null)
+            {
+                Directory.CreateDirectory(testResults);
+                if (!OperatingSystem.IsWindows())
+                    File.SetUnixFileMode(testResults, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                arguments = [.. arguments, "--logger", "trx;LogFileName=proof.trx", "--results-directory", testResults];
+            }
             var started = Stopwatch.GetTimestamp();
             var result = await commandRunner.RunAsync(new ExternalCommandRequest("dotnet", arguments, directory, id,
                 "verifying installed Durable template", inCleanup ? Math.Min(timeout, 20_000) : timeout, environment, ExternalCapturePolicy.ReleaseProof), token ?? cancellationToken);
             if (phases.Count < 32)
-                phases.Add(new(id, Stopwatch.GetElapsedTime(started).TotalSeconds, result.ExitCode, result.StandardOutputTruncated || result.StandardErrorTruncated));
+                phases.Add(new(id, Stopwatch.GetElapsedTime(started).TotalSeconds, result.ExitCode,
+                    result.StandardOutputTruncated || result.StandardErrorTruncated,
+                    testResults is null ? null : DurableTemplateTestObservation.Read(Path.Join(testResults, "proof.trx"))));
             RequireResult(result);
             return result;
         }

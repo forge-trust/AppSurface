@@ -117,6 +117,8 @@ The exact connection-setting names and exporter configuration are part of the ge
 
 ## Bounds for correctness and timing evidence
 
+The generated fixture invokes potentially blocking setup and cleanup factories on dedicated threads so their synchronous entry cannot occupy the worker pool used by deadline continuations. It observes each returned task through the complete asynchronous lifetime, including late faults; a timed-out observation never certifies resource cleanup. Keep that isolation when adapting the [generated test fixture](../Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/tests/AppSurfaceDurableWorker.Tests/SetupOperationLifetime.cs). Dedicated invocation cannot forcibly abort an adapter, and asynchronous continuations still use their normal scheduler.
+
 These are observation limits for test and evidence workflows, not claims about measured performance:
 
 | Phase | Bound |
@@ -148,6 +150,8 @@ Correctness on the candidate/local feed is separate from replay against the prom
 For an already provisioned store, the [Durable runtime doctor](../Durable/runtime-doctor.md) provides read-only schema, epoch, retention, and optional heartbeat checks using the restricted runtime credential. Use a coordinated CLI/provider version that includes doctor, then run your application's composition verifier. Clean doctor output links this canonical starter while keeping that verifier application-owned. A clean doctor result does not prove the template's authorization, terminal Work, readiness transition, or exported activity.
 
 These are recovery instructions, not captured runtime messages. A successful local test is not a publication certificate. The expected schema-v1 receipt records source revision; exact template/provider IDs, versions, and hashes; SDK, OS, and image inputs; cache and clock mode; command identifiers; per-phase elapsed durations; exit/result status; all four checkpoint assertion booleans; and owned cleanup completion. This describes the receipt expected from implementation and is not a receipt from a completed run. Release evidence must bind the generated graph/content identity as well. Missing, failed, truncated, stale, or mismatched evidence withholds success.
+
+For a failed consumer-test phase, inspect its optional `TestRun` counters and failed-method hashes using the [safe test-observation reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-worker-template-proof-806). `missing` or `invalid` means the assertion identity remains unknown; it is not a passing test result. The receipt excludes raw test messages, theory arguments and TRX files, and its diagnostic counters never authorize publication.
 
 The package-consumer proof owns unique CLI-home, package-cache, generated-output, and evidence roots outside the source checkout. It uninstalls the exact-package candidate and proves the expected short name is absent before testing installation through its isolated feed. Cleanup applies only to those positively owned roots; it never clears shared user caches or deletes the source checkout. A preinstalled template, parent NuGet configuration, remote feed, or project reference cannot satisfy a missing artifact.
 

@@ -3,20 +3,31 @@ using System.Diagnostics;
 
 namespace DurableWorkerTemplate.Tests;
 
+/// <summary>Tracks owned adapter tasks while bounding cancellation and cleanup observation.</summary>
+/// <remarks>Factories may block before returning a task, so invocation uses a dedicated thread rather than
+/// the worker pool needed by deadline continuations. The returned task remains tracked through its full
+/// asynchronous lifetime. Observation expiry does not abort a factory or certify cleanup; late faults
+/// are observed and pending operations remain owned until they settle.</remarks>
 internal sealed class SetupOperationLifetime
 {
     private readonly ConcurrentDictionary<Task, string> _operations = new();
 
     internal int PendingCount => _operations.Count;
 
+    /// <summary>Invokes one owned adapter away from the worker pool and observes it until cancellation.</summary>
+    /// <param name="phase">Safe nonempty resource label retained while the operation is pending.</param>
+    /// <param name="operationFactory">Factory invoked once, even when observation is already canceled.</param>
+    /// <param name="cancellationToken">Bounds observation; it does not cancel or discard the owned operation.</param>
+    /// <returns>A task preserving completion, fault or observation cancellation.</returns>
     internal async Task AwaitAsync(string phase, Func<Task> operationFactory, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(phase);
         ArgumentNullException.ThrowIfNull(operationFactory);
 
         // Testcontainers and other external adapters can block before returning their Task.
-        // Move invocation itself off the caller so the phase token can always bound the wait.
-        var operation = Task.Run(operationFactory, CancellationToken.None);
+        // A dedicated invocation thread keeps a synchronous adapter from occupying the pool workers
+        // needed to observe cancellation and cleanup deadlines. Unwrap tracks its entire async lifetime.
+        var operation = InvokeBlockingFactory(operationFactory);
         _operations.TryAdd(operation, phase);
         _ = operation.ContinueWith(
             completed =>
@@ -72,6 +83,14 @@ internal sealed class SetupOperationLifetime
         }
     }
 
+    /// <summary>Stops the owner and observes pending setup using one shared cleanup allowance.</summary>
+    /// <param name="stopOwnerAsync">Optional owner-stop factory, isolated during synchronous invocation.</param>
+    /// <param name="totalBudget">Positive shared allowance for owner-stop and pending-task observation.</param>
+    /// <param name="childTerminationBudget">Positive observation reservation subtracted before owner-stop.</param>
+    /// <param name="failures">Collects safe failures without abandoning pending-operation observation.</param>
+    /// <returns>Whether the captured pending setup tasks settled; callers must also inspect stop failures.</returns>
+    /// <remarks>The factory receives the original stop allowance. A late owner stop remains observed without
+    /// extending the deadline. Empty pending setup returns true without invoking owner stop.</remarks>
     internal async Task<bool> StopAndObservePendingAsync(
         Func<TimeSpan, Task<bool>>? stopOwnerAsync,
         TimeSpan totalBudget,
@@ -104,8 +123,8 @@ internal sealed class SetupOperationLifetime
                 Task<bool> stopOperation;
                 try
                 {
-                    // Invoke the stop seam off-thread too: Docker process startup can block before it returns a Task.
-                    stopOperation = Task.Run(() => stopOwnerAsync(stopBudget), CancellationToken.None);
+                    // Docker process startup can block before returning a Task; keep deadline workers available.
+                    stopOperation = InvokeBlockingFactory(() => stopOwnerAsync(stopBudget));
                 }
                 catch (Exception exception)
                 {
@@ -169,4 +188,17 @@ internal sealed class SetupOperationLifetime
             TaskContinuationOptions.ExecuteSynchronously,
             TaskScheduler.Default);
     }
+
+    /// <summary>Invokes one potentially blocking owned factory on a dedicated thread.</summary>
+    /// <param name="factory">Factory whose synchronous entry must not occupy a deadline worker.</param>
+    /// <returns>The unwrapped full asynchronous lifetime, including factory faults and cancellation.</returns>
+    /// <remarks>The caller owns observation and cleanup. Invocation has no abort or timeout; asynchronous
+    /// continuations keep their normal scheduler after the dedicated invocation thread returns.</remarks>
+    internal static Task InvokeBlockingFactory(Func<Task> factory) => Task.Factory.StartNew(factory,
+        CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+        TaskScheduler.Default).Unwrap();
+
+    private static Task<T> InvokeBlockingFactory<T>(Func<Task<T>> factory) => Task.Factory.StartNew(factory,
+        CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+        TaskScheduler.Default).Unwrap();
 }

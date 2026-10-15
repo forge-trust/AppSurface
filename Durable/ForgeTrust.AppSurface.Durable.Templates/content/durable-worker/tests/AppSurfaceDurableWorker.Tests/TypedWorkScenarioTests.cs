@@ -191,6 +191,7 @@ public sealed partial class TypedWorkScenarioTests
         var sdkFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var fallback = new TaskCompletionSource<(string Id, TimeSpan Budget)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var sdkCalls = 0;
+        bool? sdkOnThreadPool = null;
         var identityReads = 0;
         var failures = new List<string>();
         var totalBudget = sdkMode == "fault" ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(50);
@@ -202,6 +203,7 @@ public sealed partial class TypedWorkScenarioTests
                 () => PostgreSqlFixture.DisposeOwnedContainerAsync(() =>
             {
                 Interlocked.Increment(ref sdkCalls);
+                sdkOnThreadPool = Thread.CurrentThread.IsThreadPoolThread;
                 sdkEntered.SetResult();
                 try
                 {
@@ -217,6 +219,7 @@ public sealed partial class TypedWorkScenarioTests
                     return Task.FromResult(removeSucceeds);
                 }, startedAt, totalBudget, failures), observation.Token);
             await sdkEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(sdkOnThreadPool);
             var removal = await fallback.Task.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.Equal(ownedId, removal.Id);
             Assert.InRange(removal.Budget, TimeSpan.FromMilliseconds(1), totalBudget);

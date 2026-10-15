@@ -62,6 +62,7 @@ public sealed class SetupOperationLifetimeTests
         var copy = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stopEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseStop = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool? stopOnThreadPool = null;
         _ = lifetime.AwaitAsync("container-start", () => copy.Task, CancellationToken.None);
         var failures = new List<string>();
         var startedAt = Stopwatch.GetTimestamp();
@@ -69,6 +70,7 @@ public sealed class SetupOperationLifetimeTests
         var cleanup = lifetime.StopAndObservePendingAsync(
             _ =>
             {
+                stopOnThreadPool = Thread.CurrentThread.IsThreadPoolThread;
                 stopEntered.TrySetResult();
                 releaseStop.Task.GetAwaiter().GetResult();
                 return Task.FromResult(true);
@@ -80,6 +82,7 @@ public sealed class SetupOperationLifetimeTests
         try
         {
             await stopEntered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(stopOnThreadPool);
             var settled = await cleanup;
             Assert.False(settled);
             Assert.Contains("owned-resource-stop-unfinished", failures);
@@ -146,11 +149,13 @@ public sealed class SetupOperationLifetimeTests
         var lifetime = new SetupOperationLifetime();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool? factoryOnThreadPool = null;
         using var cancellation = new CancellationTokenSource();
         var awaitingOperation = lifetime.AwaitAsync(
             "container-start",
             () =>
             {
+                factoryOnThreadPool = Thread.CurrentThread.IsThreadPoolThread;
                 entered.TrySetResult();
                 release.Task.GetAwaiter().GetResult();
                 return Task.CompletedTask;
@@ -160,6 +165,7 @@ public sealed class SetupOperationLifetimeTests
         try
         {
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(factoryOnThreadPool);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => awaitingOperation);
             Assert.Equal(1, lifetime.PendingCount);

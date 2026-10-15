@@ -285,6 +285,13 @@ public sealed class TemplateRepositoryContractTests
             reference => string.Equals(GetItemInclude(reference), "coverlet.collector", StringComparison.OrdinalIgnoreCase));
         AssertProjectProperty(testProject, "IsTestProject", "true");
         AssertProjectProperty(testProject, "IsPackable", "false");
+        var runnerConfiguration = Assert.Single(GetItems(testProject, "None"), item =>
+            (string?)item.Attribute("Update") == "xunit.runner.json");
+        Assert.Equal("PreserveNewest", (string?)runnerConfiguration.Attribute("CopyToOutputDirectory"));
+        using var runnerSettings = JsonDocument.Parse(await File.ReadAllTextAsync(
+            Path.Join(Path.GetDirectoryName(testProjectPath)!, "xunit.runner.json")));
+        Assert.False(runnerSettings.RootElement.GetProperty("parallelizeAssembly").GetBoolean());
+        Assert.False(runnerSettings.RootElement.GetProperty("parallelizeTestCollections").GetBoolean());
         var hostVersions = GetPinnedPackageReferences(hostProject, packageVersions);
         var testVersions = GetPinnedPackageReferences(testProject, packageVersions);
         Assert.NotEmpty(hostVersions);

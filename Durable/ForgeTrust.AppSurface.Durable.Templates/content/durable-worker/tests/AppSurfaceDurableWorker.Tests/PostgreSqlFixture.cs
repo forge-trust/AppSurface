@@ -626,7 +626,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(forceRemove);
         ArgumentNullException.ThrowIfNull(failures);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(totalBudget, TimeSpan.Zero);
-        var disposeTask = Task.Run(dispose, CancellationToken.None);
+        var disposeTask = SetupOperationLifetime.InvokeBlockingFactory(dispose);
         ObserveLateCompletion(disposeTask);
         var operations = new SetupOperationLifetime();
         var sdkFailures = new List<string>();

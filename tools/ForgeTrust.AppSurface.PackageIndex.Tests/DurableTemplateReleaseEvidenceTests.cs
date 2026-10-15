@@ -209,7 +209,7 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
         };
 
         var error = Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
-            _receipt with { NativeTools = invalidTools }, Source, _manifest, _root, "linux-x64", true));
+            _receipt with { NativeTools = invalidTools, NativeAcquisition = tools }, Source, _manifest, _root, "linux-x64", true));
 
         Assert.Equal("Native PostgreSQL tool/server identity is missing or unsupported.", error.Message);
     }
@@ -363,6 +363,26 @@ public sealed class DurableTemplateReleaseEvidenceTests : IDisposable
         Assert.Equal(Source, receipt.SourceCommit);
         Assert.Equal(_receipt.Artifacts[0], Assert.Single(receipt.Artifacts));
         Assert.DoesNotContain("credential", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Optional_diagnostics_round_trip_without_replacing_publication_checks()
+    {
+        var path = Path.Join(_root, "diagnostic-fields.json");
+        var phases = _receipt.Phases.ToArray();
+        var index = Array.FindIndex(phases, phase => phase.Id == "archive-tests");
+        phases[index] = phases[index] with { TestRun = new("observed", 1, 1, 0, 1, [new string('c', 64)]) };
+        DurableTemplateConsumerProof.WriteReceipt(path, _receipt with
+        {
+            Succeeded = false,
+            Phases = phases,
+            NativeAcquisition = _receipt.NativeTools,
+        });
+        var receipt = DurableTemplateReleaseEvidence.Read(path);
+        Assert.Equal(1, receipt.Phases[index].TestRun!.Failed);
+        Assert.Equal(_receipt.NativeTools!.Version, receipt.NativeAcquisition!.Version);
+        Assert.Throws<PackageIndexException>(() => DurableTemplateReleaseEvidence.Validate(
+            receipt, Source, _manifest, _root, "linux-x64", true));
     }
 
     [Fact]
