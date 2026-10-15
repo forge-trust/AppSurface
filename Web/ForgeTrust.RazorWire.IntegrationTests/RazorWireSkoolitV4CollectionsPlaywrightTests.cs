@@ -107,6 +107,14 @@ public sealed class RazorWireSkoolitV4CollectionsPlaywrightTests(RazorWireMvcPla
         Assert.Equal("Added date.", await OwnedStatusTextAsync(copiedDates));
 
         await copiedDate.Locator("select[name='Actions[10].Dates[8].Shape']").SelectOptionAsync("Discrete");
+        // Value: protects=the copied V4 date's Range-to-Discrete visibility and disabled controls;
+        // fails_when=the end fieldset remains visible or its child controls can submit;
+        // why_new=the invalid-post journey intentionally enables the fieldset after this transition;
+        // seam=none; no_claim=live Skoolit adoption, since this is the version-bound consumer fixture.
+        Assert.True(await copiedEnd.IsHiddenAsync());
+        Assert.True(await copiedEnd.EvaluateAsync<bool>("fieldset => fieldset.disabled"));
+        Assert.True(await copiedDate.Locator("select[name='Actions[10].Dates[8].EndMonth']").IsDisabledAsync());
+        Assert.True(await copiedDate.Locator("input[name='Actions[10].Dates[8].EndDay']").IsDisabledAsync());
         await copiedEnd.EvaluateAsync("fieldset => fieldset.disabled = false");
         var beforePost = await CaptureFormDataAsync(page);
         Assert.Equal(["4", "10", "9"], beforePost.ActionKeys);

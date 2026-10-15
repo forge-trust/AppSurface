@@ -255,14 +255,14 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
               const template = root.querySelector('template[data-rw-form-collection-template]');
               return {
                 Collection: root.getAttribute('data-rw-form-collection') ?? '',
-                Token: root.getAttribute('data-rw-form-collection-index-token') ?? '',
+                LocalPlaceholder: root.getAttribute('data-rw-form-collection-index-token') ?? '',
                 TemplateCollectionName: template?.content.querySelector('[name$=".Kind"]')?.getAttribute('name') ?? '',
                 TemplateHasLocalToken: template?.innerHTML.includes('__date_index__') ?? false
               };
             }
             """);
         Assert.Equal("Actions[10].Dates", inertTemplate.Collection);
-        Assert.Equal("__date_index__", inertTemplate.Token);
+        Assert.Equal("__date_index__", inertTemplate.LocalPlaceholder);
         Assert.Contains("Actions[10].Dates[__date_index__]", inertTemplate.TemplateCollectionName, StringComparison.Ordinal);
         Assert.True(inertTemplate.TemplateHasLocalToken);
 
@@ -430,7 +430,7 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
               const template = root.querySelector('template[data-rw-form-collection-template]');
               return {
                 Root: root.getAttribute('data-rw-form-collection') ?? '',
-                Token: root.getAttribute('data-rw-form-collection-index-token') ?? '',
+                LocalPlaceholder: root.getAttribute('data-rw-form-collection-index-token') ?? '',
                 MessageName: template?.content.querySelector('input[name$=".Message"]')?.name ?? '',
                 MessageId: template?.content.querySelector('input[name$=".Message"]')?.id ?? '',
                 HelpId: template?.content.querySelector('[data-reminder-help]')?.id ?? '',
@@ -441,7 +441,7 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
             }
             """);
         Assert.Equal("Actions[10].Dates[9].Reminders", localTemplate.Root);
-        Assert.Equal("__reminder_index__", localTemplate.Token);
+        Assert.Equal("__reminder_index__", localTemplate.LocalPlaceholder);
         Assert.Equal("Actions[10].Dates[9].Reminders[__reminder_index__].Message", localTemplate.MessageName);
         Assert.False(string.IsNullOrWhiteSpace(localTemplate.MessageId));
         Assert.False(string.IsNullOrWhiteSpace(localTemplate.HelpId));
@@ -1190,7 +1190,7 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
     private sealed class ReminderTemplateProbe
     {
         public string Root { get; set; } = string.Empty;
-        public string Token { get; set; } = string.Empty;
+        public string LocalPlaceholder { get; set; } = string.Empty;
         public string MessageName { get; set; } = string.Empty;
         public string MessageId { get; set; } = string.Empty;
         public string HelpId { get; set; } = string.Empty;
@@ -1254,7 +1254,7 @@ public sealed class RazorWireNestedCollectionsPlaywrightTests
     private sealed class InertTemplateProbe
     {
         public string Collection { get; set; } = string.Empty;
-        public string Token { get; set; } = string.Empty;
+        public string LocalPlaceholder { get; set; } = string.Empty;
         public string TemplateCollectionName { get; set; } = string.Empty;
         public bool TemplateHasLocalToken { get; set; }
     }

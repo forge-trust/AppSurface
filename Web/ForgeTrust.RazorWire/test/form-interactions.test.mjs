@@ -989,6 +989,99 @@ test('[G07] allocator handles numeric boundaries and reserves nested descendant 
     .find(input => input.name.endsWith('.Dates.index')).value), ['0', '7']);
 });
 
+// Value: protects=owned row carriers and control pairing after omitting a tombstone;
+// fails_when=surviving cloned controls or ClientIndex/RowIndex use a different row's key;
+// why_new=the existing duplicate cases did not place a tombstone before two live carrier rows;
+// seam=none; no_claim=real DOM and MVC binding, which have separate browser proofs.
+test('[G12] row carriers stay paired with live controls when an earlier tombstone is omitted', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document, {
+    childIndicesByParent: { 0: ['0', '7', '9'] }
+  });
+  const findInput = (row, name) => Array.from(row.querySelectorAll('input'))
+    .find(input => input.name === name);
+  const findCollection = (row, name) => Array.from(row.querySelectorAll('[data-rw-form-collection]'))
+    .find(root => root.getAttribute('data-rw-form-collection') === name);
+  const sourceDatesName = 'Actions[0].Dates';
+  const sourceDates = findCollection(fixture.row, sourceDatesName);
+  sourceDates.setAttribute('data-rw-form-collection-remove-mode', 'mark');
+
+  findInput(fixture.row, 'Actions[0].ClientIndex').value = '0';
+  findInput(fixture.row, 'Actions[0].RowIndex').value = '0';
+  const sourceRows = ownedRows(sourceDates);
+  for (const row of sourceRows) {
+    const key = row.getAttribute('data-rw-form-index');
+    const prefix = sourceDatesName + '[' + key + ']';
+    findInput(row, sourceDatesName + '.index').value = key;
+    findInput(row, prefix + '.ClientIndex').value = key;
+    findInput(row, prefix + '.RowIndex').value = key;
+    findInput(row, prefix + '.Kind').value = 'source-' + key;
+  }
+  const sourceSnapshots = sourceRows.map(row => {
+    const key = row.getAttribute('data-rw-form-index');
+    const prefix = sourceDatesName + '[' + key + ']';
+    return {
+      marker: findInput(row, sourceDatesName + '.index').value,
+      clientIndex: findInput(row, prefix + '.ClientIndex').value,
+      rowIndex: findInput(row, prefix + '.RowIndex').value,
+      kind: findInput(row, prefix + '.Kind').value
+    };
+  });
+
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+
+  const tombstone = sourceRows[0];
+  ownedCommand(tombstone, 'remove').dispatchEvent(createEvent('click'));
+  assert.equal(tombstone.getAttribute('data-rw-form-collection-row-state'), 'removed');
+  assert.equal(findInput(tombstone, sourceDatesName + '[0].Delete').value, 'true');
+  ownedCommand(fixture.row, 'duplicate').dispatchEvent(createEvent('click'));
+
+  const copy = ownedRows(fixture.root).find(row => row !== fixture.row);
+  const copiedParentKey = copy.getAttribute('data-rw-form-index');
+  const copiedParentPrefix = 'Actions[' + copiedParentKey + ']';
+  assert.equal(findInput(copy, copiedParentPrefix + '.ClientIndex').value, copiedParentKey);
+  assert.equal(findInput(copy, copiedParentPrefix + '.RowIndex').value, copiedParentKey);
+  assert.equal(findInput(fixture.row, 'Actions[0].ClientIndex').value, '0');
+  assert.equal(findInput(fixture.row, 'Actions[0].RowIndex').value, '0');
+
+  const copiedDatesName = copiedParentPrefix + '.Dates';
+  const copiedDates = findCollection(copy, copiedDatesName);
+  const copiedRows = ownedRows(copiedDates);
+  assert.equal(copiedRows.length, 2);
+  const copiedSnapshots = copiedRows.map(row => {
+    const key = findInput(row, copiedDatesName + '.index').value;
+    const prefix = copiedDatesName + '[' + key + ']';
+    return {
+      marker: key,
+      clientIndex: findInput(row, prefix + '.ClientIndex').value,
+      rowIndex: findInput(row, prefix + '.RowIndex').value,
+      kind: findInput(row, prefix + '.Kind').value
+    };
+  });
+
+  assert.deepEqual(copiedSnapshots.map(snapshot => snapshot.kind), ['source-7', 'source-9']);
+  assert.equal(copiedSnapshots.some(snapshot => snapshot.kind === 'source-0'), false);
+  assert.equal(new Set(copiedSnapshots.map(snapshot => snapshot.marker)).size, 2);
+  for (const snapshot of copiedSnapshots) {
+    assert.equal(['0', '7', '9'].includes(snapshot.marker), false);
+    assert.equal(snapshot.clientIndex, snapshot.marker);
+    assert.equal(snapshot.rowIndex, snapshot.marker);
+  }
+  assert.deepEqual(sourceRows.map(row => {
+    const key = row.getAttribute('data-rw-form-index');
+    const prefix = sourceDatesName + '[' + key + ']';
+    return {
+      marker: findInput(row, sourceDatesName + '.index').value,
+      clientIndex: findInput(row, prefix + '.ClientIndex').value,
+      rowIndex: findInput(row, prefix + '.RowIndex').value,
+      kind: findInput(row, prefix + '.Kind').value
+    };
+  }), sourceSnapshots);
+});
+
 test('[G14] recursive duplicate applies control, identity, delete, file, and copyable policies', () => {
   const { context, document } = loadRuntime();
   const fixture = buildNestedFixture(document, {
@@ -1343,6 +1436,167 @@ test('[G21] duplicate aborts when before-duplicate changes an owned collection r
   assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
     .some(item => /ownership changed|binding paths changed|markers changed/.test(item.message)
       && item.impact === 'Aborted; values retained.'));
+});
+
+test('[G21] add and duplicate abort when a listener corrupts an inert descendant marker', () => {
+  // Value: protects=usable descendant templates after the cancelable preparation event;
+  // fails_when=a malformed prototype marker is inserted or listener edits are rolled back;
+  // why_new=existing interference tests covered binding names and live markers only;
+  // seam=none; no_claim=browser focus or MVC binding, which have separate integration proofs.
+  for (const action of ['add', 'duplicate']) {
+    for (const depth of [2, 3]) {
+      for (const surface of ['clone', 'source']) {
+        for (const mutation of ['value', 'disabled', 'type']) {
+          const { context, document } = loadRuntime();
+          const fixture = buildNestedFixture(document, { includeGrandchildren: true });
+          const form = document.createElement('form');
+          form.appendChild(fixture.root);
+          document.body.appendChild(form);
+          let detachedRow;
+          let changedMarker;
+          let after = 0;
+          form.addEventListener(`razorwire:form-collection:before-${action}`, event => {
+            detachedRow = event.detail.row;
+            const inspectedRow = surface === 'clone' ? detachedRow : action === 'add' ? fixture.template.content.firstElementChild : fixture.row;
+            const dates = inspectedRow.querySelector('[data-rw-form-collection]');
+            let prototype = ownedTemplate(dates).content;
+            if (depth === 3) prototype = ownedTemplate(prototype.querySelector('[data-rw-form-collection]')).content;
+            changedMarker = prototype.querySelectorAll('input').find(input => input.name.endsWith('.index'));
+            assert.ok(changedMarker);
+            if (mutation === 'value') changedMarker.value = 'listener-changed-marker';
+            else if (mutation === 'disabled') changedMarker.disabled = true;
+            else changedMarker.type = 'text';
+          });
+          form.addEventListener(`razorwire:form-collection:${action}`, () => after++);
+          context.window.RazorWire.formInteractionsManager.scan();
+          context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+          const sourceSnapshot = () => fixture.row.querySelectorAll('input').map(input => ({ name: input.name, value: input.value, type: input.type, disabled: input.disabled }));
+          const sourceBefore = sourceSnapshot();
+          const command = action === 'add' ? fixture.add : ownedCommand(fixture.row, 'duplicate');
+          command.focus();
+          command.dispatchEvent(createEvent('click'));
+
+          const scenario = `${action}/${surface}/${depth}/${mutation}`;
+          assert.equal(ownedRows(fixture.root).length, 1, scenario);
+          assert.equal(detachedRow.isConnected, false, scenario);
+          assert.deepEqual(sourceSnapshot(), sourceBefore, scenario);
+          assert.equal(after, 0, scenario);
+          assert.equal(fixture.status.textContent, '', scenario);
+          assert.equal(document.activeElement, command, scenario);
+          if (mutation === 'value') assert.equal(changedMarker.value, 'listener-changed-marker', scenario);
+          else if (mutation === 'disabled') assert.equal(changedMarker.disabled, true, scenario);
+          else assert.equal(changedMarker.type, 'text', scenario);
+          assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+            .some(diagnostic => /template binding:.*missing/.test(diagnostic.message)
+              && diagnostic.impact === 'Aborted; values retained.'
+              && diagnostic.fix === 'Match template token and marker.'
+              && diagnostic.docs === 'Web/ForgeTrust.RazorWire/Docs/form-interactions.md#troubleshooting'), scenario);
+        }
+      }
+    }
+  }
+});
+
+test('[G21] add aborts when a listener replaces its template or source lineage', () => {
+  // Value: protects=the current authored Add source; fails_when=an invalidated template inserts stale markup;
+  // why_new=earlier ownership tests changed live roots and detached bindings only; seam=none.
+  for (const mutation of ['remove-template', 'replace-template', 'replace-source']) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document);
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    const source = fixture.template.content.firstElementChild;
+    let replacement;
+    let detachedRow;
+    let after = 0;
+    form.addEventListener('razorwire:form-collection:before-add', event => {
+      detachedRow = event.detail.row;
+      if (mutation === 'replace-source') {
+        replacement = source.cloneNode(true);
+        source.remove();
+        fixture.template.content.appendChild(replacement);
+      } else {
+        fixture.template.remove();
+        if (mutation === 'replace-template') {
+          replacement = fixture.template.cloneNode(true);
+          fixture.root.appendChild(replacement);
+        }
+      }
+    });
+    form.addEventListener('razorwire:form-collection:add', () => after++);
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    fixture.add.focus();
+    fixture.add.dispatchEvent(createEvent('click'));
+    assert.equal(ownedRows(fixture.root).length, 1, mutation);
+    assert.equal(detachedRow.isConnected, false, mutation);
+    assert.equal(after, 0, mutation);
+    assert.equal(fixture.status.textContent, '', mutation);
+    assert.equal(document.activeElement, fixture.add, mutation);
+    if (mutation === 'replace-source') {
+      assert.equal(source.parentNode, null);
+      assert.equal(fixture.template.content.firstElementChild, replacement);
+    } else {
+      assert.equal(fixture.template.isConnected, false);
+      assert.equal(ownedTemplate(fixture.root), replacement);
+    }
+    assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics().some(diagnostic =>
+      diagnostic.message === 'Collection "Actions" ownership changed.'
+      && diagnostic.impact === 'Aborted; values retained.' && diagnostic.fix === 'Keep owners stable.'
+      && diagnostic.docs === 'Web/ForgeTrust.RazorWire/Docs/form-interactions.md#troubleshooting'), mutation);
+  }
+});
+
+test('[G21] duplicate aborts when a listener moves a descendant owner or its direct parent', () => {
+  // Value: protects=live descendant ownership at insertion; fails_when=containment alone accepts a moved owner;
+  // why_new=prior checks retained names and keys without checking row/parent lineage; seam=none.
+  for (const mutation of ['row-owner', 'direct-parent']) {
+    const { context, document } = loadRuntime();
+    const fixture = buildNestedFixture(document, {
+      childIndicesByParent: { 0: ['0', '7'] }, includeGrandchildren: true,
+      grandchildIndicesByDate: { 0: ['0'] }
+    });
+    const form = document.createElement('form');
+    form.appendChild(fixture.root);
+    document.body.appendChild(form);
+    const dates = fixture.row.querySelector('[data-rw-form-collection="Actions[0].Dates"]');
+    const dateRows = ownedRows(dates);
+    const reminder = dateRows[0].querySelector('[data-rw-form-collection]');
+    const title = fixture.row.querySelector('input[name="Actions[0].Title"]');
+    title.value = 'Original action';
+    let newParent;
+    let detachedRow;
+    let after = 0;
+    form.addEventListener('razorwire:form-collection:before-duplicate', event => {
+      detachedRow = event.detail.row;
+      if (mutation === 'row-owner') newParent = dateRows[1];
+      else {
+        newParent = document.createElement('div');
+        dateRows[0].appendChild(newParent);
+      }
+      newParent.appendChild(reminder);
+    });
+    form.addEventListener('razorwire:form-collection:duplicate', () => after++);
+    context.window.RazorWire.formInteractionsManager.scan();
+    context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+    const command = ownedCommand(fixture.row, 'duplicate');
+    command.focus();
+    command.dispatchEvent(createEvent('click'));
+    assert.equal(ownedRows(fixture.root).length, 1, mutation);
+    assert.equal(detachedRow.isConnected, false, mutation);
+    assert.equal(reminder.parentElement, newParent, mutation);
+    assert.equal(reminder.getAttribute('data-rw-form-collection'), 'Actions[0].Dates[0].Reminders');
+    assert.equal(reminder.closest('[data-rw-form-collection-row]'), mutation === 'row-owner' ? dateRows[1] : dateRows[0]);
+    assert.equal(title.value, 'Original action');
+    assert.equal(after, 0, mutation);
+    assert.equal(fixture.status.textContent, '', mutation);
+    assert.equal(document.activeElement, command, mutation);
+    assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics().some(diagnostic =>
+      diagnostic.message === 'Collection "Actions" ownership changed.'
+      && diagnostic.impact === 'Aborted; values retained.' && diagnostic.fix === 'Keep owners stable.'
+      && diagnostic.docs === 'Web/ForgeTrust.RazorWire/Docs/form-interactions.md#troubleshooting'), mutation);
+  }
 });
 
 test('[G22] physical remove event reaches listeners through its connected collection owner', () => {

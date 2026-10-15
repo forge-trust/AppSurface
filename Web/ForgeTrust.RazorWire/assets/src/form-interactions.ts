@@ -71,7 +71,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 this.register(form);
             }
 
-            for (const form of Array.from(this.controllers.keys())) {
+            for (const form of this.controllers.keys()) {
                 if (!form.isConnected || !forms.has(form)) {
                     this.unregister(form);
                 }
@@ -189,23 +189,10 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private syncButtonToggle(toggle: HTMLElement) {
+            const expanded = toggle.getAttribute('aria-expanded');
             const key = (toggle.getAttribute('data-rw-form-toggle') ?? '').trim();
-            if (!key) {
-                this.syncToggle(toggle);
-                return;
-            }
-
-            const targets = this.targets(this.form, key);
-            if (targets.length === 0) {
-                this.syncToggle(toggle);
-                return;
-            }
-
-            const currentExpanded = toggle.getAttribute('aria-expanded');
-            const visible = currentExpanded === null
-                ? targets.every(target => (target as HTMLElement).hidden)
-                : currentExpanded !== 'true';
-
+            // syncToggle owns missing-key/target diagnostics before applying this proposed visibility.
+            const visible = expanded === null ? this.targets(this.form, key).every(target => (target as HTMLElement).hidden) : expanded !== 'true';
             this.syncToggle(toggle, visible);
         }
 
@@ -235,8 +222,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
             const visible = visibleOverride ?? this.toggleVisible(toggle);
             const firstTarget = targets[0] as HTMLElement;
-            const before = this.toggleEvent(toggle, firstTarget, 'razorwire:form-toggle:before-change', visible, true);
-            if (before.defaultPrevented) return;
+            if (!this.toggleEvent(toggle, firstTarget, 'razorwire:form-toggle:before-change', visible, true)) return;
 
             for (const target of targets) {
                 this.applyToggleTarget(toggle, target as HTMLElement, visible);
@@ -282,15 +268,11 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         private toggleVisible(toggle: HTMLElement) {
             const input = toggle as HTMLInputElement;
-            let active: boolean;
-            if (toggle.localName === 'input' && (input.type === 'checkbox' || input.type === 'radio')) {
-                active = input.checked;
-            } else if (toggle.localName === 'select' || toggle.localName === 'textarea' || toggle.localName === 'input') {
-                active = ((toggle as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value ?? '').length > 0;
-            } else {
-                active = toggle.getAttribute('aria-expanded') !== 'false';
-            }
-
+            const active = toggle.localName === 'input' && ['checkbox', 'radio'].includes(input.type)
+                ? input.checked
+                : ['input', 'select', 'textarea'].includes(toggle.localName)
+                    ? !!input.value
+                    : toggle.getAttribute('aria-expanded') !== 'false';
             return toggle.getAttribute('data-rw-form-toggle-invert') === 'true' ? !active : active;
         }
 
@@ -371,7 +353,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private canCommand(command: Element) {
-            return !!this.commandRoot(command) && this.focusable(command as HTMLElement);
+            return this.commandRoot(command) && this.focusable(command as HTMLElement);
         }
 
         private token(root: HTMLElement) { return root.getAttribute('data-rw-form-collection-index-token')?.trim() || '__index__'; }
@@ -384,15 +366,13 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             }
             const template = this.owned(root, 'template[data-rw-form-collection-template]')[0] as HTMLTemplateElement | undefined;
             if (!template) { this.fail(root, 'is missing a template.', templateFix); return null; }
-            const row = template.content.querySelector(rowSelector) as HTMLElement | null
-                ?? template.content.firstElementChild as HTMLElement | null;
+            const row = (template.content.querySelector(rowSelector) ?? template.content.firstElementChild) as HTMLElement | null;
             const prefix = `${this.name(root)}[${token}]`;
             const markers = row ? this.marker(row, this.name(root)) : [];
             const bound = row && this.controls(row).some(element => element.closest(rowSelector) === row
                 && (element.name === prefix || element.name.startsWith(`${prefix}.`)));
             if (!bound || (!markers.length && root.parentElement?.closest(rowSelector))
-                || (markers.length && (markers.length !== 1 || markers[0].type !== 'hidden'
-                || markers[0].disabled || markers[0].value !== token))) {
+                || (markers.length && (markers.length !== 1 || markers[0].type !== 'hidden' || markers[0].disabled || markers[0].value !== token))) {
                 this.fail(root, `template binding: ${token} missing.`, templateFix);
                 return null;
             }
@@ -424,7 +404,8 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         private clonePlan(root: HTMLElement, source: HTMLElement, oldIndex: string, index: string, duplicate: boolean) {
             const row = source.cloneNode(true) as HTMLElement;
             const pairs = new Map<HTMLElement, HTMLElement>();
-            const originals = [...this.bindings(source).keys()];
+            const sourceBindings = this.bindings(source);
+            const originals = [...sourceBindings.keys()];
             let position = 0;
             this.walk(row, element => pairs.set(originals[position++], element));
             // Only template contexts introduce unresolved tokens; concrete keys never do.
@@ -448,7 +429,6 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             });
             if (!prototypesValid) return null;
             const mappings: { old: string; next: string; oldKey: string; key: string; clone: HTMLElement; collection: string }[] = [];
-            const roots: { source: HTMLElement; prefix: string; keys: string }[] = [];
             const prepare = (owner: HTMLElement, sourceRow: HTMLElement, key: string, nextCollection: string, nextKey: string): boolean => {
                 const clone = pairs.get(sourceRow)!;
                 const old = `${this.name(owner)}[${key}]`;
@@ -458,7 +438,6 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                     if (childOwner.closest(rowSelector) !== sourceRow) continue;
                     const childPrefix = this.rebase(this.name(childOwner), [{ old, next }]);
                     if (!this.name(childOwner).startsWith(`${old}.`)) return this.fail(childOwner, 'invalid child prefix.', templateFix);
-                    roots.push({ source: childOwner, prefix: this.name(childOwner), keys: this.keys(childOwner) });
                     if (!this.validateRows(childOwner, this.name(childOwner), true)) return false;
                     const reserved = new Set<string>();
                     for (const child of this.rows(childOwner)) {
@@ -503,16 +482,25 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             this.clearValidation(row);
             if (!this.remapIds(row, mappings, root, prototypes)) return null;
             const bindings = this.bindings(row);
-            return { row, index, root, source, oldIndex, mappings, roots, bindings, duplicate, prefix: this.name(root), parent: root.parentElement, sourceParent: source.parentElement };
+            const template = duplicate ? null : this.template(root);
+            return { row, index, root, source, oldIndex, mappings, bindings, sourceBindings, duplicate, prefix: this.name(root), parent: root.parentNode, template };
         }
 
         /** Before-event listeners may edit values, but planned binding paths and their owners remain fixed. */
         private bindings(row: HTMLElement) {
-            const entries = new Map<HTMLElement, (string | HTMLElement | null)[]>();
+            const entries = new Map<HTMLElement, (string | Node | boolean | null)[]>();
             this.walk(row, element => {
-                entries.set(element, [...bindingAttributes.map(name => element.getAttribute(name)), element.parentElement]);
+                entries.set(element, [...bindingAttributes.map(name => element.getAttribute(name)), element.parentNode,
+                    ...(element instanceof HTMLInputElement && element.name.endsWith('.index') ? [element.type, element.value, element.disabled] : [])]);
             });
             return entries;
+        }
+
+        /** Compare topology and binding paths while allowing ordinary live value edits. */
+        private sameBindings(row: HTMLElement, expected: ReturnType<FormInteractionsController['bindings']>) {
+            const current = this.bindings(row);
+            return current.size === expected.size && [...expected].every(([element, entry]) =>
+                entry.every((value, position) => value === current.get(element)?.[position]));
         }
 
         private rebase(value: string, mappings: { old: string; next: string }[]) {
@@ -521,8 +509,6 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private matches(value: string, prefix: string) { return value === prefix || value.startsWith(`${prefix}.`) || value.startsWith(`${prefix}[`); }
-
-        private keys(root: HTMLElement) { return JSON.stringify(this.rows(root).map(row => this.rowIndex(row, this.name(root)))); }
 
         /** Document IDs are reserved once per operation; prototype maps remain fragment-local. */
         private remapIds(row: HTMLElement, mappings: { old: string; next: string }[], root: HTMLElement, prototypes: Map<Element | DocumentFragment, string[]>) {
@@ -612,20 +598,33 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         /** Reentrant listeners may mutate the live form; abort rather than rolling back their edits. */
         private validPlan(plan: NonNullable<ReturnType<FormInteractionsController['clonePlan']>>, command: HTMLElement, prepared: boolean) {
-            const { root, source, index } = plan;
-            const duplicate = plan.duplicate;
-            if (plan.row.isConnected || root.parentElement !== plan.parent || this.name(root) !== plan.prefix || !this.form.contains(root) || command.closest(rootSelector) !== root || !this.focusable(command)
-                || (duplicate && (source.parentElement !== plan.sourceParent || !root.contains(source) || source.closest(rootSelector) !== root || command.closest(rowSelector) !== source || this.rowIndex(source, this.name(root)) !== plan.oldIndex))) {
+            const { root, source, index, duplicate } = plan;
+            if (plan.row.isConnected || root.parentNode !== plan.parent || this.name(root) !== plan.prefix || !this.form.contains(root) || command.closest(rootSelector) !== root || !this.focusable(command)
+                || (duplicate && (!root.contains(source) || source.closest(rootSelector) !== root || command.closest(rowSelector) !== source || this.rowIndex(source, this.name(root)) !== plan.oldIndex))) {
                 return this.fail(root, ownerChanged, ownerFix);
             }
-            if (!this.validateRows(root, this.name(root), true)) return false;
-            const bindings = this.bindings(plan.row);
-            if (bindings.size !== plan.bindings.size || [...bindings].some(([element, entry]) => {
-                const expected = plan.bindings.get(element);
-                return !expected || entry.some((value, position) => value !== expected[position]);
-            }))
+            if (!duplicate && (!plan.template || this.template(root) !== plan.template
+                || this.token(root) !== plan.oldIndex
+                || (plan.template.content.querySelector(rowSelector) ?? plan.template.content.firstElementChild) !== source))
                 return this.fail(root, ownerChanged, ownerFix);
-            if (duplicate && plan.roots.some(owner => this.name(owner.source) !== owner.prefix || !source.contains(owner.source) || !this.validateRows(owner.source, owner.prefix, true) || this.keys(owner.source) !== owner.keys)) return this.fail(root, ownerChanged, ownerFix);
+            if (!this.validateRows(root, this.name(root), true)) return false;
+            for (const mapping of plan.mappings) {
+                const marker = this.marker(mapping.clone, mapping.collection);
+                const staged = mapping.clone === plan.row && !prepared;
+                if (staged && !marker.length) continue;
+                if (marker.length !== 1 || marker[0].disabled || marker[0].type !== 'hidden' || marker[0].value !== (staged ? mapping.oldKey : mapping.key) || (!staged && mapping.clone.getAttribute(indexAttribute) !== mapping.key))
+                    return this.fail(root, 'markers changed.', markerFix);
+            }
+            // Snapshots include inert descendants and marker properties as well as binding paths.
+            for (const [element, entry] of [...plan.bindings, ...plan.sourceBindings]) {
+                const collection = element.getAttribute('data-rw-form-collection');
+                if (collection !== null) {
+                    if (collection !== entry[2]) return this.fail(root, ownerChanged, ownerFix);
+                    if (!this.template(element) || !this.validateRows(element, collection.trim(), true)) return false;
+                }
+            }
+            if (!this.sameBindings(plan.row, plan.bindings) || !this.sameBindings(source, plan.sourceBindings))
+                return this.fail(root, ownerChanged, ownerFix);
             if (this.rows(root).some(row => this.rowIndex(row, this.name(root)) === index)) return this.fail(root, 'index conflict.', ownerFix);
             const existing = new Set(Array.from(document.querySelectorAll('[id]')).map(element => element.id));
             let valid = true;
@@ -635,13 +634,6 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 existing.add(element.id);
             }
             if (!valid) return this.fail(root, 'ID conflict.', 'Use unique IDs.');
-            for (const mapping of plan.mappings) {
-                const marker = this.marker(mapping.clone, mapping.collection);
-                const staged = mapping.clone === plan.row && !prepared;
-                if (staged && !marker.length) continue;
-                if (marker.length !== 1 || marker[0].disabled || marker[0].type !== 'hidden' || marker[0].value !== (staged ? mapping.oldKey : mapping.key) || (!staged && mapping.clone.getAttribute(indexAttribute) !== mapping.key))
-                    return this.fail(root, 'markers changed.', markerFix);
-            }
             return true;
         }
 
@@ -742,24 +734,17 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             field.setAttribute(deleteAttribute, 'true');
             row.hidden = true;
             row.setAttribute(rowStateAttribute, 'removed');
-            field.disabled = false;
             field.value = field.getAttribute('data-rw-form-collection-delete-value') || 'true';
             for (const control of this.controls(row)) {
-                const retained = control === field || control.name.endsWith('.index') || control.hasAttribute('data-rw-form-collection-preserve')
-                    || this.preserveRemovedControl(control);
-                if (retained) control.disabled = false;
+                // The row is already marked; the shared predicate retains its selected delete field and nested tombstones.
+                if (this.preserveRemovedControl(control)) control.disabled = false;
                 else if (!control.disabled) { control.disabled = true; control.setAttribute('data-rw-disabled-by-form-collection-remove', 'true'); }
             }
             return true;
         }
 
         private removed(element: Element) {
-            let current: Element | null = element;
-            while (current) {
-                if (current.getAttribute(rowStateAttribute) === 'removed') return true;
-                current = current.parentElement;
-            }
-            return false;
+            return !!element.closest(`[${rowStateAttribute}="removed"]`);
         }
 
         private preserveRemovedControl(control: FormControl) {
@@ -774,7 +759,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 || (commandMode && commandMode !== 'true' ? commandMode : null)
                 || root.getAttribute('data-rw-form-collection-remove-mode')
                 || 'physical';
-            return raw.toLowerCase() === 'mark' || raw.toLowerCase() === 'mark-remove' ? 'mark' : 'physical';
+            return ['mark', 'mark-remove'].includes(raw.toLowerCase()) ? 'mark' : 'physical';
         }
 
         private removeFocus(root: HTMLElement, row: HTMLElement) {
@@ -808,13 +793,11 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private toggleEvent(toggle: HTMLElement, target: HTMLElement, type: string, visible: boolean, cancelable: boolean) {
-            const event = new CustomEvent(type, {
+            return toggle.dispatchEvent(new CustomEvent(type, {
                 bubbles: true,
                 cancelable,
                 detail: { form: this.form, control: toggle, target, visible }
-            });
-            toggle.dispatchEvent(event);
-            return event;
+            }));
         }
 
         private rowEvent(

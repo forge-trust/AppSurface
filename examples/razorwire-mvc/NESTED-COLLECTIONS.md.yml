@@ -1,5 +1,6 @@
 page_type: guide
-sequence_key: razorwire-proof
+sequence_key: >-
+  razorwire-proof
 order: 21
 related_pages:
   - examples/razorwire-mvc/README.md
