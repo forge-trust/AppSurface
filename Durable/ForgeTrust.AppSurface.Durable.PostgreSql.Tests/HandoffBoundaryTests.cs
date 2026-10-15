@@ -441,7 +441,9 @@ public sealed class HandoffBoundaryTests
         await using var ownerConnection = await ownerDataSource.OpenConnectionAsync();
         await using var ownerTransaction = await ownerConnection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
         var ownerPid = await PostgreSqlDurableHandoffTestSupport.GetBackendPidAsync(ownerConnection, ownerTransaction);
-        AssertHostTimeouts(await ReadHostTimeoutsAsync(ownerConnection, ownerTransaction), ownerApplicationName);
+        var ownerTimeouts = await ReadHostTimeoutsAsync(ownerConnection, ownerTransaction);
+        AssertHostTimeouts(ownerTimeouts, ownerApplicationName);
+        Assert.Equal(5_000, ownerTimeouts.IdleMilliseconds);
         var fence = new PostgreSqlDurableWorkHandoffFence(ownerDataSource, lab.Options);
         using var invocation = fence.EnterInvocation(lab.Permit);
         var prepared = await fence.ExecuteAsync(ownerTransaction, async (supplied, token) =>
@@ -476,23 +478,26 @@ public sealed class HandoffBoundaryTests
         Assert.False(appUpdate.IsCompleted);
         Assert.True(await HasSharedMigrationFenceAsync(lab, ownerPid));
 
-        await WaitForBackendGoneAsync(lab.Database.DataSource, ownerPid, TimeSpan.FromSeconds(8));
+        // Observe idle rollback through the blocked operations and the server's timeout error first.
+        // Check process teardown after consuming that error and disposing the caller resources.
+        await Task.WhenAll(cancellation, rotation, appUpdate).WaitAsync(BarrierTimeout);
         Assert.False(await HasSharedMigrationFenceAsync(lab, ownerPid));
-        var canceled = await cancellation.WaitAsync(TimeSpan.FromSeconds(8));
+        var canceled = await cancellation;
         Assert.True(canceled.IsSuccess, canceled.Problem?.Problem);
         Assert.Equal(DurableWorkCancelOutcome.Applied, canceled.Value!.Outcome);
-        var rotated = await rotation.WaitAsync(TimeSpan.FromSeconds(8));
+        var rotated = await rotation;
         Assert.Equal(newEpoch, rotated.ActiveEpoch);
-        await appUpdate.WaitAsync(TimeSpan.FromSeconds(8));
 
         await using (var staleConnection = new NpgsqlCommand("SELECT 1;", ownerConnection))
         {
-            await Assert.ThrowsAnyAsync<NpgsqlException>(async () => await staleConnection.ExecuteScalarAsync());
+            var timeout = await Assert.ThrowsAsync<PostgresException>(async () => await staleConnection.ExecuteScalarAsync());
+            Assert.Equal("25P03", timeout.SqlState); // idle_in_transaction_session_timeout
             Assert.True(ownerConnection.State is ConnectionState.Broken or ConnectionState.Closed);
         }
 
         await ownerTransaction.DisposeAsync();
         await ownerConnection.DisposeAsync();
+        await WaitForBackendGoneAsync(lab.Database.DataSource, ownerPid, BarrierTimeout);
         await using (var replacement = await ownerDataSource.OpenConnectionAsync())
         {
             Assert.NotEqual(ownerPid, await PostgreSqlDurableHandoffTestSupport.GetBackendPidAsync(replacement));
