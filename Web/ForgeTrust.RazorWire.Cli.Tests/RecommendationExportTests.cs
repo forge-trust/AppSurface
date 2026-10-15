@@ -52,6 +52,41 @@ public sealed class RecommendationExportTests
     [InlineData("", true)]
     [InlineData("/reference/next", false)]
     [InlineData("/reference/next", true)]
+    public async Task RunAsync_ShouldExportARecommendationToADocumentNamedNext(string docsRoot, bool frozen)
+    {
+        var indexRoute = docsRoot + SearchIndexSuffix;
+        var targetRoute = docsRoot + "/next";
+        var indexBody = CreateSearchIndex(SingleNode(CreateMinimalRecommendation(targetRoute + "?view=compact#overview")), indexRoute);
+        using var handler = CreateHandler(indexRoute, indexBody, targetRoute);
+        using var client = CreateClient(handler);
+        using var output = new TemporaryDirectory();
+        var context = CreateContext(output.Path, indexRoute);
+        if (frozen) context.EnableReleaseArchiveManifest();
+
+        await CreateEngine(client).RunAsync(context);
+
+        Assert.Contains(targetRoute, handler.RequestedPaths);
+        Assert.True(File.Exists(TestPathUtils.PathUnder(output.Path, targetRoute.TrimStart('/') + ".html")));
+        var genericIndexPath = frozen && docsRoot.Length == 0 ? "search-index.static.json" : indexRoute.TrimStart('/');
+        using var index = JsonDocument.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(output.Path, genericIndexPath)));
+        Assert.Equal(targetRoute + ".html#overview", index.RootElement
+            .GetProperty("documents")[0].GetProperty("recommendedPages")[0].GetProperty("path").GetString());
+        if (frozen)
+        {
+            using var archiveIndex = JsonDocument.Parse(await File.ReadAllTextAsync(
+                TestPathUtils.PathUnder(output.Path, "search-index.json")));
+            Assert.Equal("/docs" + targetRoute + ".html#overview", archiveIndex.RootElement.GetProperty("documents")[0]
+                .GetProperty("recommendedPages")[0].GetProperty("path").GetString());
+        }
+    }
+
+    [Theory]
+    [InlineData("/docs", false)]
+    [InlineData("/docs", true)]
+    [InlineData("", false)]
+    [InlineData("", true)]
+    [InlineData("/reference/next", false)]
+    [InlineData("/reference/next", true)]
     public async Task RunAsync_ShouldProjectHtmlFramesAliasesAndDocumentPathsFromTheSameArtifact(string docsRoot, bool frozen)
     {
         var indexRoute = docsRoot + SearchIndexSuffix;

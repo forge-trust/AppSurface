@@ -12,7 +12,7 @@ public partial class ExportEngine
     {
         "search", "search-index.json", "search.css", "search-client.js", "outline-client.js", "rich-authoring-client.js",
         "minisearch.min.js", "_harvest", "_health", "_health.json", "_routes", "_routes.json", "_search-index", "_markdown",
-        "v", "versions", "next", "sections", "search-index"
+        "v", "versions", "sections", "search-index"
     };
 
     private sealed record RecommendationReference(JsonObject Row, ExportReference Reference, string Location);

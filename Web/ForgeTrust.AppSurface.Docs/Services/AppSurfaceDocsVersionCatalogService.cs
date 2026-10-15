@@ -749,7 +749,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
                             return CreateRecommendationAvailabilityFailure(
                                 pathContext,
                                 index,
-                            recommendationIndex,
+                                recommendationIndex,
                                 "unsafe recommendation URL",
                                 $"'path' was rejected with category '{reason}' and value '{recommendationPathValidation.RedactedValue}'");
                         }

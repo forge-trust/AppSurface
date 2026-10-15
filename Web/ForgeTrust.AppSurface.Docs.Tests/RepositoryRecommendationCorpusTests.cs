@@ -86,6 +86,7 @@ public sealed class RepositoryRecommendationCorpusTests
         var environment = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => environment.ContentRootPath).Returns(repoRoot);
         using var cache = new MemoryCache(new MemoryCacheOptions());
+        using var memo = new Memo(cache);
         var aggregator = new DocAggregator(
             [
                 new MarkdownHarvester(NullLogger<MarkdownHarvester>.Instance, File.ReadAllTextAsync, options),
@@ -95,7 +96,7 @@ public sealed class RepositoryRecommendationCorpusTests
             ],
             options,
             environment,
-            new Memo(cache),
+            memo,
             new AppSurfaceDocsHtmlSanitizer(),
             NullLogger<DocAggregator>.Instance);
         var payload = await aggregator.GetSearchIndexPayloadAsync();

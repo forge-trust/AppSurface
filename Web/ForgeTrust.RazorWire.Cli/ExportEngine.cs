@@ -540,9 +540,6 @@ public partial class ExportEngine
                     : outcome.ArtifactPath;
                 ValidateSearchIndexProjectionPath(context, outcome, genericPath!, "generic");
                 var rewritten = RewriteRecommendationIndex(body, outcome.Route, context);
-                if (context.ReleaseArchiveManifestEnabled && JsonNode.Parse(rewritten) is JsonObject genericRoot
-                    && genericRoot["metadata"] is JsonObject genericMetadata && genericMetadata.ContainsKey("generatedAtUtc"))
-                    genericMetadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
                 if (genericPath == outcome.ArtifactPath)
                     await ExportAuthArtifactAuditor.WriteTextArtifactBytesAsync(context.OutputPath, outcome.ArtifactPath,
                         "AppSurface Docs search index", outcome.Route, Encoding.UTF8.GetBytes(rewritten), Encoding.UTF8, cancellationToken);
@@ -552,9 +549,6 @@ public partial class ExportEngine
                 if (context.ReleaseArchiveManifestEnabled)
                 {
                     var frozen = RewriteRecommendationIndex(body, outcome.Route, context, frozenProjection: true);
-                    if (JsonNode.Parse(frozen) is JsonObject frozenRoot && frozenRoot["metadata"] is JsonObject metadata
-                        && metadata.ContainsKey("generatedAtUtc"))
-                        metadata["generatedAtUtc"] = AppSurfaceDocsStableArchiveGeneratedAtUtc;
                     var frozenPath = Path.Join(context.OutputPath, "search-index.json");
                     if (genericPath == frozenPath)
                         throw new ExportValidationException([new ExportDiagnostic(RecommendationDiagnosticCode,
