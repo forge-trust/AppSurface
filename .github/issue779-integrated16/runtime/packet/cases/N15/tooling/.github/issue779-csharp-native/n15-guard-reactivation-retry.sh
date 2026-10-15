@@ -3,7 +3,8 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 # Source-only candidate. The outer runner must pin and invoke this under the original work deadline.
-fail() { printf '%s\n' 'N15_RETRY_MEASUREMENT_REJECTED' >&2; exit 1; }
+stage=preflight
+fail() { printf 'N15_RETRY_MEASUREMENT_REJECTED:%s\n' "$stage" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail
 shift
 # N15_FIXED_ARG_ABI_BEGIN
@@ -52,8 +53,9 @@ job_left=$(remaining_ms "$job_deadline") || fail
 if (( work_left < job_left )); then retry_deadline=$work_deadline; else retry_deadline=$job_deadline; fi
 initial_left=$(remaining_ms "$retry_deadline") || fail
 (( initial_left > 12000 )) || fail
+stage=partial-schema
 jq -e --arg g "$generation" --arg owner "$owner" --arg worker "$worker" '
- .schema=="issue779-n15-observer-partial-v1" and .case_generation==$g and
+ .schema=="issue779-n15-native-observer-partial-v1" and .case_generation==$g and
  .owner.unit==$owner and .worker.unit==$worker and .pidfd_signal.signal==9 and
  .owner.control_group==("/system.slice/"+$owner) and
  (.owner.starttime_ticks | type=="number" and .>0 and floor==.) and
@@ -63,6 +65,7 @@ jq -e --arg g "$generation" --arg owner "$owner" --arg worker "$worker" '
 # The observer's live owner identity is the authority for the generated cgroup path.
 # Require the selected physical kernel cgroup to be absent or empty across two bounded scans
 # before reading/resetting the pruned failed-unit metadata.
+stage=owner-group
 owner_cgroup="/system.slice/$owner"
 bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
 # N15_PHYSICAL_CGROUP_CHECK_BEGIN
@@ -172,6 +175,7 @@ except (OSError, ValueError, OverflowError):
     reject()
 # N15_PHYSICAL_CGROUP_CHECK_END
 ' /sys/fs/cgroup "$owner_cgroup" 0 || fail
+stage=worker-snapshot
 worker_before=$out/worker-before.txt
 worker_after=$out/worker-after.txt
 retry_stdout=$out/retry.stdout
@@ -181,16 +185,17 @@ owner_before=$out/owner-before.txt
 for f in "$worker_before" "$worker_after" "$retry_stdout" "$retry_stderr" "$owner_before" "$owner_after" "$out/reactivation-measurement.json"; do [[ ! -e $f && ! -L $f ]] || fail; done
 bounded "$retry_deadline" systemctl show "$worker" -p LoadState -p InvocationID -p ActiveEnterTimestampMonotonic -p ExecMainStartTimestampMonotonic -p NRestarts >"$worker_before"
 [[ -s $worker_before && $(stat -c '%u:%g:%a:%h' -- "$worker_before") == 0:0:600:1 ]] || fail
+stage=owner-recipe
 owner_pid=$(jq -er --arg unit "$owner" '.owner | select(.unit==$unit and .uid==0 and .gid==0 and .pidfd_opened==true and .identity_rechecked_before_signal==true) | .main_pid | select(type=="number" and .>1 and floor==.)' "$partial") || fail
 [[ $owner_pid =~ ^[1-9][0-9]{0,9}$ ]] || fail
-owner_properties='Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult Conditions ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath'
-bounded "$retry_deadline" systemctl show --no-pager --property="${owner_properties// /,}" "$owner" >"$owner_before"
+owner_properties='Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath'
+bounded "$retry_deadline" systemctl show --no-pager --all --property="${owner_properties// /,}" "$owner" >"$owner_before"
 [[ $(stat -c '%u:%g:%a:%h' -- "$owner_before") == 0:0:600:1 && $(stat -c %s -- "$owner_before") -le 16384 ]] || fail
 # Compare the failed unit with the complete immutable owner recipe and the same original deadlines.
 # The inline verifier is data-only: it reads this bounded systemctl snapshot and dispatch arguments.
 # N15_FAILED_OWNER_RECIPE_CHECK_BEGIN
 /usr/bin/python3.12 -I -S -B -c '
-import decimal, pathlib, re, sys, time
+import decimal, pathlib, re, shlex, subprocess, sys, time
 
 def reject():
     raise SystemExit(1)
@@ -207,7 +212,7 @@ try:
         if key in values:
             reject()
         values[key] = value
-    required = set("Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult Conditions ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath".split())
+    required = set("Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath".split())
     if set(values) != required:
         reject()
     fixed = {
@@ -217,11 +222,21 @@ try:
         "KillMode": "control-group", "RemainAfterExit": "no", "Restart": "no", "SendSIGKILL": "yes",
         "FinalKillSignal": "9", "ConditionResult": "yes", "EnvironmentFiles": "", "PassEnvironment": "",
         "FragmentPath": "/run/systemd/transient/" + owner,
-        "Conditions": "ConditionPathExists=" + armed + " (success)",
     }
     if any(values[k] != v for k, v in fixed.items()):
         reject()
     if values["ControlGroup"] not in ("", "/system.slice/" + owner):
+        reject()
+    # systemctl show does not print the compound Conditions tuple. Read its actual typed property.
+    now_boot = time.clock_gettime_ns(time.CLOCK_BOOTTIME) // 1000000
+    left = min(int(work_deadline), int(job_deadline)) - now_boot
+    if left <= 0:
+        reject()
+    object_path = "/org/freedesktop/systemd1/unit/" + "".join(c if c.isascii() and c.isalnum() else "_" + format(ord(c), "02x") for c in owner)
+    condition = subprocess.run(["/usr/bin/busctl", "--system", "--no-pager", "--timeout=1", "get-property", "org.freedesktop.systemd1", object_path, "org.freedesktop.systemd1.Unit", "Conditions"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=min(1, left / 1000), check=False, env={"PATH":"/usr/bin:/usr/sbin","LANG":"C","LC_ALL":"C"})
+    if condition.returncode != 0 or len(condition.stdout) > 4096:
+        reject()
+    if shlex.split(condition.stdout.decode("ascii", "strict")) != ["a(sbbsi)", "1", "ConditionPathExists", "false", "false", armed, "1"]:
         reject()
     fixed_environment = ("PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
                          "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp")
@@ -241,7 +256,7 @@ try:
     if not line.startswith(prefix) or not line.endswith(" }"):
         reject()
     suffix = line[len(prefix):-2]
-    if re.fullmatch(r"start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; pid=" + re.escape(owner_pid) + r" ; code=killed ; status=9", suffix) is None:
+    if re.fullmatch(r"start_time=\[[^\]\r\n]*\] ; stop_time=\[[^\]\r\n]*\] ; pid=" + re.escape(owner_pid) + r" ; code=killed ; status=9/KILL", suffix) is None:
         reject()
     def usec(text):
         units = {"h": decimal.Decimal(3600000000), "min": decimal.Decimal(60000000),
@@ -276,13 +291,15 @@ try:
     if active_since <= 0 or elapsed < 0 or original_remaining_us <= 0 or elapsed >= runtime_us \
             or elapsed >= lifetime or lifetime - elapsed > original_remaining_us:
         reject()
-except (OSError, UnicodeError, ValueError, decimal.InvalidOperation, OverflowError):
+except (OSError, UnicodeError, ValueError, decimal.InvalidOperation, OverflowError, subprocess.SubprocessError):
     reject()
 ' "$owner_before" "$generation" "$owner" "$runtime_host" "$entry" "$request" "$work_deadline" "$job_deadline" "$owner_pid" "$owner_guard/armed" || fail
 # N15_FAILED_OWNER_RECIPE_CHECK_END
+stage=owner-reset
 bounded "$retry_deadline" systemctl stop "$owner" >/dev/null || fail
 bounded "$retry_deadline" systemctl reset-failed "$owner" >/dev/null || fail
 # reset-failed may leave the failed transient unit loaded; never reuse it until not-found.
+stage=owner-unload
 unloaded=0
 for _ in {1..40}; do
  state=$(bounded "$retry_deadline" systemctl show "$owner" -p LoadState --value) || fail
@@ -291,6 +308,7 @@ for _ in {1..40}; do
  bounded "$retry_deadline" /usr/bin/sleep 0.05 || fail
 done
 (( unloaded == 1 )) || fail
+stage=replay-guard
 armed=$owner_guard/armed
 [[ ! -e $armed && ! -L $armed ]] || fail
 ( set -o noclobber; printf '%s\n' "$generation" >"$armed" ) || fail
@@ -308,6 +326,7 @@ left=$(remaining_ms "$retry_deadline") || fail
 # of the unchanged fixture-work and original job deadlines at dispatch time.
 runtime_ms=$((left-7000))
 runtime_seconds=$(awk -v ms="$runtime_ms" 'BEGIN{printf "%.3f",ms/1000}')
+stage=replay-dispatch
 retry_exit=0
 bounded "$retry_deadline" /usr/bin/systemd-run --quiet --wait --pipe --unit="$owner" \
  --property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group \
@@ -321,7 +340,9 @@ bounded "$retry_deadline" /usr/bin/systemd-run --quiet --wait --pipe --unit="$ow
 [[ $(stat -c '%u:%g:%a:%h' -- "$retry_stdout") == 0:0:600:1 \
    && $(stat -c '%u:%g:%a:%h' -- "$retry_stderr") == 0:0:600:1 \
    && $(stat -c %s -- "$retry_stdout") -le 65536 && $(stat -c %s -- "$retry_stderr") -le 65536 ]] || fail
+stage=replay-output
 [[ $retry_exit == 1 ]] && grep -Fq 'ASEVD402' "$retry_stderr" || fail
+stage=post-replay-snapshot
 bounded "$retry_deadline" systemctl show "$worker" -p LoadState -p InvocationID -p ActiveEnterTimestampMonotonic -p ExecMainStartTimestampMonotonic -p NRestarts >"$worker_after"
 bounded "$retry_deadline" systemctl show "$owner" -p LoadState -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus >"$owner_after"
 cmp -s -- "$worker_before" "$worker_after" || fail
@@ -331,6 +352,7 @@ grep -Fxq 'ExecMainStatus=1' "$owner_after" || fail
 cleanup_armed
 trap - EXIT HUP INT TERM
 [[ ! -e $armed && ! -L $armed && $(cat -- "$owner_guard/consumed") == "$generation" ]] || fail
+stage=measurement
 stdout_sha=$(sha256sum -- "$retry_stdout"); stdout_sha=${stdout_sha%% *}
 stderr_sha=$(sha256sum -- "$retry_stderr"); stderr_sha=${stderr_sha%% *}
 worker_sha=$(sha256sum -- "$worker_before"); worker_sha=${worker_sha%% *}

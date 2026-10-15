@@ -1657,9 +1657,9 @@
       "sha256": "4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/README.md": {
-      "bytes": 19985,
+      "bytes": 21210,
       "mode": "0644",
-      "sha256": "2263bea7350aad6830499db658591d99af7459028606c81e2c96b22065ee1239"
+      "sha256": "cb0b38218a7fd5f584034b265b8006a6c640c92f6129c6465414f8c61706829a"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 26419,
@@ -1674,7 +1674,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/checkpoint-n15-pending-start-death.sh": {
       "bytes": 11266,
       "mode": "0644",
-      "sha256": "ee0b8a8419ea0018d58229450b3c9e68c149833a314457e4ff5c62fa04e99e57"
+      "sha256": "a8745780662b7792745f1f1564ccb51b9998ef06c949ada8e7446c8b6d030eaa"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/finalize_n15_observation.py": {
       "bytes": 15067,
@@ -1682,9 +1682,9 @@
       "sha256": "af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/n15-guard-reactivation-retry.sh": {
-      "bytes": 20312,
+      "bytes": 21557,
       "mode": "0644",
-      "sha256": "9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6"
+      "sha256": "4dbc69f8ae8220077cdf3f94279dabefd78499ffa5d848cf800ced7ccdad40da"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/observe_n15_pending_start.py": {
       "bytes": 35028,
@@ -1704,12 +1704,12 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 31256,
       "mode": "0644",
-      "sha256": "c623ba2ed0249fcbc5d647d802a68844b97ecb5edd0030829bbbef32a125f6b8"
+      "sha256": "a5e5389f733b9e08810980ac61e340e987291f845cbc7841d239001d9609c899"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9046,
       "mode": "0644",
-      "sha256": "ac9551cdcca87695cc7a2d54468a4af348db481bbdca806371139ddc5f563085"
+      "sha256": "902fdb040c1ae6cc9cf0a525050c9fda5f5c07bc9f7810246d5f85abf8bb6798"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 12118,
@@ -1719,7 +1719,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/run-native.py": {
       "bytes": 83051,
       "mode": "0644",
-      "sha256": "ace55d745cc1802d7983996256a767574029d4734fe3ffc1108d722a322979c0"
+      "sha256": "cb38db8bd049942a832b27d6039b2d1e9a6f20dc6883157fb40390e30e073a0e"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 5581,
@@ -1749,7 +1749,7 @@
     "packet/cases/N15/tooling/.github/workflows/issue779-csharp-linux-native.yml": {
       "bytes": 21033,
       "mode": "0644",
-      "sha256": "158a1d015c1683279af7907b45acfb888676b8d1e51f312f446d58b0f21a46a8"
+      "sha256": "88bb96c531a402faa84a0b7385519821eb57051ad017277d01707a799f62b390"
     },
     "packet/cases/N16/tooling/.github/issue779-csharp-build/build-fdd.sh": {
       "bytes": 43912,
@@ -1829,12 +1829,12 @@
     "packet/runtime-packet.json": {
       "bytes": 1532732,
       "mode": "0600",
-      "sha256": "176d62e5efc32da42c9b0212bb9442c1555501f1639d56405b85207e402b0c12"
+      "sha256": "96a3e3c85daf6ba8c85ea25d0aafb1b49018234cc939fad9d0df2f20ab428f72"
     },
     "packet_execution.py": {
       "bytes": 41359,
       "mode": "0600",
-      "sha256": "ef955b188b60561d26ee57f173ed8dfd88dc1d636bf77559765eb0a0e1683209"
+      "sha256": "8946282741dc62d39a91a43e2873395a4781c7b8edbe5cf0791b8d5d13345a22"
     },
     "preparation_process.py": {
       "bytes": 25910,
@@ -1844,10 +1844,10 @@
     "verify_installation.py": {
       "bytes": 7256,
       "mode": "0600",
-      "sha256": "c7cb5986daea2029a0af37f7220f0f57a9e14d9e1b24ad5e423ecb8ead9b62d1"
+      "sha256": "50d9e4009a617c7c0242823eab95e0d5b291cbf9ebeb789b17d0539897fac1fd"
     }
   },
-  "packet_sha256": "176d62e5efc32da42c9b0212bb9442c1555501f1639d56405b85207e402b0c12",
+  "packet_sha256": "96a3e3c85daf6ba8c85ea25d0aafb1b49018234cc939fad9d0df2f20ab428f72",
   "schema": "issue779-integrated16-native-installation-v1",
   "source_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e"
 }
