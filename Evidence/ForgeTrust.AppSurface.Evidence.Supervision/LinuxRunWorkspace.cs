@@ -77,6 +77,21 @@ internal sealed class LinuxWorkspaceLayout
     /// <summary>Gets a detached read-only list of exact directory policies.</summary>
     internal ReadOnlyCollection<LinuxWorkspaceDirectoryPolicy> Directories { get; }
 
+    /// <summary>Selects the retained directories required for authenticated control transport continuity.</summary>
+    /// <remarks>
+    /// Null denotes a retained root ancestor. Only the exact generation/control/broker policies belong to
+    /// the control path; worker output and subject results remain mandatory for work inspection separately.
+    /// An unknown or reconstructed policy rejects rather than silently skipping an unrecognized directory.
+    /// This data comparison does not open a path, clear quarantine, or grant work or cleanup authority.
+    /// </remarks>
+    internal bool RequiresControlInspection(LinuxWorkspaceDirectoryPolicy? policy)
+    {
+        if (policy is null || ReferenceEquals(policy, GenerationDirectory)
+            || ReferenceEquals(policy, ControlDirectory) || ReferenceEquals(policy, BrokerDirectory)) return true;
+        if (ReferenceEquals(policy, OutputDirectory) || ReferenceEquals(policy, RawResultsDirectory)) return false;
+        throw Invalid();
+    }
+
     /// <summary>Validates distinct nonroot identity data and derives only the fixed /run layout.</summary>
     internal static LinuxWorkspaceLayout Create(Guid id, LinuxRunAccountSnapshot accounts)
     {
@@ -295,6 +310,8 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
     /// <remarks>
     /// Does not clear quarantine, alter permissions, release custody or publish a descriptor. An I/O
     /// cancellation supplies no successful check; native checks use the original owner's deadline.
+    /// The retained root/generation/control/broker path and sealed descriptor are inspected independently
+    /// of worker output and subject results, whose substitution must not prevent authenticated stop/wait.
     /// </remarks>
     internal void RequireControlOwnedBy(LinuxOwnerActivation owner, LinuxRunAccounts accounts, CancellationToken token)
     {
@@ -499,6 +516,7 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
         foreach (var node in _nodes)
         {
             Check(token, purpose);
+            if (purpose == InspectionPurpose.Control && !_layout.RequiresControlInspection(node.Policy)) continue;
             var current = LinuxProtectedMetadata.From(StatFd(node.Handle));
             if (node.Policy is null) LinuxWorkspaceLayout.RequireAncestor(current);
             else LinuxWorkspaceLayout.RequireDirectory(current, node.Policy);

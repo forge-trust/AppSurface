@@ -75,6 +75,38 @@ public sealed class LinuxRunWorkspaceTests
         Reject(() => LinuxWorkspaceLayout.Create(Id, null!));
     }
 
+    [Fact]
+    public void ControlInspectionRetainsItsWholeProtectedPathWithoutDependingOnUntrustedSiblingDirectories()
+    {
+        var layout = LinuxWorkspaceLayout.Create(Id, Accounts);
+        Assert.True(layout.RequiresControlInspection(null)); // Both retained / and /run ancestors.
+        Assert.Equal(new[] { layout.GenerationDirectory, layout.ControlDirectory, layout.BrokerDirectory },
+            layout.Directories.Where(layout.RequiresControlInspection));
+        Assert.False(layout.RequiresControlInspection(layout.OutputDirectory));
+        Assert.False(layout.RequiresControlInspection(layout.RawResultsDirectory));
+        Assert.Equal(5, layout.Directories.Count); // Full work inspection still includes both siblings.
+        foreach (var policy in layout.Directories.Where(layout.RequiresControlInspection))
+        {
+            var valid = Directory(policy);
+            LinuxWorkspaceLayout.RequireDirectory(valid, policy);
+            Reject(() => LinuxWorkspaceLayout.RequireDirectory(valid with { Uid = Accounts.WorkerUid }, policy));
+            Reject(() => LinuxWorkspaceLayout.RequireDirectory(valid with { Mode = (ushort)(valid.Mode | 0x2) }, policy));
+        }
+    }
+
+    [Fact]
+    public void ControlInspectionRejectsUnknownAndReconstructedPolicyRecordsInsteadOfSkippingThem()
+    {
+        var layout = LinuxWorkspaceLayout.Create(Id, Accounts);
+        var other = LinuxWorkspaceLayout.Create(Id, Accounts);
+        foreach (var policy in layout.Directories)
+        {
+            Reject(() => layout.RequiresControlInspection(policy with { }));
+        }
+        foreach (var policy in other.Directories) Reject(() => layout.RequiresControlInspection(policy));
+        Reject(() => layout.RequiresControlInspection(new("unknown", "", 0, Accounts.WorkerGid, 0x1c8)));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
