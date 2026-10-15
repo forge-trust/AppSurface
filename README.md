@@ -28,6 +28,9 @@ and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/
 
 For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
 
+For Durable executors that need current domain authorization before a provider effect, see the
+[PostgreSQL application handoff fence](Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff).
+
 ## Vision
 
 The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:

@@ -14,6 +14,40 @@ namespace ForgeTrust.AppSurface.Durable.PostgreSql.Tests;
 public sealed class AppSurfaceDurablePostgreSqlRegistrationTests
 {
     [Fact]
+    public void PassiveRegistration_RejectsMissingEffectiveDatabaseBeforeAddingServices()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = NpgsqlDataSource.Create("Host=localhost;Password=not-opened");
+        var services = new ServiceCollection();
+
+        var failure = Assert.Throws<ArgumentException>(() => services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime")));
+
+        Assert.Equal("connectionString", failure.ParamName);
+        Assert.Empty(services);
+    }
+
+    [Fact]
+    public void PassiveRegistration_AcceptsExplicitUsernameAsTheDefaultDatabase()
+    {
+        using var dispatcher = CreateDataSource();
+        using var runtime = NpgsqlDataSource.Create("Host=localhost;Username=durable_registration;Password=not-opened");
+        var services = new ServiceCollection();
+        services.AddAppSurfaceDurablePostgreSql(
+            dispatcher,
+            runtime,
+            new PostgreSqlDurableWorkOptions(Guid.NewGuid(), Guid.NewGuid()),
+            new PostgreSqlDurableScheduleOptions("durable_runtime"));
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        Assert.IsType<PostgreSqlDurableWorkHandoffFence>(scope.ServiceProvider.GetRequiredService<IDurableWorkHandoffFence>());
+    }
+
+    [Fact]
     public void PassiveRegistration_ResolvesRuntimeKernelWithoutInstallingHostedWork()
     {
         using var dispatcher = CreateDataSource();
