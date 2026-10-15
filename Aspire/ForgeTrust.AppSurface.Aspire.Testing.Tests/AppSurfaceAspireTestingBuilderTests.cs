@@ -5,6 +5,7 @@ using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Aspire.Testing;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -56,24 +57,25 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
     [Fact]
     public async Task CreateAsync_TypedFactoryResolvesSkoolitAssetsFromNestedGitFileRepository()
     {
-        var temporaryDirectory = Path.Combine(Path.GetTempPath(), $"appsurface-apphost-paths-{Guid.NewGuid():N}");
-        var repositoryRoot = Path.GetFullPath(temporaryDirectory);
-        var appHostDirectory = Path.Combine(repositoryRoot, "src", "Skoolit.AppHost");
-        var realmPath = Path.Combine(repositoryRoot, "src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json");
-        var themePath = Path.Combine(repositoryRoot, "src", "Skoolit.KeycloakTheme", "theme", "skoolit");
+        var temporaryDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-apphost-paths-{Guid.NewGuid():N}");
+        var repositoryRoot = temporaryDirectory;
+        var appHostDirectory = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.AppHost");
+        var realmPath = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json");
+        var themePath = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.KeycloakTheme", "theme", "skoolit");
+        var gitMarkerPath = TestPathUtils.PathUnder(repositoryRoot, ".git");
 
         try
         {
             Directory.CreateDirectory(appHostDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(realmPath)!);
             Directory.CreateDirectory(themePath);
-            File.WriteAllText(Path.Combine(repositoryRoot, ".git"), "gitdir: ../.git/worktrees/apphost-paths");
+            File.WriteAllText(gitMarkerPath, "gitdir: ../.git/worktrees/apphost-paths");
             File.WriteAllText(realmPath, "{}");
             TypedFactoryAppHost.ProjectPath = appHostDirectory;
             TypedFactoryPathComponent.Reset();
 
-            Assert.True(File.Exists(Path.Combine(repositoryRoot, ".git")));
-            Assert.False(Directory.Exists(Path.Combine(repositoryRoot, ".git")));
+            Assert.True(File.Exists(gitMarkerPath));
+            Assert.False(Directory.Exists(gitMarkerPath));
             Assert.False(Path.GetFullPath(appHostDirectory).StartsWith(
                 Path.GetFullPath(AppContext.BaseDirectory),
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
@@ -2394,8 +2396,8 @@ public sealed class TypedFactoryPathComponent : IAspireComponent<ParameterResour
         IDistributedApplicationBuilder appBuilder)
     {
         RepositoryRoot = context.GetPathFromRoot(string.Empty);
-        RealmPath = context.GetPathFromRoot("src/Skoolit.AppHost/keycloak/skoolit-realm.json");
-        ThemePath = context.GetPathFromRoot("src/Skoolit.KeycloakTheme/theme/skoolit");
+        RealmPath = context.GetPathFromRoot(TestPathUtils.RelativePath("src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json"));
+        ThemePath = context.GetPathFromRoot(TestPathUtils.RelativePath("src", "Skoolit.KeycloakTheme", "theme", "skoolit"));
         return appBuilder.AddParameter("typed-factory-skoolit-paths");
     }
 }

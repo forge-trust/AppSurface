@@ -4,6 +4,7 @@ using CliFx.Binding;
 using CliFx.Infrastructure;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -166,7 +167,7 @@ public partial class AspireProfileTests
     [Fact]
     public void Compose_MetadataFreePathFreeGraphPreservesOrderAndSharedIdentity()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"appsurface-profile-{Guid.NewGuid():N}");
+        var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-profile-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {

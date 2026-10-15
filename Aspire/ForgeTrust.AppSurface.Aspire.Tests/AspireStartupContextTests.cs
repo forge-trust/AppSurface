@@ -59,8 +59,8 @@ public class AspireStartupContextTests
         Assert.Equal(tree.Root, context.GetPathFromRoot(string.Empty));
         foreach (var (relativePath, expected) in new[]
                  {
-                     (RepositoryTree.AssetPaths[0], Path.Combine(tree.Root, "src/Skoolit.AppHost/keycloak/skoolit-realm.json")),
-                     (RepositoryTree.AssetPaths[1], Path.Combine(tree.Root, "src/Skoolit.KeycloakTheme/theme/skoolit"))
+                     (RepositoryTree.AssetPaths[0], TestPathUtils.PathUnder(tree.Root, "src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json")),
+                     (RepositoryTree.AssetPaths[1], TestPathUtils.PathUnder(tree.Root, "src", "Skoolit.KeycloakTheme", "theme", "skoolit"))
                  })
         {
             var actual = context.GetPathFromRoot(relativePath);
@@ -78,9 +78,10 @@ public class AspireStartupContextTests
         var builder = A.Fake<IDistributedApplicationBuilder>();
         var context = new AspireStartupContext(builder, rootPath);
 
-        var combined = context.GetPathFromRoot("src/appsettings.json");
+        var relativePath = TestPathUtils.RelativePath("src", "appsettings.json");
+        var combined = context.GetPathFromRoot(relativePath);
 
-        Assert.Equal(Path.Combine(rootPath, "src/appsettings.json"), combined);
+        Assert.Equal(TestPathUtils.PathUnder(rootPath, relativePath), combined);
     }
 
     [Theory]
@@ -90,13 +91,13 @@ public class AspireStartupContextTests
     {
         using var tree = new RepositoryTree();
         tree.AddMarker(tree.Root, gitFile: false);
-        var nearest = markerAtAppHost ? tree.AppHost : Path.Combine(tree.Root, "src");
+        var nearest = markerAtAppHost ? tree.AppHost : TestPathUtils.PathUnder(tree.Root, "src");
         tree.AddMarker(nearest, gitFile: true);
 
         var context = new AspireStartupContext(tree.CreateBuilder());
 
         Assert.Equal(nearest, context.GetPathFromRoot(string.Empty));
-        Assert.Equal(Path.Combine(nearest, "asset"), context.GetPathFromRoot("asset"));
+        Assert.Equal(TestPathUtils.PathUnder(nearest, "asset"), context.GetPathFromRoot("asset"));
     }
 
     [Theory]
@@ -181,7 +182,7 @@ public class AspireStartupContextTests
 
         Assert.False(Directory.Exists(Path.GetFullPath(root)));
         Assert.Equal(Path.GetFullPath(root), context.GetPathFromRoot(string.Empty));
-        Assert.Equal(Path.Combine(Path.GetFullPath(root), "asset"), context.GetPathFromRoot("asset"));
+        Assert.Equal(TestPathUtils.PathUnder(Path.GetFullPath(root), "asset"), context.GetPathFromRoot("asset"));
         A.CallTo(() => builder.AppHostDirectory).MustNotHaveHappened();
     }
 
@@ -190,7 +191,7 @@ public class AspireStartupContextTests
     {
         using var tree = new RepositoryTree();
         tree.AddMarker(tree.Root, gitFile: true);
-        var suppliedRoot = Path.Combine(tree.Root, "caller-layout");
+        var suppliedRoot = TestPathUtils.PathUnder(tree.Root, "caller-layout");
 
         var context = new AspireStartupContext(tree.CreateBuilder(), suppliedRoot);
 
@@ -233,9 +234,9 @@ public class AspireStartupContextTests
     {
         using var tree = new RepositoryTree();
         var context = new AspireStartupContext(tree.CreateBuilder(), tree.Root);
-        var rootedInput = Path.Combine(Path.GetTempPath(), "elsewhere");
+        var rootedInput = TestPathUtils.PathUnder(Path.GetTempPath(), "elsewhere");
 
-        Assert.Equal(Path.Combine(tree.Root, rootedInput), context.GetPathFromRoot(rootedInput));
+        Assert.Equal(rootedInput, context.GetPathFromRoot(rootedInput));
     }
 
     [Fact]
@@ -245,10 +246,10 @@ public class AspireStartupContextTests
         tree.AddMarker(tree.Root, gitFile: true);
         var builder = tree.CreateBuilder();
         var original = new AspireStartupContext(builder);
-        File.Delete(Path.Combine(tree.Root, ".git"));
+        File.Delete(TestPathUtils.PathUnder(tree.Root, ".git"));
 
         Assert.Equal(tree.Root, original.GetPathFromRoot(string.Empty));
-        Assert.Equal(Path.Combine(tree.Root, "asset"), original.GetPathFromRoot("asset"));
+        Assert.Equal(TestPathUtils.PathUnder(tree.Root, "asset"), original.GetPathFromRoot("asset"));
         AssertMissingRoot(new AspireStartupContext(builder));
     }
 
@@ -262,7 +263,7 @@ public class AspireStartupContextTests
         tree.AddMarker(tree.AppHost, gitFile: true);
 
         Assert.Equal(tree.Root, original.GetPathFromRoot(string.Empty));
-        Assert.Equal(Path.Combine(tree.Root, "asset"), original.GetPathFromRoot("asset"));
+        Assert.Equal(TestPathUtils.PathUnder(tree.Root, "asset"), original.GetPathFromRoot("asset"));
         Assert.Equal(tree.AppHost, new AspireStartupContext(builder).GetPathFromRoot(string.Empty));
     }
 
@@ -290,23 +291,23 @@ public class AspireStartupContextTests
     {
         public static readonly string[] AssetPaths =
         [
-            "src/Skoolit.AppHost/keycloak/skoolit-realm.json",
-            "src/Skoolit.KeycloakTheme/theme/skoolit"
+            TestPathUtils.RelativePath("src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json"),
+            TestPathUtils.RelativePath("src", "Skoolit.KeycloakTheme", "theme", "skoolit")
         ];
 
-        public string Root { get; } = Path.GetFullPath(Path.Combine(Path.GetTempPath(), $"appsurface-context-{Guid.NewGuid():N}"));
-        public string AppHost => Path.Combine(Root, "src", "Skoolit.AppHost");
+        public string Root { get; } = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-context-{Guid.NewGuid():N}");
+        public string AppHost => TestPathUtils.PathUnder(Root, "src", "Skoolit.AppHost");
 
         public RepositoryTree()
         {
-            Directory.CreateDirectory(Path.Combine(AppHost, "keycloak"));
+            Directory.CreateDirectory(TestPathUtils.PathUnder(AppHost, "keycloak"));
             File.WriteAllText(TestPathUtils.PathUnder(Root, AssetPaths[0]), "{}");
             Directory.CreateDirectory(TestPathUtils.PathUnder(Root, AssetPaths[1]));
         }
 
         public void AddMarker(string directory, bool gitFile)
         {
-            var marker = Path.Combine(directory, ".git");
+            var marker = TestPathUtils.PathUnder(directory, ".git");
             if (gitFile)
             {
                 File.WriteAllText(marker, "Marker contents are intentionally not parsed.");

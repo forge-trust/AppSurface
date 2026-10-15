@@ -1,5 +1,6 @@
 ﻿using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
+using ForgeTrust.AppSurface.Core;
 
 namespace ForgeTrust.AppSurface.Aspire;
 
@@ -105,6 +106,7 @@ public class AspireStartupContext
     /// <remarks>
     /// Marker contents are not parsed and Git validity is not checked. This single constructor-time walk performs
     /// no Git subprocess, existence requirement for the anchor, output/CWD fallback, or repeated path-time discovery.
+    /// Marker paths use <see cref="PathUtils.PathUnder"/> to keep each probe beneath its candidate directory.
     /// </remarks>
     private static string? FindRepoRoot(string? appHostDirectory)
     {
@@ -116,7 +118,7 @@ public class AspireStartupContext
         DirectoryInfo? directory = new DirectoryInfo(appHostDirectory);
         while (directory is not null)
         {
-            var marker = Path.Combine(directory.FullName, ".git");
+            var marker = PathUtils.PathUnder(directory.FullName, ".git");
             if (Directory.Exists(marker) || File.Exists(marker))
             {
                 return directory.FullName;
