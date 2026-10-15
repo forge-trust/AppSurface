@@ -61,7 +61,7 @@ require_original_owner_budget(){
  now=$(bounded_exec date -u +%s) || fail owner-original-deadline
  owner_deadline_fits "$end" "$now" || fail owner-original-budget
 }
-unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus; }
+unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus -p KillSignal -p Result; }
 field(){ bounded_exec awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1)}' <<<"$1"; }
 # Diagnostic projection only: no unit query, identity claim, or termination decision.
 terminal_numeric_field(){
@@ -79,6 +79,14 @@ owner_terminal_diagnostic(){
  printf 'OWNER_TERMINAL_DIAGNOSTIC:owner_code=%s:owner_status=%s:worker_code=%s:worker_status=%s\n' \
   "$(terminal_numeric_field "$1" ExecMainCode)" "$(terminal_numeric_field "$1" ExecMainStatus)" \
   "$(terminal_numeric_field "$2" ExecMainCode)" "$(terminal_numeric_field "$2" ExecMainStatus)" >&2
+}
+# N14 measures the original RuntimeMax stop. systemd sends SIGCONT with TERM;
+# final SIGKILL is required only if the normal stop did not finish.
+owner_terminal_matches(){
+ local selected_case=$1 code=$2 status=$3 result=$4
+ [[ $code == 2 ]] || return 1
+ if [[ $selected_case == N13 ]]; then [[ $status == 9 ]];
+ else [[ $selected_case == N14 && $result == timeout && ( $status == 9 || $status == 15 ) ]]; fi
 }
 systemd_policy_usec(){ case "$1:$2" in RuntimeMaxUSec:2min|RuntimeMaxUSec:120000000) printf '%s' 120000000 ;; TimeoutStopUSec:5s|TimeoutStopUSec:5000000) printf '%s' 5000000 ;; *) return 1 ;; esac; }
 unit_absent(){ [[ $(systemctl_bounded show "$1" -p LoadState --value 2>/dev/null || :) == not-found ]]; }
@@ -513,6 +521,7 @@ owner_cgroup=$(field "$owner_facts" ControlGroup); worker_cgroup=$(field "$worke
 [[ $owner_cgroup == "/system.slice/$owner" && $worker_cgroup == "/system.slice/$worker" ]] || fail cgroup-binding
 [[ " $(field "$worker_facts" BindsTo) " == *" $owner "* && " $(field "$worker_facts" After) " == *" $owner "* ]] || fail dependent-unit-binding
 [[ $(field "$owner_facts" Type) == exec && $(field "$owner_facts" Restart) == no && $(field "$owner_facts" RemainAfterExit) == no && $(field "$owner_facts" KillMode) == control-group && $(field "$owner_facts" SendSIGKILL) == yes && $(field "$owner_facts" FinalKillSignal) == 9 ]] || fail owner-runtime-policy
+if [[ $OWNER_DEATH_CASE == N14 ]]; then [[ $(field "$owner_facts" KillSignal) == 15 ]] || fail owner-normal-stop-policy; fi
 read -r owner_start owner_uid owner_gid owner_cg < <(proc_facts "$owner_pid") || fail owner-proc-bind
 read -r worker_start worker_uid worker_gid worker_cg < <(proc_facts "$worker_pid") || fail worker-proc-bind
 [[ $(field "$owner_facts" ActiveState) == active && $(field "$owner_facts" SubState) == running && $(field "$worker_facts" ActiveState) == active && $(field "$worker_facts" SubState) == running ]] || fail unit-not-running
@@ -532,7 +541,7 @@ read -r worker_check_start worker_check_uid worker_check_gid worker_check_cg < <
 owner_pre_facts=$(unit_sample "$owner") || fail owner-presignal-unit
 worker_pre_facts=$(unit_sample "$worker") || fail worker-presignal-unit
 [[ $(field "$owner_pre_facts" MainPID) == "$owner_pid" && $(field "$worker_pre_facts" MainPID) == "$worker_pid" && $(field "$owner_pre_facts" ActiveState) == active && $(field "$worker_pre_facts" ActiveState) == active ]] || fail presignal-unit-changed
-for property in RuntimeMaxUSec TimeoutStopUSec KillMode SendSIGKILL FinalKillSignal Restart RemainAfterExit ActiveEnterTimestampMonotonic; do [[ $(field "$owner_pre_facts" "$property") == "$(field "$owner_facts" "$property")" ]] || fail owner-policy-changed; done
+for property in RuntimeMaxUSec TimeoutStopUSec KillMode SendSIGKILL FinalKillSignal KillSignal Restart RemainAfterExit ActiveEnterTimestampMonotonic; do [[ $(field "$owner_pre_facts" "$property") == "$(field "$owner_facts" "$property")" ]] || fail owner-policy-changed; done
 signal_start=$(mono_ms) || fail monotonic-clock
 if [[ $OWNER_DEATH_CASE == N13 ]]; then kill -KILL "$owner_pid" || fail owner-sigkill; else kill -STOP "$owner_pid" || fail owner-sigstop; fi
 signal_sent=1
@@ -551,7 +560,7 @@ owner_terminal=$(unit_sample "$owner") || fail owner-terminal-sample
 worker_terminal=$(unit_sample "$worker") || fail worker-terminal-sample
 owner_state=$(field "$owner_terminal" ActiveState); worker_state=$(field "$worker_terminal" ActiveState)
 [[ $owner_state =~ ^(inactive|failed)$ && $worker_state =~ ^(inactive|failed)$ && $(field "$owner_terminal" MainPID) == 0 && $(field "$worker_terminal" MainPID) == 0 ]] || fail units-not-terminal
-[[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || { owner_terminal_diagnostic "$owner_terminal" "$worker_terminal"; fail owner-terminal-not-sigkill; }
+owner_terminal_matches "$OWNER_DEATH_CASE" "$(field "$owner_terminal" ExecMainCode)" "$(field "$owner_terminal" ExecMainStatus)" "$(field "$owner_terminal" Result)" || { owner_terminal_diagnostic "$owner_terminal" "$worker_terminal"; fail owner-terminal-not-bounded-stop; }
 [[ $(field "$owner_terminal" SubState) =~ ^(dead|failed)$ && $(field "$worker_terminal" SubState) =~ ^(dead|failed)$ ]] || fail unit-terminal-substate
 [[ -d $stage && ! -L $stage && $(stat -Lc '%u:%g:%a' "$stage") == 0:0:555 && -d $private && ! -L $private && $(stat -Lc '%u:%g:%a' "$private") == 0:0:700 ]] || fail quarantine-workspace-custody
 for pid in "$owner_pid" "$worker_pid"; do pid_absent "$pid" || fail original-process-remains; done
@@ -586,6 +595,7 @@ IFS=: read -r sg_name _ subject_group_gid _ <<<"$subject_group"
 IFS=: read -r rg_name _ results_group_gid _ <<<"$results_group"
 [[ $pw_name == "${names[0]}" && $subj_name == "${names[1]}" && $wg_name == "${names[0]}" && $sg_name == "${names[1]}" && $rg_name == "${names[2]}" && $worker_account_uid == "$worker_uid" && $worker_account_gid == "$worker_gid" && $worker_group_gid == "$worker_gid" && $subject_account_uid =~ ^[1-9][0-9]*$ && $subject_account_gid == "$subject_group_gid" && $results_group_gid =~ ^[1-9][0-9]*$ && $worker_account_uid != "$subject_account_uid" && $results_group_gid != "$worker_gid" && $results_group_gid != "$subject_group_gid" ]] || fail account-identity-binding
 elapsed_from_activation_usec=$(( $(mono_ms)*1000-active_enter_usec )); ((elapsed_from_activation_usec>=0 && elapsed_from_activation_usec<=runtime_usec+timeout_usec)) || fail original-deadline-exceeded
+if [[ $OWNER_DEATH_CASE == N14 ]]; then ((elapsed_from_activation_usec>=runtime_usec)) || fail owner-runtime-expired-too-early; fi
 measurement_done=1
 # Keep a bounded, nonsecret result record. Raw root output stays private and is not copied into JSON.
 bounded_exec jq -cnS \
@@ -608,12 +618,13 @@ bounded_exec jq -cnS \
  --arg runtime_show "$runtime_show" --arg timeout_show "$timeout_show" \
  --arg worker_name "${names[0]}" --arg subject_name "${names[1]}" --arg results_name "${names[2]}" \
  --argjson subject_uid "$subject_account_uid" --argjson subject_gid "$subject_account_gid" --argjson results_gid "$results_group_gid" \
+ --arg kill_signal "$(field "$owner_facts" KillSignal)" --arg owner_result "$(field "$owner_terminal" Result)" \
  --arg final_policy "SendSIGKILL=$(field "$owner_facts" SendSIGKILL);FinalKillSignal=$(field "$owner_facts" FinalKillSignal);KillMode=$(field "$owner_facts" KillMode)" \
  --arg owner_exit_code "$(field "$owner_terminal" ExecMainCode)" --arg owner_exit_status "$(field "$owner_terminal" ExecMainStatus)" \
  --arg stdout_sha "$(sha256sum "$log/root.stdout" | cut -d' ' -f1)" --arg stderr_sha "$(sha256sum "$log/root.stderr" | cut -d' ' -f1)" \
  --argjson stdout_bytes "$(stat -Lc %s "$log/root.stdout")" --argjson stderr_bytes "$(stat -Lc %s "$log/root.stderr")" \
  --argjson output_before 0 --argjson output_after 0 \
- '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:{active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false},termination:{owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)},pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
+ '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:({active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false}+(if $case=="N14" then {kill_signal:($kill_signal|tonumber)} else {} end)),termination:({owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)}+(if $case=="N14" then {owner_result:$owner_result} else {} end)),pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
 printf '%s\n' 'OWNER_DEATH_OBSERVED_OUTPUT_QUARANTINED' >"$quarantine"; chmod 600 "$quarantine"
 chmod 600 "$result"; bounded_exec /usr/bin/python3.12 -I -S -B "$parser" "$result" >/dev/null || fail receipt-parser
 success=1

@@ -59,7 +59,7 @@ def validate(record):
     policy = record["systemd_bound"]
     shape(policy, {"active_enter_usec", "runtime_max_usec", "runtime_max_show",
                    "timeout_stop_usec", "timeout_stop_show", "final_kill_policy",
-                   "timer_rearmed", "new_acceptance"}, "systemd-policy-shape")
+                   "timer_rearmed", "new_acceptance"} | ({"kill_signal"} if case == "N14" else set()), "systemd-policy-shape")
     need(type(policy["active_enter_usec"]) is int and policy["active_enter_usec"] > 0,
          "activation-time")
     runtime_values = {"2min": 120000000, "120000000": 120000000}
@@ -80,7 +80,7 @@ def validate(record):
                      "owner_active_state", "worker_active_state", "owner_sub_state", "worker_sub_state",
                      "owner_terminal_main_pid", "worker_terminal_main_pid", "owner_cgroup_empty",
                      "worker_cgroup_empty", "elapsed_seconds", "from_activation_usec",
-                     "owner_exec_main_code", "owner_exec_main_status"}, "termination-shape")
+                     "owner_exec_main_code", "owner_exec_main_status"} | ({"owner_result"} if case == "N14" else set()), "termination-shape")
     need(all(terminal[key] is True for key in ("owner_exited", "worker_exited", "owner_unit_terminal",
          "worker_unit_terminal", "owner_cgroup_empty", "worker_cgroup_empty")), "physical-termination")
     need(type(terminal["owner_active_state"]) is str and terminal["owner_active_state"] in ("inactive", "failed")
@@ -101,7 +101,12 @@ def validate(record):
          and type(terminal["owner_exec_main_code"]) is int
          and terminal["owner_exec_main_code"] == 2
          and type(terminal["owner_exec_main_status"]) is int
-         and terminal["owner_exec_main_status"] == 9, "termination-time-and-signal")
+         and terminal["owner_exec_main_status"] in ((9,) if case == "N13" else (9, 15)), "termination-time-and-signal")
+    if case == "N14":
+        need(type(policy["kill_signal"]) is int and policy["kill_signal"] == 15
+             and terminal["owner_result"] == "timeout"
+             and terminal["from_activation_usec"] >= policy["runtime_max_usec"],
+             "original-runtime-timeout-required")
     bound = policy["runtime_max_usec"] + (policy["timeout_stop_usec"] if case == "N14" else 0)
     need(terminal["from_activation_usec"] <= bound, "termination-outside-original-systemd-bound")
     pipes = record["pipes"]

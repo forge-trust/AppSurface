@@ -7,9 +7,9 @@
   },
   "files": {
     "check_owner_death_record.py": {
-      "bytes": 9461,
+      "bytes": 9881,
       "mode": "0644",
-      "sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
+      "sha256": "7d8ac2bc4a45aa9a49eb98ee25e812b4667441f0c436e075af9cf0f51a05abea"
     },
     "checkpoint-n13-owner-killed.sh": {
       "bytes": 125,
@@ -22,9 +22,9 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     "checkpoint-owner-death-common.sh": {
-      "bytes": 46148,
+      "bytes": 47172,
       "mode": "0644",
-      "sha256": "5e171e76c77b0c33eaf95a707eb55ffc5c5ba235890f4e954b07feec79831d9b"
+      "sha256": "16fa9b19f290ac06f3076665e7be4562e96eccd26644fc746038ebcc4455b8bb"
     }
   },
   "native_credit": false,

@@ -108,3 +108,11 @@ scan shows no other process-group members. A real exited-leader/live-descendant
 control checks that malformed control input cannot bypass this group join. If
 the final deadline expires or group sampling fails, finalization does not claim
 join or publish a successful receipt; the outer fixture stays quarantined.
+
+## N14 original-runtime stop evidence (2026-10-15)
+
+The measured owner terminal in run38699334933 was `ExecMainCode=2`, `ExecMainStatus=15`. The original fixture rejected it because it assumed every SIGSTOP owner must reach SIGKILL. The [pinned systemd kill contract](https://github.com/systemd/systemd/blob/v255/man/systemd.kill.xml#L94-L102) sends SIGCONT after the normal stop signal. Its [runtime timer](https://github.com/systemd/systemd/blob/v255/src/core/service.c#L3733-L3735) enters the timeout stop path.
+
+The N14 fixture now inspects the existing unit's `KillSignal=15` and `Result=timeout`. Its closed record adds `systemd_bound.kill_signal` and `termination.owner_result` for N14 only. The parser requires timeout provenance, an elapsed interval from activation of at least the original 120-second runtime and at most runtime plus the original five-second stop reserve, terminal signal TERM15 or KILL9, both original PIDs absent, both selected cgroups empty, original launcher/pump joins, no positive files, retained accounts and quarantine. There is no fallback from missing timeout evidence. N13 continues to require SIGKILL9 and its original record shape.
+
+These are fixture changes only. No product timer, stop signal, privilege, account, path grant or numerical gate changed. Data controls are not native credit; the failed original receipt is retained unchanged.

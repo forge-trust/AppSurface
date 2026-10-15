@@ -839,7 +839,10 @@ def fixture_arguments(root, generation, job_deadline_boot_ms):
     job_deadline = job_deadline_boot_ms
     work_deadline = job_deadline - 60_000
     startup_deadline = min(work_deadline, boot_now + 30_000)
-    admission_deadline = min(work_deadline, boot_now + 10_000)
+    # Legacy observer ABI name: this barrier holds StartAsync before the server
+    # and its real Admission10 interval exist. Share the ORIGINAL Start30 bound.
+    # No new clock sample, renewed timer, request change or extra allowance.
+    admission_deadline = startup_deadline
     require(boot_now < admission_deadline <= work_deadline
             and boot_now < startup_deadline <= work_deadline < job_deadline,
             'n15-original-deadline-window')
