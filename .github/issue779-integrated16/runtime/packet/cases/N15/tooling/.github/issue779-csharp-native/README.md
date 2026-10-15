@@ -77,3 +77,13 @@ Ten detached tests execute the actual identity and worker-terminal functions wit
 Static review found a deterministic contradictory prerequisite in the N15 finalizer: validate_replay_observation requires retry.stdout == empty, but read_fixed rejected st_size0 before reaching that check. This is a source-proven next-stage blocker, not a measured native finalizer failure.
 
 The reader now has keyword-only allow_empty=False. Exactly the fixed retry.stdout binding opts in. All other reads stay nonempty. File type, root uid/gid, mode, single link, no-follow open, FD identity, actual EOF, length, hashes, original deadline and final replay rejection remain mandatory. An empty stream cannot supply an exit or guard fact.
+
+# N15 initial activating-worker identity sampling
+
+Run38813910715 failed worker-process-binding during initial process-identities, before account snapshot or signal. The existing five-second initial identity loop may query systemd before its activating/start child has reached final credentials/cgroup. Actual mismatching fields were not retained; do not claim which field failed in that run.
+
+Only initial worker sampling opts into pending_start. A mismatch is pending only while unit ActiveState is activating and SubState is start/start-pre/start-post. The exact generated unit ControlGroup, no-restart policy and parsed PID remain required; no mismatched kernel sample is returned or used for signal. Active/running mismatches, owner checks and every pre-signal recheck remain strict. Polling uses the same original identity/start/job deadlines. A hard mismatch additionally writes at most1KiB fixed private numeric/boolean/closed-enum diagnostic data, omitting actual cgroup paths and arbitrary text. This data cannot change rejection or establish a claim.
+
+# Exact N15 successful wrapper output order
+
+Static source inspection found the runner expected two stdout lines in the opposite order from its actual shell+finalizer. The actual fixed path emits dispatch, successful final-record marker, then the measured original-launch join line. All three lines are now mandatory in that exact order, with the same numeric fields and byte-count checks. Extra bytes, reordered/duplicated/missing lines, failed observer status and unknown content reject. This is canonical data validation only; source analysis is not a measured native finalizer/validator success.

@@ -19,6 +19,10 @@ class Reject(ValueError):
     """Fixed private rejection; raw source and input data are never echoed."""
 
 
+class InitialIdentityPending(Exception):
+    """An activating/start unit has not yet supplied a matching live worker sample."""
+
+
 class TerminalIdentityPending(Exception):
     """A post-signal process is Z/X or its proc name disappeared; never an exit receipt."""
 
@@ -249,7 +253,7 @@ def proc_identity(pid, *, include_terminal=False):
             "cgroup": unified[0]}
 
 
-def unit_identity(unit, expected_kind, deadline, *, include_terminal=False, terminal_pid=None):
+def unit_identity(unit, expected_kind, deadline, *, include_terminal=False, terminal_pid=None, pending_start=False):
     """Bind live process facts to exact unit policy within the original bound.
 
     Post-signal mode requires an original positive terminal_pid, permits no replacement,
@@ -283,8 +287,25 @@ def unit_identity(unit, expected_kind, deadline, *, include_terminal=False, term
     else:
         uid = account_id(values["User"], "uid")
         gid = account_id(values["Group"], "gid")
-        require(proc["uids"] == [uid] * 4 and proc["gids"] == [gid] * 4
-                and proc["cgroup"] == expected_cgroup, "worker-process-binding")
+        matched = (proc["uids"] == [uid] * 4 and proc["gids"] == [gid] * 4
+                and proc["cgroup"] == expected_cgroup)
+        if not matched and pending_start and values["ActiveState"] == "activating" \
+                and values["SubState"] in ("start", "start-pre", "start-post"):
+            raise InitialIdentityPending()
+        if not matched:
+            # Fixed private diagnostic only. A mismatch still rejects; no raw path or text.
+            allowed_states = ("activating", "active", "inactive", "failed")
+            allowed_substates = ("start", "start-pre", "start-post", "running", "dead", "failed")
+            projection = {"schema":"issue779-n15-worker-binding-diagnostic-v1",
+                "expected_uid":uid, "expected_gid":gid,
+                "uid4":proc["uids"], "gid4":proc["gids"],
+                "cgroup_matches":proc["cgroup"] == expected_cgroup,
+                "active_state":values["ActiveState"] if values["ActiveState"] in allowed_states else "other",
+                "sub_state":values["SubState"] if values["SubState"] in allowed_substates else "other"}
+            encoded = json.dumps(projection,sort_keys=True,separators=(",",":"))
+            require(len(encoded)<=1024,"proc-process-state")
+            print(encoded,file=sys.stderr,flush=True)
+            raise Reject("worker-process-binding")
         proc["uid"] = uid
         proc["gid"] = gid
     proc["pid"] = pid
@@ -430,7 +451,11 @@ def observe_and_kill(args):
     worker_values = worker = owner_values = owner_proc = None
     while boot_ms() < identity_end:
         remaining(identity_end)
-        worker_values, worker = unit_identity(phase["unit"], "worker", identity_end)
+        try:
+            worker_values, worker = unit_identity(phase["unit"], "worker", identity_end, pending_start=True)
+        except InitialIdentityPending:
+            time.sleep(min(0.02, remaining(identity_end) / 1000))
+            continue
         owner_values, owner_proc = unit_identity(owner, "owner", identity_end)
         if worker is not None and owner_proc is not None:
             require(worker_values["ActiveState"] in ("activating", "active")
