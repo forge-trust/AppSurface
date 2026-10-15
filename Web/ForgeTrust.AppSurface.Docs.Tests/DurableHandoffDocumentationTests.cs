@@ -93,9 +93,16 @@ public sealed class DurableHandoffDocumentationTests
 
             var handoffSnippet = Assert.Single(
                 guideDocument.QuerySelectorAll("pre > code"),
-                code => code.TextContent.Contains("internal sealed class HandoffExecutor(", StringComparison.Ordinal));
-            Assert.Contains("NpgsqlDataSource runtimeDataSource", handoffSnippet.TextContent, StringComparison.Ordinal);
-            Assert.Contains("ExecuteAsync", handoffSnippet.TextContent, StringComparison.Ordinal);
+                code => code.TextContent.Contains("internal sealed class HandoffApplicationExecutor(", StringComparison.Ordinal));
+            Assert.Contains("IDurableWorkHandoffFence handoffFence", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.Contains("ON CONFLICT DO NOTHING", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.Contains("CommitAsync", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.Contains("provider.SendAsync", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("HandoffExecutionProbe", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("ObservePreparationAsync", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("CrossScope", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("AmbiguousExternalOutcome", handoffSnippet.TextContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("IOException", handoffSnippet.TextContent, StringComparison.Ordinal);
             Assert.Contains("```csharp", guideMarkdown, StringComparison.Ordinal);
             Assert.DoesNotContain(
                 "docs:snippet durable-handoff-application-flow",

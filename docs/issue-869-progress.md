@@ -1,8 +1,16 @@
 # Issue #869 progress
 
-As of **October 14, 2026**. The [approved execution plan](plans/issue-869-transaction-bound-handoff-fence.md) is implemented on `codex/make-it-so-869-handoff-fence`, with source baseline `092730aa3742aad2de94e2c724c11b92e5b98627`. Strict native PostgreSQL, fresh packed-package verification, the unchanged solution coverage gate, and documentation/browser QA have passed. The acceptance-matrix source audit and implementation enhancement review are complete. Release review, the final documentation audit, and the draft pull request are the remaining delivery steps.
+As of **October 15, 2026**. The [approved execution plan](plans/issue-869-transaction-bound-handoff-fence.md) is implemented on `codex/make-it-so-869-handoff-fence` in [PR #877](https://github.com/forge-trust/AppSurface/pull/877). Verification below is tied to specific revisions; subsequent local changes require fresh affected checks.
 
-## Current snapshot
+## Latest published verification
+
+Published source [`861ad6132fa0c694f6b50a8c811d37cde29e268a`](https://github.com/forge-trust/AppSurface/commit/861ad6132fa0c694f6b50a8c811d37cde29e268a) passed [the full CI build and coverage gate](https://github.com/forge-trust/AppSurface/actions/runs/38674845508/job/116225993972): **55 projects, 16,927 passed, 0 failed, 2 existing conditional skips**. Aggregate coverage was **96.2301% line / 88.8863% branch**; patch coverage was **99.6835% line / 99.3243% branch** against the merge checkout's `HEAD^1`. Thresholds remain 95% line / 85% branch for aggregate and patch, with the existing 0.5-point tolerance and Codecov patch mode.
+
+The [strict PostgreSQL lane](https://github.com/forge-trust/AppSurface/actions/runs/38674845508/job/116225993738) passed **971 tests, 0 failed, 0 skipped**, including 130 native handoff cases and the exact previous-package proof skipped by ordinary coverage. The second ordinary skip is the manual candidate-publication rehearsal. [Strict documentation export](https://github.com/forge-trust/AppSurface/actions/runs/38674845508/job/116234612895), package gates, formatting, security analyses, and the Codecov patch check passed. The PR remains a draft requiring maintainer review; publication and adopter feasibility remain separate milestones.
+
+## Historical implementation snapshot (October 14)
+
+The following table and local receipts describe source `092730aa3742aad2de94e2c724c11b92e5b98627`, before later review fixes and the published CI run above. Its counts and package hashes are historical evidence, not current-candidate verification. At that stage, release review, the final documentation audit, and the draft PR were still pending.
 
 | Area | State | Evidence boundary |
 | --- | --- | --- |
@@ -42,7 +50,7 @@ The packed verifier takes no positional arguments. Preserve the source revision,
 
 `HandoffPrepared=true` remains provisional until caller commit. Provider I/O follows transaction and connection release inside the active invocation and uses the existing provider-safety policy. A failed or ambiguous commit suppresses sending until the application ledger and existing native/provider rules resolve it. No `PLANNED / GAP` test-plan row becomes passed solely because its source file exists or a narrower baseline/pump/API check is green.
 
-## Final candidate verification
+## Historical candidate verification (October 14)
 
 The new misuse test proves that callback denial/exception removes the supplied-transaction write while separately committed writes and a local fake-provider call survive. The final cancellation test observes a competing native transition finish before the caller closes its outer transaction; the unsupported-isolation cases preserve isolation and the pre-canceled call never enters the database callback. No new public binder or reflective test access was added.
 

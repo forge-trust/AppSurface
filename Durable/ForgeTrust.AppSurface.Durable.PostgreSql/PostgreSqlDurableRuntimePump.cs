@@ -504,9 +504,11 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         await using (var scope = _scopeFactory.CreateAsyncScope())
         {
             DurablePreparedWorkInvocation invocation;
+            PostgreSqlDurableWorkHandoffFence handoffFence;
             try
             {
                 invocation = DurableProviderWorkAdapter.Prepare(registration, scope.ServiceProvider, claim.ToProviderClaim());
+                handoffFence = scope.ServiceProvider.GetRequiredService<PostgreSqlDurableWorkHandoffFence>();
             }
             catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
             {
@@ -558,7 +560,6 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
             }
 
             currentClaim = permit.Claim;
-            var handoffFence = scope.ServiceProvider.GetRequiredService<PostgreSqlDurableWorkHandoffFence>();
             try
             {
                 if (hasExecutionSnapshot)

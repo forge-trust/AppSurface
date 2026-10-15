@@ -88,10 +88,16 @@ public sealed partial class HandoffPostgreSqlConsumerTests
         await using var provider = fixture.BuildProvider(probe, fake);
         _ = await fixture.EnqueueAsync(provider, other);
         // Keep the other scoped Work out of this one-item runtime pass.
-        await using (var defer = fixture.AdminDataSource.CreateCommand("UPDATE appsurface_durable.dispatch SET due_at=now()+interval '1 day', execution_discovery_at=now()+interval '1 day' WHERE scope_id=@scope;"))
+        await using (var defer = fixture.AdminDataSource.CreateCommand("""
+            UPDATE appsurface_durable.dispatch
+            SET due_at=greatest(now(), appsurface_durable.work_execution_now())+interval '1 day',
+                execution_discovery_at=greatest(now(), appsurface_durable.work_execution_now())+interval '1 day'
+            WHERE scope_id=@scope
+            RETURNING due_at > now() AND execution_discovery_at > appsurface_durable.work_execution_now();
+            """))
         {
             defer.Parameters.AddWithValue("scope", other.ScopeId);
-            await defer.ExecuteNonQueryAsync();
+            Assert.True((bool)(await defer.ExecuteScalarAsync())!);
         }
         _ = await fixture.EnqueueAsync(provider, work);
         _ = await RunOneAsync(provider).WaitAsync(TimeSpan.FromSeconds(20));

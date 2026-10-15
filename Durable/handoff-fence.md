@@ -179,280 +179,84 @@ Give the application ledger a stable key scoped to the logical operation. If com
 
 `PostgreSqlDurableTransactionResources.RequireActive` is the narrow shared resource check for the transaction writer and fence: it requires the supplied transaction's active open connection and configured physical target, preserves the writer's established failure convention, and takes no ownership. `PostgreSqlDurableHandoffFacts.ReadAsync` assumes schema and active epoch were already validated, the bound transaction-local scope was set, and the connection is the transaction's exact connection. It locks scope → exact Work → dispatch → only the supplied permit ID, supports legacy and opted-in Work, samples current database time around relevant lock waits, and returns current lease/deadline facts plus a bounded refusal code. It does not create scope, consume admission, mutate a permit, scan permit history, or complete the caller transaction. `TimeProblem` gives lease expiry precedence over an elapsed opted-in deadline. The shared epoch fence remains in `PostgreSqlDurableWorkStore`; no second admission transaction is run.
 
-The complete executor flow is compiled as part of the public package consumer and published as a canonical snippet:
+The minimal application flow is compiled and executed through the public native pump in the packed consumer. The fake provider used there is an explicit test adapter outside this snippet. A commit exception propagates and suppresses provider I/O; reconcile the application ledger under the existing [uncertain-commit rules](#prepared-committed-and-provider-outcomes) before any later delivery decision.
 
-<!-- appsurface:snippet id="durable-handoff-application-flow" file="Durable/packed-consumers/PostgreSqlPolicyConsumer/HandoffPostgreSqlConsumerTests.cs" marker="durable-handoff-application-flow" lang="csharp" -->
+<!-- appsurface:snippet id="durable-handoff-application-flow" file="Durable/packed-consumers/PostgreSqlPolicyConsumer/HandoffApplicationExecutor.cs" marker="durable-handoff-application-flow" lang="csharp" -->
 ```csharp
-internal sealed class HandoffExecutor(
+internal interface IHandoffApplicationProvider
+{
+    ValueTask SendAsync(
+        HandoffWork work,
+        string activityId,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class HandoffApplicationExecutor(
     IDurableWorkHandoffFence handoffFence,
     NpgsqlDataSource runtimeDataSource,
-    HandoffExecutionProbe probe,
-    HandoffFakeProvider fakeProvider)
+    IHandoffApplicationProvider provider)
     : IDurableWorkExitExecutor<HandoffWork, HandoffResult>
 {
-    private readonly Task _preparation = ObservePreparationAsync(handoffFence, runtimeDataSource, probe);
-
-    private static async Task ObservePreparationAsync(IDurableWorkHandoffFence fence, NpgsqlDataSource source, HandoffExecutionProbe observation)
-    {
-        await using var connection = await source.OpenConnectionAsync();
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-        var result = await fence.ExecuteAsync(transaction, (_, _) =>
-        {
-            Interlocked.Increment(ref observation.PreparationCallbackCalls);
-            return ValueTask.FromResult(true);
-        });
-        observation.PreparationProblem.TrySetResult(result.Problem?.Code);
-    }
-
     public async ValueTask<DurableWorkExit<HandoffResult>> ExecuteAsync(
         DurableWorkerEnvelope<HandoffWork> envelope,
         CancellationToken cancellationToken = default)
     {
-        try { await _preparation; return await ExecuteCoreAsync(envelope, cancellationToken); }
-        catch (Exception exception) { probe.Failure.TrySetResult(exception); throw; }
-    }
-
-    private async ValueTask<DurableWorkExit<HandoffResult>> ExecuteCoreAsync(
-        DurableWorkerEnvelope<HandoffWork> envelope, CancellationToken cancellationToken)
-    {
-        var work = envelope.Payload ?? throw new InvalidOperationException("The packed handoff Work payload was missing.");
-        var identity = envelope.ExecutionIdentity ?? throw new InvalidOperationException("The native executor received no execution identity.");
-        NpgsqlConnection? callerConnection = null;
-        NpgsqlTransaction? callerTransaction = null;
-        bool handoffPrepared;
-        int backendPid;
-        string? nativeScopeAfterFence;
-        bool callbackUsedExactTransaction = false;
-        bool callbackSawRestrictedRole = false;
-        bool callbackSawBoundNativeScope = false;
-        bool callbackSawOneNativeWorkRow = false;
-        bool callbackSawOneApplicationAuthorityRow = false;
-        bool callerTransactionDisposed = false;
-
-        await using (var connection = await runtimeDataSource.OpenConnectionAsync(cancellationToken))
+        var work = envelope.Payload ?? throw new InvalidOperationException("The handoff Work payload was missing.");
+        var identity = envelope.ExecutionIdentity ?? throw new InvalidOperationException("The native execution identity was missing.");
+        await using (var callerConnection = await runtimeDataSource.OpenConnectionAsync(cancellationToken))
         {
-            callerConnection = connection;
-            await using (var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken))
+            await using (var callerTransaction = await callerConnection.BeginTransactionAsync(
+                System.Data.IsolationLevel.ReadCommitted,
+                cancellationToken))
             {
-                callerTransaction = transaction;
-                backendPid = await HandoffPostgreSqlConsumerTests.BackendPidAsync(connection, transaction);
-                await using (var setPriorScope = new NpgsqlCommand(
-                    "SELECT set_config('appsurface_durable.scope_id', 'caller-scope-before-handoff', true);",
-                    connection,
-                    transaction))
-                {
-                    await setPriorScope.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                await using (var marker = new NpgsqlCommand("""
-                    INSERT INTO handoff_consumer.caller_marker (marker_id, scope_id, marker_value)
-                    VALUES (@marker_id, @scope_id, 'caller-owned-before-fence');
-                    """, connection, transaction))
-                {
-                    marker.Parameters.AddWithValue("marker_id", work.MarkerId);
-                    marker.Parameters.AddWithValue("scope_id", work.ScopeId);
-                    await marker.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                probe.RetainedFence = handoffFence;
-                probe.BeforeFence.TrySetResult(handoffFence);
-                await probe.WaitForFenceAsync(cancellationToken);
-                DurableOperationResult<DurableWorkHandoffResult> result;
-                try
-                {
-                    result = await handoffFence.ExecuteAsync(
-                    transaction,
-                    async (suppliedTransaction, token) =>
+                var prepared = await handoffFence.ExecuteAsync(
+                    callerTransaction,
+                    async (transaction, token) =>
                     {
-                        Interlocked.Increment(ref probe.CallbackCalls);
-                        if (probe.CrossScope is { } otherScope)
-                        {
-                            await using var crossRead = new NpgsqlCommand("""
-                                SELECT (SELECT count(*) FROM appsurface_durable.work WHERE scope_id=@other_scope)
-                                     + (SELECT count(*) FROM handoff_consumer.authority WHERE scope_id=@other_scope);
-                                """, connection, suppliedTransaction);
-                            crossRead.Parameters.AddWithValue("other_scope", otherScope);
-                            probe.CrossScopeRowsHidden = (long)(await crossRead.ExecuteScalarAsync(token))! == 0;
-                            await using var forbidden = new NpgsqlCommand("""
-                                INSERT INTO handoff_consumer.ledger(scope_id, activity_id, logical_operation)
-                                VALUES (@other_scope, @activity_id, @operation);
-                                """, connection, suppliedTransaction);
-                            forbidden.Parameters.AddWithValue("other_scope", otherScope);
-                            forbidden.Parameters.AddWithValue("activity_id", identity.ActivityId);
-                            forbidden.Parameters.AddWithValue("operation", work.LogicalOperation);
-                            await forbidden.ExecuteNonQueryAsync(token);
-                        }
-                        callbackUsedExactTransaction = ReferenceEquals(suppliedTransaction, transaction)
-                            && ReferenceEquals(suppliedTransaction.Connection, connection);
-                        if (!callbackUsedExactTransaction)
-                        {
-                            throw new InvalidOperationException("The handoff callback did not receive the caller's exact transaction and connection.");
-                        }
-
-                        await using (var inspect = new NpgsqlCommand("""
-                            SELECT current_user,
-                                   current_setting('appsurface_durable.scope_id', true),
-                                   (SELECT count(*) FROM appsurface_durable.work WHERE scope_id = @scope_id),
-                                   (SELECT count(*) FROM handoff_consumer.authority WHERE scope_id = @scope_id),
-                                   (SELECT rolsuper OR rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user);
-                            """, connection, suppliedTransaction))
-                        {
-                            inspect.Parameters.AddWithValue("scope_id", work.ScopeId);
-                            await using var reader = await inspect.ExecuteReaderAsync(token);
-                            if (!await reader.ReadAsync(token))
-                            {
-                                throw new InvalidOperationException("The handoff callback could not inspect the restricted execution context.");
-                            }
-
-                            callbackSawRestrictedRole = reader.GetString(0).StartsWith("handoff_runtime_", StringComparison.Ordinal) && !reader.GetBoolean(4);
-                            callbackSawBoundNativeScope = reader.GetString(1) == work.ScopeId;
-                            callbackSawOneNativeWorkRow = reader.GetInt64(2) == 1;
-                            callbackSawOneApplicationAuthorityRow = reader.GetInt64(3) == 1;
-                        }
-
-                        probe.CallbackWaitingForAuthority.TrySetResult(new HandoffCallbackObservation(backendPid));
-                        bool authorized;
-                        await using (var authority = new NpgsqlCommand("""
+                        await using var authority = new NpgsqlCommand("""
                             SELECT is_authorized
                             FROM handoff_consumer.authority
-                            WHERE scope_id = @scope_id AND operation_key = @authority_key
+                            WHERE scope_id = @scope_id AND operation_key = @operation_key
                             FOR UPDATE;
-                            """, connection, suppliedTransaction))
-                        {
-                            authority.Parameters.AddWithValue("scope_id", work.ScopeId);
-                            authority.Parameters.AddWithValue("authority_key", work.AuthorityKey);
-                            var value = await authority.ExecuteScalarAsync(token);
-                            authorized = value is true;
-                        }
-
-                        if (!authorized)
+                            """, transaction.Connection, transaction);
+                        authority.Parameters.AddWithValue("scope_id", work.ScopeId);
+                        authority.Parameters.AddWithValue("operation_key", work.AuthorityKey);
+                        if (await authority.ExecuteScalarAsync(token) is not true)
                         {
                             return false;
                         }
 
-                        // The callback writes conditionally on the locked authority row. Both immutable identities are unique.
                         await using var ledger = new NpgsqlCommand("""
                             INSERT INTO handoff_consumer.ledger (scope_id, activity_id, logical_operation)
                             VALUES (@scope_id, @activity_id, @operation)
                             ON CONFLICT DO NOTHING
                             RETURNING activity_id;
-                            """, connection, suppliedTransaction);
+                            """, transaction.Connection, transaction);
                         ledger.Parameters.AddWithValue("scope_id", work.ScopeId);
                         ledger.Parameters.AddWithValue("activity_id", identity.ActivityId);
                         ledger.Parameters.AddWithValue("operation", work.LogicalOperation);
-                        var inserted = await ledger.ExecuteScalarAsync(token);
-                        if (inserted is null)
-                        {
-                            return false;
-                        }
-
-                        // This late test-only denial exercises removal of a staged callback write by the callback savepoint.
-                        return !probe.DenyAfterLedgerInsert;
+                        return await ledger.ExecuteScalarAsync(token) is not null;
                     },
                     cancellationToken);
-                }
-                catch
+
+                if (!prepared.IsSuccess || prepared.Value?.HandoffPrepared != true)
                 {
-                    await using var scopeAfterFailure = new NpgsqlCommand("SELECT current_setting('appsurface_durable.scope_id', true);", connection, transaction);
-                    probe.ScopeAfterFailure = await scopeAfterFailure.ExecuteScalarAsync(CancellationToken.None) as string;
-                    throw;
+                    return DurableWorkExit<HandoffResult>.RetryBeforeEffect(
+                        prepared.IsSuccess ? "handoff_denied" : "handoff_refused");
                 }
 
-                if (!result.IsSuccess || result.Value is null)
-                {
-                    throw new InvalidOperationException(result.Problem?.Code ?? "The public handoff fence refused without a problem code.");
-                }
-
-                handoffPrepared = result.Value.HandoffPrepared;
-                await using (var readRestoredScope = new NpgsqlCommand(
-                    "SELECT current_setting('appsurface_durable.scope_id', true);",
-                    connection,
-                    transaction))
-                {
-                    nativeScopeAfterFence = await readRestoredScope.ExecuteScalarAsync(cancellationToken) as string;
-                }
-
-                probe.Prepared.TrySetResult(new HandoffPreparedObservation(
-                    handoffPrepared,
-                    callbackUsedExactTransaction,
-                    transaction.IsolationLevel,
-                    callbackSawRestrictedRole,
-                    callbackSawBoundNativeScope,
-                    callbackSawOneNativeWorkRow,
-                    callbackSawOneApplicationAuthorityRow,
-                    nativeScopeAfterFence,
-                    backendPid,
-                    work.MarkerId));
-
-                await probe.WaitForCallerCommitAsync(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                if (probe.CommitMode == HandoffCommitObservationMode.EstablishedRollback)
-                    await transaction.RollbackAsync(cancellationToken);
-                else if (probe.CommitMode == HandoffCommitObservationMode.Unresolved)
-                {
-                    // A fresh scoped reader cannot see this uncommitted row. Absence does not settle its outcome.
-                    probe.CommitLedgerVisible.TrySetResult(await ReadLedgerAsync(work, identity.ActivityId));
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-                else
-                {
-                    try
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                        if (probe.CommitMode == HandoffCommitObservationMode.AcknowledgementLost)
-                            throw new IOException("Test adapter lost acknowledgement after a real PostgreSQL commit.");
-                    }
-                    catch (IOException failure) when (probe.CommitMode == HandoffCommitObservationMode.AcknowledgementLost)
-                    {
-                        probe.CommitFailure = failure;
-                    }
-                }
+                // A failed or uncertain commit propagates without sending. Reconcile the ledger before a later send.
+                await callerTransaction.CommitAsync(cancellationToken);
             }
-
-            callerTransactionDisposed = true;
         }
 
-        probe.ResourcesReleased.TrySetResult(callerTransactionDisposed && callerConnection!.State == ConnectionState.Closed);
-        if (probe.CommitMode != HandoffCommitObservationMode.Acknowledged)
-        {
-            if (probe.CommitMode != HandoffCommitObservationMode.Unresolved)
-                probe.CommitLedgerVisible.TrySetResult(await ReadLedgerAsync(work, identity.ActivityId));
-            // The test adapter reports acknowledgement loss after a real commit, established rollback, or unresolved
-            // outcome. Every uncertain path pauses provider I/O and leaves recovery to ledger/provider policy.
-            return DurableWorkExit<HandoffResult>.AmbiguousExternalOutcome("handoff_commit_requires_reconciliation");
-        }
-        await probe.WaitForProviderAsync(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        if (!handoffPrepared)
-        {
-            return DurableWorkExit<HandoffResult>.RetryBeforeEffect("handoff_denied");
-        }
-
-        await fakeProvider.SendAsync(
-            work,
-            identity.ActivityId,
-            callerTransaction!,
-            callerConnection!,
-            callerTransactionDisposed);
+        await provider.SendAsync(work, identity.ActivityId, cancellationToken);
         return DurableWorkExit<HandoffResult>.Succeeded(new HandoffResult(identity.ActivityId));
     }
-    private async Task<bool> ReadLedgerAsync(HandoffWork work, string activityId)
-    {
-        await using var connection = await runtimeDataSource.OpenConnectionAsync();
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted);
-        await using (var scope = new NpgsqlCommand("SELECT set_config('appsurface_durable.scope_id', @scope, true);", connection, transaction))
-        {
-            scope.Parameters.AddWithValue("scope", work.ScopeId);
-            await scope.ExecuteNonQueryAsync();
-        }
-        await using var read = new NpgsqlCommand("SELECT EXISTS(SELECT 1 FROM handoff_consumer.ledger WHERE scope_id=@scope AND activity_id=@activity);", connection, transaction);
-        read.Parameters.AddWithValue("scope", work.ScopeId);
-        read.Parameters.AddWithValue("activity", activityId);
-        return (bool)(await read.ExecuteScalarAsync())!;
-    }
-
 }
 ```
 <!-- /appsurface:snippet -->
 
-Start with the [compiled public handoff example above](#internal-contracts-and-verification), its [packed PostgreSQL consumer source](https://github.com/forge-trust/AppSurface/blob/main/Durable/packed-consumers/PostgreSqlPolicyConsumer/HandoffPostgreSqlConsumerTests.cs), and the [#869 proof plan](https://github.com/forge-trust/AppSurface/blob/main/docs/plans/issue-869-handoff-test-plan.md). The [package entry point](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff), [Work protocol](work-protocol-v1.md#prepare-application-handoff), [execution-policy reference](execution-policies-v1.md), and [issue progress record](https://github.com/forge-trust/AppSurface/blob/main/docs/issue-869-progress.md) provide the surrounding adoption and verification context. The consumer uses package references only; do not treat source presence as a compiled or passing proof.
+Start with the [compiled public handoff example above](#internal-contracts-and-verification), its [packed PostgreSQL consumer source](https://github.com/forge-trust/AppSurface/blob/main/Durable/packed-consumers/PostgreSqlPolicyConsumer/HandoffApplicationExecutor.cs), and the [#869 proof plan](https://github.com/forge-trust/AppSurface/blob/main/docs/plans/issue-869-handoff-test-plan.md). The [package entry point](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff), [Work protocol](work-protocol-v1.md#prepare-application-handoff), [execution-policy reference](execution-policies-v1.md), and [issue progress record](https://github.com/forge-trust/AppSurface/blob/main/docs/issue-869-progress.md) provide the surrounding adoption and verification context. The consumer uses package references only; do not treat source presence as a compiled or passing proof.

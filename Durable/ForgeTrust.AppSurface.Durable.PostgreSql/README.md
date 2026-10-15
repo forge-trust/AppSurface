@@ -36,6 +36,14 @@ start a worker, open a connection, or apply DDL. Continuous processing requires 
 [`AddWorkerHost()` opt-in](#run-a-worker-host). Startup validates the installed schema and active epoch and never
 applies DDL or advances migration history.
 
+Passive registration validates the runtime connection string's host and effective database before adding services.
+Specify `Database` explicitly, or provide an explicit username for Npgsql's same-as-username database default.
+Do not rely on an operating-system username or unsupported `PGHOST`/`PGDATABASE` defaults for physical target identity;
+see [Npgsql connection parameters](https://www.npgsql.org/doc/connection-string-parameters.html).
+The pump resolves its scoped handoff dependency during provider preparation, before acquiring an effect permit.
+A construction failure follows the existing `WorkContractUnavailable` completion path and does not leave a permit
+claiming provider work may have begun. The [handoff guide](../handoff-fence.md) explains the transaction target contract.
+
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and

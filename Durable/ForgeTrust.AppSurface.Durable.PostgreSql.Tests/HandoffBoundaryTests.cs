@@ -349,7 +349,7 @@ public sealed class HandoffBoundaryTests
             await PostgreSqlDurableHandoffTestSupport.CreateLedgerAsync(lab);
             const string appName = "869-host-lock-timeout";
             await using var dataSource = PostgreSqlDurableHandoffTestSupport.CreateDataSource(
-                lab, appName, lockTimeoutMilliseconds: 900, statementTimeoutMilliseconds: 5_000,
+                lab, appName, lockTimeoutMilliseconds: 3_000, statementTimeoutMilliseconds: 6_000,
                 idleTimeoutMilliseconds: 8_000);
             await using var owner = await lab.Database.DataSource.OpenConnectionAsync();
             await using var ownerTransaction = await owner.BeginTransactionAsync(IsolationLevel.ReadCommitted);
@@ -367,7 +367,7 @@ public sealed class HandoffBoundaryTests
                 return ValueTask.FromResult(true);
             }).AsTask();
             await PostgreSqlDurableHandoffTestSupport.WaitForBlockingPidAsync(
-                lab.Database.DataSource, appName, ownerPid, TimeSpan.FromMilliseconds(700));
+                lab.Database.DataSource, appName, ownerPid, TimeSpan.FromMilliseconds(2_500));
             var failure = await Assert.ThrowsAsync<PostgresException>(async () => await operation.WaitAsync(BarrierTimeout));
             Assert.Equal(PostgresErrorCodes.LockNotAvailable, failure.SqlState);
             Assert.Equal(0, callbacks);

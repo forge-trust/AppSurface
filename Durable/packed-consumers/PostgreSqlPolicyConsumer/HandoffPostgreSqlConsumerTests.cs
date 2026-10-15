@@ -26,6 +26,45 @@ public sealed partial class HandoffPostgreSqlConsumerTests
             DurableWorkRetryPolicy.Default);
 
     [Fact]
+    public async Task Handoff_MinimalApplicationExecutorCommitsAndReleasesConnectionBeforeProviderCall()
+    {
+        await using var fixture = await HandoffPostgreSqlFixture.CreateAsync(runtimeMaxPoolSize: 1);
+        var work = fixture.CreateWork("minimal-executor-success");
+        await fixture.SeedAuthorityAsync(work);
+        var fakeProvider = new HandoffFakeProvider(fixture.RuntimeDataSource);
+        await using var provider = fixture.BuildProvider(new HandoffExecutionProbe(), fakeProvider, useMinimalExecutor: true);
+        _ = await fixture.EnqueueAsync(provider, work);
+
+        var result = await RunOneAsync(provider).WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(1, result.Processed);
+        Assert.Equal(0, result.Failed);
+        Assert.Equal(1, fakeProvider.Calls);
+        Assert.True(fakeProvider.FreshReaderAcquired);
+        Assert.True(fakeProvider.CommittedLedgerVisible);
+    }
+
+    [Fact]
+    public async Task Handoff_MinimalApplicationExecutorDenialSkipsProviderCall()
+    {
+        await using var fixture = await HandoffPostgreSqlFixture.CreateAsync(runtimeMaxPoolSize: 1);
+        var work = fixture.CreateWork("minimal-executor-denied");
+        await fixture.SeedAuthorityAsync(work, authorized: false);
+        var fakeProvider = new HandoffFakeProvider(fixture.RuntimeDataSource);
+        await using var provider = fixture.BuildProvider(new HandoffExecutionProbe(), fakeProvider, useMinimalExecutor: true);
+        _ = await fixture.EnqueueAsync(provider, work);
+
+        var result = await RunOneAsync(provider).WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(0, result.Processed);
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, fakeProvider.Calls);
+        Assert.Equal(0L, await fixture.AdminScalarAsync<long>(
+            "SELECT count(*) FROM handoff_consumer.ledger WHERE logical_operation = @operation;",
+            ("operation", work.LogicalOperation)));
+    }
+
+    [Fact]
     public async Task Handoff_PublicExecutorCommitsBeforeFakeProviderAndUsesRestrictedRlsTransaction()
     {
         await using var fixture = await HandoffPostgreSqlFixture.CreateAsync();
@@ -290,7 +329,7 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
     private string DispatcherRole { get; }
     internal string RuntimeRole { get; }
 
-    internal static async Task<HandoffPostgreSqlFixture> CreateAsync()
+    internal static async Task<HandoffPostgreSqlFixture> CreateAsync(int runtimeMaxPoolSize = 32)
     {
         var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
         NpgsqlDataSource? adminDataSource = null;
@@ -317,7 +356,7 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
 
             adminDataSource = CreateAdminDataSource(database.ConnectionString);
             var dispatcher = CreateRoleDataSource(database.ConnectionString, dispatcherRole, DispatcherPassword, "dispatcher");
-            var runtime = CreateRoleDataSource(database.ConnectionString, runtimeRole, RuntimePassword, "runtime");
+            var runtime = CreateRoleDataSource(database.ConnectionString, runtimeRole, RuntimePassword, "runtime", runtimeMaxPoolSize);
             return new HandoffPostgreSqlFixture(
                 database,
                 adminDataSource,
@@ -360,13 +399,24 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
             Guid.NewGuid());
     }
 
-    internal ServiceProvider BuildProvider(HandoffExecutionProbe probe, HandoffFakeProvider fakeProvider)
+    internal ServiceProvider BuildProvider(
+        HandoffExecutionProbe probe,
+        HandoffFakeProvider fakeProvider,
+        bool useMinimalExecutor = false)
     {
         var services = new ServiceCollection();
         services.AddSingleton(probe);
         services.AddSingleton(fakeProvider);
         services.AddSingleton(RuntimeDataSource);
-        services.AddDurableWork(HandoffPostgreSqlConsumerTests.Definition.ExecutedByExit<HandoffExecutor>());
+        if (useMinimalExecutor)
+        {
+            services.AddSingleton<IHandoffApplicationProvider, HandoffFakeApplicationProviderAdapter>();
+            services.AddDurableWork(HandoffPostgreSqlConsumerTests.Definition.ExecutedByExit<HandoffApplicationExecutor>());
+        }
+        else
+        {
+            services.AddDurableWork(HandoffPostgreSqlConsumerTests.Definition.ExecutedByExit<HandoffExecutor>());
+        }
         services.AddAppSurfaceDurablePostgreSql(
             DispatcherDataSource,
             RuntimeDataSource,
@@ -404,14 +454,15 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
         return accepted;
     }
 
-    internal async Task SeedAuthorityAsync(HandoffWork work)
+    internal async Task SeedAuthorityAsync(HandoffWork work, bool authorized = true)
     {
         await using var command = AdminDataSource.CreateCommand("""
             INSERT INTO handoff_consumer.authority (scope_id, operation_key, is_authorized)
-            VALUES (@scope_id, @operation, true);
+            VALUES (@scope_id, @operation, @authorized);
             """);
         command.Parameters.AddWithValue("scope_id", work.ScopeId);
         command.Parameters.AddWithValue("operation", work.AuthorityKey);
+        command.Parameters.AddWithValue("authorized", authorized);
         await command.ExecuteNonQueryAsync();
     }
 
@@ -580,7 +631,8 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
         string connectionString,
         string role,
         string password,
-        string lane)
+        string lane,
+        int maximumPoolSize = 32)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString)
         {
@@ -588,7 +640,7 @@ internal sealed class HandoffPostgreSqlFixture : IAsyncDisposable
             Password = password,
             ApplicationName = $"packed-handoff-{lane}-{Guid.NewGuid():N}",
             Pooling = true,
-            MaxPoolSize = 32,
+            MaxPoolSize = maximumPoolSize,
             Options = TestConnectionOptions,
         };
         return NpgsqlDataSource.Create(builder.ConnectionString);
@@ -680,6 +732,8 @@ internal sealed class HandoffFakeProvider(NpgsqlDataSource runtimeDataSource)
 {
     internal int Calls;
     internal HandoffProviderObservation? LastObservation;
+    internal bool FreshReaderAcquired;
+    internal bool CommittedLedgerVisible;
 
     internal async ValueTask SendAsync(
         HandoffWork work,
@@ -728,9 +782,43 @@ internal sealed class HandoffFakeProvider(NpgsqlDataSource runtimeDataSource)
             throw new InvalidOperationException("The post-commit provider reader could not see the prepared application ledger row.");
         }
     }
+
+    internal async ValueTask SendCommittedAsync(HandoffWork work, string activityId, CancellationToken cancellationToken)
+    {
+        Interlocked.Increment(ref Calls);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        // These tests use a one-connection pool: this cannot complete while the caller retains its connection.
+        await using var connection = await runtimeDataSource.OpenConnectionAsync(deadline.Token);
+        FreshReaderAcquired = true;
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, deadline.Token);
+        await using (var setScope = new NpgsqlCommand(
+            "SELECT set_config('appsurface_durable.scope_id', @scope_id, true);",
+            connection,
+            transaction))
+        {
+            setScope.Parameters.AddWithValue("scope_id", work.ScopeId);
+            await setScope.ExecuteNonQueryAsync(deadline.Token);
+        }
+
+        await using var read = new NpgsqlCommand("""
+            SELECT count(*)
+            FROM handoff_consumer.ledger
+            WHERE scope_id = @scope_id AND activity_id = @activity_id AND logical_operation = @operation;
+            """, connection, transaction);
+        read.Parameters.AddWithValue("scope_id", work.ScopeId);
+        read.Parameters.AddWithValue("activity_id", activityId);
+        read.Parameters.AddWithValue("operation", work.LogicalOperation);
+        var visible = (long)(await read.ExecuteScalarAsync(deadline.Token))! == 1;
+        await transaction.CommitAsync(deadline.Token);
+        CommittedLedgerVisible = visible;
+        if (!visible)
+        {
+            throw new InvalidOperationException("The post-commit provider reader could not see the prepared application ledger row.");
+        }
+    }
 }
 
-// docs:snippet durable-handoff-application-flow:start
 internal sealed class HandoffExecutor(
     IDurableWorkHandoffFence handoffFence,
     NpgsqlDataSource runtimeDataSource,
@@ -1001,6 +1089,5 @@ internal sealed class HandoffExecutor(
 
 }
 
-// docs:snippet durable-handoff-application-flow:end
 
 internal enum HandoffCommitObservationMode { Acknowledged, AcknowledgementLost, EstablishedRollback, Unresolved }
