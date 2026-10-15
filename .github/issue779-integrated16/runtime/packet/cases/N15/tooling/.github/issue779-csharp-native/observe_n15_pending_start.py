@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed N15 live observer. It has no retry, fallback signal, or deadline renewal."""
+"""Fixed N15 live observer. It has no signal retry, fallback signal, or deadline renewal."""
 import argparse
 import hashlib
 import importlib.util
@@ -17,6 +17,10 @@ import time
 
 class Reject(ValueError):
     """Fixed private rejection; raw source and input data are never echoed."""
+
+
+class TerminalIdentityPending(Exception):
+    """A post-signal process is Z/X or its proc name disappeared; never an exit receipt."""
 
 
 def require(condition, reason):
@@ -212,12 +216,20 @@ def proc_file(pid, name, cap=8192):
         os.close(fd)
 
 
-def proc_identity(pid):
+def proc_identity(pid, *, include_terminal=False):
+    """Read an actual live identity; optional post-signal Z/X raises pending before credentials.
+
+    Default authentication rejects terminal states. Pending data never establishes exit.
+    """
     statline = proc_file(pid, "stat")
     close = statline.rfind(")")
     require(close > 0, "proc-stat-shape")
     tail = statline[close + 2:].split()
-    require(len(tail) >= 20 and tail[0] not in ("Z", "X"), "proc-process-state")
+    require(len(tail) >= 20, "proc-stat-shape")
+    if tail[0] in ("Z", "X"):
+        if include_terminal:
+            raise TerminalIdentityPending()
+        raise Reject("proc-process-state")
     starttime = int(tail[19])
     rows = {}
     for line in proc_file(pid, "status").splitlines():
@@ -237,7 +249,13 @@ def proc_identity(pid):
             "cgroup": unified[0]}
 
 
-def unit_identity(unit, expected_kind, deadline):
+def unit_identity(unit, expected_kind, deadline, *, include_terminal=False, terminal_pid=None):
+    """Bind live process facts to exact unit policy within the original bound.
+
+    Post-signal mode requires an original positive terminal_pid, permits no replacement,
+    and raises TerminalIdentityPending for Z/X or missing proc names. Only MainPID0
+    returns None; the caller separately requires original terminal metadata and empty groups.
+    """
     fields = ["MainPID", "ControlGroup", "User", "Group", "Restart", "ActiveState", "SubState",
               "ExecMainPID", "ExecMainCode", "ExecMainStatus", "Result"]
     values = systemd(unit, fields, deadline)
@@ -246,11 +264,19 @@ def unit_identity(unit, expected_kind, deadline):
     except ValueError:
         raise Reject("unit-main-pid") from None
     require(values["Restart"] == "no", "unit-restart-policy")
+    if include_terminal:
+        require(type(terminal_pid) is int and terminal_pid > 0
+            and pid in (0, terminal_pid), "unit-main-pid")
     if pid == 0:
         return values, None
     expected_cgroup = "/system.slice/" + unit
     require(values["ControlGroup"] == expected_cgroup, "unit-control-group")
-    proc = proc_identity(pid)
+    try:
+        proc = proc_identity(pid, include_terminal=include_terminal)
+    except (FileNotFoundError, ProcessLookupError):
+        if include_terminal:
+            raise TerminalIdentityPending() from None
+        raise
     if expected_kind == "owner":
         require(proc["uids"] == [0] * 4 and proc["gids"] == [0] * 4
                 and proc["cgroup"] == expected_cgroup, "owner-process-binding")
@@ -317,7 +343,11 @@ def wait_worker_terminal(unit, original_pid, group, deadline):
     last = None
     while boot_ms() < deadline:
         remaining(deadline)
-        values, proc = unit_identity(unit, "worker", deadline)
+        try:
+            values, proc = unit_identity(unit, "worker", deadline, include_terminal=True, terminal_pid=original_pid)
+        except TerminalIdentityPending:
+            time.sleep(min(0.025, remaining(deadline) / 1000))
+            continue
         if proc is not None:
             require(proc["pid"] == original_pid, "worker-replacement")
         else:
@@ -434,7 +464,13 @@ def observe_and_kill(args):
     owner_terminal = None
     while boot_ms() < args.work_deadline_boot_ms:
         remaining(args.work_deadline_boot_ms)
-        values, proc = unit_identity(owner, "owner", args.work_deadline_boot_ms)
+        try:
+            values, proc = unit_identity(owner, "owner", args.work_deadline_boot_ms, include_terminal=True, terminal_pid=owner_proc["pid"])
+        except TerminalIdentityPending:
+            time.sleep(min(0.025, remaining(args.work_deadline_boot_ms) / 1000))
+            continue
+        if proc is not None:
+            require(proc == owner_proc, "owner-process-binding")
         if proc is None:
             owner_terminal = values
             if values["ActiveState"] in ("inactive", "failed") and values["SubState"] in ("dead", "failed"):

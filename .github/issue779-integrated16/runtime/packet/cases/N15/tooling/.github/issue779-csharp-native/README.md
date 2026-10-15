@@ -61,3 +61,13 @@ The existing `--admission-deadline-boot-ms` observer argument retains its ABI na
 Run38703260712 failed in account-snapshot/generated-worker-account-name before any pidfd signal. Immutable LinuxWorkerUnit emits numeric User and Group strings, whereas the observer required the generated evw name in those properties.
 
 The observer now derives all three names from the exact generated worker kernel cgroup already bound by unit_identity, resolves numeric or named systemd properties through the existing bounded account parser, requires the same observed process UID/GID, all five distinct identities, matching primary groups and empty memberships, and adds reverse NSS equality checks. No signal, deadline, restart, guard, terminal, replay or cleanup rule changes. Data-only tests do not establish native account or signal authority.
+
+# N15 terminal process polling
+
+Run38810092731 failed in owner-terminal/proc-process-state after the pidfd signal, before terminal/guard/replay completion. The new interpretation is confined to post-signal polling.
+
+`proc_identity(pid, include_terminal=False)` still rejects Z/X for authentication. In post-signal mode a Z/X stat or a FileNotFoundError/ProcessLookupError opening its proc names raises the fixed TerminalIdentityPending category. It returns no identity or physical-exit fact. `unit_identity(..., include_terminal=True, terminal_pid=original)` first requires an exact original MainPID or zero and unchanged unit policy. A live sample must still match all kernel UID/GID/cgroup guards. Both post-signal loops may only poll pending under their existing original deadline. Owner live samples additionally require the same captured start identity; replacement rejects. Permission, malformed and other errors still reject.
+
+Final success still needs systemd MainPID0 with the original ExecMainPID/code/status, exact generated groups empty, original deadlines, consumed activation guard, reactivation denial, joined original launcher/output, strict account cleanup and bound final records. No signal, product limit, restart or acceptance rule changes.
+
+Ten detached tests execute the actual identity and worker-terminal functions with fake proc/NSS/systemd data. They exercise Z/X and missing-name transitions, unchanged authentication rejection, original PID binding, wrong credentials/cgroup, nonempty groups and successful final terminal data. They grant no root/native/cleanup authority.
