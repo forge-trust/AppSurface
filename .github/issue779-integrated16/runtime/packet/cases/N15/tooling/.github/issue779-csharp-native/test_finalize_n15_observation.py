@@ -57,7 +57,7 @@ class FinalizerDataControls(unittest.TestCase):
         text=Path(__file__).with_name("acquire-inbound.sh").read_text()
         self.assertIn('--arg capture "${v[source-capture-sha256]}"',text)
         self.assertIn('.capture_input_sha256==$capture',text)
-        self.assertNotIn('.capture_input_sha256=="6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4"',text)
+        self.assertNotIn('.capture_input_sha256=="8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046"',text)
         transport=Path(__file__).with_name("prepare-root-inputs-v2.sh").read_text()
         self.assertIn('--arg capture "${values[source-capture-sha256]}"',transport)
         self.assertIn('.capture_input_sha256==$capture',transport)
@@ -68,7 +68,7 @@ class FinalizerDataControls(unittest.TestCase):
         document=json.loads(raw)
         projection={key:document[key] for key in ("validation_commit","previous_validation_commit","source_count","source_tree","source")}
         actual_projection=hashlib.sha256(json.dumps(projection,sort_keys=True,separators=(",",":")).encode()).hexdigest()
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),"6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4")
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),"8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046")
         self.assertEqual(actual_projection,"5aa7188c4dbe5632d7602271eff23837fc49f098a3ae46b9e06d1157a2cc476a")
         self.assertIn("RESULT['capture_input_sha256'] = capture_fact['sha256']",build_text)
         self.assertIn("RESULT['capture_projection_sha256'] = projection_sha",build_text)

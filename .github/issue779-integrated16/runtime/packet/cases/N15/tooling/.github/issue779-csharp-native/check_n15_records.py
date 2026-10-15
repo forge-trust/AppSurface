@@ -5,8 +5,8 @@ import json
 import re
 
 MAX_PHASE = 8192
-SOURCE = '957da1f23ff743778fa39e3e559511ccdb281345'
-CAPTURE_SHA256 = '6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4'
+SOURCE = '71d004d6cf5a791ddbb8e73e3c538248985a8505'
+CAPTURE_SHA256 = '8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046'
 WORKER = re.compile(r"^appsurface-evidence-worker-([0-9a-f]{32})\.service$")
 JOB = re.compile(r"^/org/freedesktop/systemd1/job/[1-9][0-9]{0,19}$")
 

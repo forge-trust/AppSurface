@@ -11,7 +11,7 @@
     ".github/issue779-csharp-build/capture-receipt.json": {
       "bytes": 656713,
       "mode": "0644",
-      "sha256": "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4"
+      "sha256": "8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046"
     },
     ".github/issue779-csharp-native/README.md": {
       "bytes": 13546,
@@ -21,7 +21,7 @@
     ".github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 20740,
       "mode": "0644",
-      "sha256": "031dc96a9316615206449a16fbdce04f293452775f888aacdca59b60cbb90899"
+      "sha256": "9d9fdc617d652a1777d0577365ab8b151c4713731166cfeb77f7b546a009aa0b"
     },
     ".github/issue779-csharp-native/check_n10_pending_start.py": {
       "bytes": 10460,
@@ -31,7 +31,7 @@
     ".github/issue779-csharp-native/checkpoint-n10-pending-start.sh": {
       "bytes": 89890,
       "mode": "0644",
-      "sha256": "cc08911fe4489417b43bc4a288fca76fd73317b8bd05efb4faa3d9d2f2bfd19c"
+      "sha256": "48b0ceff1ddaf04447451d0684453a0c1c842f5c8b27f27043330bb50fe9adea"
     },
     ".github/issue779-csharp-native/prepare-os-audit-v2.py": {
       "bytes": 33200,
@@ -41,12 +41,12 @@
     ".github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 25059,
       "mode": "0644",
-      "sha256": "2602bf6e73832e7423e6e8a6dccdf72e99f4121d4032281ba6db69120444fab5"
+      "sha256": "e6505acf7c01bd316e11e5de6d2372b9800d316f89cd7be081eff1b53c97ff6b"
     },
     ".github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9046,
       "mode": "0644",
-      "sha256": "63d9ac4b107f623976d96e92cb88969d12ca6fa72459e5b3becd8e9308d0dcf4"
+      "sha256": "e04a4077b74ecdb7e09c8c1b5063a21431d9991ffc9c7f921b3a267d4766fb2f"
     },
     ".github/issue779-csharp-native/retain-native.sh": {
       "bytes": 11724,
@@ -56,12 +56,12 @@
     ".github/issue779-csharp-native/run-native.py": {
       "bytes": 62162,
       "mode": "0644",
-      "sha256": "3db1d23201d7db0d8823faaa86bf8a3e48c5af4a896777c2f2373d0fa4a0dd08"
+      "sha256": "4f38f6fe223d0b6c18fb8dceabf4c822c889dea03651cbc27a5076847c3a77c5"
     },
     ".github/issue779-csharp-native/source-review.json": {
       "bytes": 3498,
       "mode": "0644",
-      "sha256": "f6112ce62564d917a0738c34bb1aaa743c4d2b4b0fa9340f348ad0325a01bf23"
+      "sha256": "6eb45fa6abff8fbb149816a0d3037237411b9e11cc12e63e0592259b0f790216"
     },
     ".github/issue779-csharp-native/test_actual_batch_parser.py": {
       "bytes": 16628,
@@ -71,7 +71,7 @@
     ".github/issue779-csharp-native/test_n10_pending_start.py": {
       "bytes": 43827,
       "mode": "0644",
-      "sha256": "bb42b1a6d5df42eeef95c69cd947fc85b2b78703ca307c9395f3611cfd5bfde8"
+      "sha256": "ff5528e92beeae01bc97bdbd9feb2b2fcb2708e8961e3d164b2519bee2790b6f"
     },
     ".github/workflows/issue779-csharp-linux-native.yml": {
       "bytes": 25444,
@@ -94,6 +94,6 @@
     "UBUNTU_RUNTIME_REVIEWED": true
   },
   "schema": "issue779-n10-workflow-execution-review-v1",
-  "source_capture_sha256": "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4",
+  "source_capture_sha256": "8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046",
   "source_commit": "0c100a94d93f82fd633e5674009a41659940d010"
 }

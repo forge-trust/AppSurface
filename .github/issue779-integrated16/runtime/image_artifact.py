@@ -23,14 +23,14 @@ import zipfile
 import zlib
 
 
-SOURCE_COMMIT = "957da1f23ff743778fa39e3e559511ccdb281345"
-SOURCE_TREE = "51a3f946d42f4141af1cc8d297161dd362b79fd0"
+SOURCE_COMMIT = "71d004d6cf5a791ddbb8e73e3c538248985a8505"
+SOURCE_TREE = "d15b1f3a7532947d525e4d74cdc7457f6b8923ea"
 SOURCE_COUNT = 2872
-CAPTURE_SHA256 = "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4"
-CAPTURE_PROJECTION_SHA256 = "c3ec77a29d9a12b6e58f7acd3ae14a0454582a3f296eefb34f7e05f602d153b2"
+CAPTURE_SHA256 = "8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046"
+CAPTURE_PROJECTION_SHA256 = "c2e846a09c6e7561eea1a1531d34a422ba0b7379a05be4e4fcb17bd18134f891"
 BUILD_CONTRACT_SHA256 = "4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8"
-ARTIFACT_METADATA_SHA256 = "2837ae66440f45a36adc5865781eb3355c934fd80cb89d2c75e6b367c5502f07"
-ARTIFACT_RUN_ID = 38511845118
+ARTIFACT_METADATA_SHA256 = 'f1b736ee3dcb044c5bf5a6ab81667215034299f180948b3fc80289e25f54027b'
+ARTIFACT_RUN_ID = 38572441488
 
 SELECTORS = ("None", *(f"N{i:02d}" for i in range(4, 17)))
 MAX_ZIP_BYTES = 256 * 1024 * 1024
@@ -137,7 +137,7 @@ def _read_pinned(path: Path, expected_sha: str, cap: int, deadline: float) -> by
 def _source_tuple(capture: dict[str, object], capture_sha: str, deadline: float) -> dict[str, object]:
     _need(capture.get("schema") == "issue779-csharp-common-source-capture-v4"
           and capture.get("validation_commit") == SOURCE_COMMIT
-          and capture.get("previous_validation_commit") == "fc59bb1254294d624f6779f928020edfe988dd5e"
+          and capture.get("previous_validation_commit") == "957da1f23ff743778fa39e3e559511ccdb281345"
           and capture.get("source_tree") == SOURCE_TREE
           and type(capture.get("source_count")) is int and capture["source_count"] == SOURCE_COUNT
           and capture.get("native_credit") is False

@@ -22,7 +22,7 @@ def line(value):
 
 def valid_data():
     frame = dict(schema='issue779-n07-precleanup-allocation-fault-v1', phase='Allocation',
-        operation='CheckParentIdentity', error_family='Admission', capture_point='AllocateCatchBeforeCallbackRethrow',
+        operation='CheckParentIdentity', error_family='Io', capture_point='AllocateCatchBeforeCallbackRethrow',
         terminal_observed=False, observation_only=True, native_authority=False, native_acceptance=False)
     stderr = line(frame) + b'private-fatal-canary\x00\xff'
     descriptor = {key: None for key in m.DESCRIPTOR_KEYS}
@@ -121,7 +121,7 @@ class N07DetachedDataControls(unittest.TestCase):
 
     def test_raw_64k_exact_including_nontext_and_65k_reject(self):
         frame=line(dict(schema='issue779-n07-precleanup-allocation-fault-v1',phase='Allocation',operation='CheckParentIdentity',
-            error_family='Admission',capture_point='AllocateCatchBeforeCallbackRethrow',terminal_observed=False,
+            error_family='Io',capture_point='AllocateCatchBeforeCallbackRethrow',terminal_observed=False,
             observation_only=True,native_authority=False,native_acceptance=False))
         data=frame+b'\xfb'*(m.MAX_STDERR-len(frame))
         raw=line(dict(schema='issue779-n07-joined-worker-raw-v1',stdout_base64='',stderr_base64=base64.b64encode(data).decode(),
@@ -191,6 +191,30 @@ class N07DetachedDataControls(unittest.TestCase):
         self.assertNotIn(b'private-fatal-canary',line(result))
         self.assertEqual(False,result['native_authority'])
         self.assertEqual(False,result['native_acceptance'])
+
+
+    def test_io_first_frame_exact_family_and_no_claims(self):
+        stderr = valid_data()['stderr']
+        frame, value = m.first_frame(stderr)
+        self.assertEqual('Io', value['error_family'])
+        self.assertFalse(value['terminal_observed'])
+        self.assertFalse(value['native_authority'])
+        self.assertFalse(value['native_acceptance'])
+        self.assertEqual(stderr.split(b'\n', 1)[0] + b'\n', frame)
+
+    def test_admission_other_family_operation_and_malformed_rejected(self):
+        value = json.loads(valid_data()['stderr'].split(b'\n', 1)[0])
+        for field, wrong in (('error_family', 'Admission'), ('error_family', 'Unknown'),
+                             ('operation', 'CreateSlot')):
+            with self.subTest(field=field, wrong=wrong):
+                bad = dict(value)
+                bad[field] = wrong
+                with self.assertRaises(ValueError):
+                    m.first_frame(line(bad))
+        for bad in (b'{\n', b'{}\n', b'null\n'):
+            with self.subTest(malformed=bad):
+                with self.assertRaises(ValueError):
+                    m.first_frame(bad)
 
 if __name__ == '__main__':
     unittest.main()

@@ -5,7 +5,7 @@ No decoded record creates a lease, admission, account owner, or native acceptanc
 """
 import re
 
-RECORD_SHA256 = '96d01d088300aeffb5fa7eab7387c3b4be319d249e796edcb189aceb441548e7'
+RECORD_SHA256 = '27c4a9f631dc297e9f00bc8892c4824b7b3de2dccca815f987757747d68ada82'
 CAPS = {
     'n07-worker-unit.txt': 65536, 'n07-helper-unit.txt': 65536,
     'n07-worker-raw.json': 98304, 'n07-root-failure.json': 6145,

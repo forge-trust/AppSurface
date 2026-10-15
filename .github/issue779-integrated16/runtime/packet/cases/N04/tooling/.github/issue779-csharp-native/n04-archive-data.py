@@ -12,7 +12,7 @@ import re
 import stat
 import types
 
-SOURCE = '957da1f23ff743778fa39e3e559511ccdb281345'
+SOURCE = '71d004d6cf5a791ddbb8e73e3c538248985a8505'
 BASE = '4dd992ec1bc2df8220c73149115c5b478edb0085'
 PARSER_SHA256 = 'eba48c40d6f35001ba30fa7cf733d87dea0a12e23e9c55f11675a6e514f88784'
 REJECTION = 'N04 canonical archive data rejected.'

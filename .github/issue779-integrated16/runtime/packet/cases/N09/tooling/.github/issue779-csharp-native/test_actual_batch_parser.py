@@ -319,8 +319,8 @@ class NestedAuditFDControls(unittest.TestCase):
 
 
 class BuilderAncestryDataControls(unittest.TestCase):
-    SOURCE = "957da1f23ff743778fa39e3e559511ccdb281345"
-    PARENT = "fc59bb1254294d624f6779f928020edfe988dd5e"
+    SOURCE = "71d004d6cf5a791ddbb8e73e3c538248985a8505"
+    PARENT = "957da1f23ff743778fa39e3e559511ccdb281345"
 
     @staticmethod
     def _validator():

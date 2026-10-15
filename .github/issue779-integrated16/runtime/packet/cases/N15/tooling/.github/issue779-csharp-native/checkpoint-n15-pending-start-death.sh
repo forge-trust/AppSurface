@@ -3,10 +3,10 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly HERE=${BASH_SOURCE[0]%/*}
-readonly OBSERVER_SHA256=48d584499f5cb8c040ef5e29b011f13cd0120e5e06cc687bf77ed2735cd6b7e3
-readonly PARSER_SHA256=52fdaf3a770c1e22ae8758253c3d43deb330b19c30f513262e734d60b376dd3d
+readonly OBSERVER_SHA256=5ef1a0071241cb90656a98d4eb9c033c8491f985db5bd225e2c86a8d0452d18b
+readonly PARSER_SHA256=b9bfefd7bb713d29d1b344f867891312bbfd32177763b42b373015c7663ac1ae
 readonly RETRY_SHA256=9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6
-readonly FINALIZER_SHA256=a8efef674c19acfb1b09d0c4a52d804d803c0694e698d1fa619d2e1905dfe3bb
+readonly FINALIZER_SHA256=611b1a7ab3747e947dbec226b17abb464628987089bfcbf00ad1215d3df64e90
 fail(){ printf 'N15_OWNER_LAUNCH_JOIN_REJECTED:%s\n' "$1" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail execute-required
 shift

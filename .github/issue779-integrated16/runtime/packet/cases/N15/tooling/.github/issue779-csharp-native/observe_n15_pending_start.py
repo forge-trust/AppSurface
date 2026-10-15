@@ -29,7 +29,7 @@ def identity(st):
             st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 
-PARSER_SHA256 = "52fdaf3a770c1e22ae8758253c3d43deb330b19c30f513262e734d60b376dd3d"
+PARSER_SHA256 = "b9bfefd7bb713d29d1b344f867891312bbfd32177763b42b373015c7663ac1ae"
 
 
 def load_pinned_parser():

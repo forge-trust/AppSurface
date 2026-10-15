@@ -84,7 +84,7 @@ def first_frame(stderr):
                 'terminal_observed', 'observation_only', 'native_authority', 'native_acceptance'))
     require(value['schema'] == 'issue779-n07-precleanup-allocation-fault-v1'
             and value['phase'] == 'Allocation' and value['operation'] == 'CheckParentIdentity'
-            and value['error_family'] == 'Admission'
+            and value['error_family'] == 'Io'
             and value['capture_point'] == 'AllocateCatchBeforeCallbackRethrow'
             and value['terminal_observed'] is False and value['observation_only'] is True)
     no_authority(value)
