@@ -174,7 +174,7 @@ public class AspireStartupContextTests
     public void Constructor_ExplicitRootNormalizesWithoutExistenceOrAnchorAccess()
     {
         using var tree = new RepositoryTree();
-        var root = Path.Combine(tree.Root, "unused", "..", "nonexistent");
+        var root = Path.Join(tree.Root, "unused", "..", "nonexistent");
         var builder = A.Fake<IDistributedApplicationBuilder>();
         A.CallTo(() => builder.AppHostDirectory).Throws(new InvalidOperationException("Anchor must not be read."));
 
@@ -222,8 +222,8 @@ public class AspireStartupContextTests
         var expected = relativePath switch
         {
             "" => tree.Root,
-            "../sibling" => Path.Combine(tree.Root, "../sibling"),
-            "missing/asset" => Path.Combine(tree.Root, "missing/asset"),
+            "../sibling" => Path.Join(tree.Root, "../sibling"),
+            "missing/asset" => Path.Join(tree.Root, "missing/asset"),
             _ => throw new InvalidOperationException("Unexpected combination test input.")
         };
         Assert.Equal(expected, context.GetPathFromRoot(relativePath));
