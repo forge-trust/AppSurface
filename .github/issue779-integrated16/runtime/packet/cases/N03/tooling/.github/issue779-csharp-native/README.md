@@ -51,3 +51,11 @@ Source `a353970c67b7b2e02acaa248348dbff69efd3648` is an exact five-file diagnost
 ## Owned-socket custody candidate
 
 Source `806301fd259197f7d448157795259489ac01d9f1` is a six-modified/two-added child of `a353970c67b7b2e02acaa248348dbff69efd3648` with2823 SHA/mode-pinned files. Current counts, endpoint/diagnostic cases, TRX and peer pins come only from final actual receipts; prior1094/Diagnostics82/Ownership38 remain historical. The pure endpoint wrapper and optional custody diagnostics do not establish a native cause, acceptance, or permission to skip named custody checks. Operational parent is `4de73baf29c0388b3c1cb5b1bf7e655f20d25bbe`; preparation creates normal ordered merge then a sole installation child on retry-17. All43 command checks, original deadlines, clone/merge022/private077, audit/SDK/runtime/caps and19 inputs/40 pins are retained. Eight promotion flags are false until independent generated-file review; all16 native controls and Trusted/registry remain unaccepted.
+
+## Post-exec positive sampling — 2026-10-15
+
+Run38703260712 rejected both ordinary and N12 fixtures before writing their worker sample, with last closed stage `unit-loaded` and a positive MainPID. It does not identify the failing inner check. The observer previously captured credentials before confirming the post-exec image and rejected a valid systemd pre-exec executor image.
+
+The candidate treats any unpinned executable only as pending under the original finite observation interval. No pending process can emit a sample. Exact image path, device/inode/size/mode and SHA256 are required before credentials. Original repeated start-time, UID4/GID4, exact cgroup, six arguments, and generated NSS checks remain required, with original final publication and cleanup checks unchanged. Additional closed diagnostic stages locate a future rejection without raw kernel data in the terminal projection.
+
+Five detached tests execute the embedded Bash observer with fake kernel/utility data, including a pre-exec transition and wrong image, root UID, altered inode/cgroup/argv/NSS. They establish no native identity, admission or cleanup. Both full scripts pass Bash syntax checks.

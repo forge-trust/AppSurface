@@ -28,8 +28,8 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == 5457503368cdf147652c28ac71c6c03199c16dfe8d322eae617498de4b105026 &&
-   ${v[fixture-sha256]} == 707c6a381f1ffd45183cfa46ab53d95a38772c7b18faaf38bf7dd5707fe0ad84 &&
+[[ ${v[transport-sha256]} == 93d134591c18ea60ddbfda0c7646cc32d2c7047d90099f7273dab72f5e1a5627 &&
+   ${v[fixture-sha256]} == 7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a &&
    ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
    ${v[source-review-sha256]} == 085223a7396d8a62693fb2eb787cf71f080147328ae3c56d325667f849ba9294 ]] || fail frozen-input-pins
 mono() {

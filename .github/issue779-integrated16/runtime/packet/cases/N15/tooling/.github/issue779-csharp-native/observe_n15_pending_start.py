@@ -159,12 +159,16 @@ def account_id(value, kind):
 
 def account_snapshot(worker_values, worker):
     """Capture all five actual NSS identities while the selected worker is still pending."""
-    worker_name=worker_values["User"]
-    worker_group=worker_values["Group"]
-    match=re.fullmatch(r"evw([0-9a-f]{28})",worker_name)
-    require(match is not None and worker_group==worker_name,"generated-worker-account-name")
-    suffix=match.group(1)
-    names={"worker":worker_name,"subject":"evs"+suffix,"results":"evr"+suffix}
+    # systemd stores the production unit's explicitly numeric User/Group values.
+    # Names come only from the generated kernel-bound unit, never from caller data.
+    match=re.fullmatch(r"0::/system.slice/appsurface-evidence-worker-([0-9a-f]{32})\.service",
+        "0::"+worker["control_group"])
+    require(match is not None,"generated-worker-account-name")
+    suffix=match.group(1)[:28]
+    names={"worker":"evw"+suffix,"subject":"evs"+suffix,"results":"evr"+suffix}
+    require(account_id(worker_values["User"],"uid")==worker["uid"]
+        and account_id(worker_values["Group"],"gid")==worker["gid"],
+        "generated-account-identity")
     try:
         worker_passwd=pwd.getpwnam(names["worker"])
         subject_passwd=pwd.getpwnam(names["subject"])
@@ -183,6 +187,15 @@ def account_snapshot(worker_values, worker):
         and subject_passwd.pw_gid==ids["subject_gid"]
         and not worker_grp.gr_mem and not subject_grp.gr_mem and not results_grp.gr_mem,
         "generated-account-membership")
+    try:
+        require(pwd.getpwuid(ids["worker_uid"])==worker_passwd
+            and pwd.getpwuid(ids["subject_uid"])==subject_passwd
+            and grp.getgrgid(ids["worker_gid"])==worker_grp
+            and grp.getgrgid(ids["subject_gid"])==subject_grp
+            and grp.getgrgid(ids["results_gid"])==results_grp,
+            "generated-account-identity")
+    except KeyError:
+        raise Reject("generated-account-nss-missing") from None
     return {"names":names,"ids":ids}
 
 

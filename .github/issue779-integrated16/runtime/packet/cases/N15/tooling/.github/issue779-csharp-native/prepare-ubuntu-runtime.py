@@ -11,7 +11,7 @@ import time
 VERSION = '10.0.12-0ubuntu1~24.04.1'
 PACKAGES = ('dotnet-host-10.0', 'dotnet-hostfxr-10.0', 'dotnet-runtime-10.0', 'aspnetcore-runtime-10.0')
 ROOT = Path('/usr/lib/dotnet')
-RUNNER_SHA = 'd32e6d3edc66a2c9a8caebabf77b87121f987d2ee13f0dd33a9627471545b19f'
+RUNNER_SHA = 'a4475b2c9407acdee500da7e905933fedfc4e204df1b8583617a692bf6f10e4d'
 
 
 def package_rows(data):

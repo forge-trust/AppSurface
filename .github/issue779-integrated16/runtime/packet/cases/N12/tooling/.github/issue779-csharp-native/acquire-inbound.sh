@@ -28,10 +28,10 @@ readonly N03_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 helper-build-receipt-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[transport-sha256]} == bb7fa9131dba4393c0cc9e706f7047cd431610fabf73483b092890f4b5c80145 &&
-   ${v[fixture-sha256]} == 3fd3057e2f0208749347c0a7d31b88b1298293d1452cb92800334caeeba7fc62 &&
+[[ ${v[transport-sha256]} == b061d7ea50d8bc18373b7bac9eca190e9f5add0c856b4075161c23408af43ab6 &&
+   ${v[fixture-sha256]} == e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d &&
    ${v[audit-sha256]} == 0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b &&
-   ${v[source-review-sha256]} == 8e99f87e2183712eefe38200386eda3e8831e9b936409e3877d89f8fe6553649 ]] || fail frozen-input-pins
+   ${v[source-review-sha256]} == 9afded9a0668f0a695f4485f0b6cf05b96bf86ee639b4801c039756ad17e5e40 ]] || fail frozen-input-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

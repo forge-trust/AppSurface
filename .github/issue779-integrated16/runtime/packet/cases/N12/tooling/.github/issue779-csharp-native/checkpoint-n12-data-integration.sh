@@ -979,7 +979,7 @@ pin_owned_pg "$launch_pid"
   observer_exit_status=$?
   trap - EXIT
   local sink=${sample%/*}/logs/n01-observer-terminal.json stage_json result_json load_json pid_json sample_json
-  case $observer_stage in not-started|host-pinned|systemctl-result-closed|unit-absent|unit-loaded|worker-identity-closed|sample-written|observation-window-ended) stage_json=$observer_stage ;; *) stage_json=unknown ;; esac
+  case $observer_stage in not-started|host-pinned|systemctl-result-closed|unit-absent|unit-loaded|worker-image-pending|worker-image-pin|worker-kernel-snapshot|worker-arguments|worker-kernel-recheck|worker-nss-recheck|worker-identity-closed|sample-written|observation-window-ended) stage_json=$observer_stage ;; *) stage_json=unknown ;; esac
   if [[ $last_systemctl_result =~ ^[0-9]{1,3}$ ]] && ((10#$last_systemctl_result<=255)); then result_json=$((10#$last_systemctl_result)); else result_json=null; fi
   case $last_load_state in loaded|not-found|bad-setting|error|merged|masked|stub) load_json="\"$last_load_state\"" ;; *) load_json='\''"other"'\'' ;; esac
   if [[ $last_main_pid =~ ^[0-9]{1,10}$ ]] && ((10#$last_main_pid<=2147483647)); then pid_json=$((10#$last_main_pid)); else pid_json=null; fi
@@ -1016,22 +1016,28 @@ pin_owned_pg "$launch_pid"
   [[ $code == 0 && $load == loaded ]] || exit 1
   observer_stage=unit-loaded
   if [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/status ]]; then
+   observer_stage=worker-image-pending
+   exe1=$(run readlink "/proc/$pid/exe") || exit 1
+   if [[ $exe1 != "$host" ]]; then
+    # MainPID may still be the pre-exec launcher. It supplies NO positive identity.
+    # Keep polling under the original observation bound until the exact image exists.
+    run sleep .02; continue
+   fi
+   observer_stage=worker-image-pin
+   [[ $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
+   image=$(run sha256sum "/proc/$pid/exe"); [[ ${image:0:64} == "$host_hash" ]] || exit 1
+   observer_stage=worker-kernel-snapshot
    s1=$(start "$pid") || exit 1
    uid1=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid1=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg1=$(run cat "/proc/$pid/cgroup")
-   exe1=$(run readlink "/proc/$pid/exe") || exit 1
-   if [[ $exe1 != "$host" ]]; then
-    # env -i and the exec transition are pending, NEVER positive observations.
-    [[ $exe1 == /usr/bin/env ]] || exit 1; run sleep .02; continue
-   fi
-   [[ $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
-   image=$(run sha256sum "/proc/$pid/exe"); [[ ${image:0:64} == "$host_hash" ]] || exit 1
+   observer_stage=worker-arguments
    argv_file=${sample%.json}.argv
    run head -c 16385 "/proc/$pid/cmdline" >"$argv_file"
    size=$(run stat -c %s "$argv_file"); ((size>0 && size<=16384)) || exit 1
    args=(); while IFS= read -r -d "" a; do args+=("$a"); ((${#args[@]}<=6)) || exit 1; done <"$argv_file"
    [[ ${#args[@]} == 6 && ${args[0]} == "$host" && ${args[1]} == "$managed" && ${args[2]} == evidence && ${args[3]} == worker && ${args[4]} == --control && ${args[5]} == "$control" ]] || exit 1
+   observer_stage=worker-kernel-recheck
    uid2=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid2=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg2=$(run cat "/proc/$pid/cgroup"); exe2=$(run readlink "/proc/$pid/exe"); s2=$(start "$pid")
@@ -1040,6 +1046,7 @@ pin_owned_pg "$launch_pid"
    [[ ${#us[@]} == 4 && ${#gs[@]} == 4 ]] || exit 1
    for v in "${us[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${us[0]}" ]] || exit 1; done
    for v in "${gs[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${gs[0]}" ]] || exit 1; done
+   observer_stage=worker-nss-recheck
    pw=$(run getent passwd "$account"); gr=$(run getent group "$account")
    IFS=: read -r pn px pu rest <<<"$pw"; IFS=: read -r gn gx gg rest <<<"$gr"
    [[ $pn == "$account" && $gn == "$account" && $pu == "${us[0]}" && $gg == "${gs[0]}" ]] || exit 1
