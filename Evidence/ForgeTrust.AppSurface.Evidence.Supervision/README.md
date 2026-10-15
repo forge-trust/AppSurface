@@ -1,5 +1,8 @@
 # Evidence.Supervision
 
+> **Current integration status (2026-10-13):** The APIs and qualification procedures described below are now consolidated into the feature working tree from the reviewed source `1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38`. Preparation-time test counts and pending observations in individual sections describe their original handoffs. Current execution evidence and remaining requirements are tracked in the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) and [acceptance map](../../docs/evidence/issue779-acceptance-status.md). Ordinary builds select `None`; private qualification images cannot be packed, grant no Trusted capability, and do not complete the integrated native checkpoint.
+
+
 ## Account identity during teardown
 
 After `BeginRootTeardown`, new work admission is closed. The private N08/N09 cancellation
@@ -1575,6 +1578,30 @@ neither path clears lifetime failure or grants physical settlement, account rele
 A synthetic `Admission` frame previously hid the producer/consumer mismatch, so the [CLI producer control](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceN07PrecleanupFaultTests.cs)
 now binds the actual `IOException` classifier and encoder to exact bytes consumed by the [observer controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionN07OwnedCheckpointTests.cs).
 The existing friend graph is preserved; these are split portable controls, not one cross-assembly call or Linux execution proof.
+
+### N07 rejected allocation with successful worker containment
+
+The [native attempt on source914046e](https://github.com/forge-trust/AppSurface/actions/runs/38683569790)
+retained the exact `CheckParentIdentity / Io` allocation rejection and a normally exited worker with
+status one, two complete error-free pumps, and an empty final group. Its holder recorded successful
+physical containment, while the original server failed because the worker did not complete the protocol.
+The earlier snapshot gate required the worker holder itself to fail; it therefore omitted the strict
+negative receipt on this valid containment path. The separate fallback retained the failure for diagnosis.
+
+[The original worker holder](LinuxWorkerProcess.cs) now retains the selected N07 snapshot whenever its
+existing original monitor, unit, group and pump prerequisites permit encoding. It does not require a
+cleanup error as evidence of an allocation rejection. `CaptureFailureSettlement` still requires the
+reference-equal original owners, joined stop, accepted first stderr frame, committed READY and completed
+checkpoint/server handlers. Its [internal data guard](LinuxN07FailureSettlement.cs),
+`RequireFailedServerCapture(TaskStatus, LinuxN07FailureSettlement?)`, additionally requires the actual
+original server task to be faulted or cancelled and the immutable joined snapshot to exist. A successful,
+pending or unknown server status and a missing snapshot reject. The same snapshot is returned; no timer,
+native operation, owner, successful execution, custody or account-release permission is created.
+
+The [detached regression controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs)
+exercise a normally completed nonzero worker monitor with a failed server and reject the unavailable
+server/snapshot cases. They issue no protected capability. Native acceptance still requires a fresh
+image and the unchanged four-line strict fixture validation; a fallback alone cannot pass that control.
 
 ### Accepted socket cancellation boundary
 

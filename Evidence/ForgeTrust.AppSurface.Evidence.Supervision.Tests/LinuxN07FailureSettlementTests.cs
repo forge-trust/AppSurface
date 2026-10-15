@@ -51,6 +51,40 @@ public sealed class LinuxN07FailureSettlementTests
         Assert.Equal(successful, json.RootElement.GetProperty("monitor").GetProperty("completed_successfully").GetBoolean());
     }
 
+    [Theory]
+    [InlineData((int)TaskStatus.Faulted)]
+    [InlineData((int)TaskStatus.Canceled)]
+    public void SettledRejectedWorkerCanProjectAnOriginalFailedServer(int serverStatus)
+    {
+        var settlement = Encode(Valid(1, 1), TaskStatus.RanToCompletion);
+        var captured = LinuxN07FailureSettlement.RequireFailedServerCapture((TaskStatus)serverStatus, settlement);
+        Assert.Same(settlement, captured);
+        using var json = JsonDocument.Parse(LinuxN07FailureEmitter.Encode(captured, new string('a', 64),
+            (TaskStatus)serverStatus));
+        var root = json.RootElement;
+        Assert.False(root.GetProperty("server").GetProperty("completed_successfully").GetBoolean());
+        Assert.True(root.GetProperty("failure_settlement").GetProperty("monitor")
+            .GetProperty("completed_successfully").GetBoolean());
+        Assert.Equal(1, root.GetProperty("failure_settlement").GetProperty("terminal")
+            .GetProperty("exec_main_status").GetInt32());
+        Assert.False(root.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData((int)TaskStatus.Created)]
+    [InlineData((int)TaskStatus.WaitingForActivation)]
+    [InlineData((int)TaskStatus.Running)]
+    [InlineData((int)TaskStatus.RanToCompletion)]
+    [InlineData(999)]
+    public void SuccessfulOrUnjoinedServerCannotUseFailureProjection(int status) =>
+        Assert.Throws<InvalidOperationException>(() =>
+            LinuxN07FailureSettlement.RequireFailedServerCapture((TaskStatus)status, Encode(Valid(1, 1))));
+
+    [Fact]
+    public void FailedServerWithoutOriginalJoinedSnapshotCannotProject() =>
+        Assert.Throws<InvalidOperationException>(() =>
+            LinuxN07FailureSettlement.RequireFailedServerCapture(TaskStatus.Faulted, null));
+
     [Fact]
     public void IncompleteMonitorOrPipeJoinCannotPublish()
     {

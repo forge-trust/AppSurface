@@ -36,6 +36,25 @@ internal sealed class LinuxN07FailureSettlement
     }
     internal byte[] Bytes => _bytes.ToArray();
 
+    /// <summary>Requires an original failed server before returning already joined failure data.</summary>
+    /// <param name="serverStatus">Status of the original server task after its existing owner/join guard.</param>
+    /// <param name="settlement">Snapshot encoded from original final unit/group reads and joined pumps.</param>
+    /// <returns>The same immutable detached snapshot; no process or custody authority is created.</returns>
+    /// <exception cref="InvalidOperationException">The server succeeded, remains pending, or no snapshot exists.</exception>
+    /// <remarks>
+    /// The worker holder can be physically settled after correctly rejecting an allocation. Its local
+    /// cleanup need not fail for the original server to have failed. The native caller still requires
+    /// reference-equal owners, committed READY, accepted precleanup, and original server/worker joins.
+    /// This data guard cannot replace any of those prerequisites or publish a successful result.
+    /// </remarks>
+    internal static LinuxN07FailureSettlement RequireFailedServerCapture(TaskStatus serverStatus,
+        LinuxN07FailureSettlement? settlement)
+    {
+        if (serverStatus is not (TaskStatus.Faulted or TaskStatus.Canceled) || settlement is null)
+            throw Rejected();
+        return settlement;
+    }
+
     /// <summary>Encodes only complete original join/output facts and an actual normal or signal terminal.</summary>
     /// <remarks>No live sampling, token renewal, I/O, authority or acceptance occurs in this data encoder.</remarks>
     internal static LinuxN07FailureSettlement CreateDetached(Guid generation, LinuxProcessSample identity,
