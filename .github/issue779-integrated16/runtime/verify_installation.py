@@ -16,7 +16,7 @@ import stat
 LIMIT = 4 * 1024 * 1024
 SOURCE = '5b4ed381badb91de47d793715d05b6ae7737e39e'
 CAPTURE = '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540'
-PACKET = 'd35b7b9ec00fb05745e3974227de6ab10baa8981b4ead75826f7225e1ede3690'
+PACKET = 'a88681a14241c315e439d628ed318b35a5c0207d8f16faaf0df65f010a8b0a8b'
 
 
 def require(ok, category):

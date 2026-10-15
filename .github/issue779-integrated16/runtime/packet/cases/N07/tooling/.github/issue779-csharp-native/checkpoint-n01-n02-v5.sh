@@ -997,7 +997,16 @@ join_owned() {
  while kill -0 "$pid" 2>/dev/null; do
   left >/dev/null || return 124
   [[ ${owned_start[$pid]+present} ]] || return 125
-  current=$(owned_identity "$pid") || return 125
+  current=$(owned_identity "$pid") || {
+   # The original leader may exit between kill -0 and this identity read.
+   # Require fresh absence AND an empty original group before original wait.
+   left >/dev/null || return 124
+   if ! kill -0 "$pid" 2>/dev/null && ! pg_alive "$pid"; then
+    left >/dev/null || return 124
+    break
+   fi
+   return 125
+  }
   [[ $current == "${owned_start[$pid]}" ]] || return 125
   try_bounded sleep .05 || return 124
  done
@@ -1463,7 +1472,13 @@ bounded /usr/bin/env -i PATH=/usr/bin:/bin LC_ALL=C /usr/bin/python3.12 -I -S -B
 # Independently attempt both joins even if the first has nonzero status; preserve actual original statuses.
 n07_helper_exit=0; join_owned n07_launch_pid || n07_helper_exit=$?
 negative_launch=0; join_owned launch_pid || negative_launch=$?
-[[ -z $n07_launch_pid && -z $launch_pid && $n07_helper_exit == 0 && $negative_launch == 1 ]] || fail N07-owned-outcomes-inconclusive
+if ! [[ -z $n07_launch_pid && -z $launch_pid && $n07_helper_exit == 0 && $negative_launch == 1 ]]; then
+ helper_pending=0; root_pending=0
+ [[ -z $n07_launch_pid ]] || helper_pending=1
+ [[ -z $launch_pid ]] || root_pending=1
+ printf 'N07_OWNED_JOIN_OUTCOME:helper=%d:root=%d:helper_pending=%d:root_pending=%d\n' "$n07_helper_exit" "$negative_launch" "$helper_pending" "$root_pending" >&2
+ fail N07-owned-outcomes-inconclusive
+fi
 [[ $(bounded stat -c '%u:%g:%a:%h' "$log/n07-helper.stdout") == 0:0:600:1 && $(bounded stat -c %s "$log/n07-helper.stdout") -le 4096 && ! -s $log/n07-helper.stderr ]] || fail N07-helper-private-stream
 [[ $(bounded stat -c '%u:%g:%a:%h' "$log/n01.stderr") == 0:0:600:1 && $(bounded stat -c %s "$log/n01.stderr") -le 114688 && ! -s $log/n01.stdout ]] || fail N07-root-private-stream
 # Closed actual selected-unit settlement facts, with original query exit checked.

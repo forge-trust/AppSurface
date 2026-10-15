@@ -729,7 +729,7 @@
     "packet/cases/N07/tooling/.github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 32716,
       "mode": "0644",
-      "sha256": "5703d0a601d3f6944f252c30025a875ee7bc1cf0a49376a88c87fe0a362070c7"
+      "sha256": "b91b92a54feef8f3485ca10beef0658003efe435b1a751761a043ad5e024365f"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/build-helper.sh": {
       "bytes": 8211,
@@ -742,9 +742,9 @@
       "sha256": "f5f2e4696568d207e6e340d80c14a78410c21ae0427a4bde9787aa091586d4bf"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh": {
-      "bytes": 111329,
+      "bytes": 111929,
       "mode": "0644",
-      "sha256": "02979fcdc733352afa71672f02c3c97c7b4a8c596641951eb3ee562d77107072"
+      "sha256": "718d6c357bcbb73010039d172ab76c3dd789b0bbf1089d9243aed4ddaab55678"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/helper_receipt_adapter.py": {
       "bytes": 11699,
@@ -819,12 +819,12 @@
     "packet/cases/N07/tooling/.github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 29926,
       "mode": "0644",
-      "sha256": "8873bbc3ae5dd38eec8fc03ed3ad56923e6280466d928cb85448b2b630bc3f74"
+      "sha256": "62544f3d866efa4f3957476a042c7e0bc30c8e5e286bbd483647ee158133d438"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 7210,
       "mode": "0644",
-      "sha256": "fbef6c403d9ef0c918e647e2c7e5b862c9c6d693ba9b10b5dc866f8e3d2d1745"
+      "sha256": "4a70aa26f53de6ceb68ed529534061e7fff6dea84eafd5838f826d6cccb882b4"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 13454,
@@ -834,7 +834,7 @@
     "packet/cases/N07/tooling/.github/issue779-csharp-native/run-native.py": {
       "bytes": 106987,
       "mode": "0644",
-      "sha256": "e8f56bf8f111685eac29e0caec9532ad2c305ae1b87730a345f5a055ed4b7815"
+      "sha256": "be4a319fb9c0c1cecef0c3c8f99aff7ee256c79448119d906c6a035895e1fa65"
     },
     "packet/cases/N07/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 4464,
@@ -1434,7 +1434,7 @@
     "packet/cases/N13/tooling/.github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 23345,
       "mode": "0644",
-      "sha256": "bacc9e89a9ddd4a79b4d0caf434c875a93bea35c4ce63dbbd589b3cc2dc6d62b"
+      "sha256": "7aa0ac2964bbd0054a40864eaef3ce5d7bc6bd7e9337463fe5b838feadfcf893"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/check_owner_death_record.py": {
       "bytes": 9461,
@@ -1452,14 +1452,14 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh": {
-      "bytes": 45305,
+      "bytes": 45316,
       "mode": "0644",
-      "sha256": "a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f"
+      "sha256": "f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/preparation.json": {
       "bytes": 1338,
       "mode": "0644",
-      "sha256": "e87e60366ec924a7881863edbed1cc5442f5abd5b6e1b1ff485b22c52aeef13d"
+      "sha256": "4c0c34dedf5f131115c113ac49a548f8257d478ba81cb85c919403690bac007b"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/prepare-case-workspace.py": {
       "bytes": 47255,
@@ -1474,12 +1474,12 @@
     "packet/cases/N13/tooling/.github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 31479,
       "mode": "0644",
-      "sha256": "a2df10e6f4501ac202c150e319a32efc7df09d24b4b214023e45f2efa3b7368a"
+      "sha256": "1a3e2b1199a75ef1cbf5fdc8615030ead9c32c7140ca84ecaec84d998b588a61"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9090,
       "mode": "0644",
-      "sha256": "f0cec9e4fc425c01988d9d2fa35763acef2b4011795327be61c588f52272d127"
+      "sha256": "c1cca753593d7939d5640391af70d43d09594ea1ec8477ca8a3c1479a3b61afa"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 11658,
@@ -1489,7 +1489,7 @@
     "packet/cases/N13/tooling/.github/issue779-csharp-native/run-native.py": {
       "bytes": 84945,
       "mode": "0644",
-      "sha256": "eaf419476587e47728cf6d1af6986e30a29585f3b29975412d14f405910d1d57"
+      "sha256": "e747b0d70f2c51aeb0a3280a9ceb79280b2f8bb4f9e3b6fe8e47d9f83f7fa030"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/source-capture.json": {
       "bytes": 688655,
@@ -1499,7 +1499,7 @@
     "packet/cases/N13/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 6803,
       "mode": "0644",
-      "sha256": "b6928801af54df22159869569f0a983a5c5c48ef5074c5b0094fed6ddfb82f82"
+      "sha256": "39d20c5c655092e3fc7df292efe645fd3286ee9d9b698a43a2eb246628affc08"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/test_actual_batch_parser.py": {
       "bytes": 19441,
@@ -1514,7 +1514,7 @@
     "packet/cases/N13/tooling/.github/issue779-csharp-native/test_owner_death_data.py": {
       "bytes": 41153,
       "mode": "0644",
-      "sha256": "45ccd41225c69076bb038247dab7b70db44065e98a7123e2101b1132a1a1897d"
+      "sha256": "2c490b759ceafec5fa44cc1a6cd4007d643c62e63dc8131f57329547e7fca3f8"
     },
     "packet/cases/N13/tooling/.github/issue779-csharp-native/test_workspace_arguments.py": {
       "bytes": 8007,
@@ -1554,7 +1554,7 @@
     "packet/cases/N14/tooling/.github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 23345,
       "mode": "0644",
-      "sha256": "f561115bb299164c423797d45fa5167871917678bc9a1ba362772b7eeecd7e93"
+      "sha256": "14ca241360763c0f6daa262844af78e7839e6a1ce71251bb1a566886f377a2c5"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/check_owner_death_record.py": {
       "bytes": 9461,
@@ -1572,14 +1572,14 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh": {
-      "bytes": 45305,
+      "bytes": 46148,
       "mode": "0644",
-      "sha256": "a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f"
+      "sha256": "5e171e76c77b0c33eaf95a707eb55ffc5c5ba235890f4e954b07feec79831d9b"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/preparation.json": {
       "bytes": 1338,
       "mode": "0644",
-      "sha256": "e87e60366ec924a7881863edbed1cc5442f5abd5b6e1b1ff485b22c52aeef13d"
+      "sha256": "8707bcd2d13b01b58955543221053a17cc3a6c2c5a4a22d162b4232aba0586a4"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/prepare-case-workspace.py": {
       "bytes": 47255,
@@ -1594,12 +1594,12 @@
     "packet/cases/N14/tooling/.github/issue779-csharp-native/prepare-root-inputs-v2.sh": {
       "bytes": 31479,
       "mode": "0644",
-      "sha256": "2939efd9cc2bf6c415a7645e1cca7ad0891f7541ac50b9d962dedcb1b47db949"
+      "sha256": "4f8bd48078aea9f5cba6a5c743e3bb6f2430964a27d2d82526856e2386e9e324"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9090,
       "mode": "0644",
-      "sha256": "057ff68d8c1db13a35af82edfb408ee416797ab86373c8daf0e6a078727a78b2"
+      "sha256": "a6df572ffabc843c6b2f5bb66f564d0dc8986d7b8a861dc7a5cb6dda0149a041"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 11658,
@@ -1609,7 +1609,7 @@
     "packet/cases/N14/tooling/.github/issue779-csharp-native/run-native.py": {
       "bytes": 84945,
       "mode": "0644",
-      "sha256": "6cce99e5ea3f407e472a997463079f50d452bf93b5408b28ccf552bb0cd0efb5"
+      "sha256": "d926ec09b21d802668fd9ebe17bbe87335f3229ff60edafd0e25bf96820ef2e3"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/source-capture.json": {
       "bytes": 688655,
@@ -1619,7 +1619,7 @@
     "packet/cases/N14/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 6803,
       "mode": "0644",
-      "sha256": "b6928801af54df22159869569f0a983a5c5c48ef5074c5b0094fed6ddfb82f82"
+      "sha256": "d6964e4d39a702d3caf4733605024f331312725a487d4220d6da6e3d4c54e2ce"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/test_actual_batch_parser.py": {
       "bytes": 19441,
@@ -1634,7 +1634,7 @@
     "packet/cases/N14/tooling/.github/issue779-csharp-native/test_owner_death_data.py": {
       "bytes": 41153,
       "mode": "0644",
-      "sha256": "45ccd41225c69076bb038247dab7b70db44065e98a7123e2101b1132a1a1897d"
+      "sha256": "aa99a6fcd041e825b3d583f5441be9949499db050c9b97018a2b6111e8968611"
     },
     "packet/cases/N14/tooling/.github/issue779-csharp-native/test_workspace_arguments.py": {
       "bytes": 8007,
@@ -1674,7 +1674,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/checkpoint-n15-pending-start-death.sh": {
       "bytes": 9630,
       "mode": "0644",
-      "sha256": "acf870d2cf97a94fd9d3d399b95083bf39b5f6e6ce25d5f1243f7ab11eed8ff4"
+      "sha256": "fc084cd09f8aff9f6d2b5b797e95de0576ace8e8f7f08af02f171d67962f1df5"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/finalize_n15_observation.py": {
       "bytes": 14651,
@@ -1687,9 +1687,9 @@
       "sha256": "9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/observe_n15_pending_start.py": {
-      "bytes": 20494,
+      "bytes": 23410,
       "mode": "0644",
-      "sha256": "842d7c525754e8b62ce1db51da98d0378074b86abed76eada81fc7240ed4b4a5"
+      "sha256": "2bfb5af4df1be5c10536eaaf72af7e1d817074d0967bd2334d48d5a5dbfe69c0"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/prepare-case-workspace.py": {
       "bytes": 47244,
@@ -1709,7 +1709,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9046,
       "mode": "0644",
-      "sha256": "a222068cfcbf90bfc6f0417ca18ad351df9c1837b881cb1f092c1c5dace63017"
+      "sha256": "6e562a00959520bdbf460d2f7d47910f009cacced7e389c38a5a02a11ce4227e"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 12118,
@@ -1719,7 +1719,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/run-native.py": {
       "bytes": 82805,
       "mode": "0644",
-      "sha256": "d76dc42faff670ec5d1f96908950e79cc316ec0dda4febd637baa91c9a548fd5"
+      "sha256": "aa3ee6c1cf4bfc1bbf972bb19cb69088f39b89c2a176195d6eab727ac62a50d5"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 5581,
@@ -1829,12 +1829,12 @@
     "packet/runtime-packet.json": {
       "bytes": 1532731,
       "mode": "0600",
-      "sha256": "d35b7b9ec00fb05745e3974227de6ab10baa8981b4ead75826f7225e1ede3690"
+      "sha256": "a88681a14241c315e439d628ed318b35a5c0207d8f16faaf0df65f010a8b0a8b"
     },
     "packet_execution.py": {
       "bytes": 41359,
       "mode": "0600",
-      "sha256": "7f8ee96b3e952c7f26e958451e2231bbb0cd6e36c05796616828b0f3e848f14c"
+      "sha256": "992c6e4abecd17540408f66d6d8ccab0ef48fe532596bac050691bfae930f552"
     },
     "preparation_process.py": {
       "bytes": 25910,
@@ -1844,10 +1844,10 @@
     "verify_installation.py": {
       "bytes": 7256,
       "mode": "0600",
-      "sha256": "845eb1f6a4d7af434a23ec9d0e07575d4e3edc066e7e2c59f6d79369fde56223"
+      "sha256": "06eb4c0fde8b8d6946f669d167a2537a754e796413e7213e30410dadbd805749"
     }
   },
-  "packet_sha256": "d35b7b9ec00fb05745e3974227de6ab10baa8981b4ead75826f7225e1ede3690",
+  "packet_sha256": "a88681a14241c315e439d628ed318b35a5c0207d8f16faaf0df65f010a8b0a8b",
   "schema": "issue779-integrated16-native-installation-v1",
   "source_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e"
 }

@@ -9,10 +9,10 @@ readonly SOURCE_MAP=2c27553e3441cfc7e1c8b53cac0da15b6cff4a6c8c5c8d6dae01e0ba1163
 readonly SOURCE_PROJECTION_MAP=758a0f769ca67ce6f1fda2eea3569a373efafb192e2d2c2cce2224809b352a7d
 readonly CAPTURE_SHA=4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540
 readonly COUNT=2872
-readonly PREPARATION_SHA=e87e60366ec924a7881863edbed1cc5442f5abd5b6e1b1ff485b22c52aeef13d
+readonly PREPARATION_SHA=4c0c34dedf5f131115c113ac49a548f8257d478ba81cb85c919403690bac007b
 readonly N13_FIXTURE_SHA=cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc
 readonly N14_FIXTURE_SHA=d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2
-readonly COMMON_FIXTURE_SHA=a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f
+readonly COMMON_FIXTURE_SHA=f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406
 readonly PARSER_SHA=352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd
 readonly FILE_CAP=268435456 TREE_CAP=1073741824 NODE_CAP=8192
 readonly MAP_CAP=1048576 NODES_CAP=4194304 CONTROL_CAP=1048576 RESERVE_MS=5000
@@ -138,7 +138,7 @@ bounded /usr/bin/jq -e --arg head "$SOURCE" --arg parent "$PARENT" '
  .duration_policy_usec=={outer_original_request_seconds:240,owner_runtime:120000000,stop:5000000,n14_owner_bound_seconds:125} and
  .files["checkpoint-n13-owner-killed.sh"].sha256=="cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc" and
  .files["checkpoint-n14-owner-stopped.sh"].sha256=="d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2" and
- .files["checkpoint-owner-death-common.sh"].sha256=="a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f" and
+ .files["checkpoint-owner-death-common.sh"].sha256=="f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406" and
  .files["check_owner_death_record.py"].sha256=="352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
 ' "${values[fixture-preparation]}" >/dev/null
 output=/var/lib/appsurface-evidence-input-${values[generation]}

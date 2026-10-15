@@ -24,6 +24,21 @@ def require(condition, reason):
         raise Reject(reason)
 
 
+DIAGNOSTIC_STAGE = "preflight"
+DIAGNOSTIC_STAGES = ('preflight', 'phase-read', 'admission-window', 'process-identities', 'account-snapshot', 'worker-membership', 'pre-signal-recheck', 'pidfd-signal', 'owner-terminal', 'worker-terminal', 'consumed-guard', 'result')
+DIAGNOSTIC_REASONS = ('cgroup-node', 'cgroup-path', 'cgroup-pid-syntax', 'cgroup-procs-bound', 'cgroup-root', 'cgroup-symlink', 'deadline-order', 'explicit-execution-flag-required', 'fixed-case-unit', 'generated-account-identity', 'generated-account-membership', 'generated-account-nss-missing', 'generated-worker-account-name', 'generation-syntax', 'guard-ancestor-custody', 'guard-armed-remains', 'guard-consumed-bytes', 'guard-consumed-custody', 'guard-directory-custody', 'identity-window-expired', 'original-deadline-expired', 'owner-kill-terminal', 'owner-process-binding', 'parser-custody', 'parser-loader', 'parser-pin', 'phase-file-custody', 'phase-open-substitution', 'phase-read-substitution', 'pidfd-owner-recheck', 'pre-signal-identity-changed', 'proc-cgroup-shape', 'proc-credential-fields', 'proc-credentials', 'proc-file-bound', 'proc-file-read', 'proc-process-state', 'proc-stat-shape', 'root-linux-required', 'systemd-output-encoding', 'systemd-output-fields', 'systemd-output-key', 'systemd-output-shape', 'systemd-query-failed', 'unit-account-lookup', 'unit-account-range', 'unit-account-shape', 'unit-control-group', 'unit-main-pid', 'unit-restart-policy', 'unit-syntax', 'worker-account-contract', 'worker-cgroup-membership', 'worker-cgroup-not-empty', 'worker-not-started', 'worker-process-binding', 'worker-replacement', 'worker-terminal-fields', 'worker-terminal-not-observed')
+
+
+def failure_diagnostic(stage, error):
+    """Bounded fixed vocabulary only; diagnostic output cannot change rejection."""
+    stage = stage if type(stage) is str and stage in DIAGNOSTIC_STAGES else "unknown"
+    reason = "unclassified"
+    if isinstance(error, Reject) and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in DIAGNOSTIC_REASONS:
+        reason = error.args[0]
+    category = "system-error" if isinstance(error, OSError) else "subprocess-error" if isinstance(error, subprocess.SubprocessError) else "validation-error"
+    return "N15_OBSERVER_DIAGNOSTIC:stage=" + stage + ":reason=" + reason + ":category=" + category
+
+
 def identity(st):
     return (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid, st.st_nlink,
             st.st_size, st.st_mtime_ns, st.st_ctime_ns)
@@ -348,6 +363,8 @@ def consumed_guard(generation):
 
 
 def observe_and_kill(args):
+    global DIAGNOSTIC_STAGE
+    DIAGNOSTIC_STAGE = "preflight"
     require(os.geteuid() == 0 and sys.platform == "linux", "root-linux-required")
     require(re.fullmatch(r"[0-9a-f]{32}", args.case_generation) is not None, "generation-syntax")
     require(args.startup_deadline_boot_ms <= args.job_deadline_boot_ms
@@ -355,15 +372,18 @@ def observe_and_kill(args):
             and args.work_deadline_boot_ms < args.job_deadline_boot_ms, "deadline-order")
     phase_end = min(args.startup_deadline_boot_ms, args.admission_deadline_boot_ms,
                     args.job_deadline_boot_ms, args.work_deadline_boot_ms)
+    DIAGNOSTIC_STAGE = 'phase-read'
     raw, phase = wait_phase(args.phase_stderr, args.case_generation, phase_end)
     owner = OWNER_PREFIX + args.case_generation + ".service"
     require(phase["unit"] == WORKER_PREFIX + args.case_generation + ".service", "fixed-case-unit")
+    DIAGNOSTIC_STAGE = 'admission-window'
     trigger_ms = boot_ms()
     admission_remaining_ms = record_parser().admission_window_remaining(
         args.admission_deadline_boot_ms, trigger_ms)
     identity_end = min(trigger_ms + 5000, args.startup_deadline_boot_ms,
                        args.admission_deadline_boot_ms, args.job_deadline_boot_ms,
                        args.work_deadline_boot_ms)
+    DIAGNOSTIC_STAGE = 'process-identities'
     worker_values = worker = owner_values = owner_proc = None
     while boot_ms() < identity_end:
         remaining(identity_end)
@@ -377,13 +397,17 @@ def observe_and_kill(args):
         time.sleep(min(0.02, remaining(identity_end) / 1000))
     require(worker is not None and owner_proc is not None, "identity-window-expired")
     require(worker_values["User"] and worker_values["Group"], "worker-account-contract")
+    DIAGNOSTIC_STAGE = 'account-snapshot'
     account_data=account_snapshot(worker_values,worker)
+    DIAGNOSTIC_STAGE = 'worker-membership'
     members = cgroup_members("/sys/fs/cgroup", worker["control_group"], identity_end)
     require(worker["pid"] in members, "worker-cgroup-membership")
     # Recheck both units and the process starttime immediately before acquiring the pidfd.
+    DIAGNOSTIC_STAGE = 'pre-signal-recheck'
     worker_values_2, worker_2 = unit_identity(phase["unit"], "worker", identity_end)
     owner_values_2, owner_2 = unit_identity(owner, "owner", identity_end)
     require(worker_2 == worker and owner_2 == owner_proc, "pre-signal-identity-changed")
+    DIAGNOSTIC_STAGE = 'pidfd-signal'
     pidfd = os.pidfd_open(owner_proc["pid"], 0)
     try:
         owner_values_3, owner_3 = unit_identity(owner, "owner", identity_end)
@@ -393,6 +417,7 @@ def observe_and_kill(args):
         os.close(pidfd)
 
     # The helper waits only under the original work deadline supplied by the caller.
+    DIAGNOSTIC_STAGE = 'owner-terminal'
     owner_terminal = None
     while boot_ms() < args.work_deadline_boot_ms:
         remaining(args.work_deadline_boot_ms)
@@ -405,9 +430,12 @@ def observe_and_kill(args):
     require(owner_terminal is not None and owner_terminal["ExecMainPID"] == str(owner_proc["pid"])
             and owner_terminal["ExecMainCode"] == "2" and owner_terminal["ExecMainStatus"] == "9",
             "owner-kill-terminal")
+    DIAGNOSTIC_STAGE = 'worker-terminal'
     worker_terminal = wait_worker_terminal(phase["unit"], worker["pid"],
         worker["control_group"], args.work_deadline_boot_ms)
+    DIAGNOSTIC_STAGE = 'consumed-guard'
     guard = consumed_guard(args.case_generation)
+    DIAGNOSTIC_STAGE = 'result'
     return {
         "schema": record_parser().PARTIAL_SCHEMA,
         "case_generation": args.case_generation,
@@ -449,7 +477,8 @@ def main():
     require(args.execute, "explicit-execution-flag-required")
     try:
         result = observe_and_kill(args)
-    except (OSError, ValueError, KeyError, Reject, subprocess.SubprocessError, OverflowError):
+    except (OSError, ValueError, KeyError, Reject, subprocess.SubprocessError, OverflowError) as error:
+        print(failure_diagnostic(DIAGNOSTIC_STAGE, error), file=sys.stderr)
         print("N15_OBSERVER_REJECTED", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
