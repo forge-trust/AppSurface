@@ -754,6 +754,23 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
+    public async Task Script_ShouldForwardCompletedTestProgressWithoutWeakeningTheWatchdog()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var result = await RunScriptAsync([], null, null, dotnetExitCode: 0);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("--logger\nconsole;verbosity=normal\n", result.DotnetInvocations, StringComparison.Ordinal);
+        Assert.DoesNotContain("--watchdog", result.DotnetInvocations, StringComparison.Ordinal);
+        Assert.DoesNotContain("--no-progress-timeout", result.DotnetInvocations, StringComparison.Ordinal);
+        Assert.DoesNotContain("--heartbeat-interval", result.DotnetInvocations, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Script_ShouldDefaultPatchGateToOriginMainWhenDiffBaseIsUnset()
     {
         if (OperatingSystem.IsWindows())
