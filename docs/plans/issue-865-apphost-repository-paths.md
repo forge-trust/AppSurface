@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/Projects/forge-trust/runnable__neptune/.gstack/tmp/autoplan/issue865-autoplan-restore-20261010-061000.md" -->
+<!-- /autoplan restore point retained in local planning evidence. -->
 ## Implementation plan
 # Design: AppHost-anchored repository paths (#865)
 
@@ -781,7 +781,7 @@ Estimates assume existing fixtures/process helpers and exclude restore/build wai
 
 Status: planning review completed with concerns about missing outside coverage and unexecuted proof; historical review status will remain `issues_open` because resolved/mapped findings count under the review-log contract. This does not claim a clean runtime or shipping gate.
 
-QA artifact: `/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-codex-make-it-so-781-structural-classifier-pilot-eng-review-test-plan-20261010-010924.md`.
+The local engineering QA artifact is retained with the planning evidence. Its repository-relevant contracts and test matrix are recorded in [Engineering Section 3: Test Review](#engineering-section-3-test-review).
 
 ### Final approval preparation
 
