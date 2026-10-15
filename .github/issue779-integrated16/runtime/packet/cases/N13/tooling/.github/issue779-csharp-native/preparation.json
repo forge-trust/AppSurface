@@ -24,7 +24,7 @@
     "checkpoint-owner-death-common.sh": {
       "bytes": 43093,
       "mode": "0644",
-      "sha256": "f3a6ca5434d5f386223b53c65408a6120cdb1f52f7727814483e7e34b1536282"
+      "sha256": "e844c36efe5c0ccdaeebd675a1c7f6a82879787de88175d7883a279fa69f0811"
     }
   },
   "native_credit": false,
@@ -33,6 +33,6 @@
   "runtime_policy_note": "Static source handoff only. This record contains no runtime, test, owner-lifecycle, or native execution evidence.",
   "schema": "issue779-owner-death-fixture-v6-source-preparation-v1",
   "source_capture_count": 2872,
-  "source_capture_head": "71d004d6cf5a791ddbb8e73e3c538248985a8505",
-  "source_capture_parent": "957da1f23ff743778fa39e3e559511ccdb281345"
+  "source_capture_head": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
+  "source_capture_parent": "71d004d6cf5a791ddbb8e73e3c538248985a8505"
 }

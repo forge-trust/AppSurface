@@ -32,8 +32,8 @@ for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 71d004d6cf5a791ddbb8e73e3c538248985a8505 ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == c6a09c5021602a27317f6f84cc6999f7fb6363981944972bb64055a0202be0c4 && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 914046e1e998ca89a5f0f5be39a90bbfb88a431d ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == b0ca9ba9158669d20a3b448ad5efdae754fa0354295f4ec1f3a5395a1a1fa19d && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1
@@ -310,7 +310,7 @@ phase=control
 copy_pinned "${values[source-review]}" "$work/source-review.json" "${values[source-review-sha256]}" 65536 0600
 copy_pinned "${values[build-receipt]}" "$work/build-receipt.json" "${values[build-receipt-sha256]}" "$CONTROL_CAP" 0600
 copy_pinned "${values[source-capture]}" "$work/source-capture.json" "${values[source-capture-sha256]}" 2097152 0600
-bounded /usr/bin/jq -e --arg head "${values[source-commit]}" --arg parent "957da1f23ff743778fa39e3e559511ccdb281345" ' . as $c | $c.source as $s | ($c.schema=="issue779-csharp-common-source-capture-v4" and $c.validation_commit==$head and $c.previous_validation_commit==$parent and $c.source_tree=="d15b1f3a7532947d525e4d74cdc7457f6b8923ea" and ($c.source_count|type)=="number" and $c.source_count==2872 and $c.clean==true and $c.index_tree_blob_modes_equal==true and $c.native_credit==false and $c.draft_pr_created==false and ($s|type)=="object" and ($s|keys)==["modes","sha256"] and ($s.sha256|type)=="object" and ($s.sha256|length)==2872 and ($s.modes|type)=="object" and ($s.modes|length)==2872 and ($s.sha256|keys)==($s.modes|keys) and all($s.sha256|to_entries[]; (.value|type)=="string" and (.value|test("^[0-9a-f]{64}$"))) and all($s.modes[]; .=="0644" or .=="0755"))' "$work/source-capture.json" >/dev/null || fail source-capture-schema
+bounded /usr/bin/jq -e --arg head "${values[source-commit]}" --arg parent "71d004d6cf5a791ddbb8e73e3c538248985a8505" ' . as $c | $c.source as $s | ($c.schema=="issue779-csharp-common-source-capture-v4" and $c.validation_commit==$head and $c.previous_validation_commit==$parent and $c.source_tree=="c5dd0770c00b14b61f32851adeaad1cce4f2d7a8" and ($c.source_count|type)=="number" and $c.source_count==2872 and $c.clean==true and $c.index_tree_blob_modes_equal==true and $c.native_credit==false and $c.draft_pr_created==false and ($s|type)=="object" and ($s|keys)==["modes","sha256"] and ($s.sha256|type)=="object" and ($s.sha256|length)==2872 and ($s.modes|type)=="object" and ($s.modes|length)==2872 and ($s.sha256|keys)==($s.modes|keys) and all($s.sha256|to_entries[]; (.value|type)=="string" and (.value|test("^[0-9a-f]{64}$"))) and all($s.modes[]; .=="0644" or .=="0755"))' "$work/source-capture.json" >/dev/null || fail source-capture-schema
 copy_pinned "${values[helper-build-receipt]}" "$work/helper-build-receipt.json" "${values[helper-build-receipt-sha256]}" "$CONTROL_CAP" 0600
 copy_pinned "$helper_private_diagnostics" "$work/helper-build-private-diagnostics.json" "$helper_private_diagnostics_sha" 1048576 0600
 copy_pinned "${values[fixture]}" "$output/reviewed/checkpoint-n11.sh" "${values[fixture-sha256]}" 131072 0444

@@ -275,7 +275,7 @@ class CaptureMapOperandControls(unittest.TestCase):
 
     def test_actual_full_capture_matches_pinned_encoder_and_mode_mutation_differs(self):
         capture = ROOT.parent / 'issue779-csharp-build/capture-receipt.json'
-        expected_capture = '8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046'
+        expected_capture = 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953'
         self.assertEqual(expected_capture, hashlib.sha256(capture.read_bytes()).hexdigest())
         with tempfile.TemporaryDirectory(prefix='n10-capture-') as temp:
             cwd = Path(temp)

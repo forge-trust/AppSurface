@@ -17,29 +17,29 @@ import uuid
 import types
 from datetime import datetime, timezone
 
-SOURCE = '71d004d6cf5a791ddbb8e73e3c538248985a8505'
-PARENT = '957da1f23ff743778fa39e3e559511ccdb281345'
-SOURCE_MAP = '3a09062a50b035b1534ca89cc77dd29353d4ce20769ae01b4ccffbbecbd140a3'
-CANONICAL_SOURCE_MAP = '308346155ca912db28838729e5081791e2a7b6a50bcac726093c6f07d1d85abe'
-CAPTURE_SHA = '8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046'
-CAPTURE_PROJECTION_SHA = 'c2e846a09c6e7561eea1a1531d34a422ba0b7379a05be4e4fcb17bd18134f891'
+SOURCE = '914046e1e998ca89a5f0f5be39a90bbfb88a431d'
+PARENT = '71d004d6cf5a791ddbb8e73e3c538248985a8505'
+SOURCE_MAP = '85d264688e73c14ea5e4552a4e7aed1f8b1c3311a3f358dc89818bef0ed87099'
+CANONICAL_SOURCE_MAP = 'a61f03468ca7fff6ef363a510c7945f3927c966fa3b62291e4c34c3c50a23c98'
+CAPTURE_SHA = 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953'
+CAPTURE_PROJECTION_SHA = '57f62b362fd89e1935dabd7bf1cd11f62647855c303d4f98ca26dcebfd5e2dc5'
 PARSER_SHA = '276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1'
-COMMON_SHA = 'f3a6ca5434d5f386223b53c65408a6120cdb1f52f7727814483e7e34b1536282'
-PREPARATION_SHA = '3daf2bbe3463e0b62974f1fca6c30f81c66814aa420e57925db142a94d34f5a6'
+COMMON_SHA = 'e844c36efe5c0ccdaeebd675a1c7f6a82879787de88175d7883a279fa69f0811'
+PREPARATION_SHA = 'b57b3b52970cd2a0d841ff0429c6bfb602d93b8d61711d1329eb87f51afede50'
 WRAPPERS = {'N13': ('checkpoint-n13-owner-killed.sh','cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc'),
             'N14': ('checkpoint-n14-owner-stopped.sh','d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2')}
 # Zero slots are deliberate fail-closed external integration gates until the final input DAG is reviewed.
-REVIEWED_FILES = {'acquire-inbound.sh':'6687bc6c64062d7858f5867421f0624dd47e70397c87f85304ba525d313f50cd','prepare-root-inputs-v2.sh':'c658af746ff5938fecf976c94b44b0c5804546e8b072498b6956613471d2730b',
+REVIEWED_FILES = {'acquire-inbound.sh':'422f7b0841fc634ee5dd520b497d0a05571c3452dfc89773c68689de3bbca7d7','prepare-root-inputs-v2.sh':'771f874701295fb56c0211cfaef915d40c0c58247fc61b55e2cb186f84d6c63c',
  'checkpoint-n13-owner-killed.sh':'cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc',
  'checkpoint-n14-owner-stopped.sh':'d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2',
- 'checkpoint-owner-death-common.sh':'f3a6ca5434d5f386223b53c65408a6120cdb1f52f7727814483e7e34b1536282','check_owner_death_record.py':'276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1',
+ 'checkpoint-owner-death-common.sh':'e844c36efe5c0ccdaeebd675a1c7f6a82879787de88175d7883a279fa69f0811','check_owner_death_record.py':'276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1',
  'preparation.json':PREPARATION_SHA,'README.md':'b731fd4d3ee12b17453a858c7f69d0fb8a20f315867c5f13d4871167aad8093c',
- 'test_owner_death_data.py':'05d87545eb906b230f78a99b30f39d4363556a7fa1c404dda75f86fd9ef61110',
+ 'test_owner_death_data.py':'0953bcae60bac8f14423453555cb33e0aaec3c142cce03a1e8779c5b50cd1138',
  'prepare-os-audit-v2.py':'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
- 'source-review.json':'f6452b47bb3a513fda7c41685f06fd97e350d66a1f169e823c07562b9dd8b60c',
- 'prepare-case-workspace.py':'05ead0db88d110747ccf2d6c171b4af31a1809c4d69e93d8a3f28367200112a3',
+ 'source-review.json':'d64c9104b74d6ea5a4e9234b0d2c82f3a2e631d3745cd31becf3b0f6ec5c43f3',
+ 'prepare-case-workspace.py':'8dc2079d368a19f0d59b431fc85c762e4583eae12c308fac5b74cc9f536f4908',
  'test_build_receipt_contracts.py':'0a926f3423df2235bd249dd5b7603d4993ed60e60c8a9d55a3a9fd38984732b2',
- 'test_workspace_arguments.py':'08e0361c22334301535048613c2ad21ee9a181eb7a79e5ac427e632473182436'}
+ 'test_workspace_arguments.py':'d5dae4f356a896e8c3342e4bcada1ba533c1000921d24356616e4aeee789dc9b'}
 SOURCE_REVIEW_SHA = REVIEWED_FILES['source-review.json']
 SOURCE_REVIEW_CLEAR = FIXTURE_REVIEW_CLEAR = ROOT_TRANSPORT_REVIEW_CLEAR = RETENTION_REVIEW_CLEAR = NATIVE_HANDOFF_REVIEW_CLEAR = True
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
@@ -766,6 +766,40 @@ def inspect_archive(data):
             and values['QUARANTINED']==b'OWNER_DEATH_OBSERVED_OUTPUT_QUARANTINED\n', 'owner-death-retention-set')
     return values
 
+FAILURE_LOG_CAPS={'fixture-stdout.log':65536,'fixture-stderr.log':65536,'root.stdout':131072,'root.stderr':131072}
+
+def inspect_failure_archive(data, generation, case):
+    """Validate diagnostic-only partial bytes; never supply a complete measurement."""
+    require(type(generation) is str and re.fullmatch('[0-9a-f]{32}',generation) is not None and case in ('N13','N14'),'failure-archive-selector')
+    require(type(data) is bytes and 0 < len(data) <= ARCHIVE_CAP, 'failure-archive-size')
+    values={}; entries=[]; total=0
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data),mode='r:') as tar:
+            members=tar.getmembers()
+            require(1 <= len(members) <= 5, 'failure-archive-entry-count')
+            for member in members:
+                name=member.name; cap=2048 if name=='failure-retention.json' else FAILURE_LOG_CAPS.get(name)
+                require(cap is not None and name not in values and member.isfile() and member.mode==0o600 and member.uid==member.gid==member.mtime==0 and not member.linkname and not member.pax_headers and not member.uname and not member.gname and 0<=member.size<=cap, 'failure-archive-member')
+                stream=tar.extractfile(member); require(stream is not None,'failure-archive-read')
+                raw=stream.read(cap+1); require(len(raw)==member.size and len(raw)<=cap,'failure-archive-member-size')
+                total+=len(raw); require(total<=sum(FAILURE_LOG_CAPS.values())+2048,'failure-archive-expanded-size')
+                values[name]=raw; entries.append((name,raw))
+        require([name for name,_ in entries]==sorted(values) and 'failure-retention.json' in values,'failure-archive-order-or-metadata')
+        meta=decode_data(values['failure-retention.json'])
+        present=sorted(set(values)-{'failure-retention.json'}); missing=sorted(set(FAILURE_LOG_CAPS)-set(present))
+        expected_meta={'schema':'issue779-owner-death-failure-retention-v1','case':case,'generation':generation,'diagnostic_only':True,'native_credit':False,'present':present,'missing':missing}
+        require(meta==expected_meta and values['failure-retention.json']==(json.dumps(expected_meta,sort_keys=True,separators=(',',':'))+'\n').encode('ascii'),'failure-archive-binding')
+        canonical=io.BytesIO()
+        with tarfile.open(fileobj=canonical,mode='w:',format=tarfile.USTAR_FORMAT) as rebuilt:
+            for name,content in entries:
+                info=tarfile.TarInfo(name); info.size=len(content); info.mode=0o600; info.uid=info.gid=info.mtime=0
+                rebuilt.addfile(info,io.BytesIO(content))
+        require(canonical.getvalue()==data,'failure-archive-noncanonical')
+    except (tarfile.TarError,OSError,EOFError,UnicodeError,ValueError,TypeError,KeyError):
+        raise Rejected('failure-archive-invalid')
+    return values
+
+
 def decode_data(raw):
     try: return json.loads(raw.decode('utf-8'), object_pairs_hook=unique)
     except (UnicodeError, json.JSONDecodeError, ValueError): raise Rejected('retained-json')
@@ -773,7 +807,7 @@ def decode_data(raw):
 def validate_capture(capture):
     require(type(capture) is dict and capture.get('schema') == 'issue779-csharp-common-source-capture-v4'
         and capture.get('validation_commit') == SOURCE and capture.get('previous_validation_commit') == PARENT
-        and capture.get('source_count') == 2872 and capture.get('source_tree') == 'd15b1f3a7532947d525e4d74cdc7457f6b8923ea'
+        and capture.get('source_count') == 2872 and capture.get('source_tree') == 'c5dd0770c00b14b61f32851adeaad1cce4f2d7a8'
         and capture.get('clean') is True and capture.get('index_checksum_verified') is True
         and capture.get('index_tree_blob_modes_equal') is True and capture.get('no_alternates') is True
         and capture.get('native_credit') is False and capture.get('all16_final_integrated_native_verified') is False,
@@ -802,7 +836,7 @@ def validate_capture(capture):
 # Byte-identical common prerequisite contract; no native acceptance authority.
 INTEGRATED_BUILD_SOURCE = '"""Pure build prerequisites shared by the image builder and native case readers.\n\nThis module performs no I/O and issues no native credit. All fourteen images\nmust carry actual passing source-selected core and CLI test results. Commands\nare checked by their operation, project and selector, not an incidental count\nof unrelated Git/package queries. Runtime case acceptance remains separate.\n"""\n\nimport pathlib\nimport re\n\nSCHEMA = "issue779-integrated16-build-v1"\nSELECTORS = ("None", *(f"N{i:02d}" for i in range(4, 17)))\nPIPE_METHOD = "OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs"\nFRAME_METHOD = "OwnerDeathVariantIsExclusiveAndFrameIsExactBoundedData"\nCLI_METHOD = "CompiledImageOwnsOnlyItsSelectedCheckpoint"\nCORE_PROJECT = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj"\nCLI_PROJECT = "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"\nCLI_TEST_PROJECT = "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj"\nCORE_CLASS = "ForgeTrust.AppSurface.Evidence.Supervision.Tests."\nCLI_CLASS = "ForgeTrust.AppSurface.Cli.Tests.EvidenceNativeQualificationTests"\nSOURCE_PHASES = ("source_before", "source_after_assets", "source_after_build", "source_final")\n\n\nclass BuildContractError(ValueError):\n    """Closed metadata rejection; never include caller values in its message."""\n\n\ndef require(ok, category):\n    if not ok:\n        raise BuildContractError(category)\n\n\ndef is_sha(value):\n    return type(value) is str and re.fullmatch("[0-9a-f]{64}", value) is not None\n\n\ndef expected_regressions(selector):\n    require(selector in SELECTORS, "build-selector")\n    if selector in ("N13", "N14"):\n        return (("owner_death_phase_frame_regression", CORE_CLASS + "LinuxOwnerDeathPhaseFrameTests", FRAME_METHOD),\n                ("owner_death_cli_qualification", CLI_CLASS, CLI_METHOD))\n    return (("linux_pipe_regression", CORE_CLASS + "LinuxOutputPipesTests", PIPE_METHOD),\n            ("compiled_cli_qualification", CLI_CLASS, CLI_METHOD))\n\n\ndef validate_command_records(commands, selector):\n    require(selector in SELECTORS, "build-selector")\n    require(type(commands) is list and 0 < len(commands) <= 128, "build-command-bound")\n    for ordinal, row in enumerate(commands):\n        require(type(row) is dict and type(row.get("ordinal")) is int and row["ordinal"] == ordinal,\n                "build-command-ordinal")\n        args = row.get("argv")\n        require(type(args) is list and args and all(type(arg) is str and arg for arg in args),\n                "build-command-arguments")\n        # MSBuild accepts /p:, -property:, case aliases and multi-property\n        # arguments. A second selector in any such form cannot be ignored.\n        # Response files are also forbidden: they can supply unseen properties.\n        canonical = "-p:EvidencePrivateQualification=" + selector\n        require(not any(arg.startswith("@") for arg in args)\n                and all("evidenceprivatequalification" not in arg.lower()\n                        or (selector != "None" and arg == canonical) for arg in args),\n                "build-selector-alias-or-response-file")\n        require(type(row.get("exit")) is int and row["exit"] == 0 and row.get("failure") is None\n                and row.get("waited") is True and row.get("group_absent") is True\n                and row.get("forced_cleanup") is False and row.get("timed_out") is False\n                and row.get("late_completion") is not True, "build-command-terminal")\n        for name, expected in (("pipe_eofs", [True, True]), ("read_errors", [False, False]),\n                               ("write_errors", [False, False]), ("discarded_bytes", [0, 0])):\n            values = row.get(name)\n            require(type(values) is list and len(values) == 2\n                    and all(type(actual) is type(wanted) and actual == wanted\n                            for actual, wanted in zip(values, expected)), "build-command-output")\n        logs = row.get("logs")\n        require(type(logs) is list and len(logs) == 2\n                and all(type(log) is dict and is_sha(log.get("sha256"))\n                        and type(log.get("bytes")) is int and 0 <= log["bytes"] <= 8 * 1024 * 1024\n                        for log in logs), "build-command-logs")\n    selected = [row for row in commands if pathlib.PurePosixPath(row["argv"][0]).name == "dotnet"\n                and len(row["argv"]) > 1 and row["argv"][1] in ("restore", "publish", "test", "build")]\n    require([row["argv"][1] for row in selected] == ["restore", "publish", "restore", "test", "restore", "test"],\n            "build-operation-sequence")\n    projects = (CLI_PROJECT, CLI_PROJECT, CORE_PROJECT, CORE_PROJECT, CLI_TEST_PROJECT, CLI_TEST_PROJECT)\n    for row, project in zip(selected, projects):\n        args = row["argv"]\n        require(len(args) > 2 and args[2].endswith("/" + project), "build-project")\n        flags = [arg for arg in args if arg.startswith("-p:EvidencePrivateQualification=")]\n        require(flags == ([] if selector == "None" else ["-p:EvidencePrivateQualification=" + selector]),\n                "build-command-selector")\n        require(("--locked-mode" in args) if args[1] == "restore" else ("--no-restore" in args),\n                "build-restore-mode")\n        if args[1] in ("test", "publish"):\n            require("-p:UseSharedCompilation=false" in args, "build-compiler-mode")\n    for row, (_, class_name, method) in zip((selected[3], selected[5]), expected_regressions(selector)):\n        args = row["argv"]\n        require(args.count("--filter") == 1 and args[args.index("--filter") + 1]\n                == "FullyQualifiedName=" + class_name + "." + method, "build-test-filter")\n    require(sum(arg.startswith("-p:EvidencePrivateQualification=") for row in commands for arg in row["argv"])\n            == (0 if selector == "None" else 6), "build-selector-cardinality")\n    return True\n\n\ndef validate_build_receipt(receipt, selector, source):\n    """Validate a measured receipt against the independently pinned source tuple.\n\n    ``source`` has commit, parent, tree, count, capture, projection, map and\n    raw_map fields. It comes from the immutable common capture, never from the\n    receipt being validated. File/archive checks remain with the I/O caller.\n    """\n    require(selector in SELECTORS and type(receipt) is dict and type(source) is dict, "build-receipt-shape")\n    require(set(source) == {"commit", "parent", "tree", "count", "capture", "projection", "map", "raw_map"},\n            "build-source-binding-shape")\n    require(receipt.get("schema") == SCHEMA and type(receipt.get("exit")) is int and receipt["exit"] == 0\n            and receipt.get("failure") is None and receipt.get("diagnostics") == [], "build-receipt-terminal")\n    require(receipt.get("private_qualification") == selector and receipt.get("selected_variant") == selector,\n            "build-receipt-selector")\n    for field, binding in (("source_commit", "commit"), ("source_revision", "commit"), ("source_parent", "parent"),\n                           ("source_count", "count"), ("capture_sha256", "capture"),\n                           ("source_capture_sha256", "capture"), ("capture_input_sha256", "capture"),\n                           ("capture_projection_sha256", "projection"), ("source_map_sha256", "map"),\n                           ("source_capture_map_sha256", "raw_map"), ("harness_parent", "commit"),\n                           ("harness_retry_parent", "commit"), ("harness_retry_parent_parent", "parent")):\n        require(type(receipt.get(field)) is type(source[binding]) and receipt[field] == source[binding],\n                "build-receipt-source")\n    require(receipt.get("build_prerequisite_only") is True and receipt.get("test_execution") is True\n            and all(receipt.get(field) is False for field in ("native_execution", "native_acceptance", "checkpoint_pass",\n                                                            "review_clear", "source_review_clear", "fixture_review_clear",\n                                                            "root_transport_review_clear"))\n            and receipt.get("os_audit") is None, "build-receipt-scope")\n    validate_command_records(receipt.get("commands"), selector)\n    for phase in SOURCE_PHASES:\n        fact = receipt.get(phase)\n        require(type(fact) is dict and fact.get("head") == source["commit"] and fact.get("tree") == source["tree"]\n                and type(fact.get("count")) is int and fact["count"] == source["count"]\n                and fact.get("source_map_sha256") == source["map"]\n                and all(fact.get(key) is True for key in ("index_tree_matches", "physical_git_sha1", "physical_sha256_modes")),\n                "build-source-recheck")\n    for key, class_name, method in expected_regressions(selector):\n        fact = receipt.get(key)\n        require(type(fact) is dict and fact.get("class_name") == class_name and fact.get("method") == method\n                and fact.get("native_acceptance") is False and fact.get("root_factory_exercised") is False\n                and fact.get("unprivileged_library_behavior_only") is True\n                and is_sha(fact.get("trx_sha256")), "build-regression-binding")\n        counters = fact.get("counters")\n        require(type(counters) is dict and all(counters.get(key) == value for key, value in\n                {"total": "1", "executed": "1", "passed": "1", "failed": "0", "error": "0",\n                 "notExecuted": "0", "timeout": "0", "aborted": "0"}.items()), "build-regression-outcome")\n    known = {"owner_death_phase_frame_regression", "owner_death_cli_qualification", "linux_pipe_regression",\n             "compiled_cli_qualification"}\n    expected = {row[0] for row in expected_regressions(selector)}\n    require(not (known - expected) & set(receipt), "build-regression-foreign-selection")\n    return True\n'
 INTEGRATED_BUILD_SOURCE_SHA = '4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8'
-INTEGRATED_SOURCE_BINDING = {'commit': '71d004d6cf5a791ddbb8e73e3c538248985a8505', 'parent': '957da1f23ff743778fa39e3e559511ccdb281345', 'tree': 'd15b1f3a7532947d525e4d74cdc7457f6b8923ea', 'count': 2872, 'capture': '8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046', 'projection': 'c2e846a09c6e7561eea1a1531d34a422ba0b7379a05be4e4fcb17bd18134f891', 'map': '308346155ca912db28838729e5081791e2a7b6a50bcac726093c6f07d1d85abe', 'raw_map': '3a09062a50b035b1534ca89cc77dd29353d4ce20769ae01b4ccffbbecbd140a3'}
+INTEGRATED_SOURCE_BINDING = {'commit': '914046e1e998ca89a5f0f5be39a90bbfb88a431d', 'parent': '71d004d6cf5a791ddbb8e73e3c538248985a8505', 'tree': 'c5dd0770c00b14b61f32851adeaad1cce4f2d7a8', 'count': 2872, 'capture': 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953', 'projection': '57f62b362fd89e1935dabd7bf1cd11f62647855c303d4f98ca26dcebfd5e2dc5', 'map': 'a61f03468ca7fff6ef363a510c7945f3927c966fa3b62291e4c34c3c50a23c98', 'raw_map': '85d264688e73c14ea5e4552a4e7aed1f8b1c3311a3f358dc89818bef0ed87099'}
 _integrated_build_scope = {}
 if hashlib.sha256(INTEGRATED_BUILD_SOURCE.encode()).hexdigest() != INTEGRATED_BUILD_SOURCE_SHA:
     raise ValueError('integrated-build-contract-pin')
@@ -897,43 +931,70 @@ def validate_owner_death_archive(values, parser_bytes, case, generation, build_s
     return record
 
 
-OWNER_ARCHIVE = r'''import io,json,os,stat,sys,tarfile
-G,CASE,LOCAL_OUT,LOCAL_ERR,LOCAL_UID=sys.argv[1:]
-if len(G)!=32 or CASE not in ('N13','N14'): raise SystemExit(1)
-BASE='/var/lib/appsurface-evidence-input-'+G; PRIVATE='/run/appsurface-evidence-fixture/'+G; OUTPUT='/run/appsurface-evidence-'+G+'/output'
-def directory(path,uid):
+OWNER_ARCHIVE = r'''import io,json,os,re,stat,sys,tarfile
+G,CASE,MODE=sys.argv[1:]
+if not re.fullmatch('[0-9a-f]{32}',G) or CASE not in ('N13','N14') or MODE not in ('complete','failure'): raise SystemExit(1)
+BASE='/var/lib/appsurface-evidence-input-'+G; CONTROL=BASE+'/control'; PRIVATE='/run/appsurface-evidence-fixture/'+G; OUTPUT='/run/appsurface-evidence-'+G+'/output'
+def identity(s):
+ return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+def directory(path,uid,mode=0o700):
  s=os.lstat(path)
- if not stat.S_ISDIR(s.st_mode) or s.st_uid!=uid or stat.S_IMODE(s.st_mode)!=0o700: raise SystemExit(1)
+ if not stat.S_ISDIR(s.st_mode) or s.st_uid!=uid or s.st_gid!=0 or (stat.S_IMODE(s.st_mode)!=mode if mode is not None else stat.S_IMODE(s.st_mode)&0o022): raise SystemExit(1)
+ return identity(s)
 def fixed(path,cap,uid):
  before=os.lstat(path)
- if not stat.S_ISREG(before.st_mode) or before.st_uid!=uid or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or before.st_size>cap: raise SystemExit(1)
+ if not stat.S_ISREG(before.st_mode) or before.st_uid!=uid or before.st_gid!=0 or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1 or not 0<=before.st_size<=cap: raise SystemExit(1)
  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
  try:
   opened=os.fstat(fd)
-  if (opened.st_dev,opened.st_ino,opened.st_mode,opened.st_size)!=(before.st_dev,before.st_ino,before.st_mode,before.st_size): raise SystemExit(1)
+  if identity(opened)!=identity(before): raise SystemExit(1)
   data=b''
   while True:
    block=os.read(fd,min(65536,cap+1-len(data)))
    if not block: break
    data+=block
    if len(data)>cap or len(data)>before.st_size: raise SystemExit(1)
-  if len(data)!=before.st_size: raise SystemExit(1)
+  if len(data)!=before.st_size or identity(os.fstat(fd))!=identity(before) or identity(os.lstat(path))!=identity(before): raise SystemExit(1)
   return data
  finally: os.close(fd)
-directory(PRIVATE,0)
-record_data=fixed(PRIVATE+'/owner-death-result.json',65536,0); record=json.loads(record_data.decode('utf-8'))
-if record.get('case')!=CASE or record.get('generation')!=G or type(record.get('worker')) is not dict: raise SystemExit(1)
-worker_uid=record['worker'].get('uid')
-if type(worker_uid) is not int or worker_uid<=0: raise SystemExit(1)
-directory(OUTPUT,worker_uid)
-listing=os.listdir(OUTPUT)
-if listing: raise SystemExit(1)
-items={'fixture-stdout.log':fixed(LOCAL_OUT,65536,int(LOCAL_UID)),'fixture-stderr.log':fixed(LOCAL_ERR,65536,int(LOCAL_UID)),'root.stdout':fixed(PRIVATE+'/root.stdout',131072,0),'root.stderr':fixed(PRIVATE+'/root.stderr',131072,0),'owner-death-result.json':fixed(PRIVATE+'/owner-death-result.json',65536,0),'QUARANTINED':fixed(PRIVATE+'/QUARANTINED',256,0),'product-output.list':b'','transport-receipt.json':fixed(BASE+'/control/transport-receipt.json',65536,0)}
-buf=io.BytesIO()
-with tarfile.open(fileobj=buf,mode='w:',format=tarfile.USTAR_FORMAT) as tar:
- for name,data in sorted(items.items()):
-  info=tarfile.TarInfo(name); info.size=len(data); info.mode=0o600; info.uid=info.gid=info.mtime=0; tar.addfile(info,io.BytesIO(data))
-data=buf.getvalue(); path=BASE+'/control/native.tar'; fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+def failure_items():
+ items={}; missing=[]
+ paths={'fixture-stdout.log':(CONTROL+'/fixture-stdout.log',65536),'fixture-stderr.log':(CONTROL+'/fixture-stderr.log',65536),'root.stdout':(PRIVATE+'/root.stdout',131072),'root.stderr':(PRIVATE+'/root.stderr',131072)}
+ private_before=None
+ if os.path.lexists(PRIVATE):
+  directory('/run',0,None); directory('/run/appsurface-evidence-fixture',0,0o755)
+  private_before=directory(PRIVATE,0)
+ for name,(path,cap) in sorted(paths.items()):
+  if os.path.lexists(path): items[name]=fixed(path,cap,0)
+  else: missing.append(name)
+ if private_before is not None and directory(PRIVATE,0)!=private_before: raise SystemExit(1)
+ meta={'schema':'issue779-owner-death-failure-retention-v1','case':CASE,'generation':G,'diagnostic_only':True,'native_credit':False,'present':sorted(items),'missing':missing}
+ items['failure-retention.json']=(json.dumps(meta,sort_keys=True,separators=(',',':'))+'\n').encode('ascii')
+ return items
+def canonical_archive(items):
+ buf=io.BytesIO()
+ with tarfile.open(fileobj=buf,mode='w:',format=tarfile.USTAR_FORMAT) as tar:
+  for name,data in sorted(items.items()):
+   info=tarfile.TarInfo(name); info.size=len(data); info.mode=0o600; info.uid=info.gid=info.mtime=0; tar.addfile(info,io.BytesIO(data))
+ return buf.getvalue()
+# Only fixed protected roots are read; no caller-supplied log paths or UID overrides.
+directory('/var',0,None); directory('/var/lib',0,None)
+base_before=directory(BASE,0,0o711); control_before=directory(CONTROL,0)
+if MODE=='failure':
+ items=failure_items()
+else:
+ directory('/run',0,None); directory('/run/appsurface-evidence-fixture',0,0o755); directory(PRIVATE,0)
+ record_data=fixed(PRIVATE+'/owner-death-result.json',65536,0); record=json.loads(record_data.decode('utf-8'))
+ if record.get('case')!=CASE or record.get('generation')!=G or type(record.get('worker')) is not dict: raise SystemExit(1)
+ worker_uid=record['worker'].get('uid')
+ if type(worker_uid) is not int or worker_uid<=0: raise SystemExit(1)
+ # Preserve the complete measurement requirement; diagnostics cannot enter this branch.
+ s=os.lstat(OUTPUT)
+ if not stat.S_ISDIR(s.st_mode) or s.st_uid!=worker_uid or stat.S_IMODE(s.st_mode)!=0o700 or os.listdir(OUTPUT): raise SystemExit(1)
+ items={'fixture-stdout.log':fixed(CONTROL+'/fixture-stdout.log',65536,0),'fixture-stderr.log':fixed(CONTROL+'/fixture-stderr.log',65536,0),'root.stdout':fixed(PRIVATE+'/root.stdout',131072,0),'root.stderr':fixed(PRIVATE+'/root.stderr',131072,0),'owner-death-result.json':record_data,'QUARANTINED':fixed(PRIVATE+'/QUARANTINED',256,0),'product-output.list':b'','transport-receipt.json':fixed(CONTROL+'/transport-receipt.json',65536,0)}
+data=canonical_archive(items)
+if len(data)>16*1024*1024 or directory(BASE,0,0o711)!=base_before or directory(CONTROL,0)!=control_before: raise SystemExit(1)
+path=CONTROL+'/native.tar'; fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
 try:
  view=memoryview(data)
  while view:
@@ -942,6 +1003,7 @@ try:
   view=view[n:]
  os.fsync(fd)
 finally: os.close(fd)
+if fixed(path,len(data),0)!=data: raise SystemExit(1)
 view=memoryview(data)
 while view:
  n=os.write(1,view)
@@ -950,11 +1012,13 @@ while view:
 '''
 
 
-def collect_private_archive(runner, generation, case, output, fixture_logs, deadline):
+def collect_private_archive(runner, generation, case, output, deadline, failure_only=False):
     runner.phase='bounded-private-retention'
-    _,archive=runner.run(ROOT_PREFIX+['-c','exec "$@"','--','/usr/bin/python3','-I','-S','-B','-c',OWNER_ARCHIVE,generation,case,str(fixture_logs[0]),str(fixture_logs[1]),str(os.geteuid())],deadline)
-    values=inspect_archive(archive); save(output/'native-private.tar',archive,deadline)
-    return values,{'private_archive_sha256':sha(archive),'private_archive_bytes':len(archive)}
+    mode='failure' if failure_only else 'complete'
+    _,archive=runner.run(ROOT_PREFIX+['-c','exec "$@"','--','/usr/bin/python3','-I','-S','-B','-c',OWNER_ARCHIVE,generation,case,mode],deadline)
+    values=inspect_failure_archive(archive,generation,case) if failure_only else inspect_archive(archive)
+    save(output/'native-private.tar',archive,deadline)
+    return values,{'private_archive_sha256':sha(archive),'private_archive_bytes':len(archive),'private_archive_scope':'failure-diagnostics-only' if failure_only else 'complete-measurement'}
 
 
 def run_fixture_with_retention(runner, dispatch, dispatch_end, collect, result):
@@ -963,7 +1027,7 @@ def run_fixture_with_retention(runner, dispatch, dispatch_end, collect, result):
         code,_=runner.run(dispatch,dispatch_end,allow_failure=True); result['fixture_exit']=code
         require(code==0,'owner-death-fixture-nonzero')
     except BaseException as caught: failure=caught
-    try: values,facts=collect(); result.update(facts)
+    try: values,facts=collect(failure is not None); result.update(facts)
     except BaseException as caught:
         result['retention_failure']={'category':getattr(caught,'category','retention-operation'),'error_class':type(caught).__name__}; failure=failure or caught
     if failure: raise failure
@@ -1101,10 +1165,8 @@ def main():
         result['native_dispatched']=True; runner.phase='actual-owner-death-'+args.case
         dispatch=ROOT_PREFIX+['-c',DISPATCH,'--',generation,case_name,case_sha]+fixture
         dispatch_end=min(final-35,time.monotonic()+630)
-        # The command recorder owns the two joined wrapper-pump logs for retention.
-        logbase=output/f'{len(runner.records):02d}'
-        fixture_logs=(output/(f'{len(runner.records):02d}-stdout.log'),output/(f'{len(runner.records):02d}-stderr.log'))
-        values=run_fixture_with_retention(runner,dispatch,dispatch_end,lambda:collect_private_archive(runner,generation,args.case,output,fixture_logs,min(final-5,time.monotonic()+30)),result)
+        # Fixed root-control wrapper logs are distinct from the outer command recorder.
+        values=run_fixture_with_retention(runner,dispatch,dispatch_end,lambda failed:collect_private_archive(runner,generation,args.case,output,min(final-5,time.monotonic()+30),failure_only=failed),result)
         transport=decode_data(values['transport-receipt.json']); record=validate_owner_death_archive(values,parser_bytes,args.case,generation,build_sha,transport)
         result.update(fixture_generation=generation,owner_death_record_sha256=sha(values['owner-death-result.json']),transport_receipt_sha256=sha(values['transport-receipt.json']),fixture_result_verified=True,native_execution=True,native_credit=False,native_acceptance=False,measurement_summary={'case':args.case,'signal':record['signal']['name'],'owner_runtime_usec':record['systemd_bound']['runtime_max_usec'],'stop_usec':record['systemd_bound']['timeout_stop_usec'],'owner_exited':record['termination']['owner_exited'],'worker_exited':record['termination']['worker_exited'],'quarantined':record['workspace']['quarantined']})
         retained=True

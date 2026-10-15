@@ -3,10 +3,10 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly HERE=${BASH_SOURCE[0]%/*}
-readonly OBSERVER_SHA256=5ef1a0071241cb90656a98d4eb9c033c8491f985db5bd225e2c86a8d0452d18b
-readonly PARSER_SHA256=b9bfefd7bb713d29d1b344f867891312bbfd32177763b42b373015c7663ac1ae
+readonly OBSERVER_SHA256=d6cc63e4ecf4ec4d085a74cef02114b6cd24a182d8d3232d0afcf8d7485612c8
+readonly PARSER_SHA256=4d1766fbb558192a2e30397b025c913bc826d42a3bbf123188bffdbb505fcbcc
 readonly RETRY_SHA256=9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6
-readonly FINALIZER_SHA256=611b1a7ab3747e947dbec226b17abb464628987089bfcbf00ad1215d3df64e90
+readonly FINALIZER_SHA256=4d45262afe9a768731b09878fdd6c128fa09006b81c66cdd0094e042fd337588
 fail(){ printf 'N15_OWNER_LAUNCH_JOIN_REJECTED:%s\n' "$1" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail execute-required
 shift
@@ -20,7 +20,7 @@ result_dir=${14} startup_deadline=${16} admission_deadline=${18} job_deadline=${
 work_deadline=${22} root_input=${24}
 [[ $generation =~ ^[0-9a-f]{32}$ && $EUID == 0 && $OSTYPE == linux* \
    && $request == /run/appsurface-evidence-fixture/$generation/request.json \
-   && $phase_stderr == /run/appsurface-evidence-fixture/$generation/n15.stderr \
+   && $phase_stderr == /run/appsurface-evidence-fixture/$generation/logs/n15.stderr \
    && $partial == /run/appsurface-evidence-fixture/$generation/partial.json \
    && $result_dir == /run/appsurface-evidence-fixture/$generation \
    && $root_input == /var/lib/appsurface-evidence-fixture/$generation \

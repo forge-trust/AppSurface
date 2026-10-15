@@ -1,10 +1,9 @@
 {
   "all16_final_integrated_native_verified": false,
   "changed_paths": [
-    "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceN07PrecleanupFaultTests.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionN07OwnedCheckpointTests.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionN07PrecleanupObservation.cs"
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
   ],
   "clean": true,
   "commands": [
@@ -20,7 +19,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "8595a948566ed535e0cc289da5a219a1f4515163d7b4c1670f18ecf13935e000"
+      "stdout_sha256": "22eef9ccb63070f3216cc5beccfdb9a71bb640b0048efb8cc299da7e65c3ce14"
     },
     {
       "argv": [
@@ -35,7 +34,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "08db511b95169006a5de6858ce18ea97e5ac9b717318a78ed25eaf5b1c95811e"
+      "stdout_sha256": "f7e1872c5f62416df7efb1cf33769a16a09dce02b95b70d3c0c86fdbd1c65a23"
     },
     {
       "argv": [
@@ -60,10 +59,9 @@
         "core.fsmonitor=false",
         "add",
         "--",
-        "Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceN07PrecleanupFaultTests.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionN07OwnedCheckpointTests.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionN07PrecleanupObservation.cs"
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -82,11 +80,11 @@
         "user.email=issue779-fixture@localhost",
         "commit",
         "-m",
-        "fix(evidence): match N07 parent identity Io diagnostic family"
+        "fix(evidence): preserve control transport after output substitution"
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "2a845b85a0eb3157ca1f0f7d94d0477bcd3e491c0d1243d63cc4d465ffe4bd91"
+      "stdout_sha256": "6dacad4e9ad92a8a23beba1765f918bb3f35a90b9760958c6afb5fe922ef0c69"
     },
     {
       "argv": [
@@ -100,7 +98,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "22eef9ccb63070f3216cc5beccfdb9a71bb640b0048efb8cc299da7e65c3ce14"
+      "stdout_sha256": "f92c0f33fc8b2b3684ac746c6d5452252afc701b1545025844ab4b5ed756d52f"
     },
     {
       "argv": [
@@ -114,7 +112,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "8595a948566ed535e0cc289da5a219a1f4515163d7b4c1670f18ecf13935e000"
+      "stdout_sha256": "22eef9ccb63070f3216cc5beccfdb9a71bb640b0048efb8cc299da7e65c3ce14"
     },
     {
       "argv": [
@@ -144,7 +142,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "bbf06b8964914bc10cea11e3d0a4ac6791351e5a8c0836270e01002909a3b99f"
+      "stdout_sha256": "c92445cd78919889a6961b711560fdbc679fcef0c670cbab855bf7c05a05fefe"
     },
     {
       "argv": [
@@ -160,7 +158,7 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "f7f3f6e44f8451da7f62d3e24eae28ad3f069e87416c938fea1d5f206312efd3"
+      "stdout_sha256": "5e80c4c8a2dfb3567283d028a433b50d4f713e7d8a980b1e30ffb37ee47e1f08"
     },
     {
       "argv": [
@@ -174,22 +172,22 @@
       ],
       "exit": 0,
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "6b312ca904793ffcbc0d6eacde3e68e3e587cfb0583f5c064073cd43c187f641"
+      "stdout_sha256": "1a5a0eaed1c88d1aaa0a81ab121e646764108ddd684bc5f0553e737a10f5b73d"
     }
   ],
   "draft_pr_created": false,
-  "elapsed_seconds": 1.321583375,
+  "elapsed_seconds": 2.0966993340989575,
   "exit": 0,
   "independent_capture_review_pending": true,
   "index_checksum_verified": true,
-  "index_sha256": "4462a764a92e0109010a0163a3237d43f82696ec385938930142fcd7f2eec74f",
+  "index_sha256": "fbb4e073bfaaa8e2b56e9b842365644c54b20d6069c1d1cc0915a84076ce8a69",
   "index_tree_blob_modes_equal": true,
   "native_credit": false,
   "new_source_files": [],
   "no_alternates": true,
-  "previous_validation_commit": "957da1f23ff743778fa39e3e559511ccdb281345",
-  "prior_capture_sha256": "6d723d1d944485b785e400849db941c3e869065371e2978806abc6b3dec7f0c4",
-  "repository": "/private/tmp/issue779-n07-io-family-correction-meitner-20261014/repo",
+  "previous_validation_commit": "71d004d6cf5a791ddbb8e73e3c538248985a8505",
+  "prior_capture_sha256": "8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046",
+  "repository": "/private/tmp/issue779-control-directory-continuity-20261015/repo",
   "schema": "issue779-csharp-common-source-capture-v4",
   "source": {
     "modes": {
@@ -4115,7 +4113,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProcessIdentityTests.cs": "740d771266109eb93958f461e96b80fa9d0fd58d36c2ccc5e3f83527a2bf6346",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedDeploymentTests.cs": "dc3710d0135c9fc09ceb6933ec9040ca3d75fcdf38163129a9d899b7f89dc55f",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunAccountsTests.cs": "5c34483cf3b91b18e887c53bf6b80d84756e09e157d89a3a39b5ff9c67e7b3e4",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs": "4054cbd03d37dd9523fb757da26227f8853f6d988f618e5f9636f9f9044cd9b0",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs": "c498754a1bfd4e85e0a0bfacfbcc4f3326e7fe82291106dc9f343254b614ace5",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSlotNegativeObservationTests.cs": "8a253dcd4f1f73e8ece8aa18146e7ccd6097d40dc3b32e73d4fa0ebbe32b9268",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSystemdBackendTests.cs": "9ab9b18d17b5b2f0f49be6ee8f76e72517a7f8eb3f41dfeee2f84da2dcf4789a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerStopTimingTests.cs": "27e76977959ec2c67358e4701c03447d02e25850596db9f84cc38847ddc91b46",
@@ -4176,7 +4174,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.Custody.cs": "68a1edf967f2916e8df16d8f72a025241980f2484dfaf340eda796b97ae4cd5b",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.N09.cs": "322ef493ad80f46eaba61571867f1edbaf5534f1f9cf95691acbd9d37b547735",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.SlotNegative.cs": "ec8250583730aa95e26b6073ded8ecc48a157665592a83ddcdc44b8068122b5e",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs": "9e20540582033fcef580c74934397655ec902296663612ec4b951276f2463472",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs": "de656c2df4b54dc713f36709631b04460f3654ad01c9b11740aa417e2417394b",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs": "7ea94bf0c6360c79c66d8ebc724177992589df6e287f1cc66d8ad0901cbb5d68",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Owner.cs": "83ad342ccdcd0dcf44e5f08cee80a1cd9450fe589f87d8be1492bc59fe86f8f3",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Start.cs": "2ce7568a895e1e4dd3ade5435cffa5be14a8f2292feceba5ca87eb21548b898a",
@@ -4184,7 +4182,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "b299413414fa12f8b434b9795ac901d4647565dd7e3510399ebd41b394d41221",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerStopTiming.cs": "71844d7e0f26f141bfb0a6b8c2662a2d264281c3e84fb72f8aa24729278bc21f",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerUnit.cs": "50065d2353864f5e066eadc985b372143e7946937536874a62bdbabfa3891de2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "427719cda5c5e8a781a76eeebbcea1dd95af66ec7165cd488f0ab7423d0dae45",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "5c6d8c2e58dac05ecda98dca08e3df26f80c1bff13fb30efdde96272143e1737",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptOwnership.cs": "55af1758e34acf839e5d800f511e2b841f7f2f3d19f5d27b692bfa7193cd1ad0",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptedResource.cs": "4ad20dd550df785d4307f341a795c1284ae869495f414ac28ba0acf839bac130",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionCancellationPhaseObservation.cs": "adc2aaea1cd07f6633a8455995ead2ac1817222efabc451173324c43d816cc6c",
@@ -5942,12 +5940,12 @@
     }
   },
   "source_count": 2872,
-  "source_tree": "d15b1f3a7532947d525e4d74cdc7457f6b8923ea",
+  "source_tree": "c5dd0770c00b14b61f32851adeaad1cce4f2d7a8",
   "validation_and_reviews": {
-    "/private/tmp/issue779-n07-io-family-correction-meitner-20261014/independent-review.json": "534e1d22d4c4c264496bab0696291e4494abc3eb57c16beb47717aac2e18e9e1",
-    "/private/tmp/issue779-n07-io-family-correction-meitner-20261014/source-ready.json": "d1a6827dcc3907f6fb061b6afe86406331743a63d828bde41ca02b1e75422af4",
-    "/private/tmp/issue779-n07-io-family-correction-meitner-20261014/validation-attempt-2/receipt.json": "a9b4d0c0e71124055bfe80d78d436be2678fc97af0994f645bbf6caa564fc7eb"
+    "/private/tmp/issue779-control-directory-continuity-20261015/source-ready.json": "4788beaeb1c0265d96ca877171dd597cc764ce99d7b99bf602068bfec2aba792",
+    "/private/tmp/issue779-control-directory-continuity-20261015/validation/receipt.json": "9780b38f06e9ed89cd6909bc60bda65d9ce0f69b7e15fac3a7d6659ed63c98a9",
+    "/private/tmp/issue779-n07-control-review-20261015/prepared-source-review.json": "060faa07446010a6b1eb2c7ab5ec89c7051229250a99aa83caa01b162a2a0645"
   },
-  "validation_commit": "71d004d6cf5a791ddbb8e73e3c538248985a8505",
-  "validation_scope": "scoped restores/three formatters/39 core/4 CLI/22 parser controls; all owned commands settled"
+  "validation_commit": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
+  "validation_scope": "locked restore/two exact formatters/98 ordinary and 98 N07 workspace-control controls; all owned commands settled"
 }

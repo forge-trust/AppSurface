@@ -2,8 +2,8 @@
 """N15 root-side finalizer: measured cleanup and nested record assembly only."""
 import argparse, grp, hashlib, importlib.util, json, os, pwd, re, stat, subprocess, sys, time
 from pathlib import Path
-SOURCE='71d004d6cf5a791ddbb8e73e3c538248985a8505'
-CAPTURE="8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046"
+SOURCE='914046e1e998ca89a5f0f5be39a90bbfb88a431d'
+CAPTURE="b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953"
 CAP=65536
 class Reject(Exception):
     def __init__(self, category):
@@ -127,7 +127,7 @@ def main():
     partial=decode(partial_raw); m=decode(measure_raw)
     parser_path=Path(__file__).with_name("check_n15_records.py")
     parser_raw=read_fixed(parser_path,131072,deadline,0o444)
-    need(hashlib.sha256(parser_raw).hexdigest()=="b9bfefd7bb713d29d1b344f867891312bbfd32177763b42b373015c7663ac1ae","parser-pin")
+    need(hashlib.sha256(parser_raw).hexdigest()=="4d1766fbb558192a2e30397b025c913bc826d42a3bbf123188bffdbb505fcbcc","parser-pin")
     spec=importlib.util.spec_from_file_location("n15_fixed_parser",parser_path); parser=importlib.util.module_from_spec(spec); spec.loader.exec_module(parser)
     parser.validate_partial_observation(partial,a.generation)
     keys={"schema","generation","owner_unit","worker_unit","retry_exit","retry_stdout_sha256","retry_stderr_sha256","worker_before_after_snapshot_sha256","retry_owner_terminal_snapshot_sha256","raw_logs_retained","synthetic_completion_flags"}

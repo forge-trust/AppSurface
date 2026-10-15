@@ -51,7 +51,7 @@ class CommonCaptureEncoderTests(unittest.TestCase):
         source = capture['source']
         compact = hashlib.sha256(json.dumps(source, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         self.assertEqual(compact, runner_module.CANONICAL_SOURCE_MAP)
-        self.assertEqual(workspace.source_projection_sha(capture, 'tree'), 'c2e846a09c6e7561eea1a1531d34a422ba0b7379a05be4e4fcb17bd18134f891')
+        self.assertEqual(workspace.source_projection_sha(capture, 'tree'), '57f62b362fd89e1935dabd7bf1cd11f62647855c303d4f98ca26dcebfd5e2dc5')
         self.assertEqual(hashlib.sha256(raw).hexdigest(), runner_module.CAPTURE_SHA)
 
 
