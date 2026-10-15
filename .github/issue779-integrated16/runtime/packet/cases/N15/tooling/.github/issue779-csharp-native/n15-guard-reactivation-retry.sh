@@ -66,7 +66,8 @@ jq -e --arg g "$generation" --arg owner "$owner" --arg worker "$worker" '
 # Require the selected physical kernel cgroup to be absent or empty across two bounded scans
 # before reading/resetting the pruned failed-unit metadata.
 stage=owner-group
-owner_cgroup="/system.slice/$owner"
+check_empty_group(){
+ local selected_group=$1
 bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
 # N15_PHYSICAL_CGROUP_CHECK_BEGIN
 import os, re, stat, sys, time
@@ -75,7 +76,7 @@ def reject():
     raise SystemExit(1)
 
 def scan(root, group, expected_uid):
-    if re.fullmatch(r"/system\.slice/appsurface-evidence-owner-[0-9a-f]{32}\.service", group) is None:
+    if re.fullmatch(r"/system\.slice/appsurface-evidence-(?:owner|worker)-[0-9a-f]{32}\.service", group) is None:
         reject()
     rootfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     try:
@@ -174,7 +175,10 @@ try:
 except (OSError, ValueError, OverflowError):
     reject()
 # N15_PHYSICAL_CGROUP_CHECK_END
-' /sys/fs/cgroup "$owner_cgroup" 0 || fail
+' /sys/fs/cgroup "$selected_group" 0 || fail
+}
+owner_cgroup="/system.slice/$owner"
+check_empty_group "$owner_cgroup"
 stage=worker-snapshot
 worker_before=$out/worker-before.txt
 worker_after=$out/worker-after.txt
@@ -305,114 +309,7 @@ except (OSError, UnicodeError, ValueError, decimal.InvalidOperation, OverflowErr
 stage=worker-before-physical
 worker_pid=$(jq -er '.worker.main_pid | select(type=="number" and .>1 and floor==.)' "$partial") || fail
 [[ $worker_pid =~ ^[1-9][0-9]{0,9}$ && ! -e /proc/$worker_pid && ! -L /proc/$worker_pid ]] || fail
-bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
-# N15_PHYSICAL_CGROUP_CHECK_BEGIN
-import os, re, stat, sys, time
-
-def reject():
-    raise SystemExit(1)
-
-def scan(root, group, expected_uid):
-    if re.fullmatch(r"/system\.slice/appsurface-evidence-worker-[0-9a-f]{32}\.service", group) is None:
-        reject()
-    rootfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        rootst = os.fstat(rootfd)
-        if not stat.S_ISDIR(rootst.st_mode) or rootst.st_uid != expected_uid or rootst.st_mode & 0o022:
-            reject()
-        base = os.dup(rootfd)
-        try:
-            parent = os.open("system.slice", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
-            os.close(base)
-            base = parent
-            parent_before = os.fstat(base)
-            if (not stat.S_ISDIR(parent_before.st_mode) or parent_before.st_uid != expected_uid
-                    or parent_before.st_mode & 0o022):
-                reject()
-            name = group.rsplit("/", 1)[-1]
-            try:
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
-            except FileNotFoundError:
-                # Only the authenticated generated leaf may be pruned. A missing or unsafe
-                # system.slice ancestor, a symlink, and missing cgroup.procs still reject.
-                try:
-                    os.stat(name, dir_fd=base, follow_symlinks=False)
-                except FileNotFoundError:
-                    parent_after = os.fstat(base)
-                    root_after = os.fstat(rootfd)
-                    identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
-                    if identity(parent_before) != identity(parent_after) or identity(rootst) != identity(root_after):
-                        reject()
-                    return []
-                reject()
-            os.close(base)
-            base = child
-            if os.fstat(base).st_uid != expected_uid:
-                reject()
-            pending = [base]
-            base = -1
-            members = []
-            visited = 0
-            while pending:
-                directory = pending.pop()
-                try:
-                    dst = os.fstat(directory)
-                    if not stat.S_ISDIR(dst.st_mode) or dst.st_uid != expected_uid:
-                        reject()
-                    saw_procs = False
-                    for name in os.listdir(directory):
-                        visited += 1
-                        if visited > 4096 or name in (".", "..") or "/" in name:
-                            reject()
-                        item = os.stat(name, dir_fd=directory, follow_symlinks=False)
-                        if stat.S_ISLNK(item.st_mode) or item.st_uid != expected_uid:
-                            reject()
-                        if stat.S_ISDIR(item.st_mode):
-                            pending.append(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory))
-                        elif name == "cgroup.procs" and stat.S_ISREG(item.st_mode):
-                            if saw_procs:
-                                reject()
-                            saw_procs = True
-                            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
-                            try:
-                                fst = os.fstat(fd)
-                                if fst.st_uid != expected_uid or not stat.S_ISREG(fst.st_mode):
-                                    reject()
-                                raw = os.read(fd, 65537)
-                                if len(raw) > 65536 or os.read(fd, 1):
-                                    reject()
-                            finally:
-                                os.close(fd)
-                            for row in raw.splitlines():
-                                if not row.isdigit():
-                                    reject()
-                                members.append(int(row))
-                        elif stat.S_ISREG(item.st_mode):
-                            continue
-                        else:
-                            reject()
-                    if not saw_procs:
-                        reject()
-                finally:
-                    os.close(directory)
-            return members
-        finally:
-            if base >= 0:
-                os.close(base)
-    finally:
-        os.close(rootfd)
-
-try:
-    root, group, uid = sys.argv[1], sys.argv[2], int(sys.argv[3])
-    first = scan(root, group, uid)
-    time.sleep(0.05)
-    second = scan(root, group, uid)
-    if first or second:
-        reject()
-except (OSError, ValueError, OverflowError):
-    reject()
-# N15_PHYSICAL_CGROUP_CHECK_END
-' /sys/fs/cgroup "/system.slice/$worker" 0 || fail
+check_empty_group "/system.slice/$worker"
 stage=reference-release
 [[ ! -e $out/unit-reference.release && ! -L $out/unit-reference.release \
    && ! -e $out/unit-reference.release.pending && ! -L $out/unit-reference.release.pending \
@@ -479,114 +376,7 @@ stage=post-replay-snapshot
 bounded "$retry_deadline" systemctl show --all "$worker" --property="Id,LoadState,ActiveState,SubState,ControlGroup,InvocationID,MainPID,ExecMainPID,ExecMainCode,ExecMainStatus,NRestarts,ActiveEnterTimestampMonotonic,ExecMainStartTimestampMonotonic" >"$worker_after"
 bounded "$retry_deadline" systemctl show "$owner" -p LoadState -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus >"$owner_after"
 [[ ! -e /proc/$worker_pid && ! -L /proc/$worker_pid ]] || fail
-bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
-# N15_PHYSICAL_CGROUP_CHECK_BEGIN
-import os, re, stat, sys, time
-
-def reject():
-    raise SystemExit(1)
-
-def scan(root, group, expected_uid):
-    if re.fullmatch(r"/system\.slice/appsurface-evidence-worker-[0-9a-f]{32}\.service", group) is None:
-        reject()
-    rootfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    try:
-        rootst = os.fstat(rootfd)
-        if not stat.S_ISDIR(rootst.st_mode) or rootst.st_uid != expected_uid or rootst.st_mode & 0o022:
-            reject()
-        base = os.dup(rootfd)
-        try:
-            parent = os.open("system.slice", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
-            os.close(base)
-            base = parent
-            parent_before = os.fstat(base)
-            if (not stat.S_ISDIR(parent_before.st_mode) or parent_before.st_uid != expected_uid
-                    or parent_before.st_mode & 0o022):
-                reject()
-            name = group.rsplit("/", 1)[-1]
-            try:
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
-            except FileNotFoundError:
-                # Only the authenticated generated leaf may be pruned. A missing or unsafe
-                # system.slice ancestor, a symlink, and missing cgroup.procs still reject.
-                try:
-                    os.stat(name, dir_fd=base, follow_symlinks=False)
-                except FileNotFoundError:
-                    parent_after = os.fstat(base)
-                    root_after = os.fstat(rootfd)
-                    identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
-                    if identity(parent_before) != identity(parent_after) or identity(rootst) != identity(root_after):
-                        reject()
-                    return []
-                reject()
-            os.close(base)
-            base = child
-            if os.fstat(base).st_uid != expected_uid:
-                reject()
-            pending = [base]
-            base = -1
-            members = []
-            visited = 0
-            while pending:
-                directory = pending.pop()
-                try:
-                    dst = os.fstat(directory)
-                    if not stat.S_ISDIR(dst.st_mode) or dst.st_uid != expected_uid:
-                        reject()
-                    saw_procs = False
-                    for name in os.listdir(directory):
-                        visited += 1
-                        if visited > 4096 or name in (".", "..") or "/" in name:
-                            reject()
-                        item = os.stat(name, dir_fd=directory, follow_symlinks=False)
-                        if stat.S_ISLNK(item.st_mode) or item.st_uid != expected_uid:
-                            reject()
-                        if stat.S_ISDIR(item.st_mode):
-                            pending.append(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory))
-                        elif name == "cgroup.procs" and stat.S_ISREG(item.st_mode):
-                            if saw_procs:
-                                reject()
-                            saw_procs = True
-                            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
-                            try:
-                                fst = os.fstat(fd)
-                                if fst.st_uid != expected_uid or not stat.S_ISREG(fst.st_mode):
-                                    reject()
-                                raw = os.read(fd, 65537)
-                                if len(raw) > 65536 or os.read(fd, 1):
-                                    reject()
-                            finally:
-                                os.close(fd)
-                            for row in raw.splitlines():
-                                if not row.isdigit():
-                                    reject()
-                                members.append(int(row))
-                        elif stat.S_ISREG(item.st_mode):
-                            continue
-                        else:
-                            reject()
-                    if not saw_procs:
-                        reject()
-                finally:
-                    os.close(directory)
-            return members
-        finally:
-            if base >= 0:
-                os.close(base)
-    finally:
-        os.close(rootfd)
-
-try:
-    root, group, uid = sys.argv[1], sys.argv[2], int(sys.argv[3])
-    first = scan(root, group, uid)
-    time.sleep(0.05)
-    second = scan(root, group, uid)
-    if first or second:
-        reject()
-except (OSError, ValueError, OverflowError):
-    reject()
-# N15_PHYSICAL_CGROUP_CHECK_END
-' /sys/fs/cgroup "/system.slice/$worker" 0 || fail
+check_empty_group "/system.slice/$worker"
 # Parse unchanged or explicitly not-found metadata through the pinned closed parser.
 bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
 import importlib.util, pathlib, sys
