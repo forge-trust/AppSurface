@@ -117,3 +117,9 @@ Systemdv255 systemctl-show.c1288-1299 prints a killed ExecStart status as9/KILL,
 ### Empty environment-file tuple
 
 The same v255 systemctl-show EnvironmentFiles printer loops array entries but emits no line for an empty a(sb), even with --all. The owner checker therefore verifies EnvironmentFiles directly via bounded fixed busctl on the exact owner Service interface and requires a(sb)0. A missing pretty-printed line is never assumed to prove absence; any actual file tuple rejects. Other owner properties, identity/deadline/exit/guard/replay checks remain strict.
+
+## Release before same-generation replay
+
+Run38822289469 passed the full original owner recipe and failed at owner-unload. Systemdv255 adds references for BindsTo/After; holding the worker therefore keeps its referenced owner object loaded. The replay helper now snapshots the original terminal worker and validates the killed owner while held, then atomically requests release. The observer acknowledges only after successful UnrefUnit and bus closure; the wrapper joins that exact child before account finalization. All waits retain the original work/job bounds.
+
+After release, worker metadata may remain identical or become an explicit not-found/inactive/dead tuple with all execution fields empty/zero. Loaded zero-filled metadata still rejects. A pure strict parser checks both snapshots; real root checks separately require the original worker PID absent and exact selected worker cgroup empty twice before release and after replay. Actual replay still must exit1 with ASEVD402, emit no new start frame, and retain the consumed generation. Distinct before/after hashes preserve genuine GC without pretending the snapshots match.

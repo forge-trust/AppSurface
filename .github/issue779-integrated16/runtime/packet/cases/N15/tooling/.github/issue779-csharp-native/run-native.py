@@ -28,9 +28,9 @@ SOURCE_MAP = '2c27553e3441cfc7e1c8b53cac0da15b6cff4a6c8c5c8d6dae01e0ba116351ea'
 CAPTURE_SHA = '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540'
 SOURCE_COUNT = 2872
 SOURCE_TREE = '3bafd0fcd5321f1b29323f46df94b77eb48fa859'
-PARSER_SHA = 'fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877'
-REVIEWED_FILES = {'acquire-inbound.sh': '7dc4367c9e27dbd64a705277aad79b07cec192b29db38fba52b94057cd873b91', 'prepare-root-inputs-v2.sh': '1a9cbdcf8196b2babbc82fadb5b9b541fe941fab873ead18365f148d45cd61db', 'checkpoint-n15-pending-start-death.sh': '4865ffbbdc592cabe4286d6a3e9b91cf08adb26c1262415ec41c8b58daed9b86', 'check_n15_records.py': 'fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877', 'observe_n15_pending_start.py': '6215ea0bf33d24e8fc1547bcf7614ac0657b781cf4dd07738e069c6ecc3bee58', 'n15-guard-reactivation-retry.sh': '5a6a4652e6776c56047de996b34a3f64da37b4257ac6570f3366585d40be983f', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'retain-native.sh': '6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c', 'source-review.json': '446a5c08e2158a2ae17363925a96d1eecb86d518719746e0927626ee6b69dbf5', 'prepare-case-workspace.py': 'd970e2ab458a1cf6f8f3f5559ebaa15c81896aa513ce90975fb4b0d97dd99293', 'finalize_n15_observation.py': 'af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507'}
-REVIEWED_FILES['finalize_n15_observation.py'] = 'af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507'
+PARSER_SHA = 'b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf'
+REVIEWED_FILES = {'acquire-inbound.sh': '4116ce1973e5329af90ddda95a6be40923b9c86f32bd1b1eb29d82be34695f4f', 'prepare-root-inputs-v2.sh': 'c1f9ff4cf4c7518a6ef95f2f86b0ef25565a09605d8875e22ee701816c407644', 'checkpoint-n15-pending-start-death.sh': '51eb1740d8029856520d0defb7667b0c21ff575834711b6ca7177260c8933c82', 'check_n15_records.py': 'b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf', 'observe_n15_pending_start.py': '43dd0f71d07dc028fba88b538a1c9fe45aa7afab8cc21ae91b36c51fe657580f', 'n15-guard-reactivation-retry.sh': 'a6b3b232e091f8bf5d4b1d8ce7be525d4621c05ad8cd74c15d923db32ecbbf2b', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'retain-native.sh': '6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c', 'source-review.json': '446a5c08e2158a2ae17363925a96d1eecb86d518719746e0927626ee6b69dbf5', 'prepare-case-workspace.py': 'd970e2ab458a1cf6f8f3f5559ebaa15c81896aa513ce90975fb4b0d97dd99293', 'finalize_n15_observation.py': '77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6'}
+REVIEWED_FILES['finalize_n15_observation.py'] = '77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6'
 SOURCE_REVIEW_SHA = '446a5c08e2158a2ae17363925a96d1eecb86d518719746e0927626ee6b69dbf5'
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
@@ -660,7 +660,7 @@ def validate_cleanup_receipt(cleanup, partial, measurement, raw, generation):
     keys={'schema','generation','source_commit','source_capture_sha256','partial_sha256','measurement_sha256',
           'names','ids','workspace','joined_launcher_pid','launcher_absent_after_wait','worker_before_after_sha256',
           'retry_owner_terminal_sha256','retry_stdout_sha256','retry_stderr_sha256','owner_before_sha256',
-          'worker_snapshot_unchanged','retry_owner_terminal','utilities',
+          'worker_snapshot_unchanged','worker_snapshot_kind','worker_after_sha256','retry_owner_terminal','utilities',
           'numeric_and_name_lookup_absent','native_credit'}
     require(type(cleanup) is dict and set(cleanup)==keys and cleanup['schema']=='issue779-n15-root-account-cleanup-v1'
             and cleanup['generation']==generation and cleanup['source_commit']==SOURCE
@@ -674,16 +674,17 @@ def validate_cleanup_receipt(cleanup, partial, measurement, raw, generation):
             'n15-cleanup-workspace')
     require(type(cleanup['joined_launcher_pid']) is int and cleanup['joined_launcher_pid']>1
             and cleanup['launcher_absent_after_wait'] is True
-            and cleanup['worker_snapshot_unchanged'] is True and cleanup['retry_owner_terminal']=={
+            and type(cleanup['worker_snapshot_unchanged']) is bool and cleanup['worker_snapshot_unchanged']==(raw['worker-before.txt']==raw['worker-after.txt'])
+            and cleanup['worker_snapshot_kind'] in ('unchanged','garbage-collected') and cleanup['retry_owner_terminal']=={
                 'LoadState':'loaded','ActiveState':'failed','SubState':'failed','ExecMainCode':'1','ExecMainStatus':'1'}
             and cleanup['numeric_and_name_lookup_absent'] is True and cleanup['native_credit'] is False,
             'n15-cleanup-observations')
-    digest_fields={'worker_before_after_sha256':'worker_before_after_snapshot_sha256',
+    digest_fields={'worker_after_sha256':'worker_after_snapshot_sha256','worker_before_after_sha256':'worker_before_after_snapshot_sha256',
                    'retry_owner_terminal_sha256':'retry_owner_terminal_snapshot_sha256',
                    'retry_stdout_sha256':'retry_stdout_sha256','retry_stderr_sha256':'retry_stderr_sha256'}
     for target,source in digest_fields.items():
         require(cleanup[target]==measurement[source] and sha(raw['worker-before.txt'])==measurement['worker_before_after_snapshot_sha256']
-                and sha(raw['worker-after.txt'])==measurement['worker_before_after_snapshot_sha256']
+                and sha(raw['worker-after.txt'])==measurement['worker_after_snapshot_sha256']
                 and sha(raw['retry-owner.txt'])==measurement['retry_owner_terminal_snapshot_sha256']
                 and sha(raw['retry.stdout'])==measurement['retry_stdout_sha256']
                 and sha(raw['retry.stderr'])==measurement['retry_stderr_sha256'], 'n15-cleanup-raw-binding')
@@ -756,7 +757,7 @@ def validate_n15_archive(values, parser_bytes, generation, build_sha, workflow, 
     partial=decode_data(values['partial.json']); parser.validate_partial_observation(partial,generation)
     measurement=decode_data(values['reactivation-measurement.json'])
     measurement_keys={'schema','generation','owner_unit','worker_unit','retry_exit','retry_stdout_sha256','retry_stderr_sha256',
-        'worker_before_after_snapshot_sha256','retry_owner_terminal_snapshot_sha256','raw_logs_retained','synthetic_completion_flags'}
+        'worker_before_after_snapshot_sha256','worker_after_snapshot_sha256','retry_owner_terminal_snapshot_sha256','raw_logs_retained','synthetic_completion_flags'}
     require(type(measurement) is dict and set(measurement)==measurement_keys and measurement['schema']=='issue779-n15-guard-reactivation-measurement-v1'
         and measurement['generation']==generation and measurement['owner_unit']==partial['owner']['unit']
         and measurement['worker_unit']==partial['worker']['unit'] and type(measurement['retry_exit']) is int
@@ -771,6 +772,8 @@ def validate_n15_archive(values, parser_bytes, generation, build_sha, workflow, 
     parser.validate_completion_evidence(completion,generation)
     require(all(result[k]==partial[k] for k in parser.PARTIAL_KEYS & parser.FINAL_KEYS), 'n15-partial-final-binding')
     cleanup=decode_data(values['account-cleanup.json'])
+    worker_snapshot_kind=parser.validate_worker_replay_snapshots(values['worker-before.txt'],values['worker-after.txt'],generation,partial['worker']['main_pid'])
+    require(cleanup['worker_snapshot_kind']==worker_snapshot_kind, 'n15-worker-snapshot-kind')
     validate_cleanup_receipt(cleanup,partial,measurement,values,generation)
     retained_summary=decode_data(values['n15-record-summary.json'])
     require(retained_summary==summary and summary.get('generation')==generation and summary.get('phase_sha256')==phase['phase_sha256'], 'n15-record-summary-binding')

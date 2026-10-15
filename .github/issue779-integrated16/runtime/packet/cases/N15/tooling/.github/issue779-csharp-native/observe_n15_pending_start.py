@@ -53,7 +53,7 @@ def identity(st):
             st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 
-PARSER_SHA256 = "fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877"
+PARSER_SHA256 = "b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf"
 
 
 def load_pinned_parser():
@@ -540,6 +540,24 @@ def reference_markers(generation):
     return root / "unit-reference.ready", root / "unit-reference.release"
 
 
+def publish_reference_released(generation, deadline):
+    """Publish fixed root-private ACK only after successful Unref and bus closure."""
+    ready, release = reference_markers(generation)
+    path = release.with_name("unit-reference.released")
+    pending = release.with_name("unit-reference.released.pending")
+    remaining(deadline)
+    fd = os.open(pending, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        require(os.write(fd, b"released\n") == 9, "reference-marker-write")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    remaining(deadline)
+    require(not os.path.lexists(path), "reference-marker-release")
+    os.rename(pending, path)
+    remaining(deadline)
+
+
 def hold_reference_until_release(generation, deadline):
     """Announce complete partial JSON, then keep the bus connection through replay/finalization."""
     ready, release = reference_markers(generation)
@@ -692,6 +710,7 @@ def main():
         print(json.dumps(result, sort_keys=True, separators=(",", ":")), flush=True)
         hold_reference_until_release(args.case_generation, args.job_deadline_boot_ms)
         reference.close(args.job_deadline_boot_ms)
+        publish_reference_released(args.case_generation, args.job_deadline_boot_ms)
     except (OSError, ValueError, KeyError, Reject, subprocess.SubprocessError, OverflowError) as error:
         print(failure_diagnostic(DIAGNOSTIC_STAGE, error), file=sys.stderr)
         print("N15_OBSERVER_REJECTED", file=sys.stderr)

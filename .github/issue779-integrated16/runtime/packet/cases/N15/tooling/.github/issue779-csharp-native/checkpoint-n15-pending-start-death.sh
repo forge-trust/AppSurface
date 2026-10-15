@@ -3,10 +3,10 @@ set -euo pipefail
 export PATH=/usr/bin:/usr/sbin LC_ALL=C LANG=C
 umask 077
 readonly HERE=${BASH_SOURCE[0]%/*}
-readonly OBSERVER_SHA256=6215ea0bf33d24e8fc1547bcf7614ac0657b781cf4dd07738e069c6ecc3bee58
-readonly PARSER_SHA256=fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877
-readonly RETRY_SHA256=5a6a4652e6776c56047de996b34a3f64da37b4257ac6570f3366585d40be983f
-readonly FINALIZER_SHA256=af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507
+readonly OBSERVER_SHA256=43dd0f71d07dc028fba88b538a1c9fe45aa7afab8cc21ae91b36c51fe657580f
+readonly PARSER_SHA256=b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf
+readonly RETRY_SHA256=a6b3b232e091f8bf5d4b1d8ce7be525d4621c05ad8cd74c15d923db32ecbbf2b
+readonly FINALIZER_SHA256=77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6
 fail(){ printf 'N15_OWNER_LAUNCH_JOIN_REJECTED:%s\n' "$1" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail execute-required
 shift
@@ -94,7 +94,9 @@ release_observer(){
 trap 'original_status=$?; release_observer || true; exit "$original_status"' EXIT
 [[ ! -e $result_dir/unit-reference.ready && ! -L $result_dir/unit-reference.ready \
    && ! -e $result_dir/unit-reference.release && ! -L $result_dir/unit-reference.release \
-   && ! -e $result_dir/unit-reference.release.pending && ! -L $result_dir/unit-reference.release.pending ]] || fail reference-marker-reuse
+   && ! -e $result_dir/unit-reference.release.pending && ! -L $result_dir/unit-reference.release.pending \
+   && ! -e $result_dir/unit-reference.released && ! -L $result_dir/unit-reference.released \
+   && ! -e $result_dir/unit-reference.released.pending && ! -L $result_dir/unit-reference.released.pending ]] || fail reference-marker-reuse
 /usr/bin/env -i PATH=/usr/bin:/usr/sbin LANG=C LC_ALL=C PYTHONHASHSEED=0 /usr/bin/python3.12 -I -S -B "$HERE/observe_n15_pending_start.py" --execute \
   --case-generation "$generation" --phase-stderr "$phase_stderr" \
   --startup-deadline-boot-ms "$startup_deadline" --admission-deadline-boot-ms "$admission_deadline" \
@@ -128,7 +130,8 @@ bounded "$work_deadline" /usr/bin/bash --noprofile --norc "$HERE/n15-guard-react
 [[ -s $retry_out/reactivation-measurement.json && ! -L $retry_out/reactivation-measurement.json \
    && $(stat -Lc '%u:%g:%a:%h' -- "$retry_out/reactivation-measurement.json") == 0:0:600:1 ]] || fail replay-measurement-missing
 if grep -Fq '"phase":"start-transient-unit-reply"' "$retry_out/retry.stderr"; then fail replay-reemitted-start-phase; fi
-kill -0 "$observer_pid" 2>/dev/null || fail reference-observer-ended
+release_observer || fail reference-observer-early-join
+[[ $observer_status == 0 ]] || fail reference-observer-early-status
 /usr/bin/timeout --foreground --signal=KILL --kill-after=1 "$(awk -v ms="$((job_deadline-$(boot_ms)))" 'BEGIN{if(ms<1)exit 1;printf "%.3f",ms/1000}')" \
   /usr/bin/python3.12 -I -S -B "$HERE/finalize_n15_observation.py" --execute \
   --generation "$generation" --result-directory "$result_dir" --joined-launch-pid "$launch_pid" \

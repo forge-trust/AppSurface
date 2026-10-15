@@ -59,6 +59,76 @@ def validate_phase(raw, expected_generation):
 
 
 
+def validate_worker_replay_snapshots(before: bytes, after: bytes, generation: str,
+                                     original_pid: int) -> str:
+    """Classify bounded worker metadata as unchanged or garbage-collected.
+
+    Both inputs are ASCII systemctl snapshots of exactly the thirteen fields
+    below, with one key=value per line and a final LF (at most 16384 bytes).
+    The before snapshot must describe the selected original worker after a
+    nonzero exit or signal. Only identical parsed fields or the exact not-found
+    shape are accepted; loaded units with cleared metadata are rejected.
+    The PID is an integer in 1..INT_MAX; timestamps are positive uint64 values.
+    Numbers use canonical decimal text. Field order is immaterial.
+
+    Use this after retaining the original terminal observation and releasing its
+    unit reference. The returned string grants no authority and proves neither
+    physical process absence, empty cgroups, nor absence of another start.
+    Callers must establish those facts and actual guarded replay independently.
+    """
+    require(type(generation) is str and re.fullmatch(r"[0-9a-f]{32}", generation)
+            is not None, "generation-syntax")
+    require(type(original_pid) is int and 1 <= original_pid <= 2147483647,
+            "worker-snapshot-original-pid")
+    fields = set("Id LoadState ActiveState SubState ControlGroup InvocationID MainPID "
+                 "ExecMainPID ExecMainCode ExecMainStatus NRestarts "
+                 "ActiveEnterTimestampMonotonic ExecMainStartTimestampMonotonic".split())
+
+    def parse(raw):
+        require(type(raw) is bytes and 0 < len(raw) <= 16384
+                and raw.endswith(b"\n") and b"\r" not in raw and b"\x00" not in raw,
+                "worker-snapshot-bytes")
+        try:
+            text = raw[:-1].decode("ascii", "strict")
+        except UnicodeError:
+            raise Reject("worker-snapshot-ascii") from None
+        values = {}
+        for line in text.split("\n"):
+            require("=" in line, "worker-snapshot-line")
+            key, value = line.split("=", 1)
+            require(key in fields and key not in values, "worker-snapshot-fields")
+            values[key] = value
+        require(set(values) == fields, "worker-snapshot-fields")
+        return values
+
+    first, second = parse(before), parse(after)
+    unit = "appsurface-evidence-worker-" + generation + ".service"
+    require(first["Id"] == unit and first["LoadState"] == "loaded"
+            and (first["ActiveState"], first["SubState"]) in
+                (("inactive", "dead"), ("failed", "failed"))
+            and first["MainPID"] == "0" and first["ExecMainPID"] == str(original_pid)
+            and first["NRestarts"] == "0"
+            and re.fullmatch(r"[0-9a-f]{32}", first["InvocationID"]) is not None
+            and first["ControlGroup"] in ("", "/system.slice/" + unit),
+            "worker-snapshot-before-binding")
+    require(first["ExecMainCode"] in ("1", "2", "3")
+            and re.fullmatch(r"[1-9][0-9]{0,2}", first["ExecMainStatus"]) is not None,
+            "worker-snapshot-before-exit")
+    status = int(first["ExecMainStatus"])
+    require(status <= (255 if first["ExecMainCode"] == "1" else 64),
+            "worker-snapshot-before-exit")
+    for key in ("ActiveEnterTimestampMonotonic", "ExecMainStartTimestampMonotonic"):
+        require(re.fullmatch(r"[1-9][0-9]{0,19}", first[key]) is not None
+                and int(first[key]) < 2**64, "worker-snapshot-before-time")
+    if second == first:
+        return "unchanged"
+    absent = {key: "0" for key in fields}
+    absent.update(Id=unit, LoadState="not-found", ActiveState="inactive",
+                  SubState="dead", ControlGroup="", InvocationID="")
+    require(second == absent, "worker-snapshot-after-binding")
+    return "garbage-collected"
+
+
 PARTIAL_SCHEMA = "issue779-n15-native-observer-partial-v1"
 COMPLETION_SCHEMA = "issue779-n15-outer-completion-evidence-v1"
 FINAL_SCHEMA = "issue779-n15-native-fixture-observation-v1"

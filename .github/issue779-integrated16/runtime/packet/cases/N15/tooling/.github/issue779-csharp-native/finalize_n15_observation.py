@@ -85,12 +85,15 @@ def validate_utility_rows(rows,names):
     return success
 def validate_join_observation(pid,proc_present):
     need(type(pid) is int and pid>1 and type(proc_present) is bool and not proc_present,"launcher-not-joined")
-def validate_replay_observation(measurement,partial,stdout,stderr,worker_before,worker_after,owner_terminal):
+def validate_replay_observation(measurement,partial,stdout,stderr,worker_before,worker_after,owner_terminal,worker_snapshot_kind=None):
     need(measurement["owner_unit"]==partial["owner"]["unit"] and measurement["worker_unit"]==partial["worker"]["unit"]
          and type(measurement["retry_exit"]) is int and measurement["retry_exit"]==1,"replay-generation-or-exit")
     need(stdout==b"" and b"ASEVD402" in stderr and b'"phase":"start-transient-unit-reply"' not in stderr,
          "replay-output-or-phase")
-    need(worker_before==worker_after and owner_terminal=={
+    if worker_snapshot_kind is None:
+        need(worker_before==worker_after,"replay-worker-snapshot-unclassified")
+        worker_snapshot_kind="unchanged"  # Legacy detached equal-byte procedure controls only.
+    need(worker_snapshot_kind in ("unchanged","garbage-collected") and owner_terminal=={
          "LoadState":"loaded","ActiveState":"failed","SubState":"failed","ExecMainCode":"1","ExecMainStatus":"1"},
          "replay-worker-or-owner-terminal")
     return {"attempted_same_owner_generation":True,"owner_exit_nonzero":True,
@@ -133,12 +136,12 @@ def main():
     partial=decode(partial_raw); m=decode(measure_raw)
     parser_path=Path(__file__).with_name("check_n15_records.py")
     parser_raw=read_fixed(parser_path,131072,deadline,0o444)
-    need(hashlib.sha256(parser_raw).hexdigest()=="fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877","parser-pin")
+    need(hashlib.sha256(parser_raw).hexdigest()=="b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf","parser-pin")
     spec=importlib.util.spec_from_file_location("n15_fixed_parser",parser_path); parser=importlib.util.module_from_spec(spec); spec.loader.exec_module(parser)
     parser.validate_partial_observation(partial,a.generation)
-    keys={"schema","generation","owner_unit","worker_unit","retry_exit","retry_stdout_sha256","retry_stderr_sha256","worker_before_after_snapshot_sha256","retry_owner_terminal_snapshot_sha256","raw_logs_retained","synthetic_completion_flags"}
+    keys={"schema","generation","owner_unit","worker_unit","retry_exit","retry_stdout_sha256","retry_stderr_sha256","worker_before_after_snapshot_sha256","worker_after_snapshot_sha256","retry_owner_terminal_snapshot_sha256","raw_logs_retained","synthetic_completion_flags"}
     need(type(m) is dict and set(m)==keys and m["schema"]=="issue779-n15-guard-reactivation-measurement-v1" and m["generation"]==a.generation and m["owner_unit"]==partial["owner"]["unit"] and m["worker_unit"]==partial["worker"]["unit"] and type(m["retry_exit"]) is int and m["retry_exit"]==1 and m["raw_logs_retained"] is True and m["synthetic_completion_flags"] is False,"measurement-binding")
-    bindings={"retry.stdout":m["retry_stdout_sha256"],"retry.stderr":m["retry_stderr_sha256"],"worker-before.txt":m["worker_before_after_snapshot_sha256"],"worker-after.txt":m["worker_before_after_snapshot_sha256"],"retry-owner.txt":m["retry_owner_terminal_snapshot_sha256"]}
+    bindings={"retry.stdout":m["retry_stdout_sha256"],"retry.stderr":m["retry_stderr_sha256"],"worker-before.txt":m["worker_before_after_snapshot_sha256"],"worker-after.txt":m["worker_after_snapshot_sha256"],"retry-owner.txt":m["retry_owner_terminal_snapshot_sha256"]}
     raws={}
     for name,digest in bindings.items():
         need(type(digest) is str and re.fullmatch(r"[0-9a-f]{64}",digest),"measurement-digest")
@@ -153,8 +156,9 @@ def main():
     try: os.stat(f"/proc/{a.joined_launch_pid}",follow_symlinks=False); launcher_present=True
     except FileNotFoundError: launcher_present=False
     validate_join_observation(a.joined_launch_pid,launcher_present)
+    worker_snapshot_kind=parser.validate_worker_replay_snapshots(raws["worker-before.txt"],raws["worker-after.txt"],a.generation,partial["worker"]["main_pid"])
     reactivation=validate_replay_observation(m,partial,raws["retry.stdout"],raws["retry.stderr"],
-        raws["worker-before.txt"],raws["worker-after.txt"],owner)
+        raws["worker-before.txt"],raws["worker-after.txt"],owner,worker_snapshot_kind)
     rows=account_rows(partial["account_snapshot"],a.generation,partial["worker"]); verify_present(rows)
     utilities=[]; utility_failed=False
     for kind,name,num in rows[:2]:
@@ -187,10 +191,10 @@ def main():
         "partial_sha256":hashlib.sha256(partial_raw).hexdigest(),"measurement_sha256":hashlib.sha256(measure_raw).hexdigest(),
         "names":partial["account_snapshot"]["names"],"ids":partial["account_snapshot"]["ids"],"workspace":ws_after,
         "joined_launcher_pid":a.joined_launch_pid,"launcher_absent_after_wait":True,
-        "worker_before_after_sha256":m["worker_before_after_snapshot_sha256"],
+        "worker_before_after_sha256":m["worker_before_after_snapshot_sha256"],"worker_after_sha256":m["worker_after_snapshot_sha256"],
         "retry_owner_terminal_sha256":m["retry_owner_terminal_snapshot_sha256"],"retry_stdout_sha256":m["retry_stdout_sha256"],
         "retry_stderr_sha256":m["retry_stderr_sha256"],"owner_before_sha256":hashlib.sha256(read_fixed(root/"owner-before.txt",16384,deadline)).hexdigest(),
-        "worker_snapshot_unchanged":raws["worker-before.txt"]==raws["worker-after.txt"],"retry_owner_terminal":owner,
+        "worker_snapshot_unchanged":raws["worker-before.txt"]==raws["worker-after.txt"],"worker_snapshot_kind":worker_snapshot_kind,"retry_owner_terminal":owner,
         "utilities":utilities,"numeric_and_name_lookup_absent":absent,"native_credit":False}
     utility_rows_succeeded=validate_utility_rows(utilities,partial["account_snapshot"]["names"])
     save_fixed(root/"account-cleanup.json",canonical(cleanup),deadline)

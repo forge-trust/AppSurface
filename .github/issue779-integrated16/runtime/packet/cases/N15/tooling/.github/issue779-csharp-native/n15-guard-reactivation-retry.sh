@@ -183,7 +183,7 @@ retry_stderr=$out/retry.stderr
 owner_after=$out/retry-owner.txt
 owner_before=$out/owner-before.txt
 for f in "$worker_before" "$worker_after" "$retry_stdout" "$retry_stderr" "$owner_before" "$owner_after" "$out/reactivation-measurement.json"; do [[ ! -e $f && ! -L $f ]] || fail; done
-bounded "$retry_deadline" systemctl show "$worker" -p LoadState -p InvocationID -p ActiveEnterTimestampMonotonic -p ExecMainStartTimestampMonotonic -p NRestarts >"$worker_before"
+bounded "$retry_deadline" systemctl show --all "$worker" --property="Id,LoadState,ActiveState,SubState,ControlGroup,InvocationID,MainPID,ExecMainPID,ExecMainCode,ExecMainStatus,NRestarts,ActiveEnterTimestampMonotonic,ExecMainStartTimestampMonotonic" >"$worker_before"
 [[ -s $worker_before && $(stat -c '%u:%g:%a:%h' -- "$worker_before") == 0:0:600:1 ]] || fail
 stage=owner-recipe
 owner_pid=$(jq -er --arg unit "$owner" '.owner | select(.unit==$unit and .uid==0 and .gid==0 and .pidfd_opened==true and .identity_rechecked_before_signal==true) | .main_pid | select(type=="number" and .>1 and floor==.)' "$partial") || fail
@@ -302,6 +302,132 @@ except (OSError, UnicodeError, ValueError, decimal.InvalidOperation, OverflowErr
     reject()
 ' "$owner_before" "$generation" "$owner" "$runtime_host" "$entry" "$request" "$work_deadline" "$job_deadline" "$owner_pid" "$owner_guard/armed" || fail
 # N15_FAILED_OWNER_RECIPE_CHECK_END
+stage=worker-before-physical
+worker_pid=$(jq -er '.worker.main_pid | select(type=="number" and .>1 and floor==.)' "$partial") || fail
+[[ $worker_pid =~ ^[1-9][0-9]{0,9}$ && ! -e /proc/$worker_pid && ! -L /proc/$worker_pid ]] || fail
+bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
+# N15_PHYSICAL_CGROUP_CHECK_BEGIN
+import os, re, stat, sys, time
+
+def reject():
+    raise SystemExit(1)
+
+def scan(root, group, expected_uid):
+    if re.fullmatch(r"/system\.slice/appsurface-evidence-worker-[0-9a-f]{32}\.service", group) is None:
+        reject()
+    rootfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        rootst = os.fstat(rootfd)
+        if not stat.S_ISDIR(rootst.st_mode) or rootst.st_uid != expected_uid or rootst.st_mode & 0o022:
+            reject()
+        base = os.dup(rootfd)
+        try:
+            parent = os.open("system.slice", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
+            os.close(base)
+            base = parent
+            parent_before = os.fstat(base)
+            if (not stat.S_ISDIR(parent_before.st_mode) or parent_before.st_uid != expected_uid
+                    or parent_before.st_mode & 0o022):
+                reject()
+            name = group.rsplit("/", 1)[-1]
+            try:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
+            except FileNotFoundError:
+                # Only the authenticated generated leaf may be pruned. A missing or unsafe
+                # system.slice ancestor, a symlink, and missing cgroup.procs still reject.
+                try:
+                    os.stat(name, dir_fd=base, follow_symlinks=False)
+                except FileNotFoundError:
+                    parent_after = os.fstat(base)
+                    root_after = os.fstat(rootfd)
+                    identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+                    if identity(parent_before) != identity(parent_after) or identity(rootst) != identity(root_after):
+                        reject()
+                    return []
+                reject()
+            os.close(base)
+            base = child
+            if os.fstat(base).st_uid != expected_uid:
+                reject()
+            pending = [base]
+            base = -1
+            members = []
+            visited = 0
+            while pending:
+                directory = pending.pop()
+                try:
+                    dst = os.fstat(directory)
+                    if not stat.S_ISDIR(dst.st_mode) or dst.st_uid != expected_uid:
+                        reject()
+                    saw_procs = False
+                    for name in os.listdir(directory):
+                        visited += 1
+                        if visited > 4096 or name in (".", "..") or "/" in name:
+                            reject()
+                        item = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                        if stat.S_ISLNK(item.st_mode) or item.st_uid != expected_uid:
+                            reject()
+                        if stat.S_ISDIR(item.st_mode):
+                            pending.append(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory))
+                        elif name == "cgroup.procs" and stat.S_ISREG(item.st_mode):
+                            if saw_procs:
+                                reject()
+                            saw_procs = True
+                            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+                            try:
+                                fst = os.fstat(fd)
+                                if fst.st_uid != expected_uid or not stat.S_ISREG(fst.st_mode):
+                                    reject()
+                                raw = os.read(fd, 65537)
+                                if len(raw) > 65536 or os.read(fd, 1):
+                                    reject()
+                            finally:
+                                os.close(fd)
+                            for row in raw.splitlines():
+                                if not row.isdigit():
+                                    reject()
+                                members.append(int(row))
+                        elif stat.S_ISREG(item.st_mode):
+                            continue
+                        else:
+                            reject()
+                    if not saw_procs:
+                        reject()
+                finally:
+                    os.close(directory)
+            return members
+        finally:
+            if base >= 0:
+                os.close(base)
+    finally:
+        os.close(rootfd)
+
+try:
+    root, group, uid = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    first = scan(root, group, uid)
+    time.sleep(0.05)
+    second = scan(root, group, uid)
+    if first or second:
+        reject()
+except (OSError, ValueError, OverflowError):
+    reject()
+# N15_PHYSICAL_CGROUP_CHECK_END
+' /sys/fs/cgroup "/system.slice/$worker" 0 || fail
+stage=reference-release
+[[ ! -e $out/unit-reference.release && ! -L $out/unit-reference.release \
+   && ! -e $out/unit-reference.release.pending && ! -L $out/unit-reference.release.pending \
+   && ! -e $out/unit-reference.released && ! -L $out/unit-reference.released \
+   && ! -e $out/unit-reference.released.pending && ! -L $out/unit-reference.released.pending ]] || fail
+( set -o noclobber; printf 'release\n' >"$out/unit-reference.release.pending" ) || fail
+mv -n -- "$out/unit-reference.release.pending" "$out/unit-reference.release" || fail
+[[ ! -e $out/unit-reference.release.pending && ! -L $out/unit-reference.release.pending ]] || fail
+while [[ ! -s $out/unit-reference.released ]]; do
+  remaining_ms "$retry_deadline" >/dev/null || fail
+  bounded "$retry_deadline" /usr/bin/sleep 0.02 || fail
+done
+[[ ! -L $out/unit-reference.released \
+   && $(stat -c '%u:%g:%a:%h:%s' -- "$out/unit-reference.released") == 0:0:600:1:9 \
+   && $(cat -- "$out/unit-reference.released") == released ]] || fail
 stage=owner-reset
 bounded "$retry_deadline" systemctl stop "$owner" >/dev/null || fail
 bounded "$retry_deadline" systemctl reset-failed "$owner" >/dev/null || fail
@@ -350,9 +476,124 @@ bounded "$retry_deadline" /usr/bin/systemd-run --quiet --wait --pipe --unit="$ow
 stage=replay-output
 [[ $retry_exit == 1 ]] && grep -Fq 'ASEVD402' "$retry_stderr" || fail
 stage=post-replay-snapshot
-bounded "$retry_deadline" systemctl show "$worker" -p LoadState -p InvocationID -p ActiveEnterTimestampMonotonic -p ExecMainStartTimestampMonotonic -p NRestarts >"$worker_after"
+bounded "$retry_deadline" systemctl show --all "$worker" --property="Id,LoadState,ActiveState,SubState,ControlGroup,InvocationID,MainPID,ExecMainPID,ExecMainCode,ExecMainStatus,NRestarts,ActiveEnterTimestampMonotonic,ExecMainStartTimestampMonotonic" >"$worker_after"
 bounded "$retry_deadline" systemctl show "$owner" -p LoadState -p ActiveState -p SubState -p ExecMainCode -p ExecMainStatus >"$owner_after"
-cmp -s -- "$worker_before" "$worker_after" || fail
+[[ ! -e /proc/$worker_pid && ! -L /proc/$worker_pid ]] || fail
+bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
+# N15_PHYSICAL_CGROUP_CHECK_BEGIN
+import os, re, stat, sys, time
+
+def reject():
+    raise SystemExit(1)
+
+def scan(root, group, expected_uid):
+    if re.fullmatch(r"/system\.slice/appsurface-evidence-worker-[0-9a-f]{32}\.service", group) is None:
+        reject()
+    rootfd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        rootst = os.fstat(rootfd)
+        if not stat.S_ISDIR(rootst.st_mode) or rootst.st_uid != expected_uid or rootst.st_mode & 0o022:
+            reject()
+        base = os.dup(rootfd)
+        try:
+            parent = os.open("system.slice", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
+            os.close(base)
+            base = parent
+            parent_before = os.fstat(base)
+            if (not stat.S_ISDIR(parent_before.st_mode) or parent_before.st_uid != expected_uid
+                    or parent_before.st_mode & 0o022):
+                reject()
+            name = group.rsplit("/", 1)[-1]
+            try:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=base)
+            except FileNotFoundError:
+                # Only the authenticated generated leaf may be pruned. A missing or unsafe
+                # system.slice ancestor, a symlink, and missing cgroup.procs still reject.
+                try:
+                    os.stat(name, dir_fd=base, follow_symlinks=False)
+                except FileNotFoundError:
+                    parent_after = os.fstat(base)
+                    root_after = os.fstat(rootfd)
+                    identity = lambda st: (st.st_dev, st.st_ino, st.st_mode, st.st_uid, st.st_gid)
+                    if identity(parent_before) != identity(parent_after) or identity(rootst) != identity(root_after):
+                        reject()
+                    return []
+                reject()
+            os.close(base)
+            base = child
+            if os.fstat(base).st_uid != expected_uid:
+                reject()
+            pending = [base]
+            base = -1
+            members = []
+            visited = 0
+            while pending:
+                directory = pending.pop()
+                try:
+                    dst = os.fstat(directory)
+                    if not stat.S_ISDIR(dst.st_mode) or dst.st_uid != expected_uid:
+                        reject()
+                    saw_procs = False
+                    for name in os.listdir(directory):
+                        visited += 1
+                        if visited > 4096 or name in (".", "..") or "/" in name:
+                            reject()
+                        item = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                        if stat.S_ISLNK(item.st_mode) or item.st_uid != expected_uid:
+                            reject()
+                        if stat.S_ISDIR(item.st_mode):
+                            pending.append(os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory))
+                        elif name == "cgroup.procs" and stat.S_ISREG(item.st_mode):
+                            if saw_procs:
+                                reject()
+                            saw_procs = True
+                            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=directory)
+                            try:
+                                fst = os.fstat(fd)
+                                if fst.st_uid != expected_uid or not stat.S_ISREG(fst.st_mode):
+                                    reject()
+                                raw = os.read(fd, 65537)
+                                if len(raw) > 65536 or os.read(fd, 1):
+                                    reject()
+                            finally:
+                                os.close(fd)
+                            for row in raw.splitlines():
+                                if not row.isdigit():
+                                    reject()
+                                members.append(int(row))
+                        elif stat.S_ISREG(item.st_mode):
+                            continue
+                        else:
+                            reject()
+                    if not saw_procs:
+                        reject()
+                finally:
+                    os.close(directory)
+            return members
+        finally:
+            if base >= 0:
+                os.close(base)
+    finally:
+        os.close(rootfd)
+
+try:
+    root, group, uid = sys.argv[1], sys.argv[2], int(sys.argv[3])
+    first = scan(root, group, uid)
+    time.sleep(0.05)
+    second = scan(root, group, uid)
+    if first or second:
+        reject()
+except (OSError, ValueError, OverflowError):
+    reject()
+# N15_PHYSICAL_CGROUP_CHECK_END
+' /sys/fs/cgroup "/system.slice/$worker" 0 || fail
+# Parse unchanged or explicitly not-found metadata through the pinned closed parser.
+bounded "$retry_deadline" /usr/bin/python3.12 -I -S -B -c '
+import importlib.util, pathlib, sys
+path=pathlib.Path(sys.argv[1]); spec=importlib.util.spec_from_file_location("fixed_n15_parser",path); parser=importlib.util.module_from_spec(spec); spec.loader.exec_module(parser)
+parser.validate_worker_replay_snapshots(pathlib.Path(sys.argv[2]).read_bytes(),pathlib.Path(sys.argv[3]).read_bytes(),sys.argv[4],int(sys.argv[5]))
+' "${BASH_SOURCE[0]%/*}/check_n15_records.py" "$worker_before" "$worker_after" "$generation" "$(jq -er '.worker.main_pid' "$partial")" || fail
+
 grep -Fxq 'ActiveState=failed' "$owner_after" || fail
 grep -Fxq 'ExecMainCode=1' "$owner_after" || fail
 grep -Fxq 'ExecMainStatus=1' "$owner_after" || fail
@@ -363,9 +604,10 @@ stage=measurement
 stdout_sha=$(sha256sum -- "$retry_stdout"); stdout_sha=${stdout_sha%% *}
 stderr_sha=$(sha256sum -- "$retry_stderr"); stderr_sha=${stderr_sha%% *}
 worker_sha=$(sha256sum -- "$worker_before"); worker_sha=${worker_sha%% *}
+worker_after_sha=$(sha256sum -- "$worker_after"); worker_after_sha=${worker_after_sha%% *}
 owner_sha=$(sha256sum -- "$owner_after"); owner_sha=${owner_sha%% *}
 jq -ncS --arg generation "$generation" --arg owner "$owner" --arg worker "$worker" \
  --arg stdout_sha "$stdout_sha" --arg stderr_sha "$stderr_sha" --arg worker_snapshot_sha "$worker_sha" \
- --arg owner_snapshot_sha "$owner_sha" --argjson retry_exit "$retry_exit" \
- '{schema:"issue779-n15-guard-reactivation-measurement-v1",generation:$generation,owner_unit:$owner,worker_unit:$worker,retry_exit:$retry_exit,retry_stdout_sha256:$stdout_sha,retry_stderr_sha256:$stderr_sha,worker_before_after_snapshot_sha256:$worker_snapshot_sha,retry_owner_terminal_snapshot_sha256:$owner_snapshot_sha,raw_logs_retained:true,synthetic_completion_flags:false}' >"$out/reactivation-measurement.json"
+ --arg owner_snapshot_sha "$owner_sha" --arg worker_after_sha "$worker_after_sha" --argjson retry_exit "$retry_exit" \
+ '{schema:"issue779-n15-guard-reactivation-measurement-v1",generation:$generation,owner_unit:$owner,worker_unit:$worker,retry_exit:$retry_exit,retry_stdout_sha256:$stdout_sha,retry_stderr_sha256:$stderr_sha,worker_before_after_snapshot_sha256:$worker_snapshot_sha,worker_after_snapshot_sha256:$worker_after_sha,retry_owner_terminal_snapshot_sha256:$owner_snapshot_sha,raw_logs_retained:true,synthetic_completion_flags:false}' >"$out/reactivation-measurement.json"
 chmod 600 "$out/reactivation-measurement.json"
