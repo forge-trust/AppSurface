@@ -5,7 +5,7 @@ umask 077
 readonly HERE=${BASH_SOURCE[0]%/*}
 readonly OBSERVER_SHA256=6215ea0bf33d24e8fc1547bcf7614ac0657b781cf4dd07738e069c6ecc3bee58
 readonly PARSER_SHA256=fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877
-readonly RETRY_SHA256=4dbc69f8ae8220077cdf3f94279dabefd78499ffa5d848cf800ced7ccdad40da
+readonly RETRY_SHA256=5a6a4652e6776c56047de996b34a3f64da37b4257ac6570f3366585d40be983f
 readonly FINALIZER_SHA256=af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507
 fail(){ printf 'N15_OWNER_LAUNCH_JOIN_REJECTED:%s\n' "$1" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail execute-required

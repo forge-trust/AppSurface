@@ -113,3 +113,7 @@ Run38821117205 now retains the genuine killed owner, original workerSIGTERM15, t
 ### Pinned owner recipe rendering
 
 Systemdv255 systemctl-show.c1288-1299 prints a killed ExecStart status as9/KILL, so the exact regex now matches it. Conditions is a compound a(sbbsi) tuple not rendered by systemctl show; bus-print-properties.c380 skips unprintable compounds. The checker requests other owner properties with --all (retaining required empty fields) and reads the actual Conditions tuple via a bounded fixed busctl get-property. It requires exactly one ConditionPathExists with trigger=false, negate=false, exact original armed path and result1. This is strict policy verification, not permission from pretty-printed text.
+
+### Empty environment-file tuple
+
+The same v255 systemctl-show EnvironmentFiles printer loops array entries but emits no line for an empty a(sb), even with --all. The owner checker therefore verifies EnvironmentFiles directly via bounded fixed busctl on the exact owner Service interface and requires a(sb)0. A missing pretty-printed line is never assumed to prove absence; any actual file tuple rejects. Other owner properties, identity/deadline/exit/guard/replay checks remain strict.

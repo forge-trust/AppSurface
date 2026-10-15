@@ -37,7 +37,7 @@ done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
 [[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 5b4ed381badb91de47d793715d05b6ae7737e39e ]] || fail source-generation-pin
-[[ ${values[n15-parser-sha256]} == fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877 && ${values[n15-retry-sha256]} == 4dbc69f8ae8220077cdf3f94279dabefd78499ffa5d848cf800ced7ccdad40da && ${values[n15-finalizer-sha256]} =~ ^[0-9a-f]{64}$ && ${values[source-capture-sha256]} == 4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540 ]] || fail n15-source-parser-pins
+[[ ${values[n15-parser-sha256]} == fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877 && ${values[n15-retry-sha256]} == 5a6a4652e6776c56047de996b34a3f64da37b4257ac6570f3366585d40be983f && ${values[n15-finalizer-sha256]} =~ ^[0-9a-f]{64}$ && ${values[source-capture-sha256]} == 4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540 ]] || fail n15-source-parser-pins
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

@@ -188,7 +188,7 @@ bounded "$retry_deadline" systemctl show "$worker" -p LoadState -p InvocationID 
 stage=owner-recipe
 owner_pid=$(jq -er --arg unit "$owner" '.owner | select(.unit==$unit and .uid==0 and .gid==0 and .pidfd_opened==true and .identity_rechecked_before_signal==true) | .main_pid | select(type=="number" and .>1 and floor==.)' "$partial") || fail
 [[ $owner_pid =~ ^[1-9][0-9]{0,9}$ ]] || fail
-owner_properties='Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath'
+owner_properties='Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment PassEnvironment FragmentPath'
 bounded "$retry_deadline" systemctl show --no-pager --all --property="${owner_properties// /,}" "$owner" >"$owner_before"
 [[ $(stat -c '%u:%g:%a:%h' -- "$owner_before") == 0:0:600:1 && $(stat -c %s -- "$owner_before") -le 16384 ]] || fail
 # Compare the failed unit with the complete immutable owner recipe and the same original deadlines.
@@ -212,7 +212,7 @@ try:
         if key in values:
             reject()
         values[key] = value
-    required = set("Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment EnvironmentFiles PassEnvironment FragmentPath".split())
+    required = set("Id LoadState ActiveState SubState ControlGroup MainPID ExecMainPID ExecMainCode ExecMainStatus User Group Type KillMode RemainAfterExit RuntimeMaxUSec TimeoutStopUSec Restart SendSIGKILL FinalKillSignal ActiveEnterTimestampMonotonic ConditionResult ExecStart Environment UnsetEnvironment PassEnvironment FragmentPath".split())
     if set(values) != required:
         reject()
     fixed = {
@@ -220,7 +220,7 @@ try:
         "MainPID": "0", "ExecMainPID": owner_pid,
         "ExecMainCode": "2", "ExecMainStatus": "9", "User": "0", "Group": "0", "Type": "exec",
         "KillMode": "control-group", "RemainAfterExit": "no", "Restart": "no", "SendSIGKILL": "yes",
-        "FinalKillSignal": "9", "ConditionResult": "yes", "EnvironmentFiles": "", "PassEnvironment": "",
+        "FinalKillSignal": "9", "ConditionResult": "yes", "PassEnvironment": "",
         "FragmentPath": "/run/systemd/transient/" + owner,
     }
     if any(values[k] != v for k, v in fixed.items()):
@@ -237,6 +237,13 @@ try:
     if condition.returncode != 0 or len(condition.stdout) > 4096:
         reject()
     if shlex.split(condition.stdout.decode("ascii", "strict")) != ["a(sbbsi)", "1", "ConditionPathExists", "false", "false", armed, "1"]:
+        reject()
+    now_boot = time.clock_gettime_ns(time.CLOCK_BOOTTIME) // 1000000
+    left = min(int(work_deadline), int(job_deadline)) - now_boot
+    if left <= 0:
+        reject()
+    files = subprocess.run(["/usr/bin/busctl", "--system", "--no-pager", "--timeout=1", "get-property", "org.freedesktop.systemd1", object_path, "org.freedesktop.systemd1.Service", "EnvironmentFiles"], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=min(1, left / 1000), check=False, env={"PATH":"/usr/bin:/usr/sbin","LANG":"C","LC_ALL":"C"})
+    if files.returncode != 0 or len(files.stdout) > 4096 or shlex.split(files.stdout.decode("ascii", "strict")) != ["a(sb)", "0"]:
         reject()
     fixed_environment = ("PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
                          "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp")
