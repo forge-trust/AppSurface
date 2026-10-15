@@ -163,7 +163,7 @@ class SourceOrderControls(unittest.TestCase):
 
 
 class PreparationCallerChainControls(unittest.TestCase):
-    EXPECTED_PREPARATION_SHA = "10faea449fbbbd8b38ef4a6f60b78b3baa7bba2593857a5bbd2f04c09a6b4fb3"
+    EXPECTED_PREPARATION_SHA = "e87e60366ec924a7881863edbed1cc5442f5abd5b6e1b1ff485b22c52aeef13d"
 
     def test_embedded_preparation_digest_is_shared_by_workflow_runner_and_root_chain(self):
         folder = Path(__file__).parent

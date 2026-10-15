@@ -22,9 +22,9 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     "checkpoint-owner-death-common.sh": {
-      "bytes": 45303,
+      "bytes": 45305,
       "mode": "0644",
-      "sha256": "a8999c26b24946819c5b2e76ef9f1f54abb826cc99d2c4b424e8556e9edf1ef9"
+      "sha256": "a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f"
     }
   },
   "native_credit": false,

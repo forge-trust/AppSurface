@@ -1027,7 +1027,7 @@ cleanup() {
  left >/dev/null || bad=1
  if ((original!=0 || bad!=0 || success!=1)); then printf '%s\n' 'NATIVE_FIXTURE_FAILED:PATHS_AND_ACCOUNTS_PRESERVED'; exit 1; fi
  # Publication happens ONLY after joins/group checks and final original deadline check.
- try_bounded jq -jcS -n --arg g "$G" --arg source "$source_revision" --arg base "$base_revision" --arg case "$NEGATIVE_CASE" --argjson root_exit "$negative_launch" --arg policy "$policy_sha" --arg n03_result_sha256 "$n03_result_sha256" '{schema:"issue779-n07-parent-substitution-fixture-v1",generation:$g,source_revision:$source,base_revision:$base,control:$case,root_launch_join_status:$root_exit,root_stdout_bytes:0,worker_terminal_from_original_monitor:true,original_csharp_joins_required:true,account_disposition:"preserved-quarantined",native_acceptance:false,observation_only:true,policy_sha256:$policy,n03_result_sha256:$n03_result_sha256,other_controls:"not-qualified-by-this-fixture"}' >"$private/fixture-result.pending" || status=1
+ try_bounded jq -jcS -n --arg g "$G" --arg source "$source_revision" --arg base "$base_revision" --arg case "$NEGATIVE_CASE" --argjson root_exit "$negative_launch" --argjson helper_exit "$n07_helper_exit" --arg policy "$policy_sha" --arg n03_result_sha256 "$n03_result_sha256" '{schema:"issue779-n07-parent-substitution-fixture-v1",generation:$g,source_revision:$source,base_revision:$base,control:$case,root_launch_join_status:$root_exit,helper_launch_join_status:$helper_exit,root_stdout_bytes:0,worker_terminal_from_original_monitor:true,original_csharp_joins_required:true,account_disposition:"preserved-quarantined",native_acceptance:false,observation_only:true,policy_sha256:$policy,n03_result_sha256:$n03_result_sha256,other_controls:"not-qualified-by-this-fixture"}' >"$private/fixture-result.pending" || status=1
  left >/dev/null || status=1
  ((status==0)) || { printf '%s\n' 'NATIVE_FIXTURE_FAILED:PUBLICATION'; exit 1; }
  try_bounded mv -T -- "$private/fixture-result.pending" "$private/fixture-result.json" || exit 1
@@ -1144,7 +1144,7 @@ n03_run() (
    if left >/dev/null; then try_bounded mv -T -- "$n03log/failure.pending" "$n03log/failure.json" || :; fi
    printf 'N03_INCONCLUSIVE_OR_REJECTED:RETAINED\n' >&2; exit 1
   fi
-  try_bounded jq -jcS -n --arg source "$source_revision" --argjson worker "$sampled_pid" --argjson broker "$broker_actual_pid" \
+  try_bounded jq -cS -n --arg source "$source_revision" --argjson worker "$sampled_pid" --argjson broker "$broker_actual_pid" \
    '{schema:"issue779-n03-peer-observation-v1",control:"N03",status:"observed",source_commit:$source,worker_pid:$worker,broker_pid:$broker,worker_exit:1,broker_exit:0,worker_stdout_bytes:0,asevd402_observed:true,kernel_peer_bound_to_owned_worker:true,request_bytes:0,sent_bytes:0,ready_request_observed:false,descriptor_supplied:false,owned_process_groups_joined:true,stream_custody:"private-files-after-original-process-reap",native_acceptance:false,systemd_worker_authority:false}' >"$n03log/result.pending" || code=1
   left >/dev/null || code=1; ((code==0)) || exit 1
   try_bounded mv -T -- "$n03log/result.pending" "$n03log/result.json" || exit 1

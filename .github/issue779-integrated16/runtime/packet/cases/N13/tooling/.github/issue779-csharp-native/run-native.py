@@ -24,19 +24,19 @@ CANONICAL_SOURCE_MAP = '758a0f769ca67ce6f1fda2eea3569a373efafb192e2d2c2cce222480
 CAPTURE_SHA = '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540'
 CAPTURE_PROJECTION_SHA = '488b59a9bd50ef1f05f8eb4291ed3eee164b6d1536cdeec73fe9f6847194100c'
 PARSER_SHA = '352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd'
-COMMON_SHA = 'a8999c26b24946819c5b2e76ef9f1f54abb826cc99d2c4b424e8556e9edf1ef9'
-PREPARATION_SHA = '10faea449fbbbd8b38ef4a6f60b78b3baa7bba2593857a5bbd2f04c09a6b4fb3'
+COMMON_SHA = 'a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f'
+PREPARATION_SHA = 'e87e60366ec924a7881863edbed1cc5442f5abd5b6e1b1ff485b22c52aeef13d'
 WRAPPERS = {'N13': ('checkpoint-n13-owner-killed.sh','cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc'),
             'N14': ('checkpoint-n14-owner-stopped.sh','d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2')}
 # Zero slots are deliberate fail-closed external integration gates until the final input DAG is reviewed.
-REVIEWED_FILES = {'acquire-inbound.sh':'7b2b7ea1f1aa1e6e5c049b3909926ae316386ccbd626e9bbd1c08567d334826d','prepare-root-inputs-v2.sh':'69a2df9b37eefe54dda6c18c3651fbbc89e8d342cdace13ffe66fdb66337ec90',
+REVIEWED_FILES = {'acquire-inbound.sh':'bacc9e89a9ddd4a79b4d0caf434c875a93bea35c4ce63dbbd589b3cc2dc6d62b','prepare-root-inputs-v2.sh':'a2df10e6f4501ac202c150e319a32efc7df09d24b4b214023e45f2efa3b7368a',
  'checkpoint-n13-owner-killed.sh':'cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc',
  'checkpoint-n14-owner-stopped.sh':'d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2',
- 'checkpoint-owner-death-common.sh':'a8999c26b24946819c5b2e76ef9f1f54abb826cc99d2c4b424e8556e9edf1ef9','check_owner_death_record.py':'352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd',
+ 'checkpoint-owner-death-common.sh':'a3ec6e782070b51d5ae817a42e86e15a98a50673a56527c310b304cf7b09872f','check_owner_death_record.py':'352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd',
  'preparation.json':PREPARATION_SHA,'README.md':'b731fd4d3ee12b17453a858c7f69d0fb8a20f315867c5f13d4871167aad8093c',
- 'test_owner_death_data.py':'9b9a4b3a2176f9bd05dd8232cd7a04029a6666c6f615dc7df74f1e33d5d0451b',
+ 'test_owner_death_data.py':'45ccd41225c69076bb038247dab7b70db44065e98a7123e2101b1132a1a1897d',
  'prepare-os-audit-v2.py':'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0',
- 'source-review.json':'321a139ac450646fa34bd4394ef105f890713bb1cd4c16c64273f8ae24f40507',
+ 'source-review.json':'b6928801af54df22159869569f0a983a5c5c48ef5074c5b0094fed6ddfb82f82',
  'prepare-case-workspace.py':'8523906e0a9cd53d7a6231dc7fa831d2a3579276b3b0408570fda3deae584f26',
  'test_build_receipt_contracts.py':'0a926f3423df2235bd249dd5b7603d4993ed60e60c8a9d55a3a9fd38984732b2',
  'test_workspace_arguments.py':'a638bba727a53323b85ca36aba578e80d5a122b23484849acc5e99fed7b116d7'}

@@ -43,7 +43,7 @@ def validate_n07_archive(values, *, records, expected_source, expected_base):
     require(all(type(raw[n]) is bytes and len(raw[n]) <= cap for n, cap in CAPS.items()))
     fixture = values['fixture-result.json']
     keys = {'schema', 'generation', 'source_revision', 'base_revision', 'control',
-            'root_launch_join_status', 'root_stdout_bytes', 'worker_terminal_from_original_monitor',
+            'root_launch_join_status', 'helper_launch_join_status', 'root_stdout_bytes', 'worker_terminal_from_original_monitor',
             'original_csharp_joins_required', 'account_disposition', 'native_acceptance',
             'observation_only', 'policy_sha256', 'n03_result_sha256', 'other_controls'}
     require(type(fixture) is dict and set(fixture) == keys)
@@ -52,6 +52,8 @@ def validate_n07_archive(values, *, records, expected_source, expected_base):
             and fixture['base_revision'] == expected_base
             and type(fixture['root_launch_join_status']) is int
             and fixture['root_launch_join_status'] == 1
+            and type(fixture['helper_launch_join_status']) is int
+            and fixture['helper_launch_join_status'] == 0
             and type(fixture['root_stdout_bytes']) is int and fixture['root_stdout_bytes'] == 0
             and fixture['worker_terminal_from_original_monitor'] is True
             and fixture['original_csharp_joins_required'] is True
@@ -93,7 +95,15 @@ def validate_n07_archive(values, *, records, expected_source, expected_base):
     terminal = settlement['terminal']
     records.selected_unit(raw['n07-worker-unit.txt'], descriptor['unit'], terminal)
     live = records.decode(raw['n07-helper-live.json'], 2048)
-    records.selected_unit(raw['n07-helper-unit.txt'], helper_unit,
-                          {'exec_main_pid': live['pid'], 'exec_main_code': 1, 'exec_main_status': 0})
+    # The root fixture retained the original systemd-run/helper join status.
+    # A successful transient unit may already be collected before this read.
+    # Absence does not supply an exit status: require the retained join plus
+    # the independently authenticated live helper and complete record binding.
+    selected = records.selected_unit(raw['n07-helper-unit.txt'], helper_unit)
+    if selected['LoadState'] == 'loaded':
+        records.selected_unit(raw['n07-helper-unit.txt'], helper_unit,
+                              {'exec_main_pid': live['pid'], 'exec_main_code': 1, 'exec_main_status': 0})
+    else:
+        require(all(selected[name] == '0' for name in ('ExecMainPID', 'ExecMainCode', 'ExecMainStatus')))
     records.validate_failure(records.decode(lines[2], 1025))
     return result

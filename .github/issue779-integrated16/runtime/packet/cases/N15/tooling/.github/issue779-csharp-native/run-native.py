@@ -860,6 +860,7 @@ def fixture_arguments(root, generation, job_deadline_boot_ms):
 
 def collect_private_archive(runner, bootstrap, generation, output, deadline):
     """Retain bounded diagnostic bytes; callers preserve the original fixture failure."""
+    deadline=min(deadline,time.monotonic()+30)
     require(time.monotonic()<deadline,'retention-deadline')
     runner.phase='bounded-private-retention'
     runner.run(ROOT_PREFIX+[str(bootstrap/'retain-native.sh'),'--execute','--generation',generation,

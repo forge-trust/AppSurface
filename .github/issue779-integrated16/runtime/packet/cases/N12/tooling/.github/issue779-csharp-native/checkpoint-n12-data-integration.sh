@@ -974,69 +974,82 @@ pin_owned_pg "$launch_pid"
 # Observer is its own retained process group. It can only inspect this generated worker/path tuple.
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" bash -c '
  set -euo pipefail; export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
- diagnostic_stage=initial
- trap '\''code=$?; if ((code!=0)); then printf "N12_OBSERVER_FAILURE:%s:%d\n" "$diagnostic_stage" "$code" >&2; fi'\'' EXIT
+ observer_stage=not-started; observer_exit_status=0; last_systemctl_result=null; last_load_state=other; last_main_pid=null; sample_written=false
+ observer_terminal() {
+  observer_exit_status=$?
+  trap - EXIT
+  local sink=${sample%/*}/logs/n01-observer-terminal.json stage_json result_json load_json pid_json sample_json
+  case $observer_stage in not-started|host-pinned|systemctl-result-closed|unit-absent|unit-loaded|worker-identity-closed|sample-written|observation-window-ended) stage_json=$observer_stage ;; *) stage_json=unknown ;; esac
+  if [[ $last_systemctl_result =~ ^[0-9]{1,3}$ ]] && ((10#$last_systemctl_result<=255)); then result_json=$((10#$last_systemctl_result)); else result_json=null; fi
+  case $last_load_state in loaded|not-found|bad-setting|error|merged|masked|stub) load_json="\"$last_load_state\"" ;; *) load_json='\''"other"'\'' ;; esac
+  if [[ $last_main_pid =~ ^[0-9]{1,10}$ ]] && ((10#$last_main_pid<=2147483647)); then pid_json=$((10#$last_main_pid)); else pid_json=null; fi
+  case $sample_written in true) sample_json=true ;; *) sample_json=false ;; esac
+  if (umask 077; set -o noclobber; printf '\''{"schema":"issue779-n01-observer-terminal-v1","stage":"%s","observer_exit_status":%d,"last_systemctl_result":%s,"last_load_state":%s,"main_pid":%s,"sample_written":%s}\n'\'' \
+   "$stage_json" "$observer_exit_status" "$result_json" "$load_json" "$pid_json" "$sample_json" >"$sink"); then
+   exit "$observer_exit_status"
+  fi
+  if ((observer_exit_status==0)); then exit 1; fi
+  exit "$observer_exit_status"
+ }
+ trap observer_terminal EXIT
  end=$1; worker=$2; host=$3; managed=$4; control=$5; account=$6; sample=$7
  now() { local u x; IFS=" " read -r u x </proc/uptime; printf "%s" "${u%%.*}"; }
  left() { local n; n=$(now); ((n<end)) || return 124; printf "%s" "$((end-n))"; }
  run() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
  start() { local text tail; text=$(run cat "/proc/$1/stat"); [[ ${text%% *} == "$1" ]]; tail=${text##*) }; read -r -a f <<<"$tail"; [[ ${f[19]:-} =~ ^[1-9][0-9]*$ ]]; printf "%s" "${f[19]}"; }
- diagnostic_stage=host-pin
  host_pin=$(run stat -c "%d:%i:%s:%f" "$host"); host_hash=$(run sha256sum "$host"); host_hash=${host_hash:0:64}
+ observer_stage=host-pinned
  while left >/dev/null; do
-  diagnostic_stage=selected-unit-query
   code=0; facts=$(run systemctl show "$worker" -p LoadState -p MainPID) || code=$?
-  diagnostic_stage=selected-unit-shape
+  last_systemctl_result=$code
   ((${#facts}<=4096)) || exit 1
   pid=; load=; seen_pid=0; seen_load=0
   while IFS="=" read -r key value; do
    case "$key" in MainPID) ((seen_pid==0)) || exit 1; seen_pid=1; pid=$value ;; LoadState) ((seen_load==0)) || exit 1; seen_load=1; load=$value ;; *) exit 1 ;; esac
   done <<<"$facts"
   [[ $seen_pid == 1 && $seen_load == 1 && $pid =~ ^[0-9]+$ ]] || exit 1
+  case $load in loaded|not-found|bad-setting|error|merged|masked|stub) last_load_state=$load ;; *) last_load_state=other ;; esac
+  if [[ $pid =~ ^[0-9]{1,10}$ ]] && ((10#$pid<=2147483647)); then last_main_pid=$((10#$pid)); else last_main_pid=null; fi
+  observer_stage=systemctl-result-closed
   if ((code!=0)); then [[ $code == 1 && $load == not-found && $pid == 0 ]] || exit 1; fi
-  if [[ $load == not-found && $pid == 0 ]]; then run sleep .02; continue; fi
+  if [[ $load == not-found && $pid == 0 ]]; then observer_stage=unit-absent; run sleep .02; continue; fi
   [[ $code == 0 && $load == loaded ]] || exit 1
+  observer_stage=unit-loaded
   if [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/status ]]; then
-   diagnostic_stage=process-first-sample
    s1=$(start "$pid") || exit 1
    uid1=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid1=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg1=$(run cat "/proc/$pid/cgroup")
    exe1=$(run readlink "/proc/$pid/exe") || exit 1
-   diagnostic_stage=post-exec-image
    if [[ $exe1 != "$host" ]]; then
     # env -i and the exec transition are pending, NEVER positive observations.
     [[ $exe1 == /usr/bin/env ]] || exit 1; run sleep .02; continue
    fi
    [[ $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
    image=$(run sha256sum "/proc/$pid/exe"); [[ ${image:0:64} == "$host_hash" ]] || exit 1
-   diagnostic_stage=worker-argv
    argv_file=${sample%.json}.argv
    run head -c 16385 "/proc/$pid/cmdline" >"$argv_file"
    size=$(run stat -c %s "$argv_file"); ((size>0 && size<=16384)) || exit 1
    args=(); while IFS= read -r -d "" a; do args+=("$a"); ((${#args[@]}<=6)) || exit 1; done <"$argv_file"
    [[ ${#args[@]} == 6 && ${args[0]} == "$host" && ${args[1]} == "$managed" && ${args[2]} == evidence && ${args[3]} == worker && ${args[4]} == --control && ${args[5]} == "$control" ]] || exit 1
-   diagnostic_stage=process-recheck
    uid2=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    gid2=$(run awk '\''$1=="Gid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
    cg2=$(run cat "/proc/$pid/cgroup"); exe2=$(run readlink "/proc/$pid/exe"); s2=$(start "$pid")
    [[ $s1 == "$s2" && $uid1 == "$uid2" && $gid1 == "$gid2" && $cg1 == "$cg2" && $cg1 == "0::/system.slice/$worker" && $exe2 == "$host" && $(run stat -Lc "%d:%i:%s:%f" "/proc/$pid/exe") == "$host_pin" ]] || exit 1
-   diagnostic_stage=identity-shape
    IFS=: read -r -a us <<<"$uid1"; IFS=: read -r -a gs <<<"$gid1"
    [[ ${#us[@]} == 4 && ${#gs[@]} == 4 ]] || exit 1
    for v in "${us[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${us[0]}" ]] || exit 1; done
    for v in "${gs[@]}"; do [[ $v =~ ^[1-9][0-9]*$ && $v == "${gs[0]}" ]] || exit 1; done
-   diagnostic_stage=account-binding
    pw=$(run getent passwd "$account"); gr=$(run getent group "$account")
    IFS=: read -r pn px pu rest <<<"$pw"; IFS=: read -r gn gx gg rest <<<"$gr"
    [[ $pn == "$account" && $gn == "$account" && $pu == "${us[0]}" && $gg == "${gs[0]}" ]] || exit 1
-   diagnostic_stage=sample-write
+   observer_stage=worker-identity-closed
    run jq -jcS -n --argjson pid "$pid" --arg uid "$uid1" --arg gid "$gid1" --arg cg "$cg1" --arg ticks "$s1" '\''{pid:$pid,uid4:$uid,gid4:$gid,cgroup:$cg,start_time_ticks:$ticks,post_exec_image_pinned:true,exact_worker_arguments:true,ready_protocol_observed:false}'\'' >"$sample"
-   diagnostic_stage=final-deadline
+   sample_written=true; observer_stage=sample-written
    left >/dev/null; exit 0
   fi
   run sleep .02
- done; diagnostic_stage=worker-not-observed; exit 1
+ done; observer_stage=observation-window-ended; exit 1
 ' -- "$work_end" "$worker" "$host" "$managed" "/run/appsurface-evidence-$G/worker/broker/control.sock" "${names[0]}" "$private/worker-live.json" >"$log/observer.stdout" 2>"$log/observer.stderr") & observer_pid=$!
 pin_owned_pg "$observer_pid"
 set +e; join_owned launch_pid; n01=$?; set -e

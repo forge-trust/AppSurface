@@ -28,12 +28,12 @@ PINS = {
     'NativePeerBroker.csproj': '92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e',
     'packages.lock.json': 'a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb',
 
-    'prepare-root-inputs-v2.sh': 'cbdca99f39efc234fbc7483906e1aaa5c3d1885ae217550020af77e0f462b76b',
-    'checkpoint-n12-data-integration.sh': '0e7fd384a59c25b2b0d408291aa983a2d206acb0e57c23fd1138629d97064c1f',
+    'prepare-root-inputs-v2.sh': 'bb7fa9131dba4393c0cc9e706f7047cd431610fabf73483b092890f4b5c80145',
+    'checkpoint-n12-data-integration.sh': '3fd3057e2f0208749347c0a7d31b88b1298293d1452cb92800334caeeba7fc62',
     'prepare-os-audit-v2.py': '0be5002ebb3d44e55b9404d557259248cd75ea5d223fb565466903cb0d13774b',
-    'source-review.json': 'abf78331fc25d200a86bdf477d89eb851c1df68bb20ff11e963cc654a63ddc62',
-    'acquire-inbound.sh': '2692cf88841fd1cd2614fb8f461c6d7c48dae9e73ccfeffb9ed831392a72a00d',
-    'retain-native.sh': 'df77c52bae29828c12b1ad56c2dc0c150649c26a1fde1fe2c2f2c345ad54a9cd',
+    'source-review.json': '8e99f87e2183712eefe38200386eda3e8831e9b936409e3877d89f8fe6553649',
+    'acquire-inbound.sh': '6cc4b0d23de62721aed097b7738406d72f1b726915756677b6305bb188100912',
+    'retain-native.sh': '30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f',
 }
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
@@ -634,7 +634,7 @@ ARCHIVE_NAMES = {
     'retention-selection.json', 'fixture-stdout.log', 'fixture-stderr.log', 'fixture-result.json',
     'raw-evidence-plan.json', 'raw-evidence-manifest.json', 'raw-evidence-summary.json', 'worker-live.json',
     'request-policy.sha256', 'final-files.sha256', 'logs/n01.stdout', 'logs/n01.stderr', 'logs/n02.stdout',
-    'logs/n02.stderr', 'logs/n02.trace', 'logs/observer.stdout', 'logs/observer.stderr', 'logs/kill.log', 'logs/stop.log',    'logs/n02.file-limit',
+    'logs/n02.stderr', 'logs/n02.trace', 'logs/observer.stdout', 'logs/observer.stderr', 'logs/n01-observer-terminal.json', 'logs/kill.log', 'logs/stop.log',    'logs/n02.file-limit',
     'logs/n02.limits',
     'logs/n02.facts.json',
     'logs/n02.io.trace',
@@ -671,6 +671,8 @@ def inspect_archive(data):
             with stream:
                 content = stream.read(member.size + 1)
             require(len(content) == member.size, 'archive-short-read')
+            if member.name == 'logs/n01-observer-terminal.json':
+                require(len(content) <= 4096, 'observer-terminal-bound')
             if member.name == 'logs/n01.stderr':
                 require(0 < len(content) <= 4097 and content.endswith(b'\n'), 'n12-record-bound')
                 values['n12-record-sha256'] = sha(content)

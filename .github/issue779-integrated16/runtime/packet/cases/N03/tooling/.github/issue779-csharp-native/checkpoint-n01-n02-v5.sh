@@ -989,7 +989,7 @@ pin_owned_pg "$launch_pid"
  observer_terminal() {
   observer_exit_status=$?
   trap - EXIT
-  local sink=${sample%/*}/n01-observer-terminal.json stage_json result_json load_json pid_json sample_json
+  local sink=${sample%/*}/logs/n01-observer-terminal.json stage_json result_json load_json pid_json sample_json
   case $observer_stage in not-started|host-pinned|systemctl-result-closed|unit-absent|unit-loaded|worker-identity-closed|sample-written|observation-window-ended) stage_json=$observer_stage ;; *) stage_json=unknown ;; esac
   if [[ $last_systemctl_result =~ ^[0-9]{1,3}$ ]] && ((10#$last_systemctl_result<=255)); then result_json=$((10#$last_systemctl_result)); else result_json=null; fi
   case $last_load_state in loaded|not-found|bad-setting|error|merged|masked|stub) load_json="\"$last_load_state\"" ;; *) load_json='\''"other"'\'' ;; esac
