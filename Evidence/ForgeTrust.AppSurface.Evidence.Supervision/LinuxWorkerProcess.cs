@@ -123,11 +123,12 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         token.ThrowIfCancellationRequested();
         if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
             || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
-            || !_lifetime.StopJoined || Volatile.Read(ref _failed) == 0 || _pipes?.N07ObservationFailed != false)
+            || !_lifetime.StopJoined || _pipes?.N07ObservationFailed != false)
             throw LinuxSystemdBackend.InvalidControl();
         owner.RequireCleanupLaunchInput(input, token);
         var ready = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
-        var data = Volatile.Read(ref _failureSettlement) ?? throw LinuxSystemdBackend.InvalidControl();
+        var data = LinuxN07FailureSettlement.RequireFailedServerCapture(server.N07ExecutionStatus,
+            Volatile.Read(ref _failureSettlement));
         owner.RequireCleanupLaunchInput(input, token);
         return (data, ready);
     }
@@ -763,11 +764,13 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         try
         {
             if (EvidenceNativeQualification.ParentReplacementEnabled
-                && (failed || Volatile.Read(ref _failed) != 0) && monitorJoined && _exit is { IsCompleted: true }
+                && monitorJoined && _exit is { IsCompleted: true }
                 && _worker is not null && _failedSettlementUnit is not null && _failedSettlementGroup is not null
                 && _output is not null)
             {
                 var pending = _pending.Snapshot;
+                // A correctly contained negative worker can settle without a holder failure.
+                // Retain its joined facts here; the failed original server is required on capture.
                 var data = LinuxN07FailureSettlement.CreateDetached(_owner.RunId, _worker.SampledFacts,
                     _failedSettlementUnit, _failedSettlementGroup, _output, _exit.Status,
                     _lifetime.StartJoined, pending.StopJoined, unitJoined, groupJoined, pipesClosed);
