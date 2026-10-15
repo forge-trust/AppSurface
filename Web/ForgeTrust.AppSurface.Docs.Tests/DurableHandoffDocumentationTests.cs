@@ -27,9 +27,8 @@ public sealed class DurableHandoffDocumentationTests
             var document = new HtmlParser().ParseDocument(Assert.Single(docs).Content);
             var anchors = document.QuerySelectorAll("a[href]");
             Assert.NotEmpty(anchors);
-            foreach (var anchor in anchors)
+            foreach (var href in anchors.Select(anchor => anchor.GetAttribute("href")!))
             {
-                var href = anchor.GetAttribute("href")!;
                 if (href.StartsWith('#') || Uri.TryCreate(href, UriKind.Absolute, out var external)
                     && external.Scheme is "https" or "http" or "mailto")
                 {
