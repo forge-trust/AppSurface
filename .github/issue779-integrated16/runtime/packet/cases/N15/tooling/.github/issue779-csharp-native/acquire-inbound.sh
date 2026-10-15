@@ -29,7 +29,7 @@ readonly N15_INDEPENDENT_REVIEW_CLEAR=1
 for k in reviewed-script-sha256 transport-sha256 fixture-sha256 audit-sha256 source-review-sha256 source-capture-sha256 n15-parser-sha256 n15-observer-sha256 n15-retry-sha256 n15-finalizer-sha256 case-workspace-sha256; do
  [[ ${v[$k]} =~ ^[0-9a-f]{64}$ ]] || fail digest-shape
 done
-[[ ${v[source-capture-sha256]} == 4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540 && ${v[n15-parser-sha256]} == fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877 && ${v[n15-finalizer-sha256]} == 086ec6d313ce7475724668045a81f0b0340866b27ddcfa84fd7438c1b3cd97cc ]] || fail n15-source-parser-pins
+[[ ${v[source-capture-sha256]} == 4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540 && ${v[n15-parser-sha256]} == fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877 && ${v[n15-finalizer-sha256]} == af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507 ]] || fail n15-source-parser-pins
 mono() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

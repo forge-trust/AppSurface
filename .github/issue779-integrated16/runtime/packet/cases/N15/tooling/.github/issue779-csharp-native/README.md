@@ -71,3 +71,9 @@ Run38810092731 failed in owner-terminal/proc-process-state after the pidfd signa
 Final success still needs systemd MainPID0 with the original ExecMainPID/code/status, exact generated groups empty, original deadlines, consumed activation guard, reactivation denial, joined original launcher/output, strict account cleanup and bound final records. No signal, product limit, restart or acceptance rule changes.
 
 Ten detached tests execute the actual identity and worker-terminal functions with fake proc/NSS/systemd data. They exercise Z/X and missing-name transitions, unchanged authentication rejection, original PID binding, wrong credentials/cgroup, nonempty groups and successful final terminal data. They grant no root/native/cleanup authority.
+
+# Empty replay stdout retention
+
+Static review found a deterministic contradictory prerequisite in the N15 finalizer: validate_replay_observation requires retry.stdout == empty, but read_fixed rejected st_size0 before reaching that check. This is a source-proven next-stage blocker, not a measured native finalizer failure.
+
+The reader now has keyword-only allow_empty=False. Exactly the fixed retry.stdout binding opts in. All other reads stay nonempty. File type, root uid/gid, mode, single link, no-follow open, FD identity, actual EOF, length, hashes, original deadline and final replay rejection remain mandatory. An empty stream cannot supply an exit or guard fact.

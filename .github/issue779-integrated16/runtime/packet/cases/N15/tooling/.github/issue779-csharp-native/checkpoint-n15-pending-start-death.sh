@@ -6,7 +6,7 @@ readonly HERE=${BASH_SOURCE[0]%/*}
 readonly OBSERVER_SHA256=0cb173f7bed9bcfc59410aa57cfa995d2ae308183dcc6d14494ec06f738c8922
 readonly PARSER_SHA256=fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877
 readonly RETRY_SHA256=9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6
-readonly FINALIZER_SHA256=086ec6d313ce7475724668045a81f0b0340866b27ddcfa84fd7438c1b3cd97cc
+readonly FINALIZER_SHA256=af1122a3d37dba09e2045f2bf21a242422399ebd814643ca840a7d61fe71a507
 fail(){ printf 'N15_OWNER_LAUNCH_JOIN_REJECTED:%s\n' "$1" >&2; exit 1; }
 [[ ${1-} == --execute ]] || fail execute-required
 shift

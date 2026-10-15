@@ -14,10 +14,16 @@ def now_ms():
     return int(time.clock_gettime(time.CLOCK_BOOTTIME)*1000)
 def canonical(v):
     return (json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=True,allow_nan=False)+"\n").encode("ascii")
-def read_fixed(path, cap, deadline, expected_mode=0o600):
-    need(now_ms()<deadline,"deadline")
+def read_fixed(path, cap, deadline, expected_mode=0o600, *, allow_empty=False):
+    """Read one bounded root-owned regular file, rejecting empty by default.
+
+    Only the fixed retry.stdout binding passes allow_empty=True: its successful
+    denial contract requires zero bytes. Ownership/mode/link/deadline/hash checks
+    are unchanged and remain independent prerequisites.
+    """
+    need(type(allow_empty) is bool and now_ms()<deadline,"deadline")
     st=path.lstat()
-    need(stat.S_ISREG(st.st_mode) and st.st_uid==st.st_gid==0 and stat.S_IMODE(st.st_mode)==expected_mode and st.st_nlink==1 and 0<st.st_size<=cap,"record-shape")
+    need(stat.S_ISREG(st.st_mode) and st.st_uid==st.st_gid==0 and stat.S_IMODE(st.st_mode)==expected_mode and st.st_nlink==1 and (0 if allow_empty else 1)<=st.st_size<=cap,"record-shape")
     fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
     try:
         opened=os.fstat(fd); ident=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mode,x.st_uid,x.st_gid,x.st_nlink)
@@ -136,7 +142,7 @@ def main():
     raws={}
     for name,digest in bindings.items():
         need(type(digest) is str and re.fullmatch(r"[0-9a-f]{64}",digest),"measurement-digest")
-        raws[name]=read_fixed(root/name,65536,deadline)
+        raws[name]=read_fixed(root/name,65536,deadline,allow_empty=(name=="retry.stdout"))
         need(hashlib.sha256(raws[name]).hexdigest()==digest,"measurement-raw-digest")
     need(all(digest_matches(raws[name],bindings[name]) for name in bindings),"measurement-raw-digest")
     owner_lines=raws["retry-owner.txt"].decode("ascii","strict").splitlines(); owner={}
