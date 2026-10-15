@@ -360,39 +360,78 @@ def cgroup_members(root, group, deadline):
     return sorted(set(members))
 
 
+def terminal_failure_diagnostic(values, original_pid, sample_count, proc_observed):
+    """Project only the last already-read terminal poll; never queries or establishes exit."""
+    def number(key, maximum):
+        value = values.get(key)
+        if type(value) is str and re.fullmatch(r"[0-9]{1,10}", value):
+            parsed = int(value)
+            if parsed <= maximum:
+                return parsed
+        return None
+    active = values.get("ActiveState")
+    sub = values.get("SubState")
+    data = {"schema":"issue779-n15-terminal-poll-diagnostic-v1",
+        "original_pid":original_pid if type(original_pid) is int and 0<original_pid<=2147483647 else None,
+        "main_pid":number("MainPID",2147483647),"exec_main_pid":number("ExecMainPID",2147483647),
+        "exec_main_code":number("ExecMainCode",255),"exec_main_status":number("ExecMainStatus",255),
+        "active_state":active if active in ("active","inactive","activating","deactivating","failed","reloading","maintenance") else "other",
+        "sub_state":sub if sub in ("running","exited","dead","failed","start","start-pre","start-post","stop","stop-sigterm","stop-sigkill","final-sigterm","final-sigkill") else "other",
+        "restart_policy":"no" if values.get("Restart")=="no" else "other",
+        "sample_count":sample_count if type(sample_count) is int and 0<=sample_count<=10000 else None,
+        "main_proc_observed":proc_observed if type(proc_observed) is bool else None}
+    encoded = json.dumps(data,sort_keys=True,separators=(",",":"))
+    require(len(encoded)<=1024,"proc-process-state")
+    return encoded
+
+
 def wait_worker_terminal(unit, original_pid, group, deadline):
     last = None
-    while boot_ms() < deadline:
-        remaining(deadline)
-        try:
-            values, proc = unit_identity(unit, "worker", deadline, include_terminal=True, terminal_pid=original_pid)
-        except TerminalIdentityPending:
-            time.sleep(min(0.025, remaining(deadline) / 1000))
-            continue
-        if proc is not None:
-            require(proc["pid"] == original_pid, "worker-replacement")
-        else:
+    diagnostic_values = {}
+    diagnostic_samples = 0
+    diagnostic_proc = False
+    try:
+        while boot_ms() < deadline:
+            remaining(deadline)
             try:
-                exec_pid = int(values["ExecMainPID"])
-                exec_code = int(values["ExecMainCode"])
-                exec_status = int(values["ExecMainStatus"])
-            except ValueError:
-                raise Reject("worker-terminal-fields") from None
-            if (values["ActiveState"] in ("inactive", "failed")
-                    and values["SubState"] in ("dead", "failed") and exec_pid == original_pid
-                    and exec_code in (1, 2) and exec_status > 0):
-                first = cgroup_members("/sys/fs/cgroup", group, deadline)
-                time.sleep(min(0.05, remaining(deadline) / 1000))
-                second = cgroup_members("/sys/fs/cgroup", group, deadline)
-                require(not first and not second, "worker-cgroup-not-empty")
-                last = {"main_pid": 0, "active_state": values["ActiveState"],
-                    "sub_state": values["SubState"], "exec_main_pid": exec_pid,
-                    "exec_main_code": exec_code, "exec_main_status": exec_status,
-                    "restart_policy": values["Restart"], "cgroup_populated": False,
-                    "cgroup_tree_empty_twice": True, "no_successful_completion": True,
-                    "same_unit_no_replacement": True}
-                break
-        time.sleep(min(0.025, remaining(deadline) / 1000))
+                values, proc = unit_identity(unit, "worker", deadline, include_terminal=True, terminal_pid=original_pid)
+            except TerminalIdentityPending:
+                time.sleep(min(0.025, remaining(deadline) / 1000))
+                continue
+            diagnostic_values = dict(values)
+            diagnostic_samples += 1
+            diagnostic_proc = proc is not None
+            if proc is not None:
+                require(proc["pid"] == original_pid, "worker-replacement")
+            else:
+                try:
+                    exec_pid = int(values["ExecMainPID"])
+                    exec_code = int(values["ExecMainCode"])
+                    exec_status = int(values["ExecMainStatus"])
+                except ValueError:
+                    raise Reject("worker-terminal-fields") from None
+                if (values["ActiveState"] in ("inactive", "failed")
+                        and values["SubState"] in ("dead", "failed") and exec_pid == original_pid
+                        and exec_code in (1, 2) and exec_status > 0):
+                    first = cgroup_members("/sys/fs/cgroup", group, deadline)
+                    time.sleep(min(0.05, remaining(deadline) / 1000))
+                    second = cgroup_members("/sys/fs/cgroup", group, deadline)
+                    require(not first and not second, "worker-cgroup-not-empty")
+                    last = {"main_pid": 0, "active_state": values["ActiveState"],
+                        "sub_state": values["SubState"], "exec_main_pid": exec_pid,
+                        "exec_main_code": exec_code, "exec_main_status": exec_status,
+                        "restart_policy": values["Restart"], "cgroup_populated": False,
+                        "cgroup_tree_empty_twice": True, "no_successful_completion": True,
+                        "same_unit_no_replacement": True}
+                    break
+            time.sleep(min(0.025, remaining(deadline) / 1000))
+    finally:
+        if last is None:
+            try:
+                print(terminal_failure_diagnostic(diagnostic_values, original_pid,
+                    diagnostic_samples, diagnostic_proc),file=sys.stderr,flush=True)
+            except Exception:
+                pass  # Diagnostic failure never replaces the original polling failure.
     require(last is not None, "worker-terminal-not-observed")
     return last
 

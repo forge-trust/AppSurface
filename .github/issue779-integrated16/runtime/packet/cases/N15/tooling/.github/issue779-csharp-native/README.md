@@ -87,3 +87,9 @@ Only initial worker sampling opts into pending_start. A mismatch is pending only
 # Exact N15 successful wrapper output order
 
 Static source inspection found the runner expected two stdout lines in the opposite order from its actual shell+finalizer. The actual fixed path emits dispatch, successful final-record marker, then the measured original-launch join line. All three lines are now mandatory in that exact order, with the same numeric fields and byte-count checks. Extra bytes, reordered/duplicated/missing lines, failed observer status and unknown content reject. This is canonical data validation only; source analysis is not a measured native finalizer/validator success.
+
+# N15 final worker poll diagnostic
+
+Run38816938950 passed initial kernel identity, account checks and the original pidfd signal, then exhausted the original worker-terminal wait. Its final systemd values were not retained, so no exit-code, unit-state or underlying-stop cause is claimed.
+
+Only on that existing failed-wait path, the observer now emits at most1KiB closed JSON from the last values already read: original/Main/ExecMain PIDs, ExecMainCode/Status, closed active/substate/restart, sample count and whether a live main sample was returned. Unknown/malformed numbers become null and unknown states become other; no raw path, error or property text is retained. There is no extra query, reopened deadline, new state acceptance, fallback signal, group relaxation or exit claim.
