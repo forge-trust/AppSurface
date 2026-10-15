@@ -22,8 +22,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-METADATA_SHA = '3ed7dd419fb7aaf0cb12e8e0f8c7bd5bc6b813751a03a63bad91255880ecedee'
-BUILD_RUN = 38674486099
+METADATA_SHA = '269f0ae8acd2f97921c1c797a3a8cac456f29bbbe09679a637fb01f3f46809c8'
+BUILD_RUN = 38688502978
 SELECTORS = ('None', *(f'N{i:02d}' for i in range(4, 17)))
 ZIP_LIMIT = 256 * 1024 * 1024
 CONTROL_LIMIT = 16 * 1024

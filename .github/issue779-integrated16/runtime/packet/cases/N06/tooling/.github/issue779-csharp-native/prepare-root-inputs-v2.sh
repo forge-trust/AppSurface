@@ -32,8 +32,8 @@ for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 914046e1e998ca89a5f0f5be39a90bbfb88a431d ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == 2710cc51fbea72fb131f6b524446466c2e3776dc10a74fc17d9e4d233ac76f9d && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 5b4ed381badb91de47d793715d05b6ae7737e39e ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == 377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761 && ${values[os-audit-script-sha256]} == b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0 ]] || fail reviewed-source-pin
 mono_ms() {
  local stamp rest whole fraction
  IFS=' ' read -r stamp rest </proc/uptime || return 1

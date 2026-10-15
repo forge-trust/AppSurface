@@ -1,5 +1,5 @@
 {
-  "installed_fixture_sha256": "633f150f60fcfec584e75c6cb96e588b9bd2202791f0409aa813c8125b318136",
+  "installed_fixture_sha256": "0e7fd384a59c25b2b0d408291aa983a2d206acb0e57c23fd1138629d97064c1f",
   "integrated_current_review_basis": [
     {
       "path": "/private/tmp/issue779-integrated16-final-runtime-review-20261013/n01-n02-n03-current-source-review-followup.json",
@@ -94,8 +94,8 @@
   ],
   "schema": "issue779-n12-scoped-source-review-binding-v1",
   "scope_limit": "Scoped source/data evidence only. The data peer receipt binds the pinned base fixture; the installed fixture adds the bounded result digest and requires independent composition review. No build or native acceptance.",
-  "source_commit": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
+  "source_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e",
   "source_count": 2872,
-  "source_parent": "71d004d6cf5a791ddbb8e73e3c538248985a8505",
-  "source_tree": "c5dd0770c00b14b61f32851adeaad1cce4f2d7a8"
+  "source_parent": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
+  "source_tree": "3bafd0fcd5321f1b29323f46df94b77eb48fa859"
 }

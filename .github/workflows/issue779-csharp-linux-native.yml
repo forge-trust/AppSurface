@@ -46,11 +46,11 @@ jobs:
           chmod 0700 "$root"
           python3 -B "$root/verify_installation.py" \
             --root "$root" --review "$root/execution-review.json" \
-            --review-sha256 2c584014a8b9a9510f9d597001fe90b96231300b3ce83dceec7a5c172bf0c74a
+            --review-sha256 e9c6b5130c6f8a2cbc6317276fecee267eb103a7235a327cb1bf97440f8c4ac5
           python3 -B "$root/packet_execution.py" \
             --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
             --job-root "$CHECKPOINT_ROOT" \
-            --review "$root/execution-review.json" --review-sha256 2c584014a8b9a9510f9d597001fe90b96231300b3ce83dceec7a5c172bf0c74a \
+            --review "$root/execution-review.json" --review-sha256 e9c6b5130c6f8a2cbc6317276fecee267eb103a7235a327cb1bf97440f8c4ac5 \
             --plan --plan-file "$CHECKPOINT_ROOT/case-plan.json"
       - name: Download and verify the exact already-built selected image
         shell: bash
@@ -88,7 +88,7 @@ jobs:
           python3 -B "$root/packet_execution.py" \
             --selector "$IMAGE_SELECTOR" --packet-root "$root/packet" \
             --job-root "$CHECKPOINT_ROOT" \
-            --review "$root/execution-review.json" --review-sha256 2c584014a8b9a9510f9d597001fe90b96231300b3ce83dceec7a5c172bf0c74a \
+            --review "$root/execution-review.json" --review-sha256 e9c6b5130c6f8a2cbc6317276fecee267eb103a7235a327cb1bf97440f8c4ac5 \
             --execute --plan-file "$CHECKPOINT_ROOT/case-plan.json"
       - name: Check bounded private retention
         id: retention

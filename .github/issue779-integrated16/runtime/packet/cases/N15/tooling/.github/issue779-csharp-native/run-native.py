@@ -21,17 +21,17 @@ NEGATIVE_CASE = 'N15'
 N15_SOURCE_REVIEW_CLEAR = True
 N15_FIXTURE_REVIEW_CLEAR = True
 N15_ROOT_CLEANUP_REVIEW_CLEAR = True
-SOURCE = '914046e1e998ca89a5f0f5be39a90bbfb88a431d'
+SOURCE = '5b4ed381badb91de47d793715d05b6ae7737e39e'
 PARENT = '0adef6032217b4181898a4d6d129e1248cb0eda3'
-SOURCE_PARENT = '71d004d6cf5a791ddbb8e73e3c538248985a8505'
-SOURCE_MAP = '85d264688e73c14ea5e4552a4e7aed1f8b1c3311a3f358dc89818bef0ed87099'
-CAPTURE_SHA = 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953'
+SOURCE_PARENT = '914046e1e998ca89a5f0f5be39a90bbfb88a431d'
+SOURCE_MAP = '2c27553e3441cfc7e1c8b53cac0da15b6cff4a6c8c5c8d6dae01e0ba116351ea'
+CAPTURE_SHA = '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540'
 SOURCE_COUNT = 2872
-SOURCE_TREE = 'c5dd0770c00b14b61f32851adeaad1cce4f2d7a8'
-PARSER_SHA = '4d1766fbb558192a2e30397b025c913bc826d42a3bbf123188bffdbb505fcbcc'
-REVIEWED_FILES = {'acquire-inbound.sh': '4790e61b4ce012b9d007b3184c2cf74d44e1985c12ac7ea6cfd93a6bd0d60b98', 'prepare-root-inputs-v2.sh': 'bd0e68a8e717033cae6210b06b5dc86ac7bb56190f73a28e947977f6bf57c29e', 'checkpoint-n15-pending-start-death.sh': '7462673ce7a7bf14e2f859e3bf37583cc8165c201efdf89cb630dad1337122de', 'check_n15_records.py': '4d1766fbb558192a2e30397b025c913bc826d42a3bbf123188bffdbb505fcbcc', 'observe_n15_pending_start.py': 'd6cc63e4ecf4ec4d085a74cef02114b6cd24a182d8d3232d0afcf8d7485612c8', 'n15-guard-reactivation-retry.sh': '9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'retain-native.sh': '6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c', 'source-review.json': '3851fed9f50248dda43a05201d70db459a88cc978116c8fb5e1294d16388cb98', 'prepare-case-workspace.py': '54e26b7ffab3e2ee1c713e356f0078909a9f930e21f22e8332bd39d4ba10da87', 'finalize_n15_observation.py': '4d45262afe9a768731b09878fdd6c128fa09006b81c66cdd0094e042fd337588'}
-REVIEWED_FILES['finalize_n15_observation.py'] = '4d45262afe9a768731b09878fdd6c128fa09006b81c66cdd0094e042fd337588'
-SOURCE_REVIEW_SHA = '3851fed9f50248dda43a05201d70db459a88cc978116c8fb5e1294d16388cb98'
+SOURCE_TREE = '3bafd0fcd5321f1b29323f46df94b77eb48fa859'
+PARSER_SHA = 'fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877'
+REVIEWED_FILES = {'acquire-inbound.sh': 'f33509ecffde6981a8cbe545cead1028753542a22405b86ce8d5752ef899c7ba', 'prepare-root-inputs-v2.sh': 'c623ba2ed0249fcbc5d647d802a68844b97ecb5edd0030829bbbef32a125f6b8', 'checkpoint-n15-pending-start-death.sh': 'acf870d2cf97a94fd9d3d399b95083bf39b5f6e6ce25d5f1243f7ab11eed8ff4', 'check_n15_records.py': 'fa1fc74882dd5018d5e04128adf3ef30ae19570f4e1eee075eca2c9b57cfa877', 'observe_n15_pending_start.py': '842d7c525754e8b62ce1db51da98d0378074b86abed76eada81fc7240ed4b4a5', 'n15-guard-reactivation-retry.sh': '9ab6bb3f3b96a284485ba7fb8eac9aa49a2b4e0f0bed4756ec9a17d166cad3c6', 'prepare-os-audit-v2.py': 'b345b2be77b359af23ade0b334caf76d7fdeb14bd2d4a3f0837beb21232df5e0', 'retain-native.sh': '6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c', 'source-review.json': '446a5c08e2158a2ae17363925a96d1eecb86d518719746e0927626ee6b69dbf5', 'prepare-case-workspace.py': 'd970e2ab458a1cf6f8f3f5559ebaa15c81896aa513ce90975fb4b0d97dd99293', 'finalize_n15_observation.py': '086ec6d313ce7475724668045a81f0b0340866b27ddcfa84fd7438c1b3cd97cc'}
+REVIEWED_FILES['finalize_n15_observation.py'] = '086ec6d313ce7475724668045a81f0b0340866b27ddcfa84fd7438c1b3cd97cc'
+SOURCE_REVIEW_SHA = '446a5c08e2158a2ae17363925a96d1eecb86d518719746e0927626ee6b69dbf5'
 ROOT_PREFIX = ['/usr/bin/sudo', '-n', '/usr/bin/env', '-i', 'PATH=/usr/bin:/usr/sbin',
                'LANG=C', 'LC_ALL=C', '/usr/bin/bash', '--noprofile', '--norc']
 LOG_CAP = 40 * 1024 * 1024
@@ -188,7 +188,7 @@ def root_deadline(end):
 # Byte-identical common prerequisite contract; no native acceptance authority.
 INTEGRATED_BUILD_SOURCE = '"""Pure build prerequisites shared by the image builder and native case readers.\n\nThis module performs no I/O and issues no native credit. All fourteen images\nmust carry actual passing source-selected core and CLI test results. Commands\nare checked by their operation, project and selector, not an incidental count\nof unrelated Git/package queries. Runtime case acceptance remains separate.\n"""\n\nimport pathlib\nimport re\n\nSCHEMA = "issue779-integrated16-build-v1"\nSELECTORS = ("None", *(f"N{i:02d}" for i in range(4, 17)))\nPIPE_METHOD = "OwnedRawPipeReadWrappingUsesHandleModeAndJoinsBothEofs"\nFRAME_METHOD = "OwnerDeathVariantIsExclusiveAndFrameIsExactBoundedData"\nCLI_METHOD = "CompiledImageOwnsOnlyItsSelectedCheckpoint"\nCORE_PROJECT = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj"\nCLI_PROJECT = "Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"\nCLI_TEST_PROJECT = "Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj"\nCORE_CLASS = "ForgeTrust.AppSurface.Evidence.Supervision.Tests."\nCLI_CLASS = "ForgeTrust.AppSurface.Cli.Tests.EvidenceNativeQualificationTests"\nSOURCE_PHASES = ("source_before", "source_after_assets", "source_after_build", "source_final")\n\n\nclass BuildContractError(ValueError):\n    """Closed metadata rejection; never include caller values in its message."""\n\n\ndef require(ok, category):\n    if not ok:\n        raise BuildContractError(category)\n\n\ndef is_sha(value):\n    return type(value) is str and re.fullmatch("[0-9a-f]{64}", value) is not None\n\n\ndef expected_regressions(selector):\n    require(selector in SELECTORS, "build-selector")\n    if selector in ("N13", "N14"):\n        return (("owner_death_phase_frame_regression", CORE_CLASS + "LinuxOwnerDeathPhaseFrameTests", FRAME_METHOD),\n                ("owner_death_cli_qualification", CLI_CLASS, CLI_METHOD))\n    return (("linux_pipe_regression", CORE_CLASS + "LinuxOutputPipesTests", PIPE_METHOD),\n            ("compiled_cli_qualification", CLI_CLASS, CLI_METHOD))\n\n\ndef validate_command_records(commands, selector):\n    require(selector in SELECTORS, "build-selector")\n    require(type(commands) is list and 0 < len(commands) <= 128, "build-command-bound")\n    for ordinal, row in enumerate(commands):\n        require(type(row) is dict and type(row.get("ordinal")) is int and row["ordinal"] == ordinal,\n                "build-command-ordinal")\n        args = row.get("argv")\n        require(type(args) is list and args and all(type(arg) is str and arg for arg in args),\n                "build-command-arguments")\n        # MSBuild accepts /p:, -property:, case aliases and multi-property\n        # arguments. A second selector in any such form cannot be ignored.\n        # Response files are also forbidden: they can supply unseen properties.\n        canonical = "-p:EvidencePrivateQualification=" + selector\n        require(not any(arg.startswith("@") for arg in args)\n                and all("evidenceprivatequalification" not in arg.lower()\n                        or (selector != "None" and arg == canonical) for arg in args),\n                "build-selector-alias-or-response-file")\n        require(type(row.get("exit")) is int and row["exit"] == 0 and row.get("failure") is None\n                and row.get("waited") is True and row.get("group_absent") is True\n                and row.get("forced_cleanup") is False and row.get("timed_out") is False\n                and row.get("late_completion") is not True, "build-command-terminal")\n        for name, expected in (("pipe_eofs", [True, True]), ("read_errors", [False, False]),\n                               ("write_errors", [False, False]), ("discarded_bytes", [0, 0])):\n            values = row.get(name)\n            require(type(values) is list and len(values) == 2\n                    and all(type(actual) is type(wanted) and actual == wanted\n                            for actual, wanted in zip(values, expected)), "build-command-output")\n        logs = row.get("logs")\n        require(type(logs) is list and len(logs) == 2\n                and all(type(log) is dict and is_sha(log.get("sha256"))\n                        and type(log.get("bytes")) is int and 0 <= log["bytes"] <= 8 * 1024 * 1024\n                        for log in logs), "build-command-logs")\n    selected = [row for row in commands if pathlib.PurePosixPath(row["argv"][0]).name == "dotnet"\n                and len(row["argv"]) > 1 and row["argv"][1] in ("restore", "publish", "test", "build")]\n    require([row["argv"][1] for row in selected] == ["restore", "publish", "restore", "test", "restore", "test"],\n            "build-operation-sequence")\n    projects = (CLI_PROJECT, CLI_PROJECT, CORE_PROJECT, CORE_PROJECT, CLI_TEST_PROJECT, CLI_TEST_PROJECT)\n    for row, project in zip(selected, projects):\n        args = row["argv"]\n        require(len(args) > 2 and args[2].endswith("/" + project), "build-project")\n        flags = [arg for arg in args if arg.startswith("-p:EvidencePrivateQualification=")]\n        require(flags == ([] if selector == "None" else ["-p:EvidencePrivateQualification=" + selector]),\n                "build-command-selector")\n        require(("--locked-mode" in args) if args[1] == "restore" else ("--no-restore" in args),\n                "build-restore-mode")\n        if args[1] in ("test", "publish"):\n            require("-p:UseSharedCompilation=false" in args, "build-compiler-mode")\n    for row, (_, class_name, method) in zip((selected[3], selected[5]), expected_regressions(selector)):\n        args = row["argv"]\n        require(args.count("--filter") == 1 and args[args.index("--filter") + 1]\n                == "FullyQualifiedName=" + class_name + "." + method, "build-test-filter")\n    require(sum(arg.startswith("-p:EvidencePrivateQualification=") for row in commands for arg in row["argv"])\n            == (0 if selector == "None" else 6), "build-selector-cardinality")\n    return True\n\n\ndef validate_build_receipt(receipt, selector, source):\n    """Validate a measured receipt against the independently pinned source tuple.\n\n    ``source`` has commit, parent, tree, count, capture, projection, map and\n    raw_map fields. It comes from the immutable common capture, never from the\n    receipt being validated. File/archive checks remain with the I/O caller.\n    """\n    require(selector in SELECTORS and type(receipt) is dict and type(source) is dict, "build-receipt-shape")\n    require(set(source) == {"commit", "parent", "tree", "count", "capture", "projection", "map", "raw_map"},\n            "build-source-binding-shape")\n    require(receipt.get("schema") == SCHEMA and type(receipt.get("exit")) is int and receipt["exit"] == 0\n            and receipt.get("failure") is None and receipt.get("diagnostics") == [], "build-receipt-terminal")\n    require(receipt.get("private_qualification") == selector and receipt.get("selected_variant") == selector,\n            "build-receipt-selector")\n    for field, binding in (("source_commit", "commit"), ("source_revision", "commit"), ("source_parent", "parent"),\n                           ("source_count", "count"), ("capture_sha256", "capture"),\n                           ("source_capture_sha256", "capture"), ("capture_input_sha256", "capture"),\n                           ("capture_projection_sha256", "projection"), ("source_map_sha256", "map"),\n                           ("source_capture_map_sha256", "raw_map"), ("harness_parent", "commit"),\n                           ("harness_retry_parent", "commit"), ("harness_retry_parent_parent", "parent")):\n        require(type(receipt.get(field)) is type(source[binding]) and receipt[field] == source[binding],\n                "build-receipt-source")\n    require(receipt.get("build_prerequisite_only") is True and receipt.get("test_execution") is True\n            and all(receipt.get(field) is False for field in ("native_execution", "native_acceptance", "checkpoint_pass",\n                                                            "review_clear", "source_review_clear", "fixture_review_clear",\n                                                            "root_transport_review_clear"))\n            and receipt.get("os_audit") is None, "build-receipt-scope")\n    validate_command_records(receipt.get("commands"), selector)\n    for phase in SOURCE_PHASES:\n        fact = receipt.get(phase)\n        require(type(fact) is dict and fact.get("head") == source["commit"] and fact.get("tree") == source["tree"]\n                and type(fact.get("count")) is int and fact["count"] == source["count"]\n                and fact.get("source_map_sha256") == source["map"]\n                and all(fact.get(key) is True for key in ("index_tree_matches", "physical_git_sha1", "physical_sha256_modes")),\n                "build-source-recheck")\n    for key, class_name, method in expected_regressions(selector):\n        fact = receipt.get(key)\n        require(type(fact) is dict and fact.get("class_name") == class_name and fact.get("method") == method\n                and fact.get("native_acceptance") is False and fact.get("root_factory_exercised") is False\n                and fact.get("unprivileged_library_behavior_only") is True\n                and is_sha(fact.get("trx_sha256")), "build-regression-binding")\n        counters = fact.get("counters")\n        require(type(counters) is dict and all(counters.get(key) == value for key, value in\n                {"total": "1", "executed": "1", "passed": "1", "failed": "0", "error": "0",\n                 "notExecuted": "0", "timeout": "0", "aborted": "0"}.items()), "build-regression-outcome")\n    known = {"owner_death_phase_frame_regression", "owner_death_cli_qualification", "linux_pipe_regression",\n             "compiled_cli_qualification"}\n    expected = {row[0] for row in expected_regressions(selector)}\n    require(not (known - expected) & set(receipt), "build-regression-foreign-selection")\n    return True\n'
 INTEGRATED_BUILD_SOURCE_SHA = '4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8'
-INTEGRATED_SOURCE_BINDING = {'commit': '914046e1e998ca89a5f0f5be39a90bbfb88a431d', 'parent': '71d004d6cf5a791ddbb8e73e3c538248985a8505', 'tree': 'c5dd0770c00b14b61f32851adeaad1cce4f2d7a8', 'count': 2872, 'capture': 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953', 'projection': '57f62b362fd89e1935dabd7bf1cd11f62647855c303d4f98ca26dcebfd5e2dc5', 'map': 'a61f03468ca7fff6ef363a510c7945f3927c966fa3b62291e4c34c3c50a23c98', 'raw_map': '85d264688e73c14ea5e4552a4e7aed1f8b1c3311a3f358dc89818bef0ed87099'}
+INTEGRATED_SOURCE_BINDING = {'commit': '5b4ed381badb91de47d793715d05b6ae7737e39e', 'parent': '914046e1e998ca89a5f0f5be39a90bbfb88a431d', 'tree': '3bafd0fcd5321f1b29323f46df94b77eb48fa859', 'count': 2872, 'capture': '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540', 'projection': '488b59a9bd50ef1f05f8eb4291ed3eee164b6d1536cdeec73fe9f6847194100c', 'map': '758a0f769ca67ce6f1fda2eea3569a373efafb192e2d2c2cce2224809b352a7d', 'raw_map': '2c27553e3441cfc7e1c8b53cac0da15b6cff4a6c8c5c8d6dae01e0ba116351ea'}
 _integrated_build_scope = {}
 if hashlib.sha256(INTEGRATED_BUILD_SOURCE.encode()).hexdigest() != INTEGRATED_BUILD_SOURCE_SHA:
     raise ValueError('integrated-build-contract-pin')
@@ -919,7 +919,7 @@ def fixture_dispatched(dispatch_row, fixture_stdout):
 
 
 def retain_failed_command_logs(runner, deadline):
-    """Retain the first settled failed command's private logs without changing its failure.
+    """Retain original failure logs and a failed retention command's private stderr.
 
     Only fixed recorder filenames and their recorded byte/digest identities are accepted.
     This diagnostic archive is separate from fixture evidence and confers no native credit.
@@ -943,10 +943,32 @@ def retain_failed_command_logs(runner, deadline):
     require(stat.S_ISDIR(directory.st_mode) and not stat.S_ISLNK(directory.st_mode)
             and directory.st_uid == os.geteuid() and stat.S_IMODE(directory.st_mode) == 0o700,
             'failure-log-output-private')
+    # A retention failure can explain why the original fixture logs are absent.
+    # Keep its stderr separately, after the original command's two fixed logs.
+    # 4 KiB fits beside their existing 64 KiB prefixes in the same archive cap.
+    selected = [(row, member, 65536) for row, member in zip(rows, ('stdout.log', 'stderr.log'))]
+    retention = next((row for row in runner.records
+                      if row.get('phase') == 'bounded-private-retention'
+                      and type(row.get('ordinal')) is int and row['ordinal'] > ordinal
+                      and (row.get('failure') is not None or row.get('exit') not in (None, 0))), None)
+    retention_ordinal = None
+    if retention is not None:
+        require(retention.get('waited') is True and retention.get('group_absent') is True
+                and (retention.get('root_utility_unit') is None
+                     or retention.get('root_utility_cgroup_empty') is True),
+                'failure-log-retention-command-unjoined')
+        retention_ordinal = retention['ordinal']
+        require(0 <= retention_ordinal <= 99, 'failure-log-retention-command-ordinal')
+        retention_rows = retention.get('logs')
+        require(type(retention_rows) is list and len(retention_rows) == 2
+                and [row.get('name') for row in retention_rows]
+                == [f'{retention_ordinal:02d}-stdout.log', f'{retention_ordinal:02d}-stderr.log'],
+                'failure-log-retention-recorder-shape')
+        selected.append((retention_rows[1], 'retention.stderr.log', 4096))
     retained_logs = []
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode='w', format=tarfile.USTAR_FORMAT) as archive:
-        for row, member in zip(rows, ('stdout.log', 'stderr.log')):
+        for row, member, cap in selected:
             path = runner.output / row['name']
             fact = path.lstat()
             require(stat.S_ISREG(fact.st_mode) and fact.st_nlink == 1
@@ -956,7 +978,7 @@ def retain_failed_command_logs(runner, deadline):
             require(ident(fact) == ident(path.lstat()) and type(row.get('bytes')) is int
                     and row['bytes'] == len(raw) and row.get('sha256') == sha(raw),
                     'failure-log-recorder-identity')
-            prefix = raw[:65536]
+            prefix = raw[:cap]
             retained_logs.append({'name': member, 'original_bytes': len(raw), 'original_sha256': sha(raw),
                                   'retained_bytes': len(prefix), 'truncated': len(prefix) < len(raw)})
             entry = tarfile.TarInfo(member)
@@ -967,7 +989,8 @@ def retain_failed_command_logs(runner, deadline):
     require(len(raw) <= 143360 and time.monotonic() < deadline,
             'failure-log-archive-bound')
     save(runner.output / 'native-command-failure.tar', raw, deadline)
-    return {'command_ordinal': ordinal, 'bytes': len(raw), 'sha256': sha(raw), 'logs': retained_logs, 'native_credit': False}
+    return {'command_ordinal': ordinal, 'retention_command_ordinal': retention_ordinal,
+            'bytes': len(raw), 'sha256': sha(raw), 'logs': retained_logs, 'native_credit': False}
 
 
 def record_failed_command_logs(runner, result, deadline):
@@ -1044,7 +1067,7 @@ def main():
             require(re.fullmatch('[0-9a-f]{64}',pin) is not None and sha(read(reviewed/name,131072,final))==pin,'reviewed-pin')
         sr_raw=read(reviewed/'source-review.json',65536,final); require(sha(sr_raw)==SOURCE_REVIEW_SHA,'source-review-pin'); sr=decode(sr_raw)
         expected_flags={'source_capture','fixture','root_cleanup','parser','root_transport','retention','native_handoff'}
-        require(sr.get('schema')=='issue779-n15-native-source-review-v1' and sr.get('case')=='N15' and sr.get('source_commit')==SOURCE and sr.get('source_parent')==SOURCE_PARENT and sr.get('source_count')==2872 and sr.get('source_tree')=='c5dd0770c00b14b61f32851adeaad1cce4f2d7a8' and sr.get('source_capture_sha256')==CAPTURE_SHA and type(sr.get('review_flags')) is dict and set(sr['review_flags'])==expected_flags and all(value is True for value in sr['review_flags'].values()), 'n15-source-review-gates')
+        require(sr.get('schema')=='issue779-n15-native-source-review-v1' and sr.get('case')=='N15' and sr.get('source_commit')==SOURCE and sr.get('source_parent')==SOURCE_PARENT and sr.get('source_count')==2872 and sr.get('source_tree')=='3bafd0fcd5321f1b29323f46df94b77eb48fa859' and sr.get('source_capture_sha256')==CAPTURE_SHA and type(sr.get('review_flags')) is dict and set(sr['review_flags'])==expected_flags and all(value is True for value in sr['review_flags'].values()), 'n15-source-review-gates')
         raw=read(build/'receipts/build-receipt.json',1048576,final); receipt=decode(raw)
         maps={name:(read(build/f'handoff/{name}.tsv',1048576,final),read(build/f'handoff/{name}-nodes.json',4194304,final)) for name in ('source','tool','runtime')}
         validate_build(receipt,maps); result['build_receipt_sha256']=sha(raw); result['build_artifacts']=receipt['artifacts']; result['source_capture_sha256']=CAPTURE_SHA

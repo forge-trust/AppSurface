@@ -269,7 +269,7 @@ class N03ArchiveValidationControls(unittest.TestCase):
                       '  /usr/bin/jq "$@"\n'
                       '}\n'
                       'G=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
-                      'source_revision=914046e1e998ca89a5f0f5be39a90bbfb88a431d\n'
+                      'source_revision=5b4ed381badb91de47d793715d05b6ae7737e39e\n'
                       'base_revision=4dd992ec1bc2df8220c73149115c5b478edb0085\n'
                       'NEGATIVE_CASE=N07\nnegative_launch=1\n'
                       'policy_sha=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'

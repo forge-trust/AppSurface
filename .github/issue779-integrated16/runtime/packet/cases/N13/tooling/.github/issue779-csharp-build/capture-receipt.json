@@ -1,8 +1,9 @@
 {
   "all16_final_integrated_native_verified": false,
   "changed_paths": [
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs",
-    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs",
+    "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs",
     "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
   ],
   "clean": true,
@@ -10,184 +11,1103 @@
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "rev-parse",
         "HEAD"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "22eef9ccb63070f3216cc5beccfdb9a71bb640b0048efb8cc299da7e65c3ce14"
+      "log_sha256": "f92c0f33fc8b2b3684ac746c6d5452252afc701b1545025844ab4b5ed756d52f",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-00.log",
+        "log_bytes": 41,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "status",
         "--porcelain=v1",
         "-z"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "f7e1872c5f62416df7efb1cf33769a16a09dce02b95b70d3c0c86fdbd1c65a23"
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "status",
+          "--porcelain=v1",
+          "-z"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-01.log",
+        "log_bytes": 0,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
+        "clone",
+        "--local",
+        "--no-hardlinks",
+        "--no-checkout",
+        "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/source-recovered",
+        "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/n07-joined-source-capture/repo"
+      ],
+      "log_sha256": "3c50826b017abbdb9a09a27976cbd0d9ada021676fc7787fc368120bb6188134",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "clone",
+          "--local",
+          "--no-hardlinks",
+          "--no-checkout",
+          "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/source-recovered",
+          "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/n07-joined-source-capture/repo"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-02.log",
+        "log_bytes": 252,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/git",
+        "checkout",
+        "-b",
+        "codex/issue779-n07-joined-negative-20261015",
+        "914046e1e998ca89a5f0f5be39a90bbfb88a431d"
+      ],
+      "log_sha256": "308ec645a79274afe89b468e128c48112a52ba56725715f577f4f46421001bd2",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "checkout",
+          "-b",
+          "codex/issue779-n07-joined-negative-20261015",
+          "914046e1e998ca89a5f0f5be39a90bbfb88a431d"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-03.log",
+        "log_bytes": 71,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/git",
+        "diff",
+        "--name-only",
+        "-z"
+      ],
+      "log_sha256": "fe31a690deb2b41b1b0dd8a06100871f0b2ca949cd2ed8a1aeb45f12f53a9fe1",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "diff",
+          "--name-only",
+          "-z"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-04.log",
+        "log_bytes": 309,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/git",
         "diff",
         "--check"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "diff",
+          "--check"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-05.log",
+        "log_bytes": 0,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "add",
         "--",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxRunWorkspaceTests.cs",
-        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs",
+        "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs",
         "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "add",
+          "--",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-06.log",
+        "log_bytes": 0,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "-c",
-        "user.name=Issue 779 private integration",
-        "-c",
-        "user.email=issue779-fixture@localhost",
         "commit",
         "-m",
-        "fix(evidence): preserve control transport after output substitution"
+        "fix(evidence): retain N07 rejected allocation after worker settlement"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "6dacad4e9ad92a8a23beba1765f918bb3f35a90b9760958c6afb5fe922ef0c69"
+      "log_sha256": "0345f530f8af716b601ccd3dadd347098beba469ffee37e30c68c2b4d400b50a",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "commit",
+          "-m",
+          "fix(evidence): retain N07 rejected allocation after worker settlement"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-07.log",
+        "log_bytes": 175,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "rev-parse",
         "HEAD"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "f92c0f33fc8b2b3684ac746c6d5452252afc701b1545025844ab4b5ed756d52f"
+      "log_sha256": "3313ff57a914c1ec63dd48ca7d77d119a54c3bf2fe1842637b1ac6a601ca3540",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-08.log",
+        "log_bytes": 41,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "rev-parse",
         "HEAD^"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "22eef9ccb63070f3216cc5beccfdb9a71bb640b0048efb8cc299da7e65c3ce14"
+      "log_sha256": "f92c0f33fc8b2b3684ac746c6d5452252afc701b1545025844ab4b5ed756d52f",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD^"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-09.log",
+        "log_bytes": 41,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
+        "rev-parse",
+        "HEAD^{tree}"
+      ],
+      "log_sha256": "18cafb3c1462445b6e6524339a174979536659b1614a542e3fba793a4862e6fe",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "rev-parse",
+          "HEAD^{tree}"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-10.log",
+        "log_bytes": 41,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
+    },
+    {
+      "argv": [
+        "/usr/bin/git",
         "status",
         "--porcelain=v1",
         "-z"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "status",
+          "--porcelain=v1",
+          "-z"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-11.log",
+        "log_bytes": 0,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "ls-files",
         "--stage",
         "-z"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "c92445cd78919889a6961b711560fdbc679fcef0c670cbab855bf7c05a05fefe"
+      "log_sha256": "f5e3b7231ff639f9d2c603e2e9eb15bf497b74b0f19f6e7e293b00f0bd2c504e",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "ls-files",
+          "--stage",
+          "-z"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-12.log",
+        "log_bytes": 337352,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
         "ls-tree",
         "-r",
         "-z",
         "HEAD"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "5e80c4c8a2dfb3567283d028a433b50d4f713e7d8a980b1e30ffb37ee47e1f08"
+      "log_sha256": "915baf234c0cb0e5fd280ed2fa76924c6f52e9f7a4979f4aabc8b41f37ab494c",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "ls-tree",
+          "-r",
+          "-z",
+          "HEAD"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-13.log",
+        "log_bytes": 345968,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     },
     {
       "argv": [
         "/usr/bin/git",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "rev-parse",
-        "HEAD^{tree}"
+        "status",
+        "--porcelain=v1",
+        "-z"
       ],
-      "exit": 0,
-      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "stdout_sha256": "1a5a0eaed1c88d1aaa0a81ab121e646764108ddd684bc5f0553e737a10f5b73d"
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "private": {
+        "argv": [
+          "/usr/bin/git",
+          "status",
+          "--porcelain=v1",
+          "-z"
+        ],
+        "operation": "native-prerequisite",
+        "resources_after": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        },
+        "resources_before": {
+          "cgroup_memory": null,
+          "rlimits": {
+            "RLIMIT_AS": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_DATA": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            },
+            "RLIMIT_FSIZE": {
+              "hard_bytes": null,
+              "soft_bytes": null
+            }
+          },
+          "system_mem_available_bytes": null
+        }
+      },
+      "public": {
+        "deadline_ok": true,
+        "descendants_settled": true,
+        "discarded_bytes": 0,
+        "error": false,
+        "exit": 0,
+        "failure": null,
+        "forced_cleanup": false,
+        "leader_exit_observed": true,
+        "log": "command-14.log",
+        "log_bytes": 0,
+        "operation": "native-prerequisite",
+        "overflow": false,
+        "pipe_eof": true,
+        "read_error": false,
+        "waited": true,
+        "write_error": false
+      }
     }
   ],
   "draft_pr_created": false,
-  "elapsed_seconds": 2.0966993340989575,
+  "elapsed_seconds": 4.951958415999798,
   "exit": 0,
   "independent_capture_review_pending": true,
   "index_checksum_verified": true,
-  "index_sha256": "fbb4e073bfaaa8e2b56e9b842365644c54b20d6069c1d1cc0915a84076ce8a69",
+  "index_sha256": "8248535f4635ff77f264157250769792c7dee669d061966a0f7e495770760843",
   "index_tree_blob_modes_equal": true,
   "native_credit": false,
   "new_source_files": [],
   "no_alternates": true,
-  "previous_validation_commit": "71d004d6cf5a791ddbb8e73e3c538248985a8505",
-  "prior_capture_sha256": "8f5822ab0f5da555ef142a28321631f1960e61463fe14a83b33e83d521934046",
-  "repository": "/private/tmp/issue779-control-directory-continuity-20261015/repo",
+  "previous_validation_commit": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
+  "prior_capture_sha256": "b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953",
+  "repository": "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/n07-joined-source-capture/repo",
   "schema": "issue779-csharp-common-source-capture-v4",
   "source": {
     "modes": {
@@ -4100,7 +5020,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs": "341d73906eb91d33471753e4cea4e4d57e368885c372d299718d82b73b00c1c1",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxJoinedWorkerOutputDiagnosticTests.cs": "5c6abce5bfe217b7cf642f06c1167c1d6ff1196927b7426416ba3e0b94beba45",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04CheckpointOrderTests.cs": "c94b9bc301e73060146a60a06b22038afdcb6e55bba365434bf36f60453db5d8",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs": "8ee3f49ebee0f643fed5974d8b081840bcc7d6455bd0c8ce1db261b67b25902c",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs": "eda57d0afef7f78c1816a2f2b02110634383f6629f6639585eee8b0bcd79500a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN09AllocationObservationTests.cs": "a5d4ae60e236723aba36efc82b669a18aa8af564e9460fdb287cff1cdf72c77c",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN10PendingStartCheckpointTests.cs": "93c1787794c01248c83dad44ff2c4a14c2e5ef510a3aaeb242aa9d3f6a1ebdb1",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN12DescendantTests.cs": "de76668dc90abce8276d58963690626b9ff3831db9ee2795b4da998d4395a5a8",
@@ -4156,7 +5076,7 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN04CheckpointOwner.cs": "7186dd905e9a0d1cd9ee1e0c18ce4c3090f2c4ec76f19d734b457c6cbf4262fc",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07CheckpointOwner.cs": "5aed75b4b3f5785ffaa7ae68b7b6678a2bc8f22996fb4ff1a40bf334e4db46b3",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureEmitter.cs": "5ff40f553ae30f12f06d59a17040b930836f3f7427d7c97db45d9e07af6010a9",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs": "5239d5f533d3c5acebd961e3247dbc4375f73b468ae48142fc8b51a06c6b67a5",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs": "c7cf8e9741790e62a970459ccbf17235fcee4f4f1b25f014e58ba1ec5cf32b77",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN10PendingStartCheckpoint.cs": "1c340ad49e9e2a0a3ee84e57f9321831daa1430a1096d3c29c22460697d0ac37",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN12Descendant.cs": "9fb1978cedbb32ff26cd3b7d2725e3e34034ed8bd6f472fbc3d44d29b024e6d1",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxN12LeaderExitObservation.cs": "77f1aa2b76ee838b49df7c6a18e5c5b170257b35eb59470003d350378f0d87e8",
@@ -4179,10 +5099,10 @@
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Owner.cs": "83ad342ccdcd0dcf44e5f08cee80a1cd9450fe589f87d8be1492bc59fe86f8f3",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.Start.cs": "2ce7568a895e1e4dd3ade5435cffa5be14a8f2292feceba5ca87eb21548b898a",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxSystemdBackend.cs": "44db74e6e59d771781814076ed9e45dddf1516813da90ca5359f6260c04e1bf6",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "b299413414fa12f8b434b9795ac901d4647565dd7e3510399ebd41b394d41221",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerProcess.cs": "09e94d631eaf69b841dfbf39cb5e5b56d15d33a1c31c34db667b38e401ad98e0",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerStopTiming.cs": "71844d7e0f26f141bfb0a6b8c2662a2d264281c3e84fb72f8aa24729278bc21f",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerUnit.cs": "50065d2353864f5e066eadc985b372143e7946937536874a62bdbabfa3891de2",
-      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "5c6d8c2e58dac05ecda98dca08e3df26f80c1bff13fb30efdde96272143e1737",
+      "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md": "daa3e0e1e2b50142cbe6dc5a93ec8267b07fdb3d3075fc90c82bbf9f1b692ebd",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptOwnership.cs": "55af1758e34acf839e5d800f511e2b841f7f2f3d19f5d27b692bfa7193cd1ad0",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionAcceptedResource.cs": "4ad20dd550df785d4307f341a795c1284ae869495f414ac28ba0acf839bac130",
       "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionCancellationPhaseObservation.cs": "adc2aaea1cd07f6633a8455995ead2ac1817222efabc451173324c43d816cc6c",
@@ -5940,12 +6860,10 @@
     }
   },
   "source_count": 2872,
-  "source_tree": "c5dd0770c00b14b61f32851adeaad1cce4f2d7a8",
+  "source_tree": "3bafd0fcd5321f1b29323f46df94b77eb48fa859",
   "validation_and_reviews": {
-    "/private/tmp/issue779-control-directory-continuity-20261015/source-ready.json": "4788beaeb1c0265d96ca877171dd597cc764ce99d7b99bf602068bfec2aba792",
-    "/private/tmp/issue779-control-directory-continuity-20261015/validation/receipt.json": "9780b38f06e9ed89cd6909bc60bda65d9ce0f69b7e15fac3a7d6659ed63c98a9",
-    "/private/tmp/issue779-n07-control-review-20261015/prepared-source-review.json": "060faa07446010a6b1eb2c7ab5ec89c7051229250a99aa83caa01b162a2a0645"
+    "/Users/andrew/Projects/forge-trust/runnable__saturn/TestResults/issue779-recovery-20261015/control-continuity-recovery/n07-successful-containment-correction/source-clear.json": "34583fb2cb1eaca1c910ccd4bca917b8d9decc3e4d3a0146f138e6264058c3db"
   },
-  "validation_commit": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
-  "validation_scope": "locked restore/two exact formatters/98 ordinary and 98 N07 workspace-control controls; all owned commands settled"
+  "validation_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e",
+  "validation_scope": "47 ordinary and 47 N07 focused source tests, zero compiler diagnostics"
 }

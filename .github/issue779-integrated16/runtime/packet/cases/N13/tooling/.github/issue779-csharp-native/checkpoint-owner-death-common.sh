@@ -6,8 +6,8 @@ umask 077
 : "${OWNER_DEATH_CASE:?fixed wrapper must set OWNER_DEATH_CASE}"
 [[ $OWNER_DEATH_CASE == N13 || $OWNER_DEATH_CASE == N14 ]] || exit 64
 readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30 FIXTURE_REVIEW_CLEAR=1 SOURCE_REVIEW_CLEAR=1 ROOT_REVIEW_CLEAR=1
-readonly EXPECTED_HEAD=914046e1e998ca89a5f0f5be39a90bbfb88a431d EXPECTED_PARENT=71d004d6cf5a791ddbb8e73e3c538248985a8505
-readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953
+readonly EXPECTED_HEAD=5b4ed381badb91de47d793715d05b6ae7737e39e EXPECTED_PARENT=914046e1e998ca89a5f0f5be39a90bbfb88a431d
+readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540
 mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation=
 fail(){ printf 'OWNER_DEATH_FIXTURE_REJECTED:%s\n' "$1" >&2; exit 1; }
 while (($#)); do
@@ -34,23 +34,36 @@ for v in capture capture_sha request request_sha host host_sha entry entry_sha b
 [[ $capture_sha == "$EXPECTED_CAPTURE_SHA" ]] || fail capture-pin
 pin "$capture" "$capture_sha" 8388608; pin "$request" "$request_sha" 65536; pin "$host" "$host_sha" 2147483648; pin "$entry" "$entry_sha" 2147483648; pin "$build" "$build_sha" 4194304; pin "$parser" "$parser_sha" 131072
 [[ $generation =~ ^[0-9a-f]{32}$ ]] || fail generation
-jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "c5dd0770c00b14b61f32851adeaad1cce4f2d7a8" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
+jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "3bafd0fcd5321f1b29323f46df94b77eb48fa859" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
 jq -e --arg c "$OWNER_DEATH_CASE" --arg h "$EXPECTED_HEAD" --argjson n "$EXPECTED_COUNT" '.source_revision==$h and .source_count==$n and .private_qualification==$c' "$build" >/dev/null || fail build-variant-binding
 [[ $host != *'$'* && $host != *'%'* && $host != *'='* && $entry != *'$'* && $entry != *'%'* ]] || fail bootstrap-path
 if [[ $mode == prepare-only ]]; then printf 'PREPARATION_PINS_MATCHED:%s:NOT_RUN\n' "$OWNER_DEATH_CASE"; exit 0; fi
 ((EUID==0)) || fail root-required
 ((SOURCE_REVIEW_CLEAR==1 && FIXTURE_REVIEW_CLEAR==1 && ROOT_REVIEW_CLEAR==1)) || fail independent-review-pending
 [[ $OSTYPE == linux* && $(uname -m) == x86_64 ]] || fail linux-x64-required
-for t in systemd-run systemctl jq stat sha256sum awk grep sleep install getent realpath timeout setsid cmp cut cat bash; do command -v "$t" >/dev/null || fail missing-tool; done
+for t in systemd-run systemctl jq stat sha256sum awk grep sleep install getent realpath timeout setsid cmp cut cat bash date; do command -v "$t" >/dev/null || fail missing-tool; done
 mono_ms(){ local up rest frac; IFS=' ' read -r up rest </proc/uptime || return 1; [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1; frac=${up#*.}000; frac=${frac:0:3}; printf '%s' "$((10#${up%%.*}*1000+10#$frac))"; }
 start_ms=$(mono_ms) || fail monotonic-clock; hard_end_ms=$((start_ms+FIXTURE_SECONDS*1000)); work_end_ms=$((hard_end_ms-CLEANUP_RESERVE*1000))
 remaining(){ local n=$(((work_end_ms-$(mono_ms))/1000)); ((n>0)) || return 1; printf '%s' "$n"; }
 remaining_ms(){ local n=$((work_end_ms-$(mono_ms))); ((n>0)) || return 1; printf '%s' "$n"; }
 bounded_exec(){ local ms duration; ms=$(remaining_ms) || return 124; ((ms>5000)) && ms=5000; printf -v duration '%d.%03ds' "$((ms/1000))" "$((ms%1000))"; timeout --foreground --signal=KILL "$duration" "$@"; }
 systemctl_bounded(){ bounded_exec systemctl "$@"; }
+# A lowered two-minute owner plus its original five-second stop reserve must fit
+# the already-created request deadline. Integer UTC sampling leaves one second
+# of margin; a delayed/unsafe activation still rejects in the C# owner guard.
+owner_deadline_fits(){ [[ $1 =~ ^[1-9][0-9]{0,11}$ && $2 =~ ^[1-9][0-9]{0,11}$ ]] && ((10#$1>10#$2 && 10#$1-10#$2>126 && 10#$1-10#$2<=ORIGINAL_JOB_SECONDS)); }
+require_original_owner_budget(){
+ local utc end now
+ pin "$request" "$request_sha" 65536
+ utc=$(bounded_exec jq -er '.job_deadline_utc' "$request") || fail owner-original-deadline
+ [[ $utc =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || fail owner-original-deadline
+ end=$(bounded_exec date -u -d "$utc" +%s) || fail owner-original-deadline
+ now=$(bounded_exec date -u +%s) || fail owner-original-deadline
+ owner_deadline_fits "$end" "$now" || fail owner-original-budget
+}
 unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus; }
 field(){ bounded_exec awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1)}' <<<"$1"; }
-systemd_policy_usec(){ case "$1:$2" in RuntimeMaxUSec:4min|RuntimeMaxUSec:240000000) printf '%s' 240000000 ;; TimeoutStopUSec:5s|TimeoutStopUSec:5000000) printf '%s' 5000000 ;; *) return 1 ;; esac; }
+systemd_policy_usec(){ case "$1:$2" in RuntimeMaxUSec:2min|RuntimeMaxUSec:120000000) printf '%s' 120000000 ;; TimeoutStopUSec:5s|TimeoutStopUSec:5000000) printf '%s' 5000000 ;; *) return 1 ;; esac; }
 unit_absent(){ [[ $(systemctl_bounded show "$1" -p LoadState --value 2>/dev/null || :) == not-found ]]; }
 name_absent(){ local kind=$1 name=$2 code=0; bounded_exec getent "$kind" "$name" >/dev/null 2>&1 || code=$?; [[ $code == 2 ]]; }
 proc_facts(){ local pid=$1 ms duration; ms=$(remaining_ms) || return 124; ((ms>5000)) && ms=5000; printf -v duration '%d.%03ds' "$((ms/1000))" "$((ms%1000))"; timeout --foreground --signal=KILL "$duration" /bin/bash -c 'set -euo pipefail; pid=$1; [[ -r /proc/$pid/stat && -r /proc/$pid/status && -r /proc/$pid/cgroup ]]; IFS= read -r text </proc/$pid/stat; [[ ${text%% *} == "$pid" ]]; tail=${text##*) }; read -r -a f <<<"$tail"; [[ ${f[19]:-} =~ ^[1-9][0-9]*$ ]]; uid=$(awk '\''/^Uid:/{print $3}'\'' /proc/$pid/status); gid=$(awk '\''/^Gid:/{print $3}'\'' /proc/$pid/status); cg=$(awk -F: '\''$1==0{print $3}'\'' /proc/$pid/cgroup); [[ $uid =~ ^[0-9]+$ && $gid =~ ^[0-9]+$ && $cg == /system.slice/* ]]; printf "%s %s %s %s" "${f[19]}" "$uid" "$gid" "$cg"' _ "$pid"; }
@@ -431,13 +444,34 @@ trap cleanup EXIT; trap 'exit 1' INT TERM
 # Inherited launch recipe is fixed to the existing root-owned owner service; C# creates the dependent worker.
 fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
 unsafe='DOTNET_STARTUP_HOOKS DOTNET_ADDITIONAL_DEPS DOTNET_SHARED_STORE DOTNET_ROOT DOTNET_ROOT_X64 DOTNET_HOST_PATH DOTNET_ROLL_FORWARD DOTNET_ROLL_FORWARD_TO_PRERELEASE DOTNET_MULTILEVEL_LOOKUP CORECLR_ENABLE_PROFILING CORECLR_PROFILER CORECLR_PROFILER_PATH CORECLR_PROFILER_PATH_64 COR_ENABLE_PROFILING COR_PROFILER COR_PROFILER_PATH COMPlus_ReadyToRun COMPlus_ZapDisable'
-props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=240s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
+props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=120s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
 # The pinned case-workspace materializer completed full source/tool/runtime copy verification.
 # This entrypoint consumes its sealed request/runtime/entry outputs; it never restages trees.
 ((work_end_ms-$(mono_ms)>0)) || fail original-deadline
+require_original_owner_budget
 launched=1
 launch_ready_file=$log/launcher.setsid-ready
-launcher_owner_start "$log/launcher.child-pid" "$log/launcher.control.sock" "$launch_ready_file" "$hard_end_ms" timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$entry" evidence supervise --request "$request" >"$log/root.stdout" 2>"$log/root.stderr" || fail launcher-owner-start
+# The launcher can be delayed after the parent preflight. Repeat the pinned
+# request check in its actual owned child immediately before exec of systemd-run.
+read -r -d '' OWNER_LAUNCH_BUDGET_CODE <<'OWNER_LAUNCH_BUDGET_SH' || :
+set -euo pipefail
+request=$1; expected_sha=$2; generation=$3; shift 3
+[[ $generation =~ ^[0-9a-f]{32}$ && $expected_sha =~ ^[0-9a-f]{64}$
+   && $request == /run/appsurface-evidence-fixture/$generation/request.json
+   && -f $request && ! -L $request
+   && $(/usr/bin/stat -c '%u:%g:%a:%h' -- "$request") == 0:0:600:1
+   && $(/usr/bin/stat -c %s -- "$request") -le 65536 ]]
+before=$(/usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%y:%z' -- "$request")
+hash=$(/usr/bin/sha256sum -- "$request"); [[ ${hash:0:64} == "$expected_sha" ]]
+utc=$(/usr/bin/jq -er '.job_deadline_utc' "$request")
+[[ $utc =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+end=$(/usr/bin/date -u -d "$utc" +%s); now=$(/usr/bin/date -u +%s)
+[[ $end =~ ^[1-9][0-9]{0,11}$ && $now =~ ^[1-9][0-9]{0,11}$ ]]
+((10#$end>10#$now && 10#$end-10#$now>126 && 10#$end-10#$now<=240))
+[[ $(/usr/bin/stat -c '%d:%i:%s:%f:%h:%u:%g:%y:%z' -- "$request") == "$before" ]]
+exec "$@"
+OWNER_LAUNCH_BUDGET_SH
+launcher_owner_start "$log/launcher.child-pid" "$log/launcher.control.sock" "$launch_ready_file" "$hard_end_ms" timeout --signal=KILL "$(remaining)" /usr/bin/bash --noprofile --norc -c "$OWNER_LAUNCH_BUDGET_CODE" -- "$request" "$request_sha" "$G" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$entry" evidence supervise --request "$request" >"$log/root.stdout" 2>"$log/root.stderr" || fail launcher-owner-start
 
 # Source-owned phase is emitted after the authenticated accepted reply commits; no case-specific
 # STOP/WAIT/EXIT is sent. It only arms the following independent identity measurements.
@@ -472,7 +506,7 @@ active_enter_usec=$(field "$owner_facts" ActiveEnterTimestampMonotonic)
 runtime_show=$(field "$owner_facts" RuntimeMaxUSec); timeout_show=$(field "$owner_facts" TimeoutStopUSec)
 runtime_usec=$(systemd_policy_usec RuntimeMaxUSec "$runtime_show") || fail owner-runtime-policy
 timeout_usec=$(systemd_policy_usec TimeoutStopUSec "$timeout_show") || fail owner-runtime-policy
-[[ $runtime_usec == 240000000 && $timeout_usec == 5000000 ]] || fail owner-runtime-policy
+[[ $runtime_usec == 120000000 && $timeout_usec == 5000000 ]] || fail owner-runtime-policy
 # Immediate pre-signal reread binds PID/starttime/UID/GID/cgroup; signal exactly the owner PID.
 read -r check_start check_uid check_gid check_cg < <(proc_facts "$owner_pid") || fail owner-presignal-reread
 [[ $check_start == "$owner_start" && $check_uid == "$owner_uid" && $check_gid == "$owner_gid" && $check_cg == "$owner_cg" ]] || fail owner-presignal-changed

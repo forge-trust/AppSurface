@@ -196,7 +196,7 @@ class CommonSourceCaptureControls(unittest.TestCase):
                 script_text = (Path(__file__).parent / script_name).read_text()
                 self.assertIn('"$capture_query" "${values[source-capture]}" >/dev/null', script_text)
                 args = ['/usr/bin/jq', '-e', '--arg', 'h', runner.SOURCE,
-                        '--arg', 'p', runner.PARENT, '--arg', 't', 'c5dd0770c00b14b61f32851adeaad1cce4f2d7a8',
+                        '--arg', 'p', runner.PARENT, '--arg', 't', '3bafd0fcd5321f1b29323f46df94b77eb48fa859',
                         '--argjson', 'n', '2872', query]
                 accepted = subprocess.run(args + [str(CAPTURE_PATH)], stdout=subprocess.DEVNULL,
                                           stderr=subprocess.PIPE, check=False)

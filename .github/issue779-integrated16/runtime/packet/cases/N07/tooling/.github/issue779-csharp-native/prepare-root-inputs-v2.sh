@@ -34,8 +34,8 @@ for key in reviewed-script-sha256 generation deadline-monotonic-ms source-commit
 done
 hash_syntax() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail digest-syntax; }
 for key in "${!values[@]}"; do [[ $key != *sha256 ]] || hash_syntax "${values[$key]}"; done
-[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 914046e1e998ca89a5f0f5be39a90bbfb88a431d ]] || fail source-generation-pin
-[[ ${values[fixture-sha256]} == af4122e5e6d4cf96b45562820c6140007d3a986bbca4510c14cc5ac9e17eecd9 && ${values[os-audit-script-sha256]} == 6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08 ]] || fail reviewed-source-pin
+[[ ${values[generation]} =~ ^[0-9a-f]{32}$ && ${values[source-commit]} == 5b4ed381badb91de47d793715d05b6ae7737e39e ]] || fail source-generation-pin
+[[ ${values[fixture-sha256]} == 2f2dd196c447326ac86877d3b6562ab139ba334e26c1c60efec9e0718347273d && ${values[os-audit-script-sha256]} == 6d0691864264040db5097560a34a75033df7d22c81662b2b2cd52801fa673a08 ]] || fail reviewed-source-pin
 [[ ${values[n07-parser-sha256]} == 27c4a9f631dc297e9f00bc8892c4824b7b3de2dccca815f987757747d68ada82 ]] || fail n07-parser-pin
 [[ ${values[n07-live-parser-sha256]} == ff957a62af596c9ae2278685a756493c709f3906bf9194d13a2946109cb792b1 ]] || fail n07-parser-pin
 mono_ms() {

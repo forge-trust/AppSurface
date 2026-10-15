@@ -200,7 +200,7 @@ class SourceDigestBoundaryControls(unittest.TestCase):
         cls.expected_product = assignments['BUILD_SOURCE_MAP']
         capture_path = Path(__file__).parents[1] / 'issue779-csharp-build' / 'capture-receipt.json'
         capture_bytes = capture_path.read_bytes()
-        if hashlib.sha256(capture_bytes).hexdigest() != 'b070e3a38e726c698bc2608cd86987a204ceaf164bc12dff53d7d3d196a1c953':
+        if hashlib.sha256(capture_bytes).hexdigest() != '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540':
             raise AssertionError('immutable N09 capture pin mismatch')
         cls.capture = json.loads(capture_bytes)
         builder_path = capture_path.with_name('build-fdd.sh')
@@ -251,9 +251,9 @@ class SourceDigestBoundaryControls(unittest.TestCase):
         self.assertEqual(self.capture['validation_commit'], self.source)
         self.assertEqual(self.capture['previous_validation_commit'], self.parent)
         self.assertEqual(self.runner_full_rows, self.full_rows_digest)
-        self.assertEqual(self.runner_full_rows, '85d264688e73c14ea5e4552a4e7aed1f8b1c3311a3f358dc89818bef0ed87099')
-        self.assertEqual(self.capture_canonical, '3f6379185c3ec98ddc7c1f1457b16427dcf3ee820a863e9fd78bf68ca578520e')
-        self.assertEqual(self.product, 'a61f03468ca7fff6ef363a510c7945f3927c966fa3b62291e4c34c3c50a23c98')
+        self.assertEqual(self.runner_full_rows, '2c27553e3441cfc7e1c8b53cac0da15b6cff4a6c8c5c8d6dae01e0ba116351ea')
+        self.assertEqual(self.capture_canonical, '93f8bd47943773663375d0f37c440a0ea7a07a701359a4414944f87918ea389f')
+        self.assertEqual(self.product, '758a0f769ca67ce6f1fda2eea3569a373efafb192e2d2c2cce2224809b352a7d')
         self.assertEqual(self.builder_capture_map, self.capture_canonical)
         self.assertEqual(self.builder_product_map, self.product)
         self.assertTrue(all(maps['SOURCE_MAP'] == self.capture_canonical for maps in self.transport_maps.values()))
@@ -313,7 +313,7 @@ class N09RetainedObservationControls(unittest.TestCase):
     def observation():
         return {
             'schema': 'issue779-n09-retained-slot-observation-v1', 'case': 'N09',
-            'generation': GENERATION, 'source_revision': '914046e1e998ca89a5f0f5be39a90bbfb88a431d',
+            'generation': GENERATION, 'source_revision': '5b4ed381badb91de47d793715d05b6ae7737e39e',
             'base_revision': '4dd992ec1bc2df8220c73149115c5b478edb0085',
             'allocation_record_sha256': 'a' * 64, 'cleanup_record_sha256': 'b' * 64,
             'results_gid': 12001, 'account_ids_absent': True, 'worker_cgroup_settled': True,

@@ -470,9 +470,9 @@ for key in source_root source_manifest source_manifest_sha256 source_nodes sourc
 pin_file "$build_receipt" "$build_receipt_sha256" "$MAX_NODE_JSON_BYTES"
 bounded /usr/bin/python3 -B - "$build_receipt" <<'INTEGRATED_BUILD_RECEIPT'
 import base64, hashlib, zlib
-REVIEWED_READER_PACKED = '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'
+REVIEWED_READER_PACKED = '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'
 REVIEWED_READER_LENGTH = 14104
-REVIEWED_READER_SHA256 = '7425fb000d34daf95df22a1053c8aff37049cb136d7b4113c994ec1279acb87e'
+REVIEWED_READER_SHA256 = '507a8a8740db9b8a0abe8c453a42ded41149c5958cc23fcdf1854094bee70b10'
 if not 0 < REVIEWED_READER_LENGTH <= 32768 or len(REVIEWED_READER_PACKED) > 65536:
     raise ValueError('adapter-reader-size')
 _packed = base64.b64decode(REVIEWED_READER_PACKED, validate=True)
@@ -488,7 +488,7 @@ INTEGRATED_BUILD_RECEIPT
 bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
  --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
  .schema=="issue779-integrated16-build-v1" and .exit==0 and
- .source_commit==$source and $source=="914046e1e998ca89a5f0f5be39a90bbfb88a431d" and
+ .source_commit==$source and $source=="5b4ed381badb91de47d793715d05b6ae7737e39e" and
  .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
  (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
  .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
@@ -744,7 +744,7 @@ n03_validate_event_data() {
 n03_run() (
  set -euo pipefail; umask 077
  n03_fd_owner_pid=$BASHPID; readonly n03_fd_owner_pid
- [[ $# == 11 && $EUID == 0 && $source_revision == 914046e1e998ca89a5f0f5be39a90bbfb88a431d ]] || fail N03-input
+ [[ $# == 11 && $EUID == 0 && $source_revision == 5b4ed381badb91de47d793715d05b6ae7737e39e ]] || fail N03-input
  helper_root=$1 helper_map=$2 helper_map_sha=$3 helper_nodes=$4 helper_nodes_sha=$5 helper_entry_sha=$6
  broker_name=$7 worker_name=$8 shared_name=$9 startup_kib=${10} helper_generation=${11}
  n03_broker_pid= n03_worker_pid= release_fd= dir_fd= socket_pin= first_failure= result_status=rejected
@@ -985,23 +985,47 @@ pin_owned_pg "$launch_pid"
 # Observer is its own retained process group. It can only inspect this generated worker/path tuple.
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" bash -c '
  set -euo pipefail; export LC_ALL=C PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ observer_stage=not-started; observer_exit_status=0; last_systemctl_result=null; last_load_state=other; last_main_pid=null; sample_written=false
+ observer_terminal() {
+  observer_exit_status=$?
+  trap - EXIT
+  local sink=${sample%/*}/n01-observer-terminal.json stage_json result_json load_json pid_json sample_json
+  case $observer_stage in not-started|host-pinned|systemctl-result-closed|unit-absent|unit-loaded|worker-identity-closed|sample-written|observation-window-ended) stage_json=$observer_stage ;; *) stage_json=unknown ;; esac
+  if [[ $last_systemctl_result =~ ^[0-9]{1,3}$ ]] && ((10#$last_systemctl_result<=255)); then result_json=$((10#$last_systemctl_result)); else result_json=null; fi
+  case $last_load_state in loaded|not-found|bad-setting|error|merged|masked|stub) load_json="\"$last_load_state\"" ;; *) load_json='\''"other"'\'' ;; esac
+  if [[ $last_main_pid =~ ^[0-9]{1,10}$ ]] && ((10#$last_main_pid<=2147483647)); then pid_json=$((10#$last_main_pid)); else pid_json=null; fi
+  case $sample_written in true) sample_json=true ;; *) sample_json=false ;; esac
+  if (umask 077; set -o noclobber; printf '\''{"schema":"issue779-n01-observer-terminal-v1","stage":"%s","observer_exit_status":%d,"last_systemctl_result":%s,"last_load_state":%s,"main_pid":%s,"sample_written":%s}\n'\'' \
+   "$stage_json" "$observer_exit_status" "$result_json" "$load_json" "$pid_json" "$sample_json" >"$sink"); then
+   exit "$observer_exit_status"
+  fi
+  if ((observer_exit_status==0)); then exit 1; fi
+  exit "$observer_exit_status"
+ }
+ trap observer_terminal EXIT
  end=$1; worker=$2; host=$3; managed=$4; control=$5; account=$6; sample=$7
  now() { local u x; IFS=" " read -r u x </proc/uptime; printf "%s" "${u%%.*}"; }
  left() { local n; n=$(now); ((n<end)) || return 124; printf "%s" "$((end-n))"; }
  run() { local n; n=$(left) || return 124; timeout --signal=KILL "$n" "$@"; }
  start() { local text tail; text=$(run cat "/proc/$1/stat"); [[ ${text%% *} == "$1" ]]; tail=${text##*) }; read -r -a f <<<"$tail"; [[ ${f[19]:-} =~ ^[1-9][0-9]*$ ]]; printf "%s" "${f[19]}"; }
  host_pin=$(run stat -c "%d:%i:%s:%f" "$host"); host_hash=$(run sha256sum "$host"); host_hash=${host_hash:0:64}
+ observer_stage=host-pinned
  while left >/dev/null; do
   code=0; facts=$(run systemctl show "$worker" -p LoadState -p MainPID) || code=$?
+  last_systemctl_result=$code
   ((${#facts}<=4096)) || exit 1
   pid=; load=; seen_pid=0; seen_load=0
   while IFS="=" read -r key value; do
    case "$key" in MainPID) ((seen_pid==0)) || exit 1; seen_pid=1; pid=$value ;; LoadState) ((seen_load==0)) || exit 1; seen_load=1; load=$value ;; *) exit 1 ;; esac
   done <<<"$facts"
   [[ $seen_pid == 1 && $seen_load == 1 && $pid =~ ^[0-9]+$ ]] || exit 1
+  case $load in loaded|not-found|bad-setting|error|merged|masked|stub) last_load_state=$load ;; *) last_load_state=other ;; esac
+  if [[ $pid =~ ^[0-9]{1,10}$ ]] && ((10#$pid<=2147483647)); then last_main_pid=$((10#$pid)); else last_main_pid=null; fi
+  observer_stage=systemctl-result-closed
   if ((code!=0)); then [[ $code == 1 && $load == not-found && $pid == 0 ]] || exit 1; fi
-  if [[ $load == not-found && $pid == 0 ]]; then run sleep .02; continue; fi
+  if [[ $load == not-found && $pid == 0 ]]; then observer_stage=unit-absent; run sleep .02; continue; fi
   [[ $code == 0 && $load == loaded ]] || exit 1
+  observer_stage=unit-loaded
   if [[ $pid =~ ^[1-9][0-9]*$ && -r /proc/$pid/status ]]; then
    s1=$(start "$pid") || exit 1
    uid1=$(run awk '\''$1=="Uid:"{print $2":"$3":"$4":"$5}'\'' "/proc/$pid/status")
@@ -1030,11 +1054,13 @@ pin_owned_pg "$launch_pid"
    pw=$(run getent passwd "$account"); gr=$(run getent group "$account")
    IFS=: read -r pn px pu rest <<<"$pw"; IFS=: read -r gn gx gg rest <<<"$gr"
    [[ $pn == "$account" && $gn == "$account" && $pu == "${us[0]}" && $gg == "${gs[0]}" ]] || exit 1
+   observer_stage=worker-identity-closed
    run jq -jcS -n --argjson pid "$pid" --arg uid "$uid1" --arg gid "$gid1" --arg cg "$cg1" --arg ticks "$s1" '\''{pid:$pid,uid4:$uid,gid4:$gid,cgroup:$cg,start_time_ticks:$ticks,post_exec_image_pinned:true,exact_worker_arguments:true,ready_protocol_observed:false}'\'' >"$sample"
+   sample_written=true; observer_stage=sample-written
    left >/dev/null; exit 0
   fi
   run sleep .02
- done; exit 1
+ done; observer_stage=observation-window-ended; exit 1
 ' -- "$work_end" "$worker" "$host" "$managed" "/run/appsurface-evidence-$G/worker/broker/control.sock" "${names[0]}" "$private/worker-live.json" >"$log/observer.stdout" 2>"$log/observer.stderr") & observer_pid=$!
 pin_owned_pg "$observer_pid"
 set +e; join_owned launch_pid; n01=$?; set -e
@@ -1043,6 +1069,7 @@ if ((n01 != 0)); then
  fail N01-launch-outcome
 fi
 set +e; join_owned observer_pid; observed=$?; set -e
+if ((observed != 0)); then printf 'FIXTURE_N01_OBSERVER_JOIN_STATUS:%d\n' "$observed" >&2; fi
 # The join retires every fully settled registration; failed exits stay failed.
 [[ $n01 == 0 && $observed == 0 && -s $private/worker-live.json ]] || fail N01-outcome
 [[ $(bounded stat -c %s "$log/n01.stdout") -le 4096 && ! -s $log/n01.stderr ]] || fail N01-console-bound

@@ -51,9 +51,9 @@ def validate(record):
     need(signal["name"] == ("SIGKILL" if case == "N13" else "SIGSTOP")
          and signal["target_pid"] == owner["pid"] and signal["pre_signal_owner"] == owner
          and signal["syscall_succeeded"] is True, "signal-binding")
-    need(type(signal["elapsed_seconds"]) is int and 0 <= signal["elapsed_seconds"] <= 240
+    need(type(signal["elapsed_seconds"]) is int and 0 <= signal["elapsed_seconds"] <= 120
          and type(signal["from_activation_usec"]) is int
-         and 0 <= signal["from_activation_usec"] < 240000000
+         and 0 <= signal["from_activation_usec"] < 120000000
          and signal["elapsed_seconds"] == signal["from_activation_usec"] // 1000000,
          "signal-time-units")
     policy = record["systemd_bound"]
@@ -62,7 +62,7 @@ def validate(record):
                    "timer_rearmed", "new_acceptance"}, "systemd-policy-shape")
     need(type(policy["active_enter_usec"]) is int and policy["active_enter_usec"] > 0,
          "activation-time")
-    runtime_values = {"4min": 240000000, "240000000": 240000000}
+    runtime_values = {"2min": 120000000, "120000000": 120000000}
     timeout_values = {"5s": 5000000, "5000000": 5000000}
     need(type(policy["runtime_max_usec"]) is int
          and type(policy["timeout_stop_usec"]) is int
@@ -71,7 +71,7 @@ def validate(record):
          and type(policy["timeout_stop_show"]) is str
          and timeout_values.get(policy["timeout_stop_show"]) == policy["timeout_stop_usec"],
          "systemd-duration-rendering")
-    need(policy["runtime_max_usec"] == 240000000 and policy["timeout_stop_usec"] == 5000000
+    need(policy["runtime_max_usec"] == 120000000 and policy["timeout_stop_usec"] == 5000000
          and policy["final_kill_policy"] == "SendSIGKILL=yes;FinalKillSignal=9;KillMode=control-group"
          and policy["timer_rearmed"] is False and policy["new_acceptance"] is False,
          "original-policy")
@@ -94,7 +94,7 @@ def validate(record):
          and terminal["owner_terminal_main_pid"] == 0
          and type(terminal["worker_terminal_main_pid"]) is int
          and terminal["worker_terminal_main_pid"] == 0, "systemd-terminal-state")
-    need(type(terminal["elapsed_seconds"]) is int and 0 <= terminal["elapsed_seconds"] <= 245
+    need(type(terminal["elapsed_seconds"]) is int and 0 <= terminal["elapsed_seconds"] <= 125
          and type(terminal["from_activation_usec"]) is int
          and terminal["from_activation_usec"] >= 0
          and terminal["elapsed_seconds"] == terminal["from_activation_usec"] // 1000000

@@ -1,15 +1,15 @@
 {
   "duration_policy_usec": {
-    "n14_owner_bound_seconds": 245,
+    "n14_owner_bound_seconds": 125,
     "outer_original_request_seconds": 240,
-    "owner_runtime": 240000000,
+    "owner_runtime": 120000000,
     "stop": 5000000
   },
   "files": {
     "check_owner_death_record.py": {
       "bytes": 9461,
       "mode": "0644",
-      "sha256": "276df6fdd6cb9f8e623e9b09c62362d75d2b31adc07a6b2ca05e6a8c8e6ad4d1"
+      "sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
     },
     "checkpoint-n13-owner-killed.sh": {
       "bytes": 125,
@@ -22,9 +22,9 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     "checkpoint-owner-death-common.sh": {
-      "bytes": 43093,
+      "bytes": 45303,
       "mode": "0644",
-      "sha256": "e844c36efe5c0ccdaeebd675a1c7f6a82879787de88175d7883a279fa69f0811"
+      "sha256": "a8999c26b24946819c5b2e76ef9f1f54abb826cc99d2c4b424e8556e9edf1ef9"
     }
   },
   "native_credit": false,
@@ -33,6 +33,6 @@
   "runtime_policy_note": "Static source handoff only. This record contains no runtime, test, owner-lifecycle, or native execution evidence.",
   "schema": "issue779-owner-death-fixture-v6-source-preparation-v1",
   "source_capture_count": 2872,
-  "source_capture_head": "914046e1e998ca89a5f0f5be39a90bbfb88a431d",
-  "source_capture_parent": "71d004d6cf5a791ddbb8e73e3c538248985a8505"
+  "source_capture_head": "5b4ed381badb91de47d793715d05b6ae7737e39e",
+  "source_capture_parent": "914046e1e998ca89a5f0f5be39a90bbfb88a431d"
 }
