@@ -34,7 +34,7 @@ def require(condition, reason):
 
 DIAGNOSTIC_STAGE = "preflight"
 DIAGNOSTIC_STAGES = ('preflight', 'phase-read', 'admission-window', 'process-identities', 'account-snapshot', 'worker-membership', 'pre-signal-recheck', 'pidfd-signal', 'owner-terminal', 'worker-terminal', 'consumed-guard', 'result')
-DIAGNOSTIC_REASONS = ('cgroup-node', 'cgroup-path', 'cgroup-pid-syntax', 'cgroup-procs-bound', 'cgroup-root', 'cgroup-symlink', 'deadline-order', 'explicit-execution-flag-required', 'fixed-case-unit', 'generated-account-identity', 'generated-account-membership', 'generated-account-nss-missing', 'generated-worker-account-name', 'generation-syntax', 'guard-ancestor-custody', 'guard-armed-remains', 'guard-consumed-bytes', 'guard-consumed-custody', 'guard-directory-custody', 'identity-window-expired', 'original-deadline-expired', 'owner-kill-terminal', 'owner-process-binding', 'parser-custody', 'parser-loader', 'parser-pin', 'phase-file-custody', 'phase-open-substitution', 'phase-read-substitution', 'pidfd-owner-recheck', 'pre-signal-identity-changed', 'proc-cgroup-shape', 'proc-credential-fields', 'proc-credentials', 'proc-file-bound', 'proc-file-read', 'proc-process-state', 'proc-stat-shape', 'root-linux-required', 'systemd-output-encoding', 'systemd-output-fields', 'systemd-output-key', 'systemd-output-shape', 'systemd-query-failed', 'unit-account-lookup', 'unit-account-range', 'unit-account-shape', 'unit-control-group', 'unit-main-pid', 'unit-restart-policy', 'unit-syntax', 'worker-account-contract', 'worker-cgroup-membership', 'worker-cgroup-not-empty', 'worker-not-started', 'worker-process-binding', 'worker-replacement', 'worker-terminal-fields', 'worker-terminal-not-observed')
+DIAGNOSTIC_REASONS = ("phase-generation-syntax", "phase-record-byte-bound", "phase-record-json", "phase-phase-shape", "phase-phase-binding", "phase-worker-unit-generation", "phase-job-path-shape", "phase-parser-rejected", 'cgroup-node', 'cgroup-path', 'cgroup-pid-syntax', 'cgroup-procs-bound', 'cgroup-root', 'cgroup-symlink', 'deadline-order', 'explicit-execution-flag-required', 'fixed-case-unit', 'generated-account-identity', 'generated-account-membership', 'generated-account-nss-missing', 'generated-worker-account-name', 'generation-syntax', 'guard-ancestor-custody', 'guard-armed-remains', 'guard-consumed-bytes', 'guard-consumed-custody', 'guard-directory-custody', 'identity-window-expired', 'original-deadline-expired', 'owner-kill-terminal', 'owner-process-binding', 'parser-custody', 'parser-loader', 'parser-pin', 'phase-file-custody', 'phase-open-substitution', 'phase-read-substitution', 'pidfd-owner-recheck', 'pre-signal-identity-changed', 'proc-cgroup-shape', 'proc-credential-fields', 'proc-credentials', 'proc-file-bound', 'proc-file-read', 'proc-process-state', 'proc-stat-shape', 'root-linux-required', 'systemd-output-encoding', 'systemd-output-fields', 'systemd-output-key', 'systemd-output-shape', 'systemd-query-failed', 'unit-account-lookup', 'unit-account-range', 'unit-account-shape', 'unit-control-group', 'unit-main-pid', 'unit-restart-policy', 'unit-syntax', 'worker-account-contract', 'worker-cgroup-membership', 'worker-cgroup-not-empty', 'worker-not-started', 'worker-process-binding', 'worker-replacement', 'worker-terminal-fields', 'worker-terminal-not-observed')
 
 
 def failure_diagnostic(stage, error):
@@ -87,8 +87,17 @@ def record_parser():
     return _record_parser
 
 
+PHASE_REJECTIONS = ("generation-syntax", "record-byte-bound", "record-json", "phase-shape", "phase-binding", "worker-unit-generation", "job-path-shape")
+
+
 def validate_phase(raw, generation):
-    return record_parser().validate_phase(raw, generation)
+    """Keep the strict pinned parser; translate only its closed diagnostic reason."""
+    parser = record_parser()
+    try:
+        return parser.validate_phase(raw, generation)
+    except parser.Reject as error:
+        reason = error.args[0] if len(error.args) == 1 and type(error.args[0]) is str else None
+        raise Reject("phase-" + reason if reason in PHASE_REJECTIONS else "phase-parser-rejected") from None
 
 SYSTEMCTL = "/usr/bin/systemctl"
 WORKER_PREFIX = "appsurface-evidence-worker-"
@@ -321,7 +330,8 @@ def wait_phase(path, generation, deadline):
         except FileNotFoundError:
             time.sleep(min(0.02, remaining(deadline) / 1000))
             continue
-        if not raw:
+        # The C# hook writes JSON and newline separately on the original pipe.
+        if not raw or b"\n" not in raw:
             time.sleep(min(0.02, remaining(deadline) / 1000))
             continue
         parsed = validate_phase(raw, generation)

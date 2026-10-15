@@ -93,3 +93,9 @@ Static source inspection found the runner expected two stdout lines in the oppos
 Run38816938950 passed initial kernel identity, account checks and the original pidfd signal, then exhausted the original worker-terminal wait. Its final systemd values were not retained, so no exit-code, unit-state or underlying-stop cause is claimed.
 
 Only on that existing failed-wait path, the observer now emits at most1KiB closed JSON from the last values already read: original/Main/ExecMain PIDs, ExecMainCode/Status, closed active/substate/restart, sample count and whether a live main sample was returned. Unknown/malformed numbers become null and unknown states become other; no raw path, error or property text is retained. There is no extra query, reopened deadline, new state acceptance, fallback signal, group relaxation or exit claim.
+
+## Incomplete phase frame
+
+The C# hook writes JSON and its newline separately. The observer waits for that newline within the original phase deadline before invoking the unchanged strict single-record parser. It never accepts a prefix, ignores extra lines, or renews time. The latest native failure occurred at phase-read; its exact intermediate read was not retained, so the source race is reproduced locally without claiming it as the measured intermediate bytes. Complete malformed input continues to fail.
+
+Pinned-parser failures also retain only their known fixed reason in the existing closed diagnostic. Unknown reasons become phase-parser-rejected; raw JSON and exception text are never echoed. Parsing still fails.
