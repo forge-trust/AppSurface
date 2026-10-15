@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
+    <ProjectReference Include="../../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/ForgeTrust.AppSurface.Dependency.Autofac.csproj" />
     <ProjectReference Include="../../Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
     <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />

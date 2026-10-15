@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 using Aspire.Hosting.Eventing;
@@ -6,6 +7,7 @@ using Aspire.Hosting.Pipelines;
 using Aspire.Hosting.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
 namespace ForgeTrust.AppSurface.Aspire.Testing;
@@ -14,12 +16,17 @@ namespace ForgeTrust.AppSurface.Aspire.Testing;
 /// Adapts a composed AppSurface profile to Aspire's configurable testing-builder contract.
 /// </summary>
 /// <remarks>
-/// Customize this builder before its single <see cref="BuildAsync(CancellationToken)"/> call. After a successful build,
-/// all builder access and a second build are rejected. Dispose the
+/// The configured factory and profile composition first receive this builder in Preparing state. Graph access and
+/// mutations are available then, while build and disposal are rejected until the factory returns. Customize the
+/// returned builder before its single <see cref="BuildAsync(CancellationToken)"/> call. After a successful build,
+/// direct builder access and a second build are rejected. Configured resource builders retain the native Aspire
+/// context for deferred SDK callbacks after the application is built; post-build graph mutation is unsupported.
+/// Dispose the
 /// returned <see cref="DistributedApplication"/> before disposing this builder so stop and disposal failures remain at
 /// the application call site. As a fallback, builder disposal disposes the application before profile activation
 /// services. After a process-fatal build failure, builder disposal also makes a best effort to release any captured
-/// partial Aspire provider. Both disposal methods are idempotent; disposal during a build is rejected.
+/// partial Aspire provider. Both disposal methods are idempotent; concurrent callers join cleanup, while reentrant
+/// disposal from that same cleanup flow returns without waiting on itself. Disposal during a build is rejected.
 /// </remarks>
 public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicationTestingBuilder
 {
@@ -29,6 +36,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     private const int Faulted = 3;
     private const int Disposing = 4;
     private const int Disposed = 5;
+    private const int Preparing = 6;
 
     private IDistributedApplicationBuilder? _innerBuilder;
     private DistributedApplication? _application;
@@ -36,13 +44,23 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     private AspireBuildServiceProviderLease? _failedBuildServiceProviderLease;
     private readonly Action<string> _warningSink;
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly AsyncLocal<bool> _insideDisposal = new();
     private int _state;
+    private readonly bool _configuredCreation;
+    private readonly IDisposable? _creationConfiguration;
+    private readonly IFileProvider? _creationFileProvider;
+    private int _unbuiltResourcesDisposed;
+    private bool _aspireResourcesTransferred;
 
     /// <summary>
     /// Initializes a testing builder around the composed Aspire builder and its profile activation lifetime.
     /// </summary>
     /// <param name="innerBuilder">The Aspire builder to expose and build exactly once.</param>
     /// <param name="activation">The profile activation lifetime owned by this builder.</param>
+    /// <param name="isPreparing">
+    /// True only for configured factory creation: mutations are permitted but build and disposal are rejected until
+    /// the factory completes preparation. Legacy creation defaults to false.
+    /// </param>
     /// <param name="warningSink">
     /// An optional best-effort destination for compatibility and cleanup warnings. Non-process-fatal sink failures are
     /// suppressed.
@@ -50,11 +68,19 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     internal AppSurfaceAspireProfileTestingBuilder(
         IDistributedApplicationBuilder innerBuilder,
         IAsyncDisposable activation,
-        Action<string>? warningSink = null)
+        Action<string>? warningSink = null,
+        bool isPreparing = false)
     {
         _innerBuilder = innerBuilder;
         _activation = activation;
         _warningSink = warningSink ?? AspireTestingDiagnostics.TraceWarning;
+        _configuredCreation = isPreparing;
+        _state = isPreparing ? Preparing : Active;
+        if (isPreparing)
+        {
+            _creationConfiguration = innerBuilder.Configuration;
+            _creationFileProvider = innerBuilder.Environment.ContentRootFileProvider;
+        }
     }
 
     /// <inheritdoc />
@@ -96,7 +122,8 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         where T : IResource
     {
         EnsureMutable();
-        return GetInnerForAccess().AddResource(resource);
+        var result = GetInnerForAccess().AddResource(resource);
+        return _configuredCreation ? new GuardedResourceBuilder<T>(result, this) : result;
     }
 
     /// <inheritdoc />
@@ -104,7 +131,8 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         where T : IResource
     {
         EnsureMutable();
-        return GetInnerForAccess().CreateResourceBuilder(resource);
+        var result = GetInnerForAccess().CreateResourceBuilder(resource);
+        return _configuredCreation ? new GuardedResourceBuilder<T>(result, this) : result;
     }
 
     /// <summary>
@@ -122,7 +150,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// <param name="cancellationToken">A token checked before and immediately after Aspire's synchronous build.</param>
     /// <returns>The built application. The caller controls starting, stopping, and primary disposal.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The builder is already building, built, faulted, or disposing.
+    /// Factory preparation is unfinished, or the builder is already building, built, faulted, or disposing.
     /// </exception>
     /// <exception cref="ObjectDisposedException">The builder has been disposed.</exception>
     /// <exception cref="OperationCanceledException">The operation is cancelled; any unreturned application is disposed.</exception>
@@ -146,6 +174,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
                 inner.Services,
                 _warningSink);
             application = inner.Build();
+            _aspireResourcesTransferred = true;
             buildServiceProviderLease?.Release();
             cancellationToken.ThrowIfCancellationRequested();
             _application = application;
@@ -213,16 +242,22 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// After a successful build, this method disposes the application before profile activation services. After a
     /// process-fatal build failure, it instead attempts to dispose the captured partial provider before activation.
     /// </remarks>
-    /// <exception cref="InvalidOperationException">A build is in progress.</exception>
+    /// <exception cref="InvalidOperationException">Factory preparation or a build is in progress.</exception>
     public void Dispose()
     {
         var activation = BeginDispose(out var ownsDisposal);
         if (!ownsDisposal)
         {
-            _disposeCompletion.Task.GetAwaiter().GetResult();
+            if (!_insideDisposal.Value)
+            {
+                _disposeCompletion.Task.GetAwaiter().GetResult();
+            }
+
             return;
         }
 
+        var previousDisposalFlow = _insideDisposal.Value;
+        _insideDisposal.Value = true;
         Exception? primaryException = null;
         try
         {
@@ -256,6 +291,15 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
 
             try
             {
+                DisposeUnbuiltAspireResourcesAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                primaryException ??= ex;
+            }
+
+            try
+            {
                 if (activation is IDisposable disposable)
                 {
                     disposable.Dispose();
@@ -272,6 +316,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
         finally
         {
+            _insideDisposal.Value = previousDisposalFlow;
             CompleteDispose(primaryException);
         }
 
@@ -286,16 +331,46 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     /// process-fatal build failure, it instead attempts to dispose the captured partial provider before activation.
     /// </remarks>
     /// <returns>A value task that completes after activation services are disposed.</returns>
-    /// <exception cref="InvalidOperationException">A build is in progress.</exception>
+    /// <exception cref="InvalidOperationException">Factory preparation or a build is in progress.</exception>
     public async ValueTask DisposeAsync()
     {
-        var activation = BeginDispose(out var ownsDisposal);
+        await DisposeCoreAsync(allowPreparation: false).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Transfers a fully composed configured factory result from Preparing to Active.
+    /// </summary>
+    /// <remarks>Only the factory may call this; callback-rejected lifecycle operations leave Preparing unchanged.</remarks>
+    internal void CompletePreparation()
+    {
+        if (Interlocked.CompareExchange(ref _state, Active, Preparing) != Preparing)
+        {
+            throw new InvalidOperationException("Only an unfinished configured factory can complete preparation.");
+        }
+    }
+
+    /// <summary>
+    /// Aborts factory preparation through the internal ownership path and invalidates captured references.
+    /// </summary>
+    /// <returns>A task joining cleanup of unbuilt Aspire resources before activation services.</returns>
+    /// <remarks>The factory preserves its primary error if cleanup fails; public disposal cannot enter this path.</remarks>
+    internal Task AbortPreparationAsync() => DisposeCoreAsync(allowPreparation: true);
+
+    private async Task DisposeCoreAsync(bool allowPreparation)
+    {
+        var activation = BeginDispose(out var ownsDisposal, allowPreparation);
         if (!ownsDisposal)
         {
-            await _disposeCompletion.Task.ConfigureAwait(false);
+            if (!_insideDisposal.Value)
+            {
+                await _disposeCompletion.Task.ConfigureAwait(false);
+            }
+
             return;
         }
 
+        var previousDisposalFlow = _insideDisposal.Value;
+        _insideDisposal.Value = true;
         Exception? primaryException = null;
         try
         {
@@ -329,6 +404,15 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
 
             try
             {
+                await DisposeUnbuiltAspireResourcesAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                primaryException ??= ex;
+            }
+
+            try
+            {
                 if (activation is not null)
                 {
                     await activation.DisposeAsync().ConfigureAwait(false);
@@ -341,6 +425,7 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
         finally
         {
+            _insideDisposal.Value = previousDisposalFlow;
             CompleteDispose(primaryException);
         }
 
@@ -383,13 +468,13 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             throw new ObjectDisposedException(nameof(AppSurfaceAspireProfileTestingBuilder));
         }
 
-        if (state != Active)
+        if (state is not (Active or Preparing))
         {
             throw new InvalidOperationException("Aspire resources can only be changed before the single BuildAsync call.");
         }
     }
 
-    private IAsyncDisposable? BeginDispose(out bool ownsDisposal)
+    private IAsyncDisposable? BeginDispose(out bool ownsDisposal, bool allowPreparation = false)
     {
         while (true)
         {
@@ -398,6 +483,11 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
             {
                 ownsDisposal = false;
                 return null;
+            }
+
+            if (state == Preparing && !allowPreparation)
+            {
+                throw new InvalidOperationException("Cannot dispose the Aspire testing builder while factory preparation is in progress.");
             }
 
             if (state == Building)
@@ -430,6 +520,15 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
 
     private async ValueTask DisposeActivationAfterFailureAsync()
     {
+        try
+        {
+            await DisposeUnbuiltAspireResourcesAsync().ConfigureAwait(false);
+        }
+        catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+        {
+            // Non-fatal cleanup must not replace a build or cancellation failure.
+        }
+
         _innerBuilder = null;
         var activation = Interlocked.Exchange(ref _activation, null);
         if (activation is not null)
@@ -445,8 +544,74 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
         }
     }
 
+    private async Task DisposeUnbuiltAspireResourcesAsync()
+    {
+        if (!_configuredCreation || _aspireResourcesTransferred ||
+            Interlocked.Exchange(ref _unbuiltResourcesDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        var currentFileProvider = _innerBuilder?.Environment.ContentRootFileProvider;
+        Exception? firstError = null;
+        async Task AttemptAsync(object? resource)
+        {
+            try
+            {
+                if (resource is IAsyncDisposable asynchronous)
+                {
+                    await asynchronous.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (resource is IDisposable synchronous)
+                {
+                    synchronous.Dispose();
+                }
+            }
+            catch (Exception error)
+            {
+                firstError ??= error;
+            }
+        }
+
+        await AttemptAsync(_creationConfiguration).ConfigureAwait(false);
+        if (!ReferenceEquals(currentFileProvider, _creationFileProvider))
+        {
+            await AttemptAsync(currentFileProvider).ConfigureAwait(false);
+        }
+
+        await AttemptAsync(_creationFileProvider).ConfigureAwait(false);
+        if (firstError is not null)
+        {
+            ExceptionDispatchInfo.Capture(firstError).Throw();
+        }
+    }
+
+    private sealed class GuardedResourceBuilder<TResource>(IResourceBuilder<TResource> inner, AppSurfaceAspireProfileTestingBuilder owner)
+        : IResourceBuilder<TResource> where TResource : IResource
+    {
+        // Aspire evaluates deferred SDK callbacks after the native application is built. At that
+        // point its native context is needed; preparing, active and terminal references stay guarded.
+        public IDistributedApplicationBuilder ApplicationBuilder =>
+            Volatile.Read(ref owner._state) == Built ? inner.ApplicationBuilder : owner;
+        public TResource Resource => inner.Resource;
+        public IResourceBuilder<TResource> WithAnnotation<TAnnotation>(
+            TAnnotation annotation,
+            ResourceAnnotationMutationBehavior behavior = ResourceAnnotationMutationBehavior.Append)
+            where TAnnotation : IResourceAnnotation
+        {
+            owner.EnsureMutable();
+            inner.WithAnnotation(annotation, behavior);
+            return this;
+        }
+    }
+
     private static void ThrowForBuildState(int state)
     {
+        if (state == Preparing)
+        {
+            throw new InvalidOperationException("Cannot build the Aspire testing builder while factory preparation is in progress.");
+        }
+
         if (state == Disposed)
         {
             throw new ObjectDisposedException(nameof(AppSurfaceAspireProfileTestingBuilder));
