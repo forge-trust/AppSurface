@@ -135,7 +135,7 @@ public abstract class AppSurfaceStartup<TRootModule> : AppSurfaceStartup, IAppSu
     {
         AppSurfacePackageCompatibility.ValidateAssemblies(AppDomain.CurrentDomain.GetAssemblies());
         var hostArgs = NormalizeAllHostsArgument(context.Args);
-        var builder = Host.CreateDefaultBuilder(hostArgs);
+        var builder = context.HostBuilderFactory?.Invoke(hostArgs) ?? Host.CreateDefaultBuilder(hostArgs);
 
         // Support --port flag as a shortcut for --urls (e.g. --port 5001).
         // We parse once here and reuse in both Host and App configuration stages.
