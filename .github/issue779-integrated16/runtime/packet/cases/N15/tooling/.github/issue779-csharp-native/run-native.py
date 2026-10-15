@@ -770,13 +770,13 @@ def validate_n15_archive(values, parser_bytes, generation, build_sha, workflow, 
     completion={'schema':parser.COMPLETION_SCHEMA,'case_generation':generation,'source_commit':SOURCE,
         'source_capture_sha256':CAPTURE_SHA,'reactivation':result['reactivation']}
     parser.validate_completion_evidence(completion,generation)
-    require(all(result[k]==partial[k] for k in parser.PARTIAL_KEYS & parser.FINAL_KEYS), 'n15-partial-final-binding')
+    require(all(result[k]==partial[k] for k in (parser.PARTIAL_KEYS & parser.FINAL_KEYS) - {'schema'}), 'n15-partial-final-binding')
     cleanup=decode_data(values['account-cleanup.json'])
     worker_snapshot_kind=parser.validate_worker_replay_snapshots(values['worker-before.txt'],values['worker-after.txt'],generation,partial['worker']['main_pid'])
     require(cleanup['worker_snapshot_kind']==worker_snapshot_kind, 'n15-worker-snapshot-kind')
     validate_cleanup_receipt(cleanup,partial,measurement,values,generation)
     retained_summary=decode_data(values['n15-record-summary.json'])
-    require(retained_summary==summary and summary.get('generation')==generation and summary.get('phase_sha256')==phase['phase_sha256'], 'n15-record-summary-binding')
+    require(retained_summary==summary and summary.get('case_generation')==generation and summary.get('phase_sha256')==phase['phase_sha256'], 'n15-record-summary-binding')
     validate_request_binding(values['request.json'],values['request-policy.sha256'],generation,workflow,original_deadline_utc)
     return result,summary,values.get('fixture-stdout.log',b'')
 

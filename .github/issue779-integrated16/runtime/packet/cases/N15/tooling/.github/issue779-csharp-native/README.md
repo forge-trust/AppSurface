@@ -127,3 +127,9 @@ After release, worker metadata may remain identical or become an explicit not-fo
 ## Keep the existing transport cap
 
 Run38823615850 rejected before dispatch with INBOUND_REJECTED:file-size-bound. The replay script was34202bytes, above its existing32768byte transport cap. The three identical owner/worker cgroup scans now share one fixed function, invoked at the same three original points. Only the generated owner-or-worker regex and selected-group parameter are shared; FD/link/owner/node/byte checks and double-empty scans remain unchanged. The cap is unchanged. No native result is inferred from this refactor.
+
+## Partial/final schema binding
+
+Run38824345774 completed the actual fixture, replay denial, reference/launcher joins and strict account cleanup (all dispatch commands0). Outer validation rejected n15-partial-final-binding because it compared every intersecting key, including schema. The canonical partial and final records intentionally have different schema labels and each is independently validated by the pinned parser. Only schema is excluded from cross-record value equality; all shared observation fields remain equal and both schema validators still execute. Whole-archive replay validation against actual retained bytes is a detached regression, not a fresh native pass.
+
+The same full-data regression also exposed a stale summary lookup: the pinned summary uses case_generation, while the outer check looked for generation. The check now reads the actual canonical field and still compares the complete retained summary to a freshly parsed one.

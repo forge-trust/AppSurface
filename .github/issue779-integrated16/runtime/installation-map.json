@@ -1657,9 +1657,9 @@
       "sha256": "4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/README.md": {
-      "bytes": 23371,
+      "bytes": 24329,
       "mode": "0644",
-      "sha256": "8401310c88626321d192eba624e9a8f2591ba79b1fadd0238d752bea15628ed4"
+      "sha256": "88d8272013eba9975d2ee25bd98ecdd192ca30213652cde8935ac11714a87133"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/acquire-inbound.sh": {
       "bytes": 26419,
@@ -1709,7 +1709,7 @@
     "packet/cases/N15/tooling/.github/issue779-csharp-native/prepare-ubuntu-runtime.py": {
       "bytes": 9046,
       "mode": "0644",
-      "sha256": "3a875d01af296dc75555f3ef5e21125392f04349045c28d9927d2f5c1be7ede5"
+      "sha256": "b8e5d62f38e4788ae3c4fa8fe8cc94526ea50fe40be809dbad607711fb53778f"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/retain-native.sh": {
       "bytes": 12118,
@@ -1717,9 +1717,9 @@
       "sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/run-native.py": {
-      "bytes": 83615,
+      "bytes": 83635,
       "mode": "0644",
-      "sha256": "c6e1ab049e4bf256eac0bcb4b229ba084f0e05bd19db388f19d3da87ec4de06b"
+      "sha256": "b8d2a51179b9fee75e16db3bdfc74486d02ce244dba19fff12bfdbe2595fe676"
     },
     "packet/cases/N15/tooling/.github/issue779-csharp-native/source-review.json": {
       "bytes": 5581,
@@ -1829,12 +1829,12 @@
     "packet/runtime-packet.json": {
       "bytes": 1532732,
       "mode": "0600",
-      "sha256": "4640b8e4af2cae4babc1fa97fee41c2af9a5a42143390a880057ac7cec7ed43a"
+      "sha256": "6b53120b72a96f011bc42320c37dfe354e18fdaa7c8092f1fc78199e1c139f14"
     },
     "packet_execution.py": {
       "bytes": 41359,
       "mode": "0600",
-      "sha256": "2991eacfa4b3b0ecca97ae2cf42c0053ca76de952383c57db623bde075a5780b"
+      "sha256": "967dde470c48bd977f76fd68f325ccaa8c0c6ce445edab0fe7ee3b9bfcae8007"
     },
     "preparation_process.py": {
       "bytes": 25910,
@@ -1844,10 +1844,10 @@
     "verify_installation.py": {
       "bytes": 7256,
       "mode": "0600",
-      "sha256": "ba0987ab6b607d64bfc53a388ba6391d9650c445bf06738397393f3bc976e3d8"
+      "sha256": "42c474fdcd03bd9789120c1d93ffe94d759634efa3adc914fcda00cc43047361"
     }
   },
-  "packet_sha256": "4640b8e4af2cae4babc1fa97fee41c2af9a5a42143390a880057ac7cec7ed43a",
+  "packet_sha256": "6b53120b72a96f011bc42320c37dfe354e18fdaa7c8092f1fc78199e1c139f14",
   "schema": "issue779-integrated16-native-installation-v1",
   "source_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e"
 }
