@@ -15,6 +15,22 @@ custody closes accounts. Every original worker, server, output, custody and fina
 check still applies. The native N09 cancellation fixture must independently verify those
 facts; successful metadata encoding or local tests alone do not complete that control.
 
+## Control transport and artifact directory failures
+
+[`LinuxRunWorkspace.RequireControlOwnedBy`](LinuxRunWorkspace.cs) rechecks the retained `/`, `/run`,
+generation, worker-control and broker directories, plus the sealed descriptor. The exact policy selection
+comes from `LinuxWorkspaceLayout.RequiresControlInspection`; unknown or reconstructed policy objects reject.
+The [listener](LinuxControlListener.cs) additionally rechecks its retained parent, socket name and metadata,
+endpoint and authenticated owner/worker identities. Original cancellation and deadline checks still apply.
+
+The worker-owned output parent and subject-owned raw-results directory are siblings of the protected control
+path. Their substitution must fail allocation or work inspection while leaving authenticated stop/wait
+available. Full work inspection continues to check every directory. This separation does not clear workspace
+quarantine, reopen work admission, permit account deletion, or turn failed allocation into successful output.
+Closed, quarantined or custody-transferred workspaces still reject control use. The N07 native control must
+independently establish the allocation rejection and physical teardown; portable policy controls alone do
+not establish those Linux outcomes.
+
 ## Ordinary execution and private qualification images
 
 The [C# migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) requires one source graph for ordinary supervisor and worker roles. [EvidenceNativeQualification](../ForgeTrust.AppSurface.Evidence.Contracts/EvidenceNativeQualification.cs) is internal build metadata with a production default of `None`. Ordinary execution creates no N04 root-helper rendezvous, cancellation-stage barrier, N15 stderr frame or wait, stderr phase observer, or root-injected SIGINT. The ordinary worker follows authenticated planning, allocation, activation, cleanup and collection.
