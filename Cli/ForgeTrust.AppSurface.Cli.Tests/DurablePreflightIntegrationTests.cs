@@ -1326,7 +1326,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 continue;
             }
 
-            var result = await fixture.RunAsync(caller, request: request);
+            var result = await fixture.RunAndObserveSessionExitAsync(caller, request);
             Assert.Contains(result.FailedChecks, failure => CategoryOf(failure) == category);
             if (expectedFailurePrefix is not null)
             {
@@ -1370,7 +1370,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 continue;
             }
 
-            var result = await fixture.RunAsync(caller);
+            var result = await fixture.RunAndObserveSessionExitAsync(caller);
             Assert.NotEmpty(result.FailedChecks);
             if (expectedCategory is not null)
             {
@@ -1573,6 +1573,18 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 Options = options,
             };
             return await new DurableSchemaCommandService().PreflightAsync(connection.ConnectionString, request ?? _request, cancellationToken);
+        }
+
+        /// <summary>Observes backend exit after one-way client close within the verifier's existing total budget.</summary>
+        /// <remarks>Only sequential caller checks use this barrier; aggregate zero-session assertions remain unchanged.</remarks>
+        internal async Task<DurablePreflightResult> RunAndObserveSessionExitAsync(
+            string role,
+            DurablePreflightRequest? request = null)
+        {
+            using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+            var result = await RunAsync(role, cancellationToken: completionDeadline.Token, request: request);
+            await WaitForSessionExitAsync($"issue845-{role}", completionDeadline.Token);
+            return result;
         }
 
         internal async Task<CommandException> RunCommandAsync(string role)
