@@ -1,0 +1,24 @@
+{
+  "all16_final_integrated_native_verified": false,
+  "build_stage_execution_clear": true,
+  "capture_sha256": "4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540",
+  "cleared_builder_sha256": "63e5cbaa856e0e0fe99edaa66b9461cf3a0341fdd3ba4f2bbb1b2eb55d56e7f8",
+  "cleared_recipe_sha256": "0927cc47a35be8ed7fd2f3b7c03350ef912f89c37cf38d8aeec6936ad6b18ca4",
+  "files": {
+    "build-fdd.sh": "0927cc47a35be8ed7fd2f3b7c03350ef912f89c37cf38d8aeec6936ad6b18ca4",
+    "integrated16_build.py": "63e5cbaa856e0e0fe99edaa66b9461cf3a0341fdd3ba4f2bbb1b2eb55d56e7f8",
+    "integrated16_build_contract.py": "4e1e774f57d1b878a0985ac218a27490ae4de8da1f21f81cd696dbe6e9c399f8",
+    "run_image.py": "1878f17c3ce4648c9468b4270cc51e7fbad9d6ad163806687b18edb310cd022c",
+    "run_linux_real_child_preflight.py": "8e98c4209946c889a0c25a0bcc0a543e7a67ac220fde8bafd8879e0a76e5d3b5",
+    "test_integrated16_build.py": "f7cd17b19a41d3ef87a826f305ec2b0176ebb88fe9b9ec611250338e52f513b9"
+  },
+  "independent_review_sha256": "1c362b31cf99917be14091f40fd60215d56fdf3701c8c83d2b970d05d3110e5f",
+  "native_credit": false,
+  "native_execution": false,
+  "schema": "issue779-integrated16-execution-review-v1",
+  "scope": "build-only installed harness; no native case dispatch",
+  "source_commit": "5b4ed381badb91de47d793715d05b6ae7737e39e",
+  "source_review_clear": true,
+  "trusted_enabled": false,
+  "whole_harness_review_clear": true
+}

@@ -1,0 +1,8 @@
+test_real_recipe_signals_while_leader_is_still_owned (test_integrated16_build.IntegratedBuildTests.test_real_recipe_signals_while_leader_is_still_owned) ... ok
+test_real_descendant_cleanup_and_combined_pipe_cap (test_integrated16_build.IntegratedBuildTests.test_real_descendant_cleanup_and_combined_pipe_cap) ... ok
+test_combined_log_cap_joins_real_process_group (__main__.CombinedLogCapControl.test_combined_log_cap_joins_real_process_group) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.675s
+
+OK
