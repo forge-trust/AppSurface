@@ -3,7 +3,7 @@ using RazorWireWebExample.Models;
 
 namespace RazorWireWebExample.Controllers;
 
-/// <summary>Runnable consumer proof for sparse nested MVC binding and invalid redisplay.</summary>
+/// <summary>Executable consumer proof for sparse nested MVC binding and invalid redisplay.</summary>
 /// <remarks>This is a bounded equivalent of Skoolit's V4 action/date shape, not live downstream adoption. Rendering keys come from canonical posted markers, not list ordinals or ClientIndex fields.</remarks>
 public sealed class NestedCollectionsController : Controller
 {
