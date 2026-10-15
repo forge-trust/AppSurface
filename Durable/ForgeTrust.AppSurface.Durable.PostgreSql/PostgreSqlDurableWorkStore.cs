@@ -2386,7 +2386,9 @@ internal partial class PostgreSqlDurableWorkStore
         DurableWorkState.FailedTerminal or
         DurableWorkState.CanceledBeforeEffect;
 
-    private static ValueTask ValidateSchemaAsync(
+    /// <summary>Validates schema compatibility and the optional store identity in the exact caller transaction.</summary>
+    /// <remarks>Handoff callers acquire the shared migration fence first; this check does not bind scope or own resources.</remarks>
+    internal static ValueTask ValidateSchemaAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         Guid? expectedStoreId,
@@ -2523,15 +2525,18 @@ internal partial class PostgreSqlDurableWorkStore
         Guid runtimeEpoch,
         CancellationToken cancellationToken)
     {
-        await using (var epochFence = new NpgsqlCommand(
-            "SELECT pg_advisory_xact_lock_shared(@lock_id);",
-            connection,
-            transaction))
-        {
-            epochFence.Parameters.AddWithValue("lock_id", PostgreSqlDurableRuntimeSchemaManager.MigrationAdvisoryLock);
-            await epochFence.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
+        await AcquireEpochFenceAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
+        await ValidateCurrentEpochAsync(connection, transaction, runtimeEpoch, cancellationToken).ConfigureAwait(false);
+    }
 
+    /// <summary>Checks the active epoch after the caller has acquired the shared migration fence.</summary>
+    /// <remarks>Use <see cref="EnsureCurrentEpochAsync"/> unless schema validation requires acquiring the fence first.</remarks>
+    internal static async ValueTask ValidateCurrentEpochAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid runtimeEpoch,
+        CancellationToken cancellationToken)
+    {
         const string sql = """
             SELECT active_runtime_epoch
             FROM appsurface_durable.store_metadata
@@ -2544,6 +2549,20 @@ internal partial class PostgreSqlDurableWorkStore
             throw new InvalidOperationException(
                 $"{DurableProblemCodes.RecoveryEpochRequired}: The configured runtime epoch is not the active durable store epoch. " +
                 "Initialize or rotate the epoch explicitly before accepting or executing Work.");
+        }
+    }
+
+    /// <summary>Acquires the shared migration fence before schema, store and epoch reads in a caller transaction.</summary>
+    internal static async ValueTask AcquireEpochFenceAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using (var epochFence = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock_shared(@lock_id);",
+            connection,
+            transaction))
+        {
+            epochFence.Parameters.AddWithValue("lock_id", PostgreSqlDurableRuntimeSchemaManager.MigrationAdvisoryLock);
+            await epochFence.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
