@@ -4,6 +4,7 @@ using CliFx.Binding;
 using CliFx.Infrastructure;
 using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -161,6 +162,50 @@ public partial class AspireProfileTests
         Assert.Equal("Stop execution", exception.Message);
         Assert.Equal(["dependency", "component"], callOrder);
         A.CallTo(() => dependencyComponent.Generate(A<AspireStartupContext>._, A<IDistributedApplicationBuilder>._)).MustHaveHappenedOnceExactly();
+    }
+
+    [Fact]
+    public void Compose_MetadataFreePathFreeGraphPreservesOrderAndSharedIdentity()
+    {
+        var directory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-profile-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var builder = A.Fake<IDistributedApplicationBuilder>();
+            A.CallTo(() => builder.AppHostDirectory).Returns(directory);
+            var shared = A.Fake<IAspireComponent<IResource>>();
+            var own = A.Fake<IAspireComponent<IResource>>();
+            var sharedResource = A.Fake<IResourceBuilder<IResource>>();
+            var ownResource = A.Fake<IResourceBuilder<IResource>>();
+            var order = new List<string>();
+            AspireStartupContext? observedContext = null;
+            A.CallTo(() => shared.Generate(A<AspireStartupContext>._, builder))
+                .Invokes((AspireStartupContext context, IDistributedApplicationBuilder _) =>
+                {
+                    observedContext = context;
+                    order.Add("dependency");
+                })
+                .Returns(sharedResource);
+            A.CallTo(() => own.Generate(A<AspireStartupContext>._, builder))
+                .Invokes(() => order.Add("own"))
+                .Returns(ownResource);
+            var dependency = new TestProfile(A.Fake<ILogger<TestProfile>>(), [], [shared]);
+            var profile = new TestProfile(A.Fake<ILogger<TestProfile>>(), [dependency, dependency], [shared, own]);
+
+            profile.Compose(builder, CancellationToken.None);
+
+            Assert.Equal(["dependency", "own"], order);
+            Assert.NotNull(observedContext);
+            Assert.Same(sharedResource, observedContext.Resolve(shared));
+            Assert.Same(ownResource, observedContext.Resolve(own));
+            A.CallTo(() => shared.Generate(A<AspireStartupContext>._, builder)).MustHaveHappenedOnceExactly();
+            A.CallTo(() => own.Generate(A<AspireStartupContext>._, builder)).MustHaveHappenedOnceExactly();
+            Assert.Throws<InvalidOperationException>(() => observedContext.GetPathFromRoot("asset"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
