@@ -5,6 +5,7 @@ using FakeItEasy;
 using ForgeTrust.AppSurface.Aspire;
 using ForgeTrust.AppSurface.Aspire.Testing;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
@@ -51,6 +52,56 @@ public sealed class AppSurfaceAspireTestingBuilderTests : IDisposable
         Assert.NotNull(builder.Pipeline);
         Assert.NotNull(builder.FileSystemService);
         Assert.NotNull(builder.UserSecretsManager);
+    }
+
+    [Fact]
+    public async Task CreateAsync_TypedFactoryResolvesSkoolitAssetsFromNestedGitFileRepository()
+    {
+        var temporaryDirectory = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-apphost-paths-{Guid.NewGuid():N}");
+        var repositoryRoot = temporaryDirectory;
+        var appHostDirectory = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.AppHost");
+        var realmPath = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json");
+        var themePath = TestPathUtils.PathUnder(repositoryRoot, "src", "Skoolit.KeycloakTheme", "theme", "skoolit");
+        var gitMarkerPath = TestPathUtils.PathUnder(repositoryRoot, ".git");
+
+        try
+        {
+            Directory.CreateDirectory(appHostDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(realmPath)!);
+            Directory.CreateDirectory(themePath);
+            File.WriteAllText(gitMarkerPath, "gitdir: ../.git/worktrees/apphost-paths");
+            File.WriteAllText(realmPath, "{}");
+            TypedFactoryAppHost.ProjectPath = appHostDirectory;
+            TypedFactoryPathComponent.Reset();
+
+            Assert.True(File.Exists(gitMarkerPath));
+            Assert.False(Directory.Exists(gitMarkerPath));
+            Assert.False(Path.GetFullPath(appHostDirectory).StartsWith(
+                Path.GetFullPath(AppContext.BaseDirectory),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal));
+
+            await using var builder = await AppSurfaceAspireTestingBuilder.CreateAsync<
+                TypedFactoryAppHost,
+                TestModule,
+                TypedFactoryPathProfile>();
+
+            Assert.Equal(Path.GetFullPath(appHostDirectory), builder.AppHostDirectory);
+            Assert.Equal(repositoryRoot, TypedFactoryPathComponent.RepositoryRoot);
+            Assert.Equal(realmPath, TypedFactoryPathComponent.RealmPath);
+            Assert.Equal(themePath, TypedFactoryPathComponent.ThemePath);
+            Assert.True(File.Exists(TypedFactoryPathComponent.RealmPath));
+            Assert.True(Directory.Exists(TypedFactoryPathComponent.ThemePath));
+            Assert.Contains(builder.Resources, resource => resource.Name == "typed-factory-skoolit-paths");
+        }
+        finally
+        {
+            TypedFactoryAppHost.ProjectPath = AppContext.BaseDirectory;
+            TypedFactoryPathComponent.Reset();
+            if (Directory.Exists(temporaryDirectory))
+            {
+                Directory.Delete(temporaryDirectory, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -1745,6 +1796,11 @@ public sealed class TestAppHost
     public static string ProjectPath => AppContext.BaseDirectory;
 }
 
+public sealed class TypedFactoryAppHost
+{
+    public static string ProjectPath { get; set; } = AppContext.BaseDirectory;
+}
+
 public sealed class MissingDirectoryAppHost
 {
     private MissingDirectoryAppHost()
@@ -2320,6 +2376,32 @@ public sealed class TestComponent : IAspireComponent<ParameterResource>
         appBuilder.AddParameter("typed-profile-value");
 }
 
+public sealed class TypedFactoryPathComponent : IAspireComponent<ParameterResource>
+{
+    public static string? RepositoryRoot { get; private set; }
+
+    public static string? RealmPath { get; private set; }
+
+    public static string? ThemePath { get; private set; }
+
+    public static void Reset()
+    {
+        RepositoryRoot = null;
+        RealmPath = null;
+        ThemePath = null;
+    }
+
+    public IResourceBuilder<ParameterResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder)
+    {
+        RepositoryRoot = context.GetPathFromRoot(string.Empty);
+        RealmPath = context.GetPathFromRoot(TestPathUtils.RelativePath("src", "Skoolit.AppHost", "keycloak", "skoolit-realm.json"));
+        ThemePath = context.GetPathFromRoot(TestPathUtils.RelativePath("src", "Skoolit.KeycloakTheme", "theme", "skoolit"));
+        return appBuilder.AddParameter("typed-factory-skoolit-paths");
+    }
+}
+
 public sealed class ThrowingComponent : IAspireComponent<ParameterResource>
 {
     public IResourceBuilder<ParameterResource> Generate(
@@ -2373,6 +2455,23 @@ public sealed partial class TestProfile : AspireProfile
     }
 
     public override string[] PassThroughArgs => ["--profile-setting", "profile-value"];
+
+    public override IEnumerable<IAspireComponent> GetComponents()
+    {
+        yield return _component;
+    }
+}
+
+[Command("typed-factory-paths")]
+public sealed partial class TypedFactoryPathProfile : AspireProfile
+{
+    private readonly TypedFactoryPathComponent _component;
+
+    public TypedFactoryPathProfile(TypedFactoryPathComponent component, ILogger<TypedFactoryPathProfile> logger)
+        : base(logger)
+    {
+        _component = component;
+    }
 
     public override IEnumerable<IAspireComponent> GetComponents()
     {

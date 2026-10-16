@@ -258,7 +258,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
             Environments.Production,
             exposeHealthRoutes: true,
             exposeRouteInspector: true,
-            configureOperatorReadPolicy: true);
+            configureOperatorReadPolicy: true,
+            startupMode: AppSurfaceDocsHarvestStartupMode.Blocking);
 
         using var anonymous = await host.Client.GetAsync(requestPath);
         using var forbiddenRequest = CreateHealthRequest(requestPath, "alice", "docs.other");
@@ -2589,7 +2590,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
         bool configureOperatorReadPolicy = false,
         bool configureFallbackPolicy = false,
         bool registerPolicy = true,
-        bool registerAuthorizationMiddleware = true)
+        bool registerAuthorizationMiddleware = true,
+        AppSurfaceDocsHarvestStartupMode startupMode = AppSurfaceDocsHarvestStartupMode.Background)
     {
         var root = new HealthAuthorizationRootModule
         {
@@ -2609,6 +2611,8 @@ public class AppSurfaceDocsWebModuleRegressionTests
             {
                 var values = new Dictionary<string, string?>
                 {
+                    // Select Blocking for probes that require a settled harvest rather than its active progress page.
+                    ["AppSurfaceDocs:Harvest:StartupMode"] = startupMode.ToString()
                 };
                 if (configureHealthPolicy)
                 {

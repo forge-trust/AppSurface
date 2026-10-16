@@ -1,0 +1,4 @@
+<!-- appsurface:unreleased-entry section="migration-watch" -->
+### AppHost repository-relative asset paths — [issue #865](https://github.com/forge-trust/AppSurface/issues/865)
+
+`AspireStartupContext` now anchors default repository discovery at `builder.AppHostDirectory` and uses the nearest `.git` directory or file, including linked-worktree markers. Relative explicit `applicationRoot` values that were previously accepted now fail validation; supply a nonblank fully qualified path when constructing a context directly. When no root can be discovered, repository-path requests now fail with a helpful error instead of returning a silent relative path, while path-free profile and factory use remains available. Follow the [canonical repository-relative assets guide](../../Aspire/ForgeTrust.AppSurface.Aspire/README.md#repository-relative-assets) for asset checks and recovery. This behavior change is covered by the [pre-1.0 upgrade policy](../upgrade-policy.md).
