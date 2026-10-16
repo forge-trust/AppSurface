@@ -112,18 +112,26 @@ def read_output_observation(raw):
  require(sum(p['received_bytes'] for p in observed['pairs'])==observed['received_bytes'],'actual-byte-reconciliation')
  return observed
 
-def sample_producer(unit,descriptor,end):
+def sample_producer(unit,descriptor,end,pending=None):
  facts=show(unit,end);pid=int(facts.get('MainPID','0'))
  if not pid:return None
  try:
-  fields=dict(line.split(':',1) for line in (Path('/proc')/str(pid)/'status').read_text().splitlines() if ':' in line)
+  process=Path('/proc')/str(pid)
+  before=(process/'stat').read_text().rsplit(')',1)[1].split()[19]
+  fields=dict(line.split(':',1) for line in (process/'status').read_text().splitlines() if ':' in line)
   uids=[int(x) for x in fields['Uid'].split()];gids=[int(x) for x in fields['Gid'].split()]
-  groups=(Path('/proc')/str(pid)/'cgroup').read_text().splitlines()
+  groups=(process/'cgroup').read_text().splitlines()
+  after=(process/'stat').read_text().rsplit(')',1)[1].split()[19]
  except FileNotFoundError:return None
- require(uids==[descriptor['subject_uid']]*4 and gids==[descriptor['subject_gid']]*4,'actual-producer-identity')
- require(groups==['0::/system.slice/'+unit],'actual-producer-cgroup')
- require(facts['User']==str(descriptor['subject_uid']) and facts['Group']==str(descriptor['subject_gid']),'actual-unit-producer-identities')
- return {'pid':pid,'uid':uids[0],'gid':gids[0],'cgroup':groups[0][3:]}
+ matches=(uids==[descriptor['subject_uid']]*4 and gids==[descriptor['subject_gid']]*4
+  and groups==['0::/system.slice/'+unit] and before==after
+  and facts['User']==str(descriptor['subject_uid']) and facts['Group']==str(descriptor['subject_gid']))
+ if not matches:
+  if pending is not None:pending.update({'pid':pid,'uids':uids,'gids':gids,'cgroup_matches':groups==['0::/system.slice/'+unit],'same_starttime':before==after})
+  return None # Never acceptance: keep bounded observation pending until actual credentials bind.
+ final=show(unit,end)
+ if final.get('MainPID')!=str(pid) or final.get('ExecMainPID')!=str(pid):return None
+ return {'pid':pid,'uid':uids[0],'gid':gids[0],'starttime_ticks':int(before),'cgroup':groups[0][3:]}
 
 def verify_sealed_output(root):
  require(root.is_dir() and not root.is_symlink(),'sealed-output-root')
@@ -201,7 +209,7 @@ def execute_case(args,case,end,receipt):
       if raw.exists() and raw.stat().st_gid!=0:result['observed_results_gid']=raw.stat().st_gid
      descriptor_path=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
      if producer_observed is None and descriptor_path.is_file():
-      producer_observed=sample_producer(units[2],json.loads(descriptor_path.read_bytes()),case_end)
+      producer_observed=sample_producer(units[2],json.loads(descriptor_path.read_bytes()),case_end,result.setdefault('pending_producer_identity',{}))
      entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
      if case=='cancel' and not cancel_sent and producer_observed is not None:
       if entered.is_file() and entered.read_bytes()==b'cancel':

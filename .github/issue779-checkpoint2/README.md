@@ -29,3 +29,7 @@ The private driver uses umask077 for retained evidence. Fresh `/run` staging par
 ## Failed producer diagnostics
 
 When the C# producer has actually settled, failure-only prefix retention may create root-private `stdout.prefix` and `stderr.prefix` under its fixed diagnostic generation. The native driver copies only those two root-owned0600/single-link files (at most1MiB each) from a validated root-owned0700 directory, without printing their contents. The copy is diagnostic only and cannot turn failed RUN, custody or cleanup into a passing case. Missing diagnostics remain missing evidence.
+
+## Independent process sampling
+
+The harness samples actual producer UID/GID tuples, cgroup and kernel start time before granting observation credit, then rechecks the manager PID. A missing or nonmatching sample remains pending within the same finite case deadline; it cannot authorize cancellation or make a case pass. Closed last-pending identity facts are retained for diagnosis. This avoids terminating the original C# run merely because a concurrent observation saw an incomplete activation transition. The C# owner's own independent identity guards remain unchanged.

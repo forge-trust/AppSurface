@@ -28,6 +28,51 @@ class DriverControls(unittest.TestCase):
   self.assertNotIn('Trusted',json.dumps(native.policy()));self.assertEqual(5,len(native.FIXED))
   self.assertEqual('HOME=/nonexistent',native.FIXED[1])
 
+class ProducerSamplingControls(unittest.TestCase):
+ def sample(self,*,uid=1001,gid=1002,proc_uids=None,proc_gids=None,cgroup=None,
+            starts=(7654,7654),manager_pids=('4321','4321'),pending=None):
+  from unittest.mock import patch
+  unit='appsurface-evidence-producer-test.service';pid='4321'
+  descriptor={'subject_uid':uid,'subject_gid':gid}
+  expected_cgroup='/system.slice/'+unit
+  facts={'MainPID':manager_pids[0],'ExecMainPID':pid,'User':str(uid),'Group':str(gid),
+         'ControlGroup':expected_cgroup}
+  final=dict(facts,MainPID=manager_pids[1])
+  status='Name:\tdotnet\nUid:\t'+' '.join(map(str,proc_uids or [uid]*4))+'\nGid:\t'+' '.join(map(str,proc_gids or [gid]*4))+'\n'
+  group_text='0::'+(cgroup if cgroup is not None else expected_cgroup)+'\n'
+  stat_reads=iter(starts)
+  def read_text(path,*args,**kwargs):
+   value=str(path)
+   if value.endswith('/stat'):
+    start=next(stat_reads)
+    return pid+' (producer process) S '+' '.join(['0']*18+[str(start)])
+   if value.endswith('/status'):return status
+   if value.endswith('/cgroup'):return group_text
+   raise AssertionError('unexpected proc read')
+  with patch.object(native,'show',side_effect=[facts,final]) as mocked_show:
+   with patch.object(Path,'read_text',autospec=True,side_effect=read_text):
+    result=native.sample_producer(unit,descriptor,1,pending)
+  return result,mocked_show
+
+ def test_returns_only_stable_exact_producer_identity_after_manager_resample(self):
+  result,show=self.sample()
+  self.assertEqual({'pid':4321,'uid':1001,'gid':1002,'starttime_ticks':7654,
+                    'cgroup':'/system.slice/appsurface-evidence-producer-test.service'},result)
+  self.assertEqual(2,show.call_count)
+
+ def test_wrong_process_tuple_stays_pending_with_closed_observation_facts(self):
+  pending={}
+  result,show=self.sample(proc_uids=[1001,1001,1001,2001],pending=pending)
+  self.assertIsNone(result)
+  self.assertEqual(1,show.call_count)
+  self.assertEqual({'pid':4321,'uids':[1001,1001,1001,2001],'gids':[1002]*4,
+                    'cgroup_matches':True,'same_starttime':True},pending)
+
+ def test_manager_pid_transition_is_not_returned_as_producer_acceptance(self):
+  result,show=self.sample(manager_pids=('4321','9876'))
+  self.assertIsNone(result)
+  self.assertEqual(2,show.call_count)
+
 class PackageRowsControls(unittest.TestCase):
  def setUp(self):
   import base64,copy,tempfile,time
