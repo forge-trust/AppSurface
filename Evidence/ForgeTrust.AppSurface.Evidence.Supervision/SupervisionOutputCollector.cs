@@ -120,6 +120,16 @@ internal sealed class SupervisionOutputCollector
     /// </remarks>
     internal async Task<SupervisionOutputReceipt> CollectAsync(
         Stream stdout, Stream stderr, CancellationToken cancellationToken)
+        => await CollectCoreAsync(stdout, stderr, null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Collects one already registered pair against the original run-wide received-byte ledger.</summary>
+    /// <remarks>Only the run ledger calls this after retaining the original collection task, before dispatch.</remarks>
+    internal Task<SupervisionOutputReceipt> CollectRegisteredAsync(Stream stdout, Stream stderr,
+        SupervisionRunOutputBudget budget, CancellationToken cancellationToken)
+        => CollectCoreAsync(stdout, stderr, budget, cancellationToken);
+
+    private async Task<SupervisionOutputReceipt> CollectCoreAsync(
+        Stream stdout, Stream stderr, SupervisionRunOutputBudget? budget, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(stdout);
         ArgumentNullException.ThrowIfNull(stderr);
@@ -128,8 +138,9 @@ internal sealed class SupervisionOutputCollector
             throw new ArgumentException("Two distinct readable output streams are required.");
         }
 
-        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var state = new CollectionState(_receivedByteLimit, stop);
+        using var stop = budget is null ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.StopToken);
+        var state = new CollectionState(_receivedByteLimit, stop, budget);
         // Independent dispatch also owns a Stream implementation that stalls before returning its ValueTask.
         var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token, null, null, null), CancellationToken.None);
         var stderrTask = Task.Run(() => PumpAsync(stderr, state, stop.Token, _cancellationPhase, _descendant, _n07), CancellationToken.None);
@@ -203,7 +214,7 @@ internal sealed class SupervisionOutputCollector
         return new SupervisionOutputStreamReceipt(receivedBytes, ImmutableArray.CreateRange(prefix.ToArray()), eof, failure);
     }
 
-    private sealed class CollectionState(long limit, CancellationTokenSource stop)
+    private sealed class CollectionState(long limit, CancellationTokenSource stop, SupervisionRunOutputBudget? budget)
     {
         private long _receivedBytes;
         private int _failure;
@@ -212,13 +223,14 @@ internal sealed class SupervisionOutputCollector
 
         internal long ReceivedBytes => Interlocked.Read(ref _receivedBytes);
         internal SupervisionOutputFailure Failure => (SupervisionOutputFailure)Volatile.Read(ref _failure);
-        internal bool QuotaExceeded => Volatile.Read(ref _quotaExceeded) != 0;
+        internal bool QuotaExceeded => Volatile.Read(ref _quotaExceeded) != 0 || budget?.QuotaExceeded == true;
         internal bool StopSignalFailed => Volatile.Read(ref _stopSignalFailed) != 0;
 
         internal bool Charge(int count)
         {
             // Count actual bytes even when the sibling has already failed or this charge crosses the limit.
             var total = Interlocked.Add(ref _receivedBytes, count);
+            var runAccepted = budget?.Charge(count) ?? true;
             if (total > limit)
             {
                 Volatile.Write(ref _quotaExceeded, 1);
@@ -226,7 +238,7 @@ internal sealed class SupervisionOutputCollector
                 return false;
             }
 
-            return Failure == SupervisionOutputFailure.None;
+            return runAccepted && Failure == SupervisionOutputFailure.None;
         }
 
         internal void Latch(SupervisionOutputFailure failure) =>
@@ -235,6 +247,8 @@ internal sealed class SupervisionOutputCollector
         internal void Stop(SupervisionOutputFailure failure)
         {
             Latch(failure);
+            budget?.Fail(failure == SupervisionOutputFailure.QuotaExceeded
+                ? SupervisionRunOutputFailure.QuotaExceeded : SupervisionRunOutputFailure.PairFailed);
             try
             {
                 stop.Cancel();

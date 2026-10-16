@@ -210,6 +210,44 @@ the independent unit-stop path causes it to settle. The immutable receipt distin
 cancellation, overflow and byte accounting. Two EOFs and an error-free receipt establish stream completion
 only. The run owner must share or aggregate quotas across all process pairs before final completion.
 
+### Run-wide accounting primitive
+
+[`SupervisionRunOutputBudget`](SupervisionRunOutputBudget.cs) is the checkpoint-two internal
+ledger for several real stream pairs. Its constructor accepts one positive aggregate limit,
+at most the existing16MiB contract. `CollectAsync(collector, stdout, stderr, token)` registers
+the original task and both stream references before pump dispatch. Collector/stream reuse,
+closed registration and more than64 pairs reject before reading the rejected streams. The
+existing collector still supports its standalone pair API for account utilities and callers
+that do not participate in a run ledger.
+
+Every actual returned read charges both its pair counter and the shared ledger, including
+bytes returned after a sibling failure. Quota, read and cancellation failures stop registered
+siblings without detaching ignored reads. `CompleteAsync` irreversibly closes registration,
+joins the entire original task set and then reconciles every pair's byte sum against the
+aggregate. Repeated completion calls share the same task. An earlier successful pair receipt
+cannot prove final run success when another pair later fails. `Dispose` rejects until explicit
+completion has joined; it does not close caller-owned streams or terminate any process.
+
+This primitive is not yet wired to the native worker/subject/reporter composition. All three
+must share the same instance before the migration can claim aggregate output enforcement.
+In particular, root worker stdout does not include privately captured ReportGenerator output.
+This API creates neither process ownership nor an artifact/admission capability; the owning
+root lifecycle must independently stop and join native units and preserve its original deadline.
+
+## Retained producer reports
+
+[`LinuxRetainedReportSet`](LinuxRetainedReportSet.cs) supplies the first internal report-file
+primitive for checkpoint two. The [report reader reference](report-custody.md) describes its
+root-selection metadata, mandatory descriptor-relative Linux opens, exact inventory, ownership
+and link checks, byte limits, hashing, monotonic chunks and sticky failure/closure behavior.
+Its separate portable read-engine seam does not construct a root report set.
+
+The caller must eventually supply the root-selected results tree only after authentic producer
+group and pump joins. This packet does not connect the reader to a server operation or grant
+collection authority from a Boolean, supplied inventory or digest. Root account retention,
+exclusive consumer writes, the real reporter and numerical gate remain integration obligations.
+The existing final worker evidence custody retains its separate lifecycle and policy.
+
 ## Linux systemd backend
 
 `LinuxSystemdBackend.ConnectAsync` requires root on Linux x64 and uses the fixed system bus socket
