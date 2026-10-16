@@ -10,6 +10,8 @@ The [unit recipe](LinuxProducerUnit.cs) generates `appsurface-evidence-producer-
 
 The run response omits raw stdout/stderr while retaining exact charged-byte and actual truncation data; root-owned prefixes stay private. All actual pump reads use the shared [run output budget](SupervisionRunOutputBudget.cs). A successful pipe receipt is not physical exit. Any failed start, monitor, stop, group check, output/pump join or final binding remains unsuccessful. Failed cleanup quarantines the account-associated storage and identities; no boolean or detached JSON can release them.
 
+After physical settlement, a transport failure or a normal nonzero test exit may retain the original joined producer prefixes through [the private diagnostic writer](LinuxProducerFailureOutput.cs). Both paths require the same original owner, teardown allowance and bounded stream receipts; neither opens another pipe reader. Diagnostic failure preserves the original outcome. A nonzero normal exit still returns its actual code to the restricted producer, while a failed process/transport guard still rejects with ASEVD410. The private state file distinguishes those paths without publishing raw subject output.
+
 This internal native path is described with the [coverage execution and custody ordering](coverage-execution.md). Source tests of recipe and parser data are not native controls or consumer proof. Genuine Linux coverage, cancellation, quota and artifact-failure controls remain the checkpoint exit requirements; Trusted enrollment remains closed.
 
 ## Bounded runtime concurrency and exit transitions

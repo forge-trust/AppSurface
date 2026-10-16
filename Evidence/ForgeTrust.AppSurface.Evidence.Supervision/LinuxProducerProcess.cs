@@ -303,22 +303,24 @@ internal sealed class LinuxProducerProcess
                 && Volatile.Read(ref _pumpJoined) != 0 && _stoppedTerminal is not null)
             Interlocked.Exchange(ref _physicallySettled, 1);
 
-        if (Volatile.Read(ref _failed) != 0 || Volatile.Read(ref _cleanupFailed) != 0
-            || _output is not { Successful: true } || _outputBudget.QuotaExceeded || normalExitCode is null)
+        var failed = Volatile.Read(ref _failed) != 0 || Volatile.Read(ref _cleanupFailed) != 0
+            || _output is not { Successful: true } || _outputBudget.QuotaExceeded || normalExitCode is null;
+        if ((failed || normalExitCode != 0) && PhysicallySettled && _output is not null)
+        {
+            try { LinuxProducerFailureOutput.Retain(_input, _owner, _output,
+                failedStage ?? "settlement", _normalTerminal, _stoppedTerminal, _pending.Snapshot, cleanupToken); }
+            catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
+                and not StackOverflowException and not AccessViolationException) { }
+        }
+        if (failed)
         {
             _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
-            if (PhysicallySettled && _output is not null)
-            {
-                try { LinuxProducerFailureOutput.Retain(_input, _owner, _output,
-                    failedStage ?? "settlement", _normalTerminal, _stoppedTerminal, _pending.Snapshot, cleanupToken); }
-                catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
-                    and not StackOverflowException and not AccessViolationException) { }
-            }
             throw LinuxSystemdBackend.InvalidControl();
         }
 
-        return new EvidenceRestrictedProcessResult(normalExitCode.Value, string.Empty, string.Empty,
-            _output.DiscardedBytes != 0, _output.ReceivedBytes);
+        var completedOutput = _output ?? throw LinuxSystemdBackend.InvalidControl();
+        return new EvidenceRestrictedProcessResult(normalExitCode ?? throw LinuxSystemdBackend.InvalidControl(), string.Empty, string.Empty,
+            completedOutput.DiscardedBytes != 0, completedOutput.ReceivedBytes);
     }
 
     private async Task<LinuxUnitProperties> ObserveRunningAsync(CancellationToken token)

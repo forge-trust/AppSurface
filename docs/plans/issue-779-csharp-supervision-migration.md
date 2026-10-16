@@ -651,3 +651,22 @@ The ordinary source build passed **1,366 Supervision tests and 198 focused CLI t
 The four local compile-matrix attempts also produced passing TRXs for all eleven private variants and a final ordinary `None` build. These are source/metadata controls, not real systemd qualification. Attempts 1, 3 and 4 retained wrapper exit one with `PermissionError` during final process-group inspection even though their test commands returned zero; attempt 2 completed normally. Later selected-group observations found no remaining processes, but do not rewrite the original finalization failures or establish their earlier cleanup checkpoint. Preserve those failed receipts when assembling the final validation record.
 
 The subsequent changes to the selector return documentation and this plan contain no executable behavior change. The checkpoint-one exit gate remains **all sixteen genuine Linux controls on one final integrated revision with zero skipped native cases**. Producer/artifact custody, application/SDK parity, Python runtime retirement, the unchanged coverage gate and a validated draft PR remain required.
+
+### Checkpoint-two native task-limit diagnosis — 2026-10-16
+
+[Run38855271604](https://github.com/forge-trust/AppSurface/actions/runs/38855271604)
+passed1,626 supervision and121 focused CLI controls, then failed its normal coverage case at worker
+completion. The actual producer identity bound; both original output pairs reached EOF without pump
+errors. The selected producer cgroup still reached64 tasks and recorded two limit events with
+`DOTNET_PROCESSOR_COUNT=1`; observed memory peaked at172,617,728 bytes with zero OOM events.
+No positive numerical coverage or native checkpoint completion follows from this run.
+
+The next diagnostic change retains the same original joined prefixes for a normal nonzero test exit,
+as well as infrastructure failures. The private harness adds bounded process/thread role snapshots
+under the already authenticated cgroup; these are observations and never admission or cleanup facts.
+The unchanged limits remain64 tasks and1GiB. Local source validation passed1,626/1,626 with zero
+compiler diagnostics after correcting one nullable-flow warning; the earlier warning receipt is retained.
+The cancellation fixture now closes and atomically publishes its marker before its infinite wait, so
+external cancellation cannot depend on a buffered writer that never disposes. Additional cleanup and
+ignored-cancellation fixture branches are prepared but remain unrun and outside the current four-case
+native inventory until their real kernel/cleanup assertions are integrated.

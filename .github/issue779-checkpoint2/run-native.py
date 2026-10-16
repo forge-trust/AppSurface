@@ -4,6 +4,11 @@ import argparse,base64,datetime,hashlib,json,os,platform,re,shutil,stat,subproce
 
 LIMIT=1800
 MAX_LOG=4*1024*1024
+MAX_CGROUP_PROCS_BYTES=4096
+MAX_CGROUP_PROCESSES=32
+MAX_PROCESS_THREADS=8192
+MAX_TOTAL_THREADS=8192
+PROCESS_SAMPLE_SECONDS=.015
 ENV_NAMES=['DOTNET_STARTUP_HOOKS','DOTNET_ADDITIONAL_DEPS','DOTNET_SHARED_STORE','DOTNET_ROOT','DOTNET_ROOT_X64','DOTNET_HOST_PATH','DOTNET_ROLL_FORWARD','DOTNET_ROLL_FORWARD_TO_PRERELEASE','DOTNET_MULTILEVEL_LOOKUP','CORECLR_ENABLE_PROFILING','CORECLR_PROFILER','CORECLR_PROFILER_PATH','CORECLR_PROFILER_PATH_64','COR_ENABLE_PROFILING','COR_PROFILER','COR_PROFILER_PATH','COMPlus_ReadyToRun','COMPlus_ZapDisable']
 FIXED=['PATH=/usr/bin:/bin','HOME=/nonexistent','LANG=C.UTF-8','DOTNET_CLI_TELEMETRY_OPTOUT=1','DOTNET_CLI_HOME=/tmp']
 
@@ -133,7 +138,98 @@ def sample_producer(unit,descriptor,end,pending=None):
  if final.get('MainPID')!=str(pid) or final.get('ExecMainPID')!=str(pid):return None
  return {'pid':pid,'uid':uids[0],'gid':gids[0],'starttime_ticks':int(before),'cgroup':groups[0][3:]}
 
-def sample_cgroup_counters(unit,samples):
+def parse_cgroup_pids(raw):
+ if len(raw)>MAX_CGROUP_PROCS_BYTES:return None
+ try:lines=raw.decode('ascii').splitlines()
+ except UnicodeDecodeError:return None
+ if not lines or len(lines)>MAX_CGROUP_PROCESSES:return None
+ if any(not line.isdecimal() or len(line)>10 or int(line)==0 for line in lines):return None
+ pids=[int(line) for line in lines]
+ return tuple(pids) if len(set(pids))==len(pids) else None
+
+def parse_proc_starttime(raw,pid):
+ try:
+  text=raw.decode('ascii');prefix,suffix=text.rsplit(')',1);head,delimiter,comm=prefix.partition(' (');fields=suffix.split()
+  if head!=str(pid) or delimiter!=' (' or len(comm)>256 or not suffix.startswith(' ') or len(fields)<=19 or not fields[19].isdecimal():return None
+  return int(fields[19])
+ except (UnicodeDecodeError,ValueError):return None
+
+def parse_proc_status(raw,expected_uid,expected_gid):
+ try:fields=dict(line.split(':',1) for line in raw.decode('ascii').splitlines() if ':' in line)
+ except UnicodeDecodeError:return None
+ try:
+  uids=[int(v) for v in fields['Uid'].split()];gids=[int(v) for v in fields['Gid'].split()]
+  threads=int(fields['Threads'])
+ except (KeyError,ValueError):return None
+ if uids!=[expected_uid]*4 or gids!=[expected_gid]*4:return None
+ if not 1<=threads<=MAX_PROCESS_THREADS:return None
+ return threads
+
+def process_role(raw):
+ roles={b'dotnet.dll':'dotnet.dll',b'MSBuild.dll':'MSBuild.dll',b'VBCSCompiler.dll':'VBCSCompiler.dll',
+  b'csc.dll':'csc.dll',b'vstest.console.dll':'vstest.console.dll',b'datacollector.dll':'datacollector.dll',b'testhost.dll':'testhost.dll'}
+ for arg in raw.split(b'\0'):
+  basename=arg.rsplit(b'/',1)[-1]
+  if basename in roles:return roles[basename]
+ return 'other'
+
+def _bounded_proc_read(path,limit,deadline):
+ if time.monotonic()>=deadline:return None
+ with path.open('rb') as source:raw=source.read(limit+1)
+ if len(raw)>limit:return None
+ return raw
+
+def sample_process_tree(unit,identity,end):
+ if not isinstance(identity,dict) or type(identity.get('uid')) is not int or type(identity.get('gid')) is not int:return None
+ uid=identity['uid'];gid=identity['gid'];selected_pid=identity.get('pid')
+ if type(selected_pid) is not int or identity.get('cgroup')!='/system.slice/'+unit:return None
+ started=time.monotonic();deadline=min(end,started+PROCESS_SAMPLE_SECONDS) if end is not None else started+PROCESS_SAMPLE_SECONDS
+ if started>=deadline:return None
+ root=Path('/sys/fs/cgroup/system.slice')/unit
+ raw=_bounded_proc_read(root/'cgroup.procs',MAX_CGROUP_PROCS_BYTES,deadline)
+ pids=parse_cgroup_pids(raw) if raw is not None else None
+ if pids is None or selected_pid not in pids:return None
+ rows=[]
+ for pid in pids:
+  if time.monotonic()>=deadline:return None
+  process=Path('/proc')/str(pid)
+  before=_bounded_proc_read(process/'stat',4096,deadline)
+  status=_bounded_proc_read(process/'status',8192,deadline)
+  cgroup=_bounded_proc_read(process/'cgroup',4096,deadline)
+  cmdline=_bounded_proc_read(process/'cmdline',4096,deadline)
+  after=_bounded_proc_read(process/'stat',4096,deadline)
+  if any(value is None for value in (before,status,cgroup,cmdline,after)):return None
+  start_before=parse_proc_starttime(before,pid);start_after=parse_proc_starttime(after,pid)
+  threads=parse_proc_status(status,uid,gid)
+  try:groups=cgroup.decode('ascii').splitlines()
+  except UnicodeDecodeError:return None
+  if start_before is None or start_before!=start_after or threads is None or groups!=['0::/system.slice/'+unit]:return None
+  rows.append({'pid':pid,'starttime_ticks':start_before,'threads':threads,'role':process_role(cmdline)})
+ if time.monotonic()>=deadline:return None
+ final=_bounded_proc_read(root/'cgroup.procs',MAX_CGROUP_PROCS_BYTES,deadline)
+ final_pids=parse_cgroup_pids(final) if final is not None else None
+ if final_pids is None or set(final_pids)!=set(pids):return None
+ total=sum(row['threads'] for row in rows)
+ if total>MAX_TOTAL_THREADS:return None
+ by_role={}
+ for row in rows:by_role[row['role']]=by_role.get(row['role'],0)+row['threads']
+ return {'total_threads':total,'by_role_threads':by_role,'processes':rows}
+
+def _record_process_facts(unit,samples,identity,end):
+ state=samples.setdefault('process_facts',{'count':0,'last_total_threads':None,'peak_total_threads':None,
+  'last_by_role_threads':{},'peak_by_role_threads':{},'peak_snapshot':None,'last_sample_available':False})
+ state['last_sample_available']=False;state['last_total_threads']=None;state['last_by_role_threads']={}
+ try:facts=sample_process_tree(unit,identity,end)
+ except Exception:facts=None # Diagnostics are best-effort and never control actual execution.
+ if facts is None:return
+ state['count']+=1;state['last_sample_available']=True;state['last_total_threads']=facts['total_threads']
+ state['last_by_role_threads']=facts['by_role_threads']
+ for role,value in facts['by_role_threads'].items():
+  state['peak_by_role_threads'][role]=max(state['peak_by_role_threads'].get(role,0),value)
+ if state['peak_total_threads'] is None or facts['total_threads']>state['peak_total_threads']:
+  state['peak_total_threads']=facts['total_threads'];state['peak_snapshot']=facts['processes']
+
+def sample_cgroup_counters(unit,samples,producer_identity=None,end=None):
  root=Path('/sys/fs/cgroup/system.slice')/unit
  fields={}
  for name in ['pids.current','pids.max','pids.events','memory.current','memory.max','memory.events']:
@@ -153,6 +249,7 @@ def sample_cgroup_counters(unit,samples):
    if type(fields.get(name)) is int:samples[name+'.peak']=max(samples.get(name+'.peak',0),fields[name])
   for name in ['pids.events','memory.events']:
    for key,value in fields.get(name,{}).items():samples[name+'.'+key]=max(samples.get(name+'.'+key,0),value)
+ if producer_identity is not None:_record_process_facts(unit,samples,producer_identity,end)
 
 def verify_sealed_output(root):
  require(root.is_dir() and not root.is_symlink(),'sealed-output-root')
@@ -232,7 +329,7 @@ def execute_case(args,case,end,receipt):
      if producer_observed is None and descriptor_path.is_file():
       producer_observed=sample_producer(units[2],json.loads(descriptor_path.read_bytes()),case_end,result.setdefault('pending_producer_identity',{}))
      if producer_observed is not None:
-      try:sample_cgroup_counters(units[2],result.setdefault('producer_cgroup_counters',{}))
+      try:sample_cgroup_counters(units[2],result.setdefault('producer_cgroup_counters',{}),producer_observed,case_end)
       except (OSError,ValueError,RuntimeError):result['counter_sample_failed']=True
      entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
      if case=='cancel' and not cancel_sent and producer_observed is not None:

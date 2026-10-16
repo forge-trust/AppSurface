@@ -161,4 +161,97 @@ class KernelCounterControls(unittest.TestCase):
    with self.assertRaises(RuntimeError):native.sample_cgroup_counters('fixed.service',samples)
   self.assertNotIn('private-canary',json.dumps(samples));self.assertEqual(2,samples['count'])
 
+class ProcessThreadSnapshotControls(unittest.TestCase):
+ def test_cgroup_pid_parser_is_bounded_unique_and_order_independent(self):
+  self.assertEqual((12,34),native.parse_cgroup_pids(b'12\n34\n'))
+  self.assertIsNone(native.parse_cgroup_pids(b'12\n12\n'))
+  self.assertIsNone(native.parse_cgroup_pids(b'0\n'))
+  self.assertIsNone(native.parse_cgroup_pids(b'12\nprivate-canary\n'))
+  self.assertIsNone(native.parse_cgroup_pids(b'1'* (native.MAX_CGROUP_PROCS_BYTES+1)))
+  self.assertIsNone(native.parse_cgroup_pids(b'\n'.join(str(i).encode() for i in range(1,34))))
+
+ def test_proc_starttime_uses_final_comm_delimiter_and_rejects_bad_identity(self):
+  self.assertEqual(987654,native.parse_proc_starttime(b'4321 (dotnet (MSBuild)) S '+b' '.join([b'0']*18+[b'987654']),4321))
+  self.assertIsNone(native.parse_proc_starttime(b'4322 (dotnet) S '+b' '.join([b'0']*18+[b'987654']),4321))
+  self.assertIsNone(native.parse_proc_starttime(b'4321 (dotnet S '+b' '.join([b'0']*20),4321))
+
+ def test_status_accepts_only_exact_four_uid_gid_fields_and_bounded_threads(self):
+  def status(uid=1001,gid=1002,threads=7):
+   return (f'Name:\tdotnet\nUid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\nThreads:\t{threads}\n').encode()
+  self.assertEqual(7,native.parse_proc_status(status(),1001,1002))
+  self.assertIsNone(native.parse_proc_status(status(uid=2001),1001,1002))
+  self.assertIsNone(native.parse_proc_status(status(threads=native.MAX_PROCESS_THREADS+1),1001,1002))
+  self.assertIsNone(native.parse_proc_status(b'Uid: 1001 1001 1001 1001\nGid: 1002 1002 1002 1002\n',1001,1002))
+
+ def test_role_projection_returns_only_closed_executable_basenames(self):
+  self.assertEqual('MSBuild.dll',native.process_role(b'/sdk/dotnet\0/sdk/MSBuild.dll\0'))
+  self.assertEqual('testhost.dll',native.process_role(b'/private/secret/path/testhost.dll\0'))
+  self.assertEqual('other',native.process_role(b'/private/secret/canary\0'))
+  for raw in (b'/private/secret/canary',b'/private/secret/canary\0'):
+   self.assertNotIn('private/secret',native.process_role(raw))
+
+ def test_process_tree_requires_stable_exact_cgroup_membership_and_never_returns_raw_arguments(self):
+  from unittest.mock import patch
+  import time
+  unit='appsurface-evidence-producer-test.service';identity={'pid':41,'uid':1001,'gid':1002,'cgroup':'/system.slice/'+unit}
+  proc={
+   '/sys/fs/cgroup/system.slice/'+unit+'/cgroup.procs':[b'41\n7\n',b'7\n41\n'],
+   '/proc/41/stat':[b'41 (dotnet (host)) S '+b' '.join([b'0']*18+[b'888']),b'41 (dotnet (host)) S '+b' '.join([b'0']*18+[b'888'])],
+   '/proc/7/stat':[b'7 (testhost) S '+b' '.join([b'0']*18+[b'777']),b'7 (testhost) S '+b' '.join([b'0']*18+[b'777'])],
+   '/proc/41/status':[b'Uid: 1001 1001 1001 1001\nGid: 1002 1002 1002 1002\nThreads: 3\n'],
+   '/proc/7/status':[b'Uid: 1001 1001 1001 1001\nGid: 1002 1002 1002 1002\nThreads: 5\n'],
+   '/proc/41/cgroup':[b'0::/system.slice/'+unit.encode()+b'\n'],
+   '/proc/7/cgroup':[b'0::/system.slice/'+unit.encode()+b'\n'],
+   '/proc/41/cmdline':[b'/usr/share/dotnet/dotnet\0/sdk/dotnet.dll\0/private/secret/canary\0'],
+   '/proc/7/cmdline':[b'/tmp/testhost.dll\0/private/secret/canary\0']}
+  def bounded(path,limit,deadline):
+   values=proc.get(str(path))
+   if not values:return None
+   return values.pop(0)
+  with patch.object(native,'_bounded_proc_read',side_effect=bounded):
+   facts=native.sample_process_tree(unit,identity,time.monotonic()+1)
+  self.assertEqual(8,facts['total_threads'])
+  self.assertEqual({'dotnet.dll':3,'testhost.dll':5},facts['by_role_threads'])
+  self.assertEqual({41,7},{row['pid'] for row in facts['processes']})
+  self.assertNotIn('private/secret',json.dumps(facts))
+
+ def test_missing_unstable_or_foreign_process_facts_are_unavailable_not_acceptance(self):
+  from unittest.mock import patch
+  import time
+  unit='appsurface-evidence-producer-test.service';identity={'pid':41,'uid':1001,'gid':1002,'cgroup':'/system.slice/'+unit}
+  for label in ('missing','membership-churn','foreign-cgroup','unstable-stat','foreign-uid'):
+   with self.subTest(label=label):
+    reads={}
+    def bounded(path,limit,deadline):
+     name=str(path);reads[name]=reads.get(name,0)+1
+     if name.endswith('cgroup.procs'):return b'41\n' if reads[name]==1 or label!='membership-churn' else b'42\n'
+     if str(path).endswith('/stat'):
+      start=b'889' if label=='unstable-stat' and reads[name]==2 else b'888'
+      return b'41 (dotnet (worker)) S '+b' '.join([b'0']*18+[start])
+     if name.endswith('/status'):
+      if label=='missing':return None
+      uid=b'2001' if label=='foreign-uid' else b'1001'
+      return b'Uid: '+b' '.join([uid]*4)+b'\nGid: 1002 1002 1002 1002\nThreads: 2\n'
+     if name.endswith('/cgroup'):
+      group=b'0::/system.slice/other.service\n' if label=='foreign-cgroup' else b'0::/system.slice/'+unit.encode()+b'\n'
+      return group
+     if str(path).endswith('/cmdline'):return b'/sdk/dotnet.dll\0'
+     return None
+    with patch.object(native,'_bounded_proc_read',side_effect=bounded):
+     self.assertIsNone(native.sample_process_tree(unit,identity,time.monotonic()+1))
+
+ def test_recording_keeps_bounded_peak_snapshot_and_treats_sampling_failure_as_missing(self):
+  from unittest.mock import patch
+  samples={};unit='fixed.service';identity={'pid':1,'uid':1001,'gid':1002,'cgroup':'/system.slice/fixed.service'}
+  with patch.object(native,'sample_process_tree',side_effect=[{'total_threads':5,'by_role_threads':{'dotnet.dll':3,'testhost.dll':2},'processes':[{'pid':1,'starttime_ticks':2,'threads':3,'role':'dotnet.dll'}]},None,{'total_threads':4,'by_role_threads':{'dotnet.dll':4},'processes':[]} ]):
+   native._record_process_facts(unit,samples,identity,None)
+   first=samples['process_facts']['peak_snapshot']
+   native._record_process_facts(unit,samples,identity,None)
+   self.assertFalse(samples['process_facts']['last_sample_available'])
+   self.assertIsNone(samples['process_facts']['last_total_threads'])
+   native._record_process_facts(unit,samples,identity,None)
+  facts=samples['process_facts']
+  self.assertEqual(5,facts['peak_total_threads']);self.assertEqual(first,facts['peak_snapshot'])
+  self.assertEqual({'dotnet.dll':4,'testhost.dll':2},facts['peak_by_role_threads'])
+
 if __name__=='__main__':unittest.main()

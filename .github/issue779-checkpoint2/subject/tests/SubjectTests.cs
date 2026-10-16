@@ -14,6 +14,11 @@ public sealed class SubjectTests
     [InlineData(8, 2, 99, 0)]
     public async Task Calculator_branches_are_exercised(int left, int right, int operation, int expected)
     {
+        if (operation == 0 && (Scenario.Kind is "cleanup-failure" or "ignored-cancel"))
+        {
+            await SubjectFailureScenarios.Run(Scenario.Kind);
+        }
+
         var actual = Record.Exception(() => Calculator.Calculate(left, right, operation));
         if (operation == 3 && right == 0)
         {
@@ -29,16 +34,35 @@ public sealed class SubjectTests
             Assert.Equal(expected, Calculator.Calculate(left, right, operation));
         }
 
-        if (operation == 0 && Scenario.Kind != "normal")
+        if (operation == 0 && Scenario.Kind != "normal" && Scenario.Kind != "ignored-cancel")
         {
             // Root selects this immutable fixture before launch. This marker only lets the
             // external negative control wait until its actual test branch has been entered.
             var scratch = Environment.GetEnvironmentVariable("TMPDIR")
                 ?? throw new InvalidOperationException("The fixture needs its producer scratch.");
-            using var marker = new FileStream(Path.Combine(scratch, "checkpoint2-case-entered"),
-                FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            using var writer = new StreamWriter(marker);
-            writer.Write(Scenario.Kind);
+            var markerPath = Path.Combine(scratch, "checkpoint2-case-entered");
+            var pendingPath = markerPath + ".pending-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var marker = new FileStream(pendingPath,
+                           FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    using (var writer = new StreamWriter(marker, leaveOpen: true))
+                    {
+                        writer.Write(Scenario.Kind);
+                        writer.Flush();
+                    }
+
+                    marker.Flush(flushToDisk: true);
+                }
+
+                File.Move(pendingPath, markerPath, overwrite: false);
+            }
+            catch
+            {
+                File.Delete(pendingPath);
+                throw;
+            }
         }
 
         if (Scenario.Kind == "test-failure" && operation == 0)
