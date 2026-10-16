@@ -142,6 +142,33 @@ public sealed class LinuxProtectedDeploymentTests
         Assert.DoesNotContain("canary", error.Message);
     }
 
+    [Theory]
+    [InlineData("private-canary:name", "colon-name")]
+    [InlineData("private-canary\\name", "backslash-name")]
+    [InlineData("private-canary\nname", "control-name")]
+    public void StrictDirectoryFailureReasonDoesNotExposeDecodedNames(string name, string expected)
+    {
+        string? failure = null;
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxDirectoryData.Parse(Block(name), out failure));
+        Assert.Equal(expected, failure);
+        Assert.DoesNotContain("private-canary", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void DirectoryFailureReasonClearsOnlyOnCompleteValidInput()
+    {
+        Assert.Equal(new[] { "safe" }, LinuxDirectoryData.Parse(Block("safe"), out var success));
+        Assert.Null(success);
+        string? failure = null;
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxDirectoryData.Parse(new byte[19], out failure));
+        Assert.Equal("record-header", failure);
+        var malformed = Block("safe");
+        malformed[19] = 0xff;
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxDirectoryData.Parse(malformed, out failure));
+        Assert.Equal("utf8", failure);
+    }
+
     [Fact]
     public void KernelDirectoryRecordBoundsDuplicatesAndUtf8FailClosed()
     {

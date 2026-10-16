@@ -798,6 +798,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private static string[] ReadNames(SafeFileHandle directory, CancellationToken token)
     {
         var phase = "directory-open";
+        string? parseFailure = null;
         try
         {
             token.ThrowIfCancellationRequested();
@@ -811,7 +812,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
                 var count = ReadDirectory(fresh, buffer);
                 if (count == 0) break;
                 phase = "directory-parse";
-                foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
+                foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count), out parseFailure))
                 {
                     phase = "unique-directory-name";
                     if (names.Count >= LinuxProducerWorkspaceLayout.MaximumNodes || !names.Add(name))
@@ -822,7 +823,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         }
         catch (Exception error) when (Recoverable(error))
         {
-            EmitSealGuard(new { reason = "directory-read", phase,
+            EmitSealGuard(new { reason = "directory-read", phase, parse_failure = parseFailure,
                 error_kind = error is OperationCanceledException ? "Cancelled" : error is EvidenceAdmissionException ? "Admission" : error is IOException ? "Io" : "Other" });
             throw;
         }

@@ -63,8 +63,14 @@ internal static class LinuxDirectoryData
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     /// <summary>Decodes one actual kernel block, rejecting malformed, duplicate or unsafe names.</summary>
-    internal static IReadOnlyList<string> Parse(ReadOnlySpan<byte> block)
+    internal static IReadOnlyList<string> Parse(ReadOnlySpan<byte> block) => Parse(block, out _);
+
+    /// <summary>Decodes the same strict grammar while projecting the first closed failure reason as data.</summary>
+    /// <param name="block">One bounded actual or detached Linux getdents64 block.</param>
+    /// <param name="failure">Null on success; otherwise a fixed reason with no decoded filename or authority.</param>
+    internal static IReadOnlyList<string> Parse(ReadOnlySpan<byte> block, out string? failure)
     {
+        failure = "block-bound";
         if (block.Length > 32 * 1024) throw LinuxProtectedDeployment.InvalidDeployment();
         var names = new HashSet<string>(StringComparer.Ordinal);
         try
@@ -72,24 +78,34 @@ internal static class LinuxDirectoryData
             var offset = 0;
             while (offset < block.Length)
             {
+                failure = "record-header";
                 if (block.Length - offset < 20) throw LinuxProtectedDeployment.InvalidDeployment();
                 var recordLength = BinaryPrimitives.ReadUInt16LittleEndian(block[(offset + 16)..]);
+                failure = "record-length";
                 if (recordLength < 24 || recordLength % 8 != 0 || recordLength > block.Length - offset)
                     throw LinuxProtectedDeployment.InvalidDeployment();
                 var bytes = block.Slice(offset + 19, recordLength - 19);
                 var end = bytes.IndexOf((byte)0);
+                failure = "name-bound";
                 if (end < 1 || end > 255) throw LinuxProtectedDeployment.InvalidDeployment();
                 var name = Utf8.GetString(bytes[..end]);
                 if (name is not "." and not "..")
                 {
-                    if (name.Any(static c => char.IsControl(c) || c is '/' or '\\' or ':') || !names.Add(name))
+                    if (name.Any(static c => char.IsControl(c) || c is '/' or '\\' or ':'))
+                    {
+                        failure = name.Contains(':') ? "colon-name" : name.Contains('\\') ? "backslash-name"
+                            : name.Contains('/') ? "separator-name" : "control-name";
                         throw LinuxProtectedDeployment.InvalidDeployment();
+                    }
+                    failure = "duplicate-name";
+                    if (!names.Add(name)) throw LinuxProtectedDeployment.InvalidDeployment();
                 }
                 offset += recordLength;
             }
+            failure = null;
             return Array.AsReadOnly(names.Order(StringComparer.Ordinal).ToArray());
         }
-        catch (DecoderFallbackException) { throw LinuxProtectedDeployment.InvalidDeployment(); }
+        catch (DecoderFallbackException) { failure = "utf8"; throw LinuxProtectedDeployment.InvalidDeployment(); }
     }
 }
 
