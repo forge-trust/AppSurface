@@ -20,7 +20,7 @@ internal static class EvidenceCoverageObservationFiles
     private const string SupportedProducerKind = "coverage";
     private const string SupportedProducerVersion = "1.0.0";
     private const string CoverageArtifactLogicalName = "coverage-report";
-    private const string CoverageArtifactRelativePath = "merged/Cobertura.xml";
+    private const string CoverageArtifactRelativePath = "merged/coverage.cobertura.xml";
     private const string CoverageArtifactMediaType = "application/xml";
     private const long MaximumCoverageArtifactBytes = 20L * 1024 * 1024;
 
@@ -29,7 +29,7 @@ internal static class EvidenceCoverageObservationFiles
     /// <param name="planBytes">Canonical plan bytes bounded by the existing canonical JSON limit.</param>
     /// <param name="manifestBytes">Canonical manifest bytes bounded by the existing canonical JSON limit.</param>
     /// <param name="summaryBytes">The exact seven-field canonical Observation summary.</param>
-    /// <param name="artifactBytes">One artifact keyed by <c>producerId/merged/Cobertura.xml</c>.</param>
+    /// <param name="artifactBytes">One artifact keyed by <c>producerId/merged/coverage.cobertura.xml</c>.</param>
     /// <param name="token">The original caller token; parsing does not create or renew a deadline.</param>
     /// <returns>A detached manifest whose structure matches the resolved plan; never an admission or proof.</returns>
     /// <exception cref="EvidenceAdmissionException">Fixed ASEVD410 without supplied text or an inner exception.</exception>

@@ -132,7 +132,7 @@ internal static class LinuxCustodyData
         {
             LinuxCustodyNodeKind.Slot => new[] { "evidence-plan.json", "evidence-manifest.json", "evidence-summary.json", producerId },
             LinuxCustodyNodeKind.CoverageProducer => ["merged"],
-            LinuxCustodyNodeKind.CoverageMerged => ["Cobertura.xml"],
+            LinuxCustodyNodeKind.CoverageMerged => ["coverage.cobertura.xml"],
             _ => throw Rejected(),
         };
         if (names is null || names.Count < 0 || names.Count > expected.Length) throw Rejected();

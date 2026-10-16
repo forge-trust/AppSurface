@@ -709,3 +709,14 @@ that accepts a literal colon in a single Linux filename; protected deployment an
 their stricter syntax. All retained-FD containment, no-link, metadata, byte/count, deadline and account
 release guards remain required. Source regression results and a new genuine Linux run are still required
 before crediting this correction or any checkpoint-two case.
+
+### Published coverage artifact basename
+
+[Run38864316374](https://github.com/forge-trust/AppSurface/actions/runs/38864316374) passed the mutable
+producer seal, then rejected the merged report directory during custody preflight. The [shared coverage
+producer](../../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs)
+publishes `merged/coverage.cobertura.xml`; the new root reader had incorrectly selected `merged/Cobertura.xml`.
+The custody inventory, file verifier and native fixture now select the existing producer contract exactly.
+No alternate name or unknown artifact is accepted. The last diagnostic operation now points at the actual
+inventory predicate after its owner continuity recheck. Source controls and all seven Linux cases remain
+required; this failed run provides no checkpoint-two completion.

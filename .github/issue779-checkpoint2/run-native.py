@@ -445,8 +445,8 @@ def execute_case(args,case,end,receipt):
    result['output_observation']=observation
    require(final.is_file(),'actual-final-manifest')
    manifest=json.loads(final.read_bytes());producer=manifest['ProducerResults'][0]
-   require(producer['Outcome']=='Passed' and producer['Artifacts'][0]['RelativePath']=='merged/Cobertura.xml','actual-producer-result')
-   artifact=final.parent/'coverage/merged/Cobertura.xml'
+   require(producer['Outcome']=='Passed' and producer['Artifacts'][0]['RelativePath']=='merged/coverage.cobertura.xml','actual-producer-result')
+   artifact=final.parent/'coverage/merged/coverage.cobertura.xml'
    verify_sealed_output(final.parent)
    require(sha(artifact)==producer['Artifacts'][0]['Sha256'],'retained-artifact-digest')
    import xml.etree.ElementTree as ET

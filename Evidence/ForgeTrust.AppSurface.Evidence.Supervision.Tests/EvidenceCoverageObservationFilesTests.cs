@@ -31,7 +31,7 @@ public sealed class EvidenceCoverageObservationFilesTests
         Assert.NotSame(manifest, verified);
         Assert.Equal(manifest.ManifestDigest, verified.ManifestDigest);
         Assert.Equal(plan.Profile.Producers.Single().Id, verified.ProducerResults.Single().ProducerId);
-        Assert.Equal("merged/Cobertura.xml", verified.ProducerResults.Single().Artifacts!.Single().RelativePath);
+        Assert.Equal("merged/coverage.cobertura.xml", verified.ProducerResults.Single().Artifacts!.Single().RelativePath);
         Assert.Equal(EvidenceClaimKind.ObservationOnly, verified.ClaimKind);
         Assert.Equal(EvidenceClaimEligibility.Informational, verified.Eligibility);
         Array.Fill(planBytes, (byte)'x');
@@ -47,13 +47,17 @@ public sealed class EvidenceCoverageObservationFilesTests
         var manifest = Manifest(plan);
         Reject(() => Verify(plan, manifest, artifacts: new Dictionary<string, ReadOnlyMemory<byte>>
         {
-            ["merged/Cobertura.xml"] = CoberturaBytes,
+            ["merged/coverage.cobertura.xml"] = CoberturaBytes,
+        }));
+        Reject(() => Verify(plan, manifest, artifacts: new Dictionary<string, ReadOnlyMemory<byte>>
+        {
+            ["coverage/merged/Cobertura.xml"] = CoberturaBytes,
         }));
         Reject(() => Verify(plan, Rehash(manifest with
         {
             ProducerResults = [manifest.ProducerResults[0] with
             {
-                Artifacts = [manifest.ProducerResults[0].Artifacts![0] with { RelativePath = "coverage/merged/Cobertura.xml" }],
+                Artifacts = [manifest.ProducerResults[0].Artifacts![0] with { RelativePath = "coverage/merged/coverage.cobertura.xml" }],
             }],
         })));
     }
@@ -79,7 +83,7 @@ public sealed class EvidenceCoverageObservationFilesTests
         };
         var plan = new EvidencePlanner().Resolve(policy, original.ChangedPaths);
 
-        Assert.Equal("coverage-runner/merged/Cobertura.xml", PhysicalPath(plan));
+        Assert.Equal("coverage-runner/merged/coverage.cobertura.xml", PhysicalPath(plan));
         Assert.Equal(plan.PlanDigest, Verify(plan, Manifest(plan), Artifacts(plan)).PlanDigest);
     }
 
@@ -306,7 +310,7 @@ public sealed class EvidenceCoverageObservationFilesTests
 
     private static EvidenceManifest Manifest(EvidencePlan plan)
     {
-        var artifact = new EvidenceArtifactResult("coverage-report", "merged/Cobertura.xml", "application/xml",
+        var artifact = new EvidenceArtifactResult("coverage-report", "merged/coverage.cobertura.xml", "application/xml",
             CoberturaBytes.LongLength, EvidenceDigest.Sha256(CoberturaBytes));
         var result = new EvidenceProducerResult(plan.Profile.Producers.Single().Id, EvidenceProducerOutcome.Passed, [AssertionId],
             Artifacts: [artifact], ElapsedMilliseconds: 3);
@@ -329,7 +333,7 @@ public sealed class EvidenceCoverageObservationFilesTests
     });
 
     private static string PhysicalPath(EvidencePlan plan) =>
-        plan.Profile.Producers.Single().Id + "/merged/Cobertura.xml";
+        plan.Profile.Producers.Single().Id + "/merged/coverage.cobertura.xml";
 
     private static Dictionary<string, ReadOnlyMemory<byte>> Artifacts(EvidencePlan plan) => new(StringComparer.Ordinal)
     {

@@ -34,7 +34,8 @@ public sealed class LinuxCustodyDataTests
             ["coverage", "evidence-plan.json", "evidence-manifest.json", "evidence-summary.json"], "coverage");
         LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [], "coverage");
         LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageProducer, ["merged"], "coverage");
-        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageMerged, ["Cobertura.xml"], "coverage");
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageMerged, ["coverage.cobertura.xml"], "coverage");
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageMerged, ["Cobertura.xml"], "coverage"));
         foreach (var kind in new[] { LinuxCustodyNodeKind.CoverageProducer, LinuxCustodyNodeKind.CoverageMerged })
         {
             LinuxCustodyData.RequireCoverageInventory(kind, [], "coverage");

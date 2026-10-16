@@ -184,7 +184,7 @@ internal sealed partial class LinuxRunWorkspace
                                 RequireInventory(merged, Names(merged, token));
                                 if (Names(merged, token).Count != 0)
                                 {
-                                    var report = Add(merged, "Cobertura.xml", LinuxCustodyNodeKind.CoverageReport, null,
+                                    var report = Add(merged, "coverage.cobertura.xml", LinuxCustodyNodeKind.CoverageReport, null,
                                         0x800 | 0x80000, ChildResolution, token);
                                     report.Hash = Hash(report, token);
                                 }
@@ -476,7 +476,7 @@ internal sealed partial class LinuxRunWorkspace
             var id = expected.Profile.Producers.Single().Id;
             IReadOnlyDictionary<string, ReadOnlyMemory<byte>> artifacts = new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal)
             {
-                [id + "/merged/Cobertura.xml"] = ReadFile(LinuxCustodyNodeKind.CoverageReport, token),
+                [id + "/merged/coverage.cobertura.xml"] = ReadFile(LinuxCustodyNodeKind.CoverageReport, token),
             };
             return EvidenceCoverageObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
                 ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), artifacts, token);
@@ -492,8 +492,16 @@ internal sealed partial class LinuxRunWorkspace
         {
             if (node.Kind is LinuxCustodyNodeKind.Slot or LinuxCustodyNodeKind.CoverageProducer or LinuxCustodyNodeKind.CoverageMerged
                 && _input.Request.ObservationProducerIds.Count != 0)
-                LinuxCustodyData.RequireCoverageInventory(node.Kind.Value, names, CoverageProducerId(default)!);
-            else LinuxCustodyData.RequireInventory(node.Kind!.Value, names);
+            {
+                var producerId = CoverageProducerId(default)!;
+                At(LinuxCustodyOperation.InventoryPolicy, node.Kind);
+                LinuxCustodyData.RequireCoverageInventory(node.Kind.Value, names, producerId);
+            }
+            else
+            {
+                At(LinuxCustodyOperation.InventoryPolicy, node.Kind);
+                LinuxCustodyData.RequireInventory(node.Kind!.Value, names);
+            }
         }
 
         private void RecheckTree(bool terminal, CancellationToken token)
