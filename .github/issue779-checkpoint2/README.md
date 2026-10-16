@@ -21,3 +21,7 @@ The workflow installs a separate single SDK tree in runner temporary storage and
 ## Package hash verification
 
 The [SDK-only hash helper](NuGetContentHash/README.md) computes NuGet's `PackageArchiveReader.GetContentHash` and independently hashes the full archive. Signed packages have different unsigned-content and complete-ZIP hashes; the lock binds the former, while the `.nupkg.sha512` file binds the latter. The helper uses only the selected SDK's NuGet assemblies and never loads or evaluates a subject project. The original raw-hash attempt failed before subject launch and remains a failed receipt. [NuGet's implementation](https://github.com/NuGet/NuGet.Client/blob/dev/src/NuGet.Core/NuGet.Packaging/PackageArchiveReader.cs) handles signature normalization rather than a fixture ZIP rewrite.
+
+## Explicit staging-parent traversal
+
+The private driver uses umask077 for retained evidence. Fresh `/run` staging parents explicitly set0755 through their opened directory descriptor after creation, preserving root ownership and rejecting existing paths. Without this step, `mkdir(mode=0755)` silently creates0700 under that umask, and the protected deployment auditor correctly rejects the ancestor before any subject work. Only these generated input parents receive search access; the request, control, artifact and retained-evidence permissions remain private. A portable actual chmod/stat regression exercises the private umask and exclusive-path rejection.

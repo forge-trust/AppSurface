@@ -1,6 +1,6 @@
 """Finite Linux checkpoint-two consumer controls. Python prepares/observes; C# owns supervision."""
 from pathlib import Path
-import argparse,base64,datetime,hashlib,json,os,platform,shutil,stat,subprocess,sys,tempfile,time,urllib.request,uuid,zipfile
+import argparse,base64,datetime,hashlib,json,os,platform,re,shutil,stat,subprocess,sys,tempfile,time,urllib.request,uuid,zipfile
 
 LIMIT=1800
 MAX_LOG=4*1024*1024
@@ -11,6 +11,17 @@ def require(ok,code):
  if not ok:raise RuntimeError(code)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':')).encode()
+def create_traversable_root(path):
+ # mkdir's requested mode is filtered by the private harness umask; set exact traversal afterward.
+ path.mkdir(mode=0o700)
+ fd=os.open(path,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ try:
+  before=os.fstat(fd);require(before.st_uid==os.geteuid() and stat.S_ISDIR(before.st_mode),'fresh-root-owner')
+  os.fchmod(fd,0o755)
+  after=os.fstat(fd);named=path.lstat()
+  require((after.st_dev,after.st_ino)==(named.st_dev,named.st_ino)==(before.st_dev,before.st_ino) and stat.S_IMODE(after.st_mode)==0o755,'fresh-root-traversal')
+ finally:os.close(fd)
+
 def write(p,b,mode=0o600):
  p.parent.mkdir(parents=True,exist_ok=True)
  with p.open('xb') as f:f.write(b)
@@ -28,13 +39,27 @@ def command(args,end,log=None,allowed=(0,)):
 
 from staging import copy_tree
 
-def acquire_packages(lock,dest,end,runtime,hasher):
- require(not dest.exists(),'fresh-package-cache');dest.mkdir(mode=0o700)
+def package_rows(lock):
  nodes=json.loads(lock.read_bytes())['dependencies']['net10.0']
+ require(type(nodes) is dict and len(nodes)<=15,'package-lock-shape')
+ rows=[]
  for name,row in nodes.items():
-  if row['type']=='Project':continue
-  require(set(['resolved','contentHash'])<=row.keys(),'package-lock-shape')
-  ident=name.lower();version=row['resolved'].lower();url=f'https://api.nuget.org/v3-flatcontainer/{ident}/{version}/{ident}.{version}.nupkg'
+  require(type(name) is str and type(row) is dict,'package-lock-shape')
+  if row.get('type')=='Project':continue
+  require(set(['resolved','contentHash','type'])<=row.keys() and row['type'] in ('Direct','Transitive'),'package-lock-shape')
+  version=row['resolved'];digest=row['contentHash']
+  require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,99}',name) is not None and '..' not in name,'package-id')
+  require(type(version) is str and re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z.-]+)?',version) is not None and '..' not in version and len(version)<=100,'package-version')
+  require(type(digest) is str and len(digest)==88 and len(base64.b64decode(digest,validate=True))==64,'package-content-hash-shape')
+  rows.append((name.lower(),version.lower(),digest))
+ require(len(rows)==14 and len({n for n,v,h in rows})==14,'exact-subject-package-count')
+ return rows
+
+def acquire_packages(lock,dest,end,runtime,hasher):
+ rows=package_rows(lock)
+ require(not dest.exists(),'fresh-package-cache');dest.mkdir(mode=0o700)
+ for ident,version,content_hash in rows:
+  url=f'https://api.nuget.org/v3-flatcontainer/{ident}/{version}/{ident}.{version}.nupkg'
   require(time.monotonic()<end,'package-deadline')
   with urllib.request.urlopen(url,timeout=min(30,end-time.monotonic())) as response:data=response.read(128*1024*1024+1)
   require(0<len(data)<=128*1024*1024,'package-size')
@@ -45,7 +70,7 @@ def acquire_packages(lock,dest,end,runtime,hasher):
    observed=json.loads(command([str(runtime),str(hasher),str(package)],end).stdout)
   require(set(observed)=={'content_hash','archive_sha512','bytes'} and observed['bytes']==len(data),'package-hasher-shape')
   archive_hash=base64.b64encode(hashlib.sha512(data).digest()).decode()
-  require(observed['archive_sha512']==archive_hash and observed['content_hash']==row['contentHash'],'package-lock-content-hash')
+  require(observed['archive_sha512']==archive_hash and observed['content_hash']==content_hash,'package-lock-content-hash')
   parent=dest/ident/version;parent.mkdir(parents=True,mode=0o755)
   from io import BytesIO
   with zipfile.ZipFile(BytesIO(data)) as z:
@@ -64,9 +89,8 @@ def acquire_packages(lock,dest,end,runtime,hasher):
     if body:write(target,body,0o644)
   write(parent/f'{ident}.{version}.nupkg',data,0o644)
   write(parent/f'{ident}.{version}.nupkg.sha512',archive_hash.encode(),0o644)
-  write(parent/'.nupkg.metadata',canonical({'version':2,'contentHash':row['contentHash'],'source':'https://api.nuget.org/v3/index.json'}),0o644)
- count=sum(r['type']!='Project' for r in nodes.values());require(count==14,'exact-subject-package-count')
- return {'packages':count,'lock_sha256':sha(lock)}
+  write(parent/'.nupkg.metadata',canonical({'version':2,'contentHash':content_hash,'source':'https://api.nuget.org/v3/index.json'}),0o644)
+ return {'packages':len(rows),'lock_sha256':sha(lock)}
 
 def policy():
  assertion='appsurface/coverage/behavioral-patch@1'
@@ -121,7 +145,7 @@ def groups_empty(units):
 def execute_case(args,case,end,receipt):
  generation=uuid.uuid4().hex
  root=Path('/run')/('issue779-csharp-coverage-'+generation)
- root.mkdir(mode=0o755)
+ create_traversable_root(root)
  tool=root/'tool';runtime=root/'runtime';subject=root/'subject'
  result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
  owner='appsurface-evidence-owner-'+generation+'.service'
@@ -259,7 +283,7 @@ def main():
 
  args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
  receipt={'schema':'issue779-csharp-checkpoint2-native-v1','source':args.source,'base':args.base,'exit':1,'cases':[],'native_acceptance':False,'trusted_eligibility':False}
- common=Path('/run')/('issue779-csharp-checkpoint2-input-'+uuid.uuid4().hex);common.mkdir(mode=0o755)
+ common=Path('/run')/('issue779-csharp-checkpoint2-input-'+uuid.uuid4().hex);create_traversable_root(common)
  args.staged_tool=common/'tool';args.staged_runtime=common/'runtime'
  inventory={'tool':copy_tree(args.tool,args.staged_tool),'runtime':copy_tree(args.runtime,args.staged_runtime)}
  write(args.staged_tool/'fixture-policy.json',canonical(policy()),0o644)

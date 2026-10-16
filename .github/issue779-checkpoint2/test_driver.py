@@ -27,4 +27,73 @@ class DriverControls(unittest.TestCase):
  def test_fixture_never_stamps_trusted_or_native_authority(self):
   self.assertNotIn('Trusted',json.dumps(native.policy()));self.assertEqual(5,len(native.FIXED))
   self.assertEqual('HOME=/nonexistent',native.FIXED[1])
+
+class PackageRowsControls(unittest.TestCase):
+ def setUp(self):
+  import base64,copy,tempfile,time
+  from unittest.mock import patch
+  self.base64=base64;self.copy=copy;self.time=time;self.patch=patch
+  self._temporary=tempfile.TemporaryDirectory()
+  self.root=Path(self._temporary.name)
+  self.source_lock=Path(__file__).with_name('subject')/'packages.lock.json'
+  self.lock=json.loads(self.source_lock.read_text())
+
+ def tearDown(self):
+  self._temporary.cleanup()
+
+ def write_lock(self,lock,name):
+  path=self.root/name
+  path.write_text(json.dumps(lock))
+  return path
+
+ def test_accepts_the_actual_fourteen_locked_package_rows(self):
+  lock_path=self.write_lock(self.lock,'valid14.json')
+  rows=native.package_rows(lock_path)
+  self.assertEqual(14,len(rows))
+  self.assertEqual(14,len({(name,version) for name,version,_ in rows}))
+  self.assertTrue(all(name==name.lower() and version==version.lower() for name,version,_ in rows))
+  self.assertTrue(all(len(self.base64.b64decode(digest,validate=True))==64 for _,_,digest in rows))
+
+ def test_bad_lock_rows_reject_before_network_or_cache_creation(self):
+  variants=[]
+  absolute_name=self.copy.deepcopy(self.lock);nodes=absolute_name['dependencies']['net10.0'];row=nodes.pop(next(iter(nodes)));nodes['/absolute-package']=row
+  variants.append(('absolute-name',absolute_name))
+  traversal_name=self.copy.deepcopy(self.lock);nodes=traversal_name['dependencies']['net10.0'];row=nodes.pop(next(iter(nodes)));nodes['../outside']=row
+  variants.append(('traversal-name',traversal_name))
+  absolute_version=self.copy.deepcopy(self.lock);nodes=absolute_version['dependencies']['net10.0'];nodes[next(iter(nodes))]['resolved']='/1.0.0'
+  variants.append(('absolute-version',absolute_version))
+  traversal_version=self.copy.deepcopy(self.lock);nodes=traversal_version['dependencies']['net10.0'];nodes[next(iter(nodes))]['resolved']='../1.0.0'
+  variants.append(('traversal-version',traversal_version))
+  bad_type=self.copy.deepcopy(self.lock);nodes=bad_type['dependencies']['net10.0'];nodes[next(iter(nodes))]['type']='Unknown'
+  variants.append(('bad-type',bad_type))
+  bad_hash=self.copy.deepcopy(self.lock);nodes=bad_hash['dependencies']['net10.0'];nodes[next(iter(nodes))]['contentHash']='not-base64'
+  variants.append(('bad-hash',bad_hash))
+  duplicate_case=self.copy.deepcopy(self.lock);nodes=duplicate_case['dependencies']['net10.0'];names=list(nodes);row=nodes.pop(names[1]);nodes[names[0].swapcase()]=row
+  variants.append(('duplicate-case',duplicate_case))
+  too_few=self.copy.deepcopy(self.lock);nodes=too_few['dependencies']['net10.0'];nodes.pop(next(iter(nodes)))
+  variants.append(('thirteen-packages',too_few))
+  too_many=self.copy.deepcopy(self.lock);nodes=too_many['dependencies']['net10.0'];nodes['ExtraControlPackage']=self.copy.deepcopy(next(iter(nodes.values())))
+  variants.append(('fifteen-packages',too_many))
+
+  for label,lock in variants:
+   with self.subTest(label=label):
+    lock_path=self.write_lock(lock,label+'.json')
+    destination=self.root/(label+'-cache')
+    with self.patch.object(native.urllib.request,'urlopen') as urlopen:
+     with self.assertRaises(RuntimeError):
+      native.acquire_packages(lock_path,destination,self.time.monotonic()+10,'dotnet','hasher.dll')
+     urlopen.assert_not_called()
+    self.assertFalse(destination.exists())
+
+class TraversalRootControls(unittest.TestCase):
+ def test_fresh_root_has_required_traversal_under_private_umask_and_rejects_existing_path(self):
+  import os,stat,tempfile
+  with tempfile.TemporaryDirectory() as tmp:
+   path=Path(tmp)/'generation';old=os.umask(0o077)
+   try:native.create_traversable_root(path)
+   finally:os.umask(old)
+   observed=path.lstat();self.assertEqual(0o755,stat.S_IMODE(observed.st_mode));self.assertEqual(os.geteuid(),observed.st_uid)
+   with self.assertRaises(FileExistsError):native.create_traversable_root(path)
+   self.assertEqual((observed.st_dev,observed.st_ino), (path.lstat().st_dev,path.lstat().st_ino))
+
 if __name__=='__main__':unittest.main()
