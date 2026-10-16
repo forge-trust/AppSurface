@@ -33,6 +33,7 @@ internal sealed class LinuxProducerProcess
     private LinuxProducerUnit? _recipe;
     private LinuxUnitProperties? _normalTerminal;
     private LinuxUnitProperties? _stoppedTerminal;
+    private LinuxUnitProperties? _lastStopObservation;
     private SupervisionOutputReceipt? _output;
     private Task<EvidenceRestrictedProcessResult>? _run;
     private Task? _registrationJoin;
@@ -310,10 +311,14 @@ internal sealed class LinuxProducerProcess
 
         var failed = Volatile.Read(ref _failed) != 0 || Volatile.Read(ref _cleanupFailed) != 0
             || _output is not { Successful: true } || _outputBudget.QuotaExceeded || normalExitCode is null;
-        if ((failed || normalExitCode != 0) && PhysicallySettled && _output is not null)
+        if ((failed || normalExitCode != 0) && _collect is { IsCompletedSuccessfully: true } && _output is not null)
         {
             try { LinuxProducerFailureOutput.Retain(_input, _owner, _output,
-                failedStage ?? "settlement", _normalTerminal, _stoppedTerminal, _pending.Snapshot, cleanupToken); }
+                failedStage ?? "settlement", _normalTerminal, _stoppedTerminal, _pending.Snapshot, cleanupToken,
+                physicallySettled: PhysicallySettled, cleanupFailed: Volatile.Read(ref _cleanupFailed) != 0,
+                groupEmptyTwice: Volatile.Read(ref _groupEmptyTwice) != 0,
+                pumpJoined: Volatile.Read(ref _pumpJoined) != 0,
+                capturedPid: _process?.Pid, lastStop: _lastStopObservation); }
             catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
                 and not StackOverflowException and not AccessViolationException) { }
         }
@@ -377,6 +382,7 @@ internal sealed class LinuxProducerProcess
         {
             _owner.RequireCleanup(token);
             var unit = await _backend!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
+            _lastStopObservation = unit;
             var group = LinuxCgroupProbe.Read(Unit, token);
             if (_recipe!.HasStopped(unit)
                 && (_process is null || unit.ExecMainPid == _process.Pid)
@@ -390,6 +396,7 @@ internal sealed class LinuxProducerProcess
         await Task.Delay(ObservationInterval, token).ConfigureAwait(false);
         _owner.RequireCleanup(token);
         var second = await _backend!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
+        _lastStopObservation = second;
         var secondGroup = LinuxCgroupProbe.Read(Unit, token);
         if (!_recipe!.HasStopped(second) || final.ExecMainPid != second.ExecMainPid
             || final.ExecMainCode != second.ExecMainCode || final.ExecMainStatus != second.ExecMainStatus

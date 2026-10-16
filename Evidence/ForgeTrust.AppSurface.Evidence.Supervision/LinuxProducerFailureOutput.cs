@@ -11,7 +11,9 @@ internal static class LinuxProducerFailureOutput
     /// <summary>Saves bounded bytes after actual pump settlement while original root teardown remains valid.</summary>
     internal static void Retain(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         SupervisionOutputReceipt output, string stage, LinuxUnitProperties? normal,
-        LinuxUnitProperties? stopped, SupervisionPendingStartSnapshot pending, CancellationToken token)
+        LinuxUnitProperties? stopped, SupervisionPendingStartSnapshot pending, CancellationToken token,
+        bool physicallySettled, bool cleanupFailed, bool groupEmptyTwice, bool pumpJoined,
+        uint? capturedPid, LinuxUnitProperties? lastStop)
     {
         LinuxProtectedDeployment.RequirePlatform();
         owner.RequireCleanupLaunchInput(input, token);
@@ -24,9 +26,19 @@ internal static class LinuxProducerFailureOutput
             stopped_code = stopped?.ExecMainCode, stopped_status = stopped?.ExecMainStatus,
             start_reserved = pending.StartReserved, start_joined = pending.StartJoined,
             stop_joined = pending.StopJoined, pending_failure = pending.FirstFailure.ToString(),
+            physically_settled = physicallySettled, cleanup_failed = cleanupFailed,
+            group_empty_twice = groupEmptyTwice, pump_joined = pumpJoined,
+            captured_pid = capturedPid, last_main_pid = lastStop?.MainPid,
+            last_exec_pid = lastStop?.ExecMainPid, last_code = lastStop?.ExecMainCode,
+            last_status = lastStop?.ExecMainStatus, last_active = ClosedState(lastStop?.ActiveState),
+            last_substate = ClosedState(lastStop?.SubState), output_drained = output.Drained,
         });
         RetainCore(input, owner, output, "producer", state, token);
     }
+
+    private static string ClosedState(string? value) => value is "active" or "inactive" or "deactivating"
+        or "failed" or "running" or "exited" or "dead" or "stop" or "stop-sigterm" or "stop-sigkill"
+        or "stop-post" or "final-sigterm" or "final-sigkill" ? value : "unknown";
 
     /// <summary>Retains original joined worker output without creating another reader or settlement assertion.</summary>
     /// <remarks>The original worker supplies its receipt after its stop task and collector join; missing physical proof remains missing.</remarks>

@@ -42,3 +42,9 @@ bounded and stops at rejection. Physical worker finalization may accept its own 
 quota pair; later root custody requires all registered pairs and exact aggregate accounting to have
 joined. Missing EOF, read/cancellation/signalling errors or a failed native stop/group/close check
 still quarantine storage and accounts. No limit, permission or cleanup allowance is raised.
+
+The failed-settlement diagnostic may retain the original joined producer output even when physical
+settlement is false. It requires the actual original collector task to have completed successfully;
+its state file records pending failure, cleanup/pump/group flags and the last already-read stop sample.
+Unknown states remain `unknown`; it performs no new unit lookup or output read. Diagnostic retention
+never changes the physical-settlement predicate, sealing, quarantine, account disposition or run result.
