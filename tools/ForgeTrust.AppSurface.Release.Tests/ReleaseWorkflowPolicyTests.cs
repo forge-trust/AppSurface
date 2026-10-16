@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using YamlDotNet.RepresentationModel;
 
 namespace ForgeTrust.AppSurface.Release.Tests;
 
@@ -339,6 +340,22 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("hasTopLevelSetextHeading", workflow, StringComparison.Ordinal);
         Assert.Contains("must contain exactly one", workflow, StringComparison.Ordinal);
         Assert.Contains("must not contain unsupported append-only entry markers", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReleasePreparationDisablesCacheAccessForBaseRefControlledCode()
+    {
+        var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
+        var yaml = new YamlStream();
+        yaml.Load(new StringReader(workflow));
+        var root = Assert.IsType<YamlMappingNode>(Assert.Single(yaml.Documents).RootNode);
+        var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
+        var prepare = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("prepare")]);
+
+        Assert.True(
+            prepare.Children.TryGetValue(new YamlScalarNode("cache-mode"), out var cacheMode),
+            "Release preparation must deny cache access before executing base-ref-controlled tooling.");
+        Assert.Equal("none", Assert.IsType<YamlScalarNode>(cacheMode).Value);
     }
 
     [Fact]
