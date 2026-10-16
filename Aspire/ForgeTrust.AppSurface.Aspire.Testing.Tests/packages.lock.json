@@ -29,6 +29,12 @@
         "resolved": "8.0.0",
         "contentHash": "rO2ugKcbVy8SHNKeqfX/DshUcTtolnEUwMKehVB6gh5/YoL+U07zoACCyGRvgMtzq7fr9o6GLkXOmVj9WMgx+w=="
       },
+      "Microsoft.Extensions.TimeProvider.Testing": {
+        "type": "Direct",
+        "requested": "[10.9.0, )",
+        "resolved": "10.9.0",
+        "contentHash": "0If8xc915BgRpYmKB9tOOOprvHMt8Tue6kiD8ARgVf8Ok6PNUxkJScKT7QUp7+RllR4RN2DNACgaxioy9BJxeQ=="
+      },
       "Microsoft.NET.Test.Sdk": {
         "type": "Direct",
         "requested": "[18.5.1, )",
@@ -716,7 +722,8 @@
           "Aspire.Hosting": "[13.4.4, )",
           "Aspire.Hosting.AppHost": "[13.4.4, )",
           "Aspire.Hosting.Testing": "[13.4.4, )",
-          "ForgeTrust.AppSurface.Aspire": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Aspire": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.console": {
@@ -735,6 +742,9 @@
         }
       },
       "forgetrust.appsurface.deployment": {
+        "type": "Project"
+      },
+      "forgetrust.appsurface.evidence.readiness": {
         "type": "Project"
       },
       "forgetrust.appsurface.testing": {

@@ -17,6 +17,7 @@
     <PackageReference Include="Aspire.Hosting.AppHost" VersionOverride="[13.4.4,)" />
     <PackageReference Include="Aspire.Hosting.Testing" VersionOverride="[13.4.4,)" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj" />
+    <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj" />
   </ItemGroup>
 
   <ItemGroup>

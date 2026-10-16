@@ -720,6 +720,9 @@
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },
+      "forgetrust.appsurface.evidence.readiness": {
+        "type": "Project"
+      },
       "CliFx": {
         "type": "CentralTransitive",
         "requested": "[3.0.0, )",

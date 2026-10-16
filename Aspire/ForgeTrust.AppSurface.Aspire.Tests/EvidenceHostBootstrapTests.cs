@@ -5,7 +5,7 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
-public sealed class EvidenceHostBootstrapTests
+public sealed partial class EvidenceHostBootstrapTests
 {
     [Fact]
     public async Task EvidenceAspireApplication_ShouldDisposePartialApplicationWhenAspireStartupFails()

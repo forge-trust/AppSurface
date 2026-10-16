@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/Projects/forge-trust/runnable__mercury/.gstack/tmp/autoplan/main-autoplan-restore-20261015-051142.md" -->
+<!-- /autoplan private restore point: .gstack/tmp/autoplan/main-autoplan-restore-20261015-051142.md -->
 ## URGENT, outside this plan
 
 None.
@@ -162,7 +162,7 @@ No unresolved findings.
 
 <!-- autoplan-accepted:ceo -->
 - Provide safe diagnostic reference examples that identify the failed phase, allowed cause/status category, and a specific next check; do not include raw URLs, headers, bodies, transport messages, or automatic logging of arbitrary factory failures. Add verification of problem/cause/fix fields and redaction.
-- Provide a complete compiled and runnable standalone Evidence.Readiness consumer using only the neutral package; verify its restored and packed dependency closure has no Aspire, EvidenceHost bootstrap, planner, or producer dependency.
+- Provide a complete compiled and executable standalone Evidence.Readiness consumer using only the neutral package; verify its restored and packed dependency closure has no Aspire, EvidenceHost bootstrap, planner, or producer dependency.
 - Give Evidence.Aspire's new HTTP adapter the same explicit fresh-client factory escape path as the typed fixture; snapshot options, invoke the factory once per readiness invocation, and verify owned clients are disposed on success/failure/cancellation without imposing consumer proxy settings.
 - Add a linked guide choice table for native health-only testing, typed startup readiness, and full EvidenceHost evidence; show when native HTTP health already satisfies the requirement and when the extra test-side probe is intentional.
 - Compile an ordinary typed-fixture example that composes the existing CreateConfiguredAsync and immutable per-call scenario inputs without adding a second generic creation family; keep browser and business assertions consumer-owned.
@@ -267,7 +267,7 @@ Decision ledger:
 
 <!-- autoplan-accepted:ceo -->
 - Provide safe diagnostic reference examples that identify the failed phase, allowed cause/status category, and a specific next check; do not include raw URLs, headers, bodies, transport messages, or automatic logging of arbitrary factory failures. Add verification of problem/cause/fix fields and redaction.
-- Provide a complete compiled and runnable standalone Evidence.Readiness consumer using only the neutral package; verify its restored and packed dependency closure has no Aspire, EvidenceHost bootstrap, planner, or producer dependency.
+- Provide a complete compiled and executable standalone Evidence.Readiness consumer using only the neutral package; verify its restored and packed dependency closure has no Aspire, EvidenceHost bootstrap, planner, or producer dependency.
 - Give Evidence.Aspire's new HTTP adapter the same explicit fresh-client factory escape path as the typed fixture; snapshot options, invoke the factory once per readiness invocation, and verify owned clients are disposed on success/failure/cancellation without imposing consumer proxy settings.
 - Add a linked guide choice table for native health-only testing, typed startup readiness, and full EvidenceHost evidence; show when native HTTP health already satisfies the requirement and when the extra test-side probe is intentional.
 - Compile an ordinary typed-fixture example that composes the existing CreateConfiguredAsync and immutable per-call scenario inputs without adding a second generic creation family; keep browser and business assertions consumer-owned.
@@ -596,7 +596,7 @@ I want one complete example that shows the factory, explicit resource and endpoi
 
 Aside probe returned NEEDS_ASIDE; used read-only web search, primary docs only. Not comparing non-equivalent onboarding timings or treating peer illustrations as human measurements.
 
-**0D Magical Moment**: use complete compiled/runnable programs already required by C2/C5: ordinary fixture returns an endpoint only when native health and HTTP pass; neutral program demonstrates direct use with no Aspire dependencies. Three steps in an equipped project: choose exact published version/install; copy complete linked program with actual marker/module/profile types; run and see documented readiness success or safe actionable failure. The controlled neutral handler's output is package proof, not evidence that a real service is healthy. No hosted playground/new scaffolder is needed.
+**0D Magical Moment**: use complete compiled/executable programs already required by C2/C5: ordinary fixture returns an endpoint only when native health and HTTP pass; neutral program demonstrates direct use with no Aspire dependencies. Three steps in an equipped project: choose exact published version/install; copy complete linked program with actual marker/module/profile types; run and see documented readiness success or safe actionable failure. The controlled neutral handler's output is package proof, not evidence that a real service is healthy. No hosted playground/new scaffolder is needed.
 
 **0E Mode**: DX POLISH. **0F Journey Map**:
 
@@ -678,7 +678,7 @@ Scores assess the plan, not shipped experience. Prior in this table means pre-fi
 | Measurement | 4 | 7 | actual human measurement |
 | Overall | 6.5 | 7.75 | no score claims measured success |
 
-TTHW observed: unmeasured -> target: 2–5min prepared project, aspirational. Competitive rank: target Competitive, actual unknown. Magical moment: designed via complete runnable programs. Product: Library/SDK and docs. Mode DX POLISH. Principles covered in plan: zero-friction prepared start, learn by complete code, safe diagnosis, defaults with overrides, realistic typed context and endpoint-ready result; all execution unverified.
+TTHW observed: unmeasured -> target: 2–5min prepared project, aspirational. Competitive rank: target Competitive, actual unknown. Magical moment: designed via complete executable programs. Product: Library/SDK and docs. Mode DX POLISH. Principles covered in plan: zero-friction prepared start, learn by complete code, safe diagnosis, defaults with overrides, realistic typed context and endpoint-ready result; all execution unverified.
 
 ### DX Implementation Checklist
 
@@ -1001,7 +1001,7 @@ The single taste decision is d1/T1; no User Challenges. Seven native concerns ar
 
 ### Review artifacts
 
-The [engineering test plan](/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261015-051142.md) contains the critical paths and value cards. The [full review record](/Users/andrew/Projects/forge-trust/runnable__mercury/.gstack/tmp/autoplan/review-record.md) retains all phase outputs and the aggregated task list. The [deferred C6 item](../../TODOS.md#multi-resource-readiness-composition) is now saved; earlier pending-write notes are historical.
+The [engineering test plan](../plans/issue-867-readiness-test-plan.md) contains the critical paths and value cards. The full private review record (`.gstack/tmp/autoplan/review-record.md`) retains all phase outputs and the aggregated task list. The [deferred C6 item](../../TODOS.md#multi-resource-readiness-composition) is now saved; earlier pending-write notes are historical.
 
 ### Final autoplan approval — 2026-10-15
 
