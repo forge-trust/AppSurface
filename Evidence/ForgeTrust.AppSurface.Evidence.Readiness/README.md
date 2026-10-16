@@ -12,13 +12,13 @@ for current release risk, migration guidance, and readiness.
 
 For a full executable first use, start with the [standalone Evidence.Readiness consumer](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-consumer). Its project is the canonical package-only quickstart, including prerequisites, exact coordinated package-version selection, restore/build/run commands, and recorded output. The [typed Aspire consumer](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-typed-consumer) is the complete profile-based example. Run both through the [consumer verification script](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-evidence-readiness-consumers.sh). A controlled handler proves package behavior; it does not prove that a live endpoint or Aspire resource is ready.
 
-Install the exact coordinated package version selected through the [AppSurface package chooser](https://github.com/forge-trust/AppSurface/blob/main/packages/README.md) and [release hub](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md):
+Install the exact coordinated package version selected through the [release guidance](#release-guidance):
 
 ```bash
 dotnet add package ForgeTrust.AppSurface.Evidence.Readiness --version <selected-exact-version>
 ```
 
-The [coordinated release workflow](https://github.com/forge-trust/AppSurface/blob/main/releases/README.md) publishes packages together. Preview versions and their upgrade expectations follow the [pre-1.0 upgrade policy](https://github.com/forge-trust/AppSurface/blob/main/releases/upgrade-policy.md).
+The coordinated release workflow linked in [release guidance](#release-guidance) publishes packages together. Preview versions and their upgrade expectations follow the [pre-1.0 upgrade policy](https://github.com/forge-trust/AppSurface/blob/main/releases/upgrade-policy.md).
 
 ## Choose the smallest readiness layer
 
@@ -102,7 +102,7 @@ For `Deadline` and `AttemptLimit`, `LastCause`, `LastStatusCode`, and `LastHttpR
 
 Generated readiness messages and fields must not include endpoint or path values, query strings, headers, credentials, response bodies, raw transport messages, raw transport inner exceptions, or arbitrary exception data. The API does not automatically log caller exceptions and does not promise that caller-owned exception text is redacted. Do not copy an arbitrary original exception into a safe readiness field.
 
-`ReadinessException.Data` is normally empty. If typed-fixture startup fails and builder cleanup also fails, the original exception remains primary and receives only `Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure`; the raw secondary exception is not retained. Redaction checks should allow this fixed enum entry on that dual-failure path.
+`ReadinessException.Data` is normally empty. If typed-fixture startup fails and client or builder cleanup also fails, or an Evidence.Aspire readiness wait fails and its owned client cleanup also fails, the original exception remains primary and receives only `Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure`; the raw secondary exception is not retained. Redaction checks should allow this fixed enum entry on that dual-failure path.
 
 ## Troubleshooting
 
@@ -110,7 +110,7 @@ The exception's fixed [`DocumentationUrl`](#readinessexception) always ends in `
 
 ### Exact safe diagnostic templates
 
-`Problem`, `Cause`, and `NextAction` contain these fixed safe values. Braced placeholders contain only a phase enum, numeric HTTP status, or `HttpRequestError` enum; they never contain request or exception text.
+`Problem`, `Cause`, and `NextAction` contain these fixed safe values. Braced placeholders contain only a phase enum, numeric HTTP status, `HttpRequestError` enum, or fixed allowlisted cleanup type; they never contain request or exception text.
 
 | Phase and category | `Problem` | `Cause` | `NextAction` |
 | --- | --- | --- | --- |

@@ -14,6 +14,9 @@ using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Xml.Linq;
 
 namespace EvidenceReadinessTypedConsumer;
 
@@ -39,7 +42,9 @@ public static class Program
         var packageVersion = RequiredArgument(args, "--package-version");
         var sourceCommit = RequiredArgument(args, "--source-commit");
         var sourceTreeStatus = RequiredArgument(args, "--source-tree-status");
-        AssertTypedRestoreClosure(packageVersion);
+        var packageCache = RequiredArgument(args, "--package-cache");
+        var localFeed = RequiredArgument(args, "--local-feed");
+        AssertTypedRestoreClosure(packageVersion, sourceCommit, packageCache, localFeed);
         AssertNativeDcpMetadata();
 
         await RunPinnedGateEquivalentAsync("monitoring-receipt", CancellationToken.None);
@@ -114,17 +119,83 @@ public static class Program
         return 0;
     }
 
-    private static void AssertTypedRestoreClosure(string packageVersion)
+    private static void AssertTypedRestoreClosure(
+        string packageVersion,
+        string sourceCommit,
+        string packageCache,
+        string localFeed)
     {
         var assetsPath = Path.Join(Environment.CurrentDirectory, "obj", "project.assets.json");
         using var document = JsonDocument.Parse(File.ReadAllText(assetsPath));
         var assets = document.RootElement;
         var libraries = assets.GetProperty("libraries");
+        var packageFolder = assets.GetProperty("packageFolders").EnumerateObject().Single();
+        if (!SamePath(packageFolder.Name, packageCache))
+        {
+            throw new InvalidOperationException("Typed restore did not use the isolated NuGet package cache.");
+        }
+
+        var restoreSources = assets.GetProperty("project").GetProperty("restore").GetProperty("sources");
+        if (!restoreSources.EnumerateObject().Any(source => SamePath(source.Name, localFeed)))
+        {
+            throw new InvalidOperationException("Typed restore did not use the isolated local package feed.");
+        }
+
         RequirePackage(libraries, "ForgeTrust.AppSurface.Aspire.Testing", packageVersion);
         RequirePackage(libraries, "ForgeTrust.AppSurface.Evidence.Readiness", packageVersion);
         RequirePackage(libraries, "Aspire.Hosting", "13.4.4");
         RequirePackage(libraries, "Aspire.Hosting.AppHost", "13.4.4");
         RequirePackage(libraries, "Aspire.Hosting.Testing", "13.4.4");
+
+        var restoredFirstPartyPackages = new[]
+        {
+            "ForgeTrust.AppSurface.Core",
+            "ForgeTrust.AppSurface.Console",
+            "ForgeTrust.AppSurface.Deployment",
+            "ForgeTrust.AppSurface.Aspire",
+            "ForgeTrust.AppSurface.Aspire.Testing",
+            "ForgeTrust.AppSurface.Evidence.Readiness",
+        };
+        foreach (var packageId in restoredFirstPartyPackages)
+        {
+            var package = libraries.EnumerateObject().SingleOrDefault(library =>
+                library.Name.Equals($"{packageId}/{packageVersion}", StringComparison.OrdinalIgnoreCase));
+            if (package.Equals(default(JsonProperty)) ||
+                !package.Value.GetProperty("type").GetString()!.Equals("package", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Typed restore did not contain packed package {packageId}/{packageVersion}.");
+            }
+
+            var nupkgPath = Path.Join(localFeed, $"{packageId}.{packageVersion}.nupkg");
+            var packageHash = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(nupkgPath)));
+            var cachedHashPath = Path.Join(
+                packageCache, packageId.ToLowerInvariant(), packageVersion,
+                $"{packageId.ToLowerInvariant()}.{packageVersion}.nupkg.sha512");
+            if (!string.Equals(packageHash, package.Value.GetProperty("sha512").GetString(), StringComparison.Ordinal) ||
+                !string.Equals(packageHash, File.ReadAllText(cachedHashPath).Trim(), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Typed restore bytes for {packageId} do not match the fresh local-feed nupkg.");
+            }
+        }
+
+        var packedFirstPartyPackages = new[]
+        {
+            "ForgeTrust.AppSurface.Core",
+            "ForgeTrust.AppSurface.Console",
+            "ForgeTrust.AppSurface.Deployment",
+            "ForgeTrust.AppSurface.Aspire",
+            "ForgeTrust.AppSurface.Aspire.Testing",
+            "ForgeTrust.AppSurface.Evidence.Readiness",
+            "ForgeTrust.AppSurface.Evidence.Contracts",
+            "ForgeTrust.AppSurface.Evidence.Aspire",
+        };
+        foreach (var packageId in packedFirstPartyPackages)
+        {
+            var nupkgPath = Path.Join(localFeed, $"{packageId}.{packageVersion}.nupkg");
+            AssertNuspec(nupkgPath, packageId, packageVersion, sourceCommit,
+                packageId == "ForgeTrust.AppSurface.Evidence.Aspire");
+        }
+
         if (libraries.EnumerateObject().Any(library =>
                 library.Value.GetProperty("type").GetString()!.Equals("project", StringComparison.OrdinalIgnoreCase)))
         {
@@ -148,6 +219,42 @@ public static class Program
             throw new InvalidOperationException("The typed consumer direct references differ from its prepared package project.");
         }
     }
+
+    private static void AssertNuspec(
+        string packagePath,
+        string packageId,
+        string packageVersion,
+        string sourceCommit,
+        bool evidenceAspire)
+    {
+        using var archive = ZipFile.OpenRead(packagePath);
+        using var stream = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal)).Open();
+        var metadata = XDocument.Load(stream).Descendants().Single(element => element.Name.LocalName == "metadata");
+        var dependencies = metadata.Descendants().Where(element => element.Name.LocalName == "dependency").ToArray();
+        if (metadata.Elements().Single(element => element.Name.LocalName == "id").Value != packageId ||
+            metadata.Elements().Single(element => element.Name.LocalName == "version").Value != packageVersion ||
+            metadata.Elements().Single(element => element.Name.LocalName == "repository").Attribute("commit")?.Value != sourceCommit)
+        {
+            throw new InvalidOperationException($"Packed nuspec identity or source commit is incorrect for {packageId}.");
+        }
+
+        if (evidenceAspire && !dependencies.Select(dependency => dependency.Attribute("id")?.Value ?? string.Empty)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .SequenceEqual(new[]
+                    {
+                        "Aspire.Hosting",
+                        "ForgeTrust.AppSurface.Evidence.Contracts",
+                        "ForgeTrust.AppSurface.Evidence.Readiness",
+                    }.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Evidence.Aspire nuspec dependencies must be Aspire.Hosting, Evidence.Contracts, and Evidence.Readiness only.");
+        }
+    }
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     private static void RequirePackage(JsonElement libraries, string packageId, string version)
     {

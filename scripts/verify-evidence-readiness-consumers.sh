@@ -86,8 +86,11 @@ core="$repo_root/ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"
 readiness="$repo_root/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj"
 aspire="$repo_root/Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj"
 testing="$repo_root/Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj"
+contracts="$repo_root/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj"
+evidence_aspire="$repo_root/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj"
 
 stage restore-package-closure dotnet restore "$testing" --artifacts-path "$producer_artifacts" --configfile "$producer_config" --force-evaluate --disable-build-servers -m:1
+stage restore-evidence-adapter-closure dotnet restore "$evidence_aspire" --artifacts-path "$producer_artifacts" --configfile "$producer_config" --force-evaluate --disable-build-servers -m:1
 
 for package_project in \
   "$core" \
@@ -95,7 +98,9 @@ for package_project in \
   "$repo_root/Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj" \
   "$readiness" \
   "$aspire" \
-  "$testing"; do
+  "$testing" \
+  "$contracts" \
+  "$evidence_aspire"; do
   package_name=$(basename "$(dirname "$package_project")")
   stage "pack-$package_name" dotnet pack "$package_project" --artifacts-path "$producer_artifacts" --no-restore --disable-build-servers -m:1 \
     --configuration "$configuration" --output "$feed" \
@@ -135,7 +140,8 @@ stage build-typed-consumer dotnet build "$typed_root/Consumer.csproj" --no-resto
   --disable-build-servers -m:1 --configuration "$configuration"
 stage run-typed-consumer bash -c 'cd "$1" && shift && exec "$@"' _ "$typed_root" \
   dotnet "$typed_root/bin/$configuration/net10.0/EvidenceReadinessTypedConsumer.dll" \
-  --package-version "$package_version" --source-commit "$source_commit" --source-tree-status "$source_tree_status"
+  --package-version "$package_version" --source-commit "$source_commit" --source-tree-status "$source_tree_status" \
+  --package-cache "$typed_cache" --local-feed "$feed"
 
 completed=1
 printf '\nEVIDENCE_READINESS_CONSUMERS_COMPLETE status=PASS packageVersion=%s sourceCommit=%s sourceTree=%s feed=%s logs=%s consumerRoot=%s timing=unmeasured\n' \
