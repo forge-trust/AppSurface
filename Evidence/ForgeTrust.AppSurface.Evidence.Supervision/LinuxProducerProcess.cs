@@ -297,6 +297,12 @@ internal sealed class LinuxProducerProcess
             || _output is not { Successful: true } || _outputBudget.QuotaExceeded || normalExitCode is null)
         {
             _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
+            if (PhysicallySettled && _output is not null)
+            {
+                try { LinuxProducerFailureOutput.Retain(_input, _owner, _output, cleanupToken); }
+                catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
+                    and not StackOverflowException and not AccessViolationException) { }
+            }
             throw LinuxSystemdBackend.InvalidControl();
         }
 

@@ -7,6 +7,19 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Real stream counters projected as diagnostic data, with no native ownership claim.</summary>
 public sealed class LinuxCoverageOutputObservationTests
 {
+    [Fact]
+    public void FailurePrefixesRejectDefaultOversizeAndInconsistentCountersWithoutNativeIo()
+    {
+        LinuxProducerFailureOutput.RequirePrefix(new(0, [], true, SupervisionOutputFailure.None));
+        Assert.Throws<ForgeTrust.AppSurface.Evidence.Contracts.EvidenceAdmissionException>(() =>
+            LinuxProducerFailureOutput.RequirePrefix(new(0, default, false, SupervisionOutputFailure.None)));
+        Assert.Throws<ForgeTrust.AppSurface.Evidence.Contracts.EvidenceAdmissionException>(() =>
+            LinuxProducerFailureOutput.RequirePrefix(new(0, [1], true, SupervisionOutputFailure.None)));
+        Assert.Throws<ForgeTrust.AppSurface.Evidence.Contracts.EvidenceAdmissionException>(() =>
+            LinuxProducerFailureOutput.RequirePrefix(new(1048577,
+                System.Collections.Immutable.ImmutableArray.CreateRange(new byte[1048577]), true, SupervisionOutputFailure.None)));
+    }
+
     [Theory]
     [InlineData(3, false)]
     [InlineData(4, true)]

@@ -142,6 +142,25 @@ def groups_empty(units):
    if facts.get('populated')!='0':return False
  return True
 
+def retain_producer_prefixes(generation,output,case):
+ private=Path('/run/appsurface-evidence-producer-diagnostics-'+generation)
+ if private.exists():
+  before=private.lstat();require(stat.S_ISDIR(before.st_mode) and before.st_uid==before.st_gid==0 and stat.S_IMODE(before.st_mode)==0o700,'private-producer-diagnostic-root')
+  rootfd=os.open(private,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
+  try:
+   require((os.fstat(rootfd).st_dev,os.fstat(rootfd).st_ino)==(before.st_dev,before.st_ino),'private-producer-diagnostic-identity')
+   for name in ['stdout.prefix','stderr.prefix']:
+    fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=rootfd)
+    try:
+     m=os.fstat(fd);require(stat.S_ISREG(m.st_mode) and m.st_uid==m.st_gid==0 and m.st_nlink==1 and stat.S_IMODE(m.st_mode)==0o600 and m.st_size<=1024*1024,'private-producer-diagnostic-file')
+     data=os.read(fd,1024*1024+1);require(len(data)==m.st_size and not os.read(fd,1),'private-producer-diagnostic-bytes')
+     after=os.fstat(fd);require((m.st_dev,m.st_ino,m.st_size,m.st_mtime_ns,m.st_ctime_ns)==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),'private-producer-diagnostic-stability')
+     write(output/(case+'-producer-'+name),data)
+    finally:os.close(fd)
+  finally:os.close(rootfd)
+  return True
+ return False
+
 def execute_case(args,case,end,receipt):
  generation=uuid.uuid4().hex
  root=Path('/run')/('issue779-csharp-coverage-'+generation)
@@ -260,6 +279,8 @@ def execute_case(args,case,end,receipt):
    try:command(['/usr/bin/systemctl','stop',u],min(end,time.monotonic()+15),allowed=(0,1,5))
    except Exception:pass
   result['final_groups_empty']=groups_empty(units)
+  try:result['producer_diagnostics_retained']=retain_producer_prefixes(generation,args.output,case)
+  except Exception:result['producer_diagnostics_retained']=False
   for n in ['owner.stdout','owner.stderr']:
    p=root/n
    if p.exists() and p.is_file() and p.stat().st_size<=MAX_LOG:shutil.copyfile(p,args.output/(case+'-'+n));(args.output/(case+'-'+n)).chmod(0o600)

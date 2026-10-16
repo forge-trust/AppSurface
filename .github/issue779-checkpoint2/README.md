@@ -25,3 +25,7 @@ The [SDK-only hash helper](NuGetContentHash/README.md) computes NuGet's `Package
 ## Explicit staging-parent traversal
 
 The private driver uses umask077 for retained evidence. Fresh `/run` staging parents explicitly set0755 through their opened directory descriptor after creation, preserving root ownership and rejecting existing paths. Without this step, `mkdir(mode=0755)` silently creates0700 under that umask, and the protected deployment auditor correctly rejects the ancestor before any subject work. Only these generated input parents receive search access; the request, control, artifact and retained-evidence permissions remain private. A portable actual chmod/stat regression exercises the private umask and exclusive-path rejection.
+
+## Failed producer diagnostics
+
+When the C# producer has actually settled, failure-only prefix retention may create root-private `stdout.prefix` and `stderr.prefix` under its fixed diagnostic generation. The native driver copies only those two root-owned0600/single-link files (at most1MiB each) from a validated root-owned0700 directory, without printing their contents. The copy is diagnostic only and cannot turn failed RUN, custody or cleanup into a passing case. Missing diagnostics remain missing evidence.
