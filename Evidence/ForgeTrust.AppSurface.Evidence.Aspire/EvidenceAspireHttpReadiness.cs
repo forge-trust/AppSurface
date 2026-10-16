@@ -159,6 +159,10 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
         return new ValueTask(cleanupTask);
     }
 
+    /// <summary>Validates the allocated host-local value without retaining it in failure diagnostics.</summary>
+    /// <param name="endpointValue">The value allocated by the selected native Aspire endpoint.</param>
+    /// <returns>An absolute HTTP(S) URI with a nonempty host.</returns>
+    /// <exception cref="ReadinessException">The value is absent, relative, malformed, or uses a non-HTTP scheme.</exception>
     internal static Uri ResolveEndpointUri(string? endpointValue)
     {
         if (!Uri.TryCreate(endpointValue, UriKind.Absolute, out var endpoint)
@@ -293,33 +297,16 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
                 (failures ??= []).Add(exception);
             }
 
+            // The private drain completion is signaled only with TrySetResult after admitted waits settle.
+            await drainTask.ConfigureAwait(false);
+            _stop.Dispose();
             try
             {
-                await drainTask.ConfigureAwait(false);
+                await _disposeLease().ConfigureAwait(false);
             }
             catch (Exception exception)
             {
                 (failures ??= []).Add(exception);
-            }
-            finally
-            {
-                try
-                {
-                    _stop.Dispose();
-                }
-                catch (Exception exception)
-                {
-                    (failures ??= []).Add(exception);
-                }
-
-                try
-                {
-                    await _disposeLease().ConfigureAwait(false);
-                }
-                catch (Exception exception)
-                {
-                    (failures ??= []).Add(exception);
-                }
             }
 
             if (failures is null)
@@ -334,10 +321,6 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
             {
                 completion.TrySetException(new AggregateException("Aspire readiness cleanup encountered multiple failures.", failures));
             }
-        }
-        catch (Exception exception)
-        {
-            completion.TrySetException(exception);
         }
         finally
         {

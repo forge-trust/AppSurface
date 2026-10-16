@@ -1,3 +1,5 @@
+using System.Collections;
+using System.Collections.ObjectModel;
 using System.Net;
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
@@ -68,6 +70,28 @@ public sealed class EvidenceAspireHttpReadinessTests
         await adapter.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
     }
 
+    // valuecard protects owner cleanup from nested readiness reentry; fails_when an inner callback can dispose its active outer wait.
+    // why_new direct-owner coverage does not walk parent flows; seam outer health awaits an inner adapter; no_claim covers one nesting level.
+    [Fact]
+    public async Task NestedReadinessCallbackCannotDisposeAnOuterAdapter()
+    {
+        EvidenceAspireHttpReadiness? outer = null;
+        var rejected = 0;
+        var inner = Create(health: _ =>
+        {
+            Assert.Throws<InvalidOperationException>(() => outer!.DisposeAsync());
+            rejected++;
+            return Task.CompletedTask;
+        });
+        outer = Create(health: _ => inner.WaitUntilReadyAsync(default));
+
+        await outer.WaitUntilReadyAsync(default);
+
+        Assert.Equal(1, rejected);
+        await outer.DisposeAsync();
+        await inner.DisposeAsync();
+    }
+
     [Theory]
     [InlineData("health")]
     [InlineData("endpoint")]
@@ -84,6 +108,161 @@ public sealed class EvidenceAspireHttpReadinessTests
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => adapter.WaitUntilReadyAsync(caller.Token));
         Assert.Equal(caller.Token, error.CancellationToken);
         await adapter.DisposeAsync();
+    }
+
+    // valuecard protects original caller cancellation across callback failures; fails_when callback OCE wins after caller cancellation.
+    // why_new existing rows cancel without throwing OCE; seam injected callbacks/client factory; no_claim unrelated OCE is covered below.
+    [Theory]
+    [InlineData("health")]
+    [InlineData("endpoint")]
+    public async Task CallbackOperationCancellationAfterCallerCancellation_PreservesCallerTokenAndSkipsHttp(string phase)
+    {
+        using var caller = new CancellationTokenSource();
+        var callbackCancellation = new OperationCanceledException("callback cancellation");
+        var clients = 0;
+        Task CancelCallerThenThrow()
+        {
+            caller.Cancel();
+            throw callbackCancellation;
+        }
+
+        Task<string?> CancelCallerThenThrowEndpoint()
+        {
+            caller.Cancel();
+            throw callbackCancellation;
+        }
+
+        var adapter = Create(
+            health: phase == "health" ? _ => CancelCallerThenThrow() : _ => Task.CompletedTask,
+            endpoint: phase == "endpoint" ? _ => CancelCallerThenThrowEndpoint() : null,
+            client: _ => { clients++; return Client(); });
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => adapter.WaitUntilReadyAsync(caller.Token));
+
+        Assert.Equal(caller.Token, error.CancellationToken);
+        Assert.NotSame(callbackCancellation, error);
+        Assert.Equal(0, clients);
+        await adapter.DisposeAsync();
+    }
+
+    // valuecard protects unrelated callback cancellation identity; fails_when it is translated or readiness proceeds to HTTP.
+    // why_new cancellation precedence rows use the caller token; seam injected phase callbacks/client factory; no_claim does not assert a ReadinessException category.
+    [Theory]
+    [InlineData("health")]
+    [InlineData("endpoint")]
+    [InlineData("client")]
+    public async Task UnrelatedCallbackOperationCancellation_RemainsPrimaryAndCompletesWithoutHttp(string phase)
+    {
+        var unrelatedCancellation = new OperationCanceledException("unrelated cancellation");
+        var factoryInvocations = 0;
+        var requests = 0;
+        Task ThrowUnrelatedCancellation() => Task.FromException(unrelatedCancellation);
+        Task<string?> ThrowUnrelatedEndpointCancellation() => Task.FromException<string?>(unrelatedCancellation);
+        var adapter = Create(
+            health: phase == "health" ? _ => ThrowUnrelatedCancellation() : _ => Task.CompletedTask,
+            endpoint: phase == "endpoint" ? _ => ThrowUnrelatedEndpointCancellation() : null,
+            client: _ =>
+            {
+                factoryInvocations++;
+                if (phase == "client") throw unrelatedCancellation;
+                return Client((_, _) => { requests++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); });
+            });
+        var wait = adapter.WaitUntilReadyAsync(default);
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        Assert.Same(unrelatedCancellation, error);
+        Assert.True(wait.IsCompleted);
+        Assert.Equal(phase == "client" ? 1 : 0, factoryInvocations);
+        Assert.Equal(0, requests);
+        await adapter.DisposeAsync();
+    }
+
+    // valuecard protects success validation after owned-client disposal; fails_when disposal cancels the caller or expires the budget.
+    // why_new existing deadline checks precede disposal; seam handler disposal mutates the caller token or FakeTimeProvider; no_claim covers one response.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClientDisposalCancellationAfterSuccessfulResponse_RejectsSuccessAndDisposesOnce(bool deadlineExpires)
+    {
+        var time = new FakeTimeProvider();
+        using var caller = new CancellationTokenSource();
+        var clients = 0;
+        var requests = 0;
+        var clientDisposals = 0;
+        var adapter = Create(time: time, timeout: TimeSpan.FromSeconds(5), client: _ =>
+        {
+            clients++;
+            return Client(
+                (_, _) => { requests++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); },
+                () =>
+                {
+                    clientDisposals++;
+                    if (deadlineExpires) time.Advance(TimeSpan.FromSeconds(5));
+                    else caller.Cancel();
+                });
+        });
+
+        var error = await Record.ExceptionAsync(() => adapter.WaitUntilReadyAsync(caller.Token));
+        if (deadlineExpires)
+        {
+            var readiness = Assert.IsType<ReadinessException>(error);
+            Assert.Equal(ReadinessPhase.Http, readiness.Phase);
+            Assert.Equal(ReadinessFailureCategory.Deadline, readiness.Category);
+        }
+        else
+        {
+            var cancellation = Assert.IsAssignableFrom<OperationCanceledException>(error);
+            Assert.Equal(caller.Token, cancellation.CancellationToken);
+        }
+
+        Assert.Equal(1, clients);
+        Assert.Equal(1, requests);
+        Assert.Equal(1, clientDisposals);
+        await adapter.DisposeAsync();
+    }
+
+    // valuecard protects joined cleanup failure reporting and drain ordering; fails_when stop cancellation callbacks and lease cleanup both throw.
+    // why_new prior drain tests cover one cleanup error; seam pending health plus token registration and lease callback; no_claim asserts only these two failures.
+    [Fact]
+    public async Task DisposalAggregatesStopCallbackAndLeaseFailuresAfterPendingHealthDrains()
+    {
+        var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopCallbackFailure = new InvalidOperationException("stop callback failed");
+        var leaseFailure = new InvalidOperationException("lease cleanup failed");
+        var leaseDisposals = 0;
+        var clients = 0;
+        var adapter = Create(
+            health: async token =>
+            {
+                using var registration = token.Register(() => throw stopCallbackFailure);
+                healthEntered.SetResult();
+                await releaseHealth.Task;
+            },
+            client: _ => { clients++; return Client(); },
+            cleanup: () => { leaseDisposals++; throw leaseFailure; });
+        var wait = adapter.WaitUntilReadyAsync(default);
+        await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var first = adapter.DisposeAsync().AsTask();
+        var second = adapter.DisposeAsync().AsTask();
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
+        Assert.Throws<ObjectDisposedException>(() => { _ = adapter.WaitUntilReadyAsync(default); });
+        Assert.Equal(0, leaseDisposals);
+        releaseHealth.SetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        var firstFailure = await Assert.ThrowsAsync<AggregateException>(() => first.WaitAsync(TimeSpan.FromSeconds(10)));
+        var secondFailure = await Assert.ThrowsAsync<AggregateException>(() => second.WaitAsync(TimeSpan.FromSeconds(10)));
+        var repeatedFailure = await Assert.ThrowsAsync<AggregateException>(() => adapter.DisposeAsync().AsTask());
+        var failures = firstFailure.Flatten().InnerExceptions;
+        Assert.Same(firstFailure, secondFailure);
+        Assert.Same(firstFailure, repeatedFailure);
+        Assert.Equal(2, failures.Count);
+        Assert.Contains(stopCallbackFailure, failures);
+        Assert.Contains(leaseFailure, failures);
+        Assert.Equal(1, leaseDisposals);
+        Assert.Equal(0, clients);
     }
 
     [Theory]
@@ -135,8 +314,29 @@ public sealed class EvidenceAspireHttpReadinessTests
             Assert.Same(primary, error);
             Assert.Equal(ReadinessFailureCategory.CleanupFailure, error!.Data["AppSurface.Readiness.CleanupFailure"]);
         }
-        else Assert.Equal(ReadinessPhase.Cleanup, Assert.IsType<ReadinessException>(error).Phase);
+        else
+        {
+            var cleanup = Assert.IsType<ReadinessException>(error);
+            Assert.Equal(ReadinessPhase.Cleanup, cleanup.Phase);
+            Assert.Equal("Owned cleanup exception type: InvalidOperationException.", cleanup.Cause);
+        }
         Assert.DoesNotContain("raw-cleanup-secret", error!.ToString());
+        await adapter.DisposeAsync();
+    }
+
+    // valuecard protects the original operation failure when its safe metadata cannot be written; fails_when client cleanup is secondary.
+    // why_new existing cleanup coverage uses a writable Exception.Data; seam read-only Data plus failing client disposal; no_claim checks identity only.
+    [Fact]
+    public async Task ClientCleanupFailure_DoesNotReplacePrimaryWhenExceptionDataIsReadOnly()
+    {
+        var primary = new ReadOnlyDataException();
+        var adapter = Create(client: _ => Client(
+            (_, _) => Task.FromException<HttpResponseMessage>(primary),
+            () => throw new InvalidOperationException("secondary cleanup failure")));
+
+        var error = await Record.ExceptionAsync(() => adapter.WaitUntilReadyAsync(default));
+
+        Assert.Same(primary, error);
         await adapter.DisposeAsync();
     }
 
@@ -205,5 +405,11 @@ public sealed class EvidenceAspireHttpReadinessTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);
         protected override void Dispose(bool disposing) { if (disposing) dispose?.Invoke(); base.Dispose(disposing); }
     }
+
+    private sealed class ReadOnlyDataException() : Exception
+    {
+        public override IDictionary Data { get; } = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>());
+    }
+
     private sealed class PlainResource(string name) : Resource(name);
 }

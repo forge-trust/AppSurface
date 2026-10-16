@@ -50,6 +50,69 @@ public sealed partial class AppSurfaceAspireTestFixtureTests
         Assert.Equal(result == "null" ? 0 : 1, cleanup);
     }
 
+    // Value: protects=invalid build result cleanup; fails_when=null application continues startup;
+    // why_new=factory-null coverage does not exercise the transferred builder's build result;
+    // seam=existing FixtureOperations; no_claim=native builder cannot normally return null.
+    [Fact]
+    public async Task NullBuildResult_CleansTransferredBuilderWithoutStarting()
+    {
+        var cleaned = 0;
+        var started = 0;
+        var builder = CreateBuilder();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => AppSurfaceAspireTestFixture.StartAsync(
+            _ => Task.FromResult(builder), Target, null, default, TimeProvider.System,
+            new()
+            {
+                BuildAsync = (_, _) => Task.FromResult<global::Aspire.Hosting.DistributedApplication>(null!),
+                StartAsync = (_, _) => { started++; return Task.CompletedTask; },
+                CleanupAsync = _ => { cleaned++; return ValueTask.CompletedTask; },
+            }));
+        Assert.Contains("did not return an application", error.Message);
+        Assert.Equal(0, started);
+        Assert.Equal(1, cleaned);
+        await builder.DisposeAsync();
+    }
+
+    // Value: protects=primary error survives unavailable diagnostic storage;
+    // fails_when=writing cleanup metadata replaces the original exception;
+    // why_new=ordinary Exception.Data accepts writes; seam=existing FixtureOperations;
+    // no_claim=caller-owned exception text is not redacted.
+    [Fact]
+    public async Task UnavailableExceptionData_DoesNotReplacePrimaryWhenClientAndBuilderCleanupFail()
+    {
+        var primary = new UnavailableDataException();
+        var application = CreateApplication();
+        var builder = CreateBuilder();
+        var disposed = 0;
+        var cleaned = 0;
+        var operations = CreateOperations(application, [], []) with
+        {
+            WaitForHttpAsync = (_, _, _, _, _) => Task.FromException(primary),
+            CleanupAsync = _ => { cleaned++; throw new InvalidOperationException("secondary builder detail"); },
+        };
+        var error = await Record.ExceptionAsync(() => AppSurfaceAspireTestFixture.StartAsync(
+            _ => Task.FromResult(builder), Target,
+            new()
+            {
+                CreateProbeClient = _ => new HttpClient(new StubHandler(_ => new(HttpStatusCode.OK), () =>
+            {
+                disposed++;
+                throw new InvalidOperationException("secondary client detail");
+            }))
+            }, default, TimeProvider.System, operations));
+        Assert.Same(primary, error);
+        Assert.Equal(1, disposed);
+        Assert.Equal(1, cleaned);
+        Assert.DoesNotContain("secondary", error!.ToString());
+        await builder.DisposeAsync();
+        await application.DisposeAsync();
+    }
+
+    private sealed class UnavailableDataException : Exception
+    {
+        public override IDictionary Data => throw new NotSupportedException("Caller diagnostic storage is unavailable.");
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -255,7 +318,12 @@ public sealed partial class AppSurfaceAspireTestFixtureTests
             Assert.Same(primary, error);
             Assert.Equal(ReadinessFailureCategory.CleanupFailure, error.Data["AppSurface.Readiness.CleanupFailure"]);
         }
-        if (failure == "cleanup-failure") Assert.Equal(ReadinessPhase.Cleanup, Assert.IsType<ReadinessException>(error).Phase);
+        if (failure == "cleanup-failure")
+        {
+            var cleanupError = Assert.IsType<ReadinessException>(error);
+            Assert.Equal(ReadinessPhase.Cleanup, cleanupError.Phase);
+            Assert.Equal("Owned cleanup exception type: InvalidOperationException.", cleanupError.Cause);
+        }
         if (failure == "cancel-during-cleanup") Assert.Equal(caller.Token, Assert.IsAssignableFrom<OperationCanceledException>(error).CancellationToken);
         if (failure == "deadline-during-cleanup") Assert.Equal(ReadinessFailureCategory.Deadline, Assert.IsType<ReadinessException>(error).Category);
         Assert.DoesNotContain("raw-cleanup-secret", error.ToString());

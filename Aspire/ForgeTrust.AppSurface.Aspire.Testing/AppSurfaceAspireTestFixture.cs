@@ -296,7 +296,8 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
         {
             if (primaryException is null)
             {
-                primaryException = new ReadinessException(ReadinessPhase.Cleanup, ReadinessFailureCategory.CleanupFailure);
+                primaryException = new ReadinessException(ReadinessPhase.Cleanup, ReadinessFailureCategory.CleanupFailure,
+                    cleanupExceptionType: clientCleanupException.GetType());
             }
             else
             {

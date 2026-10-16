@@ -7,8 +7,10 @@ namespace AspireAppHostExample.Tests;
 
 public sealed class EvidenceReadinessIntegrationTests
 {
-    [Fact]
-    public async Task EvidenceHost_NativeHttpReadinessRunsProducerAndDisposesItsSingleLease()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task EvidenceHost_NativeHttpReadinessRunsProducerAndDisposesItsSingleLease(bool customClient)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
@@ -20,7 +22,17 @@ public sealed class EvidenceReadinessIntegrationTests
         });
         builder.AddProject<Projects.WebAppExample>("web").WithHttpEndpoint();
         await using var application = await EvidenceAspireApplication.StartAsync(builder, timeout.Token);
-        var readiness = application.CreateHttpReadiness("web", "web", "http", "/", TimeSpan.FromMinutes(1));
+        var createdClients = 0;
+        var disposedClients = 0;
+        var options = customClient ? new EvidenceAspireHttpReadinessOptions
+        {
+            CreateProbeClient = endpoint =>
+            {
+                createdClients++;
+                return new HttpClient(new ObservedClientHandler(() => disposedClients++)) { BaseAddress = endpoint };
+            },
+        } : null;
+        var readiness = application.CreateHttpReadiness("web", "web", "http", "/", TimeSpan.FromMinutes(1), options);
         var producer = new HttpConditionProducer();
         var plan = new EvidencePlan(
             "1.0", "readiness-example", "policy-digest", "diff-digest",
@@ -43,7 +55,18 @@ public sealed class EvidenceReadinessIntegrationTests
         Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
         Assert.True(manifest.Metrics.CleanupCompleted);
         Assert.Equal(1, producer.Runs);
+        Assert.Equal(customClient ? 1 : 0, createdClients);
+        Assert.Equal(createdClients, disposedClients);
         Assert.Throws<ObjectDisposedException>(() => application.CreateHealthReadiness("web", "web"));
+    }
+
+    private sealed class ObservedClientHandler(Action disposed) : DelegatingHandler(new SocketsHttpHandler())
+    {
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) disposed();
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class HttpConditionProducer : IEvidenceProducer
