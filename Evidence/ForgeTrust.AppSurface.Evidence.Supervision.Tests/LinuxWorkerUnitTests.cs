@@ -8,6 +8,23 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 public sealed class LinuxWorkerUnitTests
 {
     [Fact]
+    public void ProducerTreeIsHiddenWithoutAddingAnyWorkerWriteGrant()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var id = Guid.NewGuid();
+        LinuxWorkerUnit Recipe(string root) => LinuxWorkerUnit.Create(LinuxUnitName.Create(LinuxUnitRole.Worker, id),
+            LinuxUnitName.Create(LinuxUnitRole.Owner, id), "/usr/share/dotnet/dotnet", "/run/tool/appsurface.dll",
+            65010, 65011, "/run/broker/control.sock", "/run/tool", "/run/subject", "/run/output", "/run/raw-results",
+            TimeSpan.FromMinutes(2), TimeSpan.FromSeconds(5), output, error, root);
+        var recipe = Recipe("/run/producer");
+        Assert.Equal(new[] { "/run/raw-results", "/run/producer" }, recipe.Properties["InaccessiblePaths"].GetArray<string>());
+        Assert.Equal(new[] { "/run/output" }, recipe.Properties["ReadWritePaths"].GetArray<string>());
+        foreach (var invalid in new[] { "/run/tool", "/run/output", "/run", "/run/broker", "/usr/share/dotnet" })
+            AssertClosed(() => Recipe(invalid));
+    }
+
+    [Fact]
     public void FixedArgumentsAndPolicyCannotAddCallerWorkOrWritablePaths()
     {
         using var output = BorrowedOutput();

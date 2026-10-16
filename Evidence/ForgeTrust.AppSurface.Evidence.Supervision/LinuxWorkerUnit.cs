@@ -30,13 +30,13 @@ internal sealed class LinuxWorkerUnit
     private readonly IReadOnlyList<string> _arguments;
     private readonly string[] _readOnlyPaths;
     private readonly string _outputParent;
-    private readonly string _deniedSubjectResults;
+    private readonly string[] _deniedSubjectResults;
     private readonly uint _uid;
     private readonly uint _gid;
 
     private LinuxWorkerUnit(LinuxUnitName worker, LinuxUnitName owner, string runtimeHost, string managedEntry,
         uint uid, uint gid, string socket, string toolRoot, string subjectRoot, string outputParent,
-        string deniedSubjectResults, ulong runtime, ulong stopping, SafeHandle stdout, SafeHandle stderr)
+        string deniedSubjectResults, ulong runtime, ulong stopping, SafeHandle stdout, SafeHandle stderr, string? producerRoot)
     {
         Unit = worker;
         Owner = owner;
@@ -46,7 +46,7 @@ internal sealed class LinuxWorkerUnit
         _readOnlyPaths = new[] { toolRoot, subjectRoot, runtimeHost, runtimeHost[..runtimeHost.LastIndexOf('/')] }
             .Distinct(StringComparer.Ordinal).ToArray();
         _outputParent = outputParent;
-        _deniedSubjectResults = deniedSubjectResults;
+        _deniedSubjectResults = producerRoot is null ? [deniedSubjectResults] : [deniedSubjectResults, producerRoot];
         RuntimeMicroseconds = runtime;
         StoppingMicroseconds = stopping;
         StandardOutput = stdout;
@@ -110,7 +110,7 @@ internal sealed class LinuxWorkerUnit
             ["BindsTo"] = VariantValue.Array(new[] { Owner.Value }),
             ["ReadOnlyPaths"] = VariantValue.Array((string[])_readOnlyPaths.Clone()),
             ["ReadWritePaths"] = VariantValue.Array(new[] { _outputParent }),
-            ["InaccessiblePaths"] = VariantValue.Array(new[] { _deniedSubjectResults }),
+            ["InaccessiblePaths"] = VariantValue.Array((string[])_deniedSubjectResults.Clone()),
             ["StandardInput"] = "null",
             ["PassEnvironment"] = VariantValue.Array(Array.Empty<string>()),
             ["UnsetEnvironment"] = VariantValue.Array(new[]
@@ -144,11 +144,13 @@ internal sealed class LinuxWorkerUnit
     /// <param name="stopping">Positive stop reserve at most 30 seconds and strictly smaller than remainingJobAllowance.</param>
     /// <param name="stdout">Caller-retained valid write-end SafeHandle; metadata validation cannot prove descriptor access mode.</param>
     /// <param name="stderr">Caller-retained valid write-end SafeHandle.</param>
+    /// <param name="producerRoot">Optional root-selected producer tree hidden from the worker; must be disjoint from every worker input/output/control tree.</param>
     /// <returns>Immutable policy data without a lease, physical-exit fact, or admission.</returns>
     internal static LinuxWorkerUnit Create(LinuxUnitName worker, LinuxUnitName owner, string runtimeHost,
         string managedEntry, uint workerUid, uint workerGid, string controlSocket, string toolRoot,
         string preparedSubjectRoot, string outputParent, string deniedSubjectResults,
-        TimeSpan remainingJobAllowance, TimeSpan stopping, SafeHandle stdout, SafeHandle stderr)
+        TimeSpan remainingJobAllowance, TimeSpan stopping, SafeHandle stdout, SafeHandle stderr,
+        string? producerRoot = null)
     {
         const string workerPrefix = "appsurface-evidence-worker-";
         const string ownerPrefix = "appsurface-evidence-owner-";
@@ -162,6 +164,13 @@ internal sealed class LinuxWorkerUnit
         foreach (var path in new[] { runtimeHost, managedEntry, toolRoot, preparedSubjectRoot, outputParent, deniedSubjectResults })
             ValidatePath(path, 4096);
         ValidatePath(controlSocket, 100);
+        if (producerRoot is not null)
+        {
+            ValidatePath(producerRoot, 4096);
+            if (new[] { toolRoot, preparedSubjectRoot, outputParent, controlSocket, deniedSubjectResults,
+                runtimeHost[..runtimeHost.LastIndexOf('/')] }.Any(path => Overlaps(producerRoot, path)))
+                throw LinuxSystemdBackend.InvalidControl();
+        }
         var runtimeParent = runtimeHost[..runtimeHost.LastIndexOf('/')];
         if (runtimeParent.Length == 0 || !managedEntry.StartsWith(toolRoot + "/", StringComparison.Ordinal)
             || Overlaps(outputParent, controlSocket)
@@ -178,7 +187,7 @@ internal sealed class LinuxWorkerUnit
             || stdout.IsClosed || stdout.IsInvalid || stderr.IsClosed || stderr.IsInvalid)
             throw LinuxSystemdBackend.InvalidControl();
         return new(worker, owner, runtimeHost, managedEntry, workerUid, workerGid, controlSocket,
-            toolRoot, preparedSubjectRoot, outputParent, deniedSubjectResults, runtime, stop, stdout, stderr);
+            toolRoot, preparedSubjectRoot, outputParent, deniedSubjectResults, runtime, stop, stdout, stderr, producerRoot);
     }
 
     /// <summary>Matches running-main metadata against this exact recipe; it issues no process or admission authority.</summary>

@@ -13,6 +13,28 @@ process before returning a failed result. Callers must use one quota for the ful
 quota for each command would incorrectly reset its cumulative limit. This internal dependency supplies output
 accounting; it does not grant runtime admission or enable a supported provider.
 
+## Protected reporter output relay
+
+The fixed protected coverage producer runs the packaged ReportGenerator through the internal
+[`CoverageRunProcessRequest`](../../Cli/ForgeTrust.AppSurface.Cli/CoverageRun.cs) process runner only while its
+authenticated worker is armed. For that reporter request, `RawOutputMirror` is a caller-owned `Stream` opened from
+the root process's standard error. The runner relays every actual stdout and stderr read to that stream, serializes
+the two pumps at chunk boundaries, and awaits both the write and flush with the original caller cancellation token
+before it charges the local process-output quota or discards any excess buffered capture. Its default is `null`, so
+ordinary [`appsurface coverage run`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) keeps its
+existing capture and logging behavior.
+
+The mirror combines both channels without framing and does not promise their relative ordering. The protected root
+supervision path drains worker stderr into a bounded root-private prefix; raw reporter bytes must stay in that private
+diagnostic path and must never be echoed to public CLI output. The generator flushes the stream before returning and
+owns its `Console.OpenStandardError()` handle; the process runner never closes a caller-supplied mirror. A mirror
+write/flush failure cancels the child and fails the joined process operation, and quota overflow remains a failed
+run. Callers must supply a protected destination and must not use this internal relay as a general logging sink.
+
+The transport changes output accounting only. It adds no worker request, callback, deadline, runtime authority, or
+proof claim. Native acceptance still depends on the independent Linux procedures in the
+[EvidenceHost acceptance record](../../docs/evidence/issue779-consumer-acceptance.md).
+
 ## Fixed restricted coverage registration
 
 `EvidenceRestrictedCoverageProducerFactory.Create(EvidenceProducerDeclaration)` returns the sealed `EvidenceRestrictedCoverageRegistration`, which implements `IEvidenceProducer`. Both types are in `ForgeTrust.AppSurface.Evidence.Coverage`. Creation accepts only `coverage` version `1.0.0`, snapshots the complete declaration and performs no process, transport or artifact I/O. Its public `Declaration` contains read-only copies of resource, assertion and artifact lists. A host can inspect the concrete type and compare every declaration field with its compiled catalogue before starting an application. Matching metadata supplies no runtime authority.

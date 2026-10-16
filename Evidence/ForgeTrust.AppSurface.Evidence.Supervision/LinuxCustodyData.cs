@@ -27,6 +27,12 @@ internal enum LinuxCustodyNodeKind
     Manifest,
     /// <summary>The fixed evidence summary JSON file.</summary>
     Summary,
+    /// <summary>The single declared producer directory beneath the worker evidence slot.</summary>
+    CoverageProducer,
+    /// <summary>The fixed merged report directory beneath that producer.</summary>
+    CoverageMerged,
+    /// <summary>The declared merged Cobertura artifact, retained and hash verified.</summary>
+    CoverageReport,
 }
 
 /// <summary>Pure metadata and closed-inventory guards for checkpoint-one terminal custody.</summary>
@@ -115,6 +121,27 @@ internal static class LinuxCustodyData
         if (!valid) throw Rejected();
     }
 
+    /// <summary>Checks checkpoint-two's closed optional artifact directories without granting custody.</summary>
+    /// <remarks>Partial directories support failed-run sealing. Successful file verification requires the full declared artifact.</remarks>
+    internal static void RequireCoverageInventory(LinuxCustodyNodeKind kind, IReadOnlyList<string> names, string producerId)
+    {
+        if (string.IsNullOrEmpty(producerId) || producerId.Length > 128
+            || producerId is "." or ".." or "evidence-plan.json" or "evidence-manifest.json" or "evidence-summary.json"
+            || producerId.Any(static c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.')) throw Rejected();
+        var expected = kind switch
+        {
+            LinuxCustodyNodeKind.Slot => new[] { "evidence-plan.json", "evidence-manifest.json", "evidence-summary.json", producerId },
+            LinuxCustodyNodeKind.CoverageProducer => ["merged"],
+            LinuxCustodyNodeKind.CoverageMerged => ["Cobertura.xml"],
+            _ => throw Rejected(),
+        };
+        if (names is null || names.Count < 0 || names.Count > expected.Length) throw Rejected();
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var name in names)
+            if (unique.Count >= expected.Length || name is null || !expected.Contains(name, StringComparer.Ordinal)
+                || !unique.Add(name)) throw Rejected();
+    }
+
     private static bool AllowedName(LinuxCustodyNodeKind kind, string? name) => kind switch
     {
         LinuxCustodyNodeKind.Generation => name is "worker" or "output" or "raw-results",
@@ -147,15 +174,17 @@ internal static class LinuxCustodyData
 
     private static bool IsDirectory(LinuxCustodyNodeKind kind) => kind is LinuxCustodyNodeKind.Generation
         or LinuxCustodyNodeKind.Control or LinuxCustodyNodeKind.Broker or LinuxCustodyNodeKind.Output
-        or LinuxCustodyNodeKind.RawResults or LinuxCustodyNodeKind.Slot;
+        or LinuxCustodyNodeKind.RawResults or LinuxCustodyNodeKind.Slot
+        or LinuxCustodyNodeKind.CoverageProducer or LinuxCustodyNodeKind.CoverageMerged;
 
     private static int Type(LinuxCustodyNodeKind kind) => kind switch
     {
         LinuxCustodyNodeKind.Generation or LinuxCustodyNodeKind.Control or LinuxCustodyNodeKind.Broker
-            or LinuxCustodyNodeKind.Output or LinuxCustodyNodeKind.RawResults or LinuxCustodyNodeKind.Slot => 0x4000,
+            or LinuxCustodyNodeKind.Output or LinuxCustodyNodeKind.RawResults or LinuxCustodyNodeKind.Slot
+            or LinuxCustodyNodeKind.CoverageProducer or LinuxCustodyNodeKind.CoverageMerged => 0x4000,
         LinuxCustodyNodeKind.Socket => 0xc000,
         LinuxCustodyNodeKind.Descriptor or LinuxCustodyNodeKind.Plan or LinuxCustodyNodeKind.Manifest
-            or LinuxCustodyNodeKind.Summary => 0x8000,
+            or LinuxCustodyNodeKind.Summary or LinuxCustodyNodeKind.CoverageReport => 0x8000,
         _ => throw Rejected(),
     };
 
@@ -163,10 +192,11 @@ internal static class LinuxCustodyData
     {
         LinuxCustodyNodeKind.Generation => 0x1e8, // 0750.
         LinuxCustodyNodeKind.Control or LinuxCustodyNodeKind.Broker or LinuxCustodyNodeKind.RawResults => 0x1c8, // 0710.
-        LinuxCustodyNodeKind.Output or LinuxCustodyNodeKind.Slot => 0x1c0, // 0700.
+        LinuxCustodyNodeKind.Output or LinuxCustodyNodeKind.Slot
+            or LinuxCustodyNodeKind.CoverageProducer or LinuxCustodyNodeKind.CoverageMerged => 0x1c0, // 0700.
         LinuxCustodyNodeKind.Descriptor => 0x120, // 0440.
         LinuxCustodyNodeKind.Socket => 0x1b0, // 0660.
-        LinuxCustodyNodeKind.Plan or LinuxCustodyNodeKind.Manifest or LinuxCustodyNodeKind.Summary => 0x180, // 0600.
+        LinuxCustodyNodeKind.Plan or LinuxCustodyNodeKind.Manifest or LinuxCustodyNodeKind.Summary or LinuxCustodyNodeKind.CoverageReport => 0x180, // 0600.
         _ => throw Rejected(),
     };
 

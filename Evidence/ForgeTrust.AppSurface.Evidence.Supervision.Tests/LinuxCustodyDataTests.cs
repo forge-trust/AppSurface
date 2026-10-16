@@ -9,6 +9,45 @@ public sealed class LinuxCustodyDataTests
     private static readonly LinuxRunAccountSnapshot Accounts = new(65010, 65011, 65012, 65013, 65014);
 
     [Theory]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageReport)]
+    public void CoverageNodesHaveExactWorkerOwnershipAndRootTerminalCustody(int kindValue)
+    {
+        var kind = (LinuxCustodyNodeKind)kindValue;
+        var directory = kind != LinuxCustodyNodeKind.CoverageReport;
+        var before = new LinuxProtectedMetadata(0, 1, 123, Accounts.WorkerUid, Accounts.WorkerGid,
+            (ushort)(directory ? 0x41c0 : 0x8180), 1, directory ? 0UL : 12UL, 1, 2, 3, 4);
+        LinuxCustodyData.RequireOriginal(kind, before, Accounts);
+        var after = before with { Uid = 0, Gid = 0, Mode = (ushort)(directory ? 0x41c0 : 0x8100), ChangeSeconds = 5 };
+        LinuxCustodyData.RequireTerminal(kind, before, after);
+        Reject(() => LinuxCustodyData.RequireOriginal(kind, before with { Uid = Accounts.SubjectUid }, Accounts));
+        Reject(() => LinuxCustodyData.RequireOriginal(kind, before with { Mode = (ushort)(before.Mode | 2) }, Accounts));
+        Reject(() => LinuxCustodyData.RequireTerminal(kind, before, after with { Inode = 124 }));
+        Reject(() => LinuxCustodyData.RequireTerminal(kind, before, after with { Length = 13 }));
+    }
+
+    [Fact]
+    public void CoverageInventoriesPermitOnlyTheDeclaredProducerAndFixedMergedCoberturaPath()
+    {
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot,
+            ["coverage", "evidence-plan.json", "evidence-manifest.json", "evidence-summary.json"], "coverage");
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [], "coverage");
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageProducer, ["merged"], "coverage");
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageMerged, ["Cobertura.xml"], "coverage");
+        foreach (var kind in new[] { LinuxCustodyNodeKind.CoverageProducer, LinuxCustodyNodeKind.CoverageMerged })
+        {
+            LinuxCustodyData.RequireCoverageInventory(kind, [], "coverage");
+            Reject(() => LinuxCustodyData.RequireCoverageInventory(kind, ["CANARY"], "coverage"));
+            Reject(() => LinuxCustodyData.RequireCoverageInventory(kind, ["merged", "merged"], "coverage"));
+        }
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, ["other"], "coverage"));
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, ["coverage", "coverage"], "coverage"));
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [], "../bad"));
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageReport, [], "coverage"));
+    }
+
+    [Theory]
     [InlineData((int)LinuxCustodyNodeKind.Generation)]
     [InlineData((int)LinuxCustodyNodeKind.Control)]
     [InlineData((int)LinuxCustodyNodeKind.Broker)]

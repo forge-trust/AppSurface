@@ -6,13 +6,14 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// <remarks>
 /// The reserved supervisor role dispatches this internal native checkpoint candidate. It requires a
 /// pre-CLR sanitized, independently terminating OS owner, retained protected inputs and atomic activation.
-/// It enrolls no producers or applications and grants no Trusted claim or accepted consumer proof.
+/// It supports the empty Observation and the existing closed coverage producer; application enrollment,
+/// Trusted claims and accepted consumer proof remain unsupported.
 /// Every original server, worker and account operation is joined; failed preparation preserves paths and
 /// reusable identities for quarantine when complete native root custody cannot be established.
 /// </remarks>
 internal static class LinuxEmptyObservationExecution
 {
-    /// <summary>Runs the genuine empty targeted Observation and returns verified data only after strict final cleanup.</summary>
+    /// <summary>Runs the protected targeted empty or coverage Observation and returns data only after strict final cleanup.</summary>
     /// <param name="requestPath">The protected request selected by the authenticated OS bootstrap command.</param>
     /// <param name="token">Caller cancellation; independent cleanup uses the original owner/job reserve.</param>
     /// <returns>Detached informational Observation manifest data after normal exit and all required final closes.</returns>
@@ -36,6 +37,9 @@ internal static class LinuxEmptyObservationExecution
         LinuxOwnerActivation? owner = null;
         LinuxRunAccounts? accounts = null;
         LinuxRunWorkspace? workspace = null;
+        LinuxProducerWorkspace? producerWorkspace = null;
+        SupervisionRunOutputBudget? runOutput = null;
+        CancellationTokenRegistration outputStop = default;
         LinuxControlListener? listener = null;
         LinuxWorkerProcess? worker = null;
         LinuxEmptyObservationControlServer? server = null;
@@ -89,11 +93,23 @@ internal static class LinuxEmptyObservationExecution
             phase = EvidenceNativeObservationPhase.OwnerActivation;
             owner = await LinuxOwnerActivation.OpenAsync(input, backend, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.Plan;
-            _ = EvidenceEmptyObservationPlan.FromInput(input, job.Token);
+            var coverage = input.Request.ObservationProducerIds.Count != 0;
+            if (coverage)
+            {
+                if (EvidenceNativeQualification.Current != EvidenceNativeQualificationKind.None) throw Rejected();
+                _ = EvidenceCoverageObservationPlan.FromInput(input, job.Token);
+                input.PrepareCoverageInputs(job.Token);
+                runOutput = new SupervisionRunOutputBudget();
+                // A quota failure closes the original job, causing the actual server/worker and producer
+                // ownership paths to stop. The counter remains alive until all original pumps join.
+                outputStop = runOutput.StopToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), job);
+            }
+            else _ = EvidenceEmptyObservationPlan.FromInput(input, job.Token);
             phase = EvidenceNativeObservationPhase.AccountCreate;
             accounts = await LinuxRunAccounts.CreateAsync(owner, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkspaceCreate;
             workspace = LinuxRunWorkspace.Create(owner, accounts, job.Token);
+            if (coverage) producerWorkspace = LinuxProducerWorkspace.Create(input, owner, accounts, job.Token);
 #if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
             // The compile-time case seeds this exact retained worker output parent before the worker starts.
             // Ordinary images do not compile or call the fixture setup.
@@ -103,11 +119,12 @@ internal static class LinuxEmptyObservationExecution
             phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
-            worker = LinuxWorkerProcess.Create(input, owner, accounts, workspace, listener, job.Token);
+            worker = LinuxWorkerProcess.Create(input, owner, accounts, workspace, listener, job.Token, runOutput, producerWorkspace);
             phase = EvidenceNativeObservationPhase.WorkerStart;
             await worker.StartAsync(job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.ServerCreate;
-            server = LinuxEmptyObservationControlServer.Create(input, owner, accounts, workspace, listener, worker, job.Token);
+            server = LinuxEmptyObservationControlServer.Create(input, owner, accounts, workspace, listener, worker, job.Token,
+                producerWorkspace, runOutput);
             phase = EvidenceNativeObservationPhase.ServerLifetime;
             serverLifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Token);
             phase = EvidenceNativeObservationPhase.ServerRun;
@@ -133,9 +150,12 @@ internal static class LinuxEmptyObservationExecution
                 await error.FlushAsync(owner.RootTeardownToken).ConfigureAwait(false);
                 owner.RequireCleanup(default);
             }
+            if (runOutput is not null && !(await runOutput.CompleteAsync().ConfigureAwait(false)).Successful) throw Rejected();
             phase = EvidenceNativeObservationPhase.BeginTeardown;
             owner.BeginRootTeardown();
             cleanupToken = owner.RootTeardownToken;
+            if (producerWorkspace is not null)
+                await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.Custody;
             custody = await workspace.TakeRootCustodyAsync(input, owner, accounts, worker, server, cleanupToken).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.FileVerification;
@@ -160,6 +180,28 @@ internal static class LinuxEmptyObservationExecution
                 catch (Exception error) when (Recoverable(error)) { Record(error); failed = true; }
             if (worker is not null)
                 try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            if (producerWorkspace is not null && owner is not null && accounts is not null)
+                try { await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            if (runOutput is not null)
+                try
+                {
+                    var outputReceipt = await runOutput.CompleteAsync().ConfigureAwait(false);
+                    if (!outputReceipt.Successful) failed = true;
+                    // Observation only, after the original tasks join. Missing diagnostic output cannot
+                    // upgrade failure, bypass final custody or substitute for physical process settlement.
+                    try
+                    {
+                        var observation = LinuxCoverageOutputObservation.Encode(outputReceipt);
+                        using var error = Console.OpenStandardError();
+                        await error.WriteAsync(observation, cleanupToken).ConfigureAwait(false);
+                        await error.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
+                        await error.FlushAsync(cleanupToken).ConfigureAwait(false);
+                    }
+                    catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { }
+
+                }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
             if ((failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
@@ -441,6 +483,12 @@ internal static class LinuxEmptyObservationExecution
                 try { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { producerWorkspace?.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { outputStop.Dispose(); }
+            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            try { runOutput?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             try { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }
             catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }

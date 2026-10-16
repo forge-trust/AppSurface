@@ -38,7 +38,10 @@ internal sealed class EvidenceRestrictedCoverageTransport(EvidenceLinuxWorkerSup
 }
 
 /// <summary>Runs only the ReportGenerator entry shipped beneath the protected tool root, with no package-cache fallback.</summary>
-/// <remarks>The independent worker service owns this trusted subprocess and its pumps. Its output shares the Evidence quota.</remarks>
+/// <remarks>
+/// The independent worker service owns this trusted subprocess and its pumps. Its output shares the Evidence quota.
+/// Raw reporter bytes are relayed to the protected root's bounded private stderr prefix and must never be echoed to public output.
+/// </remarks>
 internal sealed class EvidenceProtectedReportGenerator(EvidenceLinuxWorkerSupervisor worker,
     EvidenceRunByteQuota outputQuota) : ICoverageRunReportGenerator
 {
@@ -52,11 +55,14 @@ internal sealed class EvidenceProtectedReportGenerator(EvidenceLinuxWorkerSuperv
         if (outputQuota.IsFailed || !worker.IsArmed)
             throw new EvidenceAdmissionException("ASEVD420", "Protected reporter output admission is closed.");
         var runner = new CliWrapCoverageRunProcessRunner();
+        using var reporterOutput = Console.OpenStandardError();
         var result = await runner.RunAsync(new CoverageRunProcessRequest(worker.Descriptor.DotnetPath,
             [reporter, "-reports:" + string.Join(';', coverageFiles), "-targetdir:" + outputDirectory,
                 "-reporttypes:Cobertura;TextSummary", "-verbosity:Error"],
-            worker.Descriptor.ToolRoot, null, null, CoverageRunProcessLease.Detached(), outputQuota),
+            worker.Descriptor.ToolRoot, null, null, CoverageRunProcessLease.Detached(), outputQuota,
+            RawOutputMirror: reporterOutput),
             cancellationToken).ConfigureAwait(false);
+        await reporterOutput.FlushAsync(cancellationToken).ConfigureAwait(false);
         if (result.OutputTruncated || outputQuota.IsFailed)
             throw new EvidenceAdmissionException("ASEVD420", "Protected reporter output exceeded its budget.");
         return new CoverageRunMergeResult(result.ExitCode, Path.Join(outputDirectory, "Cobertura.xml"),

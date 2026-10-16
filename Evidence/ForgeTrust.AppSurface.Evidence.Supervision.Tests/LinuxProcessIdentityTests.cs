@@ -14,6 +14,24 @@ public sealed class LinuxProcessIdentityTests
     private static readonly LinuxUnitName Owner = LinuxUnitName.Create(LinuxUnitRole.Owner, RunId);
 
     [Fact]
+    public void ProducerSamplingRequiresItsOwnNonRootUnitAndFullKernelIdentityTuple()
+    {
+        var unit = LinuxUnitName.Create(LinuxUnitRole.Producer, Guid.NewGuid());
+        LinuxProcessData.RequireSelection(123, 65012, 65013, unit, LinuxProcessSamplingRole.Producer);
+        var sample = new LinuxProcessSample(new(123, 444, 'S'), new(65012, 65012, 65012, 65012),
+            new(65013, 65013, 65013, 65013), "/system.slice/" + unit.Value);
+        LinuxProcessData.RequireExpected(sample, 123, 65012, 65013, unit, LinuxProcessSamplingRole.Producer);
+        Reject(() => LinuxProcessData.RequireSelection(123, 0, 65013, unit, LinuxProcessSamplingRole.Producer));
+        Reject(() => LinuxProcessData.RequireSelection(123, 65012, 0, unit, LinuxProcessSamplingRole.Producer));
+        Reject(() => LinuxProcessData.RequireSelection(123, 65012, 65013, Worker, LinuxProcessSamplingRole.Producer));
+        Reject(() => LinuxProcessData.RequireSelection(123, 65012, 65013, unit, LinuxProcessSamplingRole.Worker));
+        Reject(() => LinuxProcessData.RequireExpected(sample with { Uids = new(65012, 65012, 0, 65012) },
+            123, 65012, 65013, unit, LinuxProcessSamplingRole.Producer));
+        Reject(() => LinuxProcessData.RequireExpected(sample with { ControlGroup = "/system.slice/" + Worker.Value },
+            123, 65012, 65013, unit, LinuxProcessSamplingRole.Producer));
+    }
+
+    [Fact]
     public void CompleteStatusRetainsAllFourIdsAndDetachesInput()
     {
         var bytes = Status();

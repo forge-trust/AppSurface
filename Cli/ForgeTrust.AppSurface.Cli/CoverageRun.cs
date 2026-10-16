@@ -3437,6 +3437,11 @@ internal interface ICoverageRunProcessRunner
 /// <param name="OutputObserver">Non-blocking positive-byte progress observer.</param>
 /// <param name="Lease">Supervisor-owned root-process lease.</param>
 /// <param name="ProcessOutputQuota">Optional Evidence run-wide quota shared by every child command in that invocation.</param>
+/// <param name="RawOutputMirror">Optional caller-owned stream that receives and flushes every actual stdout/stderr read before quota admission or retention.</param>
+/// <remarks>
+/// The mirror combines stdout and stderr in the order their pumps acquire the shared write gate; it has no channel framing.
+/// The process runner never closes the mirror. Supply it only when its destination is already protected for raw process output.
+/// </remarks>
 internal sealed record CoverageRunProcessRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
@@ -3444,7 +3449,8 @@ internal sealed record CoverageRunProcessRequest(
     string? OutputFile,
     Action<int>? OutputObserver,
     CoverageRunProcessLease Lease,
-    EvidenceRunByteQuota? ProcessOutputQuota = null);
+    EvidenceRunByteQuota? ProcessOutputQuota = null,
+    Stream? RawOutputMirror = null);
 
 /// <summary>
 /// Result of running a coverage workflow process.
@@ -3488,8 +3494,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             }
 
             var result = request.OutputFile is null
-                ? await RunBufferedAsync(request, quota, processCancellation, processCancellation.Token)
-                : await RunStreamingAsync(request, quota, processCancellation, processCancellation.Token);
+                ? await RunBufferedAsync(request, quota, processCancellation, processCancellation.Token, cancellationToken)
+                : await RunStreamingAsync(request, quota, processCancellation, processCancellation.Token, cancellationToken);
             if (quota?.IsFailed == true)
             {
                 throw CreateOutputQuotaException();
@@ -3538,16 +3544,22 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CoverageRunProcessRequest request,
         EvidenceRunByteQuota? quota,
         CancellationTokenSource processCancellation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken mirrorCancellationToken)
     {
         using var standardOutput = new MemoryStream();
         using var standardError = new MemoryStream();
+        using var rawOutputMirrorWriteGate = request.RawOutputMirror is null ? null : new SemaphoreSlim(1, 1);
         var result = await CliCommand.Wrap(request.FileName)
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardOutput, token, request.OutputObserver, quota, processCancellation)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(source, standardError, token, request.OutputObserver, quota, processCancellation)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(
+                source, standardOutput, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, rawOutputMirrorWriteGate, mirrorCancellationToken)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToBufferAsync(
+                source, standardError, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, rawOutputMirrorWriteGate, mirrorCancellationToken)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
         var outputTruncated = standardOutput.Length > MaximumBufferedBytesPerStream
             || standardError.Length > MaximumBufferedBytesPerStream;
@@ -3561,7 +3573,8 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
         CoverageRunProcessRequest request,
         EvidenceRunByteQuota? quota,
         CancellationTokenSource processCancellation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken mirrorCancellationToken)
     {
         var directory = Path.GetDirectoryName(request.OutputFile!);
         if (!string.IsNullOrEmpty(directory))
@@ -3582,20 +3595,44 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             .WithArguments(request.Arguments)
             .WithWorkingDirectory(request.WorkingDirectory)
             .WithValidation(CommandResultValidation.None)
-            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver, quota, processCancellation)))
-            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(source, stream, writeGate, token, request.OutputObserver, quota, processCancellation)))
+            .WithStandardOutputPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(
+                source, stream, writeGate, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, mirrorCancellationToken)))
+            .WithStandardErrorPipe(PipeTarget.Create((source, token) => CopyPipeToFileAsync(
+                source, stream, writeGate, token, request.OutputObserver, quota, processCancellation,
+                request.RawOutputMirror, mirrorCancellationToken)))
             .ExecuteAsync(_ => { }, request.Lease.Attach, cancellationToken);
 
         return new CoverageRunProcessResult(result.ExitCode, string.Empty);
     }
 
-    private static async Task CopyPipeToBufferAsync(
+    /// <summary>
+    /// Drains one process pipe into its bounded buffer and optional caller-owned raw output mirror.
+    /// </summary>
+    /// <param name="source">The process pipe being drained.</param>
+    /// <param name="target">The bounded in-memory capture for this stream.</param>
+    /// <param name="cancellationToken">The process-pump token used for reads and retained-buffer writes.</param>
+    /// <param name="outputObserver">Optional diagnostic byte observer.</param>
+    /// <param name="quota">Optional received-byte quota.</param>
+    /// <param name="processCancellation">Process cancellation source used on quota or mirror failure.</param>
+    /// <param name="rawOutputMirror">Optional caller-owned raw-byte mirror.</param>
+    /// <param name="rawOutputMirrorWriteGate">Shared gate used to serialize both process output streams.</param>
+    /// <param name="mirrorCancellationToken">The caller's original cancellation token for mirror writes and flushes.</param>
+    /// <remarks>
+/// Each complete source read is charged exactly once, including when mirroring fails. A successful mirror is flushed
+/// before quota admission and before any excess buffered bytes are discarded.
+    /// The caller owns the mirror and gate. A mirror failure cancels the child process and propagates through the joined pipe task.
+    /// </remarks>
+    internal static async Task CopyPipeToBufferAsync(
         Stream source,
         MemoryStream target,
         CancellationToken cancellationToken,
         Action<int>? outputObserver,
         EvidenceRunByteQuota? quota,
-        CancellationTokenSource processCancellation)
+        CancellationTokenSource processCancellation,
+        Stream? rawOutputMirror,
+        SemaphoreSlim? rawOutputMirrorWriteGate,
+        CancellationToken mirrorCancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3608,7 +3645,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
-                ChargeOutput(quota, read, processCancellation);
+                await RelayAndChargeOutputAsync(
+                    rawOutputMirror,
+                    rawOutputMirrorWriteGate,
+                    buffer.AsMemory(0, read),
+                    quota,
+                    processCancellation,
+                    mirrorCancellationToken);
                 ObserveOutput(outputObserver, read);
                 var remaining = MaximumBufferedBytesPerStream + 1 - target.Length;
                 if (remaining > 0)
@@ -3633,14 +3676,27 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             : text;
     }
 
-    private static async Task CopyPipeToFileAsync(
+    /// <summary>Drains one process pipe to its retained log and optional caller-owned raw output mirror.</summary>
+    /// <param name="source">The process pipe being drained.</param>
+    /// <param name="target">The streamed process log.</param>
+    /// <param name="writeGate">Shared gate for the log and raw mirror writes.</param>
+    /// <param name="cancellationToken">The process-pump token used for reads and log writes.</param>
+    /// <param name="outputObserver">Optional diagnostic byte observer.</param>
+    /// <param name="quota">Optional received-byte quota.</param>
+    /// <param name="processCancellation">Process cancellation source used on quota or mirror failure.</param>
+    /// <param name="rawOutputMirror">Optional caller-owned raw-byte mirror.</param>
+    /// <param name="mirrorCancellationToken">The caller's original cancellation token for mirror writes and flushes.</param>
+    /// <remarks>Every actual read is charged once; successful mirroring completes before log retention. The mirror is never closed.</remarks>
+    internal static async Task CopyPipeToFileAsync(
         Stream source,
         Stream target,
         SemaphoreSlim writeGate,
         CancellationToken cancellationToken,
         Action<int>? outputObserver,
         EvidenceRunByteQuota? quota,
-        CancellationTokenSource processCancellation)
+        CancellationTokenSource processCancellation,
+        Stream? rawOutputMirror,
+        CancellationToken mirrorCancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
@@ -3653,7 +3709,13 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
                     return;
                 }
 
-                ChargeOutput(quota, read, processCancellation);
+                await RelayAndChargeOutputAsync(
+                    rawOutputMirror,
+                    writeGate,
+                    buffer.AsMemory(0, read),
+                    quota,
+                    processCancellation,
+                    mirrorCancellationToken);
                 ObserveOutput(outputObserver, read);
 
                 await writeGate.WaitAsync(cancellationToken);
@@ -3672,6 +3734,80 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
             ArrayPool<byte>.Shared.Return(buffer);
         }
     }
+
+    private static async Task RelayRawOutputAsync(
+        Stream? rawOutputMirror,
+        SemaphoreSlim? writeGate,
+        ReadOnlyMemory<byte> buffer,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken)
+    {
+        if (rawOutputMirror is null)
+        {
+            return;
+        }
+
+        if (writeGate is null)
+        {
+            throw new ArgumentNullException(nameof(writeGate), "A raw output mirror requires a shared write gate.");
+        }
+
+        var gateAcquired = false;
+        try
+        {
+            await writeGate.WaitAsync(cancellationToken);
+            gateAcquired = true;
+            await rawOutputMirror.WriteAsync(buffer, cancellationToken);
+            await rawOutputMirror.FlushAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            processCancellation.Cancel();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            processCancellation.Cancel();
+            if (IsFatalException(exception))
+            {
+                throw;
+            }
+
+            throw new RawOutputMirrorException(exception);
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                writeGate.Release();
+            }
+        }
+    }
+
+    private static async Task RelayAndChargeOutputAsync(
+        Stream? rawOutputMirror,
+        SemaphoreSlim? writeGate,
+        ReadOnlyMemory<byte> buffer,
+        EvidenceRunByteQuota? quota,
+        CancellationTokenSource processCancellation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RelayRawOutputAsync(rawOutputMirror, writeGate, buffer, processCancellation, cancellationToken);
+        }
+        catch
+        {
+            // A failed mirror still follows an actual read, so charge that read before the pump fails.
+            ChargeOutput(quota, buffer.Length, processCancellation);
+            throw;
+        }
+
+        ChargeOutput(quota, buffer.Length, processCancellation);
+    }
+
+    private sealed class RawOutputMirrorException(Exception innerException)
+        : Exception("The caller-owned raw process output mirror could not be written and flushed.", innerException);
 
     private static void ChargeOutput(
         EvidenceRunByteQuota? quota,
@@ -3721,12 +3857,29 @@ internal sealed class CliWrapCoverageRunProcessRunner : ICoverageRunProcessRunne
 
     private static bool IsCommandLaunchFailure(Exception exception)
     {
+        if (ContainsRawOutputMirrorFailure(exception))
+        {
+            return false;
+        }
+
         return exception is CliWrapException
             or Win32Exception
             or UnauthorizedAccessException
             or DirectoryNotFoundException
             or IOException
             or InvalidOperationException;
+    }
+
+    private static bool ContainsRawOutputMirrorFailure(Exception exception)
+    {
+        if (exception is RawOutputMirrorException)
+        {
+            return true;
+        }
+
+        return exception is AggregateException aggregate
+            ? aggregate.InnerExceptions.Any(ContainsRawOutputMirrorFailure)
+            : exception.InnerException is not null && ContainsRawOutputMirrorFailure(exception.InnerException);
     }
 
     private static async Task TryAppendFailureLogAsync(

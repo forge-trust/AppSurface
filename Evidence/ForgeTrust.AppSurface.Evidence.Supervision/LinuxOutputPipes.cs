@@ -120,13 +120,15 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     /// <param name="cancellationPhase">Optional data-only observer fed by the original charged stderr pump;
     /// creates no second reader, independent task or process authority.</param>
     /// <param name="descendant">Private N12 PID-data observer from the same original charged stderr pump; not process authentication.</param>
-    /// <remarks>Account utility callers may select 128 KiB/4 KiB. Run-wide accounting remains the owner's duty.</remarks>
+    /// <param name="runBudget">Optional original run ledger shared with every actual workload pair; standalone callers retain pair-local accounting.</param>
+    /// <remarks>Account utility callers may select 128 KiB/4 KiB. The run owner must join and finalize shared accounting.</remarks>
     internal Task<SupervisionOutputReceipt> BeginCollectAsync(CancellationToken token,
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
         int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
         SupervisionCancellationPhaseObservation? cancellationPhase = null,
-        SupervisionDescendantObservation? descendant = null) =>
-        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit, cancellationPhase, descendant);
+        SupervisionDescendantObservation? descendant = null,
+        SupervisionRunOutputBudget? runBudget = null) =>
+        _ownership.BeginCollectAsync(token, receivedByteLimit, prefixByteLimit, cancellationPhase, descendant, runBudget);
 
     /// <summary>Irreversibly closes both local write copies, only after the actual start task joined.</summary>
     /// <remarks>Attempts both closes and latches failure. This cannot close systemd's copies or stop a unit.</remarks>
@@ -240,7 +242,8 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
         long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
         int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream,
         SupervisionCancellationPhaseObservation? cancellationPhase = null,
-        SupervisionDescendantObservation? descendant = null)
+        SupervisionDescendantObservation? descendant = null,
+        SupervisionRunOutputBudget? runBudget = null)
     {
         var collector = new SupervisionOutputCollector(receivedByteLimit, prefixByteLimit);
         if (cancellationPhase is not null) collector.ObserveCancellation(cancellationPhase);
@@ -251,7 +254,7 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
         lock (_sync)
         {
             if (_disposing || _collection is not null) throw Rejected(SupervisionOutputPipeFailure.InvalidSequence);
-            task = CollectOwnedAsync(collector, gate.Task, token);
+            task = CollectOwnedAsync(collector, gate.Task, token, runBudget);
             _collection = task;
         }
         gate.SetResult();
@@ -310,10 +313,11 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
     }
 
     private async Task<SupervisionOutputReceipt> CollectOwnedAsync(SupervisionOutputCollector collector,
-        Task dispatch, CancellationToken token)
+        Task dispatch, CancellationToken token, SupervisionRunOutputBudget? runBudget)
     {
         await dispatch.ConfigureAwait(false);
-        try { return await collector.CollectAsync(_stdout, _stderr, token).ConfigureAwait(false); }
+        try { return await (runBudget is null ? collector.CollectAsync(_stdout, _stderr, token)
+            : runBudget.CollectAsync(collector, _stdout, _stderr, token)).ConfigureAwait(false); }
         catch (Exception error) when (Recoverable(error)) { throw Rejected(SupervisionOutputPipeFailure.CollectionFailed); }
     }
 

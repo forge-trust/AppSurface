@@ -14,6 +14,8 @@ internal enum LinuxProcessSamplingRole
     Worker,
     /// <summary>The generated root owner service, selected explicitly.</summary>
     Owner,
+    /// <summary>The generated nonroot subject producer service.</summary>
+    Producer,
 }
 
 /// <summary>Four sampled Linux IDs. This value cannot authenticate a process.</summary>
@@ -134,6 +136,7 @@ internal static class LinuxProcessData
         {
             LinuxProcessSamplingRole.Worker => "worker",
             LinuxProcessSamplingRole.Owner => "owner",
+            LinuxProcessSamplingRole.Producer => "producer",
             _ => throw LinuxProcessIdentity.Rejected(),
         };
         if (unit is null || pid is 0 or > int.MaxValue || uid == uint.MaxValue || gid == uint.MaxValue
@@ -311,6 +314,11 @@ internal sealed class LinuxProcessIdentity : IDisposable
     /// <summary>Explicitly captures a root generated owner, never a root worker.</summary>
     internal static LinuxProcessIdentity CaptureOwner(uint pid, LinuxUnitName unit, CancellationToken token) =>
         CaptureCore(pid, 0, 0, unit, LinuxProcessSamplingRole.Owner, token);
+
+    /// <summary>Captures the generated subject producer with exact nonroot IDs, PID, start time and cgroup.</summary>
+    /// <remarks>Recipe data cannot construct this identity; actual retained proc descriptors and repeated samples are required.</remarks>
+    internal static LinuxProcessIdentity CaptureProducer(uint pid, uint uid, uint gid, LinuxUnitName unit, CancellationToken token) =>
+        CaptureCore(pid, uid, gid, unit, LinuxProcessSamplingRole.Producer, token);
 
     private static LinuxProcessIdentity CaptureCore(uint pid, uint uid, uint gid, LinuxUnitName unit,
         LinuxProcessSamplingRole role, CancellationToken token)

@@ -6,12 +6,12 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Owns actual authenticated ready/stop/wait/exit I/O for the genuine empty-targeted Observation checkpoint.</summary>
+/// <summary>Owns authenticated control I/O for the empty and closed coverage Observation checkpoints.</summary>
 /// <remarks>
 /// The private factory accepts only the same native owners and an already started same-image worker. It
 /// independently resolves protected policy/diff bytes; no caller-injected plan, handler, producer or join
-/// assertion can enroll a workload. Run/artifact/application requests reject until their native checkpoint
-/// is composed. The descendant ledger therefore has no dispatched work in this checkpoint. The worker
+/// assertion can enroll a workload. Native coverage composition adds the fixed run/report operations and
+/// registers the actual producer in the descendant ledger. Application requests remain unsupported. The worker
 /// itself is excluded: its stop/wait request cannot join its own process or active control handler.
 /// The N16/N13/N14 private images add one fixed server-owned blocked workload after registering it in this ledger;
 /// only N16 releases it through authenticated STOP/WAIT. N13/N14 emit a compile-owned harness phase line after
@@ -27,6 +27,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly EvidenceProtectedLaunchInput _input;
     private readonly LinuxRunAccounts _accounts;
     private readonly LinuxRunWorkspace _workspace;
+    private LinuxCoverageControlOperations? _coverage;
     private LinuxN04CheckpointOwner? _n04;
     private LinuxN07CheckpointOwner? _n07;
     private int _n07OriginalTasksCompleted;
@@ -208,27 +209,38 @@ internal sealed class LinuxEmptyObservationControlServer
     internal LinuxControlFailure? FirstFailure => _failures.First;
 
     private LinuxEmptyObservationControlServer(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, LinuxWorkerProcess worker)
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, LinuxWorkerProcess worker,
+        LinuxCoverageControlOperations? coverage)
     {
         _input = input; _owner = owner; _listener = listener; _worker = worker;
         _accounts = accounts; _workspace = workspace;
+        _coverage = coverage;
         _sequence = new(_ledger, StopEmptyDescendantsAsync);
     }
 
-    /// <summary>Binds the original actual owners and verifies a genuine resolved empty targeted policy before server construction.</summary>
+    /// <summary>Binds the actual owners and resolves the protected empty or coverage targeted policy before dispatch.</summary>
     /// <remarks>This cannot activate the reserved supervisor entry or qualify an application/consumer.</remarks>
     internal static LinuxEmptyObservationControlServer Create(EvidenceProtectedLaunchInput input,
         LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
-        LinuxControlListener listener, LinuxWorkerProcess worker, CancellationToken token)
+        LinuxControlListener listener, LinuxWorkerProcess worker, CancellationToken token,
+        LinuxProducerWorkspace? producerWorkspace = null, SupervisionRunOutputBudget? output = null)
     {
         ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(listener); ArgumentNullException.ThrowIfNull(worker);
         worker.ClaimControlServer(input, owner, accounts, workspace, listener, token);
-        _ = EvidenceEmptyObservationPlan.FromInput(input, token);
+        var plan = input.Request.ObservationProducerIds.Count == 0
+            ? EvidenceEmptyObservationPlan.FromInput(input, token) : EvidenceCoverageObservationPlan.FromInput(input, token);
         _ = worker.RequireWorker(token);
         worker.RequireServerOwner(input, owner, accounts, workspace, listener, token);
-        return new(input, owner, accounts, workspace, listener, worker);
+        var server = new LinuxEmptyObservationControlServer(input, owner, accounts, workspace, listener, worker, null);
+        if (plan.Profile.Producers.Count != 0)
+        {
+            if (producerWorkspace is null || output is null) throw Rejected();
+            server._coverage = LinuxCoverageControlOperations.Create(input, owner, accounts, workspace,
+                producerWorkspace, server._ledger, output, token);
+        }
+        return server;
     }
 
     /// <summary>Registers and joins every original accept, handler, response write and accepted connection close.</summary>
@@ -370,6 +382,10 @@ internal sealed class LinuxEmptyObservationControlServer
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
             if (_n07 is not null)
                 try { await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error))
+                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+            if (_coverage is not null)
+                try { _coverage.Dispose(); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
             Interlocked.Exchange(ref _n07LocalCloseAttemptCompleted, 1);
@@ -576,6 +592,38 @@ internal sealed class LinuxEmptyObservationControlServer
             var request = await connection.ReadRequestAsync(io.Token).ConfigureAwait(false);
             operation = request.Operation;
             stage = LinuxControlFailureStage.RequestClassify;
+            byte[]? coverageResponse = null;
+            if (request is EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest)
+            {
+                if (_coverage is null || !_sequence.ReadyAcknowledged || _ledger.IsWorkloadAdmissionClosed) throw Rejected();
+                _owner.RequireActive(io.Token);
+                // Request framing retained AdmissionSeconds. Actual declared work now uses the
+                // original job token, not a fresh admission timeout, and does not hold reply order.
+                io.Token.ThrowIfCancellationRequested();
+                io.CancelAfter(Timeout.InfiniteTimeSpan);
+                using var jobOperation = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
+                jobOperation.CancelAfter(_owner.Remaining);
+                switch (request)
+                {
+                    case EvidenceRunControlRequest run:
+                        var result = await _coverage.RunAsync(run, jobOperation.Token).ConfigureAwait(false);
+                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true, exit_code = result.ExitCode,
+                            stdout = result.Stdout, stderr = result.Stderr, output_truncated = result.OutputTruncated,
+                            received_bytes = result.ReceivedBytes });
+                        break;
+                    case EvidenceArtifactsControlRequest inventory:
+                        var reports = _coverage.Inventory(inventory.RelativeRoot, jobOperation.Token);
+                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true,
+                            artifacts = reports.Select(static item => new { path = item.RelativePath, length_bytes = item.Length }).ToArray() });
+                        break;
+                    case EvidenceArtifactControlRequest read:
+                        var bytes = _coverage.Read(read, jobOperation.Token);
+                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true, bytes_base64 = Convert.ToBase64String(bytes),
+                            end = _coverage.IsEnd(read.Path, read.Offset + bytes.Length, jobOperation.Token) });
+                        break;
+                }
+                _owner.RequireActive(jobOperation.Token);
+            }
             isCleanupRequest = request is EvidenceStopControlRequest or EvidenceWaitControlRequest or EvidenceExitControlRequest;
             if (isCleanupRequest)
             {
@@ -675,6 +723,9 @@ internal sealed class LinuxEmptyObservationControlServer
             byte[] response;
             switch (request)
             {
+                case EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest:
+                    response = coverageResponse ?? throw Rejected();
+                    break;
                 case EvidenceReadyControlRequest:
                     stage = LinuxControlFailureStage.ReadyAuthorization;
                     _owner.RequireActive(io.Token);
@@ -832,6 +883,7 @@ internal sealed class LinuxEmptyObservationControlServer
 
     private Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)
     {
+        if (_coverage is not null) return _coverage.StopAndJoinAsync(token);
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
         if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
         {

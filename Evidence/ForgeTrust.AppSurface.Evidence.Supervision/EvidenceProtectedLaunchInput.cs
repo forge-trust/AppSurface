@@ -17,6 +17,8 @@ internal sealed class EvidenceProtectedLaunchInput : IDisposable
     private readonly string _requestHash;
     private readonly LinuxProtectedDeployment _tool;
     private readonly LinuxProtectedDeployment _runtime;
+    private LinuxProtectedDeployment? _subject;
+    private LinuxProtectedDeployment? _packages;
     private readonly long _startedAt;
     private readonly TimeSpan _allowance;
     private int _closed;
@@ -39,6 +41,33 @@ internal sealed class EvidenceProtectedLaunchInput : IDisposable
     internal string EntrySha256 { get; }
     /// <summary>Gets SHA-256 measured from the retained protected policy file.</summary>
     internal string PolicySha256 { get; }
+
+    /// <summary>Original monotonic deadline shared by subject preparation and report custody; never renewed.</summary>
+    internal LinuxInputDeadline Deadline => new(_startedAt, _allowance);
+
+    /// <summary>Audits the actual SDK, subject and package inputs before any untrusted MSBuild executes.</summary>
+    /// <remarks>
+    /// Coverage requires a separate SDK tree and a root-owned NuGet input tree below tooling. All bytes
+    /// are inventoried through retained no-follow handles. This evaluates no project and grants no admission.
+    /// </remarks>
+    internal void PrepareCoverageInputs(CancellationToken token)
+    {
+        Recheck(token);
+        if (Request.Solution is null || Request.ToolRoot == Request.RuntimeRoot
+            || Request.ToolRoot.StartsWith(Request.RuntimeRoot + "/", StringComparison.Ordinal)
+            || Request.RuntimeRoot.StartsWith(Request.ToolRoot + "/", StringComparison.Ordinal))
+            throw LinuxProtectedDeployment.InvalidDeployment();
+        if (_subject is not null || _packages is not null) throw LinuxProtectedDeployment.InvalidDeployment();
+        var sdkFiles = _runtime.FileNames.Where(static path => path.StartsWith("sdk/", StringComparison.Ordinal)
+            && path.Count(static c => c == '/') == 2 && path.EndsWith("/dotnet.dll", StringComparison.Ordinal)).ToArray();
+        if (sdkFiles.Length != 1) throw LinuxProtectedDeployment.InvalidDeployment();
+        _ = _runtime.RequireFile(sdkFiles[0]);
+        _ = _tool.RequireFile("reportgenerator/net10.0/ReportGenerator.dll");
+        _subject = LinuxProtectedDeployment.Open(Request.SubjectRoot, token, Deadline);
+        _ = _subject.RequireFile(Relative(Request.SubjectRoot, Request.Solution));
+        _packages = LinuxProtectedDeployment.Open(Request.ToolRoot + "/nuget", token, Deadline);
+        Recheck(token);
+    }
 
     /// <summary>Copies the original monotonic remainder for private diagnostics, without checking or changing admission.</summary>
     /// <remarks>A negative value describes expiry. This never replaces <see cref="Remaining"/> or any execution guard.</remarks>
@@ -117,6 +146,8 @@ internal sealed class EvidenceProtectedLaunchInput : IDisposable
         if (_requestFile.Hash(token, new LinuxInputDeadline(_startedAt, _allowance)) != _requestHash) throw LinuxProtectedDeployment.InvalidDeployment();
         _tool.Recheck(token);
         if (!ReferenceEquals(_tool, _runtime)) _runtime.Recheck(token);
+        _subject?.Recheck(token);
+        _packages?.Recheck(token);
         token.ThrowIfCancellationRequested();
         _ = Remaining;
     }
@@ -143,6 +174,8 @@ internal sealed class EvidenceProtectedLaunchInput : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _closed, 1) != 0) return;
+        _packages?.Dispose();
+        _subject?.Dispose();
         _runtime.Dispose();
         if (!ReferenceEquals(_tool, _runtime)) _tool.Dispose();
         LinuxProtectedDeployment.Close(_requestNodes);

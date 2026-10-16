@@ -257,6 +257,7 @@ internal sealed class LinuxRunAccounts
     private readonly LinuxAccountFailureLatch _failures = new();
     private LinuxWorkerProcess? _workerCustodyPending;
     private LinuxRunWorkspace? _workspaceCustodyPending;
+    private LinuxProducerWorkspace? _producerWorkspacePending;
     private LinuxRunAccountSnapshot? _identities;
     private Task? _closeTask;
     private bool _quarantined;
@@ -329,6 +330,20 @@ internal sealed class LinuxRunAccounts
             if (!ReferenceEquals(owner, _owner) || _workspaceCustodyPending is not null
                 || _identities is null || _closeTask is not null || _quarantined || _reservations.Failed) throw Failed();
             _workspaceCustodyPending = workspace;
+        }
+    }
+
+    /// <summary>Retains producer storage before the first mutable account-associated directory is created.</summary>
+    /// <remarks>Reusable identities remain reserved until its authentic producer has joined and storage is root sealed.</remarks>
+    internal void RetainProducerWorkspaceForCustody(LinuxProducerWorkspace workspace, LinuxOwnerActivation owner)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        workspace.RequireAccountOwner(this, owner);
+        lock (_gate)
+        {
+            if (!ReferenceEquals(owner, _owner) || _producerWorkspacePending is not null
+                || _closeTask is not null || _identities is null) throw Failed();
+            _producerWorkspacePending = workspace;
         }
     }
 
@@ -483,6 +498,9 @@ internal sealed class LinuxRunAccounts
 
     private void RequireCustody(LinuxRunWorkspace.RootCustody? custody, CancellationToken token)
     {
+        LinuxProducerWorkspace? producerWorkspace;
+        lock (_gate) producerWorkspace = _producerWorkspacePending;
+        producerWorkspace?.RequireSealedForAccountRelease(this, _owner, token);
         LinuxWorkerProcess? worker;
         LinuxRunWorkspace? workspace;
         lock (_gate) { worker = _workerCustodyPending; workspace = _workspaceCustodyPending; }

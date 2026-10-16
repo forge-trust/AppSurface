@@ -221,6 +221,15 @@ internal sealed class LinuxProtectedNode
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 
+    /// <summary>Copies exact retained bytes into an exclusively created destination under the original deadline.</summary>
+    /// <remarks>The caller owns the destination and its native ownership policy; no subject code is evaluated.</remarks>
+    internal void CopyTo(SafeFileHandle destination, CancellationToken token, LinuxInputDeadline deadline)
+    {
+        long offset = 0;
+        Read(token, bytes => { RandomAccess.Write(destination, bytes.Span, offset); offset += bytes.Length; }, deadline);
+        deadline.Check(token);
+    }
+
     /// <summary>Reads one small protected request, never the full deployment into managed memory.</summary>
     internal byte[] ReadRequest(CancellationToken token) => ReadBounded(64 * 1024, token);
 
@@ -338,6 +347,30 @@ internal sealed class LinuxProtectedDeployment : IDisposable
         if (!_files.TryGetValue(relativePath, out var file) || (executable && (file.Node.Metadata.Mode & 0x49) != 0x49))
             throw InvalidDeployment();
         return file.Hash;
+    }
+
+    /// <summary>Returns a detached exact inventory for root-owned copying; data confers no filesystem authority.</summary>
+    internal IReadOnlyList<string> FileNames => Array.AsReadOnly(_files.Keys.Order(StringComparer.Ordinal).ToArray());
+
+    /// <summary>Rechecks a retained file and returns its originally inventoried byte count before destination mutation.</summary>
+    /// <remarks>This copied length is data only. CopyFile separately verifies the original bytes and digest.</remarks>
+    internal long RequireFileLength(string relativePath, CancellationToken token, LinuxInputDeadline deadline)
+    {
+        ThrowIfClosed(); deadline.Check(token);
+        if (!_files.TryGetValue(relativePath, out var file)) throw InvalidDeployment();
+        file.Node.Recheck();
+        deadline.Check(token);
+        return checked((long)file.Node.Metadata.Length);
+    }
+
+    /// <summary>Copies one already inventoried regular file, verifying its retained bytes and original digest.</summary>
+    internal void CopyFile(string relativePath, SafeFileHandle destination, CancellationToken token, LinuxInputDeadline deadline)
+    {
+        ThrowIfClosed();
+        if (!_files.TryGetValue(relativePath, out var file)) throw InvalidDeployment();
+        file.Node.CopyTo(destination, token, deadline);
+        if (file.Node.Hash(token, deadline) != file.Hash) throw InvalidDeployment();
+        ThrowIfClosed(); deadline.Check(token);
     }
 
     /// <summary>Copies counted bytes from an already inventoried file and verifies their original measured digest.</summary>

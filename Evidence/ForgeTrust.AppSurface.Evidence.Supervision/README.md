@@ -1698,3 +1698,7 @@ metadata/codec behavior. Neither matching JSON nor successful local compilation
 proves Linux ownership, syscall rejection, containment or any Trusted eligibility.
 See the [sixteen-case migration gate](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker)
 for the required fresh native evidence.
+
+## Declared coverage execution
+
+The internal [coverage execution reference](coverage-execution.md) describes the closed producer command, audited SDK/package inputs, shared stream accounting, retained report transport and final root custody. These components are checkpoint-two work; source validation alone does not establish genuine Linux coverage, accepted consumer proof or Trusted eligibility.

@@ -1,0 +1,23 @@
+# Linux producer workspace
+
+[`LinuxProducerWorkspace`](LinuxProducerWorkspace.cs) owns the source, NuGet cache, scratch area, and result-token directory used by one Linux coverage producer. It is created only by native composition after the original request has passed [coverage-input preparation](coverage-execution.md) and actual run accounts exist. The workspace is not a portable path DTO: only the internal native factory can create it.
+
+## Paths and preparation
+
+`Create(input, owner, accounts, token)` exclusively creates `/run/appsurface-evidence-producer-data-<RunId:N>`. It never adopts an existing path. The generation root and `results` parent are root-owned `0711`; `subject` and `scratch` begin subject-owned `0700`, and `scratch/nuget` is the package root. The factory copies the fully audited subject tree and `<ToolRoot>/nuget` using retained [protected deployment](LinuxProtectedDeployment.cs) inventories and the original input deadline. It rejects unsupported source entries and enforces an 8192-node combined copy bound, a 1 GiB combined byte bound, and the deployment's 256 MiB per-file bound. One `LinuxProducerCopyBudget` reserves each new directory before `mkdir` and each retained source length before destination creation or copying, across both source and NuGet trees. `LinuxProtectedDeployment.RequireFileLength` rechecks the retained source metadata before the reservation; copying separately verifies actual bytes and their digest, and the final destination length must match. A rejected reservation performs no associated destination write; already consumed reservations never reset. The original solution path is mapped by its relative path beneath the copied `subject` root. Preparation does not evaluate MSBuild or run project code.
+
+Before creating any path, the factory retains the workspace with the same account holder. A collision, interrupted copy, or failed native check leaves the generation reserved for quarantine; it is never recursively deleted or adopted on retry. The subject tree may be modified by the producer until physical settlement.
+
+## Results and producer ownership
+
+The coverage operation passes its already selected opaque token to `PrepareResultsToken(resultsToken, token)`. That one-shot method validates the token grammar, creates exactly that subject-owned `0700` directory beneath the root-owned results parent, and returns its full path. Do not substitute a second token or derive a directory from a report path. After producer reports are ready, [`RequireResultsToken`](LinuxProducerWorkspace.cs) checks the retained token directory's actual descriptor and name, then returns its path and current metadata for [report custody](producer-artifacts.md).
+
+The producer is retained before start I/O. `Root` is the generation path that the worker launch must deny in its inaccessible-path policy. `SubjectRoot`, `SolutionPath`, `ResultsRoot`, `ScratchRoot`, and `PackageRoot` are path data; they do not replace native identity checks.
+
+## Cleanup ordering and sharp edges
+
+After server handlers and worker work have joined, await `SealForCleanup(owner, accounts, token)`. It idempotently stops and joins the retained producer, requires its physical settlement when one was retained, walks every mutable subject, scratch, and selected-results node with no-follow descriptors, and completes the bounded inventory before changing ownership or permissions. It then changes directories to root-owned `0700` and regular files to root-owned `0600`, and verifies the final native tree.
+
+`RequireSealedForAccountRelease(accounts, owner, token)` deliberately uses only the retained object references, captured scalar identity snapshot, the owner's control-identity check, and native sealed-state checks. Account cleanup invokes it while account-close work is pending and may invoke it again after that work. It must therefore keep its descriptors open and perform the full native check on every call; it cannot use active-account property accessors or a cached prior-pass bit. `Dispose` closes descriptors only after sealing and at least one successful release guard, with one final native check. If sealing or verification fails, keep the workspace and account identities quarantined.
+
+The cleanup guard proves physical containment and sealed storage only. It does not certify producer success, report validity, or coverage acceptance; those remain separate responsibilities of the [producer and artifact custody](producer-artifacts.md) flow.

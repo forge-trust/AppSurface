@@ -24,6 +24,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private readonly LinuxRunWorkspace _workspace;
     private readonly LinuxControlListener _listener;
     private readonly LinuxRunAccountSnapshot _accountData;
+    private readonly SupervisionRunOutputBudget? _runOutput;
+    private readonly LinuxProducerWorkspace? _producerWorkspace;
     private readonly SupervisionWorkerLifetime _lifetime = new();
     private readonly SupervisionSingleAttempt _serverCreation = new();
     private readonly SupervisionPendingStart _pending;
@@ -62,10 +64,12 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     private LinuxWorkerProcess(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener,
-        LinuxRunAccountSnapshot accountData)
+        LinuxRunAccountSnapshot accountData, SupervisionRunOutputBudget? runOutput, LinuxProducerWorkspace? producerWorkspace)
     {
         _input = input; _owner = owner; _accounts = accounts; _workspace = workspace;
         _listener = listener; _accountData = accountData;
+        _runOutput = runOutput;
+        _producerWorkspace = producerWorkspace;
         _pending = new(LinuxUnitName.Create(LinuxUnitRole.Worker, owner.RunId));
     }
 
@@ -182,7 +186,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener,
-        CancellationToken token)
+        CancellationToken token, SupervisionRunOutputBudget? runOutput = null, LinuxProducerWorkspace? producerWorkspace = null)
     {
         ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
@@ -194,7 +198,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         var snapshot = new LinuxRunAccountSnapshot(accounts.WorkerUid, accounts.WorkerGid,
             accounts.SubjectUid, accounts.SubjectGid, accounts.ResultsGid);
         owner.RequireLaunchInput(input, token);
-        var worker = new LinuxWorkerProcess(input, owner, accounts, workspace, listener, snapshot);
+        producerWorkspace?.RequireOwnedBy(owner, accounts, token);
+        var worker = new LinuxWorkerProcess(input, owner, accounts, workspace, listener, snapshot, runOutput, producerWorkspace);
         accounts.RetainWorkerForCustody(worker, owner);
         return worker;
     }
@@ -562,7 +567,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _pipes = LinuxOutputPipes.Create();
             _ = _pipes.BeginCollectAsync(_outputDeadline.Token, cancellationPhase:
                 EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null,
-                descendant: EvidenceNativeQualification.DescendantEnabled ? _descendant : null);
+                descendant: EvidenceNativeQualification.DescendantEnabled ? _descendant : null,
+                runBudget: _runOutput);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(_jobDeadline.Token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                 TimeSpan.FromSeconds(_input.Request.StartSeconds).Ticks)));
@@ -573,7 +579,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 _accountData.WorkerUid, _accountData.WorkerGid, _workspace.ControlSocket, request.ToolRoot,
                 request.SubjectRoot, _workspace.OutputParent, _workspace.RawResultsRoot,
                 _owner.Remaining, TimeSpan.FromSeconds(request.StoppingSeconds),
-                _pipes.StandardOutput, _pipes.StandardError);
+                _pipes.StandardOutput, _pipes.StandardError, _producerWorkspace?.Root);
             try
             {
                 await _pending.StartAsync(ct =>

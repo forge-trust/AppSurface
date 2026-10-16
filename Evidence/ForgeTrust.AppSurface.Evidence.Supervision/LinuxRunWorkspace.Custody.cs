@@ -68,6 +68,7 @@ internal sealed partial class LinuxRunWorkspace
         private readonly object _sync = new();
         private readonly SupervisionCustodyTransfer _transfer = new();
         private int _issued;
+        private string? _coverageProducerId;
         private bool _closed;
         private bool _failed;
         private readonly LinuxCustodyFailureLatch _failures = new();
@@ -140,6 +141,8 @@ internal sealed partial class LinuxRunWorkspace
             {
                 Check(token);
                 At(LinuxCustodyOperation.NodeSelection, null);
+                _coverageProducerId = _input.Request.ObservationProducerIds.Count == 0 ? null
+                    : EvidenceCoverageObservationPlan.FromInput(_input, token).Profile.Producers.Single().Id;
                 var ancestors = _workspace._nodes.Where(static node => node.Policy is null).ToArray();
                 if (ancestors.Length != 2 || ancestors[0].Name != "/" || ancestors[1].Name != "run") throw LinuxWorkspaceLayout.Invalid();
                 var slash = Add(null, "/", null, ancestors[0].Metadata, DirectoryFlags, 0, token);
@@ -167,9 +170,27 @@ internal sealed partial class LinuxRunWorkspace
                         null, DirectoryFlags, ChildResolution, token);
                     var files = Names(slot, token);
                     At(LinuxCustodyOperation.InventoryPolicy, LinuxCustodyNodeKind.Slot);
-                    LinuxCustodyData.RequireInventory(LinuxCustodyNodeKind.Slot, files);
+                    RequireInventory(slot, files);
                     foreach (var name in files)
                     {
+                        var coverage = CoverageProducerId(token);
+                        if (coverage is not null && name == coverage)
+                        {
+                            var producer = Add(slot, name, LinuxCustodyNodeKind.CoverageProducer, null, DirectoryFlags, ChildResolution, token);
+                            RequireInventory(producer, Names(producer, token));
+                            if (Names(producer, token).Count != 0)
+                            {
+                                var merged = Add(producer, "merged", LinuxCustodyNodeKind.CoverageMerged, null, DirectoryFlags, ChildResolution, token);
+                                RequireInventory(merged, Names(merged, token));
+                                if (Names(merged, token).Count != 0)
+                                {
+                                    var report = Add(merged, "Cobertura.xml", LinuxCustodyNodeKind.CoverageReport, null,
+                                        0x800 | 0x80000, ChildResolution, token);
+                                    report.Hash = Hash(report, token);
+                                }
+                            }
+                            continue;
+                        }
                         var kind = name switch
                         {
                             "evidence-plan.json" => LinuxCustodyNodeKind.Plan,
@@ -380,13 +401,13 @@ internal sealed partial class LinuxRunWorkspace
             RequireAccountRelease(accounts, _owner, _worker, token);
         }
 
-        /// <summary>Reads only a fixed retained root evidence file; bytes and JSON grant no authority.</summary>
+        /// <summary>Reads a fixed retained canonical file or the single declared merged coverage artifact; copied bytes grant no authority.</summary>
         internal byte[] ReadFile(LinuxCustodyNodeKind kind, CancellationToken token)
         {
             lock (_sync)
             {
-                if (kind is not (LinuxCustodyNodeKind.Plan or LinuxCustodyNodeKind.Manifest or LinuxCustodyNodeKind.Summary)
-                    || Volatile.Read(ref _issued) == 0) throw LinuxWorkspaceLayout.Invalid();
+                if (kind is not (LinuxCustodyNodeKind.Plan or LinuxCustodyNodeKind.Manifest or LinuxCustodyNodeKind.Summary
+                    or LinuxCustodyNodeKind.CoverageReport) || Volatile.Read(ref _issued) == 0) throw LinuxWorkspaceLayout.Invalid();
                 try
                 {
                     RecheckTree(terminal: true, token);
@@ -417,7 +438,7 @@ internal sealed partial class LinuxRunWorkspace
             }
         }
 
-        /// <summary>Verifies all three final files only after genuine protocol completion and normal physical worker exit.</summary>
+        /// <summary>Verifies canonical terminal files and any declared coverage artifact after genuine protocol completion and normal worker exit.</summary>
         /// <remarks>
         /// The expected plan is resolved again from the original retained protected inputs. Pure file verification
         /// grants no admission or proof. Account deletion, every retained close and a final deadline check still
@@ -433,10 +454,12 @@ internal sealed partial class LinuxRunWorkspace
                     _server.RequireSuccessfulCompletion(token);
                     _worker.RequireSuccessfulCompletion();
                     At(LinuxCustodyOperation.FileVerification, null);
-                    var expected = EvidenceEmptyObservationPlan.FromInput(_input, token);
-                    var manifest = EvidenceEmptyObservationFiles.Verify(expected,
-                        ReadFile(LinuxCustodyNodeKind.Plan, token), ReadFile(LinuxCustodyNodeKind.Manifest, token),
-                        ReadFile(LinuxCustodyNodeKind.Summary, token), token);
+                    var expected = _input.Request.ObservationProducerIds.Count == 0
+                        ? EvidenceEmptyObservationPlan.FromInput(_input, token) : EvidenceCoverageObservationPlan.FromInput(_input, token);
+                    var manifest = expected.Profile.Producers.Count == 0
+                        ? EvidenceEmptyObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
+                            ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), token)
+                        : VerifyCoverageFiles(expected, token);
                     _server.RequireSuccessfulCompletion(token);
                     _worker.RequireSuccessfulCompletion();
                     RecheckTree(terminal: true, token);
@@ -446,6 +469,31 @@ internal sealed partial class LinuxRunWorkspace
                 catch (Exception error) when (Recoverable(error))
                 { Capture(SupervisionCustodyFailure.None, error); ReportTransferFailure(error); _failed = true; _workspace.Quarantine(); throw LinuxWorkspaceLayout.Invalid(); }
             }
+        }
+
+        private EvidenceManifest VerifyCoverageFiles(EvidencePlan expected, CancellationToken token)
+        {
+            var id = expected.Profile.Producers.Single().Id;
+            IReadOnlyDictionary<string, ReadOnlyMemory<byte>> artifacts = new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal)
+            {
+                [id + "/merged/Cobertura.xml"] = ReadFile(LinuxCustodyNodeKind.CoverageReport, token),
+            };
+            return EvidenceCoverageObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
+                ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), artifacts, token);
+        }
+
+        private string? CoverageProducerId(CancellationToken token)
+        {
+            Check(token);
+            return _coverageProducerId;
+        }
+
+        private void RequireInventory(CustodyNode node, IReadOnlyList<string> names)
+        {
+            if (node.Kind is LinuxCustodyNodeKind.Slot or LinuxCustodyNodeKind.CoverageProducer or LinuxCustodyNodeKind.CoverageMerged
+                && _input.Request.ObservationProducerIds.Count != 0)
+                LinuxCustodyData.RequireCoverageInventory(node.Kind.Value, names, CoverageProducerId(default)!);
+            else LinuxCustodyData.RequireInventory(node.Kind!.Value, names);
         }
 
         private void RecheckTree(bool terminal, CancellationToken token)
@@ -462,7 +510,7 @@ internal sealed partial class LinuxRunWorkspace
                 {
                     var names = Names(node, token);
                     At(LinuxCustodyOperation.InventoryPolicy, node.Kind);
-                    LinuxCustodyData.RequireInventory(node.Kind.Value, names);
+                    RequireInventory(node, names);
                     At(LinuxCustodyOperation.InventoryComparison, node.Kind);
                     if (!names.Order(StringComparer.Ordinal).SequenceEqual(_nodes.Where(child => ReferenceEquals(child.Parent, node))
                         .Select(static child => child.Name).Order(StringComparer.Ordinal))) throw LinuxWorkspaceLayout.Invalid();
@@ -493,7 +541,7 @@ internal sealed partial class LinuxRunWorkspace
                 if (count == 0) break;
                 At(LinuxCustodyOperation.InventoryDecode, node.Kind);
                 foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-                    if (names.Count >= 3 || !names.Add(name)) throw LinuxWorkspaceLayout.Invalid();
+                    if (names.Count >= 4 || !names.Add(name)) throw LinuxWorkspaceLayout.Invalid();
             }
             var expected = node.Terminal ?? node.Original;
             if (LinuxProtectedMetadata.From(Inspect(directory, node.Kind)) != expected) throw LinuxWorkspaceLayout.Invalid();
