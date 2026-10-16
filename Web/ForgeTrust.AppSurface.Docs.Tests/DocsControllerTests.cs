@@ -34,6 +34,41 @@ namespace ForgeTrust.AppSurface.Docs.Tests;
 
 public class DocsControllerTests : IDisposable
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("guide")]
+    public async Task Details_ShouldProjectSequenceAndAuthoredLinksWithOptionalBadges(string? pageType)
+    {
+        var docs = new[]
+        {
+            new DocNode("Previous", "previous.md", "<p>Previous</p>", Metadata: new DocMetadata
+            { SequenceKey = "walkthrough", Order = 1, PageType = pageType }),
+            new DocNode("Current", "current.md", "<p>Current</p>", Metadata: new DocMetadata
+            { SequenceKey = "walkthrough", Order = 2, AutoRelatedPages = false, RelatedPages = ["authored.md"] }),
+            new DocNode("Next", "next.md", "<p>Next</p>", Metadata: new DocMetadata
+            { SequenceKey = "walkthrough", Order = 3, PageType = pageType }),
+            new DocNode("Authored", "authored.md", "<p>Authored</p>", Metadata: new DocMetadata { PageType = pageType })
+        };
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._)).Returns(docs);
+        var snapshot = Assert.IsType<DocDetailsViewModel>(await _aggregator.GetDocDetailsAsync("current"));
+
+        var result = Assert.IsType<ViewResult>(await _controller.Details("current"));
+        var projected = Assert.IsType<DocDetailsViewModel>(result.Model);
+
+        Assert.Equal("/docs/previous", projected.PreviousPage!.Href);
+        Assert.Equal("/docs/next", projected.NextPage!.Href);
+        Assert.Equal("/docs/authored", Assert.Single(projected.RelatedPages).Href);
+        Assert.Equal(DocRecommendationSource.Authored, Assert.Single(projected.RecommendedPages).Source);
+        Assert.NotSame(snapshot.PreviousPage, projected.PreviousPage);
+        Assert.NotSame(snapshot.NextPage, projected.NextPage);
+        Assert.NotSame(snapshot.RelatedPages[0], projected.RelatedPages[0]);
+        foreach (var link in new[] { projected.PreviousPage!, projected.NextPage!, projected.RelatedPages[0] })
+        {
+            if (pageType is null) Assert.Null(link.PageTypeBadge);
+            else Assert.Equal(pageType, Assert.IsType<DocPageTypeBadgePresentation>(link.PageTypeBadge).Value);
+        }
+    }
+
     private readonly List<string> _temporaryCatalogRoots = [];
     private readonly DocAggregator _aggregator;
     private readonly DocsController _controller;

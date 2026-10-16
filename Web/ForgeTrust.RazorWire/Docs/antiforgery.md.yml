@@ -1,5 +1,6 @@
 title: Security & Anti-Forgery
 page_type: troubleshooting
+component: ForgeTrust.RazorWire
 sequence_key: razorwire-proof
 order: 30
 related_pages:

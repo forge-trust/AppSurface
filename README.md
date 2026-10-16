@@ -28,6 +28,9 @@ and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/
 
 For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
 
+For Durable executors that need current domain authorization before a provider effect, see the
+[PostgreSQL application handoff fence](Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff).
+
 ## Vision
 
 The primary vision of AppSurface is to simplify application bootstrapping by encouraging **composition through small, focused modules**. Instead of monolithic startup classes or scattered configuration logic, AppSurface allows developers to encapsulate features into reusable modules that handle:
@@ -113,7 +116,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
 - [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
-- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces and [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers fixture-backed setup and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
+- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases), and [metadata-driven recommended next reads](./Web/ForgeTrust.AppSurface.Docs/README.md#recommended-next-reads). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers a [three-page next-read example](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#build-a-three-page-next-read-example) and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
 - [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
 - [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI when both Scalar and OpenAPI exposure gates allow it.
 

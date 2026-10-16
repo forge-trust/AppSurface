@@ -2688,7 +2688,8 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
 
 - `.appsurface-docs-route-manifest.json` at the tree root for new exports
   - The hidden manifest freezes the docs-root-relative canonical route and alias graph that existed when the release was exported.
-  - It stores route identity only. It does not store `PublicOrigin`, PathBase, `RouteRootPath`, exact-version mount roots, or absolute URLs.
+  - New exports also bind each logical identity to its ordinary HTML file through `canonicalArtifactPath` and declare `htmlUrlBase: "export-root"`; see [Frozen archive artifact routes](#frozen-archive-artifact-routes).
+  - The finalized manifest does not store `PublicOrigin`, PathBase, exact-version mount roots, or absolute URLs. Artifact paths include the source docs prefix when it is an actual output directory.
   - Missing route manifests are tolerated for older pinned archives, but archive alias recovery is unavailable for that release.
   - Verified archives parse this manifest from bytes covered by `.appsurface-docs-release-manifest.json`; malformed pinned route manifests keep the release unavailable because redirects are behavior-affecting archive content.
 - `.appsurface-docs-release-manifest.json` at the tree root for new exports
@@ -2707,6 +2708,7 @@ Each `exactTreePath` directory is treated as a prebuilt static subtree for one e
   - Do not store request `PathBase`, `PublicOrigin`, custom `RouteRootPath`, deployment-specific aliases, protocol-relative URLs, absolute URLs, executable schemes, traversal, encoded separators, or docs operational/assets routes such as `/docs/search`, `/docs/search-index.json`, `/docs/search.css`, `/docs/search-client.js`, `/docs/_health`, `/docs/_routes`, or `/docs/_search-index/refresh`.
   - Missing or blank `path`/`title` values, malformed payloads, and unsafe `path` values cause AppSurface Docs to reject only the affected published release tree during startup validation.
   - The payload must stay under `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`; oversized payloads are rejected during catalog validation before JSON parsing, so the release is marked unavailable before readers hit broken search.
+  - For additive `recommendedPages` rows, old-member behavior, nested-path validation, and safe archive recovery, see [Recommended next reads](#recommended-next-reads).
 - `search.css` at the tree root. The bundled search stylesheet carries search-local fallbacks for the shared style tokens so exact release search controls remain styled even when a historical/static export does not include `site.gen.css`.
 - `search-client.js` at the tree root
 - `outline-client.js` at the tree root for outline-aware exports whose HTML references the page-local outline runtime
@@ -2723,9 +2725,31 @@ AppSurface Docs does not regenerate these trees at request time. It resolves ext
 
 The `0.2.0-preview.11` exact docs tree has an 8,741,119-byte root `search-index.json`. Hosts that mount that archive through AppSurface Docs must set `AppSurfaceDocs__Versioning__MaxRewrittenFileSizeBytes=16777216` (16 MiB) before adding its catalog entry; the 4 MiB default marks the archive unavailable. Static Pages serves the exported file directly. The [archive verification command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-verify-archive) needs the matching `--max-rewritten-file-size-bytes 16777216` option when checking that tree.
 
+The limit applies to the complete UTF-8 input file, including searchable body text, headings, metadata, and [recommended next reads](#recommended-next-reads). It is not a limit on recommendation rows or the total archive. A successful export can therefore produce a complete full-repository search index that exceeds the archive host's default rewrite limit; export success alone does not prove that a catalog mount will be available. This limitation predates recommended next reads. Measure the exported file before catalog activation, keep its complete search data, and choose an explicit supported limit when necessary. The default remains 4 MiB.
+
 Use the limit for exported `.html` pages and the root `search-index.json` only. It is not a general docs file-size policy, it does not cap source harvesting, and it does not block images, fonts, CSS, JavaScript, or other streamed assets. When AppSurface Docs rejects an oversized rewritten artifact, diagnostics include the artifact type, observed size, configured limit, `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes`, the failure outcome, and this section name. Remediate by shrinking or re-exporting the artifact, or by setting a larger explicit limit within the supported range.
 
-When the hidden frozen route manifest is present, mounted archives also use it before file lookup to redirect archived source-shaped Markdown aliases and declared redirect aliases to the mount-local canonical route. For example, a manifest alias of `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` when the tree is mounted at `/docs/v/1.2.3`, or to `/foo/bar/packages` when the recommended release is mounted at a custom route root. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but a manifest canonical route may still include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, the RazorWire page-navigation runtime when page-navigation roots are present, and all applicable page-local `outline-client.js` and/or `rich-authoring-client.js` runtimes for outline-aware or rich-authoring exports before publishing because a missing required runtime asset or a malformed search payload keeps that release unavailable or incomplete until the artifact is fixed. The version catalog intentionally does not crawl historical HTML to infer optional runtimes; old exact archives stay immutable, and any future modernization should be an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+When the hidden frozen route manifest is present, mounted archives use it before file lookup to recover source-shaped Markdown aliases and declared redirect aliases. Legacy v1 manifests retain their logical redirects: alias `packages/README.md` with canonical route `packages` redirects to `/docs/v/1.2.3/packages` at that exact mount. New manifests use the validated physical mapping described below, including direct logical canonical requests. Redirects preserve query strings; request fragments cannot be preserved because browsers do not send them to the server, but the frozen canonical route may include its own fragment such as `guide#advanced`. Exporters should validate `.appsurface-docs-route-manifest.json`, `search-index.json`, `search.css`, `search-client.js`, `minisearch.min.js`, the [RazorWire page-navigation runtime](../ForgeTrust.RazorWire/Docs/page-navigation.md), and applicable [outline](#page-local-outline-behavior) and [rich-authoring](#rich-authoring) runtimes before publishing because missing required runtime assets or malformed search payloads keep a release unavailable or incomplete. The version catalog intentionally does not crawl historical HTML to infer optional runtimes; old exact archives stay immutable, and modernization requires an explicit rebuild from source into a new self-contained tree. Use the [RazorWire CLI](../ForgeTrust.RazorWire.Cli/README.md) or another static-export pipeline to publish those trees ahead of time.
+
+### Frozen archive artifact routes
+
+Logical route identity and physical export layout have different purposes. `canonicalRoutePath` preserves the identity used by the [live route catalog](#document-route-identity) and recommendation `targetId`; `canonicalArtifactPath` identifies the ordinary HTML member inside the complete exact tree. Use the mapping when mounting newly exported archives whose source docs root appears in their output layout. It does not change live routes, ranking, or authored order.
+
+The additive fields use the existing `appsurface-docs-route-manifest-v1` schema:
+
+| Field | Shape and behavior |
+| --- | --- |
+| `htmlUrlBase` | Optional top-level string. New finalized exports use exactly `"export-root"` and supply a mapping for every entry. Absence of both new fields preserves legacy v1 behavior. Unknown values or partial mappings reject the new manifest. |
+| `entries[].canonicalArtifactPath` | Nonblank whole-output-root relative `.html` filename, for example `docs/packages/guide.html` or root `index.html`. No leading slash, backslash, colon, query, fragment, percent escape, control character, empty segment, or hidden/dot segment. Must name an ordinary same-tree file covered by the pinned release manifest. |
+| `entries[].canonicalRoutePath` | Existing logical identity, including the empty root identity and an optional canonical fragment. It remains independent of the artifact path. |
+
+For example, canonical identity `packages/guide#advanced` can map to physical `docs/packages/guide.html`. Alias `packages/guide.md?from=old` at `/docs/v/1.2.3` receives `301 Location: /docs/v/1.2.3/docs/packages/guide.html?from=old#advanced`. A custom mount `/handbook/v/1.2.3` uses that same physical member below its own root; a request PathBase `/app` prefixes the result once. Direct logical canonical and root requests use the mapping too, while requests already naming a physical canonical file are served directly.
+
+The [Docs export command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-export) stages a private `exportCanonicalLiveUrl` for each entry. After canonical HTML materialization, the exporter derives `canonicalArtifactPath` from the successful ordinary outcome, removes the staging members, and writes the final route manifest before release hashing. Remaining staging data rejects archive activation. Missing targets, alias artifacts, unsafe files, duplicate physical targets, and collisions with another logical canonical or alias route fail export with [`RWEXPORT012`](../ForgeTrust.RazorWire.Cli/README.md#export).
+
+Static HTML, frame sources, generated alias pages, and the generic static search index keep bare publish-root artifact URLs, such as `/docs/packages/guide.html`, so they work on a generic static host. A verified mounted archive projects these HTML URLs beneath its selected mount, including assets and redirect refresh URLs. The separate frozen root `search-index.json` uses `/docs` followed by the whole-root artifact path, such as `/docs/docs/packages/guide.html`, before its [archive path projection](#recommended-next-reads). The generic index normally remains beneath the source docs root. For source root `/`, it is named `search-index.static.json`; exported HTML selects that file through `docsSearchIndexUrl`, and the archive handler selects the frozen root index at its mounted URL. Both indexes retain complete rows, ordering, identities, and explanation metadata, and the release manifest covers each file independently. See [Documentation recommendation export](../ForgeTrust.RazorWire.Cli/README.md#documentation-recommendation-export) for the producer contract. Enabling release integrity hashing does not change static HTML into mounted URLs.
+
+Archive verification binds every mapping to the same pinned ordinary HTML member. Before issuing a mapped redirect, the handler checks the physical tree and the target's current length and SHA-256 again. A missing, changed, unsafe, or uncovered target refuses the redirect and cannot fall through to generated alias HTML. Correct the source/layout, re-export using coordinated Docs and CLI packages, update the trusted catalog pin, and run [`appsurface docs verify-archive`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-verify-archive). Do not hand-edit an immutable historical archive to retrofit this contract; older v1 archives retain their recorded behavior.
 
 If a strict search-index path failure appears after upgrade, inspect the affected tree's `search-index.json`, find the reported `documents[index]`, and rewrite valid docs pages back to canonical `/docs/...` paths. For example, replace `https://docs.example.com/foo/bar/guide.html`, `/some-base/docs/guide.html`, or `/foo/bar/guide.html` with `/docs/guide.html` before rebuilding or republishing the archive. Do not repair unsafe rows by pointing them at external sites or operational docs endpoints; those entries should be removed or regenerated from a valid docs route.
 
@@ -2814,7 +2838,7 @@ After:
 - Do not store deployment-specific search-index document paths in an exact tree. The archive stores canonical `/docs/...` paths; AppSurface Docs rewrites them to the recommended alias, exact-version route, custom route root, and request `PathBase` while serving.
 - Do not treat `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` as a cache or total CPU limit. It bounds rewritten input size for published `.html` and root `search-index.json`; under-limit rewritten files can still require request-time parsing and rewriting.
 - Do not raise `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` casually. Larger limits allow larger public request-time reads; prefer shrinking or re-exporting unusually large HTML or search-index artifacts when practical.
-- Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Runtime ignores ambiguous aliases from hand-edited or legacy manifests and keeps serving normal files.
+- Do not hand-edit `.appsurface-docs-route-manifest.json` to add aliases. New exports validate duplicate aliases, aliases that collide with canonical routes, and aliases that equal their own canonical route. Legacy loading ignores ambiguous aliases and keeps serving normal files; new artifact mappings fail closed as a complete manifest. See [Frozen archive artifact routes](#frozen-archive-artifact-routes).
 - Do not hand-edit `.appsurface-docs-release-manifest.json` after export. Any byte change requires copying the new manifest digest into `releaseManifestSha256`, and file changes require a fresh export.
 - Do not describe catalog-pinned release manifests as signed provenance. A compromised catalog can pin compromised archive bytes; Sigstore, GitHub artifact attestations, and SLSA-style provenance are future trust layers.
 
@@ -3421,6 +3445,184 @@ related_pages:
 
 - Do not rely on filename prefixes or folder adjacency for proof-path behavior in this slice. Use explicit `sequence_key` values instead.
 - Do not expect `related_pages` to imply ordering. Related links stay unordered beyond the authored list order.
+
+### Recommended next reads
+
+Recommended next reads combine the page author's resolved links with a small, snapshot-computed set of metadata-backed suggestions. The details view, search index, static export, and exact-version archive project this same authored-first result; no request-time ranking or client-side replacement list is created. The consumer path is in the [three-page authoring walkthrough](./use-appsurface-docs.md#build-a-three-page-next-read-example).
+
+#### Author controls and defaults
+
+`related_pages` remains explicit curation. Resolved links retain author order and are never capped. `DocDetailsViewModel.RelatedPages` and the raw search-index `relatedPages` field keep their existing authored-only meaning. Use `DocDetailsViewModel.RecommendedPages` and the additive `recommendedPages` JSON member for the combined result.
+
+`auto_related_pages` is a nullable boolean with a default of enabled. Metadata precedence applies before the default: a non-null value on the primary source wins, including `false`; otherwise the sidecar/fallback value applies. `related_pages: []` clears only the authored list and does not turn off automatic suggestions. Turning suggestions off on one source page does not remove that page from other pages' target sets.
+
+To show only authored links—or no links—put both keys in the page's front matter or sidecar:
+
+```yaml
+related_pages: []
+auto_related_pages: false
+```
+
+An authored destination still has to resolve to a linkable public route and cannot be hidden from public navigation. It may be hidden from search, so its complete recommendation row can exist even when its page is absent from `documents[]`.
+
+#### Automatic eligibility and ranking
+
+Automatic selection uses only the final canonical pages in one Docs product snapshot. A source must be readable, linkable, public, and have neither `hide_from_public_nav` nor `hide_from_search`; internal/contributor sources and generated per-symbol fragments receive authored wayfinding only. A target must be a canonical route winner with readable content, both hide flags off, and a public `guide`, `example`, or `troubleshooting` role, or be the resolved landing page for its public section. Internal/contributor pages, symbol fragments, redirect aliases, and route-collision losers are not targets. Derived component and audience values are not evidence.
+
+An ordinary target qualifies when it shares an exact normalized authored `component`, or at least two distinct informative values from the union of authored `aliases` and `keywords`. A term is common when it occurs on at least five eligible public targets **and** on strictly more than 25% of that set (`frequency >= 5` and `frequency * 4 > eligibleTargetCount`); common terms do not count toward the two-term threshold. The resolved landing page for the source's public section is a separate orientation exception and may qualify without those signals. Audience, section, nav group, sequence, and page type alone do not make an ordinary page relevant.
+
+For component, audience, alias, and keyword comparisons, values are trimmed, internal whitespace is collapsed, and matching is ordinal case-insensitive. Sequence keys are trimmed and compared ordinal-ignore-case; internal whitespace is not collapsed. Punctuation is preserved; there is no tokenization, stemming, or synonym expansion. Components and audiences marked as derived are ignored. Common-term frequencies use the eligible target set before source-specific exclusions, so the threshold does not change with the current source page.
+
+Among qualified task pages, the target-role preference is:
+
+| Source role | Target priority, highest first |
+| --- | --- |
+| Section landing or introductory/default page | Guide → Example → Troubleshooting |
+| Guide or How-to | Example → Troubleshooting → Guide |
+| Example | Troubleshooting → Guide → Example |
+| Troubleshooting | Guide → Example → Troubleshooting |
+| API reference | Example → Guide → Troubleshooting |
+
+A resolved section landing uses the orientation priority after ordinary task pages. Automatic candidates exclude the source, owners of its previous/next pages, and owners already present in authored links. If source and target share an explicit sequence key and both have an order, only a strictly later target is eligible; missing order or different keys do not establish sequence direction.
+
+Candidates are ordered by target-role priority, exact shared component, number of shared informative topics (capped at three), forward sequence, exact shared audience, same resolved section, then sequence order when both candidates are in the source's same ordered sequence. Final ties use display title ordinal-ignore-case, canonical identity ordinal-ignore-case, and canonical identity ordinal. Harvest order and current culture do not affect the result. At most three automatic rows follow the complete authored prefix; fewer qualifying rows remain fewer, and no authored rows are truncated.
+
+Construction reuses build-local candidate and owner-exclusion buffers between sources and creates one shared canonical link map for sequence neighbors and recommendation facts. Authored destinations are projected separately; their title fallback lookup is built once on demand, preserving route-first resolution and the existing order/title/path winner. Only detached recommendation rows and response projections leave the snapshot. These buffers and the title lookup belong to one build; they are neither shared across concurrent generations nor retained for request-time ranking. The candidate union and full ordering still run for every eligible source, so large shared components can require many evaluations even though only three automatic rows are returned.
+
+#### Public API and explanation contract
+
+`DocPageRecommendationViewModel` exposes a resolved `Page` (`DocPageLinkViewModel`), `Source` (`DocRecommendationSource.Authored = 0` or `.Automatic = 1`), `PrimaryReasonCode`, ordered `ReasonCodes`, and the default `ReasonText`. `DocDetailsViewModel.RecommendedPages` is the combined result; `RelatedPages` remains authored-only. The built-in view uses the combined list and preserves legacy authored-only custom models when the combined list is empty. Empty is valid and the built-in “Read next” section is omitted.
+
+The generated search-index row is complete and ordered. It contains `targetId` (canonical identity), `path` (surface-projected URL), `title`, nullable `summary`, nullable `pageTypeLabel` and `pageTypeVariant`, string `source` (`authored` or `automatic`), `primaryReasonCode`, `reasonCodes`, and `reasonText`. Consumers render from each row directly; they must not look up the target in `documents[]`. `relatedPages` continues to carry raw authored references. New indexes emit `recommendedPages: []` when there are no rows.
+
+Primary reason codes are `authored`, `try-example`, `troubleshoot`, `deepen-guide`, and `section-overview`. The primary describes the reading action. Supporting codes are emitted only when evidence exists, in this fixed order: `shared-component`, `shared-topics`, `shared-sequence`, `same-audience`, `same-section`. Authored rows have only `authored`. The default captions come from one mapper and use the shared-component evidence exactly:
+
+| Primary code | Caption when `shared-component` is present | Caption otherwise |
+| --- | --- | --- |
+| `authored` | Selected by the author | Selected by the author |
+| `section-overview` | Explore this section | Explore this section |
+| `try-example` | Try an example for this component | Try an example for this topic |
+| `troubleshoot` | Troubleshoot this component | Troubleshoot this topic |
+| `deepen-guide` | Go deeper on this component | Go deeper on this topic |
+| Unknown future code | Read this page next | Read this page next |
+
+The component wording is truthful only when `reasonCodes` contains `shared-component`; otherwise ordinary automatic targets qualified through informative topics and use the topic wording. Section landings use section wording. Custom views may use the provided `ReasonText` unchanged or localize from the primary and supporting codes while preserving that rule. Unknown valid source or reason values keep a generic link and caption instead of dropping a row.
+
+#### Render a compatible read-next link
+
+The package's Razor view uses an internal mount-aware helper. A host-owned MVC view can use the public `Url.Content` helper with `~` plus the app-relative `Page.Href`, as below, to add the request `PathBase` once. This model's href excludes `PathBase`; a JSON client's surface-projected `path` is already ready to use and must not receive another prefix. Give each title a unique ID and label the link with that title alone; put the explanatory caption outside the link. This keeps the title as the accessible link name while allowing the caption to be localized from `PrimaryReasonCode` and `ReasonCodes` when the default `ReasonText` is not appropriate.
+
+This example assumes a model produced by `DocAggregator`, which populates `RecommendedPages`. Custom model producers that still populate only `RelatedPages` should preserve the [authored-only fallback](#public-api-and-explanation-contract) when the combined list is empty; an empty `RecommendedPages` list alone does not mean the authored list is empty.
+
+```razor
+@model ForgeTrust.AppSurface.Docs.Models.DocDetailsViewModel
+@{
+    var rowIndex = 0;
+}
+<ul>
+    @foreach (var row in Model.RecommendedPages)
+    {
+        var titleId = $"read-next-title-{rowIndex++}";
+        var href = Url.Content("~" + row.Page.Href);
+        <li>
+            <a href="@href" aria-labelledby="@titleId">
+                <span id="@titleId">@row.Page.Title</span>
+            </a>
+            <span class="read-next-reason">@row.ReasonText</span>
+        </li>
+    }
+</ul>
+```
+
+#### Consumer JSON snapshot example
+
+The following excerpt matches the public result shape: the authored “Hidden” target is not in the search document list, yet its row is self-contained; the two automatic rows share an explicit component, so their captions use the corresponding component wording.
+
+```json
+{
+  "relatedPages": ["hidden.md", "Missing", "source.md"],
+  "recommendedPages": [
+    {
+      "targetId": "hidden",
+      "path": "/docs/hidden",
+      "title": "Hidden",
+      "summary": "Author exception",
+      "pageTypeLabel": "API Reference",
+      "pageTypeVariant": "api-reference",
+      "source": "authored",
+      "primaryReasonCode": "authored",
+      "reasonCodes": ["authored"],
+      "reasonText": "Selected by the author"
+    },
+    {
+      "targetId": "example",
+      "path": "/docs/example",
+      "title": "Example",
+      "summary": null,
+      "pageTypeLabel": "Example",
+      "pageTypeVariant": "example",
+      "source": "automatic",
+      "primaryReasonCode": "try-example",
+      "reasonCodes": ["try-example", "shared-component"],
+      "reasonText": "Try an example for this component"
+    },
+    {
+      "targetId": "trouble",
+      "path": "/docs/trouble",
+      "title": "Trouble",
+      "summary": null,
+      "pageTypeLabel": "Troubleshooting",
+      "pageTypeVariant": "troubleshooting",
+      "source": "automatic",
+      "primaryReasonCode": "troubleshoot",
+      "reasonCodes": ["troubleshoot", "shared-component"],
+      "reasonText": "Troubleshoot this component"
+    }
+  ]
+}
+```
+
+#### Older and future payloads
+
+Old indexes may omit `recommendedPages`; compatible clients treat the missing member as an empty list and do not synthesize results. An empty array is valid. Archive readers accept future source/reason values and optional presentation fields; preserve the link and use a generic caption for an unknown reason. Keep `targetId` as identity and `path` as the clickable URL. The live controller prefixes both document paths and nested recommendation `path` values for `PathBase`; static export and archive mounts validate and rebase nested paths within the same selected tree.
+
+##### An older index without recommendations
+
+An older row with no member means there are no precomputed next reads:
+
+```json
+{"documents":[{"path":"/docs/guide.html","title":"Guide"}]}
+```
+
+##### A future recommendation row
+
+A future archive row can retain unfamiliar presentation values; as long as its path is safe and resolves within the exact tree, a custom reader can keep it as a link and show the generic caption:
+
+```json
+{
+  "targetId": "next",
+  "path": "/docs/next.html",
+  "title": "Next page",
+  "source": "future-source",
+  "primaryReasonCode": "future-action",
+  "reasonCodes": ["future-action", "future-evidence"],
+  "reasonText": "Read this page next"
+}
+```
+
+#### Diagnostics, recovery, and release compatibility
+
+For a published tree, every present `recommendedPages` value must be an array and each row must be an object with a nonblank safe string `path` and `title`. Those are the only recommendation-row fields whose types are required by archive/export validation. Other row properties are optional opaque metadata: preserve them for forward-compatible consumers, which should tolerate unfamiliar values. Each nested path must resolve to an ordinary HTML file inside that exact release tree. The archive does not search `documents[]` for the target.
+
+Strict static export reports recommendation URL failures as `RWEXPORT011`. Trace that diagnostic's row path to the source metadata and confirm that the target is present in the same exported tree.
+
+| Problem | Likely cause | Fix |
+| --- | --- | --- |
+| Recommendation data has a non-array list, a non-object row, or a missing/blank/non-string `path` or `title` | A generated or edited `search-index.json` does not meet the archive's required row shape | Correct the source/exporter input and export the tree again. |
+| Recommendation path is unsafe or has no ordinary HTML target in the selected tree | A row contains a deployment URL, traversal, operational route, or a target omitted from this export | Use the canonical route for a page included in this same tree, then re-export. |
+| A release becomes unavailable after row validation | The archive is validated as a self-contained, exact-version artifact | Regenerate that same release's tree, update its trusted manifest digest, and run [`appsurface docs verify-archive`](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-docs-verify-archive). Do not fall back to live pages. |
+
+The public availability message points to this [published-version contract](#published-version-catalog); structured details identify the problem, cause, fix, and reference without exposing absolute filesystem paths. This ships through the existing `ForgeTrust.AppSurface.Docs` package and CLI release lanes; it adds no package, endpoint, service, or tuning option. Static exports are snapshots and must be regenerated with `appsurface docs export` after upgrading. Exact archives remain immutable: existing trees keep their captured rows until an intentional re-export and manifest-digest update. Keep the published-tree rewrite limit and current payload intact: do not trim recommendation rows or silently raise `AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes` to make an oversized index pass.
 
 ## Metadata-Driven Page Type Display
 

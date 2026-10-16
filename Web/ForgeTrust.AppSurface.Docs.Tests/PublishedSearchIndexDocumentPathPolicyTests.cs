@@ -191,6 +191,30 @@ public sealed class PublishedSearchIndexDocumentPathPolicyTests
         Assert.Equal(PublishedSearchIndexPathRejectionReason.ReservedRoute, result.Reason);
     }
 
+    [Theory]
+    [InlineData("/docs", true, "none")]
+    [InlineData("/docs/guide.html", true, "none")]
+    [InlineData("/docs/%76", false, "reserved-route")]
+    [InlineData("/docs/%76/1.2.3/guide.html", false, "wrong-version")]
+    [InlineData("/docs/%76ersions", false, "reserved-route")]
+    [InlineData("/docs/%76ersions/1.2.3/guide.html", false, "wrong-version")]
+    public void ValidateRecommendationArchivePath_ShouldCanonicalizeRootAndRejectVersionFamilyRoutes(
+        string path,
+        bool expectedValid,
+        string expectedReason)
+    {
+        var result = PublishedSearchIndexDocumentPathPolicy.ValidateRecommendationArchivePath(
+            path,
+            new PublishedSearchIndexArchivePathContext("1.2.3"));
+
+        Assert.Equal(expectedValid, result.IsValid);
+        Assert.Equal(expectedReason, PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(result.Reason));
+        if (expectedValid)
+        {
+            Assert.Equal(path, result.NormalizedPath);
+        }
+    }
+
     [Fact]
     public void ToDiagnosticCode_ShouldReturnUnknown_ForUnsupportedEnumValue()
     {

@@ -2642,7 +2642,7 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
             manifestPath,
             "AppSurface Docs frozen route manifest",
             "/" + AppSurfaceDocsFrozenRouteManifest.FileName,
-            AppSurfaceDocsFrozenRouteManifest.Serialize(routeManifest),
+            AppSurfaceDocsFrozenRouteManifest.SerializeForExport(routeManifest),
             encoding: null,
             cancellationToken);
     }

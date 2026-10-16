@@ -305,6 +305,18 @@ public sealed class DocRouteIdentityCatalogTests
     }
 
     [Fact]
+    public void TryGetPublicRoutePathForSource_ShouldResolveExactSourceAndReturnFalseForMissingSource()
+    {
+        var catalog = CreateCatalog(new DocNode("Intro", "guides/intro.md", "<p>Intro</p>"));
+
+        Assert.True(catalog.TryGetPublicRoutePathForSource("guides/intro.md", out var routePath));
+        Assert.Equal("guides/intro", routePath);
+
+        Assert.False(catalog.TryGetPublicRoutePathForSource("guides/missing.md", out var missingRoutePath));
+        Assert.Equal(string.Empty, missingRoutePath);
+    }
+
+    [Fact]
     public void Create_ShouldEmitDiagnosticsAndKeepReservedRoutesNonPublic()
     {
         var catalog = CreateCatalog(new DocNode("Search", "search.md", "<p>Search</p>"));
