@@ -51,6 +51,16 @@ internal sealed record SupervisionOutputReceipt(
     /// <summary>Actual bytes discarded across both joined pumps.</summary>
     internal long DiscardedBytes => Stdout.DiscardedBytes + Stderr.DiscardedBytes;
 
+    /// <summary>Actual complete drainage, allowing a sticky quota rejection but no lost read, cancellation or signalling failure.</summary>
+    /// <remarks>This data permits no successful run, process-exit assertion or account release by itself.</remarks>
+    internal bool Drained => !StopSignalFailed
+        && Failure is SupervisionOutputFailure.None or SupervisionOutputFailure.QuotaExceeded
+        && Stdout.EndOfStream && Stderr.EndOfStream
+        && Stdout.Failure is SupervisionOutputFailure.None or SupervisionOutputFailure.QuotaExceeded
+        && Stderr.Failure is SupervisionOutputFailure.None or SupervisionOutputFailure.QuotaExceeded
+        && Stdout.ReceivedBytes >= Stdout.Prefix.Length && Stderr.ReceivedBytes >= Stderr.Prefix.Length
+        && ReceivedBytes == Stdout.ReceivedBytes + Stderr.ReceivedBytes;
+
     /// <summary>Whether both EOFs were observed, neither pump failed, and all received bytes fit the shared budget.</summary>
     /// <remarks>This predicate describes these two streams only; it establishes no process or cgroup exit.</remarks>
     internal bool Successful => Failure == SupervisionOutputFailure.None
@@ -139,7 +149,7 @@ internal sealed class SupervisionOutputCollector
         }
 
         using var stop = budget is null ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
-            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.StopToken);
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, budget.PumpStopToken);
         var state = new CollectionState(_receivedByteLimit, stop, budget);
         // Independent dispatch also owns a Stream implementation that stalls before returning its ValueTask.
         var stdoutTask = Task.Run(() => PumpAsync(stdout, state, stop.Token, null, null, null), CancellationToken.None);
@@ -186,6 +196,7 @@ internal sealed class SupervisionOutputCollector
                 {
                     failure = state.QuotaExceeded
                         ? SupervisionOutputFailure.QuotaExceeded : SupervisionOutputFailure.Cancelled;
+                    if (state.CanDrainQuota) continue; // Charge and discard until actual EOF under the original drain deadline.
                     break;
                 }
 
@@ -225,12 +236,16 @@ internal sealed class SupervisionOutputCollector
         internal SupervisionOutputFailure Failure => (SupervisionOutputFailure)Volatile.Read(ref _failure);
         internal bool QuotaExceeded => Volatile.Read(ref _quotaExceeded) != 0 || budget?.QuotaExceeded == true;
         internal bool StopSignalFailed => Volatile.Read(ref _stopSignalFailed) != 0;
+        internal bool CanDrainQuota => budget?.DrainOnQuotaExceeded == true && QuotaExceeded
+            && !stop.IsCancellationRequested
+            && Failure is SupervisionOutputFailure.None or SupervisionOutputFailure.QuotaExceeded;
 
         internal bool Charge(int count)
         {
             // Count actual bytes even when the sibling has already failed or this charge crosses the limit.
             var total = Interlocked.Add(ref _receivedBytes, count);
             var runAccepted = budget?.Charge(count) ?? true;
+            if (budget?.QuotaExceeded == true) Latch(SupervisionOutputFailure.QuotaExceeded);
             if (total > limit)
             {
                 Volatile.Write(ref _quotaExceeded, 1);
@@ -249,6 +264,7 @@ internal sealed class SupervisionOutputCollector
             Latch(failure);
             budget?.Fail(failure == SupervisionOutputFailure.QuotaExceeded
                 ? SupervisionRunOutputFailure.QuotaExceeded : SupervisionRunOutputFailure.PairFailed);
+            if (failure == SupervisionOutputFailure.QuotaExceeded && CanDrainQuota) return;
             try
             {
                 stop.Cancel();

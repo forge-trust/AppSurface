@@ -28,11 +28,19 @@ internal enum SupervisionRunOutputFailure
 /// <param name="Failure">First latched ledger failure.</param>
 /// <param name="QuotaExceeded">Whether any charge crossed the aggregate limit.</param>
 /// <param name="StopSignalFailed">Whether signalling cancellation threw.</param>
+/// <param name="DrainFailed">Whether any non-quota failure occurred, even after quota was the first failure.</param>
 internal sealed record SupervisionRunOutputReceipt(
     ImmutableArray<SupervisionOutputReceipt> Pairs, int RegisteredPairs,
     long ReceivedBytes, long ReceivedByteLimit, SupervisionRunOutputFailure Failure,
-    bool QuotaExceeded, bool StopSignalFailed)
+    bool QuotaExceeded, bool StopSignalFailed, bool DrainFailed = false)
 {
+    /// <summary>Complete actual stream drainage and byte reconciliation, allowing only a sticky quota failure.</summary>
+    /// <remarks>This is stream data; native process, cgroup, server, filesystem and account guards remain separate.</remarks>
+    internal bool Drained => !StopSignalFailed && !DrainFailed
+        && Failure is SupervisionRunOutputFailure.None or SupervisionRunOutputFailure.QuotaExceeded
+        && Pairs.Length == RegisteredPairs && Pairs.All(static pair => pair.Drained)
+        && Pairs.Sum(static pair => pair.ReceivedBytes) == ReceivedBytes;
+
     /// <summary>Requires the complete registered set, exact byte reconciliation and successful EOFs.</summary>
     internal bool Successful => Failure == SupervisionRunOutputFailure.None && !QuotaExceeded && !StopSignalFailed
         && Pairs.Length == RegisteredPairs && Pairs.All(static pair => pair.Successful)
@@ -52,6 +60,7 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
     private readonly object _gate = new();
     private readonly object _signalGate = new();
     private readonly CancellationTokenSource _stop = new();
+    private readonly CancellationTokenSource _pumpStop = new();
     private readonly List<Task<SupervisionOutputReceipt>> _pairs = [];
     private readonly HashSet<SupervisionOutputCollector> _collectors = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<Stream> _streams = new(ReferenceEqualityComparer.Instance);
@@ -60,20 +69,36 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
     private SupervisionRunOutputFailure _failure;
     private bool _quotaExceeded;
     private bool _stopSignalFailed;
+    private bool _drainFailed;
     private bool _closed;
     private bool _disposed;
     private Task<SupervisionRunOutputReceipt>? _completion;
 
     /// <summary>Creates a run ledger with a positive limit no greater than the existing 16 MiB contract.</summary>
-    internal SupervisionRunOutputBudget(long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+    /// <param name="receivedByteLimit">Original aggregate received-byte limit, which may only be lowered.</param>
+    /// <param name="drainOnQuotaExceeded">Fixed native policy to stop writers while charging/discarding through EOF;
+    /// false preserves ordinary stop-on-quota behavior. The original caller token still bounds every read.</param>
+    internal SupervisionRunOutputBudget(long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
+        bool drainOnQuotaExceeded = false)
     {
         if (receivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
             throw new ArgumentOutOfRangeException(nameof(receivedByteLimit));
         _limit = receivedByteLimit;
+        DrainOnQuotaExceeded = drainOnQuotaExceeded;
     }
 
-    /// <summary>Cancellation for registered pumps; not a substitute for joining processes or streams.</summary>
+    /// <summary>Immediate execution-stop signal on any ledger failure; not proof of stopped writers or joined streams.</summary>
     internal CancellationToken StopToken => _stop.Token;
+
+    /// <summary>Fixed native composition policy: overflow stops execution while original pumps drain to real EOF.</summary>
+    internal bool DrainOnQuotaExceeded { get; }
+
+    /// <summary>Pump cancellation; quota alone leaves this live only for the explicit native drain policy.</summary>
+    internal CancellationToken PumpStopToken => _pumpStop.Token;
+
+    /// <summary>Requires explicit final accounting before a native owner can use quota drainage for failed-run cleanup.</summary>
+    internal bool Drained { get { lock (_gate) return _completion is { IsCompletedSuccessfully: true }
+        && _completion.Result.Drained; } }
 
     /// <summary>Sticky actual aggregate-overflow data, also sampled by the currently reading pair.</summary>
     internal bool QuotaExceeded { get { lock (_gate) return _quotaExceeded; } }
@@ -122,7 +147,8 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
         try
         {
             var receipt = await collector.CollectRegisteredAsync(stdout, stderr, this, token).ConfigureAwait(false);
-            if (!receipt.Successful) Fail(SupervisionRunOutputFailure.PairFailed);
+            if (!receipt.Successful && !(DrainOnQuotaExceeded && receipt.Drained && QuotaExceeded))
+                Fail(SupervisionRunOutputFailure.PairFailed);
             return receipt;
         }
         catch
@@ -154,6 +180,7 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
         lock (_gate)
         {
             if (_failure == SupervisionRunOutputFailure.None) _failure = failure;
+            if (failure != SupervisionRunOutputFailure.QuotaExceeded) _drainFailed = true;
             _closed = true;
             if (_disposed) return;
         }
@@ -162,14 +189,21 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
         lock (_signalGate)
         {
             lock (_gate) if (_disposed) return;
-            try { _stop.Cancel(); }
-            catch (Exception error) when (Recoverable(error))
+            Signal(_stop);
+            if (!DrainOnQuotaExceeded || failure != SupervisionRunOutputFailure.QuotaExceeded) Signal(_pumpStop);
+        }
+    }
+
+    private void Signal(CancellationTokenSource source)
+    {
+        try { source.Cancel(); }
+        catch (Exception error) when (Recoverable(error))
+        {
+            lock (_gate)
             {
-                lock (_gate)
-                {
-                    _stopSignalFailed = true;
-                    if (_failure == SupervisionRunOutputFailure.None) _failure = SupervisionRunOutputFailure.StopSignalFailed;
-                }
+                _stopSignalFailed = true;
+                _drainFailed = true;
+                if (_failure == SupervisionRunOutputFailure.None) _failure = SupervisionRunOutputFailure.StopSignalFailed;
             }
         }
     }
@@ -206,8 +240,11 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
         lock (_gate)
         {
             if (pairs.Length != tasks.Length || pairs.Sum(static pair => pair.ReceivedBytes) != _received)
+            {
+                _drainFailed = true;
                 if (_failure == SupervisionRunOutputFailure.None) _failure = SupervisionRunOutputFailure.AccountingMismatch;
-            return new(pairs, tasks.Length, _received, _limit, _failure, _quotaExceeded, _stopSignalFailed);
+            }
+            return new(pairs, tasks.Length, _received, _limit, _failure, _quotaExceeded, _stopSignalFailed, _drainFailed);
         }
     }
 
@@ -222,6 +259,7 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
             if (_completion?.IsCompleted != true) throw new InvalidOperationException("Run output collection must join before disposal.");
             _disposed = true;
             _stop.Dispose();
+            _pumpStop.Dispose();
         }
     }
 

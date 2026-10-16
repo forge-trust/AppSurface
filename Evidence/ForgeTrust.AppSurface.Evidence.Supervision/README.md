@@ -231,11 +231,23 @@ aggregate. Repeated completion calls share the same task. An earlier successful 
 cannot prove final run success when another pair later fails. `Dispose` rejects until explicit
 completion has joined; it does not close caller-owned streams or terminate any process.
 
-This primitive is not yet wired to the native worker/subject/reporter composition. All three
-must share the same instance before the migration can claim aggregate output enforcement.
-In particular, root worker stdout does not include privately captured ReportGenerator output.
-This API creates neither process ownership nor an artifact/admission capability; the owning
-root lifecycle must independently stop and join native units and preserve its original deadline.
+The native coverage composition shares this ledger between the actual producer pair and the
+worker pair; the reporter relays its original output through the worker's charged streams.
+Native coverage selects `drainOnQuotaExceeded: true` at ledger construction. The default remains
+stop-on-quota for standalone/procedure callers. In the native policy, `StopToken` still closes the
+original job on overflow, but `PumpStopToken` is cancelled only for an additional non-quota failure.
+Original pumps continue charging and discarding every returned byte until real EOF, under the
+original owner drain deadline. They retain no new prefix bytes after quota. Read failure, owner
+cancellation, signalling failure or missing EOF cannot establish complete drainage.
+
+Pair and ledger `Drained` predicates describe exact joined stream accounting and allow a sticky
+quota failure; `Successful` remains false. The worker may use its original drained pair for physical
+finalization, but filesystem custody additionally requires the completed entire run ledger to be
+`Drained`. Native retained-unit/PID checks, monitor and pending-operation joins, empty cgroup after
+pump settlement, server joins, tree sealing and strict account deletion remain mandatory. This lets
+a failed quota run release identities after real cleanup without admitting reports or publishing a
+successful run. These stream predicates alone create no process ownership or artifact/admission
+capability and renew no deadline. See [producer execution](producer-execution.md).
 
 ## Retained producer reports
 

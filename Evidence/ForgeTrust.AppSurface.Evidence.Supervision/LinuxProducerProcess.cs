@@ -177,7 +177,8 @@ internal sealed class LinuxProducerProcess
         if (!PhysicallySettled || !pending.Closed || !pending.StopJoined || pending.FirstFailure is SupervisionPendingStartFailure.StopFailed or SupervisionPendingStartFailure.StopCancelled
             || !startJoined || Volatile.Read(ref _cleanupFailed) != 0
             || !noProcessAcquired && (_stoppedTerminal is null || Volatile.Read(ref _groupEmptyTwice) == 0
-                || Volatile.Read(ref _pumpJoined) == 0 || _collect is { IsCompleted: false }))
+                || Volatile.Read(ref _pumpJoined) == 0 || _output is not { Drained: true }
+                || _collect is { IsCompleted: false }))
             throw LinuxSystemdBackend.InvalidControl();
     }
 
@@ -304,7 +305,7 @@ internal sealed class LinuxProducerProcess
             Interlocked.Exchange(ref _cleanupFailed, 1);
         if (Volatile.Read(ref _dispatchAttempted) == 0
             || Volatile.Read(ref _cleanupFailed) == 0 && Volatile.Read(ref _groupEmptyTwice) != 0
-                && Volatile.Read(ref _pumpJoined) != 0 && _stoppedTerminal is not null)
+                && Volatile.Read(ref _pumpJoined) != 0 && _output is { Drained: true } && _stoppedTerminal is not null)
             Interlocked.Exchange(ref _physicallySettled, 1);
 
         var failed = Volatile.Read(ref _failed) != 0 || Volatile.Read(ref _cleanupFailed) != 0

@@ -31,3 +31,14 @@ The fixed producer environment supplies `DOTNET_PROCESSOR_COUNT=1` before .NET s
 The actual worker can fail before any producer exists. Its `IdentityFailure` forwards the retained process reader's existing first closed failure only when the control server fails at initial peer rechecking; no identity guard or error result changes. `RetainJoinedFailureOutput(token)` uses the original bound owner/input and collector after the original stop task joins. It saves the same fixed bounded prefixes and a distinct closed worker state under root-only `appsurface-evidence-worker-diagnostics-<generation>`. This diagnostic does not require or establish physical settlement; unknown process/cgroup/custody facts remain unknown. The [native harness](../../.github/issue779-checkpoint2/README.md) copies only those fixed private files, preserves the failed result, and never prints raw prefixes.
 
 The fixed producer environment additionally sets `DOTNET_EnableDiagnostics_IPC=0` and `DOTNET_EnableDiagnostics_Debugger=0`. These [.NET runtime switches](https://learn.microsoft.com/dotnet/core/tools/dotnet-environment-variables#dotnet_enablediagnostics_ipc) disable unused diagnostic-port and debugger services before each SDK child starts; they do not disable the profiler or change the test command, coverage collector, kernel task/memory caps, or deadlines. The processor-count hint alone still hit the native64-task ceiling. This is a bounded runtime-footprint correction whose actual effect and coverage compatibility must be measured by the genuine Linux controls; the environment assertions alone prove neither.
+
+## Quota rejection and physical cleanup
+
+Native coverage selects the [run ledger's drain-on-quota policy](README.md#run-wide-accounting-primitive).
+Overflow still signals the original job stop and permanently rejects successful output, reports and
+run completion. Unlike a read or owner-deadline failure, quota alone leaves the original readers alive
+to charge and discard bytes through actual EOF after the owned units stop. Prefix retention stays
+bounded and stops at rejection. Physical worker finalization may accept its own completely drained
+quota pair; later root custody requires all registered pairs and exact aggregate accounting to have
+joined. Missing EOF, read/cancellation/signalling errors or a failed native stop/group/close check
+still quarantine storage and accounts. No limit, permission or cleanup allowance is raised.

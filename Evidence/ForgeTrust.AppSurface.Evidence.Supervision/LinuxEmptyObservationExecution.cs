@@ -100,7 +100,7 @@ internal static class LinuxEmptyObservationExecution
                     or EvidenceNativeQualificationKind.C2ArtifactMutation)) throw Rejected();
                 _ = EvidenceCoverageObservationPlan.FromInput(input, job.Token);
                 input.PrepareCoverageInputs(job.Token);
-                runOutput = new SupervisionRunOutputBudget();
+                runOutput = new SupervisionRunOutputBudget(drainOnQuotaExceeded: true);
                 // A quota failure closes the original job, causing the actual server/worker and producer
                 // ownership paths to stop. The counter remains alive until all original pumps join.
                 outputStop = runOutput.StopToken.UnsafeRegister(static state => ((CancellationTokenSource)state!).Cancel(), job);

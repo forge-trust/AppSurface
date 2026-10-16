@@ -79,13 +79,21 @@ public sealed class SubjectTests
         {
             var chunk = new byte[65_536];
             Array.Fill(chunk, (byte)'Q');
-            using var raw = Console.OpenStandardOutput();
+            // VSTest captures successful testhost stdout instead of forwarding it to the original
+            // producer pipe. The fixed subject target emits these actual bytes through SDK output.
+            var scratch = Environment.GetEnvironmentVariable("TMPDIR")
+                ?? throw new InvalidOperationException("The fixture needs its producer scratch.");
+            using var raw = new FileStream(Path.Combine(scratch, "checkpoint2-quota-output.txt"),
+                FileMode.CreateNew, FileAccess.Write, FileShare.None);
             for (var index = 0; index < 320; index++)
             {
+                // Unique prefixes keep MSBuild's metadata batches distinct for all320 rows.
+                raw.Write(System.Text.Encoding.ASCII.GetBytes(index.ToString("D3", System.Globalization.CultureInfo.InvariantCulture) + ":"));
                 raw.Write(chunk);
+                raw.WriteByte((byte)'\n');
             }
 
-            raw.Flush();
+            raw.Flush(flushToDisk: true);
         }
     }
 }

@@ -272,7 +272,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         LinuxCgroupSample? group = null;
         if (!_lifetime.StopJoined || !PhysicallySettled || !pending.StopJoined || pending.IsFailed
             || (pending.StartReserved && !pending.StartJoined) || _exit?.IsCompleted != true
-            || _output is not { Successful: true }
+            || !OutputDrainedForCleanup() || _runOutput is { Drained: false }
             || !LinuxAccountUtility.GroupEmpty(group = LinuxCgroupProbe.Read(Unit, token)))
             throw LinuxSystemdBackend.InvalidControl();
         owner.RequireControlIdentity(token);
@@ -752,7 +752,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             {
                 _output = await _pipes.JoinAsync().ConfigureAwait(false);
                 _stopTiming?.Observe(LinuxWorkerStopMilestone.PumpsJoined);
-                if (!_output.Successful) failed = true;
+                if (!OutputDrainedForCleanup()) failed = true;
             }
             catch { failed = true; }
             try { await _pipes.DisposeAsync().ConfigureAwait(false); pipesClosed = true; }
@@ -815,6 +815,11 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         Interlocked.Exchange(ref _physicallySettled, 1);
         _stopTiming?.Observe(LinuxWorkerStopMilestone.SettlementPublished);
     }
+
+    // Only the original joined collector is consulted. Quota stays failed for all execution/report gates;
+    // native finalization must still establish the retained unit, monitor, group, pending and close facts.
+    private bool OutputDrainedForCleanup() => _output is { Successful: true }
+        || _runOutput is { DrainOnQuotaExceeded: true, QuotaExceeded: true } && _output is { Drained: true };
 
     private async Task DisposeCoreAsync(TaskCompletionSource completion)
     {

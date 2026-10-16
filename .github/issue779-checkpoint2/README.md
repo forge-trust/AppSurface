@@ -51,3 +51,14 @@ Coverage-worker failures also retain fixed `stdout.prefix`, `stderr.prefix`, and
 ## Failed workspace inspection
 
 After the original root returns unsuccessfully and the independently selected groups are empty, the harness may retain a diagnostic metadata inventory of the fixed generated producer workspace. It uses directory FDs and no-follow child opens, reads no file contents, bounds traversal to8192 nodes/depth32/five seconds, and records at most64 type/owner/mode/link/size violations. The private JSON is not custody or permission to release accounts. Missing or expired inspection remains incomplete; the original failed control is unchanged. Actual FIFO/symlink/hardlink/mode and empty-file portable controls cover the inspector without granting native authority.
+
+### Quota output and failed-run cleanup
+
+The [fixed subject quota target](subject/README.md#actual-quota-output) writes directly from the SDK
+task to its original stdout. Successful testhost output can be captured by VSTest and cannot prove
+that the supervisor received those bytes. The control still requires the actual shared C# ledger to
+cross16MiB and the original root result to fail. Native quota drainage charges/discards all later
+reads through actual EOF within the original deadline; it never accepts coverage after overflow.
+The [native cleanup guards](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-execution.md#quota-rejection-and-physical-cleanup)
+separately require physical process/group settlement, complete ledger drainage, sealed filesystem
+custody and strict account removal. The deliberate unsafe-workspace control must still quarantine.
