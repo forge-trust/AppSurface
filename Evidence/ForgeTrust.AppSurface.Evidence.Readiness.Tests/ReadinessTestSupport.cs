@@ -99,7 +99,10 @@ internal sealed class TrackingContent : HttpContent
     private readonly Action? _onDispose;
     private int _disposeCallbackInvoked;
 
-    internal TrackingContent(Action? onDispose = null) => _onDispose = onDispose;
+    internal TrackingContent(Action? onDispose = null)
+    {
+        _onDispose = onDispose;
+    }
 
     internal int SerializeCount { get; private set; }
     internal bool WasDisposed { get; private set; }
