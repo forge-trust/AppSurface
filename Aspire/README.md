@@ -5,6 +5,8 @@ Local AppHost composition and native deployment-pipeline integration for .NET As
 ## Contents
 
 - [**ForgeTrust.AppSurface.Aspire**](./ForgeTrust.AppSurface.Aspire/README.md) – Core Aspire integration, including explicit deployment annotations and native publish/verify pipeline steps.
+- [Repository-relative assets](./ForgeTrust.AppSurface.Aspire/README.md#repository-relative-assets) – Resolve source-checkout assets from the AppHost's nearest Git marker, with explicit-root and deferred-error guidance.
+- [Repository-path design](../docs/designs/issue-865-apphost-repository-paths.md) and [implementation plan](../docs/plans/issue-865-apphost-repository-paths.md) – Maintainer rationale, edge cases, and consumer verification for AppHost-anchored asset discovery.
 - [**ForgeTrust.AppSurface.Aspire.Testing**](./ForgeTrust.AppSurface.Aspire.Testing/README.md) – Deterministic typed profile testing for AppSurface profile-based AppHosts.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate consumer-owned EvidenceHost lifecycle for explicit readiness and E2E producers; it is not a normal application AppHost extension.
 - `ForgeTrust.AppSurface.Aspire.Tests` – Tests for Aspire components.
