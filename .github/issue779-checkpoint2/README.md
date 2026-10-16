@@ -33,3 +33,5 @@ When the C# producer has actually settled, failure-only prefix retention may cre
 ## Independent process sampling
 
 The harness samples actual producer UID/GID tuples, cgroup and kernel start time before granting observation credit, then rechecks the manager PID. A missing or nonmatching sample remains pending within the same finite case deadline; it cannot authorize cancellation or make a case pass. Closed last-pending identity facts are retained for diagnosis. This avoids terminating the original C# run merely because a concurrent observation saw an incomplete activation transition. The C# owner's own independent identity guards remain unchanged.
+
+The private producer diagnostic set also includes fixed `state.json` (closed operation stage, optional execution codes/statuses and pending start/stop facts). Only the selected generated producer cgroup's memory/task counters and event totals are sampled; peaks are observed lower bounds. This distinguishes a testhost OOM message from actual task/memory limit events before any resource policy correction. Unknown or pruned counters do not become zero or prove completion.

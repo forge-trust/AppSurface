@@ -133,6 +133,27 @@ def sample_producer(unit,descriptor,end,pending=None):
  if final.get('MainPID')!=str(pid) or final.get('ExecMainPID')!=str(pid):return None
  return {'pid':pid,'uid':uids[0],'gid':gids[0],'starttime_ticks':int(before),'cgroup':groups[0][3:]}
 
+def sample_cgroup_counters(unit,samples):
+ root=Path('/sys/fs/cgroup/system.slice')/unit
+ fields={}
+ for name in ['pids.current','pids.max','pids.events','memory.current','memory.max','memory.events']:
+  try:
+   raw=(root/name).read_bytes();require(len(raw)<=4096,'cgroup-counter-bound')
+  except FileNotFoundError:continue
+  if name.endswith('.events'):
+   values={}
+   for line in raw.decode('ascii').splitlines():
+    key,value=line.split();require(re.fullmatch(r'[a-z_]{1,32}',key) and value.isdecimal(),'cgroup-event-shape');values[key]=int(value)
+   fields[name]=values
+  else:
+   value=raw.strip();require(value==b'max' or value.isdigit(),'cgroup-counter-shape');fields[name]=None if value==b'max' else int(value)
+ if fields:
+  samples['count']=samples.get('count',0)+1;samples['last']=fields
+  for name in ['pids.current','memory.current']:
+   if type(fields.get(name)) is int:samples[name+'.peak']=max(samples.get(name+'.peak',0),fields[name])
+  for name in ['pids.events','memory.events']:
+   for key,value in fields.get(name,{}).items():samples[name+'.'+key]=max(samples.get(name+'.'+key,0),value)
+
 def verify_sealed_output(root):
  require(root.is_dir() and not root.is_symlink(),'sealed-output-root')
  for p in [root,*root.rglob('*')]:
@@ -157,7 +178,7 @@ def retain_producer_prefixes(generation,output,case):
   rootfd=os.open(private,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
   try:
    require((os.fstat(rootfd).st_dev,os.fstat(rootfd).st_ino)==(before.st_dev,before.st_ino),'private-producer-diagnostic-identity')
-   for name in ['stdout.prefix','stderr.prefix']:
+   for name in ['stdout.prefix','stderr.prefix','state.json']:
     fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC,dir_fd=rootfd)
     try:
      m=os.fstat(fd);require(stat.S_ISREG(m.st_mode) and m.st_uid==m.st_gid==0 and m.st_nlink==1 and stat.S_IMODE(m.st_mode)==0o600 and m.st_size<=1024*1024,'private-producer-diagnostic-file')
@@ -210,6 +231,9 @@ def execute_case(args,case,end,receipt):
      descriptor_path=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
      if producer_observed is None and descriptor_path.is_file():
       producer_observed=sample_producer(units[2],json.loads(descriptor_path.read_bytes()),case_end,result.setdefault('pending_producer_identity',{}))
+     if producer_observed is not None:
+      try:sample_cgroup_counters(units[2],result.setdefault('producer_cgroup_counters',{}))
+      except (OSError,ValueError,RuntimeError):result['counter_sample_failed']=True
      entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
      if case=='cancel' and not cancel_sent and producer_observed is not None:
       if entered.is_file() and entered.read_bytes()==b'cancel':

@@ -141,4 +141,24 @@ class TraversalRootControls(unittest.TestCase):
    with self.assertRaises(FileExistsError):native.create_traversable_root(path)
    self.assertEqual((observed.st_dev,observed.st_ino), (path.lstat().st_dev,path.lstat().st_ino))
 
+
+class KernelCounterControls(unittest.TestCase):
+ def test_closed_counter_projection_retains_peaks_and_limit_events_without_native_authority(self):
+  from unittest.mock import patch
+  rows={'pids.current':b'64', 'pids.max':b'64', 'pids.events':b'max 7\n',
+        'memory.current':b'1024', 'memory.max':b'1073741824', 'memory.events':b'oom 0\noom_kill 0\n'}
+  samples={}
+  def read(path):return rows[path.name]
+  with patch.object(Path,'read_bytes',autospec=True,side_effect=read):
+   native.sample_cgroup_counters('fixed.service',samples)
+   rows['pids.current']=b'4';native.sample_cgroup_counters('fixed.service',samples)
+  self.assertEqual(64,samples['pids.current.peak']);self.assertEqual(7,samples['pids.events.max'])
+  self.assertEqual(0,samples['memory.events.oom_kill']);self.assertEqual(2,samples['count'])
+  with patch.object(Path,'read_bytes',side_effect=FileNotFoundError):
+   native.sample_cgroup_counters('fixed.service',samples)
+  self.assertEqual(2,samples['count'])
+  with patch.object(Path,'read_bytes',return_value=b'private-canary'):
+   with self.assertRaises(RuntimeError):native.sample_cgroup_counters('fixed.service',samples)
+  self.assertNotIn('private-canary',json.dumps(samples));self.assertEqual(2,samples['count'])
+
 if __name__=='__main__':unittest.main()

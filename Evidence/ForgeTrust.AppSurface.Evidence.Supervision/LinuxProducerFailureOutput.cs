@@ -10,10 +10,13 @@ internal static class LinuxProducerFailureOutput
 {
     /// <summary>Saves bounded bytes after actual pump settlement while original root teardown remains valid.</summary>
     internal static void Retain(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        SupervisionOutputReceipt output, CancellationToken token)
+        SupervisionOutputReceipt output, string stage, LinuxUnitProperties? normal,
+        LinuxUnitProperties? stopped, SupervisionPendingStartSnapshot pending, CancellationToken token)
     {
         LinuxProtectedDeployment.RequirePlatform();
         owner.RequireCleanupLaunchInput(input, token);
+        if (stage is not ("binding" or "results" or "pipes" or "backend" or "start" or "running"
+            or "identity" or "normal-exit" or "settlement")) throw LinuxProtectedDeployment.InvalidDeployment();
         RequirePrefix(output.Stdout);
         RequirePrefix(output.Stderr);
         using var slash = OpenAt2(-100, "/", 0x10000 | 0x80000, 0, 0);
@@ -26,6 +29,15 @@ internal static class LinuxProducerFailureOutput
         if (metadata.Uid != 0 || metadata.Gid != 0 || metadata.Mode != 0x41c0) throw LinuxProtectedDeployment.InvalidDeployment();
         Save(root, "stdout.prefix", output.Stdout.Prefix.AsSpan(), token);
         Save(root, "stderr.prefix", output.Stderr.Prefix.AsSpan(), token);
+        var state = EvidenceCanonicalJson.Serialize(new
+        {
+            schema = "evidence-producer-failure-state-v1", stage,
+            normal_code = normal?.ExecMainCode, normal_status = normal?.ExecMainStatus,
+            stopped_code = stopped?.ExecMainCode, stopped_status = stopped?.ExecMainStatus,
+            start_reserved = pending.StartReserved, start_joined = pending.StartJoined,
+            stop_joined = pending.StopJoined, pending_failure = pending.FirstFailure.ToString(),
+        });
+        Save(root, "state.json", state, token);
         using var named = OpenAt2(Fd(run), name, 0x10000 | 0x80000, 0, 0x01 | 0x02 | 0x04 | 0x08);
         if (!LinuxProtectedMetadata.From(StatFd(named)).SameAncestorAs(metadata)) throw LinuxProtectedDeployment.InvalidDeployment();
         owner.RequireCleanupLaunchInput(input, token);

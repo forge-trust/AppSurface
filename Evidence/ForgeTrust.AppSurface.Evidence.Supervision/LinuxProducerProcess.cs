@@ -186,9 +186,12 @@ internal sealed class LinuxProducerProcess
     {
         await dispatch.ConfigureAwait(false);
         int? normalExitCode = null;
+        var diagnosticStage = "binding";
+        string? failedStage = null;
         try
         {
             RequireLiveBindings(token);
+            diagnosticStage = "results";
             var preparedPath = _workspace.PrepareResultsToken(resultsToken, token);
             var selected = _workspace.RequireResultsToken(resultsToken, token);
             var expectedPath = _workspace.ResultsRoot.TrimEnd('/') + "/" + resultsToken;
@@ -204,6 +207,7 @@ internal sealed class LinuxProducerProcess
             if (runtime <= TimeSpan.Zero) throw LinuxSystemdBackend.InvalidControl();
             var unitAllowance = runtime + stop;
 
+            diagnosticStage = "pipes";
             _pipes = LinuxOutputPipes.Create();
             _collect = _pipes.BeginCollectAsync(token,
                 receivedByteLimit: EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
@@ -211,6 +215,7 @@ internal sealed class LinuxProducerProcess
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                 TimeSpan.FromSeconds(_input.Request.StartSeconds).Ticks)));
+            diagnosticStage = "backend";
             _backend = await LinuxSystemdBackend.ConnectAsync(startup.Token).ConfigureAwait(false);
             _recipe = LinuxProducerUnit.Create(Unit, _owner.Unit, _input.Request.RuntimeHost,
                 _input.Request.RuntimeRoot, _input.Request.ToolRoot, _input.Request.SubjectRoot,
@@ -221,6 +226,7 @@ internal sealed class LinuxProducerProcess
 
             try
             {
+                diagnosticStage = "start";
                 await _pending.StartAsync(startToken =>
                 {
                     RequireLiveBindings(startToken);
@@ -230,17 +236,21 @@ internal sealed class LinuxProducerProcess
             }
             finally { _pipes.CloseWriteCopies(); }
 
+            diagnosticStage = "running";
             _observations = await LinuxSystemdBackend.ConnectAsync(startup.Token).ConfigureAwait(false);
             var running = await ObserveRunningAsync(startup.Token).ConfigureAwait(false);
+            diagnosticStage = "identity";
             _process = LinuxProcessIdentity.CaptureProducer(running.MainPid, _accounts.SubjectUid,
                 _accounts.SubjectGid, Unit, startup.Token);
             _process.Recheck(startup.Token);
+            diagnosticStage = "normal-exit";
             var terminal = await ObserveNormalExitAsync(token).ConfigureAwait(false);
             normalExitCode = terminal.ExecMainStatus;
             _normalTerminal = terminal;
         }
         catch
         {
+            failedStage = diagnosticStage;
             Interlocked.Exchange(ref _failed, 1);
         }
 
@@ -299,7 +309,8 @@ internal sealed class LinuxProducerProcess
             _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
             if (PhysicallySettled && _output is not null)
             {
-                try { LinuxProducerFailureOutput.Retain(_input, _owner, _output, cleanupToken); }
+                try { LinuxProducerFailureOutput.Retain(_input, _owner, _output,
+                    failedStage ?? "settlement", _normalTerminal, _stoppedTerminal, _pending.Snapshot, cleanupToken); }
                 catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
                     and not StackOverflowException and not AccessViolationException) { }
             }
