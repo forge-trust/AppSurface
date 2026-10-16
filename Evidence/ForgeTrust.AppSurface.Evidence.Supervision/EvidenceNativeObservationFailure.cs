@@ -46,6 +46,8 @@ internal enum EvidenceNativeObservationPhase
     WorkerCompletion,
     /// <summary>Original root teardown reservation.</summary>
     BeginTeardown,
+    /// <summary>Producer workspace sealing after the original root teardown reservation.</summary>
+    ProducerSeal,
     /// <summary>Actual root custody transfer.</summary>
     Custody,
     /// <summary>Actual final-file verification.</summary>

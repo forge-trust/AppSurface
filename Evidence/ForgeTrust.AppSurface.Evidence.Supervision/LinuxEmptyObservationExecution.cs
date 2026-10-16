@@ -156,7 +156,10 @@ internal static class LinuxEmptyObservationExecution
             owner.BeginRootTeardown();
             cleanupToken = owner.RootTeardownToken;
             if (producerWorkspace is not null)
+            {
+                phase = EvidenceNativeObservationPhase.ProducerSeal;
                 await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false);
+            }
             phase = EvidenceNativeObservationPhase.Custody;
             custody = await workspace.TakeRootCustodyAsync(input, owner, accounts, worker, server, cleanupToken).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.FileVerification;

@@ -365,25 +365,30 @@ internal sealed class LinuxProducerWorkspace : IDisposable
 
     private async Task SealCoreAsync(LinuxOwnerActivation owner, LinuxRunAccounts accounts, CancellationToken token)
     {
-        LinuxProducerProcess? producer;
-        lock (_gate)
-        {
-            RequireAccountOwner(accounts, owner);
-            if (_quarantined || _sealed || _slash is null || _run is null) throw LinuxProducerWorkspaceLayout.Invalid();
-            producer = _producer;
-            if (producer is null && _producerRetentionAttempted) throw LinuxProducerWorkspaceLayout.Invalid();
-        }
-
+        var phase = "reference-binding";
         try
         {
+            LinuxProducerProcess? producer;
+            lock (_gate)
+            {
+                RequireAccountOwner(accounts, owner);
+                if (_quarantined || _sealed || _slash is null || _run is null) throw LinuxProducerWorkspaceLayout.Invalid();
+                producer = _producer;
+                if (producer is null && _producerRetentionAttempted) throw LinuxProducerWorkspaceLayout.Invalid();
+            }
+
+            phase = "owner-binding";
             owner.RequireControlIdentity(token);
             if (producer is not null)
             {
+                phase = "producer-stop";
                 await producer.StopAndJoinAsync(token).ConfigureAwait(false);
+                phase = "producer-settlement";
                 producer.RequirePhysicalSettlement(owner, accounts, this, token);
             }
             else if (_producerRetentionAttempted) throw LinuxProducerWorkspaceLayout.Invalid();
 
+            phase = "workspace-binding";
             RequireControlOwnedBy(owner, accounts, token);
             lock (_gate)
             {
@@ -392,12 +397,18 @@ internal sealed class LinuxProducerWorkspace : IDisposable
                 var entries = new List<SealEntry>();
                 try
                 {
+                    phase = "collect";
                     CollectMutableTrees(entries, token, sealedTree: false);
+                    phase = "entry-recheck";
                     foreach (var entry in entries) RecheckEntry(entry, token, sealedTree: false);
+                    phase = "entry-seal";
                     foreach (var entry in entries) SealEntryNode(entry, token);
                     _finalizingSeal = true;
+                    phase = "sealed-snapshot";
                     StoreSealedMetadata();
+                    phase = "sealed-verify";
                     VerifySealedTrees(token);
+                    phase = "final-binding";
                     RecheckCriticalCore(token, cleanup: true);
                     _sealed = true;
                     _finalizingSeal = false;
@@ -406,9 +417,24 @@ internal sealed class LinuxProducerWorkspace : IDisposable
                 finally { CloseTemporaryEntries(entries); }
             }
         }
-        catch (OperationCanceledException) { Quarantine(); throw; }
+        catch (OperationCanceledException) { EmitSealFailure(phase, "Cancelled"); Quarantine(); throw; }
         catch (Exception error) when (Recoverable(error))
-        { Quarantine(); throw LinuxProducerWorkspaceLayout.Invalid(); }
+        { EmitSealFailure(phase, error is EvidenceAdmissionException ? "Admission" : error is IOException ? "Io" : "Other"); Quarantine(); throw LinuxProducerWorkspaceLayout.Invalid(); }
+    }
+
+    // Closed diagnostic labels only; no error text, file path, cleanup fact or fresh reader is exposed.
+    private static void EmitSealFailure(string phase, string errorKind)
+    {
+        try
+        {
+            var bytes = EvidenceCanonicalJson.Serialize(new
+                { schema = "evidence-producer-seal-failure-v1", phase, error_kind = errorKind });
+            using var output = Console.OpenStandardError();
+            output.Write(bytes);
+            output.Write("\n"u8);
+            output.Flush();
+        }
+        catch (Exception error) when (Recoverable(error)) { }
     }
 
     private void CreateDirectories(CancellationToken token)
