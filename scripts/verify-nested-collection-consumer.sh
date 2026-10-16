@@ -148,6 +148,26 @@ prepare() {
     STAGE="recording source identity"
     git -C "$REPO_ROOT" rev-parse HEAD > "$RUN_DIR/source-commit.txt"
     git -C "$REPO_ROOT" status --short > "$RUN_DIR/source-status.txt"
+    git -C "$REPO_ROOT" diff --binary HEAD > "$RUN_DIR/source-diff.patch"
+    python3 - "$REPO_ROOT" "$RUN_DIR/source-inputs.json" <<'PY_SOURCE'
+import hashlib
+import json
+import pathlib
+import subprocess
+import sys
+
+root = pathlib.Path(sys.argv[1])
+paths = subprocess.check_output(["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"]).split(b"\0")
+inputs = {}
+for raw in paths:
+    if not raw:
+        continue
+    path = root / raw.decode()
+    if path.is_file() and not path.is_symlink():
+        content = path.read_bytes()
+        inputs[path.relative_to(root).as_posix()] = {"sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content)}
+pathlib.Path(sys.argv[2]).write_text(json.dumps(inputs, indent=2, sort_keys=True) + "\n")
+PY_SOURCE
     local source_asset="$REPO_ROOT/Web/ForgeTrust.RazorWire/wwwroot/razorwire/form-interactions.js"
     local pinned_view_file="$RUN_DIR/skoolit-source/$PINNED_VIEW"
     local pinned_script_file="$RUN_DIR/skoolit-source/$PINNED_SCRIPT"
@@ -191,6 +211,7 @@ PY
         "Auth/ForgeTrust.AppSurface.Auth/ForgeTrust.AppSurface.Auth.csproj"
         "Intelligence/ForgeTrust.AppSurface.Intelligence/ForgeTrust.AppSurface.Intelligence.csproj"
         "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj"
+        "Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj"
         "Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj"
     )
     local project project_name log
@@ -205,7 +226,7 @@ PY
 
     local package="$RUN_DIR/local-feed/ForgeTrust.RazorWire.$PACKAGE_VERSION.nupkg"
     [[ -f "$package" ]] || fail "RazorWire package missing from the local dependency feed: $package"
-    for package_id in ForgeTrust.AppSurface.Core ForgeTrust.AppSurface.Web ForgeTrust.RazorWire; do
+    for package_id in ForgeTrust.AppSurface.Core ForgeTrust.AppSurface.Web ForgeTrust.AppSurface.Web.Tailwind ForgeTrust.RazorWire; do
         [[ -f "$RUN_DIR/local-feed/$package_id.$PACKAGE_VERSION.nupkg" ]] || fail "Required coordinated package absent from local feed: $package_id"
     done
 
@@ -292,14 +313,14 @@ PY
     mkdir -p "$host_dir"
     rsync -a --exclude '/bin/' --exclude '/obj/' --exclude '/TestResults/' \
         "$REPO_ROOT/examples/razorwire-mvc/" "$host_dir/"
-    python3 - "$host_dir/RazorWireWebExample.csproj" "$REPO_ROOT" "$PACKAGE_VERSION" <<'PY'
+    python3 - "$host_dir/RazorWireWebExample.csproj" "$PACKAGE_VERSION" <<'PY'
 import pathlib
 import re
 import sys
+import xml.etree.ElementTree as ET
 
 project_path = pathlib.Path(sys.argv[1])
-repo_root = pathlib.Path(sys.argv[2]).as_posix()
-version = sys.argv[3]
+version = sys.argv[2]
 text = project_path.read_text()
 
 razorwire_project = '    <ProjectReference Include="../../Web/ForgeTrust.RazorWire/ForgeTrust.RazorWire.csproj" />'
@@ -307,14 +328,14 @@ if text.count(razorwire_project) != 1:
     raise SystemExit("Copied example did not contain exactly one RazorWire ProjectReference.")
 text = text.replace(
     razorwire_project,
-    f'    <PackageReference Include="ForgeTrust.RazorWire" Version="{version}" />')
+    f'    <PackageReference Include="ForgeTrust.RazorWire" Version="[{version}]" />')
 
 tailwind_project = '    <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />'
 if text.count(tailwind_project) != 1:
     raise SystemExit("Copied example did not contain exactly one Tailwind ProjectReference.")
 text = text.replace(
     tailwind_project,
-    f'    <ProjectReference Include="{repo_root}/Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj" />')
+    f'    <PackageReference Include="ForgeTrust.AppSurface.Web.Tailwind" Version="[{version}]" />')
 
 tailwind_import = r'..\..\Web\ForgeTrust.AppSurface.Web.Tailwind\build\ForgeTrust.AppSurface.Web.Tailwind.targets'
 import_pattern = re.compile(r'<Import\b[^>]*Project="([^"]*ForgeTrust\.AppSurface\.Web\.Tailwind\\build\\ForgeTrust\.AppSurface\.Web\.Tailwind\.targets)"[^>]*/>')
@@ -322,11 +343,20 @@ import_matches = list(import_pattern.finditer(text))
 if len(import_matches) != 1 or tailwind_import not in import_matches[0].group(1):
     raise SystemExit("Copied example did not contain exactly one Tailwind targets import.")
 import_match = import_matches[0]
-text = text[:import_match.start(1)] + f'{repo_root}/Web/ForgeTrust.AppSurface.Web.Tailwind/build/ForgeTrust.AppSurface.Web.Tailwind.targets' + text[import_match.end(1):]
+# NuGet imports the packed Tailwind build target; no repository source import remains.
+text = text[:import_match.start()] + text[import_match.end():]
 
 if "<IsExampleProject>true</IsExampleProject>" not in text:
     text = text.replace("    <ImplicitUsings>enable</ImplicitUsings>",
                         "    <ImplicitUsings>enable</ImplicitUsings>\n    <IsExampleProject>true</IsExampleProject>")
+root = ET.fromstring(text)
+if any(element.tag.rsplit("}", 1)[-1] == "ProjectReference" for element in root.iter()):
+    raise SystemExit("Copied package consumer still contains a source ProjectReference.")
+for package_id in ("ForgeTrust.RazorWire", "ForgeTrust.AppSurface.Web.Tailwind"):
+    matches = [element for element in root.iter()
+               if element.tag.rsplit("}", 1)[-1] == "PackageReference" and element.get("Include") == package_id]
+    if len(matches) != 1 or matches[0].get("Version") != f"[{version}]":
+        raise SystemExit(f"Copied host does not reference exactly one pinned {package_id} package.")
 project_path.write_text(text)
 PY
     cat > "$host_dir/Directory.Packages.props" <<'EOF'
@@ -364,10 +394,6 @@ EOF
   </packageSourceMapping>
 </configuration>
 EOF
-    rg -q "<PackageReference Include=\"ForgeTrust.RazorWire\" Version=\"$PACKAGE_VERSION\"" "$host_dir/RazorWireWebExample.csproj" || fail "Copied host does not reference the exact packed RazorWire version."
-    if rg -q 'ProjectReference Include="[^"]*ForgeTrust\.RazorWire\.csproj"' "$host_dir/RazorWireWebExample.csproj"; then
-        fail "Copied host still has a source ProjectReference to RazorWire."
-    fi
 
     STAGE="restoring and building isolated PackageReference host"
     dotnet restore "$host_dir/RazorWireWebExample.csproj" --configfile "$host_dir/NuGet.config" \
@@ -384,6 +410,9 @@ assets = json.loads(pathlib.Path(sys.argv[1]).read_text())
 expected = "ForgeTrust.RazorWire/" + sys.argv[2]
 version = sys.argv[2]
 libraries = assets.get("libraries", {})
+for identity, library in libraries.items():
+    if identity.lower().startswith("forgetrust.") and library.get("type") != "package":
+        raise SystemExit(f"Source-project substitution in package consumer: {identity} ({library.get('type')!r}).")
 matching = next((value for key, value in libraries.items() if key.lower() == expected.lower()), None)
 if matching is None:
     raise SystemExit(f"Restore assets do not contain the exact package {expected}.")
@@ -396,7 +425,7 @@ if any(key.lower().startswith("forgetrust.razorwire/") and key.lower() != expect
     raise SystemExit("Restore assets contain an unexpected RazorWire package version.")
 dependency = assets.get("project", {}).get("frameworks", {}).get("net10.0", {}).get("dependencies", {}).get("ForgeTrust.RazorWire")
 normalized_range = dependency.get("version", "") if isinstance(dependency, dict) else ""
-if not re.fullmatch(rf"\[?{re.escape(version)}(?:,\s*\))?", normalized_range):
+if not re.fullmatch(rf"\[{re.escape(version)}(?:,\s*{re.escape(version)})?\]", normalized_range):
     raise SystemExit(f"Copied host project.assets.json does not pin ForgeTrust.RazorWire exactly to {version}; got {normalized_range!r}.")
 package_cache_entry = pathlib.Path(sys.argv[3]) / "forgetrust.razorwire" / version.lower()
 if not package_cache_entry.is_dir() or not (package_cache_entry / ".nupkg.metadata").is_file():
@@ -427,6 +456,8 @@ receipt = f'''# Skoolit V4 exact-package consumer proof
 
 - Worktree commit: {source_commit}
 - Worktree status snapshot: source-status.txt
+- Tracked source changes: source-diff.patch (binary-capable diff against HEAD)
+- Producer input bytes: source-inputs.json (SHA-256 and length of tracked and nonignored new files; ignored build outputs are excluded)
 - Package ID/version: ForgeTrust.RazorWire {package_version}
 - Package file: local-feed/ForgeTrust.RazorWire.{package_version}.nupkg
 - Package SHA-256: {package_hash}
@@ -447,10 +478,11 @@ receipt = f'''# Skoolit V4 exact-package consumer proof
 ## Consumer host
 
 - Copied host: `consumer-host/`
-- Package reference: `<PackageReference Include="ForgeTrust.RazorWire" Version="{package_version}" />`
+- Package reference: `<PackageReference Include="ForgeTrust.RazorWire" Version="[{package_version}]" />`
+- Tailwind build/package dependency: `<PackageReference Include="ForgeTrust.AppSurface.Web.Tailwind" Version="[{package_version}]" />`
 - Restore sources: this run's local feed for all `ForgeTrust.*` packages and nuget.org for external packages.
 - NuGet package cache: this run's private `{cache_path}` directory, isolated from global cache entries.
-- RazorWire source ProjectReference in copied project: removed
+- All source ProjectReferences and repository Tailwind imports in copied project: removed
 - Restore: passed; `consumer-restore.log`
 - Release build: passed; `consumer-build.log`
 - Exact package identity in `obj/project.assets.json`: verified as package `{package_version}` from this run's isolated cache.

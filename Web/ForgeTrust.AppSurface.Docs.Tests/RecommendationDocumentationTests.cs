@@ -178,6 +178,8 @@ public sealed class RecommendationDocumentationTests
         Assert.Equal(
             [
                 "Web/ForgeTrust.RazorWire/README.md",
+                "examples/razorwire-mvc/NESTED-COLLECTIONS.md",
+                "Web/ForgeTrust.RazorWire/Docs/form-interactions.md",
                 "Web/ForgeTrust.RazorWire/Docs/page-navigation.md",
                 "Web/ForgeTrust.RazorWire/Docs/form-failures.md",
                 "Web/ForgeTrust.RazorWire/Docs/form-loading.md",

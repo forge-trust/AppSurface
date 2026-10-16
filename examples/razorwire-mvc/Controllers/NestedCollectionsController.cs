@@ -30,7 +30,7 @@ public sealed class NestedCollectionsController : Controller
     /// <param name="model">The nested bound model.</param>
     /// <param name="addDateFor">An optional no-JavaScript command identifying a parent.</param>
     /// <param name="addAction">An optional no-JavaScript add command.</param>
-    /// <returns>A validation redisplay or the accepted rows with their original keys.</returns>
+    /// <returns>A validation redisplay or the accepted rows with their original keys. Rejected add-date commands return 422 with a validation summary error.</returns>
     [HttpPost("Reactivity/NestedCollections")]
     [ValidateAntiForgeryToken]
     public IActionResult Submit(NestedCollectionsSampleModel model, string? addDateFor, bool addAction = false)
@@ -63,6 +63,11 @@ public sealed class NestedCollectionsController : Controller
             {
                 var owner = model.Actions.SingleOrDefault(action => action.ClientIndex == addDateFor && !action.Delete);
                 if (owner is not null && owner.Dates.Count(date => !date.Delete) < 8) owner.Dates.Add(new NestedDateModel { ClientIndex = Guid.NewGuid().ToString("N") });
+                else
+                {
+                    ModelState.AddModelError(nameof(addDateFor), "The date could not be added to that action.");
+                    Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+                }
             }
             return Editor(model);
         }

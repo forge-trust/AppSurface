@@ -15,7 +15,7 @@ public sealed class NestedCollectionsSampleModel
     public string? Result { get; set; }
 }
 
-/// <summary>An application-authored action with a independently indexed date collection.</summary>
+/// <summary>An application-authored action with an independently indexed date collection.</summary>
 public sealed class NestedActionModel
 {
     /// <summary>Gets or sets the preserved explicit-index rendering key.</summary>

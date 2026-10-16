@@ -96,6 +96,7 @@ test('collection add allocates sparse index markers and focuses the new editable
   assert.equal(added.querySelector('input[name="Actions[1].ClientIndex"]').value, '1');
   assert.equal(added.querySelector('input[name="Actions[1].Title"]').id, 'Actions_1__Title');
   assert.equal(added.querySelector('label').getAttribute('for'), 'Actions_1__Title');
+  assert.equal(added.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-replace'), 'true');
   assert.equal(document.activeElement, added.querySelector('input[name="Actions[1].Title"]'));
   assert.match(root.querySelector('[data-rw-form-collection-status]').textContent, /Added action/);
   assert.equal(template.parentElement, root);
@@ -128,6 +129,7 @@ test('collection duplicate copies editable values, rewrites references, and clea
   assert.equal(clone.querySelector('input[name="Actions[1].Title"]').value, 'Call parent');
   assert.equal(clone.querySelector('input[name="Actions[1].Id"]').value, '');
   assert.equal(clone.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-for'), 'Actions[1].Title');
+  assert.equal(clone.querySelector('[data-valmsg-for]').getAttribute('data-valmsg-replace'), 'true');
   assert.equal(clone.querySelector('[data-valmsg-for]').textContent, '');
 });
 

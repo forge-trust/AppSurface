@@ -62,7 +62,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 } else {
                     this.recordDiagnostic(
                         `<${marker.localName}> uses form interactions outside a form.`,
-                        'A form is required.',
+                        'Form required.',
                         'Use a form.');
                 }
             }
@@ -209,7 +209,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const targets = this.targets(this.form, key);
             if (targets.length === 0) {
                 if (this.targets(document, key).some(target => !this.form.contains(target))) {
-                    this.manager.recordDiagnostic(`Toggle "${key}" points outside its form.`, 'A form is required.', 'Use a form.');
+                    this.manager.recordDiagnostic(`Toggle "${key}" points outside its form.`, 'Form required.', 'Use a form.');
                 } else {
                     this.manager.recordDiagnostic(
                         `Toggle "${key}" has no target.`,
@@ -323,7 +323,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 const key = marker?.value || metadata;
                 if (key && seen.has(key)) { this.fail(root, `has duplicate index "${key}".`, markerFix); valid = false; }
                 if (key) seen.add(key);
-                if (row.querySelector('input[type="file"]')) this.fail(root, 'contains a file input that duplicate cannot clone.', 'Reselect files.');
+                if (row.querySelector('input[type="file"]')) this.fail(root, 'has a file input that duplicate cannot clone.', 'Reselect files.');
             }
             return valid;
         }
@@ -342,7 +342,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         private commandRoot(command: Element) {
             const root = command.closest(rootSelector) as HTMLElement | null;
             if (!root || !this.form.contains(root) || !this.name(root)) {
-                this.manager.recordDiagnostic('Collection command has no root.', 'A form is required.', 'Use a form.');
+                this.manager.recordDiagnostic('Collection command has no root.', 'Form required.', 'Use a form.');
                 return null;
             }
             if (command.tagName !== 'BUTTON') {
@@ -455,11 +455,14 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             if (duplicate) {
                 const deletes = new Map<HTMLElement, HTMLInputElement | null>();
                 for (const [original, clone] of pairs) {
-                    if (!['input', 'select', 'textarea', 'button'].includes(original.localName)) continue;
-                    const owner = original.closest(rootSelector) as HTMLElement | null ?? root;
-                    const ownerRow = original.closest(rowSelector) as HTMLElement | null ?? source;
-                    if (!deletes.has(ownerRow)) deletes.set(ownerRow, this.deleteField(owner, ownerRow, false));
-                    this.copyValue(original as FormControl, clone as FormControl, deletes.get(ownerRow) === original);
+                    // Option state owns single/multiple selections; assigning select.value would discard extra choices.
+                    if (original.localName === 'select') (clone as HTMLSelectElement).selectedIndex = (original as HTMLSelectElement).selectedIndex;
+                    else if (original.localName === 'option') (clone as HTMLOptionElement).selected = (original as HTMLOptionElement).selected;
+                    else if (['input', 'textarea', 'button'].includes(original.localName)) {
+                        const ownerRow = original.closest(rowSelector) as HTMLElement | null ?? source;
+                        if (!deletes.has(ownerRow)) deletes.set(ownerRow, this.deleteField(ownerRow.closest(rootSelector) as HTMLElement ?? root, ownerRow, false));
+                        this.copyValue(original as FormControl, clone as FormControl, deletes.get(ownerRow) === original);
+                    }
                 }
             }
             mappings.sort((a, b) => b.old.length - a.old.length);
@@ -666,27 +669,24 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         private copyValue(source: FormControl, clone: FormControl, isSelectedDeleteField: boolean) {
             // Canonical markers are assigned by their owner mapping after value copying.
-            if (clone instanceof HTMLInputElement && clone.type === 'file') {
-                clone.value = '';
-                return;
+            if (clone instanceof HTMLInputElement) {
+                if (clone.type === 'hidden' && (clone.hasAttribute(deleteAttribute) || isSelectedDeleteField)) {
+                    clone.value = clone.getAttribute('value') || 'false';
+                    clone.disabled = false;
+                    return;
+                }
+                if (clone.type === 'file' || (clone.type === 'hidden'
+                    && !clone.hasAttribute('data-rw-form-collection-copyable') && !clone.name.endsWith('.index')
+                    && /(^|\.)(id|rowversion|concurrencystamp|concurrencytoken|etag|isdeleted|delete)$/i.test(clone.name))) {
+                    clone.value = '';
+                    return;
+                }
+                if (['checkbox', 'radio'].includes(clone.type)) {
+                    clone.checked = (source as HTMLInputElement).checked;
+                    return;
+                }
             }
-
-            if (clone instanceof HTMLInputElement
-                && clone.type === 'hidden'
-                && (clone.hasAttribute(deleteAttribute) || isSelectedDeleteField)) {
-                clone.value = clone.getAttribute('value') || 'false';
-                clone.disabled = false;
-                return;
-            }
-
-            if (this.clearIdentity(clone)) {
-                clone.value = '';
-                return;
-            }
-
-            if (source.localName === 'input' && ['checkbox', 'radio'].includes(source.type)) {
-                (clone as HTMLInputElement).checked = (source as HTMLInputElement).checked;
-            } else clone.value = source.value;
+            clone.value = source.value;
         }
 
         private clearValues(row: HTMLElement) {
@@ -700,18 +700,10 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         private clearValidation(row: HTMLElement) {
             this.walk(row, element => {
-                if (element.hasAttribute('data-rw-form-collection-status')) element.textContent = '';
+                if (element.hasAttribute('data-rw-form-collection-status') || element.hasAttribute('data-valmsg-for')) element.textContent = '';
                 element.removeAttribute('aria-invalid');
                 element.classList?.remove('input-validation-error', 'field-validation-error');
-                if (element.hasAttribute('data-valmsg-for')) { element.textContent = ''; element.removeAttribute('data-valmsg-replace'); }
             });
-        }
-
-        private clearIdentity(control: FormControl) {
-            if (!(control instanceof HTMLInputElement) || control.type !== 'hidden') return false;
-            if (control.hasAttribute('data-rw-form-collection-copyable')) return false;
-            if (control.name.endsWith('.index')) return false;
-            return /(^|\.)(id|rowversion|concurrencystamp|concurrencytoken|etag|isdeleted|delete)$/i.test(control.name);
         }
 
         /** Delete selectors never escape the nearest row owner, including nested child rows. */
@@ -847,7 +839,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private controls(root: Element) {
-            return Array.from(root.querySelectorAll('input, select, textarea, button')) as FormControl[];
+            return Array.from(root.querySelectorAll('input,select,textarea,button')) as FormControl[];
         }
 
         private name(root: HTMLElement) {

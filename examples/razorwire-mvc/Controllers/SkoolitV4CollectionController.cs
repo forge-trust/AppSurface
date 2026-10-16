@@ -142,6 +142,10 @@ public sealed class SkoolitV4CollectionController : Controller
                 }
 
                 var datePrefix = $"{actionPrefix}.Dates[{date.ClientIndex}]";
+                if (!string.IsNullOrWhiteSpace(date.Shape) && date.Shape is not ("Discrete" or "Range"))
+                {
+                    ModelState.AddModelError($"{datePrefix}.Shape", "Choose Discrete or Range.");
+                }
                 if (date.Shape == "Discrete")
                 {
                     AddDiscreteEndError(date.EndMonth, $"{datePrefix}.EndMonth");

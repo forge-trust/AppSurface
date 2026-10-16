@@ -1,6 +1,7 @@
 @model RazorWireWebExample.Models.SkoolitV4CollectionEditorModel
 @using RazorWireWebExample.Models
 @{
+    Layout = null;
     ViewData["Title"] = "Skoolit V4 collections consumer proof";
     ViewData["RemoveMode"] = Model.RemoveMode;
 }
@@ -32,7 +33,7 @@
         [data-v4-date-row] > fieldset { grid-column: 1 / -1; }
         .commands { display: flex; flex-wrap: wrap; gap: .5rem; }
         .field-validation-error { display: block; }
-        template { display: none; }
+        template, [hidden] { display: none !important; }
     </style>
 </head>
 <body>
