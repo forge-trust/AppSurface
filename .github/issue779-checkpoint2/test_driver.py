@@ -356,4 +356,28 @@ class RetainedMutationObservationControls(unittest.TestCase):
    with self.subTest(rows=rows):
     with self.assertRaises(RuntimeError):native.read_mutation_observation(b'\n'.join(json.dumps(row).encode() for row in rows))
 
+class WorkspaceInspectionControls(unittest.TestCase):
+ def test_safe_regular_and_empty_files_are_only_diagnostic_metadata(self):
+  import os,tempfile,time
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);(root/'nested').mkdir(mode=0o700);(root/'nested/data').write_bytes(b'owned');(root/'empty').touch()
+   observed=native.inspect_failed_workspace(root,os.getuid(),os.getgid(),time.monotonic()+10)
+   self.assertEqual([],observed['violations']);self.assertIsNone(observed['error_kind']);self.assertFalse(observed['native_authority'])
+   self.assertEqual({'directory':1,'regular':2},observed['types']);self.assertNotIn('owned',json.dumps(observed))
+ def test_unsafe_type_mode_and_links_are_reported_without_following_or_reading_them(self):
+  import os,tempfile,time
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp)/'root';root.mkdir();outside=Path(tmp)/'outside';outside.mkdir();(outside/'never-follow').write_bytes(b'private-content-canary')
+   (root/'link').symlink_to(outside,target_is_directory=True);os.mkfifo(root/'fifo',0o600)
+   (root/'file').write_bytes(b'private-content-canary');os.link(root/'file',root/'alias');(root/'writable').touch();(root/'writable').chmod(0o666)
+   result=native.inspect_failed_workspace(root,os.getuid(),os.getgid(),time.monotonic()+10)
+   reasons={v['path']:v['reason'] for v in result['violations']}
+   self.assertEqual({'alias':'links','fifo':'type','file':'links','link':'type','writable':'mode'},reasons)
+   self.assertEqual(5,result['nodes']);self.assertNotIn('never-follow',json.dumps(result));self.assertNotIn('private-content-canary',json.dumps(result));self.assertIsNone(result['error_kind'])
+ def test_expired_original_bound_stays_unavailable_and_cannot_make_a_control_pass(self):
+  import os,tempfile,time
+  with tempfile.TemporaryDirectory() as tmp:
+   result=native.inspect_failed_workspace(Path(tmp),os.getuid(),os.getgid(),time.monotonic()-1)
+   self.assertEqual('RuntimeError',result['error_kind']);self.assertFalse(result['native_authority']);self.assertEqual(0,result['nodes'])
+
 if __name__=='__main__':unittest.main()

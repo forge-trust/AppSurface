@@ -687,3 +687,14 @@ joined worker prefixes are now retained privately to diagnose that earlier path.
 and debugger services are disabled for the producer before SDK startup, preserving the profiler,
 collector, 64-task/1GiB caps, command and deadlines. Their actual footprint/coverage effect remains a
 Linux validation requirement; the prior processor-count hint alone was insufficient.
+
+### Native producer now fits, final sealing remains unsuccessful
+
+[Run38858548366](https://github.com/forge-trust/AppSurface/actions/runs/38858548366) built both ordinary
+and C2 images and passed the unchanged source checks. The actual producer's observed peak was59 tasks
+with zero task-limit events, versus the earlier64-task rejection. Memory peaked190,812,160 bytes with
+zero OOM events. The worker completed and reporter output was charged through the original pipes.
+Final root execution still failed at `BeginTeardown` with ASEVD402; no seven-case success or root-sealed
+coverage result is claimed. The reporter's missing copied-source warning was retained privately and is
+not itself proof of the cleanup cause. A bounded metadata-only inspection after failed root return and
+independent empty-group checks is the next diagnostic; custody guards remain unchanged.

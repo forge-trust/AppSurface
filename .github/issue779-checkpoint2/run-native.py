@@ -332,6 +332,37 @@ def retain_producer_prefixes(generation,output,case,role='producer'):
   return True
  return False
 
+def inspect_failed_workspace(root,subject_uid,subject_gid,end):
+ # Diagnostics only, after original root return and independently empty selected groups.
+ deadline=min(end,time.monotonic()+5);total=0;types={};violations=[];error=None
+ flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+ def walk(fd,relative,depth):
+  nonlocal total
+  require(depth<=32 and time.monotonic()<deadline,'diagnostic-workspace-bound')
+  with os.scandir(fd) as source:
+   names=[]
+   for entry in source:
+    total+=1;require(total<=8192 and time.monotonic()<deadline,'diagnostic-workspace-bound');names.append(entry.name)
+  for name in sorted(names):
+   require(time.monotonic()<deadline,'diagnostic-workspace-bound')
+   value=os.stat(name,dir_fd=fd,follow_symlinks=False);kind=stat.S_IFMT(value.st_mode);mode=stat.S_IMODE(value.st_mode)
+   label={stat.S_IFDIR:'directory',stat.S_IFREG:'regular',stat.S_IFSOCK:'socket',stat.S_IFIFO:'fifo',stat.S_IFLNK:'symlink'}.get(kind,'other')
+   types[label]=types.get(label,0)+1
+   reason='type' if kind not in (stat.S_IFDIR,stat.S_IFREG) else 'owner' if (value.st_uid,value.st_gid) not in ((0,0),(subject_uid,subject_gid)) else 'mode' if mode&0o7022 else 'links' if kind==stat.S_IFREG and value.st_nlink!=1 else 'size' if kind==stat.S_IFREG and value.st_size>256*1024*1024 else None
+   path=relative+'/'+name if relative else name
+   if reason is not None and len(violations)<64:violations.append({'path':path,'kind':label,'mode':format(mode,'04o'),'uid':value.st_uid,'gid':value.st_gid,'links':value.st_nlink,'bytes':value.st_size,'reason':reason})
+   if kind==stat.S_IFDIR:
+    child=os.open(name,flags,dir_fd=fd)
+    try:
+     opened=os.fstat(child);require((opened.st_dev,opened.st_ino)==(value.st_dev,value.st_ino),'diagnostic-workspace-identity');walk(child,path,depth+1)
+    finally:os.close(child)
+ try:
+  fd=os.open(root,flags)
+  try:walk(fd,'',0)
+  finally:os.close(fd)
+ except (OSError,RuntimeError) as failure:error=type(failure).__name__
+ return {'schema':'issue779-producer-workspace-inspection-v1','nodes':total,'types':types,'violations':violations,'error_kind':error,'native_authority':False}
+
 def execute_case(args,case,end,receipt):
  generation=uuid.uuid4().hex
  root=Path('/run')/('issue779-csharp-coverage-'+generation)
@@ -471,6 +502,13 @@ def execute_case(args,case,end,receipt):
   result['passed']=True
  except Exception as e:
   result['failure_category']=str(e) if isinstance(e,RuntimeError) else type(e).__name__
+  try:
+   descriptor=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
+   if groups_empty(units) and descriptor.is_file():
+    identity=json.loads(descriptor.read_bytes())
+    diagnostic=inspect_failed_workspace(Path('/run/appsurface-evidence-producer-data-'+generation),identity['subject_uid'],identity['subject_gid'],case_end)
+    write(args.output/(case+'-workspace-inspection.json'),canonical(diagnostic))
+  except Exception:pass # A diagnostic failure cannot replace the actual failed control.
  finally:
   # Root failure is never upgraded by fixture containment; retain paths/accounts on ambiguous custody.
   for u in units:
