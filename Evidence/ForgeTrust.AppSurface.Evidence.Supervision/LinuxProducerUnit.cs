@@ -165,7 +165,7 @@ internal sealed class LinuxProducerUnit
             LinuxOwnerFacts.BootstrapExecutable, "-i", "PATH=/usr/bin:/bin", "HOME=" + scratchRoot,
             "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp, "NUGET_PACKAGES=" + packageRoot,
             "DOTNET_ROOT=" + runtimeRoot, "DOTNET_CLI_HOME=" + cliHome,
-            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "LANG=C.UTF-8", runtimeHost,
+            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "LANG=C.UTF-8", "DOTNET_PROCESSOR_COUNT=1", runtimeHost,
             "test", solutionPath, "--configuration", "Debug", "--collect:XPlat Code Coverage",
             "--results-directory", resultsTokenRoot, "--verbosity", "quiet", "-m:1",
             "-p:UseSharedCompilation=false", "-nodeReuse:false"
@@ -214,6 +214,18 @@ internal sealed class LinuxProducerUnit
         return value.ActiveState == "active" && value.SubState == "exited"
             || value.ActiveState == "inactive" && value.SubState == "dead"
             || value.ActiveState == "failed" && value.SubState == "failed";
+    }
+
+    /// <summary>Allows only same-execution exit transitions to remain pending under the original monitor deadline.</summary>
+    /// <remarks>A transitional sample is never a finished or stopped receipt. Foreign PIDs and signal exits reject.</remarks>
+    internal bool IsNormalExitTransition(LinuxUnitProperties value, uint capturedPid)
+    {
+        RequireObservedPolicy(value);
+        if (capturedPid == 0 || value.ExecMainPid != capturedPid
+            || value.MainPid != 0 && value.MainPid != capturedPid || value.ExecMainCode is not (0 or 1)) return false;
+        return value.ActiveState == "deactivating" && value.SubState is "stop" or "stop-sigterm" or "stop-post" or "final-sigterm"
+            || value.ActiveState == "active" && value.SubState == "running" && value.MainPid == 0
+            || value.ActiveState is "inactive" or "failed" && value.SubState is "dead" or "failed" && value.ExecMainCode == 0;
     }
 
     /// <summary>Matches stopped-unit metadata after the original stop sequence; this is not physical settlement.</summary>

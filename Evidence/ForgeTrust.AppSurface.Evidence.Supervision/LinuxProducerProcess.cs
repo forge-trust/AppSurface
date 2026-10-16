@@ -352,7 +352,8 @@ internal sealed class LinuxProducerProcess
                 _owner.RequireCleanupLaunchInput(_input, token);
                 return facts;
             }
-            if (!_recipe.HasRunningMain(facts) || facts.MainPid != process.Pid)
+            if ((!_recipe.HasRunningMain(facts) || facts.MainPid != process.Pid)
+                && !_recipe.IsNormalExitTransition(facts, process.Pid))
                 throw LinuxSystemdBackend.InvalidControl();
             // The authenticated manager retains this captured execution PID through natural exit.
             // A live proc recheck after a running sample would reject a legitimate concurrent exit.

@@ -31,11 +31,12 @@ public sealed class LinuxProducerUnitTests
         Assert.Equal(new[] { recipe.Owner.Value }, p["BindsTo"].GetArray<string>());
         Assert.True(p["AddRef"].GetBool());
         Assert.True(p["RemainAfterExit"].GetBool());
+        Assert.Contains("DOTNET_PROCESSOR_COUNT=1", recipe.Arguments);
         Assert.Contains("TMPDIR=/run/producer/scratch/tmp", recipe.Arguments);
         Assert.Contains("NUGET_PACKAGES=/run/producer/scratch/nuget", recipe.Arguments);
         Assert.Equal(new[] { "test", "/run/producer/subject/Subject.csproj", "--configuration", "Debug", "--collect:XPlat Code Coverage",
             "--results-directory", "/run/producer/results/token", "--verbosity", "quiet", "-m:1", "-p:UseSharedCompilation=false", "-nodeReuse:false" },
-            recipe.Arguments.Skip(13));
+            recipe.Arguments.Skip(14));
         p["ReadWritePaths"].GetArray<string>()[0] = "/canary";
         Assert.Equal("/run/producer/subject", recipe.Properties["ReadWritePaths"].GetArray<string>()[0]);
     }
@@ -86,6 +87,26 @@ public sealed class LinuxProducerUnitTests
         Assert.Throws<EvidenceAdmissionException>(() => recipe.HasRunningMain(invalid));
         Assert.Throws<EvidenceAdmissionException>(() => recipe.HasFinished(invalid));
         Assert.Throws<EvidenceAdmissionException>(() => recipe.HasStopped(invalid));
+    }
+
+    [Theory]
+    [InlineData("deactivating", "stop", 0, 1)]
+    [InlineData("deactivating", "stop-post", 0, 1)]
+    [InlineData("active", "running", 0, 1)]
+    [InlineData("inactive", "dead", 0, 0)]
+    public void ExitTransitionIsPendingOnlyForOriginalCapturedExecution(string active, string sub, int main, int code)
+    {
+        using var stdout = new SafeFileHandle((nint)111, false);
+        using var stderr = new SafeFileHandle((nint)112, false);
+        var recipe = Recipe(stdout, stderr);
+        var sample = Running(recipe) with { ActiveState = active, SubState = sub, MainPid = (uint)main, ExecMainCode = code };
+        Assert.True(recipe.IsNormalExitTransition(sample, 1234));
+        Assert.False(recipe.HasFinished(sample));
+        Assert.False(recipe.IsNormalExitTransition(sample with { ExecMainPid = 4321 }, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample with { MainPid = 4321 }, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample with { ExecMainCode = 2, ExecMainStatus = 9 }, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample, 0));
+        Assert.Throws<EvidenceAdmissionException>(() => recipe.IsNormalExitTransition(sample with { User = "0" }, 1234));
     }
 
     private static LinuxProducerUnit Recipe(SafeFileHandle stdout, SafeFileHandle stderr)
