@@ -326,6 +326,25 @@ class IgnoringDescendantSamplingControls(unittest.TestCase):
   symlink=self.scratch/'symlink';symlink.symlink_to(valid)
   self.assertIsNone(native.read_subject_marker(symlink,self.uid,self.gid,32))
 
+ def test_sealed_term_marker_uses_observed_owner_and_exact_0600_contract(self):
+  import os
+  expected=b'SIGTERM observed'
+  marker=self.marker('sealed-term',expected)
+  observed=marker.lstat()
+  uid,gid=observed.st_uid,observed.st_gid
+  self.assertEqual(expected,native.read_subject_marker(marker,uid,gid,64,permissions=0o600))
+  marker.chmod(0o400)
+  self.assertIsNone(native.read_subject_marker(marker,uid,gid,64,permissions=0o600))
+  marker.chmod(0o644)
+  self.assertIsNone(native.read_subject_marker(marker,uid,gid,64,permissions=0o600))
+  marker.chmod(0o600)
+  canary=self.marker('sealed-term-canary',b'private-canary')
+  canary_metadata=canary.lstat()
+  canary_bytes=native.read_subject_marker(canary,canary_metadata.st_uid,canary_metadata.st_gid,64,permissions=0o600)
+  self.assertNotEqual(expected,canary_bytes)
+  symlink=self.scratch/'sealed-term-link';symlink.symlink_to(marker)
+  self.assertIsNone(native.read_subject_marker(symlink,uid,gid,64,permissions=0o600))
+
  def test_wrong_proc_uid_gid_cgroup_or_unstable_starttime_is_unavailable(self):
   from unittest.mock import patch
   cases=[('uid',self.uid+1,self.gid,None,(7654,7654)),

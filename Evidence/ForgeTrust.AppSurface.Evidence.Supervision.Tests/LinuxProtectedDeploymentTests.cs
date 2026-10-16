@@ -170,6 +170,53 @@ public sealed class LinuxProtectedDeploymentTests
     }
 
     [Fact]
+    public void MutableWorkspaceColonNamesAreLiteralWhileProtectedInventoryRemainsStrict()
+    {
+        var bytes = Block(".", "..", "sdk:cache", "compile:stamp");
+        var names = LinuxDirectoryData.ParseMutableWorkspace(bytes, out var failure);
+        Assert.Null(failure);
+        Assert.Equal(["compile:stamp", "sdk:cache"], names);
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxDirectoryData.Parse(bytes));
+        Array.Fill(bytes, (byte)0);
+        Assert.Equal(["compile:stamp", "sdk:cache"], names);
+        Assert.Throws<NotSupportedException>(() => ((IList<string>)names)[0] = "canary");
+    }
+
+    [Theory]
+    [InlineData("private-canary:/escape", "separator-name")]
+    [InlineData("private-canary\\escape", "backslash-name")]
+    [InlineData("private-canary\nescape", "control-name")]
+    public void MutableWorkspaceNamesStillRejectNonColonUnsafeCharacters(string name, string expected)
+    {
+        string? failure = null;
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxDirectoryData.ParseMutableWorkspace(Block(name), out failure));
+        Assert.Equal(expected, failure);
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.DoesNotContain("private-canary", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void MutableWorkspaceNamesRetainRecordBoundsUtf8AndDuplicateChecks()
+    {
+        Assert.Empty(LinuxDirectoryData.ParseMutableWorkspace([], out var success));
+        Assert.Null(success);
+        string? failure = null;
+        Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxDirectoryData.ParseMutableWorkspace(Block("sdk:cache", "sdk:cache"), out failure));
+        Assert.Equal("duplicate-name", failure);
+        Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxDirectoryData.ParseMutableWorkspace(new byte[19], out failure));
+        Assert.Equal("record-header", failure);
+        var malformed = Block("safe");
+        malformed[19] = 0xff;
+        Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxDirectoryData.ParseMutableWorkspace(malformed, out failure));
+        Assert.Equal("utf8", failure);
+    }
+
+    [Fact]
     public void KernelDirectoryRecordBoundsDuplicatesAndUtf8FailClosed()
     {
         Assert.Throws<EvidenceAdmissionException>(() => LinuxDirectoryData.Parse(new byte[19]));

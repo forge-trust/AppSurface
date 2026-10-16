@@ -467,8 +467,8 @@ def execute_case(args,case,end,receipt):
      term=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-term-observed')
      metadata=term.lstat() if os.path.lexists(term) else None
      require(metadata is not None,'actual-descendant-term-marker-present')
-     # Successful cleanup seals the original subject marker as root:root0400.
-     require(read_subject_marker(term,metadata.st_uid,metadata.st_gid,64,permissions=0o400)==b'SIGTERM observed' and metadata.st_uid==metadata.st_gid==0,'actual-descendant-ignored-term')
+     # Producer-workspace sealing makes mutable files root:root0600.
+     require(read_subject_marker(term,metadata.st_uid,metadata.st_gid,64,permissions=0o600)==b'SIGTERM observed' and metadata.st_uid==metadata.st_gid==0,'actual-descendant-ignored-term')
      result['descendant_term_observed']=True
     observed=read_output_observation(stderr.read_bytes())
     require(all(p['stdout_eof'] and p['stderr_eof'] and p['failure']=='None' for p in observed['pairs']),'cancel-original-output-joined')

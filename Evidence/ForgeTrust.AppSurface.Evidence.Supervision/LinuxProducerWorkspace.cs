@@ -812,7 +812,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
                 var count = ReadDirectory(fresh, buffer);
                 if (count == 0) break;
                 phase = "directory-parse";
-                foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count), out parseFailure))
+                foreach (var name in LinuxDirectoryData.ParseMutableWorkspace(buffer.AsSpan(0, count), out parseFailure))
                 {
                     phase = "unique-directory-name";
                     if (names.Count >= LinuxProducerWorkspaceLayout.MaximumNodes || !names.Add(name))

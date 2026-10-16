@@ -698,3 +698,14 @@ Final root execution still failed at `BeginTeardown` with ASEVD402; no seven-cas
 coverage result is claimed. The reporter's missing copied-source warning was retained privately and is
 not itself proof of the cleanup cause. A bounded metadata-only inspection after failed root return and
 independent empty-group checks is the next diagnostic; custody guards remain unchanged.
+
+### Mutable workspace filename correction
+
+[Run38863233579](https://github.com/forge-trust/AppSurface/actions/runs/38863233579) localized the final
+sealing rejection to the directory parser's `colon-name` branch. The producer had actually settled, both
+original output pairs reached EOF without errors, and task/memory limits were not exceeded. The cleanup
+inventory now uses a [mutable workspace parser](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-workspace.md#failure-stage-diagnostics)
+that accepts a literal colon in a single Linux filename; protected deployment and report parsers retain
+their stricter syntax. All retained-FD containment, no-link, metadata, byte/count, deadline and account
+release guards remain required. Source regression results and a new genuine Linux run are still required
+before crediting this correction or any checkpoint-two case.

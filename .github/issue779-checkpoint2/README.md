@@ -18,6 +18,8 @@ Root staging now uses [retained no-follow directory/file descriptors](staging.py
 
 Negative cases require actual subject UID/GID/cgroup sampling and a fixture marker from the executed test body. Test failure additionally requires its recorded producer exit-one diagnostic; cancellation is sent only after the cancel branch marker; quota additionally requires the C# joined ledger observation to exceed the original16MiB limit. A generic failure cannot satisfy those cases. The positive result checks the complete sealed output tree including root:root, regular single-link files0400 and directories0700.
 
+The final artifact tree uses root:root regular files0400. The producer workspace has a separate cleanup seal: mutable subject and scratch files become root:root0600. The ignored-cancel TERM marker remains in that producer workspace, so its post-seal guard checks0600; the final artifact mode does not apply to it.
+
 The workflow installs a separate single SDK tree in runner temporary storage and binds every tracked source blob/hash/mode before build and after execution. The actual subject project is deliberately not evaluated before the C# root has armed the producer. A passing fixture packet remains Observation-only and does not change production catalogue or accepted-consumer proof.
 
 ## Package hash verification

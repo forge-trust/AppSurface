@@ -68,7 +68,19 @@ internal static class LinuxDirectoryData
     /// <summary>Decodes the same strict grammar while projecting the first closed failure reason as data.</summary>
     /// <param name="block">One bounded actual or detached Linux getdents64 block.</param>
     /// <param name="failure">Null on success; otherwise a fixed reason with no decoded filename or authority.</param>
-    internal static IReadOnlyList<string> Parse(ReadOnlySpan<byte> block, out string? failure)
+    internal static IReadOnlyList<string> Parse(ReadOnlySpan<byte> block, out string? failure) =>
+        ParseCore(block, allowColon: false, out failure);
+
+    /// <summary>Decodes mutable SDK workspace names, treating a colon as a literal Linux filename character.</summary>
+    /// <remarks>
+    /// Only producer workspace sealing uses this grammar. Protected deployment and report inventories retain
+    /// their stricter grammar. Record bounds, strict UTF-8, duplicates and all other name checks are shared;
+    /// callers must still open each component relative to its retained parent with no-follow containment.
+    /// </remarks>
+    internal static IReadOnlyList<string> ParseMutableWorkspace(ReadOnlySpan<byte> block, out string? failure) =>
+        ParseCore(block, allowColon: true, out failure);
+
+    private static IReadOnlyList<string> ParseCore(ReadOnlySpan<byte> block, bool allowColon, out string? failure)
     {
         failure = "block-bound";
         if (block.Length > 32 * 1024) throw LinuxProtectedDeployment.InvalidDeployment();
@@ -91,9 +103,9 @@ internal static class LinuxDirectoryData
                 var name = Utf8.GetString(bytes[..end]);
                 if (name is not "." and not "..")
                 {
-                    if (name.Any(static c => char.IsControl(c) || c is '/' or '\\' or ':'))
+                    if (name.Any(c => char.IsControl(c) || c is '/' or '\\' || !allowColon && c == ':'))
                     {
-                        failure = name.Contains(':') ? "colon-name" : name.Contains('\\') ? "backslash-name"
+                        failure = !allowColon && name.Contains(':') ? "colon-name" : name.Contains('\\') ? "backslash-name"
                             : name.Contains('/') ? "separator-name" : "control-name";
                         throw LinuxProtectedDeployment.InvalidDeployment();
                     }
