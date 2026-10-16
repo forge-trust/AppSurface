@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Testing;
 using Xunit.Abstractions;
 
 public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageConsumerTests.PackedProducerFixture>
@@ -34,8 +35,9 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
     [Trait("Category", "Integration")]
     public async Task PackedPackage_PreservesConsumerAspireOverrideCleanupProof()
     {
+        var proofStopwatch = Stopwatch.StartNew();
         var packageRun = _producer.Packages;
-        var workDirectory = packageRun.WorkDirectory;
+        var workDirectory = ResolveDirectoryAliases(packageRun.WorkDirectory);
         var feedDirectory = packageRun.FeedDirectory;
         var consumerDirectory = Path.Join(workDirectory, "consumer-aspire-override");
         var consumerPackagesDirectory = Path.Join(workDirectory, "consumer-cache", "aspire-override-packages");
@@ -45,9 +47,28 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             consumerPackagesDirectory,
             consumerHttpCacheDirectory);
 
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var checkoutDirectory = Path.Join(consumerDirectory, "checkout");
+        var appHostDirectory = Path.Join(checkoutDirectory, "src", "Skoolit.AppHost");
+        var firstWorkingDirectory = Path.Join(consumerDirectory, "unrelated-a");
+        var secondWorkingDirectory = Path.Join(consumerDirectory, "unrelated-b");
+        var consumerDotNetEnvironment = new Dictionary<string, string>(isolatedDotNetEnvironment)
+        {
+            ["ASPIRE_DCP_PATH"] = "dummy",
+            ["ASPIRE_DASHBOARD_PATH"] = "dummy",
+            ["CONSUMER_APPHOST_DIRECTORY"] = appHostDirectory
+        };
+
         var proofSucceeded = false;
         try
         {
+            Directory.CreateDirectory(Path.Join(appHostDirectory, "keycloak"));
+            Directory.CreateDirectory(Path.Join(checkoutDirectory, "src", "Skoolit.KeycloakTheme", "theme", "skoolit"));
+            Directory.CreateDirectory(firstWorkingDirectory);
+            Directory.CreateDirectory(secondWorkingDirectory);
+            await File.WriteAllTextAsync(Path.Join(checkoutDirectory, ".git"), "gitdir: .git/worktrees/consumer-proof");
+            await File.WriteAllTextAsync(Path.Join(appHostDirectory, "keycloak", "skoolit-realm.json"), "{}");
+
             var packedPackageVersion = packageRun.PackageVersion;
             var nugetConfigPath = await WriteNuGetConfigAsync(consumerDirectory, feedDirectory);
             await File.WriteAllTextAsync(
@@ -74,6 +95,8 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 Path.Join(consumerDirectory, "Consumer.cs"),
                 """
                 using CliFx.Binding;
+                using Aspire.Hosting;
+                using Aspire.Hosting.ApplicationModel;
                 using ForgeTrust.AppSurface.Aspire;
                 using ForgeTrust.AppSurface.Aspire.Testing;
                 using ForgeTrust.AppSurface.Core;
@@ -83,7 +106,48 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
 
                 public sealed class ConsumerAppHost
                 {
-                    public static string ProjectPath => AppContext.BaseDirectory;
+                    public static string ProjectPath => Environment.GetEnvironmentVariable("CONSUMER_APPHOST_DIRECTORY")!;
+                }
+
+                public sealed class RepositoryAssetsComponent : IAspireComponent<ParameterResource>
+                {
+                    public IResourceBuilder<ParameterResource> Generate(
+                        AspireStartupContext context,
+                        IDistributedApplicationBuilder appBuilder)
+                    {
+                        var expectedRoot = Directory.GetParent(ConsumerAppHost.ProjectPath)!.Parent!.FullName;
+                        var realmPath = context.GetPathFromRoot("src/Skoolit.AppHost/keycloak/skoolit-realm.json");
+                        var themePath = context.GetPathFromRoot("src/Skoolit.KeycloakTheme/theme/skoolit");
+                        var expectedRealmPath = Path.GetFullPath(Path.Join(expectedRoot, "src/Skoolit.AppHost/keycloak/skoolit-realm.json"));
+                        var expectedThemePath = Path.GetFullPath(Path.Join(expectedRoot, "src/Skoolit.KeycloakTheme/theme/skoolit"));
+
+                        if (Path.GetFullPath(context.GetPathFromRoot(string.Empty)) != expectedRoot ||
+                            realmPath != expectedRealmPath ||
+                            themePath != expectedThemePath || !Path.IsPathFullyQualified(realmPath) ||
+                            !Path.IsPathFullyQualified(themePath))
+                        {
+                            throw new InvalidOperationException(
+                                $"Repository asset proof failed: root='{context.GetPathFromRoot(string.Empty)}', " +
+                                $"realm='{realmPath}', theme='{themePath}'.");
+                        }
+
+                        if (!File.Exists(realmPath))
+                        {
+                            throw new FileNotFoundException("Expected the repository realm fixture to exist.", realmPath);
+                        }
+
+                        if (!Directory.Exists(themePath))
+                        {
+                            throw new DirectoryNotFoundException("Expected the repository theme fixture to exist.");
+                        }
+
+                        Console.WriteLine(
+                            $"Repository path evidence: selected-root='{Path.GetFullPath(context.GetPathFromRoot(string.Empty))}'; " +
+                            $"realm expected='{expectedRealmPath}', actual='{realmPath}', exists={File.Exists(realmPath)}; " +
+                            $"theme expected='{expectedThemePath}', actual='{themePath}', exists={Directory.Exists(themePath)}.");
+
+                        return appBuilder.AddParameter("repository-assets-assertion", "verified");
+                    }
                 }
 
                 public sealed class ConsumerModule : IAppSurfaceHostModule
@@ -98,7 +162,8 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 public sealed partial class ConsumerProfile : AspireProfile
                 {
                     public ConsumerProfile(ILogger<ConsumerProfile> logger) : base(logger) { }
-                    public override IEnumerable<IAspireComponent> GetComponents() => [];
+                    public override IEnumerable<IAspireComponent> GetComponents() =>
+                        [new RepositoryAssetsComponent(), new KeycloakAssetsComponent()];
                 }
 
                 public static class ConsumerProof
@@ -106,8 +171,15 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                     public static Task<AppSurfaceAspireProfileTestingBuilder> CreateAsync() =>
                         AppSurfaceAspireTestingBuilder.CreateAsync<ConsumerAppHost, ConsumerModule, ConsumerProfile>();
 
-                    public static async Task Main()
+                    public static async Task Main(string[] args)
                     {
+                        var initialDirectory = Environment.CurrentDirectory;
+                        if (args.Length != 1 || !Path.IsPathFullyQualified(args[0]) || initialDirectory != args[0])
+                        {
+                            throw new InvalidOperationException("Consumer did not start in its requested unrelated working directory.");
+                        }
+                        Console.WriteLine($"Consumer CWD before path resolution='{initialDirectory}'.");
+
                         await using var builder = await CreateAsync();
                         builder.Services.AddSingleton<ConsumerBuildProbe>();
                         builder.Services.AddSingleton<IHostLifetime>(services =>
@@ -129,6 +201,12 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                         {
                             throw new InvalidOperationException("Expected the packed package to dispose the partial provider.");
                         }
+
+                        if (Environment.CurrentDirectory != initialDirectory)
+                        {
+                            throw new InvalidOperationException("Consumer path resolution changed its working directory.");
+                        }
+                        Console.WriteLine($"Consumer CWD after path resolution='{Environment.CurrentDirectory}'.");
                     }
                 }
 
@@ -143,6 +221,9 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 {
                 }
                 """);
+            await File.WriteAllTextAsync(
+                Path.Join(consumerDirectory, "KeycloakAssetsComponent.cs"),
+                await ReadGuideComponentSnippetAsync(packageRun.RepositoryRoot));
 
             AssertConsumerProjectHasNoProjectReferences(Path.Join(consumerDirectory, "Consumer.csproj"));
             await RunDotNetAsync(
@@ -158,20 +239,37 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 AspireOverrideVersion);
             await RunDotNetAsync(
                 consumerDirectory,
-                ["build", "Consumer.csproj", "--no-restore", "--nologo"],
+                ["build", "Consumer.csproj", "--configuration", configuration, "--no-restore", "--nologo"],
                 "Aspire 13.4.6 override consumer build",
                 isolatedDotNetEnvironment,
                 RemainingBudget(packageRun.Budget, "consumer proof"));
-            await RunDotNetAsync(
-                consumerDirectory,
-                ["run", "--project", "Consumer.csproj", "--no-build", "--no-restore"],
-                "Aspire 13.4.6 override cleanup proof",
-                new Dictionary<string, string>(isolatedDotNetEnvironment)
+            var originalWorkingDirectory = Environment.CurrentDirectory;
+            try
+            {
+                foreach (var workingDirectory in new[] { firstWorkingDirectory, secondWorkingDirectory })
                 {
-                    ["ASPIRE_DCP_PATH"] = "dummy",
-                    ["ASPIRE_DASHBOARD_PATH"] = "dummy"
-                },
-                RemainingBudget(packageRun.Budget, "override cleanup proof"));
+                    var output = await RunDotNetAsync(
+                        workingDirectory,
+                        [Path.Join(consumerDirectory, "bin", configuration, "net10.0", "Consumer.dll"), workingDirectory],
+                        "Aspire 13.4.6 repository assets and override cleanup proof",
+                        consumerDotNetEnvironment,
+                        RemainingBudget(packageRun.Budget, "repository assets and override cleanup proof"));
+                    _output.WriteLine(output);
+                    Assert.Equal(originalWorkingDirectory, Environment.CurrentDirectory);
+                }
+            }
+            finally
+            {
+                Assert.Equal(originalWorkingDirectory, Environment.CurrentDirectory);
+            }
+
+            proofStopwatch.Stop();
+            var packageDigest = Convert.ToHexString(SHA256.HashData(
+                await File.ReadAllBytesAsync(packageRun.Packages[AppSurfaceTestingPackageId])));
+            _output.WriteLine(
+                $"Packed repository-assets proof: AppSurfaceSourceCommit={packageRun.SourceCommit}; " +
+                $"PackageVersion={packageRun.PackageVersion}; PackageSha256={packageDigest}; " +
+                $"SkoolitSourceCommit={SkoolitSourceCommit}; elapsed={proofStopwatch.Elapsed}.");
 
             _output.WriteLine(
                 $"Legacy override proof passed: AppSurfaceSourceCommit={packageRun.SourceCommit}; " +
@@ -701,6 +799,60 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
             $"Stage '{stage}' failed: {executable} {string.Join(' ', arguments)} exited {process.ExitCode}." +
             $"{Environment.NewLine}{output}");
         return output;
+    }
+
+    private static async Task<string> ReadGuideComponentSnippetAsync(string repositoryRoot)
+    {
+        var guide = await File.ReadAllTextAsync(
+            Path.Join(repositoryRoot, "Aspire", "ForgeTrust.AppSurface.Aspire", "README.md"));
+        const string sectionHeading = "## Repository-relative assets";
+        const string codeFence = "```csharp";
+        const string closingFence = "```";
+        var sectionStart = guide.IndexOf(sectionHeading, StringComparison.Ordinal);
+        Assert.True(sectionStart >= 0, "Expected the canonical repository-relative assets guide section.");
+
+        var sectionEnd = guide.IndexOf("\n## ", sectionStart + sectionHeading.Length, StringComparison.Ordinal);
+        if (sectionEnd < 0)
+        {
+            sectionEnd = guide.Length;
+        }
+
+        var codeStart = guide.IndexOf(codeFence, sectionStart, sectionEnd - sectionStart, StringComparison.Ordinal);
+        Assert.True(codeStart >= 0, "Expected a C# component example in the repository-relative assets section.");
+        codeStart += codeFence.Length;
+        if (guide[codeStart] == '\r')
+        {
+            codeStart++;
+        }
+        if (guide[codeStart] == '\n')
+        {
+            codeStart++;
+        }
+
+        var codeEnd = guide.IndexOf(closingFence, codeStart, sectionEnd - codeStart, StringComparison.Ordinal);
+        Assert.True(codeEnd >= 0, "Expected the repository-relative assets C# example to close its code fence.");
+        return guide[codeStart..codeEnd];
+    }
+
+    private static string ResolveDirectoryAliases(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var currentPath = Path.GetPathRoot(fullPath)
+            ?? throw new InvalidOperationException($"Expected an absolute directory path, received '{path}'.");
+
+        foreach (var segment in fullPath[currentPath.Length..].Split(
+                     [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            currentPath = TestPathUtils.PathUnder(currentPath, segment);
+            var linkTarget = new DirectoryInfo(currentPath).ResolveLinkTarget(returnFinalTarget: true);
+            if (linkTarget is not null)
+            {
+                currentPath = linkTarget.FullName;
+            }
+        }
+
+        return Path.GetFullPath(currentPath);
     }
 
     private static string GetRepositoryRoot()
