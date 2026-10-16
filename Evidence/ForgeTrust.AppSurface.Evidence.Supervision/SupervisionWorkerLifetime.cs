@@ -84,6 +84,28 @@ internal sealed class SupervisionWorkerLifetime
         return completion.Task;
     }
 
+    /// <summary>Joins the original stop task for cleanup without reclassifying a cancelled caller as success.</summary>
+    /// <remarks>
+    /// Stop must already be reserved. This awaits that exact task; it never retries a procedure or detaches a
+    /// pending callback. Caller cancellation alone may leave Failed true after all cleanup procedures finish.
+    /// Startup, cancellation-callback, containment, finalization and source-close faults still reject. This
+    /// bookkeeping result supplies no native exit or custody; native owners must verify those independently.
+    /// </remarks>
+    internal async Task JoinCleanupAsync()
+    {
+        RequireExternalCaller();
+        Task stop;
+        lock (_gate) stop = _stop?.Task ?? throw Rejected();
+        try { await stop.ConfigureAwait(false); }
+        catch (Exception) when (CleanupProceduresCompleted()) { }
+        if (!CleanupProceduresCompleted()) throw Rejected();
+    }
+
+    private bool CleanupProceduresCompleted()
+    {
+        lock (_gate) return _stopJoined && !_failed;
+    }
+
     private async Task RunStartAsync(Func<CancellationToken, Task> start, CancellationToken token,
         TaskCompletionSource completion)
     {

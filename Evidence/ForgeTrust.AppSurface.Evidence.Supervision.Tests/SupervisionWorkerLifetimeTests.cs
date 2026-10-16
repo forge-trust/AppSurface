@@ -56,6 +56,64 @@ public sealed class SupervisionWorkerLifetimeTests
     }
 
     [Fact]
+    public async Task CancelledCallerCleanupJoinOwnsPendingFinalizationAndKeepsExecutionFailed()
+    {
+        var owner = new SupervisionWorkerLifetime();
+        using var caller = new CancellationTokenSource();
+        await owner.StartAsync(_ => Task.CompletedTask, caller.Token);
+        caller.Cancel();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stop = owner.StopAsync(() => Task.CompletedTask, async () =>
+        {
+            entered.SetResult();
+            await release.Task;
+        });
+        var cleanup = owner.JoinCleanupAsync();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(owner.Failed);
+            Assert.False(stop.IsCompleted);
+            Assert.False(cleanup.IsCompleted);
+            Assert.False(owner.StopJoined);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Assert.ThrowsAnyAsync<Exception>(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+            await cleanup.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        Assert.True(owner.Failed);
+        Assert.True(owner.StopJoined);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupJoinCannotHideContainmentOrFinalizationFaultEvenWithCallerCancelled(bool finalize)
+    {
+        var owner = new SupervisionWorkerLifetime();
+        using var caller = new CancellationTokenSource();
+        await owner.StartAsync(_ => Task.CompletedTask, caller.Token);
+        caller.Cancel();
+        var stop = owner.StopAsync(
+            () => finalize ? Task.CompletedTask : Task.FromException(new IOException("private-canary")),
+            () => finalize ? Task.FromException(new IOException("private-canary")) : Task.CompletedTask);
+        await Assert.ThrowsAnyAsync<Exception>(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Assert.ThrowsAnyAsync<Exception>(() => owner.JoinCleanupAsync().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.True(owner.Failed);
+    }
+
+    [Fact]
+    public async Task CleanupJoinBeforeStopCannotCreateOrClaimCleanup()
+    {
+        var owner = new SupervisionWorkerLifetime();
+        await Assert.ThrowsAnyAsync<Exception>(() => owner.JoinCleanupAsync());
+        Assert.False(owner.StopJoined);
+    }
+
+    [Fact]
     public async Task FailureInContainmentDoesNotSkipPendingStartupJoinOrFinalization()
     {
         var owner = new SupervisionWorkerLifetime();

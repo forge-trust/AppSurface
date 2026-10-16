@@ -731,3 +731,17 @@ stderr EOF. The [producer drain](../../Evidence/ForgeTrust.AppSurface.Evidence.S
 now shares the worker's original job/owner-teardown lifetime instead. Request cancellation still stops
 the actual unit and fails the workload; output EOF and exact ledger reconciliation remain mandatory.
 These two passed cases do not complete the seven-case checkpoint, and the failed receipt remains retained.
+
+[Run38868009860](https://github.com/forge-trust/AppSurface/actions/runs/38868009860) repeated the first two
+passes and confirmed healthy exact two-pair EOF accounting after cancellation. Cancellation still failed
+strict account custody: the worker natural-exit monitor rewrote its own original job cancellation as an
+integrity failure, which finalization treated as a failed physical join. The monitor now preserves that
+cancelled task and joins it distinctly from native faults. Final unit/PID, group, healthy pump, original
+start/stop and owner checks remain mandatory. The cancellation outcome is still failure, and another
+complete seven-case Linux run remains required.
+
+The same correction separates the retained lifetime's cleanup join from its unchanged failed-work result.
+`StopAsync` still fails for the cancelled caller, while `JoinCleanupAsync` can finish only after every
+original cleanup procedure and source close completed without fault. The native worker additionally
+requires final physical settlement before local disposal and root custody. No execution failure flag,
+unit/PID/group/pump check or account-release guard is cleared.

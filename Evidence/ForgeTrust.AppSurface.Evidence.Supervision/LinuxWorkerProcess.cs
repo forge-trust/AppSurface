@@ -529,8 +529,15 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             try { _stopTiming.Begin(_input.DiagnosticRemaining, TimeSpan.FromSeconds(_input.Request.StoppingSeconds), _recipe?.RuntimeMicroseconds); }
             catch (Exception) { } // Numeric diagnostics cannot replace the original stop result.
         }
-        var stop = _lifetime.StopAsync(ContainAsync, FinalizeAsync);
+        _ = _lifetime.StopAsync(ContainAsync, FinalizeAsync); // Observed through the retained original cleanup join.
+        var stop = JoinPhysicalCleanupAsync();
         return _stopTiming is null ? stop : ObserveStopJoinAsync(stop);
+    }
+
+    private async Task JoinPhysicalCleanupAsync()
+    {
+        await _lifetime.JoinCleanupAsync().ConfigureAwait(false);
+        if (!PhysicallySettled) throw LinuxSystemdBackend.InvalidControl();
     }
 
     private async Task ObserveStopJoinAsync(Task original)
@@ -665,6 +672,11 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(25), token).ConfigureAwait(false);
             }
         }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            Interlocked.Exchange(ref _failed, 1); // Failed work; native finalization decides custody or quarantine.
+            throw;
+        }
         catch { Fail(); throw LinuxSystemdBackend.InvalidControl(); }
     }
 
@@ -728,8 +740,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         catch { failed = true; }
         if (_exit is not null)
         {
-            try { await _exit.ConfigureAwait(false); }
-            catch { failed = true; }
+            if (!await JoinOriginalExitMonitorAsync(_exit, _jobDeadline!.Token).ConfigureAwait(false)) failed = true;
             monitorJoined = _exit.IsCompleted;
             if (monitorJoined) _stopTiming?.Observe(LinuxWorkerStopMilestone.MonitorJoined);
         }
@@ -821,6 +832,24 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         }
         if (failed) { Fail(); completion.TrySetException(LinuxSystemdBackend.InvalidControl()); }
         else completion.TrySetResult();
+    }
+
+    /// <summary>Joins the original monitor, distinguishing its expected job cancellation from a fault.</summary>
+    /// <remarks>
+    /// This helper never cancels or detaches the task, observes physical exit, or publishes settlement.
+    /// An actually cancelled monitor is an expected negative-work outcome only when its original job
+    /// token is cancelled. Integrity faults remain failures even if cancellation occurs concurrently.
+    /// Native callers must still verify the retained unit/PID, empty group, both healthy EOFs, pending
+    /// start/stop joins, local closes and final owner checks before publishing physical settlement.
+    /// </remarks>
+    internal static async Task<bool> JoinOriginalExitMonitorAsync(Task monitor, CancellationToken originalJobToken)
+    {
+        ArgumentNullException.ThrowIfNull(monitor);
+        try { await monitor.ConfigureAwait(false); return true; }
+        catch (OperationCanceledException) when (monitor.IsCanceled && originalJobToken.IsCancellationRequested)
+        { return true; }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        { return false; }
     }
 
     private EvidenceWorkerDescriptorData Descriptor(LinuxProcessIdentity worker, TimeSpan remaining) =>
