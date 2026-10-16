@@ -299,6 +299,27 @@ public sealed class SetupOperationLifetimeTests
         await WaitForPendingCountAsync(lifetime, 0);
     }
 
+    [Fact]
+    public async Task Settled_operations_are_not_pending_when_bookkeeping_continuations_are_delayed()
+    {
+        // Completing the operation and removing its registration have independent continuation order.
+        // Exercise both orders without relying on the removal notification to authorize cleanup.
+        for (var iteration = 0; iteration < 1000; iteration++)
+        {
+            var lifetime = new SetupOperationLifetime();
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var canceled = new CancellationTokenSource();
+            canceled.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lifetime.AwaitAsync(
+                "native-provisioning", () => release.Task, canceled.Token));
+            release.SetResult();
+
+            Assert.True(await lifetime.StopAndObservePendingAsync(null, TimeSpan.FromSeconds(2),
+                TimeSpan.FromSeconds(2), new List<string>()));
+            Assert.Equal(0, lifetime.PendingCount);
+        }
+    }
+
     private static async Task WaitForPendingCountAsync(SetupOperationLifetime lifetime, int expected)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(1));

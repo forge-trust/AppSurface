@@ -1941,6 +1941,34 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BootstrapLaunchUsesRedirectedWindowsPromptWithoutMutatingTheParent(bool windowsPrompt)
+    {
+        Assert.Throws<ArgumentNullException>(() => NativePostgreSqlBootstrapRunner.CreateStartInfo(null!, windowsPrompt));
+        var originalOsType = Environment.GetEnvironmentVariable("OSTYPE");
+        var originalPassword = Environment.GetEnvironmentVariable("PGPASSWORD");
+        var request = new NativePostgreSqlBootstrapRequest("owned-initdb", ["--pwprompt"], _root,
+            "private-input\nprivate-input\n", 1000);
+
+        var start = NativePostgreSqlBootstrapRunner.CreateStartInfo(request, windowsPrompt);
+
+        Assert.Equal(windowsPrompt ? "msys" : originalOsType, start.Environment.TryGetValue("OSTYPE", out var osType) ? osType : null);
+        Assert.Equal(originalOsType, Environment.GetEnvironmentVariable("OSTYPE"));
+        Assert.Equal(originalPassword, Environment.GetEnvironmentVariable("PGPASSWORD"));
+        Assert.DoesNotContain(start.Environment.Keys, key => key.StartsWith("PG", StringComparison.OrdinalIgnoreCase));
+        Assert.True(start.RedirectStandardInput);
+        Assert.True(start.RedirectStandardOutput);
+        Assert.True(start.RedirectStandardError);
+        Assert.True(start.CreateNoWindow);
+        Assert.False(start.UseShellExecute);
+        Assert.Equal("owned-initdb", start.FileName);
+        Assert.Equal(_root, start.WorkingDirectory);
+        Assert.Equal(["--pwprompt"], start.ArgumentList);
+        Assert.DoesNotContain("private-input", string.Join(' ', start.ArgumentList), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task BootstrapClearsInheritedPostgreSqlEnvironmentAndDrainsBothSecretBearingStreams()
     {

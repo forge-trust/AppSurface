@@ -12,7 +12,9 @@ internal sealed class SetupOperationLifetime
 {
     private readonly ConcurrentDictionary<Task, string> _operations = new();
 
-    internal int PendingCount => _operations.Count;
+    /// <summary>Counts unfinished operations, independently of completion-notification scheduling.</summary>
+    /// <remarks>A completed or faulted task is settled even if its bookkeeping continuation has not run yet.</remarks>
+    internal int PendingCount => _operations.Count(static pair => !pair.Key.IsCompleted);
 
     /// <summary>Invokes one owned adapter away from the worker pool and observes it until cancellation.</summary>
     /// <param name="phase">Safe nonempty resource label retained while the operation is pending.</param>

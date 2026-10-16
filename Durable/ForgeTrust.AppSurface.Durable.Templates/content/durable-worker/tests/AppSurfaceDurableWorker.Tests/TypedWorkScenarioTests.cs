@@ -212,11 +212,20 @@ public sealed partial class TypedWorkScenarioTests
                 }
                 finally { sdkFinished.SetResult(); }
             }, () => { Interlocked.Increment(ref identityReads); return ownedId; },
-                (id, remaining) =>
+                async (id, remaining) =>
                 {
+                    // A short runtime timer may fire just before the monotonic deadline. This case
+                    // promises expiry, so hold the synthetic remover until that original clock expires.
+                    if (sdkMode == "synchronous-block")
+                    {
+                        while (Stopwatch.GetElapsedTime(startedAt) < totalBudget)
+                        {
+                            await Task.Delay(1);
+                        }
+                    }
                     fallback.SetResult((id, remaining));
                     release.Set();
-                    return Task.FromResult(removeSucceeds);
+                    return removeSucceeds;
                 }, startedAt, totalBudget, failures), observation.Token);
             await sdkEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
             Assert.False(sdkOnThreadPool);

@@ -1419,21 +1419,7 @@ internal sealed class NativePostgreSqlBootstrapRunner : INativePostgreSqlBootstr
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = request.ExecutablePath,
-            WorkingDirectory = request.WorkingDirectory,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-        foreach (var argument in request.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
-        }
-        ClearPostgreSqlEnvironment(startInfo.Environment);
+        var startInfo = CreateStartInfo(request, OperatingSystem.IsWindows());
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -1504,6 +1490,39 @@ internal sealed class NativePostgreSqlBootstrapRunner : INativePostgreSqlBootstr
 
             throw;
         }
+    }
+
+    /// <summary>Creates an isolated redirected-input launch, including PostgreSQL's Windows prompt fallback.</summary>
+    /// <param name="request">Owned executable, arguments and working directory; secret input is never an argument.</param>
+    /// <param name="windowsPrompt">Whether the target uses PostgreSQL's Windows console prompt implementation.</param>
+    /// <returns>Child-only settings with inherited PostgreSQL variables removed and no console window.</returns>
+    /// <remarks>PostgreSQL opens CONIN$/CONOUT$ before consulting stdin on Windows. Its OSTYPE=msys fallback
+    /// selects redirected streams without changing authentication, restricted-token behavior or parent environment.
+    /// The explicit platform parameter is an internal launch-contract test seam, not a user setting.</remarks>
+    internal static ProcessStartInfo CreateStartInfo(NativePostgreSqlBootstrapRequest request, bool windowsPrompt)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = request.ExecutablePath,
+            WorkingDirectory = request.WorkingDirectory,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        foreach (var argument in request.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        ClearPostgreSqlEnvironment(startInfo.Environment);
+
+        if (windowsPrompt)
+        {
+            startInfo.Environment["OSTYPE"] = "msys";
+        }
+        return startInfo;
     }
 
     private static async Task<bool> WaitForOutputDrainsAsync(
