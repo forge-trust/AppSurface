@@ -238,16 +238,28 @@ public static class Program
             throw new InvalidOperationException($"Packed nuspec identity or source commit is incorrect for {packageId}.");
         }
 
-        if (evidenceAspire && !dependencies.Select(dependency => dependency.Attribute("id")?.Value ?? string.Empty)
-                .Order(StringComparer.OrdinalIgnoreCase)
-                .SequenceEqual(new[]
-                    {
-                        "Aspire.Hosting",
-                        "ForgeTrust.AppSurface.Evidence.Contracts",
-                        "ForgeTrust.AppSurface.Evidence.Readiness",
-                    }.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase))
+        if (!evidenceAspire)
         {
-            throw new InvalidOperationException("Evidence.Aspire nuspec dependencies must be Aspire.Hosting, Evidence.Contracts, and Evidence.Readiness only.");
+            return;
+        }
+
+        // Central transitive pinning also promotes existing third-party dependencies into the nuspec.
+        // Protect the intended first-party boundary without rejecting those coordinated pins.
+        var firstPartyIds = dependencies.Select(dependency => dependency.Attribute("id")?.Value ?? string.Empty)
+            .Where(id => id.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase);
+        var hostingDependency = dependencies.SingleOrDefault(dependency =>
+            string.Equals(dependency.Attribute("id")?.Value, "Aspire.Hosting", StringComparison.OrdinalIgnoreCase));
+        if (!firstPartyIds.SequenceEqual(new[]
+            {
+                "ForgeTrust.AppSurface.Evidence.Contracts",
+                "ForgeTrust.AppSurface.Evidence.Readiness",
+            }, StringComparer.OrdinalIgnoreCase) ||
+            hostingDependency?.Attribute("version")?.Value.Replace(" ", string.Empty) != "[13.4.4,14.0.0)" ||
+            dependencies.Any(dependency => string.Equals(dependency.Attribute("id")?.Value,
+                "Aspire.Hosting.Testing", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("Evidence.Aspire must reference only Contracts and Readiness first-party packages, require the supported Aspire.Hosting range, and have no Aspire.Hosting.Testing dependency.");
         }
     }
 
