@@ -560,7 +560,8 @@ internal sealed class LinuxEmptyObservationControlServer
         RequireCleanupBound();
         }
         catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(stage, null, error); throw; }
+        { _failures.Capture(stage, null, error,
+            stage == LinuxControlFailureStage.PeerCheck ? _worker.IdentityFailure : null); throw; }
     }
 
     private async Task HandleRegisteredAsync(Task dispatch, LinuxControlConnection connection,

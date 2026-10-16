@@ -254,4 +254,106 @@ class ProcessThreadSnapshotControls(unittest.TestCase):
   self.assertEqual(5,facts['peak_total_threads']);self.assertEqual(first,facts['peak_snapshot'])
   self.assertEqual({'dotnet.dll':4,'testhost.dll':2},facts['peak_by_role_threads'])
 
+class IgnoringDescendantSamplingControls(unittest.TestCase):
+ def setUp(self):
+  import os,tempfile
+  self.os=os;self.tmp=tempfile.TemporaryDirectory();self.scratch=Path(self.tmp.name)
+  self.uid=os.geteuid();self.gid=os.getegid();self.unit='appsurface-evidence-producer-test.service'
+  self.producer={'pid':41001,'uid':self.uid,'gid':self.gid,'cgroup':'/system.slice/'+self.unit}
+
+ def tearDown(self):self.tmp.cleanup()
+
+ def marker(self,name,contents):
+  path=self.scratch/name;path.write_bytes(contents);path.chmod(0o600);return path
+
+ def complete_markers(self,pid=b'41002'):
+  self.marker('checkpoint2-child-ready',b'SIGTERM handler installed')
+  self.marker('checkpoint2-case-entered',b'ignored-cancel')
+  self.marker('checkpoint2-ignored-child-pid',pid)
+
+ def proc_facts(self,*,uid=None,gid=None,cgroup=None,starts=(7654,7654)):
+  from unittest.mock import patch
+  reads={}
+  uid=self.uid if uid is None else uid;gid=self.gid if gid is None else gid
+  status=(f'Uid:\t{uid} {uid} {uid} {uid}\nGid:\t{gid} {gid} {gid} {gid}\nThreads:\t3\n').encode()
+  group=('0::/system.slice/'+self.unit+'\n' if cgroup is None else cgroup).encode()
+  def bounded(path,limit,deadline):
+   name=str(path);reads[name]=reads.get(name,0)+1
+   if name.endswith('/stat'):
+    start=starts[min(reads[name]-1,len(starts)-1)]
+    return b'41002 (testhost (child)) S '+b' '.join([b'0']*18+[str(start).encode()])
+   if name.endswith('/status'):return status
+   if name.endswith('/cgroup'):return group
+   return None
+  return patch, bounded
+
+ def test_valid_private_markers_and_stable_exact_proc_facts_are_only_observations(self):
+  self.complete_markers()
+  from unittest.mock import patch
+  _,bounded=self.proc_facts()
+  with patch.object(native,'_bounded_proc_read',side_effect=bounded):
+   observation=native.sample_ignoring_descendant(self.unit,self.producer,self.scratch)
+  self.assertEqual({'pid':41002,'uid':self.uid,'gid':self.gid,'starttime_ticks':7654,
+   'cgroup':'/system.slice/'+self.unit},observation)
+  self.assertIsNone(observation.get('accepted'))
+  self.assertIsNone(observation.get('authority'))
+
+ def test_missing_or_malformed_markers_and_zero_or_self_pid_never_sample_proc(self):
+  from unittest.mock import patch
+  self.marker('checkpoint2-child-ready',b'SIGTERM handler installed')
+  self.marker('checkpoint2-case-entered',b'ignored-cancel')
+  with patch.object(native,'_bounded_proc_read') as proc:
+   self.assertIsNone(native.sample_ignoring_descendant(self.unit,self.producer,self.scratch))
+   proc.assert_not_called()
+  for value in (b'zero',b'0',str(self.producer['pid']).encode()):
+   with self.subTest(pid_marker=value):
+    self.marker('checkpoint2-ignored-child-pid',value)
+    with patch.object(native,'_bounded_proc_read') as proc:
+     self.assertIsNone(native.sample_ignoring_descendant(self.unit,self.producer,self.scratch))
+     proc.assert_not_called()
+
+ def test_subject_marker_reader_requires_single_link_private_regular_file_and_exact_owner(self):
+  import os
+  valid=self.marker('valid',b'ignored-cancel')
+  self.assertEqual(b'ignored-cancel',native.read_subject_marker(valid,self.uid,self.gid,32))
+  self.assertIsNone(native.read_subject_marker(valid,self.uid+1,self.gid,32))
+  self.assertIsNone(native.read_subject_marker(valid,self.uid,self.gid+1,32))
+  self.assertIsNone(native.read_subject_marker(valid,self.uid,self.gid,4))
+  wrong_mode=self.marker('wrong-mode',b'ignored-cancel');wrong_mode.chmod(0o644)
+  self.assertIsNone(native.read_subject_marker(wrong_mode,self.uid,self.gid,32))
+  linked=self.marker('linked',b'ignored-cancel');os.link(linked,self.scratch/'linked-again')
+  self.assertIsNone(native.read_subject_marker(linked,self.uid,self.gid,32))
+  symlink=self.scratch/'symlink';symlink.symlink_to(valid)
+  self.assertIsNone(native.read_subject_marker(symlink,self.uid,self.gid,32))
+
+ def test_wrong_proc_uid_gid_cgroup_or_unstable_starttime_is_unavailable(self):
+  from unittest.mock import patch
+  cases=[('uid',self.uid+1,self.gid,None,(7654,7654)),
+   ('gid',self.uid,self.gid+1,None,(7654,7654)),
+   ('cgroup',self.uid,self.gid,'0::/system.slice/other.service\n',(7654,7654)),
+   ('starttime',self.uid,self.gid,None,(7654,7655))]
+  for label,uid,gid,cgroup,starts in cases:
+   with self.subTest(label=label):
+    self.complete_markers()
+    _,bounded=self.proc_facts(uid=uid,gid=gid,cgroup=cgroup,starts=starts)
+    with patch.object(native,'_bounded_proc_read',side_effect=bounded):
+     self.assertIsNone(native.sample_ignoring_descendant(self.unit,self.producer,self.scratch))
+
+class RetainedMutationObservationControls(unittest.TestCase):
+ def events(self):
+  return [{'schema':'evidence-c2-artifact-mutation-v1','phase':'mutated','original_sha256':'a'*64,'changed_sha256':'b'*64,'length':123,'device_major':1,'device_minor':2,'inode':3},
+   {'schema':'evidence-c2-artifact-mutation-v1','phase':'read-rejected','returned_bytes':0}]
+ def test_fixed_metadata_requires_actual_change_then_zero_byte_rejection(self):
+  rows=self.events();self.assertEqual(rows,native.read_mutation_observation(b'non-json-private-canary\n'+b'\n'.join(json.dumps(row).encode() for row in rows)))
+ def test_unknown_duplicate_incomplete_or_unchanged_events_never_substitute_for_the_control(self):
+  import copy
+  original=self.events();variants=[[],original[:1],original[::-1],original+original]
+  for update in [{'length':0},{'inode':0},{'changed_sha256':'a'*64},{'raw_path':'private-canary'}]:
+   rows=copy.deepcopy(original);rows[0].update(update);variants.append(rows)
+  for returned in [1,False,None]:
+   rows=copy.deepcopy(original);rows[1]['returned_bytes']=returned;variants.append(rows)
+  for rows in variants:
+   with self.subTest(rows=rows):
+    with self.assertRaises(RuntimeError):native.read_mutation_observation(b'\n'.join(json.dumps(row).encode() for row in rows))
+
 if __name__=='__main__':unittest.main()

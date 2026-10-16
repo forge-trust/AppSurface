@@ -24,6 +24,10 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
     private IReadOnlyList<LinuxRetainedReportSet.ReportInfo>? _inventory;
     private bool _failed;
     private bool _closed;
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+    private bool _c2MutationApplied;
+    private bool _c2ReadRejectionWritten;
+#endif
 
     private LinuxCoverageControlOperations(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workerWorkspace, LinuxProducerWorkspace workspace,
@@ -109,7 +113,12 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
             {
                 _reports = LinuxProducerArtifactCustody.Capture(_input, _owner, _accounts, _workspace,
                     _producer, token, cancellationToken);
-                return _inventory = _reports.ListReports(cancellationToken);
+                _inventory = _reports.ListReports(cancellationToken);
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+                EmitC2(_reports.MutateRetainedReportForC2(cancellationToken));
+                _c2MutationApplied = true;
+#endif
+                return _inventory;
             }
             catch { _failed = true; throw; }
         }
@@ -123,7 +132,22 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
             RequireOpen();
             if (!_inventoryClaimed || _reports is null || request.RelativeRoot != _token) throw Rejected();
             try { return _reports.ReadChunk(request.Path, request.Offset, 32 * 1024, token); }
-            catch { _failed = true; throw; }
+            catch (Exception failure)
+            {
+                _failed = true;
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+                if (_c2MutationApplied && !_c2ReadRejectionWritten && failure is IOException && !token.IsCancellationRequested)
+                {
+                    _c2ReadRejectionWritten = true;
+                    try { _owner.RequireActive(token); EmitC2(EvidenceCanonicalJson.Serialize(new
+                        { schema = "evidence-c2-artifact-mutation-v1", phase = "read-rejected", returned_bytes = 0 })); }
+                    catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
+                }
+#else
+                _ = failure;
+#endif
+                throw;
+            }
         }
     }
 
@@ -165,6 +189,17 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
             _reports?.Dispose();
         }
     }
+
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+    private static void EmitC2(byte[] bytes)
+    {
+        if (bytes.Length > 4096) throw Rejected();
+        using var error = Console.OpenStandardError();
+        error.Write(bytes);
+        error.Write("\n"u8);
+        error.Flush();
+    }
+#endif
 
     private void RequireOpen()
     {

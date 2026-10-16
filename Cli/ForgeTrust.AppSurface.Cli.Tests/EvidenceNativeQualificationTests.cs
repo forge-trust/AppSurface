@@ -95,6 +95,8 @@ public sealed class EvidenceNativeQualificationTests
         var expected = EvidenceNativeQualificationKind.PendingStartOwnerDeath;
 #elif EVIDENCE_PRIVATE_N16
         var expected = EvidenceNativeQualificationKind.AcceptedBlockedWork;
+#elif EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+        var expected = EvidenceNativeQualificationKind.C2ArtifactMutation;
 #elif EVIDENCE_PRIVATE_N13
         var expected = EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork;
 #elif EVIDENCE_PRIVATE_N14
@@ -126,6 +128,8 @@ public sealed class EvidenceNativeQualificationTests
             EvidenceNativeQualification.N16StopWaitEnabled);
         Assert.Equal(expected == EvidenceNativeQualificationKind.PendingStartOwnerDeath,
             EvidenceNativeQualification.PendingStartOwnerDeathEnabled);
+        Assert.Equal(expected == EvidenceNativeQualificationKind.C2ArtifactMutation,
+            EvidenceNativeQualification.C2ArtifactMutationEnabled);
         Assert.Equal(EvidenceNativeQualification.WorkerStallEnabled,
             EvidenceFixedSynchronousInputFactory.CreateForProtectedRole() is not null);
         var checkpoint = EvidenceNativeQualification.CreateCancellationCheckpoint();

@@ -42,6 +42,13 @@ jobs:
           timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -p:UseSharedCompilation=false --logger 'trx;LogFileName=supervision.trx' --results-directory "$RUNNER_TEMP/checkpoint2-evidence/tests" > "$RUNNER_TEMP/checkpoint2-evidence/core-test.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode --disable-parallel > "$RUNNER_TEMP/checkpoint2-evidence/cli-restore.log" 2>&1
           timeout --signal=KILL 180 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore -p:UseSharedCompilation=false --filter 'FullyQualifiedName~CoverageProtectedOutputRelayTests|FullyQualifiedName~EvidenceRestrictedCoverageProducerTests|FullyQualifiedName~EvidenceRestrictedCoverageFailureTests|FullyQualifiedName~EvidenceRestrictedCoverageFactoryTests' --logger 'trx;LogFileName=coverage.trx' --results-directory "$RUNNER_TEMP/checkpoint2-evidence/tests" > "$RUNNER_TEMP/checkpoint2-evidence/cli-test.log" 2>&1
+      - name: Build separate same-source private retained-artifact mutation image
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180 dotnet publish Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore -c Debug --self-contained false -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C2 -o "$RUNNER_TEMP/checkpoint2-tool-c2" > "$RUNNER_TEMP/checkpoint2-evidence/publish-c2.log" 2>&1
+          mkdir -p "$RUNNER_TEMP/checkpoint2-tool-c2/reportgenerator/net10.0"
+          cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$RUNNER_TEMP/checkpoint2-tool-c2/reportgenerator/net10.0/"
       - name: Acquire only pinned subject SDK package inputs without project evaluation
         shell: bash
         run: |
@@ -49,13 +56,14 @@ jobs:
           timeout --signal=KILL 120 dotnet restore .github/issue779-checkpoint2/NuGetContentHash/NuGetContentHash.csproj --locked-mode --disable-parallel > "$RUNNER_TEMP/checkpoint2-evidence/package-hasher-restore.log" 2>&1
           timeout --signal=KILL 120 dotnet build .github/issue779-checkpoint2/NuGetContentHash/NuGetContentHash.csproj --no-restore -p:UseSharedCompilation=false -o "$RUNNER_TEMP/checkpoint2-package-hasher" > "$RUNNER_TEMP/checkpoint2-evidence/package-hasher-build.log" 2>&1
           timeout --signal=KILL 180 python3 -B .github/issue779-checkpoint2/run-native.py --hash-runtime "$(command -v dotnet)" --package-hasher "$RUNNER_TEMP/checkpoint2-package-hasher/NuGetContentHash.dll" --acquire-packages .github/issue779-checkpoint2/subject/packages.lock.json --package-cache "$RUNNER_TEMP/checkpoint2-tool/nuget" > "$RUNNER_TEMP/checkpoint2-evidence/package-acquisition.json"
+          cp -R "$RUNNER_TEMP/checkpoint2-tool/nuget" "$RUNNER_TEMP/checkpoint2-tool-c2/nuget"
           export CHECKPOINT2_SDK_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"
           printf 'CHECKPOINT2_SDK_ROOT=%s\n' "$CHECKPOINT2_SDK_ROOT" >> "$GITHUB_ENV"
       - name: Execute real CSharp coverage and failure controls under systemd
         shell: bash
         run: |
           set -euo pipefail
-          timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint2/run-native.py --tool "$RUNNER_TEMP/checkpoint2-tool" --runtime "$CHECKPOINT2_SDK_ROOT" --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint2/subject" --output "$RUNNER_TEMP/checkpoint2-evidence/native" --source "$GITHUB_SHA" --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 > "$RUNNER_TEMP/checkpoint2-evidence/native-driver.log" 2>&1
+          timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint2/run-native.py --tool "$RUNNER_TEMP/checkpoint2-tool" --mutation-tool "$RUNNER_TEMP/checkpoint2-tool-c2" --runtime "$CHECKPOINT2_SDK_ROOT" --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint2/subject" --output "$RUNNER_TEMP/checkpoint2-evidence/native" --source "$GITHUB_SHA" --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 > "$RUNNER_TEMP/checkpoint2-evidence/native-driver.log" 2>&1
       - name: Recheck complete source after execution
         if: always()
         shell: bash

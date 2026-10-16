@@ -142,6 +142,62 @@ internal sealed class LinuxRetainedReportSet : IDisposable
         }
     }
 
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+    /// <summary>Changes one byte of the first genuine retained report in the fixed private C2 image only.</summary>
+    /// <remarks>No pathname, callback or replacement inventory is accepted. The next ordinary read must reject.</remarks>
+    internal byte[] MutateRetainedReportForC2(CancellationToken token)
+    {
+        lock (_gate)
+        {
+            RequireOpen();
+            RecheckAll(token);
+            var report = _reports.FirstOrDefault(static item => item.Length > 0);
+            if (report.Length <= 0 || report.Length > MaximumFileBytes) throw Invalid();
+            var node = _nodes.Single(item => item.RelativePath == report.RelativePath && !item.Directory);
+            if (node.Parent is null) throw Invalid();
+            using var writer = OpenAt2(Fd(node.Parent.Handle), node.Name, FileFlags | 1UL, 0, ChildResolution);
+            if (LinuxProtectedMetadata.From(StatFd(writer)) != node.Expected) throw Invalid();
+            var bytes = new byte[checked((int)report.Length)];
+            ReadExact(bytes);
+            if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != report.Sha256) throw Invalid();
+            RecheckAll(token);
+            bytes[0] ^= 1;
+            RandomAccess.Write(writer, bytes.AsSpan(0, 1), 0);
+            Check(token);
+            var changed = LinuxProtectedMetadata.From(StatFd(writer));
+            if ((changed with { ChangeSeconds = node.Expected.ChangeSeconds, ChangeNanoseconds = node.Expected.ChangeNanoseconds,
+                ModifySeconds = node.Expected.ModifySeconds, ModifyNanoseconds = node.Expected.ModifyNanoseconds }) != node.Expected)
+                throw Invalid();
+            using var named = OpenAt2(Fd(node.Parent.Handle), node.Name, PathFlags, 0, ChildResolution);
+            if (LinuxProtectedMetadata.From(StatFd(named)) != changed) throw Invalid();
+            ReadExact(bytes);
+            var changedHash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            if (changedHash == report.Sha256 || LinuxProtectedMetadata.From(StatFd(writer)) != changed) throw Invalid();
+            Check(token);
+            return ForgeTrust.AppSurface.Evidence.Contracts.EvidenceCanonicalJson.Serialize(new
+            {
+                schema = "evidence-c2-artifact-mutation-v1", phase = "mutated",
+                original_sha256 = report.Sha256, changed_sha256 = changedHash, length = report.Length,
+                device_major = changed.DeviceMajor, device_minor = changed.DeviceMinor, inode = changed.Inode,
+            });
+
+            void ReadExact(byte[] target)
+            {
+                var offset = 0;
+                while (offset < target.Length)
+                {
+                    Check(token);
+                    var read = RandomAccess.Read(node.Handle, target.AsSpan(offset), offset);
+                    if (read == 0) throw Invalid();
+                    offset += read;
+                }
+                if (RandomAccess.Read(node.Handle, new byte[1], target.Length) != 0) throw Invalid();
+                Check(token);
+            }
+        }
+    }
+#endif
+
     /// <summary>Joins serialized reads and closes every retained descriptor, in reverse acquisition order.</summary>
     public void Dispose()
     {

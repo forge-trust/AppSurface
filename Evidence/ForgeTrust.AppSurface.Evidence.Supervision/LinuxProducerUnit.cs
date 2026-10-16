@@ -165,7 +165,8 @@ internal sealed class LinuxProducerUnit
             LinuxOwnerFacts.BootstrapExecutable, "-i", "PATH=/usr/bin:/bin", "HOME=" + scratchRoot,
             "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp, "NUGET_PACKAGES=" + packageRoot,
             "DOTNET_ROOT=" + runtimeRoot, "DOTNET_CLI_HOME=" + cliHome,
-            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "LANG=C.UTF-8", "DOTNET_PROCESSOR_COUNT=1", runtimeHost,
+            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "LANG=C.UTF-8", "DOTNET_PROCESSOR_COUNT=1",
+            "DOTNET_EnableDiagnostics_IPC=0", "DOTNET_EnableDiagnostics_Debugger=0", runtimeHost,
             "test", solutionPath, "--configuration", "Debug", "--collect:XPlat Code Coverage",
             "--results-directory", resultsTokenRoot, "--verbosity", "quiet", "-m:1",
             "-p:UseSharedCompilation=false", "-nodeReuse:false"

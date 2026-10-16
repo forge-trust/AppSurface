@@ -32,11 +32,13 @@ public sealed class LinuxProducerUnitTests
         Assert.True(p["AddRef"].GetBool());
         Assert.True(p["RemainAfterExit"].GetBool());
         Assert.Contains("DOTNET_PROCESSOR_COUNT=1", recipe.Arguments);
+        Assert.Contains("DOTNET_EnableDiagnostics_IPC=0", recipe.Arguments);
+        Assert.Contains("DOTNET_EnableDiagnostics_Debugger=0", recipe.Arguments);
         Assert.Contains("TMPDIR=/run/producer/scratch/tmp", recipe.Arguments);
         Assert.Contains("NUGET_PACKAGES=/run/producer/scratch/nuget", recipe.Arguments);
         Assert.Equal(new[] { "test", "/run/producer/subject/Subject.csproj", "--configuration", "Debug", "--collect:XPlat Code Coverage",
             "--results-directory", "/run/producer/results/token", "--verbosity", "quiet", "-m:1", "-p:UseSharedCompilation=false", "-nodeReuse:false" },
-            recipe.Arguments.Skip(14));
+            recipe.Arguments.Skip(16));
         p["ReadWritePaths"].GetArray<string>()[0] = "/canary";
         Assert.Equal("/run/producer/subject", recipe.Properties["ReadWritePaths"].GetArray<string>()[0]);
     }

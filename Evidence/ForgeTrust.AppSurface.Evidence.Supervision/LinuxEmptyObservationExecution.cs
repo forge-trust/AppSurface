@@ -96,7 +96,8 @@ internal static class LinuxEmptyObservationExecution
             var coverage = input.Request.ObservationProducerIds.Count != 0;
             if (coverage)
             {
-                if (EvidenceNativeQualification.Current != EvidenceNativeQualificationKind.None) throw Rejected();
+                if (EvidenceNativeQualification.Current is not (EvidenceNativeQualificationKind.None
+                    or EvidenceNativeQualificationKind.C2ArtifactMutation)) throw Rejected();
                 _ = EvidenceCoverageObservationPlan.FromInput(input, job.Token);
                 input.PrepareCoverageInputs(job.Token);
                 runOutput = new SupervisionRunOutputBudget();
@@ -184,6 +185,12 @@ internal static class LinuxEmptyObservationExecution
             if (producerWorkspace is not null && owner is not null && accounts is not null)
                 try { await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            if ((failed || cleanupFailed) && producerWorkspace is not null && input is not null && owner is not null && worker is not null)
+                try
+                {
+                    worker.RetainJoinedFailureOutput(cleanupToken);
+                }
+                catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { }
             if (runOutput is not null)
                 try
                 {

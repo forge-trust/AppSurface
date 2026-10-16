@@ -75,6 +75,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     /// <summary>Gets the generated unit name as data, not an ownership or exit receipt.</summary>
     internal LinuxUnitName Unit => _pending.Unit;
+    /// <summary>Gets the retained process reader's first closed diagnostic, without granting live identity.</summary>
+    internal LinuxControlFailure? IdentityFailure => _worker?.FirstFailure;
     /// <summary>Gets actual dispatch/group/monitor/pipe settlement, even if the run remains failed.</summary>
     /// <remarks>Accounts still require separate retained filesystem custody and strict cleanup.</remarks>
     internal bool PhysicallySettled => Volatile.Read(ref _physicallySettled) != 0;
@@ -99,6 +101,14 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// </remarks>
     internal byte[] CaptureJoinedOutputDiagnostic(Guid generation) =>
         LinuxJoinedWorkerOutputDiagnostic.EncodeDetached(generation, _lifetime.StopJoined ? _output : null);
+
+    /// <summary>Retains failed coverage-worker output only from the original joined collector.</summary>
+    /// <remarks>No physical settlement is inferred; this writes private diagnostic bytes, not custody evidence.</remarks>
+    internal void RetainJoinedFailureOutput(CancellationToken token)
+    {
+        if (!_lifetime.StopJoined || _output is null) throw LinuxSystemdBackend.InvalidControl();
+        LinuxProducerFailureOutput.RetainWorker(_input, _owner, _output, token);
+    }
 
 #if EVIDENCE_PRIVATE_N16
     /// <summary>Copies N16 client markers from the original output pair only after its existing stop and pumps join.</summary>

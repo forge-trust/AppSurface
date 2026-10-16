@@ -358,3 +358,8 @@ Ten new Facts are defined, zero executed: original caller versus stage-only rele
 ### Compile-owned parent-substitution qualification
 
 The internal `EvidenceNativeQualification.ParentReplacementEnabled` flag selects only the private N07 parent-identity control. The [Supervision core](../ForgeTrust.AppSurface.Evidence.Supervision/README.md) constructs its fixed root rendezvous and the CLI transfers the original allocation fault only in an image compiled with `EvidencePrivateQualification=N07` across the complete project graph. Ordinary `None` creates no N07 rendezvous, pump observer, or fault-transfer write. A command argument, environment variable, descriptor, or public API cannot select it. Exactly one private selection is allowed; qualification images remain unpackable and grant neither admission nor consumer proof. This isolates the older fixed-image procedure while retaining one physical implementation in the integrated source. Native validation of the combined graph remains pending.
+
+
+### Checkpoint-two private retained-report control
+
+`EvidencePrivateQualification=C2` selects internal `EvidenceNativeQualificationKind.C2ArtifactMutation` and `C2ArtifactMutationEnabled` across the same source graph. It is mutually exclusive with every earlier private checkpoint and remains nonpackable. Ordinary `None` has no mutation dispatch. This metadata supplies no producer/application registration, admission or consumer proof; see [the Supervision mutation reference](../ForgeTrust.AppSurface.Evidence.Supervision/c2-artifact-mutation.md) for exact ordering and genuine native requirements.

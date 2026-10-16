@@ -117,6 +117,20 @@ def read_output_observation(raw):
  require(sum(p['received_bytes'] for p in observed['pairs'])==observed['received_bytes'],'actual-byte-reconciliation')
  return observed
 
+def read_mutation_observation(raw):
+ events=[]
+ for line in raw.splitlines():
+  try:event=json.loads(line)
+  except (ValueError,UnicodeError):continue
+  if isinstance(event,dict) and event.get('schema')=='evidence-c2-artifact-mutation-v1':events.append(event)
+ require(len(events)==2 and [e.get('phase') for e in events]==['mutated','read-rejected'],'actual-retention-mutation-and-rejection')
+ mutation,rejection=events
+ require(set(mutation)=={'schema','phase','original_sha256','changed_sha256','length','device_major','device_minor','inode'},'closed-mutation-observation')
+ require(all(type(mutation.get(k)) is int and mutation[k]>=0 for k in ['device_major','device_minor','inode','length']) and mutation['inode']>0 and 0<mutation['length']<=1024*1024,'actual-retained-mutation-metadata')
+ require(all(isinstance(mutation.get(k),str) and re.fullmatch('[0-9a-f]{64}',mutation[k]) for k in ['original_sha256','changed_sha256']) and mutation['original_sha256']!=mutation['changed_sha256'],'actual-retained-byte-change')
+ require(type(rejection.get('returned_bytes')) is int and rejection=={'schema':'evidence-c2-artifact-mutation-v1','phase':'read-rejected','returned_bytes':0},'actual-zero-bytes-on-rejected-read')
+ return events
+
 def sample_producer(unit,descriptor,end,pending=None):
  facts=show(unit,end);pid=int(facts.get('MainPID','0'))
  if not pid:return None
@@ -229,6 +243,36 @@ def _record_process_facts(unit,samples,identity,end):
  if state['peak_total_threads'] is None or facts['total_threads']>state['peak_total_threads']:
   state['peak_total_threads']=facts['total_threads'];state['peak_snapshot']=facts['processes']
 
+def read_subject_marker(path,uid,gid,limit,permissions=0o600):
+ try:
+  fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK)
+  try:
+   before=os.fstat(fd)
+   if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or before.st_uid!=uid or before.st_gid!=gid or stat.S_IMODE(before.st_mode)!=permissions or not 0<before.st_size<=limit:return None
+   data=os.read(fd,limit+1);after=os.fstat(fd);named=path.lstat()
+   signature=lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mode,v.st_uid,v.st_gid,v.st_nlink,v.st_mtime_ns,v.st_ctime_ns)
+   if len(data)!=before.st_size or signature(before)!=signature(after) or signature(after)!=signature(named):return None
+   return data
+  finally:os.close(fd)
+ except OSError:return None
+
+def sample_ignoring_descendant(unit,producer,scratch):
+ uid=producer['uid'];gid=producer['gid']
+ if read_subject_marker(scratch/'checkpoint2-child-ready',uid,gid,64)!=b'SIGTERM handler installed' or read_subject_marker(scratch/'checkpoint2-case-entered',uid,gid,32)!=b'ignored-cancel':return None
+ raw=read_subject_marker(scratch/'checkpoint2-ignored-child-pid',uid,gid,10)
+ if raw is None or not raw.isdigit():return None
+ pid=int(raw)
+ if pid<=0 or pid==producer['pid']:return None
+ process=Path('/proc')/str(pid)
+ try:
+  deadline=time.monotonic()+PROCESS_SAMPLE_SECONDS
+  before=_bounded_proc_read(process/'stat',4096,deadline);status=_bounded_proc_read(process/'status',8192,deadline);group=_bounded_proc_read(process/'cgroup',4096,deadline);after=_bounded_proc_read(process/'stat',4096,deadline)
+ except FileNotFoundError:return None
+ if any(x is None for x in (before,status,group,after)):return None
+ start=parse_proc_starttime(before,pid)
+ if start is None or start!=parse_proc_starttime(after,pid) or parse_proc_status(status,uid,gid) is None or group!=('0::/system.slice/'+unit+'\n').encode():return None
+ return {'pid':pid,'uid':uid,'gid':gid,'starttime_ticks':start,'cgroup':'/system.slice/'+unit}
+
 def sample_cgroup_counters(unit,samples,producer_identity=None,end=None):
  root=Path('/sys/fs/cgroup/system.slice')/unit
  fields={}
@@ -268,8 +312,9 @@ def groups_empty(units):
    if facts.get('populated')!='0':return False
  return True
 
-def retain_producer_prefixes(generation,output,case):
- private=Path('/run/appsurface-evidence-producer-diagnostics-'+generation)
+def retain_producer_prefixes(generation,output,case,role='producer'):
+ require(role in ('producer','worker'),'fixed-diagnostic-role')
+ private=Path('/run/appsurface-evidence-'+role+'-diagnostics-'+generation)
  if private.exists():
   before=private.lstat();require(stat.S_ISDIR(before.st_mode) and before.st_uid==before.st_gid==0 and stat.S_IMODE(before.st_mode)==0o700,'private-producer-diagnostic-root')
   rootfd=os.open(private,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
@@ -281,7 +326,7 @@ def retain_producer_prefixes(generation,output,case):
      m=os.fstat(fd);require(stat.S_ISREG(m.st_mode) and m.st_uid==m.st_gid==0 and m.st_nlink==1 and stat.S_IMODE(m.st_mode)==0o600 and m.st_size<=1024*1024,'private-producer-diagnostic-file')
      data=os.read(fd,1024*1024+1);require(len(data)==m.st_size and not os.read(fd,1),'private-producer-diagnostic-bytes')
      after=os.fstat(fd);require((m.st_dev,m.st_ino,m.st_size,m.st_mtime_ns,m.st_ctime_ns)==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),'private-producer-diagnostic-stability')
-     write(output/(case+'-producer-'+name),data)
+     write(output/(case+'-'+role+'-'+name),data)
     finally:os.close(fd)
   finally:os.close(rootfd)
   return True
@@ -297,12 +342,13 @@ def execute_case(args,case,end,receipt):
  units=[owner,'appsurface-evidence-worker-'+generation+'.service','appsurface-evidence-producer-'+generation+'.service']
  case_end=min(end,time.monotonic()+540)
  try:
-  tool=args.staged_tool;runtime=args.staged_runtime
+  tool=args.staged_mutation_tool if case=='artifact-mutation' else args.staged_tool;runtime=args.staged_runtime
   result['input_inventory_sha256']=args.input_inventory_sha256
   result['subject_inventory']=copy_tree(args.subject,subject)
   # Scenario selection is fixture data chosen by the root before immutable subject audit, never runtime authority.
   scenario=subject/'Scenario.cs';require(scenario.is_file(),'fixture-scenario-source')
-  scenario.write_text('namespace NativePreparation.Subject; public static class Scenario { public static string Kind => "'+case+'"; }\n');scenario.chmod(0o644)
+  scenario_kind="normal" if case=="artifact-mutation" else case
+  scenario.write_text('namespace NativePreparation.Subject; public static class Scenario { public static string Kind => "'+scenario_kind+'"; }\n');scenario.chmod(0o644)
   result['subject_inventory']['Scenario.cs']={'sha256':sha(scenario),'bytes':scenario.stat().st_size,'mode':'0444'}
   policy_file=tool/'fixture-policy.json'
   for p in [subject,*subject.rglob('*')]:
@@ -319,7 +365,7 @@ def execute_case(args,case,end,receipt):
   launch=['/usr/bin/systemd-run','--quiet','--wait','--pipe','--unit='+owner,'--service-type=exec','--property=User=0','--property=Group=0','--property=Restart=no','--property=KillMode=control-group','--property=RuntimeMaxSec=500','--property=TimeoutStopSec=10','--property=SendSIGKILL=yes','--property=FinalKillSignal=SIGKILL','--property=LimitCORE=0','--property=LimitNOFILE=65536','--property=ConditionPathExists='+str(marker/'armed'),'--property=Environment='+' '.join(FIXED),'--property=UnsetEnvironment='+' '.join(ENV_NAMES),'/usr/bin/env','-i',*FIXED,str(host),str(entry),'evidence','supervise','--request',str(request_path)]
   with stdout.open('xb') as out,stderr.open('xb') as err:
    process=subprocess.Popen(launch,stdin=subprocess.DEVNULL,stdout=out,stderr=err,start_new_session=True)
-   finished=None;cancel_sent=False;producer_observed=None
+   finished=None;cancel_sent=False;producer_observed=None;ignored_child=None
    try:
     while time.monotonic()<case_end:
      if 'observed_results_gid' not in result:
@@ -332,8 +378,11 @@ def execute_case(args,case,end,receipt):
       try:sample_cgroup_counters(units[2],result.setdefault('producer_cgroup_counters',{}),producer_observed,case_end)
       except (OSError,ValueError,RuntimeError):result['counter_sample_failed']=True
      entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
-     if case=='cancel' and not cancel_sent and producer_observed is not None:
-      if entered.is_file() and entered.read_bytes()==b'cancel':
+     if case=='ignored-cancel' and ignored_child is None and producer_observed is not None:
+      ignored_child=sample_ignoring_descendant(units[2],producer_observed,entered.parent)
+     if case in ('cancel','ignored-cancel') and not cancel_sent and producer_observed is not None:
+      if entered.is_file() and entered.read_bytes()==case.encode() and (case!='ignored-cancel' or ignored_child is not None):
+       if case=='ignored-cancel':require(not os.path.lexists(entered.parent/'checkpoint2-term-observed'),'no-preexisting-term-marker')
        command(['/usr/bin/systemctl','kill','--kill-whom=main','--signal=INT',owner],case_end);cancel_sent=True
      code=process.poll()
      if code is not None:
@@ -348,9 +397,9 @@ def execute_case(args,case,end,receipt):
       except Exception:pass
      process.kill()
     process.wait(timeout=10)
-  result['owner_terminal']=finished;result['cancel_sent']=cancel_sent;result['observed_producer']=producer_observed
+  result['owner_terminal']=finished;result['cancel_sent']=cancel_sent;result['observed_producer']=producer_observed;result['observed_ignoring_child']=ignored_child
   require(producer_observed is not None,'actual-producer-observed')
-  if case!='normal':
+  if case not in ('normal','artifact-mutation'):
    entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
    require(entered.is_file() and entered.read_bytes()==case.encode(),'actual-test-case-entered')
   require(stdout.is_file() and stderr.is_file(),'root-output-files')
@@ -375,12 +424,32 @@ def execute_case(args,case,end,receipt):
    result['coverage']={k:coverage.attrib[k] for k in ['lines-valid','lines-covered','branches-valid','branches-covered','line-rate','branch-rate']}
   else:
    require(finished['wrapper_exit']!=0,'negative-root-exit')
-   if final.exists():require(json.loads(final.read_bytes())['ExecutionVerdict']!='Passed','negative-no-passed-manifest')
+   if final.exists() and case!='cleanup-failure':require(json.loads(final.read_bytes())['ExecutionVerdict']!='Passed','negative-no-passed-manifest')
    if case=='test-failure':
     require(final.is_file(),'test-failure-manifest')
     failed=json.loads(final.read_bytes())['ProducerResults']
     require(len(failed)==1 and failed[0]['Outcome']=='Failed' and failed[0]['Diagnostic']=='The restricted coverage process exited with code 1.','actual-test-failure-result')
-   elif case=='cancel':require(cancel_sent,'actual-cancel-sent')
+   elif case in ('cancel','ignored-cancel'):
+    require(cancel_sent,'actual-cancel-sent')
+    if case=='ignored-cancel':
+     require(ignored_child is not None,'actual-ignoring-child-observed')
+     term=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-term-observed')
+     metadata=term.lstat() if os.path.lexists(term) else None
+     require(metadata is not None,'actual-descendant-term-marker-present')
+     # Successful cleanup seals the original subject marker as root:root0400.
+     require(read_subject_marker(term,metadata.st_uid,metadata.st_gid,64,permissions=0o400)==b'SIGTERM observed' and metadata.st_uid==metadata.st_gid==0,'actual-descendant-ignored-term')
+     result['descendant_term_observed']=True
+    observed=read_output_observation(stderr.read_bytes())
+    require(all(p['stdout_eof'] and p['stderr_eof'] and p['failure']=='None' for p in observed['pairs']),'cancel-original-output-joined')
+    result['output_observation']=observed
+   elif case=='artifact-mutation':
+    result['artifact_mutation']=read_mutation_observation(stderr.read_bytes())
+   elif case=='cleanup-failure':
+    require(final.is_file() and json.loads(final.read_bytes())['ExecutionVerdict']=='Passed','cleanup-failed-after-passing-procedure')
+    require(not stdout.read_bytes(),'cleanup-no-successful-root-receipt')
+    links=list(Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp').glob('checkpoint2-cleanup-link-*'))
+    require(len(links)==1 and links[0].is_symlink(),'actual-unsafe-scratch-quarantined')
+    result['quarantined']=True
    elif case=='quota':
     observed=read_output_observation(stderr.read_bytes())
     require(observed['quota_exceeded'] is True and observed['received_bytes']>observed['received_byte_limit']==16*1024*1024,'actual-output-quota-crossed')
@@ -394,10 +463,10 @@ def execute_case(args,case,end,receipt):
    identities=[('worker_uid','passwd',d['worker_uid']),('subject_uid','passwd',d['subject_uid']),('worker_gid','group',d['worker_gid']),('subject_gid','group',d['subject_gid'])]
    identities.append(('results_gid','group',result['observed_results_gid']))
    for key,table,number in identities:
-    c=command(['/usr/bin/getent',table,str(number)],case_end,allowed=(0,2));require(c.returncode==2,'numeric-account-still-reserved')
+    c=command(['/usr/bin/getent',table,str(number)],case_end,allowed=(0,2));require(c.returncode==(0 if case=='cleanup-failure' else 2),'numeric-account-custody')
    for prefix,table in [('evw','passwd'),('evs','passwd'),('evw','group'),('evs','group'),('evr','group')]:
-    c=command(['/usr/bin/getent',table,prefix+generation[:28]],case_end,allowed=(0,2));require(c.returncode==2,'named-account-still-reserved')
-   result['accounts_absent']=True
+    c=command(['/usr/bin/getent',table,prefix+generation[:28]],case_end,allowed=(0,2));require(c.returncode==(0 if case=='cleanup-failure' else 2),'named-account-custody')
+   result['accounts_absent']=case!='cleanup-failure';result['accounts_quarantined']=case=='cleanup-failure'
   else:raise RuntimeError('missing-retained-descriptor')
   result['passed']=True
  except Exception as e:
@@ -410,6 +479,8 @@ def execute_case(args,case,end,receipt):
   result['final_groups_empty']=groups_empty(units)
   try:result['producer_diagnostics_retained']=retain_producer_prefixes(generation,args.output,case)
   except Exception:result['producer_diagnostics_retained']=False
+  try:result['worker_diagnostics_retained']=retain_producer_prefixes(generation,args.output,case,'worker')
+  except Exception:result['worker_diagnostics_retained']=False
   for n in ['owner.stdout','owner.stderr']:
    p=root/n
    if p.exists() and p.is_file() and p.stat().st_size<=MAX_LOG:shutil.copyfile(p,args.output/(case+'-'+n));(args.output/(case+'-'+n)).chmod(0o600)
@@ -419,7 +490,7 @@ def execute_case(args,case,end,receipt):
 
 def main():
  ap=argparse.ArgumentParser();ap.add_argument('--acquire-packages',type=Path);ap.add_argument('--package-cache',type=Path);ap.add_argument('--hash-runtime',type=Path);ap.add_argument('--package-hasher',type=Path)
- for n in ['tool','runtime','subject','output']:ap.add_argument('--'+n,type=Path)
+ for n in ['tool','runtime','subject','output','mutation-tool']:ap.add_argument('--'+n,type=Path)
  ap.add_argument('--source');ap.add_argument('--base');args=ap.parse_args()
  end=time.monotonic()+LIMIT;os.umask(0o077)
  if args.acquire_packages:
@@ -434,19 +505,22 @@ def main():
  args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
  receipt={'schema':'issue779-csharp-checkpoint2-native-v1','source':args.source,'base':args.base,'exit':1,'cases':[],'native_acceptance':False,'trusted_eligibility':False}
  common=Path('/run')/('issue779-csharp-checkpoint2-input-'+uuid.uuid4().hex);create_traversable_root(common)
- args.staged_tool=common/'tool';args.staged_runtime=common/'runtime'
- inventory={'tool':copy_tree(args.tool,args.staged_tool),'runtime':copy_tree(args.runtime,args.staged_runtime)}
- write(args.staged_tool/'fixture-policy.json',canonical(policy()),0o644)
- inventory['tool']['fixture-policy.json']={'sha256':sha(args.staged_tool/'fixture-policy.json'),'bytes':(args.staged_tool/'fixture-policy.json').stat().st_size,'mode':'0444'}
- for p in [args.staged_tool,args.staged_runtime,*args.staged_tool.rglob('*'),*args.staged_runtime.rglob('*')]:
-  os.chown(p,0,0,follow_symlinks=False);p.chmod(0o555 if p.is_dir() or p.stat().st_mode&0o111 else 0o444)
+ require(args.mutation_tool is not None,'compiled-c2-image-required')
+ args.staged_tool=common/'tool';args.staged_runtime=common/'runtime';args.staged_mutation_tool=common/'mutation-tool'
+ inventory={'tool':copy_tree(args.tool,args.staged_tool),'runtime':copy_tree(args.runtime,args.staged_runtime),'mutation_tool':copy_tree(args.mutation_tool,args.staged_mutation_tool)}
+ for name,tool_path in [('tool',args.staged_tool),('mutation_tool',args.staged_mutation_tool)]:
+  write(tool_path/'fixture-policy.json',canonical(policy()),0o644)
+  inventory[name]['fixture-policy.json']={'sha256':sha(tool_path/'fixture-policy.json'),'bytes':(tool_path/'fixture-policy.json').stat().st_size,'mode':'0444'}
+ for tree in [args.staged_tool,args.staged_mutation_tool,args.staged_runtime]:
+  for p in [tree,*tree.rglob('*')]:
+   os.chown(p,0,0,follow_symlinks=False);p.chmod(0o555 if p.is_dir() or p.stat().st_mode&0o111 else 0o444)
  write(args.output/'input-inventory.json',canonical(inventory))
  args.input_inventory_sha256=sha(args.output/'input-inventory.json')
 
  try:
-  for case in ['normal','test-failure','cancel','quota']:
+  for case in ['normal','test-failure','cancel','quota','ignored-cancel','artifact-mutation','cleanup-failure']:
    if not execute_case(args,case,end,receipt):break
-  receipt['exit']=0 if len(receipt['cases'])==4 and all(c['passed'] for c in receipt['cases']) else 1
+  receipt['exit']=0 if len(receipt['cases'])==7 and all(c['passed'] for c in receipt['cases']) else 1
  finally:write(args.output/'native-receipt.json',canonical(receipt))
  return receipt['exit']
 if __name__=='__main__':raise SystemExit(main())

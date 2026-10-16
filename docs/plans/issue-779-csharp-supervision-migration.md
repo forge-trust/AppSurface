@@ -670,3 +670,20 @@ The cancellation fixture now closes and atomically publishes its marker before i
 external cancellation cannot depend on a buffered writer that never disposes. Additional cleanup and
 ignored-cancellation fixture branches are prepared but remain unrun and outside the current four-case
 native inventory until their real kernel/cleanup assertions are integrated.
+
+### Complete checkpoint-two failure inventory preparation
+
+The candidate now defines seven genuine cases: ordinary numerical coverage, test failure,
+cancellation, output quota, an actual TERM-ignoring inherited-pipe descendant, compile-private
+retained-report mutation, and strict cleanup quarantine. See [the native inventory](../../.github/issue779-checkpoint2/README.md#seven-case-completion-inventory)
+and [private mutation ordering](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/c2-artifact-mutation.md).
+None is credited by source preparation. The mutation image is separately published from the same
+source with `EvidencePrivateQualification=C2`; ordinary builds omit the write hook. The final negative
+cleanup case must preserve its original reserved accounts rather than falsely reporting cleanup.
+
+The diagnostic retry38856802509 failed before producer dispatch at worker peer rechecking, so no task
+breakdown or current subject failure was observed. Existing process-reader failure stages and original
+joined worker prefixes are now retained privately to diagnose that earlier path. Runtime diagnostic-port
+and debugger services are disabled for the producer before SDK startup, preserving the profiler,
+collector, 64-task/1GiB caps, command and deadlines. Their actual footprint/coverage effect remains a
+Linux validation requirement; the prior processor-count hint alone was insufficient.

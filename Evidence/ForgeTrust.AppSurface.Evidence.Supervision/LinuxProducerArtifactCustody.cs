@@ -147,6 +147,19 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
         }
     }
 
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+    /// <summary>Forwards the compile-private mutation to this genuine set after normal inventory succeeds.</summary>
+    internal byte[] MutateRetainedReportForC2(CancellationToken token)
+    {
+        lock (_gate)
+        {
+            RequireOpen();
+            CheckWork(token);
+            return (_reports ?? throw Invalid()).MutateRetainedReportForC2(token);
+        }
+    }
+#endif
+
     /// <summary>Reads only an exact inventoried report at its next offset, returning at most 128 KiB.</summary>
     /// <remarks>The retained engine serves 64 KiB pieces; this wrapper joins at most two pieces per call.</remarks>
     internal byte[] ReadChunk(string relativePath, long offset, int maximumBytes, CancellationToken token = default)

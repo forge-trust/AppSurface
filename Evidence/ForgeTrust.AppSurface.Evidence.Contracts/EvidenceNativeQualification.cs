@@ -32,11 +32,13 @@ internal enum EvidenceNativeQualificationKind
     OwnerKilledDuringAcceptedWork,
     /// <summary>Private N14 owner SIGSTOP until its existing systemd runtime deadline.</summary>
     OwnerStoppedDuringAcceptedWork,
+    /// <summary>Private C2 in-place mutation of one retained producer artifact before its first read.</summary>
+    C2ArtifactMutation,
 }
 
 /// <summary>Separates fixed private Linux qualification behavior from ordinary execution.</summary>
 /// <remarks>
-/// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_N04,
+/// Ordinary builds select None. A private build may define exactly one of EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION, EVIDENCE_PRIVATE_N04,
 /// EVIDENCE_PRIVATE_N05, EVIDENCE_PRIVATE_N06, EVIDENCE_PRIVATE_N07, EVIDENCE_PRIVATE_N08, EVIDENCE_PRIVATE_N09, EVIDENCE_PRIVATE_N10, EVIDENCE_PRIVATE_N11, EVIDENCE_PRIVATE_N12, EVIDENCE_PRIVATE_N13, EVIDENCE_PRIVATE_N14, EVIDENCE_PRIVATE_N15 or EVIDENCE_PRIVATE_N16 across the complete same-image project graph.
 /// Arguments, environment variables, descriptors and public APIs cannot select a checkpoint.
 /// Qualification still requires the original authenticated native owners and all ordinary guards;
@@ -44,6 +46,9 @@ internal enum EvidenceNativeQualificationKind
 /// </remarks>
 internal static class EvidenceNativeQualification
 {
+#if EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION && (EVIDENCE_PRIVATE_ACCEPTED_WORK || EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)
+#error A private qualification image must select exactly one checkpoint.
+#endif
 #if (EVIDENCE_PRIVATE_N04 && (EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N07 && (EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N08 && (EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N09 && (EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N10 && (EVIDENCE_PRIVATE_N11 || EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N11 && (EVIDENCE_PRIVATE_N12 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N12 && (EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N13 && (EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N14 && (EVIDENCE_PRIVATE_N15 || EVIDENCE_PRIVATE_N16)) || (EVIDENCE_PRIVATE_N15 && (EVIDENCE_PRIVATE_N16))
 #error A private qualification image must select exactly one checkpoint.
 #endif
@@ -86,6 +91,8 @@ internal static class EvidenceNativeQualification
             return EvidenceNativeQualificationKind.OwnerKilledDuringAcceptedWork;
 #elif EVIDENCE_PRIVATE_N14
             return EvidenceNativeQualificationKind.OwnerStoppedDuringAcceptedWork;
+#elif EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION
+            return EvidenceNativeQualificationKind.C2ArtifactMutation;
 #else
             return EvidenceNativeQualificationKind.None;
 #endif
@@ -145,6 +152,9 @@ internal static class EvidenceNativeQualification
 
     /// <summary>Gets whether this image owns the fixed N15 pending-start death barrier.</summary>
     internal static bool PendingStartOwnerDeathEnabled => Current == EvidenceNativeQualificationKind.PendingStartOwnerDeath;
+
+    /// <summary>Gets whether this image owns the fixed C2 retained-artifact mutation control.</summary>
+    internal static bool C2ArtifactMutationEnabled => Current == EvidenceNativeQualificationKind.C2ArtifactMutation;
 
     /// <summary>Creates metadata for the private stage wait only in a cancellation qualification image.</summary>
     /// <returns>Null for every image except N08 and N09; otherwise an internal one-attempt checkpoint.</returns>
