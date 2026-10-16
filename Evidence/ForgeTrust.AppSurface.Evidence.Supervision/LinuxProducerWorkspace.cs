@@ -437,6 +437,20 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         catch (Exception error) when (Recoverable(error)) { }
     }
 
+    private static void EmitSealGuard(object fields)
+    {
+        try
+        {
+            var bytes = EvidenceCanonicalJson.Serialize(new { schema = "evidence-producer-seal-guard-v1", fields });
+            if (bytes.Length > 4096) return;
+            using var output = Console.OpenStandardError();
+            output.Write(bytes);
+            output.Write("\n"u8);
+            output.Flush();
+        }
+        catch (Exception error) when (Recoverable(error)) { }
+    }
+
     private void CreateDirectories(CancellationToken token)
     {
         CheckInput(token);
@@ -582,10 +596,14 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         var totalBytes = 0L;
         foreach (var entry in entries)
         {
-            if (entries.Count > LinuxProducerWorkspaceLayout.MaximumNodes) throw LinuxProducerWorkspaceLayout.Invalid();
+            if (entries.Count > LinuxProducerWorkspaceLayout.MaximumNodes)
+            { EmitSealGuard(new { reason = "node-count", count = entries.Count }); throw LinuxProducerWorkspaceLayout.Invalid(); }
             if (entry.Directory) continue;
             if (entry.Original.Length > (ulong)(LinuxProducerWorkspaceLayout.MaximumTreeBytes - totalBytes))
+            {
+                EmitSealGuard(new { reason = "aggregate-bytes", bytes = totalBytes, next_bytes = entry.Original.Length });
                 throw LinuxProducerWorkspaceLayout.Invalid();
+            }
             totalBytes += checked((long)entry.Original.Length);
         }
     }
@@ -603,13 +621,15 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private void CollectChildren(SafeFileHandle parent, string parentName, List<SealEntry> entries,
         CancellationToken token, bool sealedTree, int depth)
     {
-        if (depth > 32) throw LinuxProducerWorkspaceLayout.Invalid();
+        if (depth > 32)
+        { EmitSealGuard(new { reason = "depth", depth }); throw LinuxProducerWorkspaceLayout.Invalid(); }
         var expectedUid = sealedTree ? 0u : _layout.Accounts.SubjectUid;
         var expectedGid = sealedTree ? 0u : _layout.Accounts.SubjectGid;
         foreach (var name in ReadNames(parent, token))
         {
             token.ThrowIfCancellationRequested();
-            if (entries.Count >= LinuxProducerWorkspaceLayout.MaximumNodes) throw LinuxProducerWorkspaceLayout.Invalid();
+            if (entries.Count >= LinuxProducerWorkspaceLayout.MaximumNodes)
+            { EmitSealGuard(new { reason = "node-count", count = entries.Count }); throw LinuxProducerWorkspaceLayout.Invalid(); }
             SafeFileHandle? probe = null;
             SafeFileHandle? opened = null;
             try
@@ -618,13 +638,14 @@ internal sealed class LinuxProducerWorkspace : IDisposable
                 var sampled = LinuxProtectedMetadata.From(StatFd(probe));
                 var type = sampled.Mode & 0xf000;
                 var directory = type == 0x4000;
-                if (!directory && type != 0x8000) throw LinuxProducerWorkspaceLayout.Invalid();
+                if (!directory && type != 0x8000)
+                { EmitSealGuard(new { reason = "node-type", mode = sampled.Mode }); throw LinuxProducerWorkspaceLayout.Invalid(); }
                 RequireMutableMetadata(sampled, directory, expectedUid, expectedGid, sealedTree);
                 opened = OpenAt2(Fd(parent), name, directory ? DirectoryFlags : ReadFileFlags, 0,
                     ChildResolution);
                 var actual = LinuxProtectedMetadata.From(StatFd(opened));
                 if (directory ? !actual.SameAncestorAs(sampled) : actual != sampled)
-                    throw LinuxProducerWorkspaceLayout.Invalid();
+                { EmitSealGuard(new { reason = "opened-metadata", directory, sampled, actual }); throw LinuxProducerWorkspaceLayout.Invalid(); }
                 var entry = new SealEntry(opened, parent, name, actual, directory, ownsHandle: true);
                 entries.Add(entry);
                 opened = null;
@@ -733,7 +754,12 @@ internal sealed class LinuxProducerWorkspace : IDisposable
             || (directory ? sealedTree && permissions != PrivatePermissions
                 : value.LinkCount != 1 || value.Length > LinuxProducerWorkspaceLayout.MaximumFileBytes
                     || sealedTree && permissions != PrivateFilePermissions))
+        {
+            EmitSealGuard(new { reason = "node-metadata", directory, sealed_tree = sealedTree,
+                expected_uid = uid, expected_gid = gid, actual_uid = value.Uid, actual_gid = value.Gid,
+                mode = value.Mode, links = value.LinkCount, bytes = value.Length, inode = value.Inode });
             throw LinuxProducerWorkspaceLayout.Invalid();
+        }
     }
 
     private static void RequireCopiedFile(LinuxProtectedMetadata value)
@@ -771,26 +797,44 @@ internal sealed class LinuxProducerWorkspace : IDisposable
 
     private static string[] ReadNames(SafeFileHandle directory, CancellationToken token)
     {
-        token.ThrowIfCancellationRequested();
-        using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        var buffer = new byte[32 * 1024];
-        while (true)
+        var phase = "directory-open";
+        try
         {
             token.ThrowIfCancellationRequested();
-            var count = ReadDirectory(fresh, buffer);
-            if (count == 0) break;
-            foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-                if (names.Count >= LinuxProducerWorkspaceLayout.MaximumNodes || !names.Add(name))
-                    throw LinuxProducerWorkspaceLayout.Invalid();
+            using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            var buffer = new byte[32 * 1024];
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                phase = "getdents";
+                var count = ReadDirectory(fresh, buffer);
+                if (count == 0) break;
+                phase = "directory-parse";
+                foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
+                {
+                    phase = "unique-directory-name";
+                    if (names.Count >= LinuxProducerWorkspaceLayout.MaximumNodes || !names.Add(name))
+                        throw LinuxProducerWorkspaceLayout.Invalid();
+                }
+            }
+            return names.Order(StringComparer.Ordinal).ToArray();
         }
-        return names.Order(StringComparer.Ordinal).ToArray();
+        catch (Exception error) when (Recoverable(error))
+        {
+            EmitSealGuard(new { reason = "directory-read", phase,
+                error_kind = error is OperationCanceledException ? "Cancelled" : error is EvidenceAdmissionException ? "Admission" : error is IOException ? "Io" : "Other" });
+            throw;
+        }
     }
 
     private static void RequireExactNames(IReadOnlyCollection<string> actual, params string[] expected)
     {
         if (actual.Count != expected.Length || expected.Any(name => !actual.Contains(name, StringComparer.Ordinal)))
+        {
+            EmitSealGuard(new { reason = "directory-names", actual_count = actual.Count, expected_count = expected.Length });
             throw LinuxProducerWorkspaceLayout.Invalid();
+        }
     }
 
     private static void SetOwnershipAndMode(SafeFileHandle handle, uint uid, uint gid, ushort permissions)
