@@ -433,6 +433,109 @@ public sealed class LinuxWorkerUnitTests
         Assert.False(output.IsClosed); Assert.False(error.IsClosed);
     }
 
+    [Theory]
+    [InlineData("active", "exited", 0)]
+    [InlineData("inactive", "dead", 17)]
+    [InlineData("failed", "failed", 17)]
+    public void HasExitedExecutionAcceptsNormalTerminalExitIncludingNonzeroStatus(string state, string substate, int status)
+    {
+        using var output = BorrowedOutput(); using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var terminal = Running(recipe) with
+        {
+            ActiveState = state, SubState = substate, MainPid = 0,
+            ExecMainCode = 1, ExecMainStatus = status
+        };
+
+        Assert.True(recipe.HasExitedExecution(terminal, terminal.ExecMainPid));
+        Assert.True(recipe.HasFinished(terminal));
+        Assert.False(recipe.HasRunningMain(terminal));
+        Assert.False(output.IsClosed); Assert.False(error.IsClosed);
+    }
+
+    [Theory]
+    [InlineData("inactive", "dead", 2, 15)]
+    [InlineData("failed", "failed", 2, 9)]
+    [InlineData("inactive", "dead", 3, 6)]
+    public void HasExitedExecutionAcceptsValidSignalTerminationAsExitedOnly(string state, string substate,
+        int code, int signal)
+    {
+        using var output = BorrowedOutput(); using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var terminal = Running(recipe) with
+        {
+            ActiveState = state, SubState = substate, MainPid = 0,
+            ExecMainCode = code, ExecMainStatus = signal
+        };
+
+        Assert.True(recipe.HasExitedExecution(terminal, terminal.ExecMainPid));
+        Assert.True(recipe.HasStopped(terminal));
+        Assert.False(recipe.HasFinished(terminal));
+        Assert.False(recipe.HasRunningMain(terminal));
+    }
+
+    [Fact]
+    public void HasExitedExecutionRejectsRunningWrongCapturedPidAndForeignPolicy()
+    {
+        using var output = BorrowedOutput(); using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var running = Running(recipe);
+        Assert.False(recipe.HasExitedExecution(running, running.ExecMainPid));
+
+        var terminal = running with { MainPid = 0, ActiveState = "inactive", SubState = "dead", ExecMainCode = 1 };
+        AssertRejected(() => recipe.HasExitedExecution(terminal, 0));
+        AssertRejected(() => recipe.HasExitedExecution(terminal, terminal.ExecMainPid + 1));
+        AssertClosed(() => recipe.HasExitedExecution(terminal with { User = "0" }, terminal.ExecMainPid));
+        Assert.False(output.IsClosed); Assert.False(error.IsClosed);
+    }
+
+    [Theory]
+    [InlineData(2, 0)]
+    [InlineData(2, 65)]
+    [InlineData(3, 0)]
+    [InlineData(3, 65)]
+    public void HasExitedExecutionRejectsSignalsOutsideTheKernelSignalRange(int code, int signal)
+    {
+        using var output = BorrowedOutput(); using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var terminal = Running(recipe) with
+        {
+            ActiveState = "inactive", SubState = "dead", MainPid = 0,
+            ExecMainCode = code, ExecMainStatus = signal
+        };
+        AssertClosed(() => recipe.HasExitedExecution(terminal, terminal.ExecMainPid));
+    }
+
+    [Fact]
+    public void ValidSignalTransitionStaysPendingUntilTheSameExecutionIsTerminal()
+    {
+        using var output = BorrowedOutput(); using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var transition = Running(recipe) with
+        {
+            MainPid = 0, ExecMainCode = 3, ExecMainStatus = 6
+        };
+
+        Assert.True(recipe.IsExitTransition(transition, transition.ExecMainPid));
+        Assert.False(recipe.HasExitedExecution(transition, transition.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(transition, transition.ExecMainPid + 1));
+
+        var terminal = transition with { ActiveState = "failed", SubState = "failed" };
+        Assert.False(recipe.IsExitTransition(terminal, terminal.ExecMainPid));
+        Assert.True(recipe.HasExitedExecution(terminal, terminal.ExecMainPid));
+        AssertClosed(() => recipe.IsExitTransition(transition with { User = "0" }, transition.ExecMainPid));
+    }
+
+    private static void AssertRejected(Func<bool> predicate)
+    {
+        try { Assert.False(predicate()); }
+        catch (EvidenceAdmissionException error)
+        {
+            Assert.Equal("ASEVD410", error.Code);
+            Assert.Null(error.InnerException);
+        }
+    }
+
     private static LinuxUnitProperties Running(LinuxWorkerUnit recipe) => new(recipe.Unit.Value,
         "loaded", "active", "running", "/system.slice/" + recipe.Unit.Value, 4001, 4001, 0, 0,
         "65010", "65011", "exec", "control-group", true, recipe.RuntimeMicroseconds, recipe.StoppingMicroseconds);

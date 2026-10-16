@@ -657,14 +657,16 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 _owner.RequireCleanupLaunchInput(_input, token);
                 RequireOutputNotFailed();
                 var facts = await _observations!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
-                if (_recipe!.HasFinished(facts))
+                if (_recipe!.HasExitedExecution(facts, _worker!.Pid))
                 {
-                    if (facts.ExecMainPid != _worker!.Pid) throw LinuxSystemdBackend.InvalidControl();
                     _owner.RequireControlIdentity(token);
                     _naturalTerminal = facts;
+                    if (facts.ExecMainCode != 1 || facts.ExecMainStatus != 0)
+                        Interlocked.Exchange(ref _failed, 1); // Failed work, not failed physical cleanup.
                     return facts;
                 }
-                if (!_recipe.HasRunningMain(facts) || facts.MainPid != _worker!.Pid)
+                if ((!_recipe.HasRunningMain(facts) || facts.MainPid != _worker!.Pid)
+                    && !_recipe.IsExitTransition(facts, _worker.Pid))
                     throw LinuxSystemdBackend.InvalidControl();
                 // Authenticated unit facts retain the captured main PID through natural exit. Requiring
                 // live /proc after a running sample would race a legitimate exit; every control I/O

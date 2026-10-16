@@ -225,6 +225,35 @@ internal sealed class LinuxWorkerUnit
             || value.ActiveState == "failed" && value.SubState == "failed";
     }
 
+    /// <summary>Recognizes this retained execution's terminal record, including failed signal termination.</summary>
+    /// <param name="value">Actual typed sample; detached test records supply no native ownership.</param>
+    /// <param name="capturedPid">Original kernel-authenticated execution PID retained by the worker holder.</param>
+    /// <returns>True only for a normal finished or stopped terminal of that exact execution.</returns>
+    /// <remarks>Signal termination remains failed work. Stop, pending operations, monitor and pumps must still
+    /// join, followed by final unit/group and filesystem checks. This predicate grants no successful completion.</remarks>
+    internal bool HasExitedExecution(LinuxUnitProperties value, uint capturedPid)
+    {
+        RequireObservedPolicy(value);
+        if (capturedPid == 0 || value.ExecMainPid != capturedPid) throw LinuxSystemdBackend.InvalidControl();
+        return HasFinished(value) || HasStopped(value);
+    }
+
+    /// <summary>Keeps validated same-execution exit transitions pending within the original monitor bound.</summary>
+    /// <remarks>Unit and service properties are read separately; a mixed running/zero-main sample is not
+    /// terminal success. Foreign identities, unsupported states and malformed exit records still reject.</remarks>
+    internal bool IsExitTransition(LinuxUnitProperties value, uint capturedPid)
+    {
+        RequireObservedPolicy(value);
+        if (capturedPid == 0 || value.ExecMainPid != capturedPid
+            || value.MainPid != 0 && value.MainPid != capturedPid) return false;
+        if (value.ExecMainCode is 2 or 3 && value.ExecMainStatus is < 1 or > 64)
+            throw LinuxSystemdBackend.InvalidControl();
+        if (value.ExecMainCode is < 0 or > 3) return false;
+        return value.ActiveState == "deactivating" && value.SubState is "stop" or "stop-sigterm" or "stop-sigkill" or "stop-post" or "final-sigterm" or "final-sigkill"
+            || value.ActiveState == "active" && value.SubState == "running" && value.MainPid == 0
+            || value.ActiveState is "inactive" or "failed" && value.SubState is "dead" or "failed" && value.ExecMainCode == 0;
+    }
+
     /// <summary>Matches stopped-unit metadata after the original stop sequence; this is not physical settlement.</summary>
     /// <param name="value">Actual retained unit sample, or detached metadata when testing this predicate.</param>
     /// <returns>True only for inactive/dead or failed/failed, zero main PID and a recorded positive execution PID.</returns>

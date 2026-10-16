@@ -48,3 +48,21 @@ settlement is false. It requires the actual original collector task to have comp
 its state file records pending failure, cleanup/pump/group flags and the last already-read stop sample.
 Unknown states remain `unknown`; it performs no new unit lookup or output read. Diagnostic retention
 never changes the physical-settlement predicate, sealing, quarantine, account disposition or run result.
+
+## Worker failure versus unsafe cleanup
+
+The worker monitor recognizes the original captured execution's normal terminal or authenticated
+stopped signal-exit record through `LinuxWorkerUnit.HasExitedExecution(sample, capturedPid)`.
+Signal termination and normal nonzero status permanently mark work failed. They do not by themselves
+quarantine storage before native finalization can inspect it. Foreign PIDs, malformed status or policy,
+failed observations and other integrity faults still reject and quarantine. All successful-completion
+checks retain the exact normal code1/status0 requirement. The original stop and pending tasks, unit/PID,
+post-pump cgroup emptiness, both original EOFs, owner continuity and retained-tree sealing still govern
+filesystem custody and account removal after a failed worker. This distinction is needed when an
+artifact read correctly rejects mutation and the worker's fail-fast path terminates its own process.
+
+`IsExitTransition` permits only policy-validated same-execution stop states and mixed-interface
+running/zero-main observations to remain pending under the original monitor token. Unit and service
+properties are separate authenticated reads, so an exit between them can produce that mixed tuple.
+The transition grants no terminal or physical result; the monitor must still reach an exact finished
+or stopped record. Foreign PIDs/policy, invalid signals and unsupported states remain rejection paths.
