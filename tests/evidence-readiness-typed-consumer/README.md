@@ -31,7 +31,7 @@ Each call injects an immutable `GateScenario` through `CreateConfiguredAsync` an
 
 The equivalence is native Aspire startup/readiness only. Browser execution, authentication, test data, and billing or monitoring assertions remain downstream responsibilities. The executable resource serves its local `/healthz` path so the packed consumer can exercise the fixture without relying on a remote service.
 
-Prerequisites are the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
+Prerequisites are a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
 
 ```sh
 dotnet add package ForgeTrust.AppSurface.Aspire.Testing \
@@ -45,7 +45,7 @@ For the standalone prepared project, copy this directory's `Consumer.csproj.temp
 scripts/verify-evidence-readiness-consumers.sh
 ```
 
-The script's final line is transactional: `EVIDENCE_READINESS_CONSUMERS_COMPLETE status=PASS ...` appears only after both packed consumers restore, build, and run. The typed run emits two `READINESS_GATE_EQUIVALENCE` lines and then a `READINESS_TYPED_CONSUMER_OK` line containing the actual package version, repository commit, dirty/clean source-tree state, and gate inputs. Both outputs say `timing=unmeasured`.
+The script exports the captured commit with `git archive` and takes every package producer and consumer fixture from that immutable export. It refuses a dirty checkout with exit code 2; commit intended changes before running. A failure reports retained `logs`, `consumerRoot` and `producerRoot` paths. The script's final line includes `sourceSnapshot=git-archive` and is transactional: `EVIDENCE_READINESS_CONSUMERS_COMPLETE status=PASS ...` appears only after both packed consumers restore, build, and run. The typed run emits two `READINESS_GATE_EQUIVALENCE` lines and then a `READINESS_TYPED_CONSUMER_OK` line containing the actual package version, repository commit, clean source-tree state, and gate inputs. Both outputs say `timing=unmeasured`.
 
 Run both neutral and typed packed consumers from the repository root with:
 
