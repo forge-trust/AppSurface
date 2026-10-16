@@ -15,6 +15,12 @@ This changelog is the compact release ledger for AppSurface. The monorepo ships 
 - Upgrade policy: [Pre-1.0 upgrade policy](./releases/upgrade-policy.md)
 - Authoring workflow: [Release authoring checklist](./releases/release-authoring-checklist.md)
 
+## 0.2.0-preview.14 - 2026-10-15
+
+- Narrative release note: [v0.2.0-preview.14](./releases/v0.2.0-preview.14.md)
+- Release manifest: `releases/v0.2.0-preview.14.release.json`
+- Release evidence bundle: `releases/v0.2.0-preview.14.evidence.json`
+
 ## 0.2.0-preview.13 - 2026-10-04
 
 - Narrative release note: [v0.2.0-preview.13](./releases/v0.2.0-preview.13.md)

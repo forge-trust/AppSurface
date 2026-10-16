@@ -912,7 +912,8 @@ public sealed class DurableDoctorInstalledToolTests
         TimeSpan? staleAfter)
     {
         Assert.False(run.TimedOut, "The installed doctor child process exceeded its finite timeout and was terminated.");
-        Assert.Equal(row.ExitCode, run.ExitCode);
+        Assert.True(row.ExitCode == run.ExitCode,
+            $"Installed doctor matrix row {row.Id} ({row.Scenario}) expected exit {row.ExitCode}, actual {run.ExitCode}.");
         AssertOutputDoesNotExposeSecrets(run, connectionString);
         Assert.True(string.IsNullOrWhiteSpace(run.StandardError), "The installed doctor emitted unexpected stderr output.");
         Assert.True(run.StandardOutput.EndsWith('\n'), "The installed doctor output must end with a newline.");

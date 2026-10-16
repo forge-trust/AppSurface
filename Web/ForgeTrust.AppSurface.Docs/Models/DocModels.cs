@@ -124,6 +124,17 @@ public sealed record DocMetadata
     public IReadOnlyList<string>? RelatedPages { get; init; }
 
     /// <summary>
+    /// Gets whether automatic next-page suggestions are enabled for this source page.
+    /// </summary>
+    /// <remarks>
+    /// A missing value enables suggestions. An explicitly authored value wins over fallback metadata;
+    /// <see langword="false"/> leaves <see cref="RelatedPages"/> intact and does not exclude this page as a target.
+    /// Use both an empty related list and this flag set to false to suppress all recommended rows.
+    /// See the <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#metadata-driven-wayfinding">metadata-driven wayfinding reference</see> for selection and authoring rules.
+    /// </remarks>
+    public bool? AutoRelatedPages { get; init; }
+
+    /// <summary>
     /// Gets the preferred canonical slug for the page.
     /// </summary>
     public string? CanonicalSlug { get; init; }
@@ -284,6 +295,7 @@ public sealed record DocMetadata
             HideFromPublicNav = primary.HideFromPublicNav ?? fallback.HideFromPublicNav,
             HideFromSearch = primary.HideFromSearch ?? fallback.HideFromSearch,
             RelatedPages = MergeLists(primary.RelatedPages, fallback.RelatedPages),
+            AutoRelatedPages = primary.AutoRelatedPages ?? fallback.AutoRelatedPages,
             CanonicalSlug = DocTrustMergeHelpers.PreferNonBlank(primary.CanonicalSlug, fallback.CanonicalSlug),
             Breadcrumbs = breadcrumbs,
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
@@ -2074,6 +2086,15 @@ public sealed record DocDetailsViewModel
     public IReadOnlyList<DocPageLinkViewModel> RelatedPages { get; init; } = [];
 
     /// <summary>
+    /// Gets the combined next reads: all resolved authored links, then at most three automatic metadata suggestions.
+    /// </summary>
+    /// <remarks>
+    /// The default is empty for compatibility with custom model producers. Built-in views prefer this collection and
+    /// fall back to <see cref="RelatedPages"/> when it is empty. The source control is <see cref="DocMetadata.AutoRelatedPages"/>.
+    /// </remarks>
+    public IReadOnlyList<DocPageRecommendationViewModel> RecommendedPages { get; init; } = [];
+
+    /// <summary>
     /// Gets the contributor provenance evidence resolved for the current page.
     /// </summary>
     public DocContributorProvenanceViewModel? ContributorProvenance { get; init; }
@@ -2262,7 +2283,7 @@ public sealed record DocDetailsViewModel
     /// <summary>
     /// Gets a value indicating whether the page has any sequence or related-page wayfinding links to render.
     /// </summary>
-    public bool HasWayfinding => PreviousPage is not null || NextPage is not null || RelatedPages.Count > 0;
+    public bool HasWayfinding => PreviousPage is not null || NextPage is not null || RelatedPages.Count > 0 || RecommendedPages.Count > 0;
 }
 
 /// <summary>

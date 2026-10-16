@@ -1,3 +1,7 @@
+title: RazorWire MVC Example
+summary: Run the RazorWire MVC sample and inspect its interactive server-rendered flows.
+page_type: example
+component: ForgeTrust.RazorWire
 sequence_key: razorwire-proof
 order: 20
 related_pages:

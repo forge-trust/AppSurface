@@ -61,6 +61,18 @@
     var visibleDocumentContent = ForgeTrust.AppSurface.Docs.Services.AppSurfaceDocsHeadingSuppressor.SuppressLeadingMarkdownH1(
         documentContent,
         shellOwnsH1: true);
+    var authoredReasonText = ForgeTrust.AppSurface.Docs.Services.DocRecommendationPolicy.ReasonText("authored");
+    System.Collections.Generic.IReadOnlyList<ForgeTrust.AppSurface.Docs.Models.DocPageRecommendationViewModel> recommendationRows =
+        Model.RecommendedPages.Count > 0
+            ? Model.RecommendedPages
+            : Model.RelatedPages.Select(page => new ForgeTrust.AppSurface.Docs.Models.DocPageRecommendationViewModel
+            {
+                Page = page,
+                Source = ForgeTrust.AppSurface.Docs.Models.DocRecommendationSource.Authored,
+                PrimaryReasonCode = "authored",
+                ReasonCodes = ["authored"],
+                ReasonText = authoredReasonText
+            }).ToArray();
 }
 @functions {
     private static readonly System.Text.RegularExpressions.Regex RootedSymbolSourceLinkRegex = new(
@@ -467,31 +479,55 @@
                     </div>
                 }
 
-                @if (Model.RelatedPages.Count > 0)
+                @if (recommendationRows.Count > 0)
                 {
-                    <div class="space-y-3">
-                        <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Related pages</div>
-                        <div class="grid gap-3 md:grid-cols-2">
-                            @foreach (var relatedPage in Model.RelatedPages)
-                            {
-                                <a href="@Url.PathBaseAware(relatedPage.Href)"
-                                   data-doc-related-link="true"
-                                   data-turbo-frame="doc-content"
-                                   data-turbo-action="advance"
-                                   class="block rounded-lg border docs-token-border-muted docs-token-bg-raised px-4 py-4 transition-colors docs-token-hover-border-accent docs-token-hover-bg-raised">
-                                    <div class="text-base font-semibold text-white">@relatedPage.Title</div>
-                                    @if (relatedPage.PageTypeBadge is not null)
-                                    {
-                                        <span class="docs-page-badge docs-page-badge--@relatedPage.PageTypeBadge.Variant mt-3 inline-flex">@relatedPage.PageTypeBadge.Label</span>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(relatedPage.Summary))
-                                    {
-                                        <p class="mt-3 text-sm text-slate-400">@relatedPage.Summary</p>
-                                    }
-                                </a>
-                            }
-                        </div>
-                    </div>
+                    <section class="docs-recommended-next">
+                        <h2 id="docs-read-next-heading" class="docs-recommended-next__heading">Read next</h2>
+                        <nav aria-labelledby="docs-read-next-heading" class="docs-recommended-next__nav">
+                            <ul class="docs-recommended-next__list">
+                                @for (var index = 0; index < recommendationRows.Count; index++)
+                                {
+                                    var recommendation = recommendationRows[index];
+                                    var recommendedPage = recommendation.Page;
+                                    var titleId = $"docs-recommended-page-title-{index}";
+                                    var isKnownRecommendationSource = recommendation.Source is
+                                        ForgeTrust.AppSurface.Docs.Models.DocRecommendationSource.Authored or
+                                        ForgeTrust.AppSurface.Docs.Models.DocRecommendationSource.Automatic;
+                                    var reasonText = !isKnownRecommendationSource
+                                        ? ForgeTrust.AppSurface.Docs.Services.DocRecommendationPolicy.ReasonText("future")
+                                        : string.IsNullOrWhiteSpace(recommendation.ReasonText)
+                                            ? ForgeTrust.AppSurface.Docs.Services.DocRecommendationPolicy.ReasonText(
+                                                recommendation.PrimaryReasonCode,
+                                                recommendation.ReasonCodes.Contains("shared-component", StringComparer.Ordinal))
+                                            : recommendation.ReasonText;
+                                    <li class="docs-recommended-next__item">
+                                        <a href="@Url.PathBaseAware(recommendedPage.Href)"
+                                           aria-labelledby="@titleId"
+                                           data-doc-related-link="true"
+                                           data-turbo-frame="doc-content"
+                                           data-turbo-action="advance"
+                                           class="docs-recommended-next__link">
+                                            <span class="docs-recommended-next__link-body">
+                                                <span class="docs-recommended-next__title-line">
+                                                    <span id="@titleId" class="docs-recommended-next__title">@recommendedPage.Title</span>
+                                                    @if (recommendedPage.PageTypeBadge is not null)
+                                                    {
+                                                        <span class="docs-page-badge docs-page-badge--@recommendedPage.PageTypeBadge.Variant docs-recommended-next__badge">@recommendedPage.PageTypeBadge.Label</span>
+                                                    }
+                                                </span>
+                                                @if (!string.IsNullOrWhiteSpace(recommendedPage.Summary))
+                                                {
+                                                    <span class="docs-recommended-next__summary">@recommendedPage.Summary</span>
+                                                }
+                                                <span class="docs-recommended-next__reason">@reasonText</span>
+                                            </span>
+                                            <span aria-hidden="true" class="docs-recommended-next__arrow">→</span>
+                                        </a>
+                                    </li>
+                                }
+                            </ul>
+                        </nav>
+                    </section>
                 }
             </section>
         }

@@ -1201,6 +1201,60 @@ public sealed class PostgreSqlDurableRuntimePumpTests
     }
 
     [Fact]
+    public async Task RunOnceAsync_RecordsContractFailureWithoutAnEffectPermitWhenHandoffResolutionFails()
+    {
+        await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
+        var schema = new PostgreSqlDurableRuntimeSchemaManager(database.DataSource);
+        await schema.ApplyAsync();
+        var epoch = Guid.NewGuid();
+        await schema.InitializeRuntimeEpochAsync(epoch, "runtime-pump-tests", "handoff-resolution-failure");
+        var registration = new SuccessfulWorkRegistration();
+        var services = new ServiceCollection();
+        services.AddSingleton<DurableWorkRegistration>(registration);
+        services.AddAppSurfaceDurablePostgreSql(
+            database.DataSource,
+            database.CreateDataSource(),
+            new PostgreSqlDurableWorkOptions(epoch, (await schema.GetStatusAsync()).StoreId),
+            new PostgreSqlDurableScheduleOptions("appsurface"),
+            options => options.SendWakeNotifications = false);
+        services.AddScoped<PostgreSqlDurableWorkHandoffFence>(_ =>
+            throw new InvalidOperationException("Simulated handoff dependency construction failure."));
+        await using var provider = services.BuildServiceProvider();
+        var scope = new DurableScopeId("runtime-pump-handoff-resolution-scope");
+        var accepted = await provider.GetRequiredService<IDurableWorkClient>().EnqueueAsync(new DurableWorkRequest(
+            scope,
+            new DurableCommandId("runtime-pump-handoff-resolution-command"),
+            "runtime-pump-handoff-resolution-key",
+            SuccessfulWorkRegistration.Name,
+            "v1",
+            registration.InputCodec.EncodeObject(Encoding.UTF8.GetBytes("input")),
+            DurableProviderSafety.Idempotent));
+        Assert.True(accepted.IsSuccess);
+
+        var result = await provider.GetRequiredService<IDurableRuntimePump>().RunOnceAsync(
+            new DurableRuntimePumpRequest(maximumItems: 1, surfaces: DurableRuntimeSurface.Work));
+
+        Assert.Equal(1, result.Failed);
+        Assert.Equal(0, result.Processed);
+        var snapshot = await provider.GetRequiredService<IDurableWorkControlClient>().GetAsync(
+            new DurableWorkGetRequest(scope, accepted.Value!.WorkId));
+        Assert.True(snapshot.IsSuccess);
+        Assert.Equal(DurableWorkState.Suspended, snapshot.Value!.State);
+        Assert.Equal(DurableProblemCodes.WorkContractUnavailable, snapshot.Value.TerminalCode);
+        await using var facts = database.DataSource.CreateCommand("""
+            SELECT (SELECT count(*) FROM appsurface_durable.effect_permit WHERE scope_id=@scope_id AND work_id=@work_id),
+                   lease_owner IS NULL
+            FROM appsurface_durable.work WHERE scope_id=@scope_id AND work_id=@work_id;
+            """);
+        facts.Parameters.AddWithValue("scope_id", scope.Value);
+        facts.Parameters.AddWithValue("work_id", accepted.Value.WorkId.Value);
+        await using var reader = await facts.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(0, reader.GetInt64(0));
+        Assert.True(reader.GetBoolean(1));
+    }
+
+    [Fact]
     public async Task RunOnceAsync_FailsClosedWhenProviderPreparationRejectsTheClaim()
     {
         await using var database = await PostgreSqlIntegrationTestDatabase.TryCreateAsync();
