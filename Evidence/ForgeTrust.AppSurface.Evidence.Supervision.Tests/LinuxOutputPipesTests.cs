@@ -43,6 +43,122 @@ public sealed class LinuxOutputPipesTests
     }
 
     [Fact]
+    public async Task WorkCancellationDoesNotCancelPairedDrainOrFailItsRunLedger()
+    {
+        var stdout = PortablePipe();
+        var stderr = PortablePipe();
+        var stdoutWriteHandle = stdout.Write.SafePipeHandle;
+        var stderrWriteHandle = stderr.Write.SafePipeHandle;
+        using var ownerTeardown = new CancellationTokenSource();
+        using var workCancellation = new CancellationTokenSource();
+        using var drainDeadline = LinuxOutputPipes.CreateDrainDeadline(ownerTeardown.Token, TimeSpan.FromMinutes(1));
+        using var budget = new SupervisionRunOutputBudget(receivedByteLimit: 128 * 1024);
+        await using var owner = new SupervisionOutputPipeOwnership(stdout.Read, stderr.Read, stdout.Write, stderr.Write);
+        var collection = owner.BeginCollectAsync(drainDeadline.Token, receivedByteLimit: 128 * 1024,
+            prefixByteLimit: 32, runBudget: budget);
+        var output = Encoding.UTF8.GetBytes("actual-stdout-bytes");
+        var error = Encoding.UTF8.GetBytes("actual-stderr-bytes");
+        var dispatched = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task RunWorkAsync()
+        {
+            await stdout.Write.WriteAsync(output).AsTask().WaitAsync(Guard);
+            await stderr.Write.WriteAsync(error).AsTask().WaitAsync(Guard);
+            await stdout.Write.FlushAsync().WaitAsync(Guard);
+            await stderr.Write.FlushAsync().WaitAsync(Guard);
+            dispatched.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, workCancellation.Token);
+        }
+
+        var work = RunWorkAsync();
+        try
+        {
+            await dispatched.Task.WaitAsync(Guard);
+            workCancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => work.WaitAsync(Guard));
+            Assert.True(work.IsCanceled);
+            Assert.False(ownerTeardown.IsCancellationRequested);
+            Assert.False(drainDeadline.IsCancellationRequested);
+            Assert.False(collection.IsCompleted);
+            Assert.Same(collection, owner.JoinAsync());
+            Assert.False(stdoutWriteHandle.IsClosed);
+            Assert.False(stderrWriteHandle.IsClosed);
+        }
+        finally
+        {
+            workCancellation.Cancel();
+            owner.CloseWriteCopies();
+            try { await work.WaitAsync(Guard); }
+            catch (OperationCanceledException) when (workCancellation.IsCancellationRequested) { }
+            await collection.WaitAsync(Guard);
+            await budget.CompleteAsync().WaitAsync(Guard);
+        }
+
+        var receipt = await collection;
+        Assert.True(receipt.Successful);
+        Assert.Equal(SupervisionOutputFailure.None, receipt.Failure);
+        Assert.Equal(SupervisionOutputFailure.None, receipt.Stdout.Failure);
+        Assert.Equal(SupervisionOutputFailure.None, receipt.Stderr.Failure);
+        Assert.True(receipt.Stdout.EndOfStream);
+        Assert.True(receipt.Stderr.EndOfStream);
+        Assert.Equal(output.Length + error.Length, receipt.ReceivedBytes);
+        Assert.Equal(0, receipt.DiscardedBytes);
+        Assert.Equal(output, receipt.Stdout.Prefix.ToArray());
+        Assert.Equal(error, receipt.Stderr.Prefix.ToArray());
+        Assert.True(stdoutWriteHandle.IsClosed);
+        Assert.True(stderrWriteHandle.IsClosed);
+
+        var ledger = await budget.CompleteAsync().WaitAsync(Guard);
+        Assert.True(ledger.Successful);
+        Assert.Equal(SupervisionRunOutputFailure.None, ledger.Failure);
+        Assert.Equal(1, ledger.RegisteredPairs);
+        Assert.Equal(receipt.ReceivedBytes, ledger.ReceivedBytes);
+        Assert.Single(ledger.Pairs);
+        Assert.Same(receipt, ledger.Pairs[0]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(3_600_001)]
+    public void DrainDeadlineCannotCreateAnUnboundedOrRenewedAllowance(int milliseconds)
+    {
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            LinuxOutputPipes.CreateDrainDeadline(default, TimeSpan.FromMilliseconds(milliseconds)));
+        Assert.Equal("originalRemaining", error.ParamName);
+    }
+
+    [Fact]
+    public async Task OwnerTeardownStillRejectsDrainAndCannotInventAnEofOrDetachARead()
+    {
+        var stdout = new GatedReadStream();
+        var stderr = new GatedReadStream();
+        var writes = Writes();
+        using var teardown = new CancellationTokenSource();
+        using var deadline = LinuxOutputPipes.CreateDrainDeadline(teardown.Token, TimeSpan.FromHours(1));
+        await using var owner = new SupervisionOutputPipeOwnership(stdout, stderr, writes.First, writes.Second);
+        var task = owner.BeginCollectAsync(deadline.Token);
+        try
+        {
+            await Task.WhenAll(stdout.Entered.Task, stderr.Entered.Task).WaitAsync(Guard);
+            teardown.Cancel();
+            Assert.True(deadline.IsCancellationRequested);
+            Assert.False(task.IsCompleted);
+            Assert.Equal(0, stdout.DisposeCount);
+            Assert.Equal(0, stderr.DisposeCount);
+        }
+        finally
+        {
+            owner.CloseWriteCopies();
+            stdout.ReleaseEof();
+            stderr.ReleaseEof();
+            await task.WaitAsync(Guard);
+        }
+        Assert.False((await task).Successful);
+        Assert.Equal(SupervisionOutputFailure.Cancelled, (await task).Failure);
+    }
+
+    [Fact]
     public async Task OneCollectionTaskIsRegisteredBeforeEitherPumpCanObserveEntry()
     {
         var stdout = new GatedReadStream();

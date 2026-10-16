@@ -188,6 +188,7 @@ internal sealed class LinuxProducerProcess
         int? normalExitCode = null;
         var diagnosticStage = "binding";
         string? failedStage = null;
+        CancellationTokenSource? outputDeadline = null;
         try
         {
             RequireLiveBindings(token);
@@ -208,8 +209,9 @@ internal sealed class LinuxProducerProcess
             var unitAllowance = runtime + stop;
 
             diagnosticStage = "pipes";
+            outputDeadline = LinuxOutputPipes.CreateDrainDeadline(_owner.TeardownCancellation, _input.Remaining);
             _pipes = LinuxOutputPipes.Create();
-            _collect = _pipes.BeginCollectAsync(token,
+            _collect = _pipes.BeginCollectAsync(outputDeadline.Token,
                 receivedByteLimit: EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
                 prefixByteLimit: RetainedPrefixBytesPerStream, runBudget: _outputBudget);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -293,6 +295,8 @@ internal sealed class LinuxProducerProcess
         try { _observations?.Dispose(); }
         catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
         try { _backend?.Dispose(); }
+        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
+        try { outputDeadline?.Dispose(); }
         catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
 
         var pending = _pending.Snapshot;

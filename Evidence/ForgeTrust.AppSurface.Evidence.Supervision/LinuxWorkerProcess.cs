@@ -572,8 +572,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _jobDeadline = CancellationTokenSource.CreateLinkedTokenSource(token, _owner.TeardownCancellation);
             _jobDeadline.CancelAfter(_owner.Remaining);
             // Startup/monitor cancellation is independent from output draining. Stop must not invent EOF.
-            _outputDeadline = CancellationTokenSource.CreateLinkedTokenSource(_owner.TeardownCancellation);
-            _outputDeadline.CancelAfter(_owner.Remaining);
+            _outputDeadline = LinuxOutputPipes.CreateDrainDeadline(_owner.TeardownCancellation, _owner.Remaining);
             _pipes = LinuxOutputPipes.Create();
             _ = _pipes.BeginCollectAsync(_outputDeadline.Token, cancellationPhase:
                 EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null,

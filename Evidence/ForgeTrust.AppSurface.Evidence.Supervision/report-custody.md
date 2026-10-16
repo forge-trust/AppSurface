@@ -2,10 +2,12 @@
 
 `LinuxRetainedReportSet` is an internal file-custody primitive in the
 [supervision package](README.md). It does not establish joined-producer,
-subject-group, output-pump, workload or admission authority. There is no server
-integration in this packet. Future protected integration must privately bind
-authentic producer/group/pump joins before construction; possession of this
-reader, an inventory, a digest or metadata is insufficient.
+subject-group, output-pump, workload or admission authority. The server's
+[producer artifact wrapper](producer-artifacts.md) privately binds the authentic
+owner, producer, workspace and group/pump joins before constructing the reader.
+The [closed coverage control owner](coverage-execution.md) retains that wrapper
+through listing and sequenced reads. Possession of this reader, an inventory,
+a digest or metadata is insufficient.
 
 ## Construction
 

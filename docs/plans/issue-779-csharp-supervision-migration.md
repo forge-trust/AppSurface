@@ -720,3 +720,14 @@ The custody inventory, file verifier and native fixture now select the existing 
 No alternate name or unknown artifact is accepted. The last diagnostic operation now points at the actual
 inventory predicate after its owner continuity recheck. Source controls and all seven Linux cases remain
 required; this failed run provides no checkpoint-two completion.
+
+### First genuine coverage and failed-test cases; cancellation drain correction
+
+[Run38865694918](https://github.com/forge-trust/AppSurface/actions/runs/38865694918) passed the normal
+case with9/9 lines and7/7 branches covered, actual final report custody and strict account cleanup. The
+failed-test negative case also passed. The run stopped at cancellation: the producer collector borrowed
+the request token, so cancellation marked its pair failed and cancelled the sibling worker drain before
+stderr EOF. The [producer drain](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-execution.md)
+now shares the worker's original job/owner-teardown lifetime instead. Request cancellation still stops
+the actual unit and fails the workload; output EOF and exact ledger reconciliation remain mandatory.
+These two passed cases do not complete the seven-case checkpoint, and the failed receipt remains retained.

@@ -113,6 +113,26 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     internal static FileStream WrapOwnedRead(SafeFileHandle readHandle) =>
         new(readHandle, FileAccess.Read, bufferSize: 4096);
 
+    /// <summary>Creates the drain-only token source from the original job remainder and owner teardown token.</summary>
+    /// <param name="ownerTeardown">The borrowed retained owner token, never the work/request cancellation token.</param>
+    /// <param name="originalRemaining">The current original job remainder, greater than zero and at most one hour.</param>
+    /// <returns>An owned source retained until both original pump tasks and pipe disposal have joined.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The supplied original remainder is outside its fixed bounds.</exception>
+    /// <remarks>
+    /// Work/start/request cancellation must stop the owned writers, not cancel their drain. Both workers and
+    /// producers use this source until their original pumps join. The source may only shorten the existing
+    /// job deadline; caller cancellation supplies no EOF, and owner teardown expiry still rejects drainage.
+    /// This scheduling helper authenticates no owner or pipe; native callers supply their retained owner facts.
+    /// </remarks>
+    internal static CancellationTokenSource CreateDrainDeadline(CancellationToken ownerTeardown, TimeSpan originalRemaining)
+    {
+        if (originalRemaining <= TimeSpan.Zero || originalRemaining > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(originalRemaining));
+        var source = CancellationTokenSource.CreateLinkedTokenSource(ownerTeardown);
+        try { source.CancelAfter(originalRemaining); return source; }
+        catch { source.Dispose(); throw; }
+    }
+
     /// <summary>Registers the one owned collector task before either pump can dispatch.</summary>
     /// <param name="token">Cancellation from the existing owner deadline/stop; no new timer is created.</param>
     /// <param name="receivedByteLimit">Shared pair maximum; defaults to 16 MiB and may only be lowered.</param>
