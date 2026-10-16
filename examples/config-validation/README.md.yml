@@ -1,0 +1,13 @@
+title: Config validation example
+summary: Run a strongly typed PortConfig scalar rule and inspect the redacted startup failure for an invalid port.
+page_type: example
+nav_group: Examples
+component: ForgeTrust.AppSurface.Config
+keywords:
+  - configuration
+  - scalar validation
+  - PortConfig
+  - startup
+related_pages:
+  - troubleshooting/startup-and-modules.md
+  - Config/ForgeTrust.AppSurface.Config/README.md

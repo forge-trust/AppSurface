@@ -1,0 +1,184 @@
+{
+  "baseCommit": "c2f062f2",
+  "configuration": "Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json",
+  "snapshotMetadata": {
+    "generatedAtUtc": "2026-10-09T20:00:56.8708080+00:00",
+    "version": "1",
+    "engine": "minisearch"
+  },
+  "snapshotDurationMilliseconds": 5750,
+  "snapshotDocumentCount": 2462,
+  "searchRecordCount": 2438,
+  "searchIndexBytes": 6864301,
+  "searchIndexSha256": "29b1e8c6e192a752bea28ec11020b929ec8d744eec251b44c3bf09596a320a96",
+  "configuredRewriteLimitBytes": 4194304,
+  "baselineExceedsRewriteLimit": true,
+  "algorithmStatus": "not implemented or run",
+  "limitations": "Single host observation, not a repeated performance benchmark. Existing baseline JSON already exceeds the default archive rewrite limit; no limit changed or gate waived. Allocation, retained/overlap memory and synthetic stress remain unmeasured.",
+  "routeProofs": [
+    {
+      "canonicalId": "guides/evidencehost-cookbook",
+      "sourcePath": "guides/evidencehost-cookbook.md",
+      "path": "/docs/guides/evidencehost-cookbook",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/guides/evidencehost-cookbook",
+      "contentType": "text/html",
+      "responseBytes": 210354
+    },
+    {
+      "canonicalId": "examples/config-validation",
+      "sourcePath": "examples/config-validation/README.md",
+      "path": "/docs/examples/config-validation",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/examples/config-validation",
+      "contentType": "text/html",
+      "responseBytes": 184961
+    },
+    {
+      "canonicalId": "troubleshooting/startup-and-modules",
+      "sourcePath": "troubleshooting/startup-and-modules.md",
+      "path": "/docs/troubleshooting/startup-and-modules",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/troubleshooting/startup-and-modules",
+      "contentType": "text/html",
+      "responseBytes": 198660
+    },
+    {
+      "canonicalId": "Namespaces/ForgeTrust.RazorWire.html",
+      "sourcePath": "Namespaces/ForgeTrust.RazorWire",
+      "path": "/docs/Namespaces/ForgeTrust.RazorWire.html",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/Namespaces/ForgeTrust.RazorWire.html",
+      "contentType": "text/html",
+      "responseBytes": 371677
+    },
+    {
+      "canonicalId": "start-here/appsurface-evaluator",
+      "sourcePath": "start-here/appsurface-evaluator.md",
+      "path": "/docs/start-here/appsurface-evaluator",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/start-here/appsurface-evaluator",
+      "contentType": "text/html",
+      "responseBytes": 209073
+    },
+    {
+      "canonicalId": "start-here/evidencehost",
+      "sourcePath": "start-here/evidencehost.md",
+      "path": "/docs/start-here/evidencehost",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/start-here/evidencehost",
+      "contentType": "text/html",
+      "responseBytes": 209004
+    },
+    {
+      "canonicalId": "cli/forgetrust.appsurface.cli",
+      "sourcePath": "Cli/ForgeTrust.AppSurface.Cli/README.md",
+      "path": "/docs/cli/forgetrust.appsurface.cli",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/cli/forgetrust.appsurface.cli",
+      "contentType": "text/html",
+      "responseBytes": 421577
+    },
+    {
+      "canonicalId": "evidence/forgetrust.appsurface.evidence.contracts",
+      "sourcePath": "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
+      "path": "/docs/evidence/forgetrust.appsurface.evidence.contracts",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/evidence/forgetrust.appsurface.evidence.contracts",
+      "contentType": "text/html",
+      "responseBytes": 193691
+    },
+    {
+      "canonicalId": "config/forgetrust.appsurface.config",
+      "sourcePath": "Config/ForgeTrust.AppSurface.Config/README.md",
+      "path": "/docs/config/forgetrust.appsurface.config",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/config/forgetrust.appsurface.config",
+      "contentType": "text/html",
+      "responseBytes": 366911
+    },
+    {
+      "canonicalId": "forgetrust.appsurface.core",
+      "sourcePath": "ForgeTrust.AppSurface.Core/README.md",
+      "path": "/docs/forgetrust.appsurface.core",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/forgetrust.appsurface.core",
+      "contentType": "text/html",
+      "responseBytes": 214202
+    },
+    {
+      "canonicalId": "packages",
+      "sourcePath": "packages/README.md",
+      "path": "/docs/packages",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/packages",
+      "contentType": "text/html",
+      "responseBytes": 307710
+    },
+    {
+      "canonicalId": "web/forgetrust.razorwire",
+      "sourcePath": "Web/ForgeTrust.RazorWire/README.md",
+      "path": "/docs/web/forgetrust.razorwire",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/web/forgetrust.razorwire",
+      "contentType": "text/html",
+      "responseBytes": 419414
+    },
+    {
+      "canonicalId": "web/forgetrust.razorwire/docs/stream-authorization",
+      "sourcePath": "Web/ForgeTrust.RazorWire/Docs/stream-authorization.md",
+      "path": "/docs/web/forgetrust.razorwire/docs/stream-authorization",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/web/forgetrust.razorwire/docs/stream-authorization",
+      "contentType": "text/html",
+      "responseBytes": 203179
+    },
+    {
+      "canonicalId": "web/forgetrust.razorwire/docs/dialog-responses",
+      "sourcePath": "Web/ForgeTrust.RazorWire/Docs/dialog-responses.md",
+      "path": "/docs/web/forgetrust.razorwire/docs/dialog-responses",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/web/forgetrust.razorwire/docs/dialog-responses",
+      "contentType": "text/html",
+      "responseBytes": 249794
+    },
+    {
+      "canonicalId": "start-here/should-i-use-appsurface",
+      "sourcePath": "start-here/should-i-use-appsurface.md",
+      "path": "/docs/start-here/should-i-use-appsurface",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/start-here/should-i-use-appsurface",
+      "contentType": "text/html",
+      "responseBytes": 196150
+    },
+    {
+      "canonicalId": "examples/product-readiness-lab",
+      "sourcePath": "examples/product-readiness-lab/README.md",
+      "path": "/docs/examples/product-readiness-lab",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/examples/product-readiness-lab",
+      "contentType": "text/html",
+      "responseBytes": 195624
+    },
+    {
+      "canonicalId": "guides/from-program-cs-to-module",
+      "sourcePath": "guides/from-program-cs-to-module.md",
+      "path": "/docs/guides/from-program-cs-to-module",
+      "status": 200,
+      "finalUrl": "http://127.0.0.1:5255/docs/guides/from-program-cs-to-module",
+      "contentType": "text/html",
+      "responseBytes": 202438
+    }
+  ],
+  "diagnosticMinimalUtf8Bytes": 6791686,
+  "diagnosticMinimalStillExceedsRewriteLimit": true,
+  "serializationDiagnostic": "Python UTF8 serialization with compact separators remains above the default limit. This is diagnostic data, not the actual CLI export artifact or a serialization change.",
+  "issueVerification": {
+    "number": 255,
+    "state": "OPEN",
+    "title": "[RazorDocs] Add metadata-driven related-page recommendations",
+    "url": "https://github.com/forge-trust/AppSurface/issues/255",
+    "method": "gh issue view 255 --repo forge-trust/AppSurface --json number,title,body,url,state,labels,assignees",
+    "scopeMatchesApprovedPlan": true
+  }
+}

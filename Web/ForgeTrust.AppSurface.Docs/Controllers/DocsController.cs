@@ -1893,13 +1893,15 @@ public class DocsController : Controller
     /// This helper operates on the typed <see cref="DocsSearchIndexPayload" /> contract, which always exposes a top-level
     /// <see cref="DocsSearchIndexPayload.Documents" /> list. It does not inspect or reshape arbitrary JSON payloads, so
     /// callers that hold raw JSON without a top-level <c>documents</c> array must deserialize or otherwise handle that
-    /// mismatch before calling this method. Within the typed payload, only rooted
-    /// <see cref="DocsSearchIndexDocument.Path" /> values are rewritten. Non-rooted, blank, or otherwise unchanged values
+    /// mismatch before calling this method. Within the typed payload, rooted
+    /// <see cref="DocsSearchIndexDocument.Path" /> and nested recommendation paths are rewritten. Non-rooted, blank, or otherwise unchanged values
     /// such as <c>guide.html</c> are returned as-is, so callers should supply leading-slash browser paths for docs-local
     /// navigation when rebasing is expected. For example, rebasing a payload that contains
     /// <c>documents[0].path = "/docs/guide.html"</c> with <c>/some-base/</c> produces
     /// <c>/some-base/docs/guide.html</c>. The supplied path base is trimmed of trailing slashes before concatenation, and
-    /// the method is idempotent when <paramref name="requestPathBase" /> is null, empty, or <c>/</c>.
+    /// paths are unchanged when <paramref name="requestPathBase" /> is null, empty, or <c>/</c>. Recommendation rows and
+    /// their reason lists are detached even for an unchanged mount. Target identities, raw authored references and
+    /// explanations are preserved; no ranking runs during this projection.
     /// </remarks>
     internal static DocsSearchIndexPayload PrefixSearchIndexPathsForPathBase(
         DocsSearchIndexPayload payload,
@@ -1907,33 +1909,27 @@ public class DocsController : Controller
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (string.IsNullOrWhiteSpace(requestPathBase)
-            || string.Equals(requestPathBase, "/", StringComparison.Ordinal))
-        {
-            return payload;
-        }
-
-        var normalizedPathBase = requestPathBase.TrimEnd('/');
+        var normalizedPathBase = string.IsNullOrWhiteSpace(requestPathBase) || requestPathBase == "/"
+            ? string.Empty : requestPathBase.TrimEnd('/');
         var changed = false;
-        var documents = new DocsSearchIndexDocument[payload.Documents.Count];
-
-        for (var index = 0; index < payload.Documents.Count; index++)
+        string Prefix(string path)
         {
-            var document = payload.Documents[index];
-            if (string.IsNullOrWhiteSpace(document.Path)
-                || !document.Path.StartsWith("/", StringComparison.Ordinal))
-            {
-                documents[index] = document;
-                continue;
-            }
-
+            if (normalizedPathBase.Length == 0 || string.IsNullOrWhiteSpace(path) || !path.StartsWith("/", StringComparison.Ordinal))
+                return path;
             changed = true;
-            documents[index] = document with
-            {
-                Path = normalizedPathBase + document.Path
-            };
+            return normalizedPathBase + path;
         }
-
+        var documents = payload.Documents.Select(document =>
+        {
+            var path = Prefix(document.Path);
+            var recommendations = document.RecommendedPages.Select(row =>
+            {
+                // Even an unchanged mount owns a detached explanation array and row.
+                changed = true;
+                return row with { Path = Prefix(row.Path), ReasonCodes = row.ReasonCodes.ToArray() };
+            }).ToArray();
+            return document with { Path = path, RecommendedPages = recommendations };
+        }).ToArray();
         return changed ? payload with { Documents = documents } : payload;
     }
 
@@ -2206,9 +2202,26 @@ public class DocsController : Controller
             }
         }
 
+        DocPageLinkViewModel? ProjectLink(DocPageLinkViewModel? page)
+        {
+            if (page is null) return null;
+            // Views apply PathBaseAware once when rendering these app-relative links.
+            return page with
+            {
+                PageTypeBadge = page.PageTypeBadge is { } badge ? badge with { } : null
+            };
+        }
         return details with
         {
             Document = pathBaseAwareDoc,
+            PreviousPage = ProjectLink(details.PreviousPage),
+            NextPage = ProjectLink(details.NextPage),
+            RelatedPages = details.RelatedPages.Select(page => ProjectLink(page)!).ToArray(),
+            RecommendedPages = details.RecommendedPages.Select(row => row with
+            {
+                Page = ProjectLink(row.Page)!,
+                ReasonCodes = row.ReasonCodes.ToArray()
+            }).ToArray(),
             Title = resolvedTitle,
             CanonicalUrl = currentHref,
             Summary = summary,

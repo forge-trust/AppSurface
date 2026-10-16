@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Docs.Models;
 using YamlDotNet.Core;
+using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -14,6 +15,7 @@ internal static class MarkdownFrontMatterParser
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .WithTypeConverter(new AutoRelatedPagesYamlValueConverter())
         .IgnoreUnmatchedProperties()
         .Build();
 
@@ -154,6 +156,7 @@ internal static class MarkdownFrontMatterParser
             HideFromPublicNav = document.HideFromPublicNav,
             HideFromSearch = document.HideFromSearch,
             RelatedPages = NormalizeList(document.RelatedPages),
+            AutoRelatedPages = document.AutoRelatedPages?.Value,
             CanonicalSlug = Normalize(document.CanonicalSlug) ?? Normalize(document.Slug),
             Breadcrumbs = NormalizeList(document.Breadcrumbs),
             FeaturedPageGroups = NormalizeFeaturedPageGroups(
@@ -255,6 +258,76 @@ internal static class MarkdownFrontMatterParser
     private static string? Normalize(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private readonly record struct AutoRelatedPagesYamlValue(bool? Value);
+
+    private sealed class AutoRelatedPagesYamlValueConverter : IYamlTypeConverter
+    {
+        private const string BooleanTag = "tag:yaml.org,2002:bool";
+        private const string NullTag = "tag:yaml.org,2002:null";
+
+        public bool Accepts(Type type)
+        {
+            return type == typeof(AutoRelatedPagesYamlValue)
+                || Nullable.GetUnderlyingType(type) == typeof(AutoRelatedPagesYamlValue);
+        }
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            if (parser.Current is not Scalar scalar)
+            {
+                throw InvalidAutoRelatedPagesYamlValue();
+            }
+
+            parser.MoveNext();
+
+            if (IsNullableYamlNull(scalar))
+            {
+                return new AutoRelatedPagesYamlValue(null);
+            }
+
+            var hasBooleanTag = !scalar.Tag.IsEmpty
+                && string.Equals(scalar.Tag.Value, BooleanTag, StringComparison.Ordinal);
+            var isImplicitPlainScalar = scalar.Tag.IsEmpty && scalar.Style == ScalarStyle.Plain;
+            if ((hasBooleanTag || isImplicitPlainScalar)
+                && bool.TryParse(scalar.Value, out var value))
+            {
+                return new AutoRelatedPagesYamlValue(value);
+            }
+
+            throw InvalidAutoRelatedPagesYamlValue();
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            throw new NotSupportedException("This converter is only used for deserialization.");
+        }
+
+        private static bool IsNullableYamlNull(Scalar scalar)
+        {
+            if (!scalar.Tag.IsEmpty
+                && string.Equals(scalar.Tag.Value, NullTag, StringComparison.Ordinal))
+            {
+                return true;
+            }
+
+            if (!scalar.Tag.IsEmpty)
+            {
+                return false;
+            }
+
+            var isPlainOrEmpty = scalar.Style == ScalarStyle.Plain
+                || scalar.Style == ScalarStyle.Any && scalar.Value.Length == 0;
+            return isPlainOrEmpty
+                && (scalar.Value is "" or "~"
+                    || string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static YamlException InvalidAutoRelatedPagesYamlValue()
+        {
+            return new YamlException("The auto_related_pages value must be a YAML boolean or null.");
+        }
     }
 
     private static IReadOnlyList<string>? NormalizeList(List<string>? values)
@@ -1078,6 +1151,8 @@ internal static class MarkdownFrontMatterParser
         public bool? HideFromSearch { get; init; }
 
         public List<string>? RelatedPages { get; init; }
+
+        public AutoRelatedPagesYamlValue? AutoRelatedPages { get; init; }
 
         public string? CanonicalSlug { get; init; }
 

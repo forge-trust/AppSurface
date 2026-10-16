@@ -309,18 +309,15 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
             Timeout = 30_000
         });
         await page.ClickAsync("#docs-page-outline a[href='#files-behind-the-hero-flow']");
-        await page.WaitForFunctionAsync(
-            """
-            () => document
-              .querySelector("#docs-page-outline a[href='#files-behind-the-hero-flow']")
-              ?.getAttribute('aria-current') === 'location'
-            """,
-            null,
-            new PageWaitForFunctionOptions { Timeout = 15_000 });
-        var detailStyles = await page.EvaluateAsync<string[]>(
+        // Capture active state and styles together; smooth-scroll callbacks can
+        // change the active heading between separate browser evaluations.
+        await using var detailSnapshot = await page.WaitForFunctionAsync(
             """
             () => {
               const activeOutline = document.querySelector("#docs-page-outline a[href='#files-behind-the-hero-flow']");
+              if (activeOutline?.getAttribute('aria-current') !== 'location') {
+                return false;
+              }
               const style = (selector) => window.getComputedStyle(document.querySelector(selector));
               return [
                 window.getComputedStyle(activeOutline, '::before').backgroundColor,
@@ -329,7 +326,10 @@ public sealed class AppSurfaceDocsStyleTokenPlaywrightTests
                 style('.docs-content--markdown :not(pre) > code').backgroundColor
               ];
             }
-            """);
+            """,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 15_000 });
+        var detailStyles = await detailSnapshot.JsonValueAsync<string[]>();
 
         Assert.All(detailStyles, AssertNonTransparentComputedValue);
 

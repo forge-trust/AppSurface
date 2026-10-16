@@ -185,13 +185,14 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     /// <summary>Serves exactly the selected mount; a false result never changes that selection.</summary>
     private async Task<bool> TryServeMountAsync(HttpContext context, AppSurfaceDocsPublishedTreeMount mount, string requestPath)
     {
-        if (TryResolveFrozenManifestRedirect(context, mount, requestPath, out var redirectUrl))
+        if (TryResolveFrozenManifestRedirect(context, mount, requestPath, out var redirectUrl, out var rejectedArtifact))
         {
             WritePermanentRedirect(context, redirectUrl);
             return true;
         }
 
-        if (!TryResolveFile(mount, requestPath, out var fileInfo, out var relativeFilePath)
+        if (rejectedArtifact
+            || !TryResolveFile(mount, requestPath, out var fileInfo, out var relativeFilePath)
             || !CanServeResolvedFile(mount, relativeFilePath, fileInfo))
         {
             return false;
@@ -240,9 +241,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         HttpContext httpContext,
         AppSurfaceDocsPublishedTreeMount mount,
         string requestPath,
-        out string redirectUrl)
+        out string redirectUrl,
+        out bool rejectedArtifact)
     {
         redirectUrl = string.Empty;
+        rejectedArtifact = false;
         if (mount.FrozenRouteManifest is null)
         {
             return false;
@@ -250,18 +253,56 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
 
         var relativeRequestPath = GetMountRelativeRequestPath(requestPath, mount.MountRootPath);
         var aliasRoutePath = AppSurfaceDocsFrozenRouteManifest.NormalizeRoutePath(relativeRequestPath);
-        if (string.IsNullOrWhiteSpace(aliasRoutePath) || !AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(aliasRoutePath))
+        if (!AppSurfaceDocsFrozenRouteManifest.IsSafeRoutePath(aliasRoutePath))
         {
             return false;
         }
 
         if (!TryValidateFrozenManifestPath(mount))
         {
+            rejectedArtifact = mount.FrozenRouteManifest.UsesVerifiedSnapshot
+                               && mount.FrozenRouteManifest.GetManifest(_logger).HtmlUsesExportRootUrls;
             return false;
         }
 
         var manifest = mount.FrozenRouteManifest.GetManifest(_logger);
-        if (!manifest.TryResolveAlias(aliasRoutePath, out var canonicalRoutePath))
+        var isAlias = manifest.TryResolveAlias(aliasRoutePath, out var canonicalRoutePath);
+        var projectedIdentity = isAlias ? canonicalRoutePath : aliasRoutePath;
+        if (manifest.TryResolveCanonicalArtifactPath(projectedIdentity, out var artifactPath))
+        {
+            var fragmentIndex = artifactPath.IndexOf('#', StringComparison.Ordinal);
+            var filePath = fragmentIndex < 0 ? artifactPath : artifactPath[..fragmentIndex];
+            // A physical canonical URL is served directly; it must not redirect to itself.
+            if (!isAlias && string.Equals(aliasRoutePath, filePath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var file = mount.FileProvider.GetFileInfo(filePath);
+            if (mount.ExactTreeRootPath is null
+                || mount.ArchiveVerificationState != AppSurfaceDocsReleaseArchiveVerificationState.AvailableVerified
+                || mount.VerifiedReleaseArchive is null
+                || !mount.VerifiedReleaseArchive.TryGetFile(filePath, out var verifiedFile)
+                || !file.Exists
+                || !TryValidateResolvedFile(mount, filePath, file)
+                || !AppSurfaceDocsReleaseArchiveVerifier.FileMatches(file, verifiedFile))
+            {
+                rejectedArtifact = true;
+                _logger.LogWarning(
+                    "ASDOCSARCHIVE010: Denying canonical artifact redirect to {ArchivePath} because the target is not an ordinary matching member of the verified tree at {MountRootPath}.",
+                    filePath,
+                    mount.MountRootPath);
+                return false;
+            }
+
+            var escapedArtifactPath = string.Join('/', filePath.Split('/').Select(Uri.EscapeDataString))
+                                      + (fragmentIndex < 0 ? string.Empty : artifactPath[fragmentIndex..]);
+            redirectUrl = BuildRedirectUrl(httpContext.Request.PathBase.Value, mount.MountRootPath,
+                escapedArtifactPath, httpContext.Request.QueryString.Value);
+            return true;
+        }
+
+        if (!isAlias)
         {
             return false;
         }
@@ -518,6 +559,31 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         yield return trimmed + "/index.html";
     }
 
+    /// <summary>
+    /// Builds only the ordinary HTML file candidates that the published route resolver would use for a docs route.
+    /// </summary>
+    /// <param name="relativeRequestPath">The decoded path below the selected mount root.</param>
+    /// <returns>Exact <c>.html</c>, <c>route.html</c>, or <c>route/index.html</c> candidates in serving order.</returns>
+    internal static IReadOnlyList<string> BuildHtmlDocumentCandidatePaths(string relativeRequestPath)
+    {
+        if (string.IsNullOrWhiteSpace(relativeRequestPath) || HasHiddenPathSegment(relativeRequestPath))
+        {
+            return string.IsNullOrEmpty(relativeRequestPath) ? ["index.html"] : [];
+        }
+
+        var trimmed = relativeRequestPath.TrimStart('/');
+        if (IsHandlerServeableFilePath(trimmed, allowSvg: true))
+        {
+            return trimmed.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                ? [trimmed]
+                : [];
+        }
+
+        return BuildCandidatePaths(relativeRequestPath)
+            .Where(candidate => candidate.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     private static bool HasAllowedEmbeddedAssetExtension(string path, bool allowSvg)
     {
         var extension = Path.GetExtension(path);
@@ -645,7 +711,9 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 routeRootPath,
                 httpContext.Request.PathBase.Value,
                 mount.CanonicalRootPath,
-                publicOrigin);
+                publicOrigin,
+                mount.FrozenRouteManifest?.UsesVerifiedSnapshot == true
+                && mount.FrozenRouteManifest.GetManifest(_logger).HtmlUsesExportRootUrls);
             SetSuccessHeaders(httpContext, contentType, fileInfo, relativeFilePath, rewrittenHtml);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
@@ -1132,17 +1200,21 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     /// <param name="canonicalRootPath">The app-relative route root canonical metadata should prefer for this mount.</param>
     /// <param name="publicOrigin">The runtime public origin used for absolute canonical metadata, or <see langword="null" /> to preserve exported origins.</param>
     /// <returns>The rewritten HTML document.</returns>
+    /// <param name="htmlUsesExportRootUrls">Whether verified frozen metadata declares bare URLs relative to the complete export root.</param>
     /// <remarks>
     /// This method rewrites exported stable-root docs links, assets, and the inline
     /// <c>window.__appSurfaceDocsConfig</c> payload matched by <see cref="DocsClientConfigRegex" /> so the document behaves
     /// like it was originally emitted for <paramref name="mountRootPath" />. As part of that rewrite, the legacy
     /// <c>docsVersionsUrl</c> client field is removed because version archive navigation is rendered server-side. When
     /// <paramref name="mountRootPath" /> and <paramref name="routeRootPath" /> are both the default <c>/docs</c>,
-    /// rewrites only occur if <paramref name="requestPathBase" /> is non-empty so sub-path-hosted apps still emit
+    /// legacy rewrites only occur if <paramref name="requestPathBase" /> is non-empty so sub-path-hosted apps still emit
     /// <c>/some-base/docs/...</c> links. Request-scoped CSP nonces are always removed from the generated AppSurface
     /// preference bootstrap and critical-theme styles, because published output must remain a deterministic, reusable
     /// artifact. The handler recognizes only the package's published bootstrap hash when allowing scripts in a
-    /// versioned Docs response; all other inline scripts remain blocked.
+    /// versioned Docs response; all other inline scripts remain blocked. New verified <c>htmlUrlBase: export-root</c>
+    /// manifests instead project local HTML attributes and generated redirect refresh URLs from the complete export
+    /// root beneath the mount, even at stable <c>/docs</c>. Absolute external URLs and explicitly ignored authoring
+    /// anchors stay unchanged. This flag must come from the verified frozen snapshot, not request data or live metadata.
     /// </remarks>
     internal static string RewriteHtml(
         string html,
@@ -1151,7 +1223,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         string routeRootPath = DocsUrlBuilder.DocsEntryPath,
         string? requestPathBase = null,
         string? canonicalRootPath = null,
-        string? publicOrigin = null)
+        string? publicOrigin = null,
+        bool htmlUsesExportRootUrls = false)
     {
         ArgumentNullException.ThrowIfNull(html);
         ArgumentException.ThrowIfNullOrWhiteSpace(mountRootPath);
@@ -1160,7 +1233,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         canonicalRootPath = string.IsNullOrWhiteSpace(canonicalRootPath) ? mountRootPath : canonicalRootPath;
         var normalizedPublicOrigin = DocsUrlBuilder.NormalizePublicOriginOrNull(publicOrigin);
 
-        var requiresMountRewrite = !string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+        var requiresMountRewrite = htmlUsesExportRootUrls
+            || !string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
             || !string.Equals(canonicalRootPath, mountRootPath, StringComparison.OrdinalIgnoreCase)
             || HasNonEmptyPathBase(requestPathBase)
@@ -1191,7 +1265,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 routeRootPath,
                 requestPathBase,
                 canonicalRootPath,
-                normalizedPublicOrigin);
+                normalizedPublicOrigin,
+                htmlUsesExportRootUrls);
         }
 
         foreach (var element in document.QuerySelectorAll("[src]"))
@@ -1204,7 +1279,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 routeRootPath,
                 requestPathBase,
                 canonicalRootPath,
-                normalizedPublicOrigin);
+                normalizedPublicOrigin,
+                htmlUsesExportRootUrls);
         }
 
         foreach (var element in document.QuerySelectorAll("[srcset]"))
@@ -1215,10 +1291,44 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            var rewrittenValue = RewriteSrcSetValue(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
+            var rewrittenValue = RewriteSrcSetValue(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase, htmlUsesExportRootUrls);
             if (!string.Equals(value, rewrittenValue, StringComparison.Ordinal))
             {
                 element.SetAttribute("srcset", rewrittenValue);
+            }
+        }
+
+        if (htmlUsesExportRootUrls)
+        {
+            foreach (var refresh in document.QuerySelectorAll("meta[http-equiv]"))
+            {
+                if (!string.Equals(refresh.GetAttribute("http-equiv"), "refresh", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var content = refresh.GetAttribute("content");
+                var separator = content?.IndexOf(';', StringComparison.Ordinal) ?? -1;
+                if (separator < 0)
+                {
+                    continue;
+                }
+
+                var target = content![(separator + 1)..].Trim();
+                if (!target.StartsWith("url=", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var url = target[4..].Trim();
+                var quote = url.Length >= 2 && url[0] is '\'' or '"' && url[^1] == url[0] ? url[0].ToString() : string.Empty;
+                if (quote.Length > 0)
+                {
+                    url = url[1..^1];
+                }
+
+                refresh.SetAttribute("content", content[..(separator + 1)] + "url="
+                    + quote + RewriteExportRootUrl(url, mountRootPath, requestPathBase) + quote);
             }
         }
 
@@ -1293,21 +1403,15 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
     /// <param name="routeRootPath">The route-family root that owns archive and exact-version routes.</param>
     /// <param name="requestPathBase">The current host path base that should prefix rewritten app-relative docs URLs.</param>
     /// <returns>
-    /// The original payload when the mount and route root are the default <c>/docs</c> surface without a non-empty path
-    /// base, when the payload is not a JSON object with a top-level <c>documents</c> array, or when no eligible
-    /// <c>documents[*].path</c> values require rewriting; otherwise a payload whose rewritten document paths stay
-    /// inside the mounted docs root.
+    /// The original payload when it is not a JSON object with a top-level <c>documents</c> array or when no top-level
+    /// document path or nested recommendation path requires rewriting; otherwise a payload whose rewritten links stay
+    /// inside the selected docs mount.
     /// </returns>
     /// <remarks>
-    /// Only <c>documents[*].path</c> values are rewritten. Other JSON fields, including titles, metadata, and facet
-    /// payloads, are preserved exactly as exported. Default stable mounts rooted at <c>/docs</c> are a no-op unless
-    /// <paramref name="requestPathBase" /> is non-empty, because the exported payload already points at the default
-    /// surface. Preview-root paths, archive paths such as <c>{RouteRootPath}/versions</c>, and already-versioned exact
-    /// routes such as <c>{RouteRootPath}/v/1.2.3/guide.html</c> are preserved rather than rebased.
-    /// When a rewrite does occur, the helper prepends the normalized request path base to eligible app-relative URLs,
-    /// so <c>/docs/guide.html</c> becomes <c>/some-base/docs/v/1.2.3/guide.html</c> for an exact mount at
-    /// <c>/docs/v/1.2.3</c>. Callers should not expect other JSON fields to change, and they must supply a non-empty
-    /// <paramref name="requestPathBase" /> if stable mounts need virtual-directory rebasing.
+    /// Top-level document paths retain their established mounted-URL rules. For each recommendation row, the original
+    /// complete URL is validated as a canonical archive recommendation before its path is rebased; the metadata query
+    /// is discarded and only the validated fragment is retained. Other row identity, display, and reason fields are
+    /// unchanged. A default stable <c>/docs</c> mount remains byte-preserving unless a nested query must be removed.
     /// </remarks>
     internal static string RewriteSearchIndexJson(
         string json,
@@ -1321,19 +1425,27 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(routeRootPath);
 
-        if (string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
-            && !HasNonEmptyPathBase(requestPathBase))
+        var isDefaultStableMount = string.Equals(mountRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+                                   && string.Equals(routeRootPath, DocsUrlBuilder.DocsEntryPath, StringComparison.OrdinalIgnoreCase)
+                                   && !HasNonEmptyPathBase(requestPathBase);
+        JsonObject? node;
+        try
+        {
+            node = JsonNode.Parse(json) as JsonObject;
+        }
+        catch (JsonException) when (isDefaultStableMount)
         {
             return json;
         }
 
-        var node = JsonNode.Parse(json) as JsonObject;
         if (node?["documents"] is not JsonArray documents)
         {
             return json;
         }
 
+        var changed = false;
+        var archivePathContext = new PublishedSearchIndexArchivePathContext(
+            GetVersionFromMountRoot(mountRootPath, routeRootPath));
         foreach (var document in documents.OfType<JsonObject>())
         {
             if (document["path"] is not JsonValue pathValue
@@ -1343,10 +1455,74 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                 continue;
             }
 
-            document["path"] = RewriteMountedDocsUrl(path, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
+            var rewrittenPath = RewriteMountedDocsUrl(path, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
+            if (!string.Equals(path, rewrittenPath, StringComparison.Ordinal))
+            {
+                document["path"] = rewrittenPath;
+                changed = true;
+            }
+
+            if (document["recommendedPages"] is not JsonArray recommendations)
+            {
+                continue;
+            }
+
+            foreach (var recommendation in recommendations.OfType<JsonObject>())
+            {
+                if (recommendation["path"] is not JsonValue recommendationPathValue
+                    || !recommendationPathValue.TryGetValue<string>(out var recommendationPath)
+                    || string.IsNullOrWhiteSpace(recommendationPath))
+                {
+                    continue;
+                }
+
+                var validation = PublishedSearchIndexDocumentPathPolicy.ValidateRecommendationArchivePath(
+                    recommendationPath,
+                    archivePathContext);
+                if (!validation.IsValid)
+                {
+                    continue;
+                }
+
+                var normalizedPath = validation.NormalizedPath!;
+                var relativeRecommendationPath = normalizedPath.Length == DocsUrlBuilder.DocsEntryPath.Length
+                    ? string.Empty
+                    : normalizedPath[(DocsUrlBuilder.DocsEntryPath.Length + 1)..];
+                var mountedRecommendationPath = DocsUrlBuilder.JoinPath(mountRootPath, relativeRecommendationPath);
+                var rewrittenRecommendationPath = PrefixPathBase(mountedRecommendationPath, requestPathBase)
+                                                 + (validation.ValidatedFragment ?? string.Empty);
+                if (!string.Equals(recommendationPath, rewrittenRecommendationPath, StringComparison.Ordinal))
+                {
+                    recommendation["path"] = rewrittenRecommendationPath;
+                    changed = true;
+                }
+            }
         }
 
-        return node.ToJsonString();
+        return changed ? node.ToJsonString() : json;
+    }
+
+    private static string GetVersionFromMountRoot(string mountRootPath, string routeRootPath)
+    {
+        var normalizedMountRoot = mountRootPath.TrimEnd('/');
+        foreach (var routeFamily in new[] { "v", "versions" })
+        {
+            var versionPrefix = DocsUrlBuilder.JoinPath(routeRootPath, routeFamily) + "/";
+            if (!normalizedMountRoot.StartsWith(versionPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var remainder = normalizedMountRoot[versionPrefix.Length..];
+            var separator = remainder.IndexOf('/');
+            var version = separator >= 0 ? remainder[..separator] : remainder;
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                return version;
+            }
+        }
+
+        return string.Empty;
     }
 
     private static void RewriteAttributeValue(
@@ -1357,7 +1533,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         string routeRootPath,
         string? requestPathBase,
         string canonicalRootPath,
-        string? publicOrigin)
+        string? publicOrigin,
+        bool htmlUsesExportRootUrls)
     {
         var value = element.GetAttribute(attributeName);
         if (string.IsNullOrWhiteSpace(value))
@@ -1365,9 +1542,16 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
             return;
         }
 
+        if (htmlUsesExportRootUrls && attributeName == "href" && element.HasAttribute("data-rw-export-ignore"))
+        {
+            return;
+        }
+
         var rewrittenValue = IsCanonicalLink(element)
-            ? RewriteCanonicalHref(value, canonicalRootPath, previewRootPath, routeRootPath, requestPathBase, publicOrigin)
-            : RewriteMountedDocsUrl(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
+            ? RewriteCanonicalHref(value, canonicalRootPath, previewRootPath, routeRootPath, requestPathBase, publicOrigin, htmlUsesExportRootUrls)
+            : htmlUsesExportRootUrls
+                ? RewriteExportRootUrl(value, mountRootPath, requestPathBase)
+                : RewriteMountedDocsUrl(value, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
         if (!string.Equals(value, rewrittenValue, StringComparison.Ordinal))
         {
             element.SetAttribute(attributeName, rewrittenValue);
@@ -1393,14 +1577,17 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         string previewRootPath,
         string routeRootPath,
         string? requestPathBase,
-        string? publicOrigin)
+        string? publicOrigin,
+        bool htmlUsesExportRootUrls)
     {
         if (value.StartsWith("/", StringComparison.Ordinal))
         {
             var suffixIndex = value.IndexOfAny(['?', '#']);
             var path = suffixIndex >= 0 ? value[..suffixIndex] : value;
             var suffix = suffixIndex >= 0 ? value[suffixIndex..] : string.Empty;
-            var rewrittenPath = RewriteMountedDocsPath(
+            var rewrittenPath = htmlUsesExportRootUrls
+                ? RewriteExportRootUrl(path, canonicalRootPath, publicOrigin is null ? requestPathBase : null)
+                : RewriteMountedDocsPath(
                 path,
                 canonicalRootPath,
                 previewRootPath,
@@ -1548,7 +1735,8 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
         string mountRootPath,
         string previewRootPath,
         string routeRootPath,
-        string? requestPathBase)
+        string? requestPathBase,
+        bool htmlUsesExportRootUrls = false)
     {
         var rewrittenEntries = srcSetValue
             .Split(',', StringSplitOptions.TrimEntries)
@@ -1563,15 +1751,29 @@ internal static class AppSurfaceDocsPublishedTreeContentRewriter
                     var separatorIndex = entry.IndexOf(' ');
                     if (separatorIndex < 0)
                     {
-                        return RewriteMountedDocsUrl(entry, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
+                        return htmlUsesExportRootUrls
+                            ? RewriteExportRootUrl(entry, mountRootPath, requestPathBase)
+                            : RewriteMountedDocsUrl(entry, mountRootPath, previewRootPath, routeRootPath, requestPathBase);
                     }
 
                     var url = entry[..separatorIndex];
                     var descriptor = entry[separatorIndex..];
-                    return RewriteMountedDocsUrl(url, mountRootPath, previewRootPath, routeRootPath, requestPathBase) + descriptor;
+                    return (htmlUsesExportRootUrls
+                        ? RewriteExportRootUrl(url, mountRootPath, requestPathBase)
+                        : RewriteMountedDocsUrl(url, mountRootPath, previewRootPath, routeRootPath, requestPathBase)) + descriptor;
                 });
 
         return string.Join(", ", rewrittenEntries);
+    }
+
+    private static string RewriteExportRootUrl(string value, string mountRootPath, string? requestPathBase)
+    {
+        if (!value.StartsWith("/", StringComparison.Ordinal) || value.StartsWith("//", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        return PrefixPathBase(DocsUrlBuilder.JoinPath(mountRootPath, value.TrimStart('/')), requestPathBase);
     }
 
     private static string RewriteMountedDocsUrl(
