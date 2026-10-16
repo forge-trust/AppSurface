@@ -1,6 +1,6 @@
 """Finite Linux checkpoint-two consumer controls. Python prepares/observes; C# owns supervision."""
 from pathlib import Path
-import argparse,base64,datetime,hashlib,json,os,platform,shutil,stat,subprocess,sys,time,urllib.request,uuid,zipfile
+import argparse,base64,datetime,hashlib,json,os,platform,shutil,stat,subprocess,sys,tempfile,time,urllib.request,uuid,zipfile
 
 LIMIT=1800
 MAX_LOG=4*1024*1024
@@ -28,7 +28,7 @@ def command(args,end,log=None,allowed=(0,)):
 
 from staging import copy_tree
 
-def acquire_packages(lock,dest,end):
+def acquire_packages(lock,dest,end,runtime,hasher):
  require(not dest.exists(),'fresh-package-cache');dest.mkdir(mode=0o700)
  nodes=json.loads(lock.read_bytes())['dependencies']['net10.0']
  for name,row in nodes.items():
@@ -38,7 +38,14 @@ def acquire_packages(lock,dest,end):
   require(time.monotonic()<end,'package-deadline')
   with urllib.request.urlopen(url,timeout=min(30,end-time.monotonic())) as response:data=response.read(128*1024*1024+1)
   require(0<len(data)<=128*1024*1024,'package-size')
-  require(base64.b64encode(hashlib.sha512(data).digest()).decode()==row['contentHash'],'package-lock-content-hash')
+  # NuGet signed packages use their unsigned-content hash for lock binding.
+  # Reuse the pinned SDK implementation rather than reimplement ZIP signature normalization.
+  with tempfile.TemporaryDirectory(prefix='checkpoint2-package-') as tmp:
+   package=Path(tmp)/'package.nupkg';write(package,data)
+   observed=json.loads(command([str(runtime),str(hasher),str(package)],end).stdout)
+  require(set(observed)=={'content_hash','archive_sha512','bytes'} and observed['bytes']==len(data),'package-hasher-shape')
+  archive_hash=base64.b64encode(hashlib.sha512(data).digest()).decode()
+  require(observed['archive_sha512']==archive_hash and observed['content_hash']==row['contentHash'],'package-lock-content-hash')
   parent=dest/ident/version;parent.mkdir(parents=True,mode=0o755)
   from io import BytesIO
   with zipfile.ZipFile(BytesIO(data)) as z:
@@ -56,7 +63,7 @@ def acquire_packages(lock,dest,end):
     body=z.read(i);require(len(body)==i.file_size,'package-size-exact')
     if body:write(target,body,0o644)
   write(parent/f'{ident}.{version}.nupkg',data,0o644)
-  write(parent/f'{ident}.{version}.nupkg.sha512',row['contentHash'].encode(),0o644)
+  write(parent/f'{ident}.{version}.nupkg.sha512',archive_hash.encode(),0o644)
   write(parent/'.nupkg.metadata',canonical({'version':2,'contentHash':row['contentHash'],'source':'https://api.nuget.org/v3/index.json'}),0o644)
  count=sum(r['type']!='Project' for r in nodes.values());require(count==14,'exact-subject-package-count')
  return {'packages':count,'lock_sha256':sha(lock)}
@@ -237,12 +244,12 @@ def execute_case(args,case,end,receipt):
  return result['passed']
 
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--acquire-packages',type=Path);ap.add_argument('--package-cache',type=Path)
+ ap=argparse.ArgumentParser();ap.add_argument('--acquire-packages',type=Path);ap.add_argument('--package-cache',type=Path);ap.add_argument('--hash-runtime',type=Path);ap.add_argument('--package-hasher',type=Path)
  for n in ['tool','runtime','subject','output']:ap.add_argument('--'+n,type=Path)
  ap.add_argument('--source');ap.add_argument('--base');args=ap.parse_args()
  end=time.monotonic()+LIMIT;os.umask(0o077)
  if args.acquire_packages:
-  print(json.dumps(acquire_packages(args.acquire_packages,args.package_cache,end)));return 0
+  print(json.dumps(acquire_packages(args.acquire_packages,args.package_cache,end,args.hash_runtime,args.package_hasher)));return 0
  require(os.geteuid()==0 and platform.machine()=='x86_64' and sys.platform=='linux','linux-root-x64')
  require(Path('/sys/fs/cgroup/cgroup.controllers').is_file(),'unified-cgroup-v2')
  require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')

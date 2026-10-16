@@ -81,6 +81,33 @@ If privilege bootstrap or same-binary role isolation fails, resolve that design 
 
 **Exit gate:** genuine declared tests run in the producer identity, generate real coverage, and reach the existing gate; positive/negative report semantics, cancellation, ignored cancellation, quota overflow, artifact mutation, and cleanup failure remain unsuccessful when appropriate. Worker/control/tool/final roots remain denied to subject writes. Label procedure tests separately from protected runtime evidence.
 
+### Checkpoint-two integration and first Linux source result — 2026-10-16
+
+The isolated checkpoint-two branch now wires actual producer execution, copied SDK/package inputs,
+root-selected report custody, worker reporter-byte relay and final filesystem/account custody through
+the C# server. Its implementation references are [coverage execution](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/coverage-execution.md),
+[producer workspaces](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-workspace.md),
+[process settlement](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-execution.md),
+and [artifact custody](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-artifacts.md).
+The earlier concrete-integration table records the checkpoint-one starting boundary; it does not describe
+these later implementation additions as already native-qualified.
+
+[Linux run 38850796941](https://github.com/forge-trust/AppSurface/actions/runs/38850796941)
+bound all2,916 tracked source files, bytes and modes on head `e3a0af54fb4ddda983067d779b3450889387c154`.
+It built the ordinary CLI and passed1,621 supervision controls plus121 focused coverage/relay controls,
+with zero failed/skipped tests or compiler diagnostics in the retained logs. Subject execution was skipped:
+the fixture's direct package downloader incorrectly compared a signed archive's complete ZIP hash against
+NuGet's unsigned-content lock hash. The [SDK hash helper](../../.github/issue779-checkpoint2/NuGetContentHash/README.md)
+is the narrow preparation correction; no dependency version, lock hash, process policy or gate is changed.
+The earlier workflow-only attempt38850650087 failed validation before creating a job.
+
+The [native harness](../../.github/issue779-checkpoint2/README.md) currently defines genuine calculation
+coverage, failed tests, cancellation after test entry, and received-output quota controls. Those outcomes
+remain pending. Artifact mutation after retention and failed workspace sealing/quarantine are additional
+required mechanism controls before the complete checkpoint-two exit gate can be claimed. Local stream,
+metadata and real-file tests do not replace those native ownership controls. Production catalogue and
+consumer-proof registration remain closed, and Observation results retain their informational eligibility.
+
 ## Checkpoint 3: restricted application and SDK parity
 
 **Scope:** the existing compiled restricted application contract, actual AppHost/DCP/resource startup, readiness, and joined shutdown. Use a compiled test registration to validate mechanics; production catalogue and proof registry remain closed.
