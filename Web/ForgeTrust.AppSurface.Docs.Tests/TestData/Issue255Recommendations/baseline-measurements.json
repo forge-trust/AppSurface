@@ -1,0 +1,134 @@
+{
+  "measurement": "current-corpus snapshot measurements",
+  "machine": {
+    "osDescription": "macOS 26.7.1",
+    "osArchitecture": "Arm64",
+    "processorCount": 14,
+    "comparisonLabel": "Local macOS ARM64 host; use the same host/configuration for the candidate comparison."
+  },
+  "runtime": {
+    "frameworkDescription": ".NET 10.0.2",
+    "version": "10.0.2",
+    "processArchitecture": "Arm64",
+    "is64BitProcess": true,
+    "serverGc": false
+  },
+  "configuration": {
+    "settingsPath": "Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json",
+    "effectiveRepositoryRoot": ".",
+    "effectiveMode": "Source",
+    "appSurfaceDocs": {
+      "AppSurfaceDocs:Harvest:Markdown:ExcludeGlobs:0": "releases/unreleased.entries/**",
+      "AppSurfaceDocs:Harvest:Paths:ExcludeGlobs:0": "**/TestResults/**",
+      "AppSurfaceDocs:Harvest:Paths:ExcludeGlobs:1": "**/generated/**",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:0": "README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:1": "CHANGELOG.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:10": "Console/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:11": "Dependency/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:12": "Deployment/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:13": "Durable/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:14": "Durable/external-activation-v1.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:15": "Durable/flow-trace-context-v1.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:16": "Durable/operational-assessments.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:17": "Evidence/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:18": "Flow/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:19": "Intelligence/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:2": "LICENSE",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:20": "Observability/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:21": "Workers/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:22": "ForgeTrust.AppSurface.Core/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:23": "ForgeTrust.AppSurface.Theming/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:24": "packages/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:25": "Web/ForgeTrust.AppSurface.Docs/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:26": "Web/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:27": "Web/**/NAMESPACE.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:28": "Web/**/Docs/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:29": "Web/ForgeTrust.RazorWire/assets/contracts/*.js",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:3": "Aspire/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:30": "releases/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:31": "start-here/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:32": "guides/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:33": "concepts/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:34": "troubleshooting/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:35": "examples/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:36": "**/*.cs",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:4": "Auth/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:5": "Caching/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:6": "Cli/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:7": "Cli/**/docs/**/*.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:8": "Config/**/README.md",
+      "AppSurfaceDocs:Harvest:Paths:IncludeGlobs:9": "Config/**/docs/**/*.md"
+    }
+  },
+  "measurementScope": {
+    "elapsed": "Wall-clock time from cache/aggregator construction through the first docs and search-payload reads.",
+    "allocated": "Process-wide GC.GetTotalAllocatedBytes(true) delta over the elapsed interval; includes concurrent managed allocations elsewhere in this test process.",
+    "retained": "Process-wide live managed heap from GC.GetTotalMemory(true), sampled before and after each build while its cache and captured values are live; this is not per-snapshot attribution.",
+    "overlap": "During generation 2, generation 1's captured docs list and search payload remain rooted while generation 2 builds with a fresh cache. Generation 1's Memo and cache have been disposed, and its aggregator is not intentionally retained. These are process-wide consumer-overlap point samples, not whole-snapshot sizes or peak-memory measurements.",
+    "payloadBytes": "Length of UTF-8 bytes from JsonSerializer.SerializeToUtf8Bytes(payload, JsonSerializerDefaults.Web); serialization is outside elapsed and allocation intervals.",
+    "performanceThresholds": "None. Measurements are reported without numerical performance assertions or SLOs."
+  },
+  "overlap": {
+    "firstGeneration": 1,
+    "secondGeneration": 2,
+    "processManagedHeapBytesBeforeSecondBuild": 176047304,
+    "processManagedHeapBytesAfterSecondBuild": 482308320,
+    "processManagedHeapDeltaBytes": 306261016
+  },
+  "generations": [
+    {
+      "generation": 1,
+      "elapsedMilliseconds": 6872.497,
+      "processAllocatedManagedBytes": 1579856592,
+      "processManagedHeapBytesBeforeBuild": 51629576,
+      "processManagedHeapBytesAfterBuild": 314716056,
+      "retainedManagedHeapDeltaBytes": 263086480,
+      "documentCount": 2462,
+      "searchRecordCount": 2438,
+      "searchPayloadUtf8Bytes": 6864301,
+      "priorCapturedConsumersRetainedDuringBuild": false
+    },
+    {
+      "generation": 2,
+      "elapsedMilliseconds": 3857.0512,
+      "processAllocatedManagedBytes": 1539217832,
+      "processManagedHeapBytesBeforeBuild": 176047304,
+      "processManagedHeapBytesAfterBuild": 482308320,
+      "retainedManagedHeapDeltaBytes": 306261016,
+      "documentCount": 2462,
+      "searchRecordCount": 2438,
+      "searchPayloadUtf8Bytes": 6864301,
+      "priorCapturedConsumersRetainedDuringBuild": true
+    },
+    {
+      "generation": 3,
+      "elapsedMilliseconds": 2911.8634,
+      "processAllocatedManagedBytes": 1476340144,
+      "processManagedHeapBytesBeforeBuild": 482276984,
+      "processManagedHeapBytesAfterBuild": 262497784,
+      "retainedManagedHeapDeltaBytes": -219779200,
+      "documentCount": 2462,
+      "searchRecordCount": 2438,
+      "searchPayloadUtf8Bytes": 6864301,
+      "priorCapturedConsumersRetainedDuringBuild": false
+    }
+  ],
+  "provenance": {
+    "baseCommit": "c2f062f2a22afeff972c5c6512f1f34dd182db90",
+    "branch": "codex/make-it-so-recommended-next-pages",
+    "workingTree": "Pre-implementation corpus sidecar, preflight tests and planning/evidence files are uncommitted; no recommendation policy or public model/integration changes.",
+    "recordedAtUtc": "2026-10-09T22:25:37.898741+00:00",
+    "command": "dotnet test Web/ForgeTrust.AppSurface.Docs.Tests/ForgeTrust.AppSurface.Docs.Tests.csproj --no-restore -p:UseSharedCompilation=false --filter FullyQualifiedName~RepositoryRecommendationBaselineMeasurements --logger 'console;verbosity=detailed'",
+    "exitCode": 0,
+    "testsPassed": 1,
+    "testRunSeconds": 15.1538,
+    "warningsOrErrors": false,
+    "normalization": "Removed machine hostname and process ID; made configuration/root paths repository-relative. All measured values are unchanged."
+  },
+  "remainingEvidence": [
+    "Candidate and 10x/common-component stress comparisons",
+    "Actual overlapping whole-generation peak memory evidence",
+    "Candidate evaluations and retained automatic/authored results",
+    "Final export payload versus configured rewrite limit and required maintainer disposition"
+  ]
+}

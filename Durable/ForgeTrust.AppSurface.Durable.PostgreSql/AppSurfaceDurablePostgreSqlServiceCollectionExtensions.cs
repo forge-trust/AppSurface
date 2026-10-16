@@ -22,12 +22,15 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
     /// <param name="scheduleOptions">Validated exact runtime role and Schedule clock/lease safety settings.</param>
     /// <param name="configure">Optional process-local activation settings.</param>
     /// <returns>A builder that can explicitly add continuous host activation.</returns>
+    /// <exception cref="ArgumentException">The runtime connection string does not identify a host and effective database.</exception>
     /// <remarks>
     /// The supplied data sources must be distinct and configured with roles that are non-owner and free of
     /// <c>BYPASSRLS</c>. The identity check prevents reusing one data source for both roles, but cannot validate
     /// the database credentials; see the
     /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql">PostgreSQL role recipe</see>.
-    /// This method performs no network I/O or DDL. Apply migrations with a separate migration-owner data source
+    /// Registration validates the runtime host and effective database locally before adding services. The database
+    /// may default to an explicit username, as in Npgsql; otherwise specify Database. This method performs no
+    /// network I/O or DDL. Apply migrations with a separate migration-owner data source
     /// through <see cref="IDurableRuntimeSchemaManager"/> before a worker is started.
     /// </remarks>
     public static AppSurfaceDurablePostgreSqlBuilder AddAppSurfaceDurablePostgreSql(
@@ -57,6 +60,7 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
         }
 
         ValidatePumpOverrideComposition(services);
+        _ = PostgreSqlDurableStoreTarget.Create(runtimeDataSource.ConnectionString);
 
         var configuredOptions = new AppSurfaceDurablePostgreSqlOptions();
         configure?.Invoke(configuredOptions);
@@ -97,6 +101,15 @@ public static class AppSurfaceDurablePostgreSqlServiceCollectionExtensions
                 provider.GetRequiredService<IDurableWorkRegistry>(),
                 runtime.WorkOptions);
         });
+        services.TryAddSingleton(static _ => PostgreSqlDurableHandoffCheckpointHook.NoOp);
+        services.TryAddScoped<PostgreSqlDurableWorkHandoffFence>(static provider =>
+        {
+            var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();
+            return new PostgreSqlDurableWorkHandoffFence(runtime.RuntimeDataSource, runtime.WorkOptions,
+                provider.GetRequiredService<PostgreSqlDurableHandoffCheckpointHook>());
+        });
+        services.TryAddScoped<IDurableWorkHandoffFence>(static provider =>
+            provider.GetRequiredService<PostgreSqlDurableWorkHandoffFence>());
         services.TryAddSingleton<IDurableWorkClient>(static provider =>
         {
             var runtime = provider.GetRequiredService<PostgreSqlDurableRuntimeRegistration>();

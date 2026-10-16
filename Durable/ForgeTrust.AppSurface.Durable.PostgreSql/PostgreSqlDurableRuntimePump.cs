@@ -504,9 +504,11 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
         await using (var scope = _scopeFactory.CreateAsyncScope())
         {
             DurablePreparedWorkInvocation invocation;
+            PostgreSqlDurableWorkHandoffFence handoffFence;
             try
             {
                 invocation = DurableProviderWorkAdapter.Prepare(registration, scope.ServiceProvider, claim.ToProviderClaim());
+                handoffFence = scope.ServiceProvider.GetRequiredService<PostgreSqlDurableWorkHandoffFence>();
             }
             catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
             {
@@ -590,6 +592,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                         (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(
                             invocation,
                             currentClaim,
+                            handoffFence,
+                            permit,
                             cancellationToken).ConfigureAwait(false);
                     }
                 }
@@ -598,6 +602,8 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
                     (exit, currentClaim) = await InvokeWithLeaseAndHeartbeatAsync(
                         invocation,
                         currentClaim,
+                        handoffFence,
+                        permit,
                         cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -621,10 +627,12 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
     private async ValueTask<(DurableEncodedWorkExit Exit, PostgreSqlDurableWorkClaim Claim)> InvokeWithLeaseAndHeartbeatAsync(
         DurablePreparedWorkInvocation invocation,
         PostgreSqlDurableWorkClaim claim,
+        PostgreSqlDurableWorkHandoffFence handoffFence,
+        PostgreSqlEffectPermit permit,
         CancellationToken cancellationToken)
     {
         using var executorStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var running = _executionBoundary.InvokeExitAsync(invocation, executorStop.Token).AsTask();
+        var running = InvokeBoundAsync(invocation, handoffFence, permit, executorStop.Token).AsTask();
         var current = claim;
         var heartbeatInterval = _registration.Options.HeartbeatStaleAfter / 3;
         var nextHeartbeat = _timeProvider.GetUtcNow() + heartbeatInterval;
@@ -718,6 +726,14 @@ internal sealed partial class PostgreSqlDurableRuntimePump : IDurableRuntimePump
 
             throw;
         }
+    }
+
+    /// <summary>Deactivates invocation authority as soon as the executor exits, independently of lease maintenance.</summary>
+    private async ValueTask<DurableEncodedWorkExit> InvokeBoundAsync(DurablePreparedWorkInvocation invocation,
+        PostgreSqlDurableWorkHandoffFence handoffFence, PostgreSqlEffectPermit permit, CancellationToken token)
+    {
+        using var binding = handoffFence.EnterInvocation(permit);
+        return await _executionBoundary.InvokeExitAsync(invocation, token).ConfigureAwait(false);
     }
 
     /// <summary>Schedules opt-in lease maintenance without adding beyond its current authoritative lease bound.</summary>

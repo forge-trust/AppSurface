@@ -121,7 +121,35 @@ internal sealed record DocsSearchIndexDocument(
     bool? IsDeprecated = null,
     [property: JsonPropertyName("isGeneratedApiSymbol")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    bool? IsGeneratedApiSymbol = null);
+    bool? IsGeneratedApiSymbol = null)
+{
+    /// <summary>Gets complete authored-first next reads, including nonsearch targets; old indexes may omit this member.</summary>
+    [JsonPropertyName("recommendedPages")]
+    public IReadOnlyList<DocsSearchIndexRecommendation> RecommendedPages { get; init; } = [];
+}
+
+/// <summary>
+/// A complete JSON next-read row. TargetId is the stable canonical identity (including an approved fragment); Path is
+/// surface-specific. Source is explicitly authored/automatic. Consumers need no documents-array lookup and should
+/// use generic presentation for future optional explanation or badge values. Old indexes treat a missing list as empty.
+/// </summary>
+internal sealed record DocsSearchIndexRecommendation(
+    [property: JsonPropertyName("targetId")] string TargetId,
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("summary")] string? Summary,
+    [property: JsonPropertyName("pageTypeLabel")] string? PageTypeLabel,
+    [property: JsonPropertyName("pageTypeVariant")] string? PageTypeVariant,
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("primaryReasonCode")] string PrimaryReasonCode,
+    [property: JsonPropertyName("reasonCodes")] IReadOnlyList<string> ReasonCodes,
+    [property: JsonPropertyName("reasonText")] string ReasonText);
+
+/// <summary>Resolved sequence and authored links owned by one snapshot; public projections detach every row.</summary>
+internal sealed record DocWayfindingSnapshot(
+    DocPageLinkViewModel? PreviousPage,
+    DocPageLinkViewModel? NextPage,
+    IReadOnlyList<DocPageLinkViewModel> RelatedPages);
 
 /// <summary>
 /// A bounded, display-only Markdown projection for a docs search-result summary.
@@ -387,7 +415,9 @@ public class DocAggregator
         DocsSearchIndexProjectionCache SearchIndexProjections,
         Dictionary<string, DocContributorProvenanceViewModel> ContributorProvenanceByPath,
         DocHarvestHealthSnapshot HarvestHealth,
-        MarkdownDownloadSourceSnapshot MarkdownDownloadSources);
+        MarkdownDownloadSourceSnapshot MarkdownDownloadSources,
+        IReadOnlyDictionary<string, DocWayfindingSnapshot> Wayfinding,
+        DocRecommendationPolicyResult Recommendations);
 
     private sealed record HarvesterRunResult(
         string HarvesterType,
@@ -847,21 +877,25 @@ public class DocAggregator
             return null;
         }
 
-        var orderedDocs = snapshot.DocsByPath.Values
-            .OrderBy(node => node.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        var previousPage = ResolveSequenceNeighbor(doc, orderedDocs, direction: -1);
-        var nextPage = ResolveSequenceNeighbor(doc, orderedDocs, direction: 1);
-        var relatedPages = ResolveRelatedPages(doc, orderedDocs, snapshot.PathResolver, previousPage, nextPage);
+        snapshot.Wayfinding.TryGetValue(doc.Path, out var wayfinding);
+        snapshot.Recommendations.Pages.TryGetValue(GetSnapshotCanonicalPath(doc), out var recommendations);
         snapshot.ContributorProvenanceByPath.TryGetValue(doc.Path, out var contributorProvenance);
 
         return new DocDetailsViewModel
         {
             Document = doc,
             Outline = doc.Outline ?? [],
-            PreviousPage = previousPage,
-            NextPage = nextPage,
-            RelatedPages = relatedPages,
+            PreviousPage = ClonePageLink(wayfinding?.PreviousPage),
+            NextPage = ClonePageLink(wayfinding?.NextPage),
+            RelatedPages = (wayfinding?.RelatedPages ?? []).Select(page => ClonePageLink(page)!).ToArray(),
+            RecommendedPages = (recommendations ?? []).Select(row => new DocPageRecommendationViewModel
+            {
+                Page = ClonePageLink(row.Page)!,
+                Source = row.IsAutomatic ? DocRecommendationSource.Automatic : DocRecommendationSource.Authored,
+                PrimaryReasonCode = row.PrimaryReasonCode,
+                ReasonCodes = row.ReasonCodes.ToArray(),
+                ReasonText = row.ReasonText
+            }).ToArray(),
             ContributorProvenance = contributorProvenance
         };
     }
@@ -878,7 +912,7 @@ public class DocAggregator
     internal async Task<DocsSearchIndexPayload> GetSearchIndexPayloadAsync(CancellationToken cancellationToken = default)
     {
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return snapshot.SearchIndexProjections.GetPayload(new DocsSearchIndexProjection());
+        return DetachRecommendations(snapshot.SearchIndexProjections.GetPayload(new DocsSearchIndexProjection()));
     }
 
     /// <summary>
@@ -897,7 +931,7 @@ public class DocAggregator
         ArgumentNullException.ThrowIfNull(projection);
 
         var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
-        return snapshot.SearchIndexProjections.GetPayload(projection);
+        return DetachRecommendations(snapshot.SearchIndexProjections.GetPayload(projection));
     }
 
     /// <summary>
@@ -1111,6 +1145,12 @@ public class DocAggregator
                                .Select(node => node.Path)
                                .ToHashSet(StringComparer.Ordinal);
                            var finalRouteIdentityCatalog = DocRouteIdentityCatalog.Create(docsByPath.Values, _docsUrlBuilder);
+                           docsByPath = docsByPath.ToDictionary(pair => pair.Key,
+                               pair => pair.Value with
+                               {
+                                   CanonicalPath = finalRouteIdentityCatalog.TryGetPublicRoutePathForSource(pair.Key, out var route)
+                                       ? route : null
+                               }, StringComparer.Ordinal);
                            docsByPath = ResolveTypedNamespaceEntryPointHrefs(docsByPath, finalRouteIdentityCatalog);
                            var (markdownDownloadSources, markdownDownloadDiagnostic) = BuildMarkdownDownloadSources(
                                harvesterResults,
@@ -1123,13 +1163,16 @@ public class DocAggregator
                                finalRouteIdentityCatalog);
 
                            var publicSections = BuildPublicSections(docsByPath.Values, logger);
+                           var (wayfinding, recommendations) = BuildWayfindingSnapshot(
+                               docsByPath.Values.ToArray(), pathResolver, publicSections);
                            var contributorProvenanceByPath = await BuildContributorProvenanceByPathAsync(
                                docsByPath.Values,
                                CancellationToken.None);
                            var (searchIndexPayload, searchRecordCount) = BuildSearchIndexPayload(
                                docsByPath.Values,
                                publicSections,
-                               finalRouteIdentityCatalog);
+                               finalRouteIdentityCatalog,
+                               recommendations);
                            var searchIndexProjections = new DocsSearchIndexProjectionCache(searchIndexPayload, localizedGraph);
                            var routeManifest = finalRouteIdentityCatalog.BuildRouteManifest();
                            var harvestHealth = BuildHarvestHealthSnapshot(
@@ -1168,7 +1211,9 @@ public class DocAggregator
                                searchIndexProjections,
                                contributorProvenanceByPath,
                                harvestHealth,
-                               markdownDownloadSourceSnapshot);
+                               markdownDownloadSourceSnapshot,
+                               wayfinding,
+                               recommendations);
                            PublishMarkdownDownloadSources(generation, markdownDownloadSourceSnapshot);
                            return snapshot;
                        }
@@ -2522,11 +2567,13 @@ public class DocAggregator
     /// <param name="docs">The documentation nodes to index.</param>
     /// <param name="publicSections">The resolved public sections used to derive landing winners.</param>
     /// <param name="routeIdentityCatalog">The snapshot route catalog used to emit public canonical paths.</param>
+    /// <param name="recommendations">Complete rows resolved by the same snapshot policy, before any response mount.</param>
     /// <returns>A tuple containing the serializable payload and the number of records indexed.</returns>
     private (DocsSearchIndexPayload Payload, int RecordCount) BuildSearchIndexPayload(
         IEnumerable<DocNode> docs,
         IReadOnlyList<DocSectionSnapshot> publicSections,
-        DocRouteIdentityCatalog routeIdentityCatalog)
+        DocRouteIdentityCatalog routeIdentityCatalog,
+        DocRecommendationPolicyResult recommendations)
     {
         var resolvedLandingPaths = publicSections
             .Where(section => section.LandingDoc is not null)
@@ -2538,7 +2585,7 @@ public class DocAggregator
             .Select<DocNode, DocsSearchIndexDocument?>(
                 d =>
                 {
-                    if (!routeIdentityCatalog.TryGetPublicRoutePath(d.Path, out var publicRoutePath))
+                    if (!routeIdentityCatalog.TryGetPublicRoutePathForSource(d.Path, out var publicRoutePath))
                     {
                         return null;
                     }
@@ -2623,7 +2670,14 @@ public class DocAggregator
                         generatedApiSymbol?.ApiLifecycle,
                         generatedApiSymbol?.ApiLifecycleLabel,
                         generatedApiSymbol?.IsDeprecated,
-                        generatedApiSymbol is null ? null : true);
+                        generatedApiSymbol is null ? null : true)
+                    {
+                        RecommendedPages = recommendations.Pages.GetValueOrDefault(publicRoutePath, [])
+                            .Select(row => new DocsSearchIndexRecommendation(row.TargetId, row.Page.Href, row.Page.Title,
+                                row.Page.Summary, row.Page.PageTypeBadge?.Label, row.Page.PageTypeBadge?.Variant,
+                                row.IsAutomatic ? "automatic" : "authored", row.PrimaryReasonCode, row.ReasonCodes,
+                                row.ReasonText)).ToArray()
+                    };
                 })
             .Where(r => r is not null)
             .Select(r => r!)
@@ -2819,53 +2873,80 @@ public class DocAggregator
         return text[..boundary].TrimEnd() + "...";
     }
 
-    private DocPageLinkViewModel? ResolveSequenceNeighbor(
-        DocNode currentDoc,
-        IReadOnlyList<DocNode> docs,
-        int direction)
+    /// <summary>
+    /// Resolves all legacy wayfinding and new recommendations once after merge, canonical collision resolution and
+    /// section landing selection. A shared canonical link map supplies sequence neighbors and policy facts; authored
+    /// destinations are projected separately. Their title fallback index is created once on demand within this build.
+    /// Response projections detach links. Results publish atomically with the search projection in the cached generation.
+    /// </summary>
+    private (IReadOnlyDictionary<string, DocWayfindingSnapshot> Wayfinding, DocRecommendationPolicyResult Recommendations)
+        BuildWayfindingSnapshot(IReadOnlyList<DocNode> docs, DocPathResolver resolver,
+            IReadOnlyList<DocSectionSnapshot> sections)
     {
-        var currentMetadata = currentDoc.Metadata;
-        if (currentMetadata is null)
+        var ordered = docs.OrderBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+        var canonical = ordered.Where(doc => doc.CanonicalPath is not null)
+            .GroupBy(GetSnapshotCanonicalPath, StringComparer.OrdinalIgnoreCase).Select(group => group.First()).ToArray();
+        var linksByPath = canonical.ToDictionary(doc => doc.Path, CreatePageLink, StringComparer.Ordinal);
+        var relatedDocsByTitle = new Lazy<IReadOnlyDictionary<string, DocNode>>(() => BuildRelatedTitleLookup(ordered));
+        var previous = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
+        var next = new Dictionary<string, DocPageLinkViewModel>(StringComparer.Ordinal);
+        var groups = canonical.Where(doc => doc.Metadata?.SequenceKey is { } key && CanJoinSequence(doc, key.Trim()))
+            .GroupBy(doc => NormalizeMetadataText(doc.Metadata!.SequenceKey)!, StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups)
         {
-            return null;
+            var sequence = group.OrderBy(doc => doc.Metadata!.Order)
+                .ThenBy(GetDisplayTitle, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase).ToArray();
+            for (var i = 0; i < sequence.Length; i++)
+            {
+                if (i > 0) previous[sequence[i].Path] = linksByPath[sequence[i - 1].Path];
+                if (i + 1 < sequence.Length) next[sequence[i].Path] = linksByPath[sequence[i + 1].Path];
+            }
         }
 
-        var sequenceKey = NormalizeMetadataText(currentMetadata.SequenceKey);
-        if (sequenceKey is null)
+        var sectionByPath = sections.SelectMany(section => section.VisiblePages.Select(doc => (doc.Path, Section: section)))
+            .ToDictionary(pair => pair.Path, pair => pair.Section, StringComparer.Ordinal);
+        var wayfinding = new Dictionary<string, DocWayfindingSnapshot>(StringComparer.Ordinal);
+        var facts = new List<DocRecommendationPageFacts>();
+        var idsByHref = canonical.ToDictionary(doc => linksByPath[doc.Path].Href,
+            GetSnapshotCanonicalPath, StringComparer.OrdinalIgnoreCase);
+        foreach (var doc in canonical)
         {
-            return null;
+            var prev = previous.GetValueOrDefault(doc.Path);
+            var following = next.GetValueOrDefault(doc.Path);
+            var related = ResolveRelatedPages(doc, relatedDocsByTitle, resolver, prev, following);
+            wayfinding[doc.Path] = new DocWayfindingSnapshot(prev, following, related);
+            sectionByPath.TryGetValue(doc.Path, out var section);
+            facts.Add(new DocRecommendationPageFacts(doc, GetSnapshotCanonicalPath(doc), linksByPath[doc.Path], section?.Section,
+                section?.LandingDoc?.Path == doc.Path,
+                prev is null ? null : idsByHref[prev.Href], following is null ? null : idsByHref[following.Href],
+                related.Select(page => new DocRecommendationLink(idsByHref[page.Href], page)).ToArray()));
         }
 
-        if (currentMetadata.Order is null)
+        return (wayfinding, DocRecommendationPolicy.Build(facts));
+    }
+
+    private static DocPageLinkViewModel? ClonePageLink(DocPageLinkViewModel? page) => page is null ? null :
+        page with { PageTypeBadge = page.PageTypeBadge is { } badge ? badge with { } : null };
+
+    /// <summary>Detaches the new nested mutable collections without changing the locale graph or cached ranking.</summary>
+    private static DocsSearchIndexPayload DetachRecommendations(DocsSearchIndexPayload payload) => payload with
+    {
+        Documents = payload.Documents.Select(document => document with
         {
-            return null;
-        }
+            RecommendedPages = document.RecommendedPages.Select(row => row with { ReasonCodes = row.ReasonCodes.ToArray() }).ToArray()
+        }).ToArray()
+    };
 
-        if (HasFragment(currentDoc))
+    /// <summary>Returns build-time candidate counts without exposing the snapshot or a request-time ranking operation.</summary>
+    internal async Task<DocRecommendationMeasurements> GetRecommendationMeasurementsAsync(CancellationToken cancellationToken = default)
+    {
+        var snapshot = await GetCachedDocsSnapshotAsync().WaitAsync(cancellationToken);
+        return snapshot.Recommendations.Measurements with
         {
-            return null;
-        }
-
-        var sequenceDocs = docs
-            .Where(doc => CanJoinSequence(doc, sequenceKey))
-            .OrderBy(doc => doc.Metadata!.Order)
-            .ThenBy(doc => GetDisplayTitle(doc), StringComparer.OrdinalIgnoreCase)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var currentIndex = sequenceDocs.FindIndex(doc => string.Equals(doc.Path, currentDoc.Path, StringComparison.OrdinalIgnoreCase));
-        if (currentIndex < 0)
-        {
-            return null;
-        }
-
-        var neighborIndex = currentIndex + direction;
-        if (neighborIndex < 0 || neighborIndex >= sequenceDocs.Count)
-        {
-            return null;
-        }
-
-        return CreatePageLink(sequenceDocs[neighborIndex]);
+            CandidateCounts = new Dictionary<string, int>(snapshot.Recommendations.Measurements.CandidateCounts,
+                StringComparer.OrdinalIgnoreCase)
+        };
     }
 
     private static bool CanJoinSequence(DocNode doc, string sequenceKey)
@@ -2904,7 +2985,7 @@ public class DocAggregator
 
     private IReadOnlyList<DocPageLinkViewModel> ResolveRelatedPages(
         DocNode currentDoc,
-        IReadOnlyList<DocNode> docs,
+        Lazy<IReadOnlyDictionary<string, DocNode>> relatedDocsByTitle,
         DocPathResolver pathResolver,
         DocPageLinkViewModel? previousPage,
         DocPageLinkViewModel? nextPage)
@@ -2943,8 +3024,10 @@ public class DocAggregator
                                  _docsUrlBuilder.CurrentDocsRootPath,
                                  _docsUrlBuilder.RouteRootPath,
                                  DocsUrlBuilder.DocsEntryPath)
-                             ?? ResolveDocByTitle(normalizedEntry, docs);
-            if (relatedDoc is null || relatedDoc.Metadata?.HideFromPublicNav == true)
+                             ?? relatedDocsByTitle.Value.GetValueOrDefault(normalizedEntry);
+            if (relatedDoc is null || relatedDoc.Metadata?.HideFromPublicNav == true
+                || relatedDoc.CanonicalPath is null
+                || !(relatedDoc.HasReaderContent || relatedDoc.IsFragmentStub))
             {
                 continue;
             }
@@ -2961,15 +3044,23 @@ public class DocAggregator
         return relatedPages;
     }
 
-    private static DocNode? ResolveDocByTitle(string title, IReadOnlyList<DocNode> docs)
+    /// <summary>
+    /// Indexes readable authored destinations by display title, preserving the related-page resolver's order/title/path
+    /// winner and stable input ordering for ties. The build-local lookup is populated only when route resolution fails.
+    /// </summary>
+    private static IReadOnlyDictionary<string, DocNode> BuildRelatedTitleLookup(IReadOnlyList<DocNode> docs)
     {
-        return docs
-            .Where(doc => doc.Metadata?.HideFromPublicNav != true)
+        var byTitle = new Dictionary<string, DocNode>(StringComparer.OrdinalIgnoreCase);
+        foreach (var doc in docs.Where(doc => doc.Metadata?.HideFromPublicNav != true && doc.CanonicalPath is not null
+                                            && (doc.HasReaderContent || doc.IsFragmentStub))
             .OrderBy(doc => doc.Metadata?.Order ?? int.MaxValue)
             .ThenBy(doc => GetDisplayTitle(doc), StringComparer.OrdinalIgnoreCase)
-            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault(
-                doc => string.Equals(GetDisplayTitle(doc), title, StringComparison.OrdinalIgnoreCase));
+            .ThenBy(doc => doc.Path, StringComparer.OrdinalIgnoreCase))
+        {
+            if (GetDisplayTitle(doc) is { } title) byTitle.TryAdd(title, doc);
+        }
+
+        return byTitle;
     }
 
     private DocPageLinkViewModel CreatePageLink(DocNode doc)
@@ -3541,6 +3632,7 @@ public class DocAggregator
             NavGroup = metadata.NavGroupIsDerived == true ? null : metadata.NavGroup,
             NavGroupIsDerived = metadata.NavGroupIsDerived == true ? null : metadata.NavGroupIsDerived,
             RelatedPages = metadata.RelatedPages,
+            AutoRelatedPages = metadata.AutoRelatedPages,
             Breadcrumbs = metadata.Breadcrumbs,
             BreadcrumbsMatchPathTargets = metadata.BreadcrumbsMatchPathTargets,
             EntryPoints = metadata.EntryPoints,

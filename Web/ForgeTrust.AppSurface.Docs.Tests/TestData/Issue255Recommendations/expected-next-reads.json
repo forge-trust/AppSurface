@@ -1,0 +1,306 @@
+{
+  "schemaVersion": 1,
+  "status": "maintainer-approved-before-algorithm-output",
+  "capturedAtUtc": "2026-10-09T21:36:10.643915+00:00",
+  "repository": "forge-trust/AppSurface",
+  "baseCommit": "c2f062f2",
+  "branch": "codex/make-it-so-recommended-next-pages",
+  "corpusConfiguration": "Web/ForgeTrust.AppSurface.Docs.Standalone/appsettings.json",
+  "baselineSearchIndexSha256": "29b1e8c6e192a752bea28ec11020b929ec8d744eec251b44c3bf09596a320a96",
+  "baselineSearchIndexBytes": 6864301,
+  "provenance": "Implementer proposals adapted from the approved plan, verified against the source-backed host, and approved by the maintainer with A before any recommendation output. The config-validation sidecar is the only pre-evaluation corpus-authoring addition.",
+  "interpretation": "These are useful reading destinations, not a promise of three automatic rows. Existing previous/next destinations are suppressed from recommendations. Preserve curated order; explicit curation may be needed where current metadata does not establish an automatic relationship. Record actual output and dispositions separately without changing these expectations.",
+  "cases": [
+    {
+      "role": "guide",
+      "sourcePath": "guides/evidencehost-cookbook.md",
+      "canonicalSourceId": "guides/evidencehost-cookbook",
+      "sourceTitle": "EvidenceHost Cookbook",
+      "verifiedSourceMetadata": {
+        "id": "guides/evidencehost-cookbook",
+        "path": "/docs/guides/evidencehost-cookbook",
+        "title": "EvidenceHost Cookbook",
+        "pageType": "guide",
+        "pageTypeLabel": "Guide",
+        "pageTypeVariant": "guide",
+        "publicSection": "how-to-guides",
+        "isSectionLanding": false,
+        "component": null,
+        "audience": null,
+        "aliases": [
+          "evidence policy",
+          "no evidence required",
+          "browser E2E evidence",
+          "release envelope"
+        ],
+        "keywords": [
+          "appsurface evidence init",
+          "appsurface evidence doctor",
+          "appsurface evidence explain",
+          "appsurface evidence run",
+          "appsurface evidence verify",
+          "coverage gate"
+        ],
+        "sequenceKey": "evidencehost",
+        "order": 70,
+        "relatedPages": [
+          "start-here/evidencehost.md",
+          "Cli/ForgeTrust.AppSurface.Cli/README.md",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md",
+          "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md"
+        ]
+      },
+      "expectedNextReads": [
+        {
+          "sourcePath": "start-here/evidencehost.md",
+          "canonicalTargetId": "start-here/evidencehost",
+          "title": "EvidenceHost: risk-mediated CI",
+          "reason": "Review the evidence claim and adoption model that the cookbook applies.",
+          "intendedNavigation": "previous-sequence"
+        },
+        {
+          "sourcePath": "Cli/ForgeTrust.AppSurface.Cli/README.md",
+          "canonicalTargetId": "cli/forgetrust.appsurface.cli",
+          "title": "AppSurface CLI",
+          "reason": "Look up the evidence CLI commands used by these recipes.",
+          "intendedNavigation": "curated"
+        },
+        {
+          "sourcePath": "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
+          "canonicalTargetId": "evidence/forgetrust.appsurface.evidence.contracts",
+          "title": "ForgeTrust.AppSurface.Evidence.Contracts",
+          "reason": "Inspect the plan, manifest and execution contracts behind the recipes.",
+          "intendedNavigation": "curated"
+        }
+      ]
+    },
+    {
+      "role": "example",
+      "sourcePath": "examples/config-validation/README.md",
+      "canonicalSourceId": "examples/config-validation",
+      "sourceTitle": "Config validation example",
+      "verifiedSourceMetadata": {
+        "id": "examples/config-validation",
+        "path": "/docs/examples/config-validation",
+        "title": "Config validation example",
+        "pageType": "example",
+        "pageTypeLabel": "Example",
+        "pageTypeVariant": "example",
+        "publicSection": "examples",
+        "isSectionLanding": false,
+        "component": "ForgeTrust.AppSurface.Config",
+        "audience": null,
+        "aliases": [],
+        "keywords": [
+          "configuration",
+          "scalar validation",
+          "PortConfig",
+          "startup"
+        ],
+        "sequenceKey": null,
+        "order": null,
+        "relatedPages": [
+          "troubleshooting/startup-and-modules.md",
+          "Config/ForgeTrust.AppSurface.Config/README.md"
+        ]
+      },
+      "expectedNextReads": [
+        {
+          "sourcePath": "troubleshooting/startup-and-modules.md",
+          "canonicalTargetId": "troubleshooting/startup-and-modules",
+          "title": "Troubleshoot Startup and Modules",
+          "reason": "Diagnose the startup failure demonstrated by the invalid PortConfig value.",
+          "intendedNavigation": "curated"
+        },
+        {
+          "sourcePath": "Config/ForgeTrust.AppSurface.Config/README.md",
+          "canonicalTargetId": "config/forgetrust.appsurface.config",
+          "title": "ForgeTrust.AppSurface.Config",
+          "reason": "Learn how typed configuration and scalar validation are registered.",
+          "intendedNavigation": "curated"
+        }
+      ]
+    },
+    {
+      "role": "troubleshooting",
+      "sourcePath": "troubleshooting/startup-and-modules.md",
+      "canonicalSourceId": "troubleshooting/startup-and-modules",
+      "sourceTitle": "Troubleshoot Startup and Modules",
+      "verifiedSourceMetadata": {
+        "id": "troubleshooting/startup-and-modules",
+        "path": "/docs/troubleshooting/startup-and-modules",
+        "title": "Troubleshoot Startup and Modules",
+        "pageType": "troubleshooting",
+        "pageTypeLabel": "Troubleshooting",
+        "pageTypeVariant": "troubleshooting",
+        "publicSection": "troubleshooting",
+        "isSectionLanding": false,
+        "component": null,
+        "audience": null,
+        "aliases": [
+          "module did not run",
+          "dependency module",
+          "config failed",
+          "wrong package"
+        ],
+        "keywords": [
+          "StartupContext",
+          "IAppSurfaceModule",
+          "dependency",
+          "configuration"
+        ],
+        "sequenceKey": null,
+        "order": 10,
+        "relatedPages": [
+          "examples/config-validation/README.md",
+          "ForgeTrust.AppSurface.Core/README.md",
+          "packages/README.md"
+        ]
+      },
+      "expectedNextReads": [
+        {
+          "sourcePath": "examples/config-validation/README.md",
+          "canonicalTargetId": "examples/config-validation",
+          "title": "Config validation example",
+          "reason": "Reproduce a safe configuration failure with a concrete working sample.",
+          "intendedNavigation": "curated"
+        },
+        {
+          "sourcePath": "ForgeTrust.AppSurface.Core/README.md",
+          "canonicalTargetId": "forgetrust.appsurface.core",
+          "title": "ForgeTrust.AppSurface.Core",
+          "reason": "Check startup ownership and dependent-module registration.",
+          "intendedNavigation": "curated"
+        },
+        {
+          "sourcePath": "packages/README.md",
+          "canonicalTargetId": "packages",
+          "title": "AppSurface package chooser",
+          "reason": "Find the correct package when a missing capability is a package-choice problem.",
+          "intendedNavigation": "curated"
+        }
+      ]
+    },
+    {
+      "role": "api-reference",
+      "sourcePath": "Namespaces/ForgeTrust.RazorWire",
+      "canonicalSourceId": "Namespaces/ForgeTrust.RazorWire.html",
+      "sourceTitle": "ForgeTrust.RazorWire",
+      "verifiedSourceMetadata": {
+        "id": "Namespaces/ForgeTrust.RazorWire.html",
+        "path": "/docs/Namespaces/ForgeTrust.RazorWire.html",
+        "title": "ForgeTrust.RazorWire",
+        "pageType": "api-reference",
+        "pageTypeLabel": "API Reference",
+        "pageTypeVariant": "api-reference",
+        "publicSection": "api-reference",
+        "isSectionLanding": false,
+        "component": "RazorWire",
+        "audience": "developer",
+        "aliases": [
+          "RazorWire namespace",
+          "RazorWire API entry points"
+        ],
+        "keywords": [
+          "RazorWire registration",
+          "RazorWire services",
+          "RazorWire streams"
+        ],
+        "sequenceKey": null,
+        "order": null,
+        "relatedPages": []
+      },
+      "expectedNextReads": [
+        {
+          "sourcePath": "Web/ForgeTrust.RazorWire/README.md",
+          "canonicalTargetId": "web/forgetrust.razorwire",
+          "title": "RazorWire",
+          "reason": "Move from API entry points to the RazorWire installation and quickstart path.",
+          "intendedNavigation": "explicit-curation-needed"
+        },
+        {
+          "sourcePath": "Web/ForgeTrust.RazorWire/Docs/stream-authorization.md",
+          "canonicalTargetId": "web/forgetrust.razorwire/docs/stream-authorization",
+          "title": "RazorWire Stream Authorization",
+          "reason": "Understand the authorization contract before exposing a stream endpoint.",
+          "intendedNavigation": "explicit-curation-needed"
+        },
+        {
+          "sourcePath": "Web/ForgeTrust.RazorWire/Docs/dialog-responses.md",
+          "canonicalTargetId": "web/forgetrust.razorwire/docs/dialog-responses",
+          "title": "Dialog Responses",
+          "reason": "See how a documented response API is used for dialog interactions.",
+          "intendedNavigation": "explicit-curation-needed"
+        }
+      ]
+    },
+    {
+      "role": "section-landing",
+      "sourcePath": "start-here/appsurface-evaluator.md",
+      "canonicalSourceId": "start-here/appsurface-evaluator",
+      "sourceTitle": "Start Here for AppSurface Evaluators",
+      "verifiedSourceMetadata": {
+        "id": "start-here/appsurface-evaluator",
+        "path": "/docs/start-here/appsurface-evaluator",
+        "title": "Start Here for AppSurface Evaluators",
+        "pageType": "guide",
+        "pageTypeLabel": "Guide",
+        "pageTypeVariant": "guide",
+        "publicSection": "start-here",
+        "isSectionLanding": true,
+        "component": null,
+        "audience": null,
+        "aliases": [
+          "AppSurface evaluator",
+          "team standard",
+          "startup standardization",
+          "plain ASP.NET Core"
+        ],
+        "keywords": [
+          "Program.cs",
+          "modules",
+          "startup",
+          "team lead",
+          "architect"
+        ],
+        "sequenceKey": "appsurface-evaluator",
+        "order": 10,
+        "relatedPages": [
+          "start-here/should-i-use-appsurface.md",
+          "start-here/first-success-path.md",
+          "packages/README.md"
+        ]
+      },
+      "expectedNextReads": [
+        {
+          "sourcePath": "start-here/should-i-use-appsurface.md",
+          "canonicalTargetId": "start-here/should-i-use-appsurface",
+          "title": "Should I Use AppSurface?",
+          "reason": "Decide whether AppSurface fits the application before adopting it.",
+          "intendedNavigation": "next-sequence"
+        },
+        {
+          "sourcePath": "examples/product-readiness-lab/README.md",
+          "canonicalTargetId": "examples/product-readiness-lab",
+          "title": "AppSurface Product Readiness Lab",
+          "reason": "Inspect a composed example that demonstrates the product readiness path.",
+          "intendedNavigation": "explicit-curation-needed"
+        },
+        {
+          "sourcePath": "guides/from-program-cs-to-module.md",
+          "canonicalTargetId": "guides/from-program-cs-to-module",
+          "title": "From Program.cs to an AppSurface Module",
+          "reason": "Try a concrete migration from Program.cs startup code to a module.",
+          "intendedNavigation": "automatic-if-evidence-qualifies"
+        }
+      ]
+    }
+  ],
+  "approval": {
+    "choice": "A",
+    "approvedAtUtc": "2026-10-09T22:40:22.288363+00:00",
+    "basis": "User approved the concrete five-page proposal and all next-read reasons in this chat after the G1 request.",
+    "preApprovalFileSha256": "47bf8aa1931e127e7adc0bfb7169e5434f91241ab351fb996b91063ed102d80e",
+    "expectedCasesUnchanged": true
+  }
+}

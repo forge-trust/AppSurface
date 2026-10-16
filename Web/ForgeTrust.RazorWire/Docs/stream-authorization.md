@@ -1,3 +1,12 @@
+---
+title: RazorWire Stream Authorization
+summary: Authorize RazorWire event streams before subscription and map safe denial outcomes.
+page_type: guide
+component: ForgeTrust.RazorWire
+related_pages:
+  - Web/ForgeTrust.RazorWire/Docs/antiforgery.md
+---
+
 # RazorWire Stream Authorization
 
 RazorWire stream endpoints are safe by default. A request must pass channel validation, stream authorization, and

@@ -30,6 +30,10 @@ For #765 retry timing choices, start with the [execution-policy v1 reference](ex
 legacy completion-relative backoff, deadline-only execution, and fixed acceptance-relative attempt plans, then links the
 source-compiled adopter example, diagnostics, and schema-12 rollout procedure.
 
+For current application authorization immediately before a provider effect, use the [PostgreSQL handoff entry point](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff).
+It combines current native invocation authority with application-owned conditional ledger writes in the caller's exact
+transaction; caller commit and resource release still precede provider I/O.
+
 ## Deterministic retry-plan timeline
 
 A planned Work's authoritative acceptance instant is the database insertion time, sampled inside the caller-owned

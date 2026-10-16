@@ -145,5 +145,7 @@ If you want the live standalone host to exercise the full `Source of truth` stri
 ## Related Projects
 
 - [ForgeTrust.AppSurface.Docs](../ForgeTrust.AppSurface.Docs/README.md) for the reusable docs package
+- [Recommended next-read contract](../ForgeTrust.AppSurface.Docs/README.md#recommended-next-reads) for author controls, API, JSON, and archive behavior
+- [Three-page authoring walkthrough](../ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#build-a-three-page-next-read-example) for a real guide, example, and troubleshooting set
 - [Back to Web List](../README.md)
 - [Back to Root](../../README.md)

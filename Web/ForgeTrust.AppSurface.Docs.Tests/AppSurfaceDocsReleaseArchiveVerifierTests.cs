@@ -261,6 +261,40 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
     }
 
     [Fact]
+    public void TryVerify_ShouldFail_WhenCanonicalArtifactIsNotCoveredByReleaseManifest()
+    {
+        const string artifactPath = "guide.html";
+        var index = WriteFile("index.html", "<html>ok</html>");
+        _ = WriteFile(artifactPath, "<html>guide</html>");
+        var routeManifest = WriteFile(
+            AppSurfaceDocsFrozenRouteManifest.FileName,
+            """
+            {
+              "schema": "appsurface-docs-route-manifest-v1",
+              "htmlUrlBase": "export-root",
+              "entries": [
+                {
+                  "sourcePath": "guide.md",
+                  "canonicalRoutePath": "guide",
+                  "recoveryAliases": [],
+                  "declaredAliases": [],
+                  "canonicalArtifactPath": "guide.html"
+                }
+              ]
+            }
+            """,
+            "application/json");
+        var digest = WriteManifest(index, routeManifest);
+        var fileSystem = new OmittedEnumeratedFileSystem(TestPathUtils.PathUnder(_tempDirectory, artifactPath));
+
+        var failure = VerifyFailure(digest, fileSystem);
+
+        Assert.Equal("ASDOCSARCHIVE009", failure.Code);
+        Assert.Equal(artifactPath, failure.Path);
+        Assert.Contains("canonical artifact is not covered", failure.PublicMessage);
+    }
+
+    [Fact]
     public void TryVerify_ShouldFail_WhenServeableArchiveFileIsNotListed()
     {
         var index = WriteFile("index.html", "<html>ok</html>");
@@ -657,6 +691,35 @@ public sealed class AppSurfaceDocsReleaseArchiveVerifierTests : IDisposable
         internal override IEnumerable<string> EnumerateFiles(string rootPath)
         {
             return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories).Append(extraPath);
+        }
+    }
+
+    private sealed class OmittedEnumeratedFileSystem(string omittedPath) : AppSurfaceDocsReleaseArchiveFileSystem
+    {
+        internal override bool FileExists(string path)
+        {
+            return File.Exists(path);
+        }
+
+        internal override byte[] ReadAllBytes(string path)
+        {
+            return File.ReadAllBytes(path);
+        }
+
+        internal override long GetLength(string path)
+        {
+            return new FileInfo(path).Length;
+        }
+
+        internal override string ComputeSha256(string path)
+        {
+            return ComputeFileSha256(path);
+        }
+
+        internal override IEnumerable<string> EnumerateFiles(string rootPath)
+        {
+            return Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories)
+                .Where(path => !string.Equals(path, omittedPath, StringComparison.Ordinal));
         }
     }
 
