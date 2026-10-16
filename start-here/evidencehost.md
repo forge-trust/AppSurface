@@ -57,6 +57,8 @@ The [neutral readiness package reference](https://github.com/forge-trust/AppSurf
 
 Readiness checks only the declared HTTP status condition after Aspire reports the selected resource healthy. The default predicate is exactly HTTP 200; it does not read a body or prove browser behavior, authentication, business state, or evidence obligations. Keep those assertions in the owning test or producer. The deadline is cooperative: synchronous factories and callbacks, transports that ignore cancellation, and awaited cleanup can outlast it.
 
+Each adapter created by an [Evidence.Aspire application lease](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#http-readiness-adapter) retains its own application registration. Adapter disposal drains its own HTTP waits and releases that registration; only the final adapter release stops the application. Dispose every adapter, and finish all readiness work before directly disposing the application lease.
+
 ## Keep test and application hosts separate
 
 An EvidenceHost is not a specialized production `AppHost`. Keep it in consumer test/CI composition and register every resource and producer explicitly:

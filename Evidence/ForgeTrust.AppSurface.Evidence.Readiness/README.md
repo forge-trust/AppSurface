@@ -81,7 +81,7 @@ Cancellation is cooperative. Synchronous callbacks cannot be preempted, and a tr
 
 For the typed fixture, a factory must return an exclusive, active, unbuilt builder. Ownership transfers immediately when it returns, including when cancellation is observed just afterward. If a custom factory allocates resources but throws or fails before returning, that factory cleans its own allocations. Startup failure preserves its primary exception while awaiting builder cleanup. Fixture disposal owns the application-before-activation cleanup order; callers must not build or dispose `Application` independently.
 
-For the Evidence.Aspire adapter, each readiness wait has its own deadline and client. Adapter disposal stops new waits, cancels and drains admitted waits and their client cleanup, then delegates once to the existing application lease. Do not dispose that lease, or another adapter forwarding disposal to the same lease, while a readiness wait is active. This is adapter-local coordination; it does not claim general EvidenceHost cleanup terminalization.
+For the Evidence.Aspire adapter, each readiness wait has its own deadline and client. Adapter disposal stops new waits, cancels and drains admitted waits and their client cleanup, then releases its own application registration. Each adapter has a separate registration, so disposing one adapter does not stop the application while another adapter remains registered. Dispose every adapter you create, including adapters that were never waited on. Finish readiness work before directly disposing the `EvidenceAspireApplication` owner. This is adapter-local coordination; it does not claim general EvidenceHost cleanup terminalization.
 
 ## `ReadinessException`
 

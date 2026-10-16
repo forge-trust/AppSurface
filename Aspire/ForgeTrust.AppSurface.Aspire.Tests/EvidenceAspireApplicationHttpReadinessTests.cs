@@ -1,5 +1,6 @@
 using Aspire.Hosting;
 using ForgeTrust.AppSurface.Evidence.Aspire;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -32,7 +33,27 @@ public sealed class EvidenceAspireApplicationHttpReadinessTests
         Assert.Throws<ObjectDisposedException>(() => application.CreateHttpReadiness(null!, "api", "http", "/health", TimeSpan.FromSeconds(1)));
     }
 
-    private static async Task<EvidenceAspireApplication> StartEmptyApplicationAsync()
+    // Value: protects=independent health/HTTP application registrations; fails_when=one adapter stops another's owner;
+    // why_new=the existing public tests cover guards only; seam=none; no_claim=active transport draining is tested separately.
+    [Fact]
+    public async Task HealthAndHttpAdapters_KeepTheApplicationUntilTheFinalRegistrationDisposes()
+    {
+        await using var application = await StartEmptyApplicationAsync(builder =>
+            builder.AddExecutable("api", "unused", ".").WithHttpEndpoint(targetPort: 8080, name: "http"));
+        var health = application.CreateHealthReadiness("health", "api");
+        var http = application.CreateHttpReadiness("http", "api", "http", "/health", TimeSpan.FromSeconds(1));
+
+        await Assert.IsAssignableFrom<IAsyncDisposable>(health).DisposeAsync();
+        IEvidenceResourceReadiness? final = null;
+        Assert.Null(Record.Exception(() => final = application.CreateHealthReadiness("final", "api")));
+        await Assert.IsAssignableFrom<IAsyncDisposable>(http).DisposeAsync();
+        await Assert.IsAssignableFrom<IAsyncDisposable>(final).DisposeAsync();
+
+        Assert.Throws<ObjectDisposedException>(() => application.CreateHealthReadiness("late", "api"));
+        await application.DisposeAsync();
+    }
+
+    private static async Task<EvidenceAspireApplication> StartEmptyApplicationAsync(Action<IDistributedApplicationBuilder>? configure = null)
     {
         var originalDcpPath = Environment.GetEnvironmentVariable("ASPIRE_DCP_PATH");
         var originalDashboardPath = Environment.GetEnvironmentVariable("ASPIRE_DASHBOARD_PATH");
@@ -47,6 +68,7 @@ public sealed class EvidenceAspireApplicationHttpReadinessTests
                 ProjectDirectory = Directory.GetCurrentDirectory(),
                 DisableDashboard = true,
             });
+            configure?.Invoke(builder);
             builder.Services.RemoveAll<IHostedService>();
             return await EvidenceAspireApplication.StartAsync(builder);
         }

@@ -18,11 +18,12 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
 {
     private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(30);
     private readonly DistributedApplication _application;
-    private int _disposed;
+    private readonly EvidenceAspireApplicationLifetime _lifetime;
 
     private EvidenceAspireApplication(DistributedApplication application)
     {
         _application = application;
+        _lifetime = new EvidenceAspireApplicationLifetime(DisposeApplicationAsync);
     }
 
     /// <summary>
@@ -66,12 +67,14 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     /// <param name="evidenceResourceId">Declared EvidenceHost resource identifier.</param>
     /// <param name="aspireResourceName">Consumer-owned Aspire resource name.</param>
     /// <returns>An explicitly registered health readiness adapter.</returns>
+    /// <remarks>Dispose every returned adapter. It retains one application registration; only the final adapter release stops this application.</remarks>
     public IEvidenceResourceReadiness CreateHealthReadiness(string evidenceResourceId, string aspireResourceName)
     {
         ThrowIfDisposed();
         ArgumentException.ThrowIfNullOrWhiteSpace(evidenceResourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(aspireResourceName);
-        return new AspireHealthReadiness(evidenceResourceId, aspireResourceName, _application.ResourceNotifications, this);
+        var notifications = _application.ResourceNotifications;
+        return new AspireHealthReadiness(evidenceResourceId, aspireResourceName, notifications, _lifetime.Acquire());
     }
 
     /// <summary>
@@ -83,12 +86,14 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     /// <param name="probePath">Relative or root-relative HTTP path checked after health and endpoint allocation.</param>
     /// <param name="timeout">One finite positive budget shared by health, endpoint allocation, HTTP requests, and retry delays.</param>
     /// <param name="options">Optional immutable-at-call-time HTTP and owned-client settings.</param>
-    /// <returns>A disposable readiness adapter that owns one fresh probe client per active wait and joins active waits before releasing this lease.</returns>
+    /// <returns>A disposable readiness adapter that owns one fresh probe client per active wait and joins active waits before releasing its application registration.</returns>
     /// <remarks>
     /// The adapter resolves the exact resource and endpoint from the running application's
     /// <see cref="DistributedApplicationModel"/> using Aspire.Hosting APIs. It does not require
     /// Aspire.Hosting.Testing. A custom client factory must return a fresh client for each wait;
     /// the adapter disposes each returned client after its probe completes.
+    /// Each adapter retains this application until disposed. Only the last adapter release stops
+    /// the application, so disposing one adapter cannot interrupt another adapter's admitted waits.
     /// </remarks>
     public IEvidenceResourceReadiness CreateHttpReadiness(
         string evidenceResourceId,
@@ -113,6 +118,7 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
             ? endpoint => factory(endpoint)
             : static _ => new HttpClient();
 
+        var registration = _lifetime.Acquire();
         return CreateHttpReadinessCore(
             evidenceResourceId,
             probePath,
@@ -121,7 +127,7 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
             token => notifications.WaitForResourceHealthyAsync(resourceName, token),
             token => ResolveEndpointValueAsync(endpointReference, token),
             createClient,
-            DisposeAsync,
+            registration.DisposeAsync,
             TimeProvider.System);
     }
 
@@ -227,16 +233,14 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
         new(ReadinessPhase.EndpointResolution, ReadinessFailureCategory.EndpointUnavailable);
 
     /// <summary>
-    /// Stops and disposes the owned Aspire application. Repeated calls are safe.
+    /// Stops and disposes the owned Aspire application. Repeated calls join the same cleanup result.
     /// </summary>
     /// <returns>A task that completes after bounded application cleanup.</returns>
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
+    /// <remarks>Stop all readiness work before directly disposing this owner. Adapter disposal releases only its own registration.</remarks>
+    public ValueTask DisposeAsync() => _lifetime.DisposeAsync();
 
+    private async ValueTask DisposeApplicationAsync()
+    {
         using var stop = new CancellationTokenSource(StopTimeout);
         try
         {
@@ -250,20 +254,20 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        _lifetime.ThrowIfDisposed();
     }
 
     private sealed class AspireHealthReadiness(
         string id,
         string resourceName,
         global::Aspire.Hosting.ApplicationModel.ResourceNotificationService notifications,
-        EvidenceAspireApplication application) : IEvidenceResourceReadiness, IAsyncDisposable
+        IAsyncDisposable registration) : IEvidenceResourceReadiness, IAsyncDisposable
     {
         public string Id { get; } = id;
 
         public Task WaitUntilReadyAsync(CancellationToken cancellationToken) =>
             notifications.WaitForResourceHealthyAsync(resourceName, cancellationToken);
 
-        public ValueTask DisposeAsync() => application.DisposeAsync();
+        public ValueTask DisposeAsync() => registration.DisposeAsync();
     }
 }
