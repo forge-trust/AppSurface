@@ -285,7 +285,9 @@ def main():
  for name in ('tool','sdk-tool','runtime','subject','prepared','digests','output'):parser.add_argument('--'+name,type=Path,required=True)
  parser.add_argument('--source',required=True);parser.add_argument('--base',required=True);args=parser.parse_args();os.umask(0o077)
  require(os.geteuid()==0 and sys.platform=='linux' and platform.machine()=='x86_64','native-root-linux-x64')
- end=time.monotonic()+1200;require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
+ # Seven independently bounded executions also pay for protected SDK/bundle preparation.
+ # This matrix clock is not a job, owner, case or cleanup deadline.
+ end=time.monotonic()+1800;require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
  args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
  receipt={'schema':'issue779-csharp-checkpoint3-native-v1','source':args.source,'base':args.base,'exit':1,'cases':[],'trusted_eligibility':False}
  try:

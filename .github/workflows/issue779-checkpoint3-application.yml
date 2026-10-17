@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           ulimit -c 0
-          timeout --signal=KILL 1200 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint3/run-native.py \
+          timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint3/run-native.py \
             --tool "$CHECKPOINT3_TOOL" \
             --sdk-tool "$CHECKPOINT3_SDK_TOOL" \
             --runtime "$CHECKPOINT3_SDK_ROOT" \
