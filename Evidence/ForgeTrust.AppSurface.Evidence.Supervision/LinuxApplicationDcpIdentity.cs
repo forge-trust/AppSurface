@@ -18,7 +18,7 @@ internal enum LinuxDcpCaptureStage
 {
     Selection, CgroupRoot, CgroupSlice, CgroupLeaf, CgroupProcesses, ProcessList,
     FilesystemRoot, AuditedExecutable, CandidateIdentity, CandidateExecutable, CandidateContinuity,
-    CandidateBinding, SelectedExecutable, RepeatedProcessList, FinalBinding, Complete
+    CandidateBinding, SelectedExecutable, ParentSelection, RepeatedProcessList, FinalBinding, Complete
 }
 
 /// <summary>First bounded capture rejection data; no path, exception text, command line or authority.</summary>
@@ -28,7 +28,7 @@ internal sealed record LinuxDcpCaptureFailure(LinuxDcpCaptureStage Stage, string
 /// <summary>Retains the one selected application process whose actual executable is the audited DCP file.</summary>
 /// <remarks>
 /// Capture is available only to root on Linux x64. It reads only the exact generated application cgroup,
-/// captures every listed member through <see cref="LinuxProcessIdentity"/>, and accepts exactly one member
+/// captures every listed member through <see cref="LinuxProcessIdentity"/>, and retains the selected member
 /// whose retained <c>/proc/PID/exe</c> descriptor has the audited DCP file identity. Command lines and
 /// executable link text are never used as authority. <see cref="Recheck"/> repeats live process, procfs,
 /// executable, and named DCP-path checks; callers keep this identity until application stop is joined.
@@ -100,7 +100,29 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     /// <param name="diagnostic">Closed checkpoint/counters on rejection only; no identity or retry permission.</param>
     /// <returns>Only the authentic retained identity from the original capture.</returns>
     internal static LinuxApplicationDcpIdentity Capture(LinuxUnitName unit, uint uid, uint gid,
-        string auditedDcpPath, CancellationToken token, out LinuxDcpCaptureFailure? diagnostic)
+        string auditedDcpPath, CancellationToken token, out LinuxDcpCaptureFailure? diagnostic) =>
+        CaptureCore(unit, uid, gid, auditedDcpPath, null, token, out diagnostic);
+
+    /// <summary>Selects the nearest audited DCP ancestor of the actual authenticated resource peer.</summary>
+    /// <param name="unit">Actual generated application unit.</param>
+    /// <param name="uid">Actual application UID.</param>
+    /// <param name="gid">Actual application GID.</param>
+    /// <param name="auditedDcpPath">Root-audited immutable DCP executable.</param>
+    /// <param name="resource">Retained actual peer identity, not parsed PID metadata.</param>
+    /// <param name="token">Original readiness deadline.</param>
+    /// <param name="diagnostic">Closed rejection data, never process authority.</param>
+    /// <returns>The actual nearest ancestor after two complete kernel parent walks and executable checks.</returns>
+    /// <remarks>SDK 13.4.4 may run several processes from the same DCP executable. No arbitrary first PID
+    /// or command line selects among them. The resource and every parent remain bound to the same UID/GID,
+    /// start times and generated cgroup. The single-candidate Capture overload stays strict.</remarks>
+    internal static LinuxApplicationDcpIdentity CaptureForResource(LinuxUnitName unit, uint uid, uint gid,
+        string auditedDcpPath, LinuxProcessIdentity resource, CancellationToken token,
+        out LinuxDcpCaptureFailure? diagnostic) =>
+        CaptureCore(unit, uid, gid, auditedDcpPath, resource ?? throw Rejected(), token, out diagnostic);
+
+    private static LinuxApplicationDcpIdentity CaptureCore(LinuxUnitName unit, uint uid, uint gid,
+        string auditedDcpPath, LinuxProcessIdentity? resource, CancellationToken token,
+        out LinuxDcpCaptureFailure? diagnostic)
     {
         diagnostic = null;
         var stage = LinuxDcpCaptureStage.Selection;
@@ -109,6 +131,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(auditedDcpPath);
         var cgroupHandles = new List<SafeFileHandle>();
+        var candidates = new List<(LinuxProcessIdentity Process, RetainedProcCandidate Proc)>();
         SafeFileHandle? filesystemRoot = null;
         SafeFileHandle? auditedDcp = null;
         LinuxProcessIdentity? selectedProcess = null;
@@ -165,12 +188,10 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
                     if (!SameExecutable(actualFile, expectedFile)) continue;
                     matching++;
                     stage = LinuxDcpCaptureStage.SelectedExecutable;
-                    if (selectedProcess is not null) throw Rejected();
                     RequireAuditedDcp(ToFileMetadata(StatFd(auditedDcp)));
                     if (!SameExecutable(ToFileMetadata(StatFd(auditedDcp)), expectedFile)) throw Rejected();
-                    selectedProcess = after;
+                    candidates.Add((after, candidate));
                     after = null;
-                    selectedProc = candidate;
                     candidate = null;
                 }
                 finally
@@ -181,7 +202,52 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             }
 
             stage = LinuxDcpCaptureStage.SelectedExecutable;
-            if (selectedProcess is null || selectedProc is null) throw Rejected();
+            if (candidates.Count == 0) throw Rejected();
+            var selectedIndex = 0;
+            if (resource is null)
+            {
+                if (candidates.Count != 1) throw Rejected();
+            }
+            else
+            {
+                stage = LinuxDcpCaptureStage.ParentSelection;
+                if (resource.Role != LinuxProcessSamplingRole.Application || resource.Unit != unit
+                    || resource.Uid != uid || resource.Gid != gid) throw Rejected();
+                resource.Recheck(token);
+                var samples = candidates.Select(static item => item.Process.SampledFacts).ToArray();
+                var targetPids = samples.Select(static item => item.Stat.Pid).ToHashSet();
+                var parents = new List<LinuxProcessIdentity>();
+                var parentProcs = new List<RetainedProcCandidate>();
+                try
+                {
+                    var first = CaptureNearestParentWalk(resource, targetPids, parents, parentProcs, token);
+                    var selectedPid = FindNearestDcpAncestor(first, resource.SampledFacts, samples, uid, gid, unit);
+                    var second = CaptureNearestParentWalk(resource, targetPids, parents, parentProcs, token);
+                    if (FindNearestDcpAncestor(second, resource.SampledFacts, samples, uid, gid, unit) != selectedPid)
+                        throw Rejected();
+                    RequireSameParentWalk(first, second);
+                    resource.Recheck(token);
+                    foreach (var parent in parents) parent.Recheck(token);
+                    foreach (var parentProc in parentProcs) RequireProcCandidate(parentProc, token);
+                    foreach (var item in candidates)
+                    {
+                        item.Process.Recheck(token); RequireProcCandidate(item.Proc, token);
+                        RequireCurrentExecutable(item.Proc, expectedFile, token);
+                    }
+                    selectedIndex = candidates.FindIndex(item => item.Process.Pid == selectedPid);
+                    if (selectedIndex < 0) throw Rejected();
+                }
+                finally
+                {
+                    var closed = true;
+                    foreach (var proc in parentProcs.AsEnumerable().Reverse()) closed &= DisposeCaptured(proc) is null;
+                    foreach (var parent in parents.AsEnumerable().Reverse()) closed &= DisposeCaptured(parent) is null;
+                    if (!closed) throw Rejected();
+                }
+            }
+            selectedProcess = candidates[selectedIndex].Process;
+            selectedProc = candidates[selectedIndex].Proc;
+            candidates.RemoveAt(selectedIndex);
             stage = LinuxDcpCaptureStage.RepeatedProcessList;
             var secondPids = ParseProcessIds(ReadBounded(processes.Handle, MaximumProcessBytes, token));
             if (!pids.AsSpan().SequenceEqual(secondPids)) throw Rejected();
@@ -208,6 +274,13 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         { diagnostic = CaptureFailure(stage, error, observed, matching); failure = Rejected(); }
         finally
         {
+            foreach (var candidate in candidates.AsEnumerable().Reverse())
+            {
+                var procClose = DisposeCaptured(candidate.Proc);
+                failure ??= procClose;
+                var processClose = DisposeCaptured(candidate.Process);
+                failure ??= processClose;
+            }
             if (!CloseHandles(cgroupHandles)) failure ??= Rejected();
             var cleanupFailure = DisposeCaptured(selectedProc);
             failure ??= cleanupFailure;
@@ -487,6 +560,46 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         catch (Exception) { throw Rejected(); }
     }
 
+    /// <summary>Finds the first audited DCP PID reached by complete same-unit parent facts, as data only.</summary>
+    /// <remarks>No live identity or capability can be created from this helper's returned PID. Native callers
+    /// separately capture every candidate's exact executable and retain/recheck all process descriptors.</remarks>
+    internal static uint FindNearestDcpAncestor(IReadOnlyList<LinuxApplicationParentFact> chain,
+        LinuxProcessSample resource, IReadOnlyList<LinuxProcessSample> candidates, uint uid, uint gid, LinuxUnitName unit)
+    {
+        try { return FindNearestDcpAncestorCore(chain, resource, candidates, uid, gid, unit); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        { throw Rejected(); }
+    }
+
+    private static uint FindNearestDcpAncestorCore(IReadOnlyList<LinuxApplicationParentFact> chain,
+        LinuxProcessSample resource, IReadOnlyList<LinuxProcessSample> candidates, uint uid, uint gid, LinuxUnitName unit)
+    {
+        if (chain.Count is 0 or > MaximumResourceParentDepth || candidates.Count is 0 or > MaximumProcesses) throw Rejected();
+        var matching = new Dictionary<uint, LinuxProcessSample>();
+        foreach (var candidate in candidates)
+        {
+            LinuxProcessData.RequireExpected(candidate, candidate.Stat.Pid, uid, gid, unit, LinuxProcessSamplingRole.Application);
+            if (candidate.Stat.Pid == resource.Stat.Pid || !matching.TryAdd(candidate.Stat.Pid, candidate)) throw Rejected();
+        }
+        var expected = resource.Stat.Pid;
+        var visited = new HashSet<uint>();
+        for (var index = 0; index < chain.Count; index++)
+        {
+            var fact = chain[index];
+            if (fact.Pid != expected || !visited.Add(fact.Pid) || fact.ParentPid == 0) throw Rejected();
+            LinuxProcessData.RequireExpected(fact.Process, fact.Pid, uid, gid, unit, LinuxProcessSamplingRole.Application);
+            if (index == 0) LinuxProcessData.RequireSameIdentity(resource, fact.Process);
+            if (matching.TryGetValue(fact.ParentPid, out var selected))
+            {
+                if (index != chain.Count - 1) throw Rejected();
+                RequireParentChain(chain, resource, selected, uid, gid, unit);
+                return selected.Stat.Pid;
+            }
+            expected = fact.ParentPid;
+        }
+        throw Rejected();
+    }
+
     /// <summary>Requires two bounded parent walks to preserve PPids and every process start-time/credential identity.</summary>
     internal static void RequireSameParentWalk(IReadOnlyList<LinuxApplicationParentFact> first,
         IReadOnlyList<LinuxApplicationParentFact> second)
@@ -722,6 +835,31 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             if (link.ParentPid is 0 or > int.MaxValue || !visited.Add(link.ParentPid)) throw Rejected();
             current = LinuxProcessIdentity.CaptureApplication(link.ParentPid, resource.Uid, resource.Gid,
                 resource.Unit, token);
+            owned.Add(current);
+        }
+        throw Rejected();
+    }
+
+    private static List<LinuxApplicationParentFact> CaptureNearestParentWalk(LinuxProcessIdentity resource,
+        IReadOnlySet<uint> targetPids, List<LinuxProcessIdentity> owned, List<RetainedProcCandidate> candidates,
+        CancellationToken token)
+    {
+        var facts = new List<LinuxApplicationParentFact>();
+        var visited = new HashSet<uint> { resource.Pid };
+        var current = resource;
+        for (var depth = 0; depth < MaximumResourceParentDepth; depth++)
+        {
+            token.ThrowIfCancellationRequested(); current.Recheck(token);
+            var proc = OpenProcCandidate(current.Pid, token); candidates.Add(proc);
+            using var stat = OpenAt2(Fd(proc.Directory), "stat", ReadFlags, 0, DescendantResolution);
+            RequireProcRegularFile(stat);
+            var link = ParseParentLink(ReadBounded(stat, LinuxProcessData.MaximumStatBytes, token));
+            if (link.Pid != current.Pid || link.StartTimeTicks != current.StartTimeTicks) throw Rejected();
+            RequireProcCandidate(proc, token); current.Recheck(token);
+            facts.Add(new(link.Pid, link.ParentPid, current.SampledFacts));
+            if (targetPids.Contains(link.ParentPid)) return facts;
+            if (link.ParentPid is 0 or > int.MaxValue || !visited.Add(link.ParentPid)) throw Rejected();
+            current = LinuxProcessIdentity.CaptureApplication(link.ParentPid, resource.Uid, resource.Gid, resource.Unit, token);
             owned.Add(current);
         }
         throw Rejected();

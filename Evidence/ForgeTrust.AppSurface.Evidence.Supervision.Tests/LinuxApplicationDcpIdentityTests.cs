@@ -138,6 +138,45 @@ public sealed class LinuxApplicationDcpIdentityTests
     }
 
     [Fact]
+    public void MultipleAuditedDcpCandidatesSelectTheNearestKernelAncestorRatherThanArrayOrder()
+    {
+        var resource = Sample(123, 444);
+        var near = Sample(121, 442);
+        var far = Sample(120, 441);
+        LinuxApplicationDcpIdentity.LinuxApplicationParentFact[] chain =
+        [new(123, 122, resource), new(122, 121, Sample(122, 443))];
+        Assert.Equal(121u, LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource,
+            [far, near], 65010, 65011, Unit));
+        Assert.Equal(121u, LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource,
+            [near, far], 65010, 65011, Unit));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void MultipleCandidateMetadataCannotInventOrExtendTheNearestAncestry(int variant)
+    {
+        var resource = Sample(123, 444);
+        LinuxProcessSample[] candidates = [Sample(121, 442), Sample(120, 441)];
+        LinuxApplicationDcpIdentity.LinuxApplicationParentFact[] chain = [new(123, 121, resource)];
+        switch (variant)
+        {
+            case 0: candidates = [candidates[0], candidates[0]]; break;
+            case 1: candidates = [resource, candidates[0]]; break;
+            case 2: candidates = [candidates[0] with { Gids = new(65011, 1, 65011, 65011) }]; break;
+            case 3: chain = [chain[0], new(121, 120, candidates[0])]; break;
+            case 4: chain = [new(123, 999, resource)]; break;
+            case 5: chain = [new(123, 121, resource with { Stat = new(123, 999, 'S') })]; break;
+        }
+        // Detached comparisons only: no fake process owner, supervisor or admission is issued.
+        Reject(() => LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource, candidates, 65010, 65011, Unit));
+    }
+
+    [Fact]
     public void ParentWalkRequiresStableSameUnitKernelAncestryAndBoundsDepth()
     {
         var resource = Sample(123, 444);

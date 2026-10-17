@@ -193,8 +193,8 @@ internal sealed partial class LinuxApplicationProcess
                         LinuxDcpCaptureFailure? captureFailure = null;
                         try
                         {
-                            _dcp = LinuxApplicationDcpIdentity.Capture(Unit, _accounts.ApplicationUid, _accounts.ApplicationGid,
-                                _workspace.DcpPath, deadline.Token, out captureFailure);
+                            _dcp = LinuxApplicationDcpIdentity.CaptureForResource(Unit, _accounts.ApplicationUid, _accounts.ApplicationGid,
+                                _workspace.DcpPath, _resource, deadline.Token, out captureFailure);
                         }
                         catch (EvidenceAdmissionException) when (!deadline.IsCancellationRequested)
                         {
@@ -228,7 +228,8 @@ internal sealed partial class LinuxApplicationProcess
                         cgroup = started.Cgroup,
                         http_status = 200,
                         received_bytes = length,
-                        dcp_checked = true
+                        dcp_checked = true,
+                        dcp_pid = _dcp.Pid
                     });
                     return _ready;
                 }

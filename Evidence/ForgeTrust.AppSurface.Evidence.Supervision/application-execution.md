@@ -97,3 +97,19 @@ These diagnostics distinguish a stalled HTTP read from repeated DCP sampling rej
 HTTP response limit, resource deadline, cgroup/executable/proc guards, failure latch, stop policy or acceptance.
 A diagnostic write failure is ignored and cannot replace the original operation result. Only the original
 complete identity capture and peer-provenance check can produce the existing readiness ACK.
+
+### Several processes from the audited DCP executable
+
+The genuine pinned SDK run observed two live application members with the same root-audited DCP executable,
+so executable uniqueness is not a valid assumption for resource selection. `CaptureForResource` still captures
+every bounded cgroup member, authenticates each candidate's UID/GID tuple and start time, and compares its
+actual executable descriptor with the retained root file. It chooses only the nearest such candidate in the
+actual resource peer's kernel PPid chain, sampled twice through at most sixteen same-application parents.
+No array order, raw PID field, argument text, log or first executable match selects the DCP owner.
+
+Both parent walks must agree, all intermediate and candidate identities are rechecked, the complete cgroup
+process list is repeated, and the selected executable and named root path are checked before transfer. All
+unselected retained descriptors close on every outcome; the selected owner remains retained until joined
+application shutdown. `RequireResourcePeer` repeats the same selected lineage at readiness ACK, before producer
+dispatch and during monitoring. The original `Capture` entry without a resource remains a strict one-candidate
+mechanism fixture. `FindNearestDcpAncestor` is detached comparison data only and cannot construct a live owner.
