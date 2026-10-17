@@ -103,6 +103,8 @@ A template must bind its owned row through names such as `Actions[__action_index
 
 Allocation reserves owned live and marked rows, plus source and pending destination keys during recursive duplication; inert prototypes do not reserve live keys. Whole decimal keys use a fresh safe integer increment when possible. Mixed opaque keys, numeric-prefix strings, or unsafe increments use an opaque generated key with collision checking. Leading zeros in existing keys remain unchanged. These are allocation choices, not a grammar imposed on submitted keys.
 
+Add inserts the new row after the last owned row. For an empty collection, it inserts before the direct child of the collection root that contains the owned template. This keeps rows outside command-bar wrappers and preserves the nearest-collection ownership boundary.
+
 ### Nested event and identity behavior
 
 Before-add receives the attribute-rebased detached row at the established preparation stage, before editable values clear and before final row metadata and marker assignment. Before-duplicate receives its fully prepared detached clone. Before-remove receives the current live row. These existing events are cancelable: cancellation prevents RazorWire-owned mutation, focus movement, and success announcement, while listener-authored edits remain. After-events run only after the mutation succeeds. A child command's `detail.root` identifies its child collection and events bubble normally; a parent add or duplicate emits one parent event, not synthetic child commands.
@@ -217,7 +219,7 @@ Physical removal detaches the command together with its row. Its `razorwire:form
 
 - The enabled hidden `Actions.index` marker is the binding contract at each level. RazorWire never renumbers existing rows. Keep the placeholder (`__action_index__`) distinct from the concrete marker value and from an action's persisted `Id`.
 - Indices may be sparse. Server validation should re-render the posted indices, not `Enumerable.Range(0, Count)`.
-- Bind posted parent and child marker keys alongside their rows in posted marker order. On failed validation, use those exact keys for field names and `data-valmsg-for`, and retain ModelState attempted values and errors. Do not clear ModelState or silently replace sparse keys with list ordinals.
+- Bind posted parent and child marker keys alongside their rows in posted marker order. On failed validation, use those exact keys for field names and `data-valmsg-for`, and retain ModelState attempted values and errors. Do not clear ModelState or silently replace sparse keys with list ordinals. ASP.NET Core form field names and ModelState paths are case-insensitive. The MVC sample adapters therefore reject same-owner keys that differ only by case, such as `A` and `a`, with `400`; distinct child owners may reuse those strings. Accepted keys keep their original spelling. This is a consumer binding constraint, not runtime key normalization.
 - Disabled controls do not post. Hidden controls still post unless disabled.
 - Checkbox hidden fallbacks must stay in the same row as the checkbox they support.
 - Physical remove only removes fields from the submitted payload. It does not mean "delete an existing database row" unless the server infers that separately.

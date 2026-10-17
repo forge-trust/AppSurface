@@ -231,11 +231,9 @@ PY
     done
 
     STAGE="checking package and asset identities"
-    local package_hash source_asset_hash source_view_hash source_script_hash consumer_policy_hash embedded_path
+    local package_hash source_asset_hash consumer_policy_hash embedded_path
     package_hash="$(shasum -a 256 "$package" | awk '{print $1}')"
     source_asset_hash="$(shasum -a 256 "$source_asset" | awk '{print $1}')"
-    source_view_hash="$(shasum -a 256 "$pinned_view_file" | awk '{print $1}')"
-    source_script_hash="$(shasum -a 256 "$pinned_script_file" | awk '{print $1}')"
     consumer_policy_hash="$(shasum -a 256 "$consumer_policy" | awk '{print $1}')"
     embedded_path="$(python3 - "$package" "$RUN_DIR/packaged-form-interactions.js" <<'PY'
 import pathlib
@@ -407,29 +405,43 @@ import re
 import sys
 
 assets = json.loads(pathlib.Path(sys.argv[1]).read_text())
-expected = "ForgeTrust.RazorWire/" + sys.argv[2]
 version = sys.argv[2]
 libraries = assets.get("libraries", {})
 for identity, library in libraries.items():
     if identity.lower().startswith("forgetrust.") and library.get("type") != "package":
         raise SystemExit(f"Source-project substitution in package consumer: {identity} ({library.get('type')!r}).")
-matching = next((value for key, value in libraries.items() if key.lower() == expected.lower()), None)
-if matching is None:
-    raise SystemExit(f"Restore assets do not contain the exact package {expected}.")
-if matching.get("type") != "package":
-    raise SystemExit(f"Expected {expected} to restore as a NuGet package, got {matching.get('type')!r}.")
-expected_package_path = f"forgetrust.razorwire/{version.lower()}"
-if matching.get("path", "").lower() != expected_package_path:
-    raise SystemExit(f"Expected package path {expected_package_path}, got {matching.get('path')!r}.")
-if any(key.lower().startswith("forgetrust.razorwire/") and key.lower() != expected.lower() for key in assets.get("libraries", {})):
-    raise SystemExit("Restore assets contain an unexpected RazorWire package version.")
-dependency = assets.get("project", {}).get("frameworks", {}).get("net10.0", {}).get("dependencies", {}).get("ForgeTrust.RazorWire")
-normalized_range = dependency.get("version", "") if isinstance(dependency, dict) else ""
-if not re.fullmatch(rf"\[{re.escape(version)}(?:,\s*{re.escape(version)})?\]", normalized_range):
-    raise SystemExit(f"Copied host project.assets.json does not pin ForgeTrust.RazorWire exactly to {version}; got {normalized_range!r}.")
-package_cache_entry = pathlib.Path(sys.argv[3]) / "forgetrust.razorwire" / version.lower()
-if not package_cache_entry.is_dir() or not (package_cache_entry / ".nupkg.metadata").is_file():
-    raise SystemExit(f"Exact package was not restored into this run's private NuGet cache: {package_cache_entry}.")
+for package_id in ("ForgeTrust.RazorWire", "ForgeTrust.AppSurface.Web.Tailwind"):
+    expected = f"{package_id}/{version}"
+    expected_lower = expected.lower()
+    identities = [(key, value) for key, value in libraries.items() if key.lower() == expected_lower]
+    if not identities:
+        raise SystemExit(f"Restore assets do not contain the exact package {expected}.")
+    if len(identities) != 1:
+        raise SystemExit(f"Restore assets contain duplicate case-insensitive identities for {expected}.")
+    matching = identities[0][1]
+    if matching.get("type") != "package":
+        raise SystemExit(f"Expected {expected} to restore as a NuGet package, got {matching.get('type')!r}.")
+    expected_package_path = f"{package_id.lower()}/{version.lower()}"
+    if matching.get("path", "").lower() != expected_package_path:
+        raise SystemExit(f"Expected package path {expected_package_path}, got {matching.get('path')!r}.")
+    package_prefix = f"{package_id.lower()}/"
+    if any(key.lower().startswith(package_prefix) and key.lower() != expected_lower for key in libraries):
+        display_package = "RazorWire" if package_id == "ForgeTrust.RazorWire" else package_id
+        raise SystemExit(f"Restore assets contain an unexpected {display_package} package version.")
+
+    dependencies = assets.get("project", {}).get("frameworks", {}).get("net10.0", {}).get("dependencies", {})
+    dependency_matches = [value for key, value in dependencies.items() if key.lower() == package_id.lower()]
+    if len(dependency_matches) != 1:
+        normalized_range = ""
+    else:
+        dependency = dependency_matches[0]
+        normalized_range = dependency.get("version", "") if isinstance(dependency, dict) else ""
+    if not re.fullmatch(rf"\[{re.escape(version)}(?:,\s*{re.escape(version)})?\]", normalized_range):
+        raise SystemExit(f"Copied host project.assets.json does not pin {package_id} exactly to {version}; got {normalized_range!r}.")
+
+    package_cache_entry = pathlib.Path(sys.argv[3]) / package_id.lower() / version.lower()
+    if not package_cache_entry.is_dir() or not (package_cache_entry / ".nupkg.metadata").is_file():
+        raise SystemExit(f"Exact package was not restored into this run's private NuGet cache: {package_cache_entry}.")
 PY
 
     local asset_relative source_commit
@@ -494,7 +506,7 @@ receipt = f'''# Skoolit V4 exact-package consumer proof
 - Pinned view: `src/Skoolit.Web/Views/ForwardingProof/EvidenceCandidate.cshtml` (Git blob SHA-1 `{view_blob}`, SHA-256 `{view_hash}`)
 - Pinned page script: `src/Skoolit.Web/wwwroot/js/alpha-evidence-wizard.js` (Git blob SHA-1 `{script_blob}`, SHA-256 `{script_hash}`)
 - Evidence copies: `skoolit-source/src/Skoolit.Web/Views/ForwardingProof/EvidenceCandidate.cshtml` and `skoolit-source/src/Skoolit.Web/wwwroot/js/alpha-evidence-wizard.js`, fetched from the immutable Skoolit commit above.
-- Renderer adaptation: before rendering a POST, the adapter requires action marker count to equal the bound action count and each action's date marker count to equal its bound date count; each list must contain nonblank distinct strings. A mismatch returns HTTP 400. For accepted payloads, it restores posted strings in marker order and leaves ModelState intact, preserving attempted values and error paths without ordinal rekeying.
+- Renderer adaptation: before rendering a POST, the adapter requires action marker count to equal the bound action count and each action's date marker count to equal its bound date count; each owner-local list must contain nonblank keys unique under ASP.NET's case-insensitive field-path comparison. A mismatch returns HTTP 400. Accepted keys retain their posted strings and marker order, and ModelState remains intact, preserving attempted values and error paths without ordinal rekeying.
 - Consumer behavior retained in the fixture source: V4 temporal parts and optional source years, Discrete end-part rejection, source unsaved-date feedback, ordinary MVC submission, and server-side no-JavaScript commands. Browser/no-JavaScript round-trip verification remains pending.
 - Persistence: none in the fixture.
 - Adoption claim: this isolated version-bound proof does not establish live Skoolit adoption.

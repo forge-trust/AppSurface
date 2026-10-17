@@ -380,7 +380,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         private nextIndex(root: HTMLElement, collection: string, reserved = new Set<string>()) {
-            const values = [...this.rows(root).map(row => this.rowIndex(row, collection)).filter((key): key is string => !!key), ...reserved];
+            const values = [...this.rows(root).map(row => this.rowIndex(row, collection)).filter(Boolean) as string[], ...reserved];
             if (values.every(value => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)))) {
                 const next = Math.max(-1, ...values.map(Number)) + 1;
                 if (Number.isSafeInteger(next)) return String(next);
@@ -484,9 +484,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             }
             this.clearValidation(row);
             if (!this.remapIds(row, mappings, root, prototypes)) return null;
-            const bindings = this.bindings(row);
-            const template = duplicate ? null : this.template(root);
-            return { row, index, root, source, oldIndex, mappings, bindings, sourceBindings, duplicate, prefix: this.name(root), parent: root.parentNode, template };
+            return { row, index, root, source, oldIndex, mappings, bindings: this.bindings(row), sourceBindings, duplicate, prefix: this.name(root), parent: root.parentNode, template: duplicate ? null : this.template(root) };
         }
 
         /** Before-event listeners may edit values, but planned binding paths and their owners remain fixed. */
@@ -579,8 +577,8 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             plan.row.setAttribute(indexAttribute, index);
             plan.bindings = this.bindings(plan.row);
             if (!this.validPlan(plan, command, true)) return;
-            const before = this.owned(root, '[data-rw-form-collection-add]')[0] ?? template;
-            before.insertAdjacentElement('beforebegin', plan.row);
+            const last = this.rows(root).pop();
+            (last ?? [...root.children].find(child => child.contains(template)) ?? template).insertAdjacentElement(last ? 'afterend' : 'beforebegin', plan.row);
             this.inserted(root, command, plan.row, 'add', index);
         }
 

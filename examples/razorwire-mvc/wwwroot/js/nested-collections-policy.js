@@ -9,10 +9,11 @@
             if (event.detail.root.closest('[data-nested-proof]')) initialize(event.detail.row);
         });
     }
-    document.addEventListener('razorwire:form-collection:before-add', event => {
+    const enforceDateLimit = event => {
         const root = event.detail.root;
         if (!root.closest('[data-nested-proof]') || !root.getAttribute('data-rw-form-collection').endsWith('.Dates')) return;
         const rows = [...root.querySelectorAll('[data-rw-form-collection-row]')].filter(row => row.closest('[data-rw-form-collection]') === root && row.dataset.rwFormCollectionRowState !== 'removed');
         if (rows.length >= 8) { event.preventDefault(); root.querySelector('[data-rw-form-collection-status]').textContent = 'Use at most eight dates per action.'; }
-    });
+    };
+    for (const action of ['add', 'duplicate']) document.addEventListener(`razorwire:form-collection:before-${action}`, enforceDateLimit);
 })();

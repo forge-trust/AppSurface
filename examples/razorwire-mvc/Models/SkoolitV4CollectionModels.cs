@@ -107,6 +107,7 @@ public sealed class SkoolitV4CollectionDateModel
     public SkoolitV4CollectionSavedDate? SavedDate { get; set; }
 
     /// <summary>Gets or sets the consumer-rendered temporal result or unsaved-draft feedback.</summary>
+    /// <remarks>Populated dates without a saved identity remain unsaved across submissions; an empty newly added date retains its initial entry prompt.</remarks>
     [BindNever]
     public string TemporalFeedback { get; set; } = "Enter the source month and day. The year is optional and should remain blank when the source omits it.";
 

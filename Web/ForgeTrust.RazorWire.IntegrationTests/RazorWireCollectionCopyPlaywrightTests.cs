@@ -6,6 +6,40 @@ namespace ForgeTrust.RazorWire.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class RazorWireCollectionCopyPlaywrightTests(RazorWireMvcPlaywrightFixture fixture)
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task CollectionAdd_KeepsRowsOutsideWrappedCommandBars(bool startsEmpty, bool wrapTemplate)
+    {
+        await using var context = await fixture.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.SetContentAsync(
+            """
+            <!doctype html>
+            <form>
+              <section data-rw-form-collection="Items">
+                <fieldset data-rw-form-collection-row data-rw-form-index="0"><input type="hidden" name="Items.index" value="0"><input name="Items[0].Name" value="Source"></fieldset>
+                <template data-rw-form-collection-template><fieldset data-rw-form-collection-row><input type="hidden" name="Items.index" value="__index__"><input name="Items[__index__].Name"></fieldset></template>
+                <div class="commands"><button type="button" data-rw-form-collection-add>Add</button><span data-rw-form-collection-status></span></div>
+              </section>
+            </form>
+            """);
+        if (startsEmpty) await page.Locator("[data-rw-form-collection-row]").EvaluateAsync("row => row.remove()");
+        if (wrapTemplate) await page.EvaluateAsync("() => document.querySelector('.commands').prepend(document.querySelector('template'))");
+        var repositoryRoot = ForgeTrust.AppSurface.Core.PathUtils.FindRepositoryRoot(AppContext.BaseDirectory);
+        var runtimePath = TestPathUtils.PathUnder(repositoryRoot, "Web", "ForgeTrust.RazorWire", "wwwroot", "razorwire", "form-interactions.js");
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Content = await File.ReadAllTextAsync(runtimePath) });
+        await page.WaitForFunctionAsync("() => document.querySelector('form')?.dataset.rwFormInteractionsEnhanced === 'true'");
+        await page.Locator("[data-rw-form-collection-add]").ClickAsync();
+        await page.Locator("[data-rw-form-collection-add]").ClickAsync();
+        var collection = page.Locator("section");
+        Assert.Equal(startsEmpty ? 2 : 3, await collection.Locator(":scope > [data-rw-form-collection-row]").CountAsync());
+        Assert.Equal(0, await collection.Locator(".commands [data-rw-form-collection-row]").CountAsync());
+        Assert.Equal(startsEmpty ? new[] { "0", "1" } : new[] { "0", "1", "2" }, await page.EvaluateAsync<string[]>("() => new FormData(document.querySelector('form')).getAll('Items.index').map(String)"));
+    }
+
     [Fact]
     public async Task CollectionAddAndDuplicate_PreserveLiveMultiSelectValuesAndValidationPlaceholderMetadata()
     {

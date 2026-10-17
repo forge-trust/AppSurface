@@ -18,10 +18,16 @@
         endControls.setAttribute("aria-hidden", String(!isRange));
     }
 
-    function syncDateRows(scope) {
+    function syncDateRows(scope, duplicated = false) {
         if (!(scope instanceof HTMLElement)) return;
-        if (scope.matches(dateRowSelector)) syncDateRow(scope);
-        scope.querySelectorAll(dateRowSelector).forEach(syncDateRow);
+        const rows = [...(scope.matches(dateRowSelector) ? [scope] : []), ...scope.querySelectorAll(dateRowSelector)];
+        for (const row of rows) {
+            syncDateRow(row);
+            if (duplicated) {
+                const feedback = row.querySelector("[data-date-resolution]");
+                if (feedback) feedback.textContent = unsavedFeedback;
+            }
+        }
     }
 
     function onCollectionMutation(event) {
@@ -38,7 +44,7 @@
 
         // Parent duplicate has one parent event; initialize only its date descendants.
         // A child add/duplicate supplies that date row as detail.row.
-        syncDateRows(row);
+        syncDateRows(row, event.type === "razorwire:form-collection:duplicate");
     }
 
     function onDateChange(event) {

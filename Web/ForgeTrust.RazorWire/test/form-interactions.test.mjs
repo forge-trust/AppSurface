@@ -102,6 +102,88 @@ test('collection add allocates sparse index markers and focuses the new editable
   assert.equal(template.parentElement, root);
 });
 
+test('collection add keeps new rows outside a wrapped command bar for empty and populated roots', () => {
+  const { context, document } = loadRuntime();
+
+  for (const indices of [[], ['0']]) {
+    const collection = buildCollection(document);
+    if (indices.length === 0) collection.row.remove();
+    const commands = document.createElement('div');
+    commands.setAttribute('class', 'commands');
+    commands.appendChild(collection.add);
+    collection.root.appendChild(commands);
+    const form = document.createElement('form');
+    form.appendChild(collection.root);
+    document.body.appendChild(form);
+
+    context.window.RazorWire.formInteractionsManager.scan();
+    collection.add.dispatchEvent(createEvent('click'));
+    collection.add.dispatchEvent(createEvent('click'));
+
+    const rows = ownedRows(collection.root);
+    const addedRows = rows.slice(indices.length);
+    assert.equal(addedRows.length, 2);
+    assert.deepEqual(addedRows.map(row => row.parentElement), [collection.root, collection.root]);
+    assert.deepEqual(addedRows.map(row => row.getAttribute('data-rw-form-index')),
+      indices.length === 0 ? ['0', '1'] : ['1', '2']);
+    assert.deepEqual(commands.querySelectorAll('[data-rw-form-collection-row]'), []);
+    assert.equal(collection.root.children.indexOf(addedRows[0]) < collection.root.children.indexOf(collection.template), true);
+  }
+});
+
+test('empty collection add keeps rows outside a wrapper shared by its template and command', () => {
+  const { context, document } = loadRuntime();
+  const collection = buildCollection(document);
+  collection.row.remove();
+  const commands = document.createElement('div');
+  const buttonWrapper = document.createElement('span');
+  buttonWrapper.appendChild(collection.add);
+  commands.append(collection.template, buttonWrapper);
+  collection.root.appendChild(commands);
+  const form = document.createElement('form');
+  form.appendChild(collection.root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  collection.add.dispatchEvent(createEvent('click'));
+  collection.add.dispatchEvent(createEvent('click'));
+
+  const rows = ownedRows(collection.root);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.every(row => row.parentElement === collection.root), true);
+  assert.equal(commands.querySelectorAll('[data-rw-form-collection-row]').length, 0);
+  assert.equal(collection.template.parentElement, commands);
+});
+
+test('adding beside a wrapped parent command preserves nested collection ownership', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document, {
+    parentIndices: ['0'],
+    childIndicesByParent: { 0: ['0'] },
+    parentTemplateChildIndices: ['0']
+  });
+  const commands = document.createElement('div');
+  commands.appendChild(fixture.add);
+  fixture.root.appendChild(commands);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+
+  context.window.RazorWire.formInteractionsManager.scan();
+  fixture.add.dispatchEvent(createEvent('click'));
+  const addedParent = ownedRows(fixture.root)[1];
+  const childRoot = addedParent.querySelector('[data-rw-form-collection]');
+  const childAdd = childRoot.querySelector('[data-rw-form-collection-add]');
+  childAdd.dispatchEvent(createEvent('click'));
+
+  assert.equal(addedParent.parentElement, fixture.root);
+  assert.equal(addedParent.closest('[data-rw-form-collection]'), fixture.root);
+  assert.equal(childRoot.parentElement, addedParent);
+  assert.equal(ownedRows(childRoot).length, 2);
+  assert.equal(ownedRows(fixture.root).length, 2);
+  assert.equal(commands.querySelectorAll('[data-rw-form-collection-row]').length, 0);
+});
+
 test('collection duplicate copies editable values, rewrites references, and clears identity hidden fields', () => {
   const { context, document } = loadRuntime();
   const { root, duplicate } = buildCollection(document);

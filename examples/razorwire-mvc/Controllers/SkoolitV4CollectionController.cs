@@ -110,7 +110,8 @@ public sealed class SkoolitV4CollectionController : Controller
             return false;
         }
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // Form field names and ModelState paths compare without case. Preserve accepted key spelling.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var key in keys)
         {
             if (string.IsNullOrWhiteSpace(key) || !seen.Add(key))
@@ -258,11 +259,18 @@ public sealed class SkoolitV4CollectionController : Controller
         {
             date.TemporalFeedback = date.SavedDate is not null && MatchesSaved(date, date.SavedDate)
                 ? SavedResult(date.SavedDate)
-                : date.SavedDate is not null || HasDateError(date)
+                : date.SavedDate is not null || HasDraftDateParts(date) || HasDateError(date)
                     ? UnsavedFeedback
                     : InitialFeedback;
         }
     }
+
+    // Identity-free populated dates are unsaved drafts across requests; an empty newly added date keeps its initial prompt.
+    private static bool HasDraftDateParts(SkoolitV4CollectionDateModel date) => new[]
+    {
+        date.Kind, date.Shape, date.StartMonth, date.StartDay, date.StartYear,
+        date.EndMonth, date.EndDay, date.EndYear, date.StartTime, date.EndTime, date.TimeZone
+    }.Any(value => !string.IsNullOrWhiteSpace(value));
 
     private bool HasDateError(SkoolitV4CollectionDateModel date)
     {
@@ -321,7 +329,7 @@ public sealed class SkoolitV4CollectionController : Controller
 
     private static string UniqueKey(IEnumerable<string> existing)
     {
-        var keys = existing.ToHashSet(StringComparer.Ordinal);
+        var keys = existing.ToHashSet(StringComparer.OrdinalIgnoreCase);
         string candidate;
         do
         {
@@ -372,7 +380,7 @@ public sealed class SkoolitV4CollectionController : Controller
         string actionKey)
     {
         var dates = sourceDates.Where(date => !date.Delete).ToArray();
-        var reservedKeys = sourceDates.Select(date => date.ClientIndex).ToHashSet(StringComparer.Ordinal);
+        var reservedKeys = sourceDates.Select(date => date.ClientIndex).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var clones = new List<SkoolitV4CollectionDateModel>(dates.Length);
         foreach (var date in dates)
         {

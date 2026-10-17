@@ -204,24 +204,39 @@ class NestedCollectionConsumerTests(unittest.TestCase):
                 "frameworks": {
                     "net10.0": {
                         "dependencies": {
-                            "ForgeTrust.RazorWire": {"version": f"[{PACKAGE_VERSION}]"}
+                            "ForgeTrust.RazorWire": {"version": f"[{PACKAGE_VERSION}]"},
+                            "ForgeTrust.AppSurface.Web.Tailwind": {"version": f"[{PACKAGE_VERSION}]"},
                         }
                     }
                 }
             },
         }
 
-    def run_assets_guard(self, assets: dict[str, object], *, cache_entry: bool = True,
-                         metadata: bool = True) -> subprocess.CompletedProcess[str]:
+    def run_assets_guard(
+        self,
+        assets: dict[str, object],
+        *,
+        cache_entry: bool = True,
+        metadata: bool = True,
+        missing_cache_packages: tuple[str, ...] = (),
+        missing_metadata_packages: tuple[str, ...] = (),
+    ) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory_name:
             root = pathlib.Path(directory_name)
             assets_path = root / "project.assets.json"
             assets_path.write_text(json.dumps(assets), encoding="utf-8")
             cache_path = root / "nuget-packages"
-            package_cache = cache_path / "forgetrust.razorwire" / PACKAGE_VERSION.lower()
-            if cache_entry:
+            package_ids = (
+                "ForgeTrust.RazorWire",
+                "ForgeTrust.AppSurface.Web.Tailwind",
+            )
+            for package_id in package_ids:
+                normalized_id = package_id.lower()
+                if not cache_entry or package_id in missing_cache_packages:
+                    continue
+                package_cache = cache_path / normalized_id / PACKAGE_VERSION.lower()
                 package_cache.mkdir(parents=True)
-                if metadata:
+                if metadata and package_id not in missing_metadata_packages:
                     (package_cache / ".nupkg.metadata").write_text("{}", encoding="utf-8")
             return self.run_inline(
                 self.assets_script,
@@ -275,20 +290,96 @@ class NestedCollectionConsumerTests(unittest.TestCase):
         self.assertIn("Expected package path", result.stderr)
 
     def test_asset_guard_rejects_non_exact_dependency_ranges(self) -> None:
-        for dependency_range in (
-            PACKAGE_VERSION,
-            f"[{PACKAGE_VERSION},)",
-            f"(,{PACKAGE_VERSION}]",
+        for package_id in (
+            "ForgeTrust.RazorWire",
+            "ForgeTrust.AppSurface.Web.Tailwind",
         ):
-            with self.subTest(dependency_range=dependency_range):
+            for dependency_range in (
+                PACKAGE_VERSION,
+                f"[{PACKAGE_VERSION},)",
+                f"(,{PACKAGE_VERSION}]",
+            ):
+                with self.subTest(package_id=package_id, dependency_range=dependency_range):
+                    assets = self.valid_assets()
+                    assets["project"]["frameworks"]["net10.0"]["dependencies"][  # type: ignore[index]
+                        package_id
+                    ]["version"] = dependency_range  # type: ignore[index]
+                    result = self.run_assets_guard(assets)
+
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(f"does not pin {package_id} exactly", result.stderr)
+
+    def test_asset_guard_rejects_a_missing_exact_tailwind_package(self) -> None:
+        assets = self.valid_assets()
+        del assets["libraries"][f"ForgeTrust.AppSurface.Web.Tailwind/{PACKAGE_VERSION}"]  # type: ignore[index]
+        result = self.run_assets_guard(assets)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("do not contain the exact package ForgeTrust.AppSurface.Web.Tailwind", result.stderr)
+
+    def test_asset_guard_rejects_an_additional_tailwind_package_version(self) -> None:
+        assets = self.valid_assets()
+        assets["libraries"]["ForgeTrust.AppSurface.Web.Tailwind/9.9.9"] = {  # type: ignore[index]
+            "type": "package",
+            "path": "forgetrust.appsurface.web.tailwind/9.9.9",
+        }
+        result = self.run_assets_guard(assets)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unexpected ForgeTrust.AppSurface.Web.Tailwind package version", result.stderr)
+
+    def test_asset_guard_rejects_a_tailwind_project_library(self) -> None:
+        assets = self.valid_assets()
+        assets["libraries"][f"ForgeTrust.AppSurface.Web.Tailwind/{PACKAGE_VERSION}"] = {  # type: ignore[index]
+            "type": "project",
+            "path": "../../Web/ForgeTrust.AppSurface.Web.Tailwind/ForgeTrust.AppSurface.Web.Tailwind.csproj",
+        }
+        result = self.run_assets_guard(assets)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Source-project substitution", result.stderr)
+
+    def test_asset_guard_rejects_a_wrong_tailwind_package_path(self) -> None:
+        assets = self.valid_assets()
+        assets["libraries"][f"ForgeTrust.AppSurface.Web.Tailwind/{PACKAGE_VERSION}"]["path"] = (  # type: ignore[index]
+            "forgetrust.appsurface.web.tailwind/another-version"
+        )
+        result = self.run_assets_guard(assets)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Expected package path forgetrust.appsurface.web.tailwind", result.stderr)
+
+    def test_asset_guard_rejects_missing_exact_dependency_for_each_package(self) -> None:
+        for package_id in (
+            "ForgeTrust.RazorWire",
+            "ForgeTrust.AppSurface.Web.Tailwind",
+        ):
+            with self.subTest(package_id=package_id):
                 assets = self.valid_assets()
-                assets["project"]["frameworks"]["net10.0"]["dependencies"][  # type: ignore[index]
-                    "ForgeTrust.RazorWire"
-                ]["version"] = dependency_range  # type: ignore[index]
+                del assets["project"]["frameworks"]["net10.0"]["dependencies"][package_id]  # type: ignore[index]
                 result = self.run_assets_guard(assets)
 
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("does not pin ForgeTrust.RazorWire exactly", result.stderr)
+                self.assertIn(f"does not pin {package_id} exactly", result.stderr)
+
+    def test_asset_guard_rejects_missing_tailwind_private_cache_entry_or_metadata(self) -> None:
+        cases = (
+            ({"ForgeTrust.AppSurface.Web.Tailwind"}, set()),
+            (set(), {"ForgeTrust.AppSurface.Web.Tailwind"}),
+        )
+        for missing_cache, missing_metadata in cases:
+            with self.subTest(missing_cache=missing_cache, missing_metadata=missing_metadata):
+                result = self.run_assets_guard(
+                    self.valid_assets(),
+                    missing_cache_packages=tuple(missing_cache),
+                    missing_metadata_packages=tuple(missing_metadata),
+                )
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f"forgetrust.appsurface.web.tailwind/{PACKAGE_VERSION.lower()}",
+                    result.stderr,
+                )
 
     def test_asset_guard_rejects_missing_private_cache_entry_or_metadata(self) -> None:
         cases = (

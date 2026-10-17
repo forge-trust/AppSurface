@@ -77,9 +77,9 @@ public sealed class NestedCollectionsController : Controller
     }
 
     // This adapter intentionally does not infer a universal binder key grammar.
-    // It rejects failed/ambiguous binding rather than rekeying or clearing ModelState.
+    // Match the form binder's case-insensitive field paths; reject ambiguous keys without rekeying or clearing ModelState.
     private static bool ValidKeys(string?[] keys, int boundCount) => keys.Length == boundCount
-        && keys.All(key => !string.IsNullOrWhiteSpace(key)) && keys.Distinct(StringComparer.Ordinal).Count() == keys.Length;
+        && keys.All(key => !string.IsNullOrWhiteSpace(key)) && keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() == keys.Length;
 
     private ViewResult Editor(NestedCollectionsSampleModel model) => View("~/Views/Reactivity/NestedCollections.cshtml", model);
 }
