@@ -114,25 +114,37 @@ def remove_sealed_fixture_tree(path,generation,deadline):
  require(path in allowed and len(generation)==32 and all(c in '0123456789abcdef' for c in generation),'fixed-fixture-cleanup-root')
  root=path.lstat();require(stat.S_ISDIR(root.st_mode) and root.st_uid==root.st_gid==0 and root.st_mode&0o7022==0,'sealed-fixture-root')
  count=0;flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
- def walk(fd):
+ def mount_id(fd):
+  with open('/proc/self/fdinfo/'+str(fd),'rb') as info:data=info.read(4097)
+  require(len(data)<=4096,'fixture-fdinfo-bound')
+  values=[line[7:].strip() for line in data.splitlines() if line.startswith(b'mnt_id:')]
+  require(len(values)==1 and values[0].isdigit() and int(values[0])>0,'fixture-mount-identity')
+  return int(values[0])
+ def walk(fd,expected_mount):
   nonlocal count
-  require(time.monotonic()<deadline,'fixture-cleanup-deadline')
-  for name in os.listdir(fd):
-   count+=1;require(count<=100000 and name not in ('.','..') and '/' not in name and time.monotonic()<deadline,'fixture-cleanup-bound')
-   m=os.stat(name,dir_fd=fd,follow_symlinks=False)
-   require(m.st_uid==m.st_gid==0 and m.st_dev==root.st_dev and m.st_mode&0o7022==0,'sealed-fixture-owner-mode-device')
-   if stat.S_ISDIR(m.st_mode):
-    child=os.open(name,flags,dir_fd=fd)
-    try:
-     actual=os.fstat(child);require((actual.st_dev,actual.st_ino)==(m.st_dev,m.st_ino),'sealed-fixture-dir-binding');walk(child)
-    finally:os.close(child)
-    os.rmdir(name,dir_fd=fd)
-   else:
-    require(stat.S_ISREG(m.st_mode) and m.st_nlink==1,'sealed-fixture-leaf')
-    os.unlink(name,dir_fd=fd)
+  require(time.monotonic()<deadline and mount_id(fd)==expected_mount,'fixture-cleanup-deadline-or-mount')
+  with os.scandir(fd) as entries:
+   for entry in entries:
+    name=entry.name;count+=1
+    require(count<=100000 and name not in ('.','..') and '/' not in name and time.monotonic()<deadline,'fixture-cleanup-bound')
+    m=os.stat(name,dir_fd=fd,follow_symlinks=False)
+    require(m.st_uid==m.st_gid==0 and m.st_dev==root.st_dev and m.st_mode&0o7022==0,'sealed-fixture-owner-mode-device')
+    if stat.S_ISDIR(m.st_mode):
+     child=os.open(name,flags,dir_fd=fd)
+     try:
+      actual=os.fstat(child);require((actual.st_dev,actual.st_ino)==(m.st_dev,m.st_ino),'sealed-fixture-dir-binding');walk(child,expected_mount)
+     finally:os.close(child)
+     os.rmdir(name,dir_fd=fd)
+    else:
+     require(stat.S_ISREG(m.st_mode) and m.st_nlink==1,'sealed-fixture-leaf')
+     os.unlink(name,dir_fd=fd)
  fd=os.open(path,flags)
  try:
-  actual=os.fstat(fd);require((actual.st_dev,actual.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-root-binding');walk(fd)
+  actual=os.fstat(fd);require((actual.st_dev,actual.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-root-binding')
+  parent=os.open('/run',flags)
+  try:expected_mount=mount_id(parent)
+  finally:os.close(parent)
+  walk(fd,expected_mount)
  finally:os.close(fd)
  named=path.lstat();require((named.st_dev,named.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-final-root')
  path.rmdir()
