@@ -179,14 +179,14 @@ public sealed class LinuxApplicationWorkspaceTests
             using var writer = File.OpenHandle(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
             RandomAccess.Write(writer, "armed\n"u8, 0);
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
-            Assert.Throws<IOException>(() => { _ = RandomAccess.Read(writer, new byte[6], 0); });
+            RequireDescriptorAccessDenied(() => { _ = RandomAccess.Read(writer, new byte[6], 0); });
             using var readable = LinuxApplicationWorkspace.OpenMarkerReadOnly(parent, writer, default);
             writer.Dispose();
             var bytes = new byte[6];
             Assert.Equal(6, RandomAccess.Read(readable, bytes, 0));
             Assert.Equal("armed\n"u8.ToArray(), bytes);
             Assert.Equal(UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
-            Assert.Throws<IOException>(() => RandomAccess.Write(readable, "changed"u8, 0));
+            RequireDescriptorAccessDenied(() => RandomAccess.Write(readable, "changed"u8, 0));
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
@@ -211,6 +211,14 @@ public sealed class LinuxApplicationWorkspaceTests
             Assert.Equal("replacement", File.ReadAllText(path));
         }
         finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    private static void RequireDescriptorAccessDenied(Action operation)
+    {
+        // Linux .NET maps EBADF to UnauthorizedAccessException with an IOException cause;
+        // the managed surface can also expose IOException directly. Either must remain a rejection.
+        var error = Record.Exception(operation);
+        Assert.True(error is IOException or UnauthorizedAccessException { InnerException: IOException });
     }
 
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
