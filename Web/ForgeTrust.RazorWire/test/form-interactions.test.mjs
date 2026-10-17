@@ -1018,6 +1018,77 @@ test('[G06] opaque concrete parent and child keys survive duplication and child 
   }
 });
 
+test('[G07] allocator avoids case-only collisions without rewriting opaque keys or reserving other owners', () => {
+  for (const { key, marked } of [
+    { key: 'RW01', marked: false },
+    { key: 'RW01', marked: true },
+    { key: '_0_1', marked: false },
+    { key: '_0_1', marked: true }
+  ]) {
+    const { context, document } = loadRuntime();
+    context.Date = { now: () => 0 };
+    const collection = makeCollectionRoot(document, 'Actions', '__index__',
+      (index, isTemplate) => makeSimpleNestedRow(document, 'Actions', index, isTemplate), [key]);
+    if (marked) collection.rows[0].setAttribute('data-rw-form-collection-row-state', 'removed');
+    const form = document.createElement('form');
+    form.appendChild(collection.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    collection.add.dispatchEvent(createEvent('click'));
+
+    const keys = ownedRows(collection.root).map(row => findInput(row, 'Actions.index').value);
+    assert.equal(keys.length, 2);
+    assert.equal(keys[0], key);
+    assert.equal(new Set(keys.map(key => key.toUpperCase())).size, 2);
+    assert.equal(keys[1], keys[1].toUpperCase());
+    assert.equal(keys[1], keys[1].toLowerCase());
+    assert.equal(findInput(collection.rows[0], `Actions[${key}].Text`).name, `Actions[${key}].Text`);
+  }
+
+  const { context, document } = loadRuntime();
+  context.Date = { now: () => 0 };
+  const collection = makeCollectionRoot(document, 'Actions', '__index__',
+    (index, isTemplate) => makeSimpleNestedRow(document, 'Actions', index, isTemplate), ['opaque']);
+  const sibling = makeCollectionRoot(document, 'OtherActions', '__index__',
+    (index, isTemplate) => makeSimpleNestedRow(document, 'OtherActions', index, isTemplate), ['_0_1']);
+  const form = document.createElement('form');
+  form.append(collection.root, sibling.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  collection.add.dispatchEvent(createEvent('click'));
+
+  assert.deepEqual(ownedRows(collection.root).map(row => findInput(row, 'Actions.index').value), ['opaque', '_0_1']);
+  assert.equal(findInput(sibling.rows[0], 'OtherActions.index').value, '_0_1');
+});
+
+test('[G07/G12] reentrant commands abort when a listener reserves the generated key with different casing', () => {
+  for (const action of ['add', 'duplicate']) {
+    const { context, document } = loadRuntime();
+    context.Date = { now: () => 0 };
+    const collection = makeCollectionRoot(document, 'Actions', '__index__',
+      (index, isTemplate) => makeSimpleNestedRow(document, 'Actions', index, isTemplate), ['opaque']);
+    const form = document.createElement('form');
+    form.appendChild(collection.root);
+    document.body.appendChild(form);
+    context.window.RazorWire.formInteractionsManager.scan();
+    let listenerRow;
+    form.addEventListener(`razorwire:form-collection:before-${action}`, event => {
+      listenerRow = makeSimpleNestedRow(document, 'Actions', event.detail.index.toUpperCase(), false);
+      collection.root.appendChild(listenerRow);
+    });
+    const command = action === 'add' ? collection.add : ownedCommand(collection.rows[0], 'duplicate');
+    command.dispatchEvent(createEvent('click'));
+
+    const rows = ownedRows(collection.root);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0], collection.rows[0]);
+    assert.equal(rows[1], listenerRow);
+    assert.equal(findInput(collection.rows[0], 'Actions.index').value, 'opaque');
+    assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics()
+      .some(diagnostic => /index conflict/.test(diagnostic.message)));
+  }
+});
+
 test('[G07] allocator handles numeric boundaries and reserves nested descendant keys', () => {
   const cases = [
     { label: 'empty', indices: [], expected: '0' },
@@ -1026,6 +1097,8 @@ test('[G07] allocator handles numeric boundaries and reserves nested descendant 
     { label: 'mixed opaque', indices: ['0', 'opaque'], fallback: true },
     { label: 'numeric prefix', indices: ['1x'], fallback: true },
     { label: 'maximum safe integer', indices: [String(Number.MAX_SAFE_INTEGER)], fallback: true },
+    { label: 'unsafe input integer', indices: ['9007199254740992'], fallback: true },
+    { label: 'decimal overflow', indices: ['9'.repeat(400)], fallback: true },
     { label: 'tombstone reservation', indices: ['0', '7'], tombstone: '7', expected: '8' }
   ];
 

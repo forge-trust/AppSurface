@@ -386,7 +386,8 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 if (Number.isSafeInteger(next)) return String(next);
             }
             let candidate: string;
-            do { candidate = `rw${Date.now().toString(36)}${(++this.indexSeed).toString(36)}`; } while (values.includes(candidate));
+            // Case-free tokens also keep the post-event exact collision guard valid for case-insensitive binders.
+            do { candidate = `_${Date.now()}_${++this.indexSeed}`; } while (values.includes(candidate));
             return candidate;
         }
 
