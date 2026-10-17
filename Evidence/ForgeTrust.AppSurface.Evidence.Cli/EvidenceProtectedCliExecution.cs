@@ -83,6 +83,7 @@ internal static class EvidenceProtectedCliExecution
     {
         var descriptor = worker.Descriptor;
         var clock = TimeProvider.System;
+        var executionStarted = clock.GetTimestamp();
         var collectionLimit = TimeSpan.FromSeconds(descriptor.CollectionSeconds);
         var execution = new EvidenceWorkerExecution(worker, clock, worker.JobRemaining,
             TimeSpan.FromSeconds(descriptor.CleanupSeconds), TimeSpan.FromSeconds(descriptor.StoppingSeconds),
@@ -239,6 +240,7 @@ internal static class EvidenceProtectedCliExecution
             if (execution.TerminalCode != EvidenceWorkerTerminalCode.None) admission.LatchFailure();
             if (!budget.CompleteCleanup() || !budget.TryBeginCollection())
                 throw new EvidenceAdmissionException("ASEVD421", "The protected final collection reserve is exhausted.");
+            var collectionEntryMilliseconds = (long)Math.Max(0, clock.GetElapsedTime(executionStarted).TotalMilliseconds);
             var collected = await execution.CollectAsync(budget.CollectionRemaining, async token =>
             {
                 var artifactsVerified = true;
@@ -247,18 +249,13 @@ internal static class EvidenceProtectedCliExecution
                 admission.Complete(ownedWorkStopped, artifactsVerified, cleanup);
                 var manifest = EvidenceManifestBuilder.Build(plan, results, admission, resourceResults, metrics: new EvidenceExecutionMetrics(
                     ResourceReadinessMilliseconds: resourceResults.Sum(static result => result.ElapsedMilliseconds),
+                    TotalMilliseconds: collectionEntryMilliseconds,
                     CleanupCompleted: cleanup,
                     TerminalFailureCode: execution.TerminalCode != EvidenceWorkerTerminalCode.None
                         ? execution.TerminalCode.ToString()
                         : artifactsVerified ? null : nameof(EvidenceWorkerTerminalCode.StageFailed)));
                 // All final output uses retained descriptors with exclusive names, after stopped work and cleanup.
-                await WriteAndVerifyAsync(root!, "evidence-plan.json", EvidenceCanonicalJson.Serialize(plan), token).ConfigureAwait(false);
-                await WriteAndVerifyAsync(root!, "evidence-manifest.json", EvidenceCanonicalJson.Serialize(manifest), token).ConfigureAwait(false);
-                await WriteAndVerifyAsync(root!, "evidence-summary.json", EvidenceCanonicalJson.Serialize(new
-                {
-                    manifest.Mode, manifest.ClaimKind, manifest.Eligibility, manifest.ExecutionVerdict,
-                    manifest.EnvelopeStatus, Procedure = "registered-protected-producer", SandboxAttestation = false,
-                }), token).ConfigureAwait(false);
+                await EvidenceProtectedTerminalFiles.WriteAsync(root!, plan, manifest, token).ConfigureAwait(false);
                 await root!.DisposeAsync().ConfigureAwait(false);
                 root = null;
                 return manifest;
@@ -446,10 +443,5 @@ internal static class EvidenceProtectedCliExecution
         return new(phase, operation, outcome, terminalCode, errorClass, errno);
     }
 
-    private static async ValueTask WriteAndVerifyAsync(EvidenceLinuxArtifactRoot root, string path, byte[] bytes,
-        CancellationToken cancellationToken)
-    {
-        await root.WriteAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-        await root.VerifyAsync(path, bytes.Length, EvidenceDigest.Sha256(bytes), cancellationToken).ConfigureAwait(false);
-    }
+
 }

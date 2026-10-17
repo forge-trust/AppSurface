@@ -110,3 +110,8 @@ Aspire 13.4.4 remains pinned. The central MessagePack pin uses the compatible 2.
 [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h), with matching content-hash
 locks and normal NuGet auditing. This dependency update does not change application capabilities,
 registration policy or admission.
+
+Compiled v2 application collection uses the [shared protected terminal layout](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-protected-terminal-file-layout)
+for the canonical plan, manifest and summary before original root handles close and worker completion is
+requested. V1 SDK empty-Observation collection preserves its existing `manifest.json` filename. Neither layout
+turns informational Observation into a protected gate claim.

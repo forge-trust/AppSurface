@@ -1004,10 +1004,18 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
                 if (root is not null)
                 {
-                    var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
-                    await root.WriteAsync("manifest.json", manifestBytes, token).ConfigureAwait(false);
-                    await root.VerifyAsync("manifest.json", manifestBytes.Length, EvidenceDigest.Sha256(manifestBytes), token)
-                        .ConfigureAwait(false);
+                    if (compiledApplication is not null)
+                    {
+                        await EvidenceProtectedTerminalFiles.WriteAsync(root, _plan, manifest, token).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // Preserve the established v1 SDK fixture/layout; compiled v2 uses root's fixed terminal set.
+                        var manifestBytes = EvidenceCanonicalJson.Serialize(manifest);
+                        await root.WriteAsync("manifest.json", manifestBytes, token).ConfigureAwait(false);
+                        await root.VerifyAsync("manifest.json", manifestBytes.Length, EvidenceDigest.Sha256(manifestBytes), token)
+                            .ConfigureAwait(false);
+                    }
 
                     // This host-owned disposal remains inside the bounded collection callback.
                     // The broker exit acknowledgement follows only after retained handles close.
@@ -1179,11 +1187,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             var outcome = cancellationToken.IsCancellationRequested
                 ? EvidenceProducerOutcome.Cancelled
                 : execution.Outcome switch
-            {
-                EvidenceWorkerStageOutcome.TimedOut => EvidenceProducerOutcome.TimedOut,
-                EvidenceWorkerStageOutcome.Cancelled => EvidenceProducerOutcome.Cancelled,
-                _ => EvidenceProducerOutcome.Failed,
-            };
+                {
+                    EvidenceWorkerStageOutcome.TimedOut => EvidenceProducerOutcome.TimedOut,
+                    EvidenceWorkerStageOutcome.Cancelled => EvidenceProducerOutcome.Cancelled,
+                    _ => EvidenceProducerOutcome.Failed,
+                };
             var timedOut = outcome == EvidenceProducerOutcome.TimedOut;
             results.Add(new EvidenceProducerResult(
                 declaration.Id,

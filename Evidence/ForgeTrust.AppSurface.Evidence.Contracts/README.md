@@ -387,3 +387,19 @@ resource is recorded Ready and producer/artifact/cleanup requirements pass. This
 admission or protected writer and cannot authenticate its own origin. `EvidenceProtectedGate.Allows` still
 rejects every Observation, including structurally valid resource-bearing results. Failed readiness remains
 Incomplete; changing resource data or hashes cannot authorize an application launch.
+
+### Shared protected terminal-file layout
+
+[`EvidenceProtectedTerminalFiles.WriteAsync`](EvidenceProtectedTerminalFiles.cs) is the internal CLI/v2 SDK
+collection primitive. It accepts an already allocated actual Linux artifact root, the completed plan/manifest
+and the original collection token. It exclusively writes and verifies `evidence-plan.json`,
+`evidence-manifest.json` and the seven-field `evidence-summary.json`; no filename, writer callback or output
+location is supplied by the caller. Canonical serialization uses the existing byte limits, and every write is
+verified against its exact length and SHA-256. The summary claims no sandbox attestation.
+
+Call only after original work and cleanup have joined, inside the tracked collection callback, then close the
+root before requesting root completion. A partial write failure cannot be retried over these exclusive names
+or upgraded to a completed run. This helper allocates no capability and structural verification cannot prove
+origin. The existing v1 SDK empty-Observation fixture retains its legacy `manifest.json`; compiled v2 applications
+use the shared three-file layout required by C# root custody. CLI elapsed totals use the same monotonic clock
+as its lifecycle; timing data never establishes kernel settlement or changes a deadline.
