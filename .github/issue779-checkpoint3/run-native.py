@@ -90,7 +90,7 @@ def stage(args,end):
  write(args.output/'staging.json',canonical(inventory));return tools,runtime
 
 def retain_application_prefixes(generation,output,case):
- root=Path('/run/appsurface-application-'+generation+'/control')
+ root=Path('/run/appsurface-app-'+generation+'/control')
  if not root.exists():return False
  before=root.lstat();require(stat.S_ISDIR(before.st_mode) and before.st_uid==before.st_gid==0 and stat.S_IMODE(before.st_mode)==0o700,'private-app-diagnostic-root')
  fd=os.open(root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
@@ -110,7 +110,7 @@ def retain_application_prefixes(generation,output,case):
 def remove_sealed_fixture_tree(path,generation,deadline):
  # Fixture housekeeping only AFTER original positive custody/account-absence checks.
  # Every leaf is root-owned, single-link regular data; no symlinks, devices or mounts are traversed.
- allowed={Path('/run')/(prefix+generation) for prefix in ('appsurface-evidence-producer-data-','appsurface-application-')}
+ allowed={Path('/run')/(prefix+generation) for prefix in ('appsurface-evidence-producer-data-','appsurface-app-')}
  require(path in allowed and len(generation)==32 and all(c in '0123456789abcdef' for c in generation),'fixed-fixture-cleanup-root')
  root=path.lstat();require(stat.S_ISDIR(root.st_mode) and root.st_uid==root.st_gid==0 and root.st_mode&0o7022==0,'sealed-fixture-root')
  count=0;flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
@@ -174,7 +174,7 @@ def execute(args,case,tools,runtime,end):
     require(stdout.stat().st_size+stderr.stat().st_size<=MAX_LOG,'root-output-bound')
     path=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
     if descriptor is None and path.is_file():descriptor=json.loads(path.read_bytes());require(descriptor['schema']=='evidence-worker-linux-v2','actual-v2-descriptor')
-    scratch=Path('/run/appsurface-application-'+generation+'/scratch')
+    scratch=Path('/run/appsurface-app-'+generation+'/scratch')
     if descriptor is not None:
      a=descriptor['application'];uid=a['application_uid'];gid=a['application_gid'];facts=c2.show(appunit,deadline)
      if app is None and int(facts.get('MainPID','0')):
@@ -186,7 +186,7 @@ def execute(args,case,tools,runtime,end):
       fm=scratch/'factory-entered'
       if fm.is_file():factory=fm.read_bytes()==b'factory-entered\n'
       if dcp is None:
-       expected=Path('/run/appsurface-application-'+generation+'/bundle/dcp/dcp').stat()
+       expected=Path('/run/appsurface-app-'+generation+'/bundle/dcp/dcp').stat()
        for pid in members(appunit):
         try:
          executable=(Path('/proc')/str(pid)/'exe').stat()
@@ -272,7 +272,7 @@ def execute(args,case,tools,runtime,end):
   if result.get('passed') and case!='disposal-failure':
    try:
     result['fixture_reclaimed_nodes']={}
-    for prefix in ('appsurface-evidence-producer-data-','appsurface-application-'):
+    for prefix in ('appsurface-evidence-producer-data-','appsurface-app-'):
      selected=Path('/run')/(prefix+generation)
      result['fixture_reclaimed_nodes'][prefix]=remove_sealed_fixture_tree(selected,generation,min(end,time.monotonic()+15))
    except (OSError,RuntimeError) as failure:

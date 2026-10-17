@@ -46,7 +46,7 @@ var allowedInput = Environment.GetEnvironmentVariable("PROOF_ALLOWED_INPUT")
 
 // Each operation is attempted separately against the root-staged managed CLI PE and private output root.
 var deniedToolOpen = ToolOpenDenied(Path.Combine(toolRoot, "protected-tool.dll"));
-var deniedToolLoad = ToolLoadDenied(Path.Combine(toolRoot, "protected-tool.dll"));
+var deniedToolLoad = ToolLoadDenied(Path.Combine(toolRoot, "protected-tool.dll"), deniedToolOpen);
 var deniedCreateNew = OutputCreateDenied(Path.Combine(outputRoot,
     "native-resource-output-probe"));
 var declaredInputMatches = File.ReadAllBytes(allowedInput)
@@ -96,7 +96,7 @@ static bool ToolOpenDenied(string path)
     }
 }
 
-static bool ToolLoadDenied(string path)
+static bool ToolLoadDenied(string path, bool independentlyDeniedOpen)
 {
     try
     {
@@ -109,6 +109,13 @@ static bool ToolLoadDenied(string path)
     }
     catch (SecurityException)
     {
+        return true;
+    }
+    catch (FileNotFoundException) when (independentlyDeniedOpen)
+    {
+        // Assembly.LoadFile hides an inaccessible mount as missing. The C# root independently
+        // requires this exact real managed PE before start/readiness/join, and File.OpenRead
+        // must already have returned access denial. A genuinely missing fixture never passes root.
         return true;
     }
     catch (FileLoadException exception) when (exception.HResult == unchecked((int)0x80070005)

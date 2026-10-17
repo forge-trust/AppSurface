@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -60,7 +61,7 @@ internal sealed class LinuxApplicationWorkspaceLayout
         ApplicationGid = gid;
         Limits = limits with { };
         BundleFiles = Array.AsReadOnly(files.ToArray());
-        RootName = "appsurface-application-" + runId.ToString("N", CultureInfo.InvariantCulture);
+        RootName = "appsurface-app-" + runId.ToString("N", CultureInfo.InvariantCulture);
         Root = "/run/" + RootName;
         ControlRoot = Root + "/control";
         BundleRoot = Root + "/bundle";
@@ -131,7 +132,7 @@ internal sealed class LinuxApplicationWorkspaceLayout
             || readOnlyInputs.Count != 1 || !StringComparer.Ordinal.Equals(readOnlyInputs[0], declared.RelativePath))
             throw Invalid();
 
-        var rootName = "appsurface-application-" + runId.ToString("N", CultureInfo.InvariantCulture);
+        var rootName = "appsurface-app-" + runId.ToString("N", CultureInfo.InvariantCulture);
         var root = "/run/" + rootName;
         if (Overlaps(toolRoot, root)) throw Invalid();
         return new(runId, toolRoot, entryDigest, applicationUid, applicationGid, limits, files);
@@ -267,6 +268,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     private readonly IReadOnlyDictionary<string, LinuxApplicationBundleFile> _files;
     private readonly Dictionary<string, LinuxProtectedNode> _sourceDirectories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, LinuxProtectedNode> _sourceFiles = new(StringComparer.Ordinal);
+    private LinuxProtectedNode? _toolProbe;
     private readonly List<LinuxProtectedNode> _sourceNodes = [];
     private readonly Dictionary<string, WorkspaceNode> _bundleDirectories = new(StringComparer.Ordinal);
     private readonly Dictionary<string, WorkspaceNode> _bundleFiles = new(StringComparer.Ordinal);
@@ -436,7 +438,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     internal void RequireAccountOwner(LinuxRunAccounts accounts, LinuxOwnerActivation owner)
     {
         if (!ReferenceEquals(_accounts, accounts) || !ReferenceEquals(_owner, owner)
-            || _layout.RunId == Guid.Empty || _layout.RootName != "appsurface-application-" + owner.RunId.ToString("N"))
+            || _layout.RunId == Guid.Empty || _layout.RootName != "appsurface-app-" + owner.RunId.ToString("N"))
             throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 
@@ -591,6 +593,11 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
 
     private void OpenAndInventorySource(CancellationToken token)
     {
+        _toolProbe = LinuxProtectedNode.OpenAbsolute(_layout.ToolRoot + "/protected-tool.dll", false,
+            true, 64L * 1024 * 1024, _sourceNodes, token, _deadline);
+        var expectedProbeHash = _layout.BundleFiles.Single(static file => file.Role == LinuxApplicationBundleRole.Resource).Sha256;
+        if (_toolProbe.Metadata.Mode != (ushort)(0x8000 | 0x124)) throw LinuxApplicationWorkspaceLayout.Invalid();
+        RequireManagedToolProbe(_toolProbe.ReadBounded(64 * 1024 * 1024, token, _deadline), expectedProbeHash);
         var sourceRoot = _layout.ToolRoot + "/application";
         _sourceDirectories[string.Empty] = null!;
         var root = LinuxProtectedNode.OpenAbsolute(sourceRoot, true, true, 0, _sourceNodes, token, _deadline);
@@ -791,6 +798,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     {
         if (_bundle is null || _sourceDirectories.Count == 0 || _bundleFiles.Count != _layout.BundleFiles.Count)
             throw LinuxApplicationWorkspaceLayout.Invalid();
+        if (_toolProbe is null || _toolProbe.Hash(token, _deadline)
+            != _layout.BundleFiles.Single(static file => file.Role == LinuxApplicationBundleRole.Resource).Sha256)
+            throw LinuxApplicationWorkspaceLayout.Invalid();
         RequireSourceNames(token);
         RequireBundleNames(token);
         foreach (var source in _sourceNodes)
@@ -933,6 +943,26 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     {
         if (_root is null) throw LinuxApplicationWorkspaceLayout.Invalid();
         RequireDirectoryNames(_root.Handle, ["bundle", "control", "denied-output", "scratch"], token);
+    }
+
+    /// <summary>Checks bounded bytes against the selected resource digest and actual PE/CLR metadata.</summary>
+    /// <param name="bytes">Retained root probe bytes, never loaded or executed by this method.</param>
+    /// <param name="expectedSha256">The exact compiled resource-role digest.</param>
+    /// <remarks>This data check grants no file, application, writer or admission capability. The owner separately
+    /// retains the root-owned nonwritable file and rechecks its named bytes before start, health and cleanup.</remarks>
+    internal static void RequireManagedToolProbe(ReadOnlyMemory<byte> bytes, string expectedSha256)
+    {
+        try
+        {
+            if (bytes.Length is < 1 or > 64 * 1024 * 1024
+                || Convert.ToHexStringLower(SHA256.HashData(bytes.Span)) != expectedSha256)
+                throw LinuxApplicationWorkspaceLayout.Invalid();
+            using var reader = new PEReader(new MemoryStream(bytes.ToArray(), writable: false));
+            if (!reader.HasMetadata || reader.PEHeaders.CorHeader is null) throw LinuxApplicationWorkspaceLayout.Invalid();
+            _ = reader.GetMetadata().GetContent();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        { throw LinuxApplicationWorkspaceLayout.Invalid(); }
     }
 
     private void RequireNoOutputProbe(CancellationToken token)

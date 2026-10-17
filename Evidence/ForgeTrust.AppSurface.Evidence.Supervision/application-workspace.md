@@ -24,7 +24,7 @@ The exposed path properties have fixed meanings:
 
 | Property | Path or contract |
 | --- | --- |
-| `Root` | `/run/appsurface-application-<RunId:N>` |
+| `Root` | `/run/appsurface-app-<RunId:N>` |
 | `BundleRoot` | `Root/bundle`, outside `ToolRoot` |
 | `ScratchRoot` | `Root/scratch`, a host-visible tmpfs sized by `ScratchBytes` and owned by the application UID/GID |
 | `ProtectedOutputRoot` | `Root/denied-output`, root-owned and mode `0700` |
@@ -84,3 +84,20 @@ EBADF error and cannot arm a run. A changed name/inode rejects and quarantines r
 The FD helper authenticates no application or root owner on its own: Linux tests use ordinary owned files
 to verify real descriptor access and deterministic name replacement. Full root ownership, contents, freshness,
 original deadlines and native application ownership remain `Arm`'s separate mandatory guards.
+
+### Linux socket-home length
+
+The fixed application root is `/run/appsurface-app-<RunId:N>`; its identity, root ownership, bundle custody,
+private control and app-owned bounded tmpfs remain unchanged. The shorter closed component leaves room for
+Aspire 13.4.4's auxiliary socket below `HOME/.aspire/cli/bch/`, including its 11-character AppHost identifier,
+8-character random identifier, decimal PID and terminating NUL within Linux's 108-byte bound. The pinned
+[source naming rule](https://github.com/dotnet/aspire/blob/ccc566c5ab3285c9beb8f38ede34734bb477c029/src/Shared/BackchannelConstants.cs#L251)
+is a payload compatibility constraint, not authority to choose a path. Callers cannot supply a shorter alias or
+relocate scratch. The generation still binds every root operation and final check.
+
+The fixed protected-tool prerequisite is retained separately from the copied bundle, beneath the denied tool
+root. `RequireManagedToolProbe` checks at most 64 MiB of exact selected resource-role SHA-256 bytes using
+`PEReader` metadata inspection, without loading the assembly. The actual root file must have mode 0444 and
+passes the existing root ownership/single-link retained-node checks. Named metadata and the selected hash are
+rechecked before startup, health and final cleanup. The pure byte helper creates no protected capability; an
+ordinary actual managed test assembly verifies format handling, not sandbox denial.

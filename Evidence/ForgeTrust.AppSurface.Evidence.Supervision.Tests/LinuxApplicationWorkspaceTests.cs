@@ -23,7 +23,7 @@ public sealed class LinuxApplicationWorkspaceTests
         Assert.Equal(61001u, layout.ApplicationUid);
         Assert.Equal(61002u, layout.ApplicationGid);
         Assert.Equal("/opt/forge/tools", layout.DeniedToolRoot);
-        Assert.Equal("/run/appsurface-application-7f05e0719a9b4f40a211c9b3064f22d8", layout.Root);
+        Assert.Equal("/run/appsurface-app-7f05e0719a9b4f40a211c9b3064f22d8", layout.Root);
         Assert.Equal(layout.Root + "/control", layout.ControlRoot);
         Assert.Equal(layout.Root + "/bundle", layout.BundleRoot);
         Assert.Equal(layout.Root + "/scratch", layout.ScratchRoot);
@@ -106,7 +106,7 @@ public sealed class LinuxApplicationWorkspaceTests
         Reject(() => LinuxApplicationWorkspaceLayout.Create(RunId, "/opt/forge/tools", EntryDigest,
             61001, 61002, Limits, files, ["other.json"]));
         Reject(() => LinuxApplicationWorkspaceLayout.Create(RunId,
-            "/run/appsurface-application-7f05e0719a9b4f40a211c9b3064f22d8", EntryDigest,
+            "/run/appsurface-app-7f05e0719a9b4f40a211c9b3064f22d8", EntryDigest,
             61001, 61002, Limits, files, ["input.json"]));
     }
 
@@ -163,6 +163,28 @@ public sealed class LinuxApplicationWorkspaceTests
             rows.Add(new(file.RelativePath, false, 0, 0, (ushort)(0x8000 | file.Mode), 1,
                 inode++, file.LengthBytes, file.Sha256));
         return rows.ToArray();
+    }
+
+    [Fact]
+    public void ManagedToolProbeRequiresActualManagedBytesAndTheSelectedResourceDigest()
+    {
+        var managed = File.ReadAllBytes(typeof(LinuxApplicationWorkspaceTests).Assembly.Location);
+        var hash = EvidenceDigest.Sha256(managed);
+        LinuxApplicationWorkspace.RequireManagedToolProbe(managed, hash);
+        Reject(() => LinuxApplicationWorkspace.RequireManagedToolProbe(managed, new string('0', 64)));
+        Reject(() => LinuxApplicationWorkspace.RequireManagedToolProbe(ReadOnlyMemory<byte>.Empty, hash));
+        var invalid = "CANARY-not-a-managed-assembly"u8.ToArray();
+        Reject(() => LinuxApplicationWorkspace.RequireManagedToolProbe(invalid, EvidenceDigest.Sha256(invalid)));
+    }
+
+    [Fact]
+    public void ScratchHomeFitsPinnedAspireBackchannelEvenAtMaximumPidLength()
+    {
+        var layout = Create(Files(includeExtension: true));
+        // Aspire 13.4.4 uses eleven AppHost-id plus eight random-id characters, dot, PID and NUL.
+        // This is path-length data only, not an executed AppHost or kernel socket capability.
+        var path = layout.ScratchRoot + "/.aspire/cli/bch/" + new string('a', 19) + "." + int.MaxValue;
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(path) + 1 <= 108);
     }
 
     [Fact]
