@@ -199,6 +199,7 @@ internal sealed partial class LinuxApplicationProcess
                             await Task.Delay(25, deadline.Token).ConfigureAwait(false);
                         }
                     }
+                    _dcp.RequireResourcePeer(_resource, _input.Request.RuntimeHost, deadline.Token);
                     RequirePolling(deadline.Token);
                     _ready = new(started.LeaseId, request.ResourceId, peer.Uid, started.Cgroup, 200, length);
                     Emit(new
@@ -229,7 +230,7 @@ internal sealed partial class LinuxApplicationProcess
         RequirePolling(token);
         if (_ready is null || _started is null || _appHost is null || _resource is null || _dcp is null
             || _monitor?.IsFaulted == true || _stop is not null) throw Rejected();
-        _appHost.Recheck(token); _resource.Recheck(token); _dcp?.Recheck(token); _workspace.RecheckBundle(token);
+        _appHost.Recheck(token); _resource.Recheck(token); _dcp.RequireResourcePeer(_resource, _input.Request.RuntimeHost, token); _workspace.RecheckBundle(token);
         RequirePolling(token);
     }
 
@@ -333,6 +334,7 @@ internal sealed partial class LinuxApplicationProcess
                 var sample = await _monitorBackend!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
                 if (!_recipe!.IsRunning(sample) || sample.MainPid != _appHost!.Pid) throw Rejected();
                 _resource?.Recheck(token); _dcp?.Recheck(token);
+                if (_ready is not null) _dcp!.RequireResourcePeer(_resource!, _input.Request.RuntimeHost, token);
                 await Task.Delay(25, token).ConfigureAwait(false);
             }
         }

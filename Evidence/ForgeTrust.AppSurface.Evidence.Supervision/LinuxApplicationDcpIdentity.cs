@@ -39,6 +39,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     private const ushort RegularFileType = 0x8000;
     private const ushort DirectoryType = 0x4000;
     private const ushort RequiredDcpMode = RegularFileType | 0x16d;
+    private const int MaximumResourceParentDepth = 16;
 
     private readonly object _sync = new();
     private readonly string _dcpRelativePath;
@@ -201,6 +202,73 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         }
     }
 
+    /// <summary>Requires a resource peer to run the root-audited host and descend from this retained DCP process.</summary>
+    /// <param name="resource">The retained authenticated application socket peer.</param>
+    /// <param name="auditedRuntimeHost">The canonical root-selected runtime host path.</param>
+    /// <param name="token">The original owner/resource deadline.</param>
+    /// <remarks>Executable file identity and a bounded actual PPid chain are sampled twice; proc command text is not authority.</remarks>
+    internal void RequireResourcePeer(LinuxProcessIdentity resource, string auditedRuntimeHost, CancellationToken token)
+    {
+        lock (_sync)
+        {
+            var ownedProcesses = new List<LinuxProcessIdentity>();
+            var procCandidates = new List<RetainedProcCandidate>();
+            SafeFileHandle? runtimeHost = null;
+            RetainedProcCandidate? resourceProc = null;
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (_closed || _rejected || resource is null
+                    || resource.Role != LinuxProcessSamplingRole.Application
+                    || resource.Unit != _process.Unit || resource.Uid != _process.Uid || resource.Gid != _process.Gid)
+                    throw Rejected();
+
+                var relativeHost = RelativeDcpPath(auditedRuntimeHost);
+                resource.Recheck(token);
+                _process.Recheck(token);
+                runtimeHost = OpenAt2(Fd(_filesystemRoot), relativeHost, NamedFlags, 0, AuditedPathResolution);
+                var expectedHost = ToFileMetadata(StatFd(runtimeHost));
+                RequireAuditedRuntimeHost(expectedHost);
+                RequireNamedRuntimeHostPath(_filesystemRoot, relativeHost, runtimeHost, expectedHost, token);
+
+                resourceProc = OpenProcCandidate(resource.Pid, token);
+                RequireCurrentExecutable(resourceProc, expectedHost, token);
+                var first = CaptureParentWalk(resource, ownedProcesses, procCandidates, token);
+                RequireParentChain(first, resource.SampledFacts, _process.SampledFacts,
+                    resource.Uid, resource.Gid, resource.Unit);
+                var second = CaptureParentWalk(resource, ownedProcesses, procCandidates, token);
+                RequireParentChain(second, resource.SampledFacts, _process.SampledFacts,
+                    resource.Uid, resource.Gid, resource.Unit);
+                RequireSameParentWalk(first, second);
+
+                resource.Recheck(token);
+                foreach (var process in ownedProcesses) process.Recheck(token);
+                foreach (var candidate in procCandidates) RequireProcCandidate(candidate, token);
+                RequireProcCandidate(resourceProc, token);
+                RequireCurrentExecutable(resourceProc, expectedHost, token);
+                RequireNamedRuntimeHostPath(_filesystemRoot, relativeHost, runtimeHost, expectedHost, token);
+                _process.Recheck(token);
+                RequireProcCandidate(_proc, token);
+                RequireCurrentExecutable(_proc, _expectedFile, token);
+                RequireNamedDcpPath(_filesystemRoot, _dcpRelativePath, _auditedDcp, _expectedFile, token);
+                token.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception) { _rejected = true; throw Rejected(); }
+            finally
+            {
+                var failed = false;
+                foreach (var candidate in procCandidates.AsEnumerable().Reverse())
+                    failed |= DisposeCaptured(candidate) is not null;
+                foreach (var process in ownedProcesses.AsEnumerable().Reverse())
+                    failed |= DisposeCaptured(process) is not null;
+                failed |= DisposeCaptured(resourceProc) is not null;
+                failed |= DisposeCaptured(runtimeHost) is not null;
+                if (failed) { _rejected = true; throw Rejected(); }
+            }
+        }
+    }
+
     /// <summary>Requires an authenticated application process to retain the exact native resource argv.</summary>
     /// <param name="process">The retained authenticated application process identity.</param>
     /// <param name="runtimeHost">The independently selected canonical runtime host path.</param>
@@ -313,6 +381,86 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     /// <returns>Whether device, inode, type, UID, full mode, and length all match.</returns>
     internal static bool SameExecutable(LinuxDcpFileMetadata actual, LinuxDcpFileMetadata audited) =>
         actual == audited;
+
+    /// <summary>Detached PPid link; it grants no live process identity or resource admission.</summary>
+    internal readonly record struct LinuxApplicationParentLink(uint Pid, uint ParentPid, ulong StartTimeTicks);
+
+    /// <summary>One actual parent-walk node paired with its independently captured process sample.</summary>
+    internal readonly record struct LinuxApplicationParentFact(uint Pid, uint ParentPid, LinuxProcessSample Process);
+
+    /// <summary>Parses one bounded proc stat record's PID, PPid, and start time after validating the full stat grammar.</summary>
+    internal static LinuxApplicationParentLink ParseParentLink(ReadOnlySpan<byte> bytes)
+    {
+        var process = LinuxProcessData.ParseStat(bytes);
+        var text = new UTF8Encoding(false, true).GetString(bytes);
+        var closing = text.LastIndexOf(')');
+        var fields = text[(closing + 2)..^1].Split(' ');
+        if (fields.Length != 50 || !uint.TryParse(fields[1], NumberStyles.None,
+            CultureInfo.InvariantCulture, out var parentPid) || parentPid > int.MaxValue)
+            throw Rejected();
+        return new(process.Pid, parentPid, process.StartTimeTicks);
+    }
+
+    /// <summary>Checks that actual PPid links reach the retained DCP through at most sixteen same-unit app processes.</summary>
+    internal static void RequireParentChain(IReadOnlyList<LinuxApplicationParentFact> chain,
+        LinuxProcessSample resource, LinuxProcessSample dcp, uint uid, uint gid, LinuxUnitName unit)
+    {
+        try
+        {
+            LinuxProcessData.RequireExpected(resource, resource.Stat.Pid, uid, gid, unit, LinuxProcessSamplingRole.Application);
+            LinuxProcessData.RequireExpected(dcp, dcp.Stat.Pid, uid, gid, unit, LinuxProcessSamplingRole.Application);
+            if (resource.Stat.Pid == dcp.Stat.Pid)
+            {
+                if (resource.Stat.StartTimeTicks != dcp.Stat.StartTimeTicks || chain.Count != 0) throw Rejected();
+                return;
+            }
+            if (chain.Count is 0 or > MaximumResourceParentDepth) throw Rejected();
+
+            var visited = new HashSet<uint>();
+            var expectedPid = resource.Stat.Pid;
+            var reachedDcp = false;
+            for (var index = 0; index < chain.Count; index++)
+            {
+                var fact = chain[index];
+                LinuxProcessData.RequireExpected(fact.Process, fact.Pid, uid, gid, unit,
+                    LinuxProcessSamplingRole.Application);
+                if (fact.Pid != expectedPid || fact.Process.Stat.Pid != fact.Pid || !visited.Add(fact.Pid)
+                    || fact.ParentPid is 0 or > int.MaxValue) throw Rejected();
+                if (index == 0) LinuxProcessData.RequireSameIdentity(resource, fact.Process);
+                if (fact.ParentPid == dcp.Stat.Pid)
+                {
+                    reachedDcp = index == chain.Count - 1;
+                    break;
+                }
+                if (visited.Contains(fact.ParentPid)) throw Rejected();
+                expectedPid = fact.ParentPid;
+            }
+            if (!reachedDcp) throw Rejected();
+        }
+        catch (Exception) { throw Rejected(); }
+    }
+
+    /// <summary>Requires two bounded parent walks to preserve PPids and every process start-time/credential identity.</summary>
+    internal static void RequireSameParentWalk(IReadOnlyList<LinuxApplicationParentFact> first,
+        IReadOnlyList<LinuxApplicationParentFact> second)
+    {
+        if (first.Count != second.Count) throw Rejected();
+        for (var index = 0; index < first.Count; index++)
+        {
+            if (first[index].Pid != second[index].Pid || first[index].ParentPid != second[index].ParentPid)
+                throw Rejected();
+            try { LinuxProcessData.RequireSameIdentity(first[index].Process, second[index].Process); }
+            catch (Exception) { throw Rejected(); }
+        }
+    }
+
+    /// <summary>Requires root ownership, a regular executable, no write/special bits, and nonempty runtime bytes.</summary>
+    internal static void RequireAuditedRuntimeHost(LinuxDcpFileMetadata value)
+    {
+        if (value.Inode == 0 || value.Type != RegularFileType || value.Uid != 0
+            || (value.Mode & 0x0e00) != 0 || (value.Mode & 0x92) != 0
+            || (value.Mode & 0x49) == 0 || value.Length == 0) throw Rejected();
+    }
 
     /// <summary>Requires before/after retained process samples to identify the same live application member.</summary>
     /// <param name="before">The authenticated sample captured before inspecting its executable descriptor.</param>
@@ -500,6 +648,49 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         if (!SameExecutable(retained, expected)) throw Rejected();
         using var current = OpenExecutable(candidate.Directory);
         if (!SameExecutable(ToFileMetadata(StatFd(current)), expected)) throw Rejected();
+        token.ThrowIfCancellationRequested();
+    }
+
+    private List<LinuxApplicationParentFact> CaptureParentWalk(LinuxProcessIdentity resource,
+        List<LinuxProcessIdentity> owned, List<RetainedProcCandidate> candidates, CancellationToken token)
+    {
+        if (resource.Pid == _process.Pid) return [];
+        var facts = new List<LinuxApplicationParentFact>();
+        var visited = new HashSet<uint> { resource.Pid };
+        var current = resource;
+        for (var depth = 0; depth < MaximumResourceParentDepth; depth++)
+        {
+            token.ThrowIfCancellationRequested();
+            current.Recheck(token);
+            var proc = OpenProcCandidate(current.Pid, token);
+            candidates.Add(proc);
+            using var stat = OpenAt2(Fd(proc.Directory), "stat", ReadFlags, 0, DescendantResolution);
+            RequireProcRegularFile(stat);
+            var link = ParseParentLink(ReadBounded(stat, LinuxProcessData.MaximumStatBytes, token));
+            if (link.Pid != current.Pid || link.StartTimeTicks != current.StartTimeTicks) throw Rejected();
+            RequireProcCandidate(proc, token);
+            current.Recheck(token);
+            facts.Add(new(link.Pid, link.ParentPid, current.SampledFacts));
+            if (link.ParentPid == _process.Pid) return facts;
+            if (link.ParentPid is 0 or > int.MaxValue || !visited.Add(link.ParentPid)) throw Rejected();
+            current = LinuxProcessIdentity.CaptureApplication(link.ParentPid, resource.Uid, resource.Gid,
+                resource.Unit, token);
+            owned.Add(current);
+        }
+        throw Rejected();
+    }
+
+    private static void RequireNamedRuntimeHostPath(SafeFileHandle filesystemRoot, string relativePath,
+        SafeFileHandle retainedHost, LinuxDcpFileMetadata expected, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var retained = ToFileMetadata(StatFd(retainedHost));
+        RequireAuditedRuntimeHost(retained);
+        if (!SameExecutable(retained, expected)) throw Rejected();
+        using var named = OpenAt2(Fd(filesystemRoot), relativePath, NamedFlags, 0, AuditedPathResolution);
+        var current = ToFileMetadata(StatFd(named));
+        RequireAuditedRuntimeHost(current);
+        if (!SameExecutable(current, expected)) throw Rejected();
         token.ThrowIfCancellationRequested();
     }
 

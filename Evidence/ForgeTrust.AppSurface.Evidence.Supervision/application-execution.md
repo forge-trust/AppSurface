@@ -39,7 +39,7 @@ protected tools/control roots or write worker/producer results. See the
 A systemd start reply does not establish running identity. The root authenticates live PID, all four
 UIDs/GIDs, start time and exact cgroup. Resource readiness additionally connects to the fixed Unix
 socket, authenticates `SO_PEERCRED`, retains the actual resource identity and DCP executable identity,
-and reads at most 4096 HTTP bytes. Only status 200 with the exact fixed body and unambiguous content
+and reads at most 4096 HTTP bytes. Launch-argument bytes remain a consistency check; kernel executable identity and the retained DCP process lineage bind the responding resource to root-controlled launch provenance. Only status 200 with the exact fixed body and unambiguous content
 length passes. AppHost log text and JSON health declarations cannot establish readiness.
 
 ## Shutdown and file custody

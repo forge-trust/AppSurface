@@ -69,7 +69,7 @@ def stage(args,end):
  require(prep['schema']=='issue779-c3-preparation-input-v1' and digests['schema']=='issue779-c3-registration-digests-v1','preparation-shape')
  entries={e['application_id']:e['application_entry_digest'] for e in digests['entries']}
  require(len(entries)==4 and set(prep['variants'])=={'normal','readiness','factory-stall','stuck-descendant'},'closed-four-variants')
- parent=Path('/run')/('issue779-c3-input-'+uuid.uuid4().hex);c2.create_traversable_root(parent)
+ parent=Path('/var/lib')/('issue779-c3-input-'+uuid.uuid4().hex);c2.create_traversable_root(parent)
  runtime=parent/'runtime';inventory={'runtime':c2.copy_tree(args.runtime,runtime),'deployments':{}}
  tools={}
  for key in ('normal','sdk-normal','readiness','factory-stall','stuck-descendant'):
@@ -106,6 +106,37 @@ def retain_application_prefixes(generation,output,case):
    finally:os.close(child)
  finally:os.close(fd)
  return True
+
+def remove_sealed_fixture_tree(path,generation,deadline):
+ # Fixture housekeeping only AFTER original positive custody/account-absence checks.
+ # Every leaf is root-owned, single-link regular data; no symlinks, devices or mounts are traversed.
+ allowed={Path('/run')/(prefix+generation) for prefix in ('appsurface-evidence-producer-data-','appsurface-application-')}
+ require(path in allowed and len(generation)==32 and all(c in '0123456789abcdef' for c in generation),'fixed-fixture-cleanup-root')
+ root=path.lstat();require(stat.S_ISDIR(root.st_mode) and root.st_uid==root.st_gid==0 and root.st_mode&0o7022==0,'sealed-fixture-root')
+ count=0;flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
+ def walk(fd):
+  nonlocal count
+  require(time.monotonic()<deadline,'fixture-cleanup-deadline')
+  for name in os.listdir(fd):
+   count+=1;require(count<=100000 and name not in ('.','..') and '/' not in name and time.monotonic()<deadline,'fixture-cleanup-bound')
+   m=os.stat(name,dir_fd=fd,follow_symlinks=False)
+   require(m.st_uid==m.st_gid==0 and m.st_dev==root.st_dev and m.st_mode&0o7022==0,'sealed-fixture-owner-mode-device')
+   if stat.S_ISDIR(m.st_mode):
+    child=os.open(name,flags,dir_fd=fd)
+    try:
+     actual=os.fstat(child);require((actual.st_dev,actual.st_ino)==(m.st_dev,m.st_ino),'sealed-fixture-dir-binding');walk(child)
+    finally:os.close(child)
+    os.rmdir(name,dir_fd=fd)
+   else:
+    require(stat.S_ISREG(m.st_mode) and m.st_nlink==1,'sealed-fixture-leaf')
+    os.unlink(name,dir_fd=fd)
+ fd=os.open(path,flags)
+ try:
+  actual=os.fstat(fd);require((actual.st_dev,actual.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-root-binding');walk(fd)
+ finally:os.close(fd)
+ named=path.lstat();require((named.st_dev,named.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-final-root')
+ path.rmdir()
+ return count
 
 def execute(args,case,tools,runtime,end):
  variant=case if case in ('readiness','factory-stall','stuck-descendant','sdk-normal') else 'normal'
@@ -181,12 +212,12 @@ def execute(args,case,tools,runtime,end):
    require(code==0,'positive-root-exit');summary=json.loads(stdout.read_bytes());require(summary.get('ExecutionVerdict')=='Passed' and summary.get('CleanupCompleted') is True and summary.get('ClaimKind')=='ObservationOnly','actual-root-result')
    require(producer is not None and dcp is not None and any(e['phase']=='ready' and e['dcp_checked'] for e in observed),'actual-dcp-resource-producer')
    require(settled[0]['main_code']==1 and settled[0]['main_status']==0,'cooperative-normal-application-exit')
-   final=Path('/run/appsurface-evidence-'+generation+'/output/evidence/evidence-manifest.json');manifest=json.loads(final.read_bytes());pr=manifest['ProducerResults'][0]
+   final=Path('/run/appsurface-evidence-'+generation+'/output/evidence/evidence-manifest.json');manifest=json.loads(final.read_bytes());require(len(manifest['ProducerResults'])==1,'exact-producer-result-count');pr=manifest['ProducerResults'][0];require(len(pr['Artifacts'])==1,'exact-artifact-count')
    require(pr['Outcome']=='Passed' and pr['Artifacts'][0]['RelativePath']=='merged/coverage.cobertura.xml','real-shared-coverage-result')
    report=final.parent/'coverage/merged/coverage.cobertura.xml';require(sha(report)==pr['Artifacts'][0]['Sha256'],'retained-report-digest');c2.verify_sealed_output(final.parent)
    import xml.etree.ElementTree as ET
    coverage=ET.fromstring(report.read_bytes());require(int(coverage.attrib['lines-valid'])>0 and int(coverage.attrib['branches-valid'])>0 and float(coverage.attrib['line-rate'])>=.945 and float(coverage.attrib['branch-rate'])>=.845,'genuine-positive-coverage')
-   result['coverage']=coverage.attrib;result['output']=output_accounting(stderr);require(result['output']['registered_pairs']==3,'all-three-stream-pairs')
+   write(args.output/(case+'-manifest.json'),final.read_bytes());result['coverage']=coverage.attrib;result['output']=output_accounting(stderr);require(result['output']['registered_pairs']==3,'all-three-stream-pairs')
   else:
    require(code!=0 and not stdout.read_bytes(),'negative-no-root-success')
    if case=='readiness':require(dcp is not None and resource is not None and probe503 is not None and probe503['status']==503,'actual-authenticated-503')
@@ -223,6 +254,14 @@ def execute(args,case,tools,runtime,end):
   for name in ('owner.stdout','owner.stderr'):
    p=root/name
    if p.is_file() and p.stat().st_size<=MAX_LOG:shutil.copyfile(p,args.output/(case+'-'+name));(args.output/(case+'-'+name)).chmod(0o600)
+  if result.get('passed') and case!='disposal-failure':
+   try:
+    result['fixture_reclaimed_nodes']={}
+    for prefix in ('appsurface-evidence-producer-data-','appsurface-application-'):
+     selected=Path('/run')/(prefix+generation)
+     result['fixture_reclaimed_nodes'][prefix]=remove_sealed_fixture_tree(selected,generation,min(end,time.monotonic()+15))
+   except (OSError,RuntimeError) as failure:
+    result['passed']=False;result['failure_category']='fixture-sealed-tree-cleanup-failed';result['fixture_error']=type(failure).__name__
   write(args.output/(case+'.json'),canonical(result))
  return result
 

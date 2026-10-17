@@ -99,6 +99,59 @@ public sealed class LinuxApplicationDcpIdentityTests
     }
 
     [Fact]
+    public void RuntimeHostMetadataRequiresRootOwnedReadonlyExecutableAndExactIdentity()
+    {
+        var expected = new LinuxDcpFileMetadata(8, 1, 42, 0x8000, 0, 0x816d, 8192);
+        LinuxApplicationDcpIdentity.RequireAuditedRuntimeHost(expected);
+        Assert.True(LinuxApplicationDcpIdentity.SameExecutable(expected, expected));
+        Assert.False(LinuxApplicationDcpIdentity.SameExecutable(expected with { DeviceMajor = 9 }, expected));
+        Assert.False(LinuxApplicationDcpIdentity.SameExecutable(expected with { Inode = 43 }, expected));
+        foreach (var invalid in new[]
+        {
+            expected with { Uid = 1 }, expected with { Mode = 0x81ed },
+            expected with { Mode = 0x8124 }, expected with { Length = 0 },
+        })
+            Reject(() => LinuxApplicationDcpIdentity.RequireAuditedRuntimeHost(invalid));
+    }
+
+    [Fact]
+    public void ParentWalkRequiresStableSameUnitKernelAncestryAndBoundsDepth()
+    {
+        var resource = Sample(123, 444);
+        var dcp = Sample(121, 442);
+        var valid = new[]
+        {
+            new LinuxApplicationDcpIdentity.LinuxApplicationParentFact(123, 124, resource),
+            new LinuxApplicationDcpIdentity.LinuxApplicationParentFact(124, 121, Sample(124, 445)),
+        };
+        LinuxApplicationDcpIdentity.RequireParentChain(valid, resource, dcp, 65010, 65011, Unit);
+        LinuxApplicationDcpIdentity.RequireSameParentWalk(valid, valid);
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
+            [valid[0], valid[1] with { Process = Sample(124, 445) with { Uids = new(65010, 1, 65010, 65010) } }],
+            resource, dcp, 65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
+            [valid[0], valid[1] with { ParentPid = 123 }], resource, dcp, 65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.RequireSameParentWalk(valid,
+            [valid[0], valid[1] with { Process = Sample(124, 999) }]));
+
+        var depth16 = Enumerable.Range(0, 16).Select(index =>
+        {
+            var pid = (uint)(300 + index);
+            var parent = index == 15 ? 500u : pid + 1;
+            return new LinuxApplicationDcpIdentity.LinuxApplicationParentFact(pid, parent, Sample(pid, (ulong)(600 + index)));
+        }).ToArray();
+        LinuxApplicationDcpIdentity.RequireParentChain(depth16, Sample(300, 600), Sample(500, 800), 65010, 65011, Unit);
+        var depth17 = Enumerable.Range(0, 17).Select(index =>
+        {
+            var pid = (uint)(300 + index);
+            var parent = index == 16 ? 500u : pid + 1;
+            return new LinuxApplicationDcpIdentity.LinuxApplicationParentFact(pid, parent, Sample(pid, (ulong)(600 + index)));
+        }).ToArray();
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
+            depth17, Sample(300, 600), Sample(500, 800), 65010, 65011, Unit));
+    }
+
+    [Fact]
     public void RootLinuxX64FixtureAuthenticatesTheActualDcpExecutableAndRejectsPathReplacement()
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64
@@ -155,7 +208,7 @@ public sealed class LinuxApplicationDcpIdentityTests
         }
     }
 
-    private static LinuxProcessSample Sample() => new(new(123, 444, 'S'),
+    private static LinuxProcessSample Sample(uint pid = 123, ulong start = 444) => new(new(pid, start, 'S'),
         new(65010, 65010, 65010, 65010), new(65011, 65011, 65011, 65011),
         "/system.slice/" + Unit.Value);
 
