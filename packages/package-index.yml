@@ -412,6 +412,42 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 50
+    use_when: Create an application-owned externally activated PostgreSQL Work host and prove its first completed Work from an installed template.
+    includes: Native dotnet-new starter, required activation authorization, passive restricted-role composition, typed sample Work, readiness and exported-activity proof, and disposable test provisioning.
+    does_not_include: A new runtime, hosted service, production credentials, startup migrations, automatic source upgrades, or a guarantee about downstream identity policies.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Templates/README.md
+    recipe_summary: Install the coordinated template with dotnet new install, create a standalone worker, and run its real first-Work test; follow the [canonical guide](../start-here/durable-worker.md) for prerequisites, production composition and safe replacement.
+    depends_on: []
+    expected_dependency_package_ids: []
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/AppSurfaceDurableWorker.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Maintained application-owned template source; verified outside the repository against published or candidate packages.
+    product_family: internal_support
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 51
+    note: Standalone authored starter, not a separately published runtime package; generated source belongs to each adopter.
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates.VerificationHost/ForgeTrust.AppSurface.Durable.Templates.VerificationHost.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: Non-packable coverage assembly for authored template host sources; never substitutes for installed-package proof.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 52
+    note: Coverage-only source verification project that links generated host C# into a non-test assembly and is never packed or published.
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
     classification: excluded
     publish_decision: do_not_publish
