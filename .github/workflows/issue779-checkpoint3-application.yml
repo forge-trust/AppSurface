@@ -43,7 +43,7 @@ jobs:
           printf 'CHECKPOINT3_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
 
-      - name: Restore and run ordinary None core and focused CLI tests with warnings as errors
+      - name: Restore and run ordinary None core, CLI, and Aspire tests with warnings as errors
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +51,10 @@ jobs:
           timeout --signal=KILL 180 dotnet restore Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/core-restore.log" 2>&1
           timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --logger 'trx;LogFileName=core-supervision.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/core-test.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/cli-restore.log" 2>&1
-          timeout --signal=KILL 180 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --filter 'FullyQualifiedName~CoverageProtectedOutputRelayTests|FullyQualifiedName~EvidenceRestrictedCoverageProducerTests|FullyQualifiedName~EvidenceRestrictedCoverageFailureTests|FullyQualifiedName~EvidenceRestrictedCoverageFactoryTests|FullyQualifiedName~EvidenceClosedApplicationCatalogueTests|FullyQualifiedName~EvidenceLinuxApplicationProtocolTests|FullyQualifiedName~EvidenceProtectedCliApplicationStagesTests' --logger 'trx;LogFileName=cli-focused.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/cli-focused-test.log" 2>&1
+          timeout --signal=KILL 180 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --filter 'FullyQualifiedName~CoverageProtectedOutputRelayTests|FullyQualifiedName~EvidenceRestrictedCoverageProducerTests|FullyQualifiedName~EvidenceRestrictedCoverageFailureTests|FullyQualifiedName~EvidenceRestrictedCoverageFactoryTests|FullyQualifiedName~EvidenceClosedApplicationCatalogueTests|FullyQualifiedName~EvidenceLinuxApplicationProtocolTests|FullyQualifiedName~EvidenceProtectedCliApplicationStagesTests|FullyQualifiedName~EvidenceAdmissionTests|FullyQualifiedName~EvidenceProtectedWorkerInputsTests|FullyQualifiedName~EvidencePlannerTests' --logger 'trx;LogFileName=cli-focused.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/cli-focused-test.log" 2>&1
+
+          timeout --signal=KILL 180 dotnet restore Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/aspire-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --filter 'FullyQualifiedName~EvidenceHostBootstrapTests|FullyQualifiedName~EvidenceRestrictedHostRegistrationTests|FullyQualifiedName~EvidenceWorkerExecutionTests' --logger 'trx;LogFileName=aspire-focused.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/aspire-focused-test.log" 2>&1
 
       - name: Locked restore the native HTTP resource and Linux Aspire AppHost payload
         shell: bash
