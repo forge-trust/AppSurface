@@ -52,12 +52,22 @@ var deniedCreateNew = OutputCreateDenied(Path.Combine(outputRoot,
 var declaredInputMatches = File.ReadAllBytes(allowedInput)
     .AsSpan().SequenceEqual("declared-native-input\n"u8);
 
-app.MapGet("/health", () => control == "readiness-failure"
-        || control == "stuck-descendant" && !File.Exists(Path.Combine(Path.GetDirectoryName(socket)!, "descendant-verified"))
-        || !deniedToolOpen || !deniedToolLoad
+app.MapGet("/health", async (HttpContext context) =>
+{
+    if (control == "stuck-descendant")
+    {
+        // This private control must remain pending until the independent root observer has
+        // authenticated the installed signal handler's descendant PID. A transient 503 would
+        // race the real owner's deliberately strict one-attempt readiness validation.
+        var verified = Path.Combine(Path.GetDirectoryName(socket)!, "descendant-verified");
+        while (!File.Exists(verified))
+            await Task.Delay(10, context.RequestAborted);
+    }
+    return control == "readiness-failure" || !deniedToolOpen || !deniedToolLoad
         || !deniedCreateNew || !declaredInputMatches
-    ? Results.StatusCode(503)
-    : Results.Text("native-http-ready", "text/plain"));
+        ? Results.StatusCode(503)
+        : Results.Text("native-http-ready", "text/plain");
+});
 
 if (control == "stuck-descendant")
 {

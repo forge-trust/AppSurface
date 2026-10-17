@@ -13,7 +13,7 @@ The root native runner receives the CLI image, SDK image, full SDK root, subject
 3. Actual resource readiness failure with HTTP 503 and independently observed process identity.
 4. Factory-entry stall before DCP startup.
 5. Cancellation while the application is running.
-6. Stuck descendant with a test coordination marker after PID, UID/GID, and cgroup identity checks, followed by the real SIGTERM handler marker.
+6. Stuck descendant with a test coordination marker after PID, UID/GID, and cgroup identity checks, followed by the real SIGTERM handler marker. Its private health handler stays pending until that independent check completes, using request cancellation; it does not answer a premature transient 503 that could end the real one-attempt readiness procedure before the control is established.
 7. Disposal failure while a real scratch holder prevents ordinary unmount, with no accepted receipt and accounts retained through root termination.
 
 The CLI and SDK tool images are each built once and reused across the case matrix. The root runner selects the matching generated application registration and copies that case's prepared bundle and policy into its fresh protected tool root. Immutable SDK and tool staging uses a fresh root-owned `/var/lib/issue779-c3-input-<UUID>` directory: duplicating those large inputs into `/run` exhausted the runner's temporary filesystem before the first control in the initial Linux attempt. The C# owner's bounded application and producer workspaces remain under `/run`.

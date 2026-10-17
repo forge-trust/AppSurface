@@ -8,10 +8,11 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
 /// <summary>Owns authenticated control I/O for empty, coverage, and compile-selected application Observations.</summary>
 /// <remarks>
-/// The private factory accepts only the same native owners and an already started same-image worker. It
-/// independently resolves protected policy/diff bytes; no caller-injected plan, handler, producer or join
-/// assertion can enroll a workload. Native coverage composition adds the fixed run/report operations and
-/// registers the actual producer in the descendant ledger. Application requests remain unsupported. The worker
+/// The private factory retains the same native owners and same-image worker holder before worker dispatch.
+/// RunCoreAsync requires its joined startup and actual live kernel identity before accepting requests. The
+/// factory independently resolves protected policy/diff bytes; no caller-injected plan, handler, producer or
+/// join assertion can enroll a workload. Coverage composition registers the actual producer in the descendant
+/// ledger; application operations require a separately selected compiled definition and retained native owner. The worker
 /// itself is excluded: its stop/wait request cannot join its own process or active control handler.
 /// The N16/N13/N14 private images add one fixed server-owned blocked workload after registering it in this ledger;
 /// only N16 releases it through authenticated STOP/WAIT. N13/N14 emit a compile-owned harness phase line after
