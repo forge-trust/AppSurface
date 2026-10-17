@@ -26,6 +26,12 @@ The workflow retains `source.json`, the generated registration source and its SH
 
 The workflow is triggered by pushes to `codex/issue779-checkpoint3-application-20261017`. Source preparation alone does not establish native acceptance; only a successful run of the complete seven-control workflow against its captured source revision can do that.
 
+## Establishing the stuck-descendant negative control
+
+The application stop recipe sends cooperative TERM only to AppHost. After its original grace expires, unit stop and immediate group KILL provide forced containment; a descendant's TERM callback is not guaranteed to run in that final interval. [Run 39073759716](https://github.com/forge-trust/AppSurface/actions/runs/39073759716) authenticated and joined the actual stuck child but did not observe its TERM marker, so that control correctly failed.
+
+The fixture first pins the child PID with a Linux [pidfd](https://man7.org/linux/man-pages/man2/pidfd_open.2.html), then samples and rechecks its UID/GID, start time and cgroup while requiring that descriptor to remain live around the samples. It sends TERM through that retained descriptor. It requires the complete exact handler marker and the same still-live process before publishing the private health-coordination marker or cancelling the running producer. The marker read is bounded to 65 bytes; a missing, partial or invalid marker grants nothing and remains pending within the original deadline. The descriptor closes on every outcome. PID reuse and exit reject. This establishes the intended TERM-resistant child before testing the unchanged C# stop/KILL/join procedure; it changes no production shutdown policy or accepted claim. The [portable controls](test_run_native.py) verify ordering and rejection with pipe descriptors and mocked signaling, not real pidfds or native authority. The seven-case Linux matrix supplies that execution evidence.
+
 ## Managed-load denial translation
 
 The native resource independently attempts both `File.OpenRead` and `Assembly.LoadFile` on the root-selected

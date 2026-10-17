@@ -48,6 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -m 0700 "$CHECKPOINT3_EVIDENCE/tests"
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_run_native.py > "$CHECKPOINT3_EVIDENCE/runner-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/core-restore.log" 2>&1
           timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --logger 'trx;LogFileName=core-supervision.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/core-test.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/cli-restore.log" 2>&1

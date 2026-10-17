@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Bounded real Linux consumers. C# owns runtime policy, processes, custody and cleanup."""
-import argparse, datetime, hashlib, importlib.util, json, os, platform, shutil, signal, socket, stat, struct, subprocess, sys, time, uuid
+import argparse, datetime, hashlib, importlib.util, json, os, platform, select, shutil, signal, socket, stat, struct, subprocess, sys, time, uuid
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'issue779-checkpoint2'))
 spec=importlib.util.spec_from_file_location('checkpoint2_helpers',Path(__file__).resolve().parents[1]/'issue779-checkpoint2/run-native.py')
@@ -28,6 +28,48 @@ def process_sample(pid,uid,gid,unit):
  after=c2.parse_proc_starttime((root/'stat').read_bytes(),pid)
  require(before is not None and before==after and threads is not None and group==('0::/system.slice/'+unit+'\n').encode(),'actual-application-identity')
  return {'pid':pid,'uid':uid,'gid':gid,'starttime':before,'cgroup':'/system.slice/'+unit,'threads':threads}
+
+class DescendantControl:
+ """Fixture-only pidfd owner; confirms actual TERM resistance before cancellation is allowed."""
+ def __init__(self,pid,uid,gid,unit):
+  self.unit=unit;self.fd=None;self.term_seen=False
+  fd=os.pidfd_open(pid,0)
+  self.fd=fd
+  try:
+   self.require_pidfd_live()
+   self.sample=process_sample(pid,uid,gid,unit)
+   self.require_live()
+   signal.pidfd_send_signal(fd,signal.SIGTERM,None,0)
+  except BaseException:
+   self.close();raise
+
+ def require_pidfd_live(self):
+  require(self.fd is not None,'descendant-pidfd-owned')
+  poll=select.poll();poll.register(self.fd,select.POLLIN|select.POLLHUP|select.POLLERR)
+  require(not poll.poll(0),'descendant-still-live')
+
+ def require_live(self):
+  self.require_pidfd_live()
+  actual=process_sample(self.sample['pid'],self.sample['uid'],self.sample['gid'],self.unit)
+  require(all(actual[key]==self.sample[key] for key in ('pid','uid','gid','starttime','cgroup')),'descendant-original-identity')
+  self.require_pidfd_live()
+
+ def confirm(self,scratch):
+  self.require_live()
+  if self.term_seen:return True
+  marker=scratch/'descendant-term'
+  if not marker.is_file():return False
+  with marker.open('rb') as source:payload=source.read(65)
+  # File.WriteAllText publishes the name before its bytes; incomplete/invalid bytes grant nothing.
+  if payload!=b'SIGTERM handler ran\n':return False
+  self.require_live()
+  write(scratch/'descendant-verified',b'kernel-identity-and-term-checked\n',0o444)
+  self.term_seen=True
+  return True
+
+ def close(self):
+  if self.fd is not None:
+   fd=self.fd;self.fd=None;os.close(fd)
 
 def members(unit):
  p=Path('/sys/fs/cgroup/system.slice')/unit/'cgroup.procs'
@@ -165,7 +207,7 @@ def execute(args,case,tools,runtime,end):
  request_path=root/'request.json';write(request_path,canonical(request))
  guard=Path('/run/appsurface-evidence-owners');guard.mkdir(mode=0o700,exist_ok=True);require(guard.stat().st_uid==0 and stat.S_IMODE(guard.stat().st_mode)==0o700,'guard-parent')
  marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
- stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;held=None;descriptor=None;app=None;producer=None;resource=None;dcp=None;descendant=None;cancelled=False;factory=False;probe503=None;term_seen=False
+ stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;held=None;descriptor=None;app=None;producer=None;resource=None;dcp=None;descendant=None;descendant_control=None;cancelled=False;factory=False;probe503=None;term_seen=False
  launch=['/usr/bin/systemd-run','--quiet','--wait','--pipe','--unit='+owner,'--service-type=exec','--property=User=0','--property=Group=0','--property=Restart=no','--property=KillMode=control-group','--property=RuntimeMaxSec=1100','--property=TimeoutStopSec=10','--property=SendSIGKILL=yes','--property=FinalKillSignal=SIGKILL','--property=LimitCORE=0','--property=LimitNOFILE=65536','--property=ConditionPathExists='+str(marker/'armed'),'--property=Environment='+' '.join(c2.FIXED),'--property=UnsetEnvironment='+' '.join(c2.ENV_NAMES),'/usr/bin/env','-i',*c2.FIXED,str(runtime/'dotnet'),str(tool/'ForgeTrust.AppSurface.Cli.dll'),'evidence','supervise','--request',str(request_path)]
  try:
   with stdout.open('xb') as out,stderr.open('xb') as err:
@@ -195,22 +237,23 @@ def execute(args,case,tools,runtime,end):
       if case=='readiness' and probe503 is None and (scratch/'http.sock').exists():
        try:resource,status,size=health(scratch/'http.sock',uid,gid,appunit);probe503={'status':status,'received_bytes':size}
        except (OSError,RuntimeError,ValueError):pass
-      if case=='stuck-descendant' and descendant is None:
+      if case=='stuck-descendant' and descendant_control is None:
        dm=scratch/'descendant-armed'
        if dm.is_file():
         try:
-         pid=int(dm.read_text());descendant=process_sample(pid,uid,gid,appunit)
+         pid=int(dm.read_text())
          require(pid!=app['pid'],'descendant-distinct')
-         # A test-only compiled resource will not report health before this independent kernel check.
-         write(scratch/'descendant-verified',b'kernel-identity-checked\n',0o444)
+         descendant_control=DescendantControl(pid,uid,gid,appunit)
         except (OSError,ValueError,RuntimeError):pass
-      if case=='stuck-descendant' and (scratch/'descendant-term').is_file():term_seen=True
+      if descendant_control is not None and not term_seen and descendant_control.confirm(scratch):
+       descendant=descendant_control.sample;term_seen=True
       if case=='disposal-failure' and held is None and any(e['phase']=='ready' for e in events(stderr,'evidence-application-native-v1')):
        held=os.open(scratch,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC);metadata=os.fstat(held)
        require(metadata.st_uid==uid and metadata.st_gid==gid,'actual-mounted-scratch-holder');result['scratch_hold']={'device':metadata.st_dev,'inode':metadata.st_ino,'uid':uid,'gid':gid}
-      if case in ('cancel','stuck-descendant') and not cancelled and producer is not None and (case!='stuck-descendant' or descendant is not None):
+      if case in ('cancel','stuck-descendant') and not cancelled and producer is not None and (case!='stuck-descendant' or term_seen):
        entered=Path('/run/appsurface-evidence-producer-data-'+generation+'/scratch/tmp/checkpoint2-case-entered')
        if entered.is_file() and entered.read_bytes()==b'cancel':
+        if case=='stuck-descendant':descendant_control.require_live()
         command(['/usr/bin/systemctl','kill','--kill-whom=main','--signal=INT',owner],deadline);cancelled=True
     if process.poll() is not None:break
     time.sleep(.1)
@@ -252,6 +295,7 @@ def execute(args,case,tools,runtime,end):
   result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
  finally:
   # No fixture containment/repair upgrades the original result.
+  if descendant_control is not None:descendant_control.close()
   if held is not None:os.close(held)
   if process is not None and process.poll() is None:
    for unit in units:
