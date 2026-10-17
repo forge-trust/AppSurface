@@ -225,6 +225,66 @@ public sealed class EvidenceAdmissionTests
         Assert.Equal("ASEVD406", missingClassError.Code);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResourceObservationCannotBeEnabledByApplicationMetadataAndAnArmedInterface(bool attachApplication)
+    {
+        var (original, _) = Inputs();
+        var resource = new EvidenceResourceDeclaration("http", "aspire_health", 1, []);
+        var producer = new EvidenceProducerDeclaration("coverage", "coverage", "1.0.0", [resource.Id], ["coverage@1"], [], 1);
+        var profile = new EvidenceProfile("application-observation", EvidenceProfileScope.Targeted, [resource], [producer], []);
+        var policy = original.PolicySnapshot! with { ConservativeProfileId = profile.Id, Profiles = [profile], Rules = [] };
+        var plan = new EvidencePlanner().Resolve(policy, original.ChangedPaths);
+        var hash = new string('a', 64);
+        var application = new EvidenceLinuxApplicationDescriptor("application", "1.0.0", "build", hash, hash,
+            "13.4.4", [resource], [producer], [], new(["input.txt"], 1024, 1024, 1, 1024, 1, 1),
+            65014, 65015, 65016, 65017);
+        var context = new EvidenceAdmissionContext("run/1", policy, plan.ChangedPaths, plan, [producer], [resource],
+            [profile.Id], [producer.Id], [], false, false, null,
+            ObservationProducerClasses: [new("coverage", "1.0.0")],
+            CompiledApplication: attachApplication ? application : null);
+        var verifier = new Verifier(null);
+
+        // This is a metadata/armed-interface denial control, never an authenticated supervisor or lease.
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(async () =>
+            await EvidenceAdmission.AdmitAsync(EvidenceExecutionMode.Observation, plan, context, new Worker(), verifier, default));
+        Assert.Equal("ASEVD406", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.Equal(0, verifier.Calls);
+    }
+
+    [Theory]
+    [InlineData(EvidenceResourceOutcome.Ready, EvidenceExecutionVerdict.Passed)]
+    [InlineData(EvidenceResourceOutcome.Unavailable, EvidenceExecutionVerdict.Incomplete)]
+    public void ResourceObservationMetadataCanVerifyStructurallyButNeverAuthorizeAProtectedGate(
+        EvidenceResourceOutcome outcome, EvidenceExecutionVerdict verdict)
+    {
+        var (original, originalContext) = Inputs();
+        var resource = new EvidenceResourceDeclaration("http", "aspire_health", 1, []);
+        var profile = new EvidenceProfile("resource-metadata", EvidenceProfileScope.Targeted, [resource], [], []);
+        var policy = original.PolicySnapshot! with { ConservativeProfileId = profile.Id, Profiles = [profile], Rules = [] };
+        var plan = new EvidencePlanner().Resolve(policy, original.ChangedPaths);
+        // Serialized data only: this issues no admission, authenticated supervisor, writer or runtime lease.
+        var manifest = EvidenceAdmissionTestFixture.BuildLegacyStructural(plan, [],
+            [new(resource.Id, outcome, 1)], new EvidenceExecutionMetrics(CleanupCompleted: true)) with
+        {
+            Mode = EvidenceExecutionMode.Observation,
+            ClaimKind = verdict == EvidenceExecutionVerdict.Passed ? EvidenceClaimKind.ObservationOnly : EvidenceClaimKind.None,
+            Eligibility = verdict == EvidenceExecutionVerdict.Passed ? EvidenceClaimEligibility.Informational : EvidenceClaimEligibility.None,
+            ManifestDigest = string.Empty,
+        };
+        manifest = manifest with { ManifestDigest = EvidenceDigest.CanonicalSha256(manifest) };
+        Assert.Equal(verdict, manifest.ExecutionVerdict);
+        Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+        var facts = originalContext.ExpectedAssertion!;
+        var expected = new EvidenceProtectedGateExpectation(facts.RunId, facts.BaseRevision, facts.SubjectRevision,
+            facts.WorkflowIdentity, plan.PolicyDigest, facts.AcceptanceProofDigest, "metadata-output",
+            facts.VerifierId, facts.VerifierVersion, facts.Provider, facts.CatalogueDigest, facts.CapabilitiesDigest,
+            facts.AllocationPolicyDigest, facts.ToolRootIdentity, facts.SubjectRootIdentity, facts.OutputParentIdentity);
+        Assert.False(EvidenceProtectedGate.Allows(plan, manifest, expected));
+    }
+
     private static (EvidencePlan, EvidenceAdmissionContext) Inputs()
     {
         var profile = new EvidenceProfile("no-evidence", EvidenceProfileScope.Targeted, [], [], []);

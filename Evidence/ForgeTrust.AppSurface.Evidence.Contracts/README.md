@@ -171,7 +171,7 @@ time. A release gate must explicitly set `AllowReleaseValidatedNotAttested` to `
 opt-in accepts `ValidatedNotAttested`, which records registered-verifier validation and does not claim independent
 attestation.
 
-Observation admission requires an allowlisted dependency-free profile, its exact selected producer IDs, and an
+Ordinary resource-free Observation admission requires an allowlisted dependency-free profile, its exact selected producer IDs, and an
 exact internally registered producer class `(Kind, Version)` for every producer. The current class map admits only
 `coverage@1.0.0`; selecting an ID or profile at the repository root cannot authorize an unknown or privileged
 producer kind. The class map is internal and adds no public API.
@@ -363,3 +363,27 @@ The internal `EvidenceNativeQualification.ParentReplacementEnabled` flag selects
 ### Checkpoint-two private retained-report control
 
 `EvidencePrivateQualification=C2` selects internal `EvidenceNativeQualificationKind.C2ArtifactMutation` and `C2ArtifactMutationEnabled` across the same source graph. It is mutually exclusive with every earlier private checkpoint and remains nonpackable. Ordinary `None` has no mutation dispatch. This metadata supplies no producer/application registration, admission or consumer proof; see [the Supervision mutation reference](../ForgeTrust.AppSurface.Evidence.Supervision/c2-artifact-mutation.md) for exact ordering and genuine native requirements.
+
+### Observation with a compiled root-owned application
+
+The internal admission context may retain the exact `EvidenceLinuxApplicationDescriptor` object only
+after [protected input resolution](../ForgeTrust.AppSurface.Evidence.Planner/EvidenceProtectedWorkerInputs.cs)
+selects the complete compiled catalogue entry. Resource-bearing Observation additionally requires the actual
+private-constructed `EvidenceLinuxWorkerSupervisor`, its authenticated v2 descriptor, reference identity with
+that descriptor's application, and complete matching resource/producer declarations. A context record, parsed
+JSON, application metadata, or an `IEvidenceArmedWorker` implementation cannot authorize this path. The same
+profile/producer allowlists, exact producer kind/version classes, secret/projection rejection and plan/diff
+binding still apply. No new public factory or runtime registration selector exists.
+
+This permits [the C# root application owner](../ForgeTrust.AppSurface.Evidence.Supervision/application-execution.md)
+to qualify real lifecycle mechanics using Observation. Its result remains `ObservationOnly`, informational and
+without an envelope assertion. It does not qualify a Trusted consumer or change the closed proof registry.
+The production compiled catalogue remains empty; ordinary public resource factories still reject. Local
+metadata denial tests create neither an authenticated supervisor nor a positive application admission; the
+genuine CLI/SDK Linux controls are required for the positive path.
+
+Structural verification may reconstruct an informational resource-bearing Observation when every required
+resource is recorded Ready and producer/artifact/cleanup requirements pass. This data check creates no
+admission or protected writer and cannot authenticate its own origin. `EvidenceProtectedGate.Allows` still
+rejects every Observation, including structurally valid resource-bearing results. Failed readiness remains
+Incomplete; changing resource data or hashes cannot authorize an application launch.

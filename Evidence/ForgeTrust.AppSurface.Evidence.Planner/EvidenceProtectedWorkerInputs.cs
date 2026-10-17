@@ -106,7 +106,8 @@ internal static class EvidenceProtectedWorkerInputs
             protectedResolvedPlan, protectedResolvedPlan.Profile.Producers, protectedResolvedPlan.Profile.Resources,
             descriptor.ObservationProfileIds, descriptor.ObservationProducerIds, [], false,
             AcceptedConsumerProof(descriptor), assertion,
-            ObservationProducerClasses: [new("coverage", "1.0.0")]);
+            ObservationProducerClasses: [new("coverage", "1.0.0")],
+            CompiledApplication: application is null ? null : descriptor.Application);
     }
 
     /// <summary>Excludes every provider/platform until a matching full immutable release acceptance is registered.</summary>

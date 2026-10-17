@@ -6,7 +6,7 @@ public enum EvidenceExecutionMode
     /// <summary>Requires a registered protected verifier and an accepted consumer/platform proof.</summary>
     Trusted,
 
-    /// <summary>Uses a declared dependency-free, secret-free profile and can issue only informational evidence.</summary>
+    /// <summary>Uses a declared secret-free profile with independently owned dependencies and issues informational evidence only.</summary>
     Observation,
 }
 
@@ -172,7 +172,9 @@ public sealed class EvidenceAdmissionException : InvalidOperationException
 }
 
 /// <summary>Protected declarations captured before callback invocation; never constructed from subject discovery.</summary>
-/// <remarks>Provisional internal integration shape pending the complete consumer proof. Each catalogue entry is an exact declaration.</remarks>
+/// <remarks>Each catalogue entry is an exact declaration. CompiledApplication is comparison data assigned only
+/// after closed catalogue resolution; it cannot authorize resources without reference binding to the actual
+/// private-constructed Linux supervisor. No data field establishes Trusted consumer proof.</remarks>
 internal sealed record EvidenceAdmissionContext(
     string RunId,
     EvidencePolicy Policy,
@@ -186,7 +188,8 @@ internal sealed record EvidenceAdmissionContext(
     bool ProtectedSecretsPresent,
     bool ConsumerAcceptanceMatches,
     EvidenceEnvelopeAssertion? ExpectedAssertion,
-    IReadOnlyList<EvidenceObservationProducerClass>? ObservationProducerClasses = null);
+    IReadOnlyList<EvidenceObservationProducerClass>? ObservationProducerClasses = null,
+    EvidenceLinuxApplicationDescriptor? CompiledApplication = null);
 
 /// <summary>A protected registration's dependency-free Observation capability class and exact version.</summary>
 internal sealed record EvidenceObservationProducerClass(string Kind, string Version);
@@ -264,10 +267,20 @@ internal static class EvidenceAdmission
 
         if (mode == EvidenceExecutionMode.Observation)
         {
+            // Declaration data alone cannot authorize resource work. The only resource-bearing
+            // Observation path requires the private-constructed authenticated supervisor and the
+            // exact descriptor object resolved through Planner's closed compiled catalogue.
+            var application = context.CompiledApplication;
+            var ownedApplication = application is not null && worker is EvidenceLinuxWorkerSupervisor supervisor
+                && supervisor.Descriptor.Schema == "evidence-worker-linux-v2"
+                && ReferenceEquals(application, supervisor.Descriptor.Application)
+                && Same(application.Resources, context.Resources)
+                && Same(application.Producers, context.Producers);
             if (snapshot.Profile.Scope != EvidenceProfileScope.Targeted
-                || snapshot.Profile.Resources.Count != 0
+                || application is not null && !ownedApplication
+                || snapshot.Profile.Resources.Count != 0 && !ownedApplication
                 || !context.ObservationProfiles.Contains(snapshot.Profile.Id, StringComparer.Ordinal)
-                || snapshot.Profile.Producers.Any(producer => producer.RequiredResources.Count != 0
+                || snapshot.Profile.Producers.Any(producer => producer.RequiredResources.Count != 0 && !ownedApplication
                     || !context.ObservationProducerIds.Contains(producer.Id, StringComparer.Ordinal)
                     || context.ObservationProducerClasses?.Any(capability => capability.Kind == producer.Kind
                         && capability.Version == producer.Version) != true))

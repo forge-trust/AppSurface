@@ -111,3 +111,9 @@ Private checkpoint-three builds accept an explicit `EvidenceC3RegistrationSource
 finished, inspected AppHost/DCP payload. `C3` and `C3Sdk` images require that file and cannot be packed.
 Ordinary builds never include it. Validation records must bind the generated source and finished binary
 inventory separately from the repository commit; a build-time metadata file is not a runtime loader.
+
+The internal context's optional `CompiledApplication` retains the exact authenticated descriptor application
+object only after complete catalogue resolution. It is comparison data, not a Boolean permission or a new
+capability. [Contracts admission](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#observation-with-a-compiled-root-owned-application)
+requires reference binding to the actual Linux supervisor and complete declarations before allowing a
+resource-bearing informational Observation. V1 contexts retain null, and Trusted proof remains closed.

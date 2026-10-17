@@ -17,7 +17,7 @@ compatibility guidance, and readiness.
 
 The factory registration below describes the API shape for a future accepted resource lane. It currently
 fails with `ASEVD407` before factory invocation: no restricted Aspire child or resource capability map has
-been proved. A resource-bearing profile also fails Observation admission with `ASEVD406`. See the
+been proved. A public resource-bearing profile also fails Observation admission with `ASEVD406`. The internal [compiled root-owned application path](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#observation-with-a-compiled-root-owned-application) additionally requires the actual authenticated v2 supervisor; public metadata and an armed-interface implementation cannot enable it. See the
 [EvidenceHost execution guide](../../start-here/evidencehost.md) for the dependency-free Observation candidate
 and the [migration guide](../../docs/evidence/evidencehost-migration.md) for rejected legacy calls. This example
 is not an executable quickstart for resource-backed work.

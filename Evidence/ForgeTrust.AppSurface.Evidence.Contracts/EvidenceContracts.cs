@@ -1446,7 +1446,7 @@ public static class EvidenceManifestBuilder
         var releaseEnvelopeAccepted = mode is null
             ? plan.Profile.Scope != EvidenceProfileScope.Release || envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
             : mode == EvidenceExecutionMode.Observation
-                ? plan.Profile.Scope == EvidenceProfileScope.Targeted && plan.Profile.Resources.Count == 0
+                ? plan.Profile.Scope == EvidenceProfileScope.Targeted
                 : mode == EvidenceExecutionMode.Trusted && envelopeStatus == EvidenceEnvelopeStatus.ValidatedNotAttested
                     && EvidenceAdmission.ValidAssertion(assertion, assertion?.RunId ?? string.Empty)
                     && !string.IsNullOrWhiteSpace(assertion?.OutputIdentity);
