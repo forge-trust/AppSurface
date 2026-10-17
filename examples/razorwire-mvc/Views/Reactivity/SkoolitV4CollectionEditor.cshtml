@@ -1,0 +1,97 @@
+@model RazorWireWebExample.Models.SkoolitV4CollectionEditorModel
+@using RazorWireWebExample.Models
+@{
+    Layout = null;
+    ViewData["Title"] = "Skoolit V4 collections consumer proof";
+    ViewData["RemoveMode"] = Model.RemoveMode;
+}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"]</title>
+    <style>
+        :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #172033; background: #f4f6fa; }
+        body { max-width: 74rem; margin: 0 auto; padding: 2rem 1rem; }
+        h1, h2, legend { line-height: 1.2; }
+        .proof-note, .result, .errors { padding: 1rem; border: 1px solid #aab5c7; border-radius: .5rem; background: white; }
+        .proof-note { border-left: .35rem solid #6545c5; }
+        .result { border-color: #27834c; }
+        .errors, .field-validation-error { color: #9f1d2d; }
+        [data-v4-form] { display: grid; gap: 1rem; }
+        fieldset { min-width: 0; padding: 1rem; border: 1px solid #8793a7; border-radius: .5rem; background: white; }
+        [data-rw-form-collection="Actions"] > fieldset { margin-block: 1rem; }
+        [data-rw-form-collection$=".Dates"] { display: grid; gap: .75rem; }
+        [data-v4-date-row] { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
+        label { display: grid; gap: .25rem; }
+        input, select, button { min-height: 2.75rem; padding: .45rem .65rem; font: inherit; }
+        input, select { width: 100%; border: 1px solid #8793a7; border-radius: .25rem; background: white; }
+        button { border: 1px solid #59677c; border-radius: .35rem; background: white; cursor: pointer; }
+        button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #6545c5; outline-offset: 2px; }
+        [data-rw-form-collection-status], [data-date-resolution] { grid-column: 1 / -1; }
+        [data-v4-date-row] > fieldset { grid-column: 1 / -1; }
+        .commands { display: flex; flex-wrap: wrap; gap: .5rem; }
+        .field-validation-error { display: block; }
+        template, [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Skoolit V4 nested action/date consumer proof</h1>
+    <p class="proof-note">
+        This isolated fixture is pinned to Skoolit commit <code>a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e</code>,
+        <code>src/Skoolit.Web/Views/ForwardingProof/EvidenceCandidate.cshtml</code>, and its
+        <code>alpha-evidence-wizard.js</code>. It keeps the V4 date fields, Discrete-end rejection, temporal feedback,
+        and ordinary server commands. Renderer adaptation: this MVC proof carries each posted sparse key in the
+        consumer model's <code>ClientIndex</code> field and uses it to render names after binding. Its bounded MVC
+        adapter restores posted <code>.index</code> keys in binder order. Blank or duplicate marker keys, or marker
+        counts that disagree with bound rows, return <code>400</code>. It keeps ModelState intact and does not invent
+        ordinal keys. This fixture has no persistence and does not
+        establish live Skoolit adoption.
+    </p>
+
+    <form method="post" action="/Reactivity/SkoolitV4Collections" data-v4-form data-turbo="false">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="RemoveMode" value="@Model.RemoveMode" />
+        @Html.ValidationSummary(false, "Correct the highlighted date fields before saving.", new { @class = "errors", role = "alert" })
+        @if (Model.Result is not null)
+        {
+            <p class="result" role="status" data-v4-result>@Model.Result</p>
+        }
+
+        <section rw-form-collection="Actions"
+                 rw-form-collection-label="action"
+                 rw-form-collection-remove-mode="@Model.RemoveMode">
+            @for (var actionPosition = 0; actionPosition < Model.Actions.Count; actionPosition++)
+            {
+                ViewData["ActionPosition"] = actionPosition;
+                @await Html.PartialAsync("~/Views/Reactivity/_SkoolitV4CollectionAction.cshtml", Model.Actions[actionPosition], ViewData)
+            }
+            <template rw-form-collection-template>
+                @{ ViewData["ActionPosition"] = "__index__"; }
+                @await Html.PartialAsync(
+                    "~/Views/Reactivity/_SkoolitV4CollectionAction.cshtml",
+                    new SkoolitV4CollectionActionModel
+                    {
+                        ClientIndex = "__index__",
+                        Dates = [new SkoolitV4CollectionDateModel { ClientIndex = "0", ActionClientIndex = "__index__" }]
+                    },
+                    ViewData)
+            </template>
+            <div class="commands">
+                <button type="button" rw-form-collection-add>Add action</button>
+                <span data-rw-form-collection-status role="status" aria-live="polite"></span>
+            </div>
+            <noscript>
+                <button type="submit" name="draftIntent" value="add-action" formnovalidate>Add action on server</button>
+            </noscript>
+        </section>
+
+        <button type="submit">Save labels</button>
+    </form>
+</main>
+<rw:scripts form-interactions="true" />
+<script src="/js/SkoolitV4CollectionPolicy.js" defer></script>
+</body>
+</html>

@@ -3,6 +3,8 @@ order: 10
 related_pages:
   - Web/ForgeTrust.RazorWire/DESIGN.md
   - examples/razorwire-mvc/README.md
+  - examples/razorwire-mvc/NESTED-COLLECTIONS.md
+  - Web/ForgeTrust.RazorWire/Docs/form-interactions.md
   - Web/ForgeTrust.RazorWire/Docs/runtime-contract-pipeline.md
   - Web/ForgeTrust.RazorWire/Docs/page-navigation.md
   - Web/ForgeTrust.RazorWire/Docs/section-copy.md

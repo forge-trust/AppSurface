@@ -86,19 +86,67 @@ public sealed class FormInteractionTagHelperTests
     [Fact]
     public void Collection_Process_EmitsNameLabelAndRemoveMode()
     {
-        var output = CreateOutput("div", "rw-form-collection", "Actions");
+        var output = CreateOutput(
+            "div",
+            "rw-form-collection", "Actions",
+            "rw-form-collection-index-token", "   ");
 
         new FormCollectionTagHelper
         {
             Name = "Actions",
             Label = "action",
-            RemoveMode = "mark"
+            RemoveMode = "mark",
+            IndexToken = " \t "
         }.Process(CreateContext("div"), output);
 
         Assert.Equal("Actions", output.Attributes["data-rw-form-collection"].Value);
+        Assert.Equal("__index__", output.Attributes["data-rw-form-collection-index-token"].Value);
         Assert.Equal("action", output.Attributes["data-rw-form-collection-label"].Value);
         Assert.Equal("mark", output.Attributes["data-rw-form-collection-remove-mode"].Value);
         Assert.False(output.Attributes.ContainsName("rw-form-collection"));
+        Assert.False(output.Attributes.ContainsName("rw-form-collection-index-token"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    public void Collection_Process_EmitsDefaultIndexTokenWhenInputIsMissingOrWhitespace(string? indexToken)
+    {
+        var output = CreateOutput("div", "rw-form-collection", "Actions");
+
+        new FormCollectionTagHelper { Name = "Actions", IndexToken = indexToken }
+            .Process(CreateContext("div"), output);
+
+        Assert.Equal("__index__", output.Attributes["data-rw-form-collection-index-token"].Value);
+    }
+
+    [Fact]
+    public void Collection_Process_EmitsTrimmedCustomIndexToken()
+    {
+        var output = CreateOutput("div", "rw-form-collection", "Actions");
+
+        new FormCollectionTagHelper { Name = "Actions", IndexToken = "  __action_index__  " }
+            .Process(CreateContext("div"), output);
+
+        Assert.Equal("__action_index__", output.Attributes["data-rw-form-collection-index-token"].Value);
+    }
+
+    [Theory]
+    [InlineData("action_index", "action_index")]
+    [InlineData("__1__", "__1__")]
+    [InlineData("__action-index__", "__action-index__")]
+    [InlineData("  __action-index__  ", "__action-index__")]
+    public void Collection_Process_PreservesNonblankInvalidIndexTokenForRuntimeDiagnostic(
+        string indexToken,
+        string expectedToken)
+    {
+        var output = CreateOutput("div", "rw-form-collection", "Actions");
+
+        new FormCollectionTagHelper { Name = "Actions", IndexToken = indexToken }
+            .Process(CreateContext("div"), output);
+
+        Assert.Equal(expectedToken, output.Attributes["data-rw-form-collection-index-token"].Value);
     }
 
     [Fact]
