@@ -38,3 +38,18 @@ and keep XML parsing and numeric gate evaluation in the registered restricted pr
 deadline or converts a root request into admission.
 
 The fixed published basename is `coverage.cobertura.xml`, matching the [shared producer artifact source](../ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs). ReportGenerator's intermediate filename is not the custody contract. A directory containing `Cobertura.xml` instead is still rejected. [Native run38864316374](https://github.com/forge-trust/AppSurface/actions/runs/38864316374) completed producer sealing but exposed the earlier mismatch at the final merged inventory. Inventory failure checkpoints are set after owner rechecks so that a rejected name cannot inherit an unrelated owner-identity label.
+
+## Compiled application terminal files
+
+`VerifyApplication` is a separate pure-data entry for the root's independently selected application plan. It
+requires exactly one `aspire_health` resource, the coverage producer's exact dependency on it, one Ready result
+with nonnegative elapsed time and no failure diagnostic, and readiness time included in nonnegative cumulative
+metrics. All original canonical policy/plan/manifest/summary, artifact role/length/SHA, cleanup, obligation and
+informational-only checks remain. `Verify` retains the strict resource-free checkpoint-two contract. Neither
+method issues admission, a registered application, filesystem custody, numeric coverage proof or gate authority.
+
+The [actual custody transfer](LinuxRunWorkspace.Custody.cs) selects this verifier only for an application request
+already resolved by the [compiled root owner](application-execution.md). It re-resolves the same protected inputs
+at both inventory selection and file verification, and still requires the original server/worker completion,
+retained handles, physical joins, sealed tree checks, account release and final deadline checks. A successful
+data-only verifier test cannot replace those native requirements.

@@ -183,8 +183,11 @@ public sealed class EvidenceCoverageObservationFilesTests
             "claim" => manifest with { ClaimKind = EvidenceClaimKind.TargetedComplete },
             "eligibility" => manifest with { Eligibility = EvidenceClaimEligibility.PullRequestGate },
             "envelope" => manifest with { EnvelopeStatus = EvidenceEnvelopeStatus.ValidatedNotAttested },
-            "assertion" => manifest with { EnvelopeAssertion = new("d", "d", "d", "d", "d", "d", "d", "d",
-                "d", "d", "d", "d", "d", "d", "d", "d", DateTimeOffset.UnixEpoch) },
+            "assertion" => manifest with
+            {
+                EnvelopeAssertion = new("d", "d", "d", "d", "d", "d", "d", "d",
+                "d", "d", "d", "d", "d", "d", "d", "d", DateTimeOffset.UnixEpoch)
+            },
             "resource" => manifest with { ResourceResults = [new("extra", EvidenceResourceOutcome.Ready, 0)] },
             "producer-count" => manifest with { ProducerResults = [] },
             "selected-obligation" => manifest with { SelectedObligationIds = ["extra"] },
@@ -286,6 +289,78 @@ public sealed class EvidenceCoverageObservationFilesTests
             }));
     }
 
+    [Fact]
+    public void ApplicationFilesVerifyAsInformationalDataWhileDependencyFreeVerifierRemainsStrict()
+    {
+        var plan = ApplicationPlan();
+        var manifest = ApplicationManifest(plan);
+        var verified = VerifyApplication(plan, manifest);
+        Assert.Equal(EvidenceClaimKind.ObservationOnly, verified.ClaimKind);
+        Assert.Equal(EvidenceClaimEligibility.Informational, verified.Eligibility);
+        Assert.Null(verified.EnvelopeAssertion);
+        Reject(() => Verify(plan, manifest));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void ApplicationFilesRejectWrongUnreadyOrMalformedResourceMetadata(int variant)
+    {
+        var plan = ApplicationPlan();
+        var manifest = ApplicationManifest(plan);
+        var ready = manifest.ResourceResults.Single();
+        var changed = variant switch
+        {
+            0 => ready with { ResourceId = "foreign" },
+            1 => ready with { Outcome = EvidenceResourceOutcome.Unavailable },
+            2 => ready with { ElapsedMilliseconds = -1 },
+            _ => ready with { Diagnostic = "CANARY-resource-data" },
+        };
+        Reject(() => VerifyApplication(plan, Rehash(manifest with { ResourceResults = [changed] })));
+    }
+
+    [Theory]
+    [InlineData(-1L, 9L)]
+    [InlineData(3L, 8L)]
+    [InlineData(1L, 0L)]
+    public void ApplicationFilesIncludeReadinessInNonnegativeCumulativeMetrics(long readiness, long total)
+    {
+        var plan = ApplicationPlan();
+        var manifest = ApplicationManifest(plan);
+        var metrics = manifest.Metrics with { ResourceReadinessMilliseconds = readiness, TotalMilliseconds = total };
+        Reject(() => VerifyApplication(plan, Rehash(manifest with { Metrics = metrics })));
+    }
+
+    private static EvidencePlan ApplicationPlan()
+    {
+        var resource = new EvidenceResourceDeclaration("native-http", "aspire_health", 1, []);
+        var policy = Policy();
+        policy = policy with
+        {
+            Profiles = policy.Profiles.Select(profile => profile.Id == "coverage"
+            ? profile with { Resources = [resource], Producers = [CoverageProducer() with { RequiredResources = [resource.Id] }] }
+            : profile).ToArray()
+        };
+        return new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/changed.cs")]);
+    }
+
+    // Pure canonical file data only: these helpers issue no admission, lease, process or custody authority.
+    private static EvidenceManifest ApplicationManifest(EvidencePlan plan)
+    {
+        var data = Manifest(plan);
+        return Rehash(data with
+        {
+            ResourceResults = [new("native-http", EvidenceResourceOutcome.Ready, 1)],
+            Metrics = data.Metrics with { ResourceReadinessMilliseconds = 1, TotalMilliseconds = 9 },
+        });
+    }
+
+    private static EvidenceManifest VerifyApplication(EvidencePlan plan, EvidenceManifest manifest) =>
+        EvidenceCoverageObservationFiles.VerifyApplication(plan, EvidenceCanonicalJson.Serialize(plan),
+            EvidenceCanonicalJson.Serialize(manifest), Summary(manifest), Artifacts(plan));
+
     private static EvidencePlan Plan(string path = "src/changed.cs")
     {
         var policy = Policy();
@@ -328,8 +403,13 @@ public sealed class EvidenceCoverageObservationFilesTests
 
     private static byte[] Summary(EvidenceManifest manifest) => EvidenceCanonicalJson.Serialize(new
     {
-        manifest.Mode, manifest.ClaimKind, manifest.Eligibility, manifest.ExecutionVerdict, manifest.EnvelopeStatus,
-        Procedure = "registered-protected-producer", SandboxAttestation = false,
+        manifest.Mode,
+        manifest.ClaimKind,
+        manifest.Eligibility,
+        manifest.ExecutionVerdict,
+        manifest.EnvelopeStatus,
+        Procedure = "registered-protected-producer",
+        SandboxAttestation = false,
     });
 
     private static string PhysicalPath(EvidencePlan plan) =>

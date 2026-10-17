@@ -4,7 +4,7 @@ using ForgeTrust.AppSurface.Evidence.Planner;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Verifies detached terminal files for a resolved checkpoint-two coverage Observation.</summary>
+/// <summary>Verifies detached terminal files for resolved dependency-free or compiled application coverage Observations.</summary>
 /// <remarks>
 /// This pure-data verifier checks canonical bindings and one declared Cobertura artifact. It does not establish
 /// worker execution, root custody, producer authenticity, admission, XML validity, numeric gate success, or native
@@ -48,7 +48,28 @@ internal static class EvidenceCoverageObservationFiles
         ReadOnlyMemory<byte> manifestBytes,
         ReadOnlyMemory<byte> summaryBytes,
         IReadOnlyDictionary<string, ReadOnlyMemory<byte>> artifactBytes,
-        CancellationToken token = default)
+        CancellationToken token = default) =>
+        VerifyCore(expected, planBytes, manifestBytes, summaryBytes, artifactBytes, false, token);
+
+    /// <summary>Checks pure terminal data for the root's separately resolved single-resource application plan.</summary>
+    /// <param name="expected">Protected plan resolved only after the root selected its compiled application.</param>
+    /// <param name="planBytes">Canonical plan bytes.</param>
+    /// <param name="manifestBytes">Canonical informational Observation manifest.</param>
+    /// <param name="summaryBytes">Canonical seven-field summary with no sandbox attestation.</param>
+    /// <param name="artifactBytes">The single copied declared Cobertura artifact.</param>
+    /// <param name="token">Original cleanup/deadline token; no allowance is renewed.</param>
+    /// <returns>Copied validated metadata only, never admission, custody or acceptance authority.</returns>
+    /// <remarks>The caller separately proves the selected application's start, health, group/pump joins and
+    /// sealed custody. This overload requires one aspire_health resource, its exact coverage dependency and
+    /// Ready result; it does not turn candidate data into a registered application.</remarks>
+    internal static EvidenceManifest VerifyApplication(EvidencePlan expected, ReadOnlyMemory<byte> planBytes,
+        ReadOnlyMemory<byte> manifestBytes, ReadOnlyMemory<byte> summaryBytes,
+        IReadOnlyDictionary<string, ReadOnlyMemory<byte>> artifactBytes, CancellationToken token = default) =>
+        VerifyCore(expected, planBytes, manifestBytes, summaryBytes, artifactBytes, true, token);
+
+    private static EvidenceManifest VerifyCore(EvidencePlan expected, ReadOnlyMemory<byte> planBytes,
+        ReadOnlyMemory<byte> manifestBytes, ReadOnlyMemory<byte> summaryBytes,
+        IReadOnlyDictionary<string, ReadOnlyMemory<byte>> artifactBytes, bool applicationProfile, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         try
@@ -79,9 +100,13 @@ internal static class EvidenceCoverageObservationFiles
             if (policy is null || snapshot.ChangedPaths.Count == 0
                 || snapshot.Profile.Scope != EvidenceProfileScope.Targeted
                 || snapshot.Profile.Id == policy.ConservativeProfileId
-                || snapshot.Profile.Resources.Count != 0
+                || (applicationProfile
+                    ? snapshot.Profile.Resources.Count != 1 || snapshot.Profile.Resources[0].Readiness != "aspire_health"
+                    : snapshot.Profile.Resources.Count != 0)
                 || snapshot.Profile.Producers.Count != 1
-                || !IsCompatibleCoverageProducer(snapshot.Profile.Producers[0]))
+                || !IsCompatibleCoverageProducer(snapshot.Profile.Producers[0], applicationProfile)
+                || applicationProfile && !snapshot.Profile.Producers[0].RequiredResources.SequenceEqual(
+                    snapshot.Profile.Resources.Select(static resource => resource.Id), StringComparer.Ordinal))
                 throw Rejected();
 
             token.ThrowIfCancellationRequested();
@@ -100,10 +125,13 @@ internal static class EvidenceCoverageObservationFiles
                 || manifest.Eligibility != EvidenceClaimEligibility.Informational
                 || manifest.EnvelopeStatus != EvidenceEnvelopeStatus.NotRequired
                 || manifest.EnvelopeAssertion is not null
-                || manifest.ResourceResults.Count != 0
+                || manifest.ResourceResults.Count != snapshot.Profile.Resources.Count
+                || manifest.ResourceResults.Any(resource => resource.Outcome != EvidenceResourceOutcome.Ready
+                    || resource.ElapsedMilliseconds < 0 || resource.Diagnostic is not null
+                    || !snapshot.Profile.Resources.Any(declaration => declaration.Id == resource.ResourceId))
                 || manifest.ProducerResults.Count != 1
                 || manifest.UnmediatedObligationIds.Count != 0
-                || !ValidMetrics(manifest.Metrics, manifest.ProducerResults[0])
+                || !ValidMetrics(manifest.Metrics, manifest.ProducerResults[0], applicationProfile)
                 || !ValidProducerResult(producer, manifest.ProducerResults[0], artifactCopy)
                 || !EvidenceManifestBuilder.Verify(plan, manifest))
                 throw Rejected();
@@ -113,8 +141,13 @@ internal static class EvidenceCoverageObservationFiles
             if (summary.ValueKind != JsonValueKind.Object) throw Rejected();
             RequireSame(summaryCopy, EvidenceCanonicalJson.Serialize(new
             {
-                manifest.Mode, manifest.ClaimKind, manifest.Eligibility, manifest.ExecutionVerdict,
-                manifest.EnvelopeStatus, Procedure = "registered-protected-producer", SandboxAttestation = false,
+                manifest.Mode,
+                manifest.ClaimKind,
+                manifest.Eligibility,
+                manifest.ExecutionVerdict,
+                manifest.EnvelopeStatus,
+                Procedure = "registered-protected-producer",
+                SandboxAttestation = false,
             }));
             token.ThrowIfCancellationRequested();
             return manifest;
@@ -130,10 +163,10 @@ internal static class EvidenceCoverageObservationFiles
         }
     }
 
-    private static bool IsCompatibleCoverageProducer(EvidenceProducerDeclaration producer)
+    private static bool IsCompatibleCoverageProducer(EvidenceProducerDeclaration producer, bool applicationProfile)
     {
         if (producer.Kind != SupportedProducerKind || producer.Version != SupportedProducerVersion
-            || producer.RequiredResources.Count != 0 || producer.TimeoutSeconds is < 1 or > 1800
+            || !applicationProfile && producer.RequiredResources.Count != 0 || producer.TimeoutSeconds is < 1 or > 1800
             || producer.CoverageGate is null || producer.AssertionIds.Count != 1
             || producer.AssertionIds[0] != SupportedAssertionId || producer.ArtifactSlots.Count != 1)
             return false;
@@ -162,23 +195,27 @@ internal static class EvidenceCoverageObservationFiles
             && artifact.Sha256 == EvidenceDigest.Sha256(artifactBytes);
     }
 
-    private static bool ValidMetrics(EvidenceExecutionMetrics metrics, EvidenceProducerResult result)
+    private static bool ValidMetrics(EvidenceExecutionMetrics metrics, EvidenceProducerResult result, bool applicationProfile)
     {
         if (!metrics.CleanupCompleted || metrics.TerminalFailureCode is not null
-            || metrics.CleanupDiagnostic is not null || metrics.ResourceReadinessMilliseconds != 0
+            || metrics.CleanupDiagnostic is not null || metrics.ResourceReadinessMilliseconds < 0
+            || !applicationProfile && metrics.ResourceReadinessMilliseconds != 0
             || metrics.PlanningMilliseconds < 0 || metrics.ProducerMilliseconds < 0
             || metrics.CleanupMilliseconds < 0 || metrics.TotalMilliseconds < 0
             || result.ElapsedMilliseconds < 0)
             return false;
 
-        // Current CLI manifests report cleanup state but leave total/stage wall-clock metrics at zero.
-        // Treat zero total as unreported; enforce arithmetic consistency only when a total was supplied.
+        // Zero total is an unreported timing set and requires every stage metric to be zero.
+        // Otherwise include readiness alongside the other measured stages without demanding equality;
+        // startup and orchestration overhead may also contribute to the elapsed total.
         if (metrics.TotalMilliseconds == 0)
-            return metrics.PlanningMilliseconds == 0 && metrics.ProducerMilliseconds == 0
-                && metrics.CleanupMilliseconds == 0;
+            return metrics.PlanningMilliseconds == 0 && metrics.ResourceReadinessMilliseconds == 0
+                && metrics.ProducerMilliseconds == 0 && metrics.CleanupMilliseconds == 0;
 
         if (metrics.PlanningMilliseconds > metrics.TotalMilliseconds) return false;
         var remaining = metrics.TotalMilliseconds - metrics.PlanningMilliseconds;
+        if (metrics.ResourceReadinessMilliseconds > remaining) return false;
+        remaining -= metrics.ResourceReadinessMilliseconds;
         if (metrics.ProducerMilliseconds > remaining) return false;
         remaining -= metrics.ProducerMilliseconds;
         return metrics.CleanupMilliseconds <= remaining;

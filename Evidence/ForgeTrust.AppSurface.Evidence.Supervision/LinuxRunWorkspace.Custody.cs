@@ -122,9 +122,9 @@ internal sealed partial class LinuxRunWorkspace
             try
             {
                 At(LinuxCustodyOperation.Settlement, null);
-            _worker.RequireCustodyOwner(_input, _owner, _accounts, _workspace, _server, default);
+                _worker.RequireCustodyOwner(_input, _owner, _accounts, _workspace, _server, default);
                 At(LinuxCustodyOperation.AccountOwner, null);
-            _accounts.RequireControlOwnedBy(_owner, default);
+                _accounts.RequireControlOwnedBy(_owner, default);
                 return Task.CompletedTask;
 
             }
@@ -142,7 +142,7 @@ internal sealed partial class LinuxRunWorkspace
                 Check(token);
                 At(LinuxCustodyOperation.NodeSelection, null);
                 _coverageProducerId = _input.Request.ObservationProducerIds.Count == 0 ? null
-                    : EvidenceCoverageObservationPlan.FromInput(_input, token).Profile.Producers.Single().Id;
+                    : ExpectedCoveragePlan(token).Profile.Producers.Single().Id;
                 var ancestors = _workspace._nodes.Where(static node => node.Policy is null).ToArray();
                 if (ancestors.Length != 2 || ancestors[0].Name != "/" || ancestors[1].Name != "run") throw LinuxWorkspaceLayout.Invalid();
                 var slash = Add(null, "/", null, ancestors[0].Metadata, DirectoryFlags, 0, token);
@@ -200,10 +200,10 @@ internal sealed partial class LinuxRunWorkspace
                         };
                         // Inspect through O_PATH before content open, so special files cannot stall a read.
                         At(LinuxCustodyOperation.Open, kind);
-                    using var probe = OpenAt2(Fd(slot.Handle), name, PathFlags, 0, ChildResolution);
+                        using var probe = OpenAt2(Fd(slot.Handle), name, PathFlags, 0, ChildResolution);
                         var expected = LinuxProtectedMetadata.From(Inspect(probe, kind));
                         At(LinuxCustodyOperation.OriginalPolicy, kind);
-                    LinuxCustodyData.RequireOriginal(kind, expected, _workspace._layout.AccountData);
+                        LinuxCustodyData.RequireOriginal(kind, expected, _workspace._layout.AccountData);
                         var file = Add(slot, name, kind, expected, 0x800 | 0x80000, ChildResolution, token);
                         file.Hash = Hash(file, token);
                     }
@@ -455,7 +455,7 @@ internal sealed partial class LinuxRunWorkspace
                     _worker.RequireSuccessfulCompletion();
                     At(LinuxCustodyOperation.FileVerification, null);
                     var expected = _input.Request.ObservationProducerIds.Count == 0
-                        ? EvidenceEmptyObservationPlan.FromInput(_input, token) : EvidenceCoverageObservationPlan.FromInput(_input, token);
+                        ? EvidenceEmptyObservationPlan.FromInput(_input, token) : ExpectedCoveragePlan(token);
                     var manifest = expected.Profile.Producers.Count == 0
                         ? EvidenceEmptyObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
                             ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), token)
@@ -471,6 +471,10 @@ internal sealed partial class LinuxRunWorkspace
             }
         }
 
+        private EvidencePlan ExpectedCoveragePlan(CancellationToken token) =>
+            _input.Request.ApplicationId is null ? EvidenceCoverageObservationPlan.FromInput(_input, token)
+                : EvidenceApplicationSelection.ResolvePlan(_input, token);
+
         private EvidenceManifest VerifyCoverageFiles(EvidencePlan expected, CancellationToken token)
         {
             var id = expected.Profile.Producers.Single().Id;
@@ -478,8 +482,11 @@ internal sealed partial class LinuxRunWorkspace
             {
                 [id + "/merged/coverage.cobertura.xml"] = ReadFile(LinuxCustodyNodeKind.CoverageReport, token),
             };
-            return EvidenceCoverageObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
-                ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), artifacts, token);
+            return _input.Request.ApplicationId is null
+                ? EvidenceCoverageObservationFiles.Verify(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
+                ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), artifacts, token)
+                : EvidenceCoverageObservationFiles.VerifyApplication(expected, ReadFile(LinuxCustodyNodeKind.Plan, token),
+                    ReadFile(LinuxCustodyNodeKind.Manifest, token), ReadFile(LinuxCustodyNodeKind.Summary, token), artifacts, token);
         }
 
         private string? CoverageProducerId(CancellationToken token)
