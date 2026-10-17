@@ -1,6 +1,7 @@
 using Aspire.Hosting.Testing;
 using AspireAppHostExample;
 using ForgeTrust.AppSurface.Aspire.Testing;
+using ForgeTrust.AppSurface.Evidence.Readiness;
 
 namespace AspireAppHostExample.Tests;
 
@@ -11,18 +12,20 @@ public sealed class TypedProfileIntegrationTests
     [Fact]
     public async Task QaProfile_StartsHealthyWebResourceAndServesHttp()
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        await using var builder = await AppSurfaceAspireTestingBuilder.CreateAsync<
-            Projects.AspireAppHostExample,
-            ExampleModule,
-            QaProfile>(timeout.Token);
-        await using var application = await builder.BuildAsync(timeout.Token);
+        await using var fixture = await AppSurfaceAspireTestFixture.StartAsync(
+            createBuilder: cancellationToken => AppSurfaceAspireTestingBuilder.CreateAsync<
+                Projects.AspireAppHostExample,
+                ExampleModule,
+                QaProfile>(cancellationToken),
+            target: new AspireHttpReadinessTarget("web", "http", "/"),
+            options: new AppSurfaceAspireStartupOptions
+            {
+                StartupTimeout = TimeSpan.FromMinutes(2),
+                Http = new HttpReadinessOptions { MaxAttempts = MaximumHttpRequestAttempts },
+            });
 
-        await application.StartAsync(timeout.Token);
-        await application.ResourceNotifications.WaitForResourceHealthyAsync("web", timeout.Token);
-
-        using var client = application.CreateHttpClient("web", "http");
-        using var response = await GetResponseWithTransientRetryAsync(client, timeout.Token);
+        using var client = fixture.Application.CreateHttpClient("web", "http");
+        using var response = await client.GetAsync("/");
 
         Assert.True(response.IsSuccessStatusCode, $"Expected HTTP success but received {(int)response.StatusCode}.");
     }

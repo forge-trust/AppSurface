@@ -19,6 +19,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         "ForgeTrust.AppSurface.Deployment",
         "ForgeTrust.AppSurface.Console",
         "ForgeTrust.AppSurface.Aspire",
+        "ForgeTrust.AppSurface.Evidence.Readiness",
         AppSurfaceTestingPackageId
     ];
     private readonly ITestOutputHelper _output;
@@ -453,6 +454,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 "Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj",
                 "Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj",
                 "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+                "Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj",
                 producerProject
             };
             foreach (var project in projects)

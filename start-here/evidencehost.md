@@ -45,9 +45,19 @@ Anything else has `ClaimKind.None`: a filtered test suite, missing browser runti
 | Situation | Use | Why |
 | --- | --- | --- |
 | Existing coverage command needs clearer scope and artifacts. | [`appsurface evidence`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) | Policy planning, diagnostics, canonical plan/manifest, and GitHub summary. |
-| Consumer has PostgreSQL, a browser, or a real E2E journey to prove. | [`ForgeTrust.AppSurface.Evidence.Aspire`](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | A separate explicit EvidenceHost waits for consumer-owned readiness, runs typed producers, and cleans them up. |
+| An Aspire resource needs its native healthy condition only. | [Aspire resource notifications](https://learn.microsoft.com/dotnet/aspire/testing/accessing-resources) | Use Aspire's health wait when resource health is the complete precondition. |
+| A test needs one profile-based AppHost started and an HTTP status condition checked. | [Typed AppSurface Aspire fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) and the neutral [HTTP readiness package](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) | One startup budget covers typed profile creation, build, start, native health, endpoint allocation, and the HTTP check. Ordinary tests do not need an EvidenceHost plan or producer. |
+| Consumer has PostgreSQL, a browser, or a real E2E journey to prove. | [`ForgeTrust.AppSurface.Evidence.Aspire`](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | A separate explicit EvidenceHost waits for consumer-owned readiness, runs typed producers, and cleans them up. Its optional HTTP adapter composes native health with one declared HTTP condition. |
 | You are writing a producer, external gate, or policy editor. | [`ForgeTrust.AppSurface.Evidence.Contracts`](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) and [`Planner`](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) | Stable contracts and deterministic diff-to-plan resolution. |
 | You only need numeric Cobertura thresholds. | [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) | Keep the current private, local coverage gate; EvidenceHost does not hide its configured threshold. |
+
+## Aspire HTTP readiness
+
+The [neutral readiness package reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) documents `HttpReadinessProbe.WaitAsync`, its defaults, safe diagnostics, and transport limits. Use its standalone probe when the application and `HttpClient` already exist. Use [Aspire's native HTTP health checks](https://aspire.dev/reference/api/csharp/aspire.hosting/resourcebuilderextensions/methods/) when they fully express the required condition. Add the [typed startup fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) when the test also needs the profile-based AppHost lifecycle under the same deadline.
+
+Readiness checks only the declared HTTP status condition after Aspire reports the selected resource healthy. The default predicate is exactly HTTP 200; it does not read a body or prove browser behavior, authentication, business state, or evidence obligations. Keep those assertions in the owning test or producer. The deadline is cooperative: synchronous factories and callbacks, transports that ignore cancellation, and awaited cleanup can outlast it.
+
+Each adapter created by an [Evidence.Aspire application lease](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#http-readiness-adapter) retains its own application registration. Disposing an HTTP readiness adapter closes admission and drains that adapter's HTTP waits before releasing its registration. A health-only adapter retains a registration but does not cancel or drain its native health wait; finish or cancel and await that wait before disposing the adapter. Only the final adapter release stops the application. Dispose every adapter, and finish all readiness work before directly disposing the application lease.
 
 ## Keep test and application hosts separate
 
@@ -77,3 +87,4 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 - [CLI evidence command reference](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence)
 - [Evidence contract reference](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md)
 - [Aspire lifecycle reference](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md)
+- [HTTP readiness reference and troubleshooting](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#troubleshooting)
