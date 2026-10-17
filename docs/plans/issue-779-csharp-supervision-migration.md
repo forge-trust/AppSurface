@@ -1,7 +1,7 @@
 # Plan: migrate EvidenceHost supervision to C#
 
 - Date: 2026-10-06
-- Status: Checkpoint 1 complete empty-run source composition implemented; native gate pending.
+- Status: Checkpoint 3 complete on source `4ce55f54`; checkpoint 4 cutover and full verification remain.
 - Design: [C# supervision core](../designs/issue-779-csharp-supervision-core.md).
 - Requirements retained: [#779 trust boundary](../designs/issue-779-evidencehost-trust-boundary.md), [57-group test plan](issue-779-evidencehost-test-plan.md), and [consumer acceptance](../evidence/issue779-consumer-acceptance.md).
 
@@ -113,10 +113,20 @@ consumer-proof registration remain closed, and Observation results retain their 
 **Implementation checkpoint (2026-10-17):** Restored the successful checkpoint-two revision
 `300794e83970f9f36962ef91f1c4b985191f70ac` into a persistent checkout under the primary workspace's
 ignored artifacts directory. The C# application owner, exact bundle custody, optional isolated accounts,
-Unix-peer HTTP readiness, DCP identity and aggregate shutdown are implemented. Local source validation
-passed 1,712 supervision and 557 focused CLI tests with no compiler/analyzer diagnostics; the private
-C3 SDK image and generated catalogue metadata also compile. The [checkpoint-three workflow](../../.github/workflows/issue779-checkpoint3-application.yml)
-is the pending native gate. These local results establish neither Linux acceptance nor Trusted eligibility.
+Unix-peer HTTP readiness, DCP identity and aggregate shutdown are implemented.
+[Run 39076625148](https://github.com/forge-trust/AppSurface/actions/runs/39076625148), at
+`4ce55f5407c9bcf48e1b8dd6f64195450272fbfc`, passed all seven native controls with zero skips: CLI and SDK
+coverage, readiness failure, factory stall, cancellation, the stuck descendant, and disposal quarantine.
+The same Linux run passed 1,740 supervision, 576 focused CLI, 155 Aspire and eight portable runner tests,
+with no compiler/analyzer diagnostics. Both private images and generated catalogue metadata compiled.
+
+Both positive cases measured 9/9 covered fixture lines and 7/7 covered fixture branches, returned
+informational Observation manifests, and completed strict account cleanup. Every case joined original
+work and error-free, byte-reconciled output. The disposal negative recorded actual `EBUSY`, returned failure
+without a root success result, and retained all eight accounts. The artifact digest and all 2,969 committed
+source-file hashes/modes were independently verified. See the [seven-case validation record](../../.github/issue779-checkpoint3/README.md#verified-checkpoint-result).
+The earlier failed attempts remain historical evidence. This checkpoint establishes neither full-repository
+coverage nor Trusted eligibility; the complete cutover and verification work below remains required.
 
 
 **Scope:** the existing compiled restricted application contract, actual AppHost/DCP/resource startup, readiness, and joined shutdown. Use a compiled test registration to validate mechanics; production catalogue and proof registry remain closed.

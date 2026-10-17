@@ -6,6 +6,20 @@ Receipt paths under `TestResults` are local-only ignored execution records. They
 checkout, and their recorded results do not verify later source edits. Public CI observations link to their
 recorded run through the consumer acceptance record.
 
+## C# supervision migration — 2026-10-17
+
+The [migration plan](../plans/issue-779-csharp-supervision-migration.md#checkpoint-3-restricted-application-and-sdk-parity)
+now records the implemented C# application owner and its current checkpoint-three Linux boundary.
+[Run 39076625148](https://github.com/forge-trust/AppSurface/actions/runs/39076625148) passed all seven
+checkpoint-three native controls on `4ce55f5407c9bcf48e1b8dd6f64195450272fbfc`, including genuine CLI/SDK
+coverage and the required readiness, factory, cancellation, descendant and disposal failures. The disposal
+case verified busy-unmount rejection, joined work and retained accounts; it returned no successful root
+result. The [validation record](../../.github/issue779-checkpoint3/README.md#verified-checkpoint-result)
+binds the artifact digest, complete source inventory and test counts. Checkpoint three is complete.
+The historical group inventory below is not a current acceptance total; full
+cutover, the complete unchanged coverage gate and consumer/platform proof remain separate requirements.
+The production application catalogue and Trusted proof registry remain closed.
+
 ## Execution boundary
 
 - The supplied `integration-pass2` ledger reports CLI 289 passed, repaired Aspire 41 passed, five isolated lifecycle cases, and 16 control-protocol cases from the predecessor. These are historical run results, not verification of later/current edits. The stored `resume-status.json` is an earlier checkpoint (CLI 289; Aspire 35 passed/4 failed; lifecycle 5; control 16) and predates the reported Aspire repair.

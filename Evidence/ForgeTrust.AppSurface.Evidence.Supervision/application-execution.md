@@ -80,6 +80,11 @@ stall, cancellation, a stuck descendant and disposal failure. Private images can
 native receipts must bind the tested source revision and actual cleanup facts; preparatory or local
 build success is not a Linux pass or a Trusted claim.
 
+The [verified checkpoint-three record](../../.github/issue779-checkpoint3/README.md#verified-checkpoint-result)
+binds all seven genuine controls to source `4ce55f54`, including CLI/SDK numerical coverage and the intended
+disposal quarantine. This completes that checkpoint only; production enrollment and the full cutover/coverage
+gate remain separate requirements in the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md).
+
 ### Control-server preparation before worker dispatch
 
 The root retains the control server, resolved plan, coverage owner and application owner before calling

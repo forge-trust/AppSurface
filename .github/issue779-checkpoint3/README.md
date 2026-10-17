@@ -26,6 +26,34 @@ The workflow retains `source.json`, the generated registration source and its SH
 
 The workflow is triggered by pushes to `codex/issue779-checkpoint3-application-20261017`. Source preparation alone does not establish native acceptance; only a successful run of the complete seven-control workflow against its captured source revision can do that.
 
+## Verified checkpoint result
+
+[Run 39076625148](https://github.com/forge-trust/AppSurface/actions/runs/39076625148) passed on source
+`4ce55f5407c9bcf48e1b8dd6f64195450272fbfc` on 2026-10-17. All seven controls passed with zero skipped
+native cases. Linux source builds also passed 1,740 supervision, 576 focused CLI and 155 Aspire tests;
+the portable runner suite passed eight tests. Compiler/analyzer diagnostic counts were zero.
+
+| Control | Verified result |
+| --- | --- |
+| CLI application and coverage | Actual AppHost/DCP/resource/producer; Passed informational Observation; 9/9 lines and 7/7 branches; accounts removed. |
+| SDK application and coverage | Same plan and root implementation; same numerical coverage and claim restrictions; accounts removed. |
+| Readiness failure | Independently authenticated resource returned HTTP 503; failed root result and joined cleanup. |
+| Factory stall | Actual factory-entry marker before DCP; bounded forced containment and joined cleanup. |
+| Cancellation | Actual running producer cancelled; original nonzero result retained and cleanup joined. |
+| Stuck descendant | Pinned child received TERM and remained live with its exact handler marker before cancellation; whole group forcibly joined. |
+| Disposal failure | Actual retained scratch holder caused strict unmount `EBUSY`; root failed and all eight accounts remained quarantined. |
+
+Every case retained the original process/pending-start joins, double empty-group observations and reconciled,
+error-free EOF accounting. Normal CLI and SDK application mains exited zero; their monitor-failure bits and
+ledger failures were clear. The disposal failure did not publish successful root output or release identities.
+
+Artifact `12117576849` contains 1,129,194 compressed bytes with SHA-256
+`b78632201be684a42df08f837a17927dcf25a358c2359d667b5e0446defd1346`. The downloaded digest and the
+complete 2,969-file source capture, Git blobs, hashes and modes matched the tested commit, with zero mismatches.
+The fixture's 100% coverage is not a full-repository coverage result. The production application catalogue
+and accepted Trusted proof registry remain closed; [checkpoint four](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-4-cutover-and-full-verification)
+still requires runtime cutover, complete consumer acceptance, packaging and the unchanged solution/patch gate.
+
 ## Establishing the stuck-descendant negative control
 
 The application stop recipe sends cooperative TERM only to AppHost. After its original grace expires, unit stop and immediate group KILL provide forced containment; a descendant's TERM callback is not guaranteed to run in that final interval. [Run 39073759716](https://github.com/forge-trust/AppSurface/actions/runs/39073759716) authenticated and joined the actual stuck child but did not observe its TERM marker, so that control correctly failed.
