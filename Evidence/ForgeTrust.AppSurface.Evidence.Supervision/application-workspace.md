@@ -101,3 +101,8 @@ root. `RequireManagedToolProbe` checks at most 64 MiB of exact selected resource
 passes the existing root ownership/single-link retained-node checks. Named metadata and the selected hash are
 rechecked before startup, health and final cleanup. The pure byte helper creates no protected capability; an
 ordinary actual managed test assembly verifies format handling, not sandbox denial.
+
+The retained-node `ReadManagedProbeBytes` entry has a fixed separate 64 MiB binary bound and retains the
+original name/identity/time/length/deadline checks. It accepts neither a filename nor a caller-selected limit.
+`ReadBounded` remains the smaller canonical JSON/request reader and rejects a larger supplied bound; passing
+64 MiB to that API is invalid even for a small DLL. The binary entry does not relax JSON parsing limits.

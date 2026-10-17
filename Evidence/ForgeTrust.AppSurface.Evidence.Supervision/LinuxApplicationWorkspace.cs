@@ -597,7 +597,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
             true, 64L * 1024 * 1024, _sourceNodes, token, _deadline);
         var expectedProbeHash = _layout.BundleFiles.Single(static file => file.Role == LinuxApplicationBundleRole.Resource).Sha256;
         if (_toolProbe.Metadata.Mode != (ushort)(0x8000 | 0x124)) throw LinuxApplicationWorkspaceLayout.Invalid();
-        RequireManagedToolProbe(_toolProbe.ReadBounded(64 * 1024 * 1024, token, _deadline), expectedProbeHash);
+        RequireManagedToolProbe(_toolProbe.ReadManagedProbeBytes(token, _deadline), expectedProbeHash);
         var sourceRoot = _layout.ToolRoot + "/application";
         _sourceDirectories[string.Empty] = null!;
         var root = LinuxProtectedNode.OpenAbsolute(sourceRoot, true, true, 0, _sourceNodes, token, _deadline);

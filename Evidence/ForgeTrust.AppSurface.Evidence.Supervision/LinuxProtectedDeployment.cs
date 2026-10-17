@@ -273,6 +273,22 @@ internal sealed class LinuxProtectedNode
         return bytes;
     }
 
+    /// <summary>Reads only the retained managed denial-probe binary under its separate fixed 64 MiB bound.</summary>
+    /// <param name="token">Original owner/start cancellation.</param>
+    /// <param name="deadline">Original protected-input monotonic deadline.</param>
+    /// <returns>Exact retained bytes after repeated name, identity, time and length checks.</returns>
+    /// <remarks>This grants no root/file/application authority, accepts no supplied filename or byte limit,
+    /// and does not alter the smaller canonical JSON/request limit used by ReadBounded.</remarks>
+    internal byte[] ReadManagedProbeBytes(CancellationToken token, LinuxInputDeadline deadline)
+    {
+        if (_directory || Metadata.Length is 0 or > 64UL * 1024 * 1024)
+            throw LinuxProtectedDeployment.InvalidDeployment();
+        var bytes = new byte[checked((int)Metadata.Length)];
+        var offset = 0;
+        Read(token, memory => { memory.Span.CopyTo(bytes.AsSpan(offset)); offset += memory.Length; }, deadline);
+        return bytes;
+    }
+
     private void Read(CancellationToken token, Action<ReadOnlyMemory<byte>> receive, LinuxInputDeadline? deadline = null)
     {
         if (_directory) throw LinuxProtectedDeployment.InvalidDeployment();
