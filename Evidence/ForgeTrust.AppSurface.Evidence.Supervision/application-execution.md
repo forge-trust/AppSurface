@@ -83,3 +83,17 @@ its retained owners remain in the existing aggregate failure cleanup path.
 The [native runner](../../.github/issue779-checkpoint3/run-native.py) retains the existing bounded C2
 worker/producer failure prefixes in its private artifact as well as application prefixes. A closed root
 `PeerCheck` failure alone cannot identify the worker's earlier error; diagnostic absence remains unknown.
+
+### Bounded readiness rejection observations
+
+`evidence-application-readiness-v1` reports fixed `resource-peer-validated` and `http-validated` checkpoints,
+and at most the first `dcp-capture-rejected` record for one readiness operation. The latter contains a closed
+`LinuxDcpCaptureStage`, closed error family, optional known direct errno, and bounded observed/matching process
+counts. It contains no exception text, path, command line or candidate-controlled values. The actual Capture
+overload returns these data on rejection while preserving its original exception, identity guards, cleanup and
+deadline. This output grants no readiness, process ownership or retry permission. It is not a success receipt.
+
+These diagnostics distinguish a stalled HTTP read from repeated DCP sampling rejection without changing the
+HTTP response limit, resource deadline, cgroup/executable/proc guards, failure latch, stop policy or acceptance.
+A diagnostic write failure is ignored and cannot replace the original operation result. Only the original
+complete identity capture and peer-provenance check can produce the existing readiness ACK.

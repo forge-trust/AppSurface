@@ -170,6 +170,7 @@ internal sealed partial class LinuxApplicationProcess
                     _resource = LinuxProcessIdentity.CaptureApplication(checked((uint)peer.Pid), peer.Uid, peer.Gid, Unit, deadline.Token);
                     LinuxApplicationDcpIdentity.RequireResourceCommand(_resource, _input.Request.RuntimeHost,
                         _workspace.BundleRoot + "/resource/NativeHttpResource.dll", _workspace.ScratchRoot + "/http.sock", deadline.Token);
+                    EmitReadiness(new { schema = "evidence-application-readiness-v1", stage = "resource-peer-validated", pid = peer.Pid });
                     await using var stream = new NetworkStream(socket, ownsSocket: false);
                     await stream.WriteAsync("GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"u8.ToArray(), deadline.Token).ConfigureAwait(false);
                     var bytes = new byte[4097]; var length = 0;
@@ -180,20 +181,33 @@ internal sealed partial class LinuxApplicationProcess
                         length += count;
                     }
                     RequireHealth(bytes.AsSpan(0, length));
+                    EmitReadiness(new { schema = "evidence-application-readiness-v1", stage = "http-validated", received_bytes = length });
                     if (ReadPeer(socket) != peer) throw Rejected();
                     _resource.Recheck(deadline.Token); _appHost.Recheck(deadline.Token);
                     _workspace.RecheckBundle(deadline.Token);
+                    var captureFailures = 0;
                     while (_dcp is null)
                     {
                         RequirePolling(deadline.Token);
                         _resource.Recheck(deadline.Token); _appHost.Recheck(deadline.Token);
+                        LinuxDcpCaptureFailure? captureFailure = null;
                         try
                         {
                             _dcp = LinuxApplicationDcpIdentity.Capture(Unit, _accounts.ApplicationUid, _accounts.ApplicationGid,
-                                _workspace.DcpPath, deadline.Token);
+                                _workspace.DcpPath, deadline.Token, out captureFailure);
                         }
                         catch (EvidenceAdmissionException) when (!deadline.IsCancellationRequested)
                         {
+                            if (++captureFailures == 1) EmitReadiness(new
+                            {
+                                schema = "evidence-application-readiness-v1",
+                                stage = "dcp-capture-rejected",
+                                checkpoint = captureFailure?.Stage.ToString(),
+                                error_kind = captureFailure?.ErrorKind,
+                                native_errno = captureFailure?.NativeErrno,
+                                observed_processes = captureFailure?.ObservedProcesses,
+                                matching_executables = captureFailure?.MatchingExecutables
+                            });
                             // A member can fork/exit during the two complete cgroup/proc samples.
                             // Retry observation within this same readiness deadline; no partial sample grants health.
                             await Task.Delay(25, deadline.Token).ConfigureAwait(false);
@@ -340,6 +354,12 @@ internal sealed partial class LinuxApplicationProcess
         }
         catch (OperationCanceledException) when (_monitorStop.IsCancellationRequested) { }
         catch { _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed); throw; }
+    }
+
+    private static void EmitReadiness<T>(T value)
+    {
+        try { Emit(value); }
+        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
     }
 
     private static void Emit<T>(T value)

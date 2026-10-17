@@ -13,6 +13,18 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 internal readonly record struct LinuxDcpFileMetadata(uint DeviceMajor, uint DeviceMinor, ulong Inode,
     ushort Type, uint Uid, ushort Mode, ulong Length);
 
+/// <summary>Closed diagnostic checkpoints only; no captured process or executable authority.</summary>
+internal enum LinuxDcpCaptureStage
+{
+    Selection, CgroupRoot, CgroupSlice, CgroupLeaf, CgroupProcesses, ProcessList,
+    FilesystemRoot, AuditedExecutable, CandidateIdentity, CandidateExecutable, CandidateContinuity,
+    CandidateBinding, SelectedExecutable, RepeatedProcessList, FinalBinding, Complete
+}
+
+/// <summary>First bounded capture rejection data; no path, exception text, command line or authority.</summary>
+internal sealed record LinuxDcpCaptureFailure(LinuxDcpCaptureStage Stage, string ErrorKind,
+    int? NativeErrno, int ObservedProcesses, int MatchingExecutables);
+
 /// <summary>Retains the one selected application process whose actual executable is the audited DCP file.</summary>
 /// <remarks>
 /// Capture is available only to root on Linux x64. It reads only the exact generated application cgroup,
@@ -77,8 +89,23 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     /// <returns>A retained actual process and executable identity; dispose it only after application stop joins.</returns>
     /// <exception cref="EvidenceAdmissionException">The native platform, cgroup, process set, or executable identity is unavailable or changed.</exception>
     internal static LinuxApplicationDcpIdentity Capture(LinuxUnitName unit, uint uid, uint gid,
-        string auditedDcpPath, CancellationToken token)
+        string auditedDcpPath, CancellationToken token) => Capture(unit, uid, gid, auditedDcpPath, token, out _);
+
+    /// <summary>Runs the identical root capture and returns closed first-failure diagnostic data on rejection.</summary>
+    /// <param name="unit">Actual generated application unit.</param>
+    /// <param name="uid">Actual root-selected application UID.</param>
+    /// <param name="gid">Actual root-selected application GID.</param>
+    /// <param name="auditedDcpPath">Already audited immutable DCP file.</param>
+    /// <param name="token">The original readiness deadline.</param>
+    /// <param name="diagnostic">Closed checkpoint/counters on rejection only; no identity or retry permission.</param>
+    /// <returns>Only the authentic retained identity from the original capture.</returns>
+    internal static LinuxApplicationDcpIdentity Capture(LinuxUnitName unit, uint uid, uint gid,
+        string auditedDcpPath, CancellationToken token, out LinuxDcpCaptureFailure? diagnostic)
     {
+        diagnostic = null;
+        var stage = LinuxDcpCaptureStage.Selection;
+        var observed = 0;
+        var matching = 0;
         ArgumentNullException.ThrowIfNull(unit);
         ArgumentNullException.ThrowIfNull(auditedDcpPath);
         var cgroupHandles = new List<SafeFileHandle>();
@@ -96,14 +123,22 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             LinuxProcessData.RequireSelection(1, uid, gid, unit, LinuxProcessSamplingRole.Application);
             var relativeDcpPath = RelativeDcpPath(auditedDcpPath);
 
+            stage = LinuxDcpCaptureStage.CgroupRoot;
             var cgroupRoot = OpenCgroupNode(null, CgroupMount, true, cgroupHandles, token);
+            stage = LinuxDcpCaptureStage.CgroupSlice;
             var systemSlice = OpenCgroupNode(cgroupRoot, "system.slice", true, cgroupHandles, token);
+            stage = LinuxDcpCaptureStage.CgroupLeaf;
             var leaf = OpenCgroupNode(systemSlice, unit.Value, true, cgroupHandles, token);
+            stage = LinuxDcpCaptureStage.CgroupProcesses;
             var processes = OpenCgroupNode(leaf, "cgroup.procs", false, cgroupHandles, token);
+            stage = LinuxDcpCaptureStage.ProcessList;
             var pids = ParseProcessIds(ReadBounded(processes.Handle, MaximumProcessBytes, token));
 
+            observed = pids.Length;
+            stage = LinuxDcpCaptureStage.FilesystemRoot;
             filesystemRoot = OpenAt2(AtFdcwd, "/", DirectoryFlags, 0, MountResolution);
             RequireDirectory(filesystemRoot);
+            stage = LinuxDcpCaptureStage.AuditedExecutable;
             auditedDcp = OpenAt2(Fd(filesystemRoot), relativeDcpPath, NamedFlags, 0, AuditedPathResolution);
             var expectedFile = ToFileMetadata(StatFd(auditedDcp));
             RequireAuditedDcp(expectedFile);
@@ -112,18 +147,24 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             foreach (var pid in pids)
             {
                 token.ThrowIfCancellationRequested();
+                stage = LinuxDcpCaptureStage.CandidateIdentity;
                 using var before = LinuxProcessIdentity.CaptureApplication(pid, uid, gid, unit, token);
                 LinuxProcessIdentity? after = null;
                 RetainedProcCandidate? candidate = null;
                 try
                 {
+                    stage = LinuxDcpCaptureStage.CandidateExecutable;
                     candidate = OpenProcCandidate(pid, token);
                     var actualFile = ToFileMetadata(StatFd(candidate.Executable));
+                    stage = LinuxDcpCaptureStage.CandidateContinuity;
                     after = LinuxProcessIdentity.CaptureApplication(pid, uid, gid, unit, token);
+                    stage = LinuxDcpCaptureStage.CandidateBinding;
                     RequireCandidateContinuity(before.SampledFacts, after.SampledFacts, pid, uid, gid, unit);
                     RequireProcCandidate(candidate, token);
 
                     if (!SameExecutable(actualFile, expectedFile)) continue;
+                    matching++;
+                    stage = LinuxDcpCaptureStage.SelectedExecutable;
                     if (selectedProcess is not null) throw Rejected();
                     RequireAuditedDcp(ToFileMetadata(StatFd(auditedDcp)));
                     if (!SameExecutable(ToFileMetadata(StatFd(auditedDcp)), expectedFile)) throw Rejected();
@@ -139,9 +180,12 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
                 }
             }
 
+            stage = LinuxDcpCaptureStage.SelectedExecutable;
             if (selectedProcess is null || selectedProc is null) throw Rejected();
+            stage = LinuxDcpCaptureStage.RepeatedProcessList;
             var secondPids = ParseProcessIds(ReadBounded(processes.Handle, MaximumProcessBytes, token));
             if (!pids.AsSpan().SequenceEqual(secondPids)) throw Rejected();
+            stage = LinuxDcpCaptureStage.FinalBinding;
             RequireCgroupNode(processes, token);
             RequireProcCandidate(selectedProc, token);
             selectedProcess.Recheck(token);
@@ -150,6 +194,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             selectedProcess.Recheck(token);
             token.ThrowIfCancellationRequested();
 
+            stage = LinuxDcpCaptureStage.Complete;
             result = new LinuxApplicationDcpIdentity(relativeDcpPath, filesystemRoot, auditedDcp,
                 expectedFile, selectedProcess, selectedProc);
             filesystemRoot = null;
@@ -157,8 +202,10 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             selectedProcess = null;
             selectedProc = null;
         }
-        catch (OperationCanceledException error) when (token.IsCancellationRequested) { failure = error; }
-        catch (Exception) { failure = Rejected(); }
+        catch (OperationCanceledException error) when (token.IsCancellationRequested)
+        { diagnostic = CaptureFailure(stage, error, observed, matching); failure = error; }
+        catch (Exception error)
+        { diagnostic = CaptureFailure(stage, error, observed, matching); failure = Rejected(); }
         finally
         {
             if (!CloseHandles(cgroupHandles)) failure ??= Rejected();
@@ -731,6 +778,26 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     private static void RequireFileSystem(SafeFileHandle handle, long expectedType)
     {
         if (FstatFs(handle, out var filesystem) != 0 || filesystem.Type != expectedType) throw Rejected();
+    }
+
+    /// <summary>Projects closed exception categories and known direct errno values without retaining text.</summary>
+    internal static LinuxDcpCaptureFailure CaptureFailure(LinuxDcpCaptureStage stage, Exception error,
+        int observed, int matching)
+    {
+        if (!Enum.IsDefined(stage) || observed is < 0 or > MaximumProcesses || matching is < 0 or > MaximumProcesses)
+            throw Rejected();
+        var kind = error switch
+        {
+            OperationCanceledException => "Cancelled",
+            EvidenceAdmissionException => "Admission",
+            PlatformNotSupportedException => "Unsupported",
+            IOException => "Io",
+            UnauthorizedAccessException => "AccessDenied",
+            _ => "Other"
+        };
+        int? errno = error.InnerException is Win32Exception native && native.NativeErrorCode is 1 or 2 or 3 or 9 or 13 or 18 or 22 or 38 or 95
+            ? native.NativeErrorCode : null;
+        return new(stage, kind, errno, observed, matching);
     }
 
     private static Exception? DisposeCaptured(IDisposable? value)

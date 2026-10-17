@@ -98,6 +98,29 @@ public sealed class LinuxApplicationDcpIdentityTests
             "/run/root/bundle/other/NativeHttpResource.dll", SocketPath));
     }
 
+    [Theory]
+    [InlineData(0, "Io", 13)]
+    [InlineData(1, "Unsupported", 38)]
+    [InlineData(2, "Other", null)]
+    public void CaptureDiagnosticsKeepOnlyClosedCheckpointCountsAndKnownErrno(int variant, string kind, int? errno)
+    {
+        Exception error = variant switch
+        {
+            0 => new IOException("CANARY-io", new System.ComponentModel.Win32Exception(13)),
+            1 => new PlatformNotSupportedException("CANARY-unsupported", new System.ComponentModel.Win32Exception(38)),
+            _ => new InvalidOperationException("CANARY-private-exception"),
+        };
+        var data = LinuxApplicationDcpIdentity.CaptureFailure(LinuxDcpCaptureStage.CandidateExecutable, error, 4, 0);
+        Assert.Equal(LinuxDcpCaptureStage.CandidateExecutable, data.Stage);
+        Assert.Equal(kind, data.ErrorKind);
+        Assert.Equal(errno, data.NativeErrno);
+        Assert.Equal(4, data.ObservedProcesses);
+        Assert.Equal(0, data.MatchingExecutables);
+        var bytes = EvidenceCanonicalJson.Serialize(data);
+        Assert.True(bytes.Length <= 1024);
+        Assert.DoesNotContain("CANARY", System.Text.Encoding.UTF8.GetString(bytes));
+    }
+
     [Fact]
     public void RuntimeHostMetadataRequiresRootOwnedReadonlyExecutableAndExactIdentity()
     {
