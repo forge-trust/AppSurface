@@ -132,11 +132,13 @@ internal static class LinuxEmptyObservationExecution
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
             worker = LinuxWorkerProcess.Create(input, owner, accounts, workspace, listener, job.Token, runOutput, producerWorkspace, applicationSelection?.Descriptor);
-            phase = EvidenceNativeObservationPhase.WorkerStart;
-            await worker.StartAsync(job.Token).ConfigureAwait(false);
+            // Complete protected plan/bundle/owner preparation before launching the worker. Its
+            // authentication allowance starts at connect and must not pay for this root-only work.
             phase = EvidenceNativeObservationPhase.ServerCreate;
             server = LinuxEmptyObservationControlServer.Create(input, owner, accounts, workspace, listener, worker, job.Token,
                 producerWorkspace, runOutput, applicationWorkspace, applicationSelection);
+            phase = EvidenceNativeObservationPhase.WorkerStart;
+            await worker.StartAsync(job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.ServerLifetime;
             serverLifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Token);
             phase = EvidenceNativeObservationPhase.ServerRun;

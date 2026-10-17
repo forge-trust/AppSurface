@@ -261,6 +261,9 @@ def execute(args,case,tools,runtime,end):
    except ProcessLookupError:pass
    process.wait(timeout=5)
   result['final_groups_empty']=c2.groups_empty(units)
+  for role in ('worker','producer'):
+   try:result[role+'_diagnostics_retained']=c2.retain_producer_prefixes(generation,args.output,case,role)
+   except (OSError,RuntimeError):result[role+'_diagnostics_retained']=False
   try:result['application_prefixes_retained']=retain_application_prefixes(generation,args.output,case)
   except (OSError,RuntimeError):result['application_prefixes_retained']=False
   for name in ('owner.stdout','owner.stderr'):

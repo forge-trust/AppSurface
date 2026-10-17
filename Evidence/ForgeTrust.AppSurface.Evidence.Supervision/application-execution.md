@@ -69,3 +69,17 @@ real AppHost/DCP/resource processes, positive tool/output denial probes, readine
 stall, cancellation, a stuck descendant and disposal failure. Private images cannot be packed. Genuine
 native receipts must bind the tested source revision and actual cleanup facts; preparatory or local
 build success is not a Linux pass or a Trusted claim.
+
+### Control-server preparation before worker dispatch
+
+The root retains the control server, resolved plan, coverage owner and application owner before calling
+`LinuxWorkerProcess.StartAsync`. This preparation uses the original job allowance, not the worker's
+30-second connection/admission allowance. Creating the server establishes reference ownership only;
+`RunCoreAsync` still requires the original joined startup and authenticates the live worker PID, all four
+UID/GID values, start time and cgroup before accepting request bytes. A prepared server cannot supply READY
+or an application lease without that later kernel check. Preparation failure prevents worker dispatch, and
+its retained owners remain in the existing aggregate failure cleanup path.
+
+The [native runner](../../.github/issue779-checkpoint3/run-native.py) retains the existing bounded C2
+worker/producer failure prefixes in its private artifact as well as application prefixes. A closed root
+`PeerCheck` failure alone cannot identify the worker's earlier error; diagnostic absence remains unknown.

@@ -239,7 +239,8 @@ internal sealed class LinuxEmptyObservationControlServer
         var plan = input.Request.ObservationProducerIds.Count == 0
             ? EvidenceEmptyObservationPlan.FromInput(input, token) : input.Request.ApplicationId is null
                 ? EvidenceCoverageObservationPlan.FromInput(input, token) : EvidenceApplicationSelection.ResolvePlan(input, token);
-        _ = worker.RequireWorker(token);
+        // Ownership references may be retained before startup. RunCoreAsync still requires the
+        // actual joined startup and rechecks live kernel identity before any accepted request.
         worker.RequireServerOwner(input, owner, accounts, workspace, listener, token);
         var server = new LinuxEmptyObservationControlServer(input, owner, accounts, workspace, listener, worker, null);
         if (plan.Profile.Producers.Count != 0)
