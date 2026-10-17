@@ -76,7 +76,7 @@ internal sealed record EvidenceLinuxApplicationDescriptor(string ApplicationId, 
 /// <param name="AppHostPid">Positive AppHost PID.</param>
 /// <param name="ApplicationUid">Exact descriptor application UID.</param>
 /// <param name="ApplicationGid">Exact descriptor application GID.</param>
-/// <param name="Cgroup">Exact /system.slice/issue779-app-&lt;lease&gt;.service cgroup.</param>
+/// <param name="Cgroup">Exact generated application cgroup; legacy issue779-app and C# appsurface-evidence-application names are closed spellings.</param>
 internal sealed record EvidenceLinuxApplicationStartReceipt(string LeaseId, int AppHostPid, uint ApplicationUid,
     uint ApplicationGid, string Cgroup);
 
@@ -109,8 +109,12 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
         ApplicationRequire(application is not null && ApplicationId(appId) && ApplicationHash(entryDigest)
             && appId == application.ApplicationId && entryDigest == application.EntryDigest);
         if (Interlocked.CompareExchange(ref _applicationStartClaimed, 1, 0) != 0) throw ApplicationFailure("ASEVD410");
-        var response = await RequestApplicationAsync(new { op = "application-start", application_id = appId,
-            entry_digest = entryDigest }, cancellationToken).ConfigureAwait(false);
+        var response = await RequestApplicationAsync(new
+        {
+            op = "application-start",
+            application_id = appId,
+            entry_digest = entryDigest
+        }, cancellationToken).ConfigureAwait(false);
         var receipt = ParseApplicationStartReceipt(response, application);
         Volatile.Write(ref _applicationStartReceipt, receipt);
         return receipt;
@@ -129,8 +133,12 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
         var started = Volatile.Read(ref _applicationStartReceipt);
         if (application is null || started is null || leaseId != started.LeaseId || !ApplicationId(resourceId)
             || !application.Resources.Any(item => item.Id == resourceId)) throw ApplicationFailure("ASEVD410");
-        var response = await RequestApplicationAsync(new { op = "resource-wait", lease_id = leaseId,
-            resource_id = resourceId }, cancellationToken).ConfigureAwait(false);
+        var response = await RequestApplicationAsync(new
+        {
+            op = "resource-wait",
+            lease_id = leaseId,
+            resource_id = resourceId
+        }, cancellationToken).ConfigureAwait(false);
         return ParseApplicationResourceReceipt(response, application, started, resourceId);
     }
 
@@ -192,7 +200,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
             var uid = ApplicationUInt(value, "application_uid"); var gid = ApplicationUInt(value, "application_gid");
             var cgroup = ApplicationString(value, "cgroup", 128);
             ApplicationRequire(uid > 0 && gid > 0 && uid == expected.ApplicationUid && gid == expected.ApplicationGid
-                && cgroup == ApplicationCgroup(lease));
+                && ApplicationCgroupMatches(cgroup, lease));
             return new(lease, (int)pid, uid, gid, cgroup);
         }
         catch (EvidenceAdmissionException) { throw ApplicationFailure("ASEVD410"); }
@@ -214,7 +222,7 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
                 "http_status", "healthy", "received_bytes");
             ApplicationRequire(expected is not null && started is not null && started.AppHostPid > 0 && ApplicationLease(started.LeaseId)
                 && started.ApplicationUid == expected.ApplicationUid && started.ApplicationGid == expected.ApplicationGid
-                && started.Cgroup == ApplicationCgroup(started.LeaseId) && ApplicationId(resourceId)
+                && ApplicationCgroupMatches(started.Cgroup, started.LeaseId) && ApplicationId(resourceId)
                 && expected.Resources.Any(item => item.Id == resourceId));
             ApplicationRequire(ApplicationTrue(value, "ok") && ApplicationTrue(value, "kernel_peer_checked") && ApplicationTrue(value, "healthy"));
             var lease = ApplicationString(value, "lease_id", 32); var resource = ApplicationIdentifier(value, "resource_id");
@@ -236,7 +244,8 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
         try { return await RequestAsync(request, cancellationToken).ConfigureAwait(false); }
         catch (EvidenceAdmissionException error) { throw NormalizeApplicationRequestFailure(error); }
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
-            or FormatException or OverflowException or SocketException or IOException) { throw NormalizeApplicationRequestFailure(error); }
+            or FormatException or OverflowException or SocketException or IOException)
+        { throw NormalizeApplicationRequestFailure(error); }
     }
 
     /// <summary>Preserves authenticated-channel diagnostics before normalizing application wire failures.</summary>
@@ -407,7 +416,9 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor
     private static bool ApplicationRelative(string value) => value.Length <= 256 && value[0] != '/'
         && value.All(static item => char.IsAsciiLetterOrDigit(item) || item is '-' or '_' or '.' or '/')
         && value.Split('/').All(static item => item.Length > 0 && item is not "." and not "..");
-    private static string ApplicationCgroup(string lease) => "/system.slice/issue779-app-" + lease + ".service";
+    private static bool ApplicationCgroupMatches(string group, string lease) =>
+        group == "/system.slice/issue779-app-" + lease + ".service"
+        || group == "/system.slice/appsurface-evidence-application-" + lease + ".service";
     private static void ApplicationRequire([DoesNotReturnIf(false)] bool condition) { if (!condition) throw ApplicationFailure("ASEVD402"); }
     private static EvidenceAdmissionException ApplicationFailure(string code) => new(code, code == "ASEVD402"
         ? "The protected application descriptor or request is invalid."

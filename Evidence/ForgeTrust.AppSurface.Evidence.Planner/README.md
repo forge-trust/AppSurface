@@ -97,3 +97,17 @@ The root parent still must independently inspect retained bundle bytes, ownershi
 | `ASEVD128` | A hunked unified diff does not include Git file headers. | Supply a Git-formatted diff or explicit changed paths. |
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).
+
+### Root selection of a compiled application
+
+`EvidenceClosedApplicationCatalogue.ResolveRoot` compares the requested application identity and exact
+entry digest against the already compiled table, independently resolved protected policy/plan, full
+bundle/capability metadata and the root's actual eight identity fields. Its return is definition metadata,
+not a process lease or an admission result. The [native C# owner](../ForgeTrust.AppSurface.Evidence.Supervision/application-execution.md)
+still audits and retains the selected file bytes before start. Production's empty table rejects with
+`ASEVD407`; pure candidate audit APIs cannot populate it.
+
+Private checkpoint-three builds accept an explicit `EvidenceC3RegistrationSource` generated from the
+finished, inspected AppHost/DCP payload. `C3` and `C3Sdk` images require that file and cannot be packed.
+Ordinary builds never include it. Validation records must bind the generated source and finished binary
+inventory separately from the repository commit; a build-time metadata file is not a runtime loader.

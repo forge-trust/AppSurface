@@ -58,6 +58,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     /// <summary>Gets only the original stderr-pump phase task; data creates no process authority.</summary>
     internal Task CancellationPhaseObserved => _cancellationPhase.Observed;
+    private EvidenceLinuxApplicationDescriptor? _application;
     private int _dispatchAttempted;
     private int _failed;
     private int _physicallySettled;
@@ -196,7 +197,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener,
-        CancellationToken token, SupervisionRunOutputBudget? runOutput = null, LinuxProducerWorkspace? producerWorkspace = null)
+        CancellationToken token, SupervisionRunOutputBudget? runOutput = null, LinuxProducerWorkspace? producerWorkspace = null, EvidenceLinuxApplicationDescriptor? application = null)
     {
         ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
@@ -205,11 +206,11 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         accounts.RequireOwnedBy(owner, token);
         workspace.RequireOwnedBy(owner, accounts, token);
         listener.RequireOwnedBy(owner, accounts, workspace, token);
-        var snapshot = new LinuxRunAccountSnapshot(accounts.WorkerUid, accounts.WorkerGid,
-            accounts.SubjectUid, accounts.SubjectGid, accounts.ResultsGid);
+        var snapshot = workspace.Layout.AccountData;
         owner.RequireLaunchInput(input, token);
         producerWorkspace?.RequireOwnedBy(owner, accounts, token);
         var worker = new LinuxWorkerProcess(input, owner, accounts, workspace, listener, snapshot, runOutput, producerWorkspace);
+        worker._application = application;
         accounts.RetainWorkerForCustody(worker, owner);
         return worker;
     }
@@ -862,7 +863,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private EvidenceWorkerDescriptorData Descriptor(LinuxProcessIdentity worker, TimeSpan remaining) =>
         EvidenceWorkerDescriptorData.Create(_input.Request, _owner.RunId, checked((int)worker.Pid),
             Environment.ProcessId, _accountData, _workspace.Layout, _workspace.OutputParentIdentity,
-            _input.EntrySha256, _input.PolicySha256, remaining);
+            _input.EntrySha256, _input.PolicySha256, remaining, _application);
 
     private void RequireActive(CancellationToken token)
     {

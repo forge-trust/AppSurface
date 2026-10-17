@@ -150,6 +150,23 @@ internal static partial class EvidenceClosedApplicationCatalogue
         return entry;
     }
 
+    /// <summary>Selects only a compiled registration for the authenticated root composition.</summary>
+    /// <remarks>The returned definition remains metadata. Native bundle auditing, process ownership,
+    /// worker admission and all eight independently created identities are still mandatory.</remarks>
+    internal static (EvidenceClosedApplicationDefinition Definition, string CatalogueDigest) ResolveRoot(
+        string applicationId, string entryDigest, EvidencePolicy policy, EvidencePlan plan,
+        EvidenceClosedApplicationIdentities identities)
+    {
+        var entry = CompiledEntries.SingleOrDefault(item => item.Id == applicationId)
+            ?? throw new EvidenceAdmissionException("ASEVD407", "No compiled restricted application registration is available.");
+        var catalogue = ComputeCatalogueDigest(CompiledEntries);
+        VerifyCandidateBinding(entry, catalogue, policy, plan, new(entry.Id, entry.Version, entry.BuildId,
+            catalogue, entryDigest, "github-actions", "linux-x64", "evidence-worker-linux-v2",
+            entry.Resources.Select(item => item.Declaration).ToArray(), entry.Producers.Select(item => item.Declaration).ToArray(),
+            entry.BundleFiles, entry.Capabilities, identities));
+        return (entry, catalogue);
+    }
+
     /// <summary>Resolves authenticated v2 application metadata against the immutable compiled table.</summary>
     /// <param name="policy">Complete independently read protected policy.</param>
     /// <param name="plan">Independently re-resolved plan for the protected changed paths.</param>
@@ -244,11 +261,15 @@ internal static partial class EvidenceClosedApplicationCatalogue
             Require(producer.ImplementationId == "coverage" && producer.ImplementationVersion == "1.0.0"
                 && producer.Declaration.Kind == producer.ImplementationId && producer.Declaration.Version == producer.ImplementationVersion);
         }
-        ValidatePolicyBounds(definition.Policy with { Profiles = [profile! with
+        ValidatePolicyBounds(definition.Policy with
+        {
+            Profiles = [profile! with
         {
             Resources = definition.Resources.Select(static item => item.Declaration).ToArray(),
             Producers = definition.Producers.Select(static item => item.Declaration).ToArray(),
-        }], Rules = [] });
+        }],
+            Rules = []
+        });
         Require(SameDeclarations(definition.Resources.Select(static item => item.Declaration).ToArray(), profile!.Resources, static item => item.Id));
         Require(SameDeclarations(definition.Producers.Select(static item => item.Declaration).ToArray(), profile.Producers, static item => item.Id));
         ValidateBundle(definition.BundleFiles);
@@ -422,7 +443,9 @@ internal static partial class EvidenceClosedApplicationCatalogue
     private static EvidenceResourceDeclaration FreezeResource(EvidenceResourceDeclaration value) => value with { Requires = ReadOnly(value.Requires) };
     private static EvidenceProducerDeclaration FreezeProducer(EvidenceProducerDeclaration value) => value with
     {
-        RequiredResources = ReadOnly(value.RequiredResources), AssertionIds = ReadOnly(value.AssertionIds), ArtifactSlots = ReadOnly(value.ArtifactSlots),
+        RequiredResources = ReadOnly(value.RequiredResources),
+        AssertionIds = ReadOnly(value.AssertionIds),
+        ArtifactSlots = ReadOnly(value.ArtifactSlots),
     };
     private static IReadOnlyList<T> ReadOnly<T>(IEnumerable<T> values) => Array.AsReadOnly(values.ToArray());
     private static bool Count<T>(IReadOnlyList<T>? values, int maximum) => values is not null && values.Count <= maximum;

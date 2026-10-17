@@ -39,7 +39,7 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
         LinuxRunAccounts accounts, LinuxRunWorkspace workerWorkspace, LinuxProducerWorkspace workspace,
         SupervisionWorkRegistry ledger, SupervisionRunOutputBudget output, CancellationToken token)
     {
-        _ = EvidenceCoverageObservationPlan.FromInput(input, token);
+        _ = input.Request.ApplicationId is null ? EvidenceCoverageObservationPlan.FromInput(input, token) : EvidenceApplicationSelection.ResolvePlan(input, token);
         owner.RequireLaunchInput(input, token);
         workspace.RequireOwnedBy(owner, accounts, token);
         var producer = LinuxProducerProcess.Create(input, owner, accounts, workerWorkspace, workspace, ledger, output, token);

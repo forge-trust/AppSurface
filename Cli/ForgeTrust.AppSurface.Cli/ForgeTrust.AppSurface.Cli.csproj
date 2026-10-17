@@ -34,6 +34,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="CoverageRunDrivers.cs" />
     <Compile Remove="CoverageRunWatchdog.cs" />
     <Compile Remove="CoverageRunArtifactReader.cs" />

@@ -110,6 +110,15 @@ consumer-proof registration remain closed, and Observation results retain their 
 
 ## Checkpoint 3: restricted application and SDK parity
 
+**Implementation checkpoint (2026-10-17):** Restored the successful checkpoint-two revision
+`300794e83970f9f36962ef91f1c4b985191f70ac` into a persistent checkout under the primary workspace's
+ignored artifacts directory. The C# application owner, exact bundle custody, optional isolated accounts,
+Unix-peer HTTP readiness, DCP identity and aggregate shutdown are implemented. Local source validation
+passed 1,712 supervision and 557 focused CLI tests with no compiler/analyzer diagnostics; the private
+C3 SDK image and generated catalogue metadata also compile. The [checkpoint-three workflow](../../.github/workflows/issue779-checkpoint3-application.yml)
+is the pending native gate. These local results establish neither Linux acceptance nor Trusted eligibility.
+
+
 **Scope:** the existing compiled restricted application contract, actual AppHost/DCP/resource startup, readiness, and joined shutdown. Use a compiled test registration to validate mechanics; production catalogue and proof registry remain closed.
 
 ### Work

@@ -22,4 +22,12 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk'">
+    <Compile Include="$(EvidenceC3RegistrationSource)" />
+  </ItemGroup>
+  <Target Name="RequirePrivateC3RegistrationSource" BeforeTargets="CoreCompile"
+          Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk'">
+    <Error Condition="'$(EvidenceC3RegistrationSource)' == '' or !Exists('$(EvidenceC3RegistrationSource)')"
+           Text="Private C3 images require the independently generated immutable registration source." />
+  </Target>
 </Project>

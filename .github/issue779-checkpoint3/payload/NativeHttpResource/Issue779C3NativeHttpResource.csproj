@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>NativeHttpResource</AssemblyName>
+    <RootNamespace>NativeHttpResource</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);$(C3Variant)</DefineConstants>
+  </PropertyGroup>
+</Project>

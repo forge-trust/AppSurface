@@ -342,17 +342,63 @@ public sealed class EvidenceSupervisorRequestTests
         Reject(Encoding.UTF8.GetBytes(escapedSurrogate));
     }
 
+    [Fact]
+    public void ApplicationIdentityPairRemainsMetadataAndCannotSupplyACommandOrRegistration()
+    {
+        var data = Valid();
+        data["application_id"] = "native-http";
+        data["application_entry_digest"] = new string('a', 64);
+        var request = Parse(data);
+        Assert.Equal("native-http", request.ApplicationId);
+        Assert.Equal(new string('a', 64), request.ApplicationEntryDigest);
+        data["application_command"] = "/tmp/private-canary";
+        Reject(data);
+    }
+
+    [Theory]
+    [InlineData("application_id")]
+    [InlineData("application_entry_digest")]
+    public void PartialApplicationSelectionCannotStartAnAttempt(string field)
+    {
+        var data = Valid();
+        data[field] = field == "application_id" ? "native-http" : new string('a', 64);
+        Reject(data);
+    }
+
+    [Theory]
+    [InlineData("-private-canary", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("native/http", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("native-http", "private-canary")]
+    public void InvalidApplicationIdentityOrDigestIsClosed(string id, string digest)
+    {
+        var data = Valid();
+        data["application_id"] = id;
+        data["application_entry_digest"] = digest;
+        Reject(data);
+    }
+
     private static Dictionary<string, object?> Valid() => new(StringComparer.Ordinal)
     {
-        ["schema"] = "evidence-supervisor-linux-v1", ["mode"] = "observation",
-        ["tool_root"] = "/opt/tool", ["runtime_root"] = "/opt/runtime", ["runtime_host"] = "/opt/runtime/dotnet",
-        ["entry_path"] = "/opt/tool/Worker.dll", ["policy_file"] = "/opt/tool/policy.json",
-        ["subject_root"] = "/work/subject", ["base_revision"] = new string('a', 40),
-        ["subject_revision"] = new string('b', 40), ["workflow_identity"] = "workflow-1",
-        ["paths"] = new[] { "src/Calculation.cs" }, ["observation_profile_ids"] = new[] { "profile-1" },
-        ["observation_producer_ids"] = new[] { "producer-1" }, ["job_deadline_utc"] = "2001-01-01T00:00:00Z",
-        ["admission_seconds"] = 10, ["start_seconds"] = 30, ["collection_seconds"] = 15,
-        ["cleanup_seconds"] = 60, ["stopping_seconds"] = 1,
+        ["schema"] = "evidence-supervisor-linux-v1",
+        ["mode"] = "observation",
+        ["tool_root"] = "/opt/tool",
+        ["runtime_root"] = "/opt/runtime",
+        ["runtime_host"] = "/opt/runtime/dotnet",
+        ["entry_path"] = "/opt/tool/Worker.dll",
+        ["policy_file"] = "/opt/tool/policy.json",
+        ["subject_root"] = "/work/subject",
+        ["base_revision"] = new string('a', 40),
+        ["subject_revision"] = new string('b', 40),
+        ["workflow_identity"] = "workflow-1",
+        ["paths"] = new[] { "src/Calculation.cs" },
+        ["observation_profile_ids"] = new[] { "profile-1" },
+        ["observation_producer_ids"] = new[] { "producer-1" },
+        ["job_deadline_utc"] = "2001-01-01T00:00:00Z",
+        ["admission_seconds"] = 10,
+        ["start_seconds"] = 30,
+        ["collection_seconds"] = 15,
+        ["cleanup_seconds"] = 60,
+        ["stopping_seconds"] = 1,
     };
 
     private static EvidenceSupervisorRequest Parse(Dictionary<string, object?> data) =>

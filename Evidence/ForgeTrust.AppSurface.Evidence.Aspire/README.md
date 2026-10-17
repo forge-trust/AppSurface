@@ -92,3 +92,21 @@ For release scope, an accepted v1 envelope is represented as `ValidatedNotAttest
 - Do not use reflection or assembly scanning to find producers; explicit registration is the trust boundary.
 
 Read next: [contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md), [planner](../ForgeTrust.AppSurface.Evidence.Planner/README.md), and the [E2E recipe](../../guides/evidencehost-cookbook.md#resource-backed-browser-e2e).
+
+## Shared C# application owner
+
+The protected SDK entry uses the same [C# application owner](../ForgeTrust.AppSurface.Evidence.Supervision/application-execution.md)
+and control protocol as the CLI adapter. Consumer configuration supplies complete registration metadata;
+only a matching compiled catalogue entry can select AppHost/DCP/resource execution. Calling the public
+application factory API still cannot enroll an application or grant a protected process capability.
+
+The same deployed CLI image can host the SDK adapter in the private checkpoint-three parity image.
+Its worker invokes the public `EvidenceHostBootstrap.RunAsync(EvidenceExecutionRequest, CancellationToken)`
+path, including tracked start/readiness stages, the shared coverage registration, joined local disposal
+and protected artifact verification. Root containment and account/storage closure remain in
+`Evidence.Supervision`; that core has no dependency on Aspire.
+
+Aspire 13.4.4 remains pinned. The central MessagePack pin uses the compatible 2.5.303 patch for
+[GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h), with matching content-hash
+locks and normal NuGet auditing. This dependency update does not change application capabilities,
+registration policy or admission.

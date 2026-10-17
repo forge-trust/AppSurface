@@ -1,0 +1,224 @@
+name: Issue 779 checkpoint 3 native Aspire application
+
+on:
+  push:
+    branches: [codex/issue779-checkpoint3-application-20261017]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue779-checkpoint3-application-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-native-application:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      NUGET_XMLDOC_MODE: skip
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/checkpoint3-sdk
+        with:
+          dotnet-version: 10.0.401
+
+      - name: Initialize private evidence directory and bind complete source
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/checkpoint3-evidence"
+          mkdir -m 0700 "$evidence"
+          printf 'CHECKPOINT3_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+
+      - name: Restore and run ordinary None core and focused CLI tests with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 0700 "$CHECKPOINT3_EVIDENCE/tests"
+          timeout --signal=KILL 180 dotnet restore Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/core-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --logger 'trx;LogFileName=core-supervision.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/core-test.log" 2>&1
+          timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/cli-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --filter 'FullyQualifiedName~CoverageProtectedOutputRelayTests|FullyQualifiedName~EvidenceRestrictedCoverageProducerTests|FullyQualifiedName~EvidenceRestrictedCoverageFailureTests|FullyQualifiedName~EvidenceRestrictedCoverageFactoryTests|FullyQualifiedName~EvidenceClosedApplicationCatalogueTests|FullyQualifiedName~EvidenceLinuxApplicationProtocolTests|FullyQualifiedName~EvidenceProtectedCliApplicationStagesTests' --logger 'trx;LogFileName=cli-focused.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/cli-focused-test.log" 2>&1
+
+      - name: Locked restore the native HTTP resource and Linux Aspire AppHost payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          test -f .github/issue779-checkpoint3/payload/AspireChild/packages.linux-x64.lock.json
+          timeout --signal=KILL 180 dotnet restore .github/issue779-checkpoint3/payload/NativeHttpResource/Issue779C3NativeHttpResource.csproj --locked-mode --disable-parallel -warnaserror > "$CHECKPOINT3_EVIDENCE/native-resource-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet restore .github/issue779-checkpoint3/payload/AspireChild/Issue779C3AppHost.csproj --locked-mode --disable-parallel -warnaserror > "$CHECKPOINT3_EVIDENCE/apphost-linux-restore.log" 2>&1
+
+      - name: Build four resource variants and matching AppHost payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          resource_project=.github/issue779-checkpoint3/payload/NativeHttpResource/Issue779C3NativeHttpResource.csproj
+          apphost_project=.github/issue779-checkpoint3/payload/AspireChild/Issue779C3AppHost.csproj
+          payload_root="$RUNNER_TEMP/checkpoint3-payload-builds"
+          mkdir -m 0700 "$payload_root"
+          cases=(normal readiness factory-stall stuck-descendant)
+          variants=("" C3Readiness C3FactoryStall C3StuckDescendant)
+          for index in "${!cases[@]}"; do
+            case_name="${cases[$index]}"
+            variant="${variants[$index]}"
+            resource_output="$payload_root/resource-$case_name"
+            apphost_output="$payload_root/payload-$case_name"
+            mkdir -m 0700 "$resource_output" "$apphost_output"
+            timeout --signal=KILL 180 dotnet build "$resource_project" --no-restore -c Debug -warnaserror -p:UseSharedCompilation=false -p:C3Variant="$variant" -o "$resource_output" > "$CHECKPOINT3_EVIDENCE/resource-$case_name-build.log" 2>&1
+            timeout --signal=KILL 180 dotnet build "$apphost_project" --no-restore -c Debug -warnaserror -p:UseSharedCompilation=false -p:C3Variant="$variant" -p:BuildProjectReferences=false -p:C3ResourceOutput="$resource_output" -o "$apphost_output" > "$CHECKPOINT3_EVIDENCE/apphost-$case_name-build.log" 2>&1
+            test -s "$apphost_output/AspireChild.dll"
+            test -s "$apphost_output/resource/NativeHttpResource.dll"
+            test -s "$apphost_output/dcp/dcp"
+          done
+          printf 'CHECKPOINT3_PAYLOAD_ROOT=%s\n' "$payload_root" >> "$GITHUB_ENV"
+
+      - name: Inventory finished payloads and emit the generated C3 registration source
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          prepared="$RUNNER_TEMP/checkpoint3-prepared"
+          registration="$RUNNER_TEMP/checkpoint3-generated/EvidencePrivateC3Registration.g.cs"
+          mkdir -m 0700 "$RUNNER_TEMP/checkpoint3-generated"
+          python3 -B .github/issue779-checkpoint3/prepare_payload.py \
+            --normal "$CHECKPOINT3_PAYLOAD_ROOT/payload-normal" \
+            --readiness "$CHECKPOINT3_PAYLOAD_ROOT/payload-readiness" \
+            --factory-stall "$CHECKPOINT3_PAYLOAD_ROOT/payload-factory-stall" \
+            --stuck-descendant "$CHECKPOINT3_PAYLOAD_ROOT/payload-stuck-descendant" \
+            --output-root "$prepared" \
+            --registration-source "$registration" > "$CHECKPOINT3_EVIDENCE/payload-preparation.log"
+          cp "$prepared/payload-preparation.json" "$CHECKPOINT3_EVIDENCE/payload-preparation.json"
+          cp "$registration" "$CHECKPOINT3_EVIDENCE/generated-registration-source.cs"
+          sha256sum "$registration" | cut -d ' ' -f 1 > "$CHECKPOINT3_EVIDENCE/generated-registration-source.sha256"
+          python3 -B - "$registration" "$prepared/payload-preparation.json" <<'PY'
+          import hashlib, json, pathlib, sys
+          source = pathlib.Path(sys.argv[1]).read_bytes()
+          receipt = json.loads(pathlib.Path(sys.argv[2]).read_bytes())
+          assert receipt["schema"] == "issue779-c3-preparation-input-v1"
+          assert receipt["registration_source_sha256"] == hashlib.sha256(source).hexdigest()
+          assert set(receipt["variants"]) == {"normal", "readiness", "factory-stall", "stuck-descendant"}
+          PY
+          printf 'CHECKPOINT3_PREPARED=%s\n' "$prepared" >> "$GITHUB_ENV"
+          printf 'CHECKPOINT3_REGISTRATION_SOURCE=%s\n' "$registration" >> "$GITHUB_ENV"
+
+      - name: Restore and publish the C3 CLI image with generated application registrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli=Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+          tool="$RUNNER_TEMP/checkpoint3-tool"
+          mkdir -m 0700 "$tool"
+          timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$tool" > "$CHECKPOINT3_EVIDENCE/cli-c3-publish.log" 2>&1
+          mkdir -p "$tool/reportgenerator/net10.0"
+          cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$tool/reportgenerator/net10.0/"
+          test -s "$tool/ForgeTrust.AppSurface.Cli.dll"
+
+      - name: Restore and publish the C3Sdk CLI image with the same generated registrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli=Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+          sdk_tool="$RUNNER_TEMP/checkpoint3-sdk-tool"
+          mkdir -m 0700 "$sdk_tool"
+          timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          mkdir -p "$sdk_tool/reportgenerator/net10.0"
+          cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$sdk_tool/reportgenerator/net10.0/"
+          test -s "$sdk_tool/ForgeTrust.AppSurface.Cli.dll"
+
+      - name: Build C3 registration digest helper and bind the compiled table
+        shell: bash
+        run: |
+          set -euo pipefail
+          digest_project=.github/issue779-checkpoint3/registration-digest/RegistrationDigest.csproj
+          digest_output="$RUNNER_TEMP/checkpoint3-digest-tool"
+          mkdir -m 0700 "$digest_output"
+          timeout --signal=KILL 180 dotnet restore "$digest_project" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/digest-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$digest_project" --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$digest_output" > "$CHECKPOINT3_EVIDENCE/digest-publish.log" 2>&1
+          timeout --signal=KILL 60 dotnet "$digest_output/ForgeTrust.AppSurface.Cli.dll" > "$CHECKPOINT3_EVIDENCE/registration-digests.json"
+          python3 -B - "$CHECKPOINT3_EVIDENCE/registration-digests.json" <<'PY'
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_bytes())
+          assert value["schema"] == "issue779-c3-registration-digests-v1"
+          assert len(value["entries"]) == 4
+          assert {row["application_id"] for row in value["entries"]} == {
+              "issue779-c3-normal", "issue779-c3-readiness",
+              "issue779-c3-factory-stall", "issue779-c3-stuck-descendant",
+          }
+          PY
+          printf 'CHECKPOINT3_TOOL=%s\n' "$RUNNER_TEMP/checkpoint3-tool" >> "$GITHUB_ENV"
+          printf 'CHECKPOINT3_SDK_TOOL=%s\n' "$RUNNER_TEMP/checkpoint3-sdk-tool" >> "$GITHUB_ENV"
+
+      - name: Acquire only the subject lock packages with the pinned C2 NuGet content hasher
+        shell: bash
+        run: |
+          set -euo pipefail
+          hasher_project=.github/issue779-checkpoint2/NuGetContentHash/NuGetContentHash.csproj
+          hasher_output="$RUNNER_TEMP/checkpoint3-package-hasher"
+          package_cache="$RUNNER_TEMP/checkpoint3-subject-packages"
+          mkdir -m 0700 "$hasher_output"
+          timeout --signal=KILL 180 dotnet restore "$hasher_project" --locked-mode --disable-parallel -warnaserror > "$CHECKPOINT3_EVIDENCE/package-hasher-restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet build "$hasher_project" --no-restore -warnaserror -p:UseSharedCompilation=false -o "$hasher_output" > "$CHECKPOINT3_EVIDENCE/package-hasher-build.log" 2>&1
+          timeout --signal=KILL 180 python3 -B .github/issue779-checkpoint2/run-native.py --hash-runtime "$(command -v dotnet)" --package-hasher "$hasher_output/NuGetContentHash.dll" --acquire-packages .github/issue779-checkpoint3/subject/packages.lock.json --package-cache "$package_cache" > "$CHECKPOINT3_EVIDENCE/package-acquisition.json"
+          cp -R "$package_cache" "$CHECKPOINT3_TOOL/nuget"
+          cp -R "$package_cache" "$CHECKPOINT3_SDK_TOOL/nuget"
+          test -s "$CHECKPOINT3_TOOL/reportgenerator/net10.0/ReportGenerator.dll"
+          test -s "$CHECKPOINT3_SDK_TOOL/reportgenerator/net10.0/ReportGenerator.dll"
+          CHECKPOINT3_SDK_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"
+          printf 'CHECKPOINT3_SDK_ROOT=%s\n' "$CHECKPOINT3_SDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Run the seven native C3 application controls under the root CSharp supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          ulimit -c 0
+          timeout --signal=KILL 1200 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint3/run-native.py \
+            --tool "$CHECKPOINT3_TOOL" \
+            --sdk-tool "$CHECKPOINT3_SDK_TOOL" \
+            --runtime "$CHECKPOINT3_SDK_ROOT" \
+            --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint3/subject" \
+            --prepared "$CHECKPOINT3_PREPARED/payload-preparation.json" \
+            --digests "$CHECKPOINT3_EVIDENCE/registration-digests.json" \
+            --output "$CHECKPOINT3_EVIDENCE/native" \
+            --source "$GITHUB_SHA" \
+            --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
+
+      - name: Recheck complete source after preparation, builds, and native execution
+        if: always()
+        shell: bash
+        run: |
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$CHECKPOINT3_EVIDENCE/source.json" --verify
+
+      - name: Verify bounded private evidence retention
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$CHECKPOINT3_EVIDENCE"
+          python3 -B .github/issue779-checkpoint2/check-retention.py "$CHECKPOINT3_EVIDENCE"
+
+      - name: Retain source, generated registration, preparation, digest, and bounded native receipts
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint3-evidence
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

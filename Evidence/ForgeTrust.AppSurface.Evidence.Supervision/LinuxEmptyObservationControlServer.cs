@@ -6,7 +6,7 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Owns authenticated control I/O for the empty and closed coverage Observation checkpoints.</summary>
+/// <summary>Owns authenticated control I/O for empty, coverage, and compile-selected application Observations.</summary>
 /// <remarks>
 /// The private factory accepts only the same native owners and an already started same-image worker. It
 /// independently resolves protected policy/diff bytes; no caller-injected plan, handler, producer or join
@@ -28,6 +28,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly LinuxRunAccounts _accounts;
     private readonly LinuxRunWorkspace _workspace;
     private LinuxCoverageControlOperations? _coverage;
+    private LinuxApplicationProcess? _application;
     private LinuxN04CheckpointOwner? _n04;
     private LinuxN07CheckpointOwner? _n07;
     private int _n07OriginalTasksCompleted;
@@ -147,9 +148,14 @@ internal sealed class LinuxEmptyObservationControlServer
             throw Rejected();
         return System.Text.Json.JsonSerializer.Serialize(new
         {
-            schema = "issue779-cancellation-signal-v1", generation = _owner.RunId.ToString("N"),
-            @case = EvidenceOriginalCancellationCheckpoint.Case, signal = 2, syscall_exit = 0,
-            original_signal_task_joined = true, ready_committed = true, phase_observed = true,
+            schema = "issue779-cancellation-signal-v1",
+            generation = _owner.RunId.ToString("N"),
+            @case = EvidenceOriginalCancellationCheckpoint.Case,
+            signal = 2,
+            syscall_exit = 0,
+            original_signal_task_joined = true,
+            ready_committed = true,
+            phase_observed = true,
             native_authority = false
         });
     }
@@ -223,14 +229,16 @@ internal sealed class LinuxEmptyObservationControlServer
     internal static LinuxEmptyObservationControlServer Create(EvidenceProtectedLaunchInput input,
         LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
         LinuxControlListener listener, LinuxWorkerProcess worker, CancellationToken token,
-        LinuxProducerWorkspace? producerWorkspace = null, SupervisionRunOutputBudget? output = null)
+        LinuxProducerWorkspace? producerWorkspace = null, SupervisionRunOutputBudget? output = null,
+        LinuxApplicationWorkspace? applicationWorkspace = null, EvidenceApplicationSelection? applicationSelection = null)
     {
         ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(listener); ArgumentNullException.ThrowIfNull(worker);
         worker.ClaimControlServer(input, owner, accounts, workspace, listener, token);
         var plan = input.Request.ObservationProducerIds.Count == 0
-            ? EvidenceEmptyObservationPlan.FromInput(input, token) : EvidenceCoverageObservationPlan.FromInput(input, token);
+            ? EvidenceEmptyObservationPlan.FromInput(input, token) : input.Request.ApplicationId is null
+                ? EvidenceCoverageObservationPlan.FromInput(input, token) : EvidenceApplicationSelection.ResolvePlan(input, token);
         _ = worker.RequireWorker(token);
         worker.RequireServerOwner(input, owner, accounts, workspace, listener, token);
         var server = new LinuxEmptyObservationControlServer(input, owner, accounts, workspace, listener, worker, null);
@@ -239,6 +247,12 @@ internal sealed class LinuxEmptyObservationControlServer
             if (producerWorkspace is null || output is null) throw Rejected();
             server._coverage = LinuxCoverageControlOperations.Create(input, owner, accounts, workspace,
                 producerWorkspace, server._ledger, output, token);
+        }
+        if (applicationWorkspace is not null || applicationSelection is not null)
+        {
+            if (applicationWorkspace is null || applicationSelection is null || producerWorkspace is null || output is null) throw Rejected();
+            server._application = LinuxApplicationProcess.Create(input, owner, accounts, workspace, producerWorkspace,
+                applicationWorkspace, applicationSelection, server._ledger, output, token);
         }
         return server;
     }
@@ -402,166 +416,168 @@ internal sealed class LinuxEmptyObservationControlServer
         var stage = LinuxControlFailureStage.PeerCheck;
         try
         {
-        var peer = _worker.RequireWorker(token);
-        stage = LinuxControlFailureStage.WorkerExitTask;
-        var naturalExit = _worker.WaitForExitAsync();
-        stage = LinuxControlFailureStage.RequestLifetime;
-        using var requests = CancellationTokenSource.CreateLinkedTokenSource(token, _owner.TeardownCancellation);
-        stage = LinuxControlFailureStage.RequestLifetime;
-        requests.CancelAfter(_owner.CleanupRemaining);
-        stage = LinuxControlFailureStage.RequestLifetime;
-        using var accepts = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
-        stage = LinuxControlFailureStage.RequestLifetime;
-        var handlers = new List<Task>(SupervisionWorkRegistry.MaximumActiveControls);
-        Task<LinuxControlConnection>? pending = null;
-        using var cancellationLifetime = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
-        var signalDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _cancellationSignal = EvidenceNativeQualification.CancellationEnabled
-            ? SignalCancellationOwnedAsync(signalDispatch.Task, cancellationLifetime.Token)
-            : Task.CompletedTask;
-        signalDispatch.SetResult(); // Task retained before its actual wait/syscall dispatch, outside gates.
-        try
-        {
-            while (!_exitIntent.Task.IsCompleted && !_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
+            var peer = _worker.RequireWorker(token);
+            stage = LinuxControlFailureStage.WorkerExitTask;
+            var naturalExit = _worker.WaitForExitAsync();
+            stage = LinuxControlFailureStage.RequestLifetime;
+            using var requests = CancellationTokenSource.CreateLinkedTokenSource(token, _owner.TeardownCancellation);
+            stage = LinuxControlFailureStage.RequestLifetime;
+            requests.CancelAfter(_owner.CleanupRemaining);
+            stage = LinuxControlFailureStage.RequestLifetime;
+            using var accepts = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
+            stage = LinuxControlFailureStage.RequestLifetime;
+            var handlers = new List<Task>(SupervisionWorkRegistry.MaximumActiveControls);
+            Task<LinuxControlConnection>? pending = null;
+            using var cancellationLifetime = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
+            var signalDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _cancellationSignal = EvidenceNativeQualification.CancellationEnabled
+                ? SignalCancellationOwnedAsync(signalDispatch.Task, cancellationLifetime.Token)
+                : Task.CompletedTask;
+            signalDispatch.SetResult(); // Task retained before its actual wait/syscall dispatch, outside gates.
+            try
             {
-                stage = LinuxControlFailureStage.AcceptLoop;
-                requests.Token.ThrowIfCancellationRequested();
-                if (_cancellationFailed.Task.IsCompleted) await _cancellationSignal.ConfigureAwait(false);
-                // Join each original completed handler before removing its retained task. No proxy
-                // wait or success snapshot substitutes for observing the actual procedure.
-                for (var index = handlers.Count - 1; index >= 0; index--)
-                    if (handlers[index].IsCompleted)
+                while (!_exitIntent.Task.IsCompleted && !_exitCommitted.Task.IsCompleted && !naturalExit.IsCompleted)
+                {
+                    stage = LinuxControlFailureStage.AcceptLoop;
+                    requests.Token.ThrowIfCancellationRequested();
+                    if (_cancellationFailed.Task.IsCompleted) await _cancellationSignal.ConfigureAwait(false);
+                    // Join each original completed handler before removing its retained task. No proxy
+                    // wait or success snapshot substitutes for observing the actual procedure.
+                    for (var index = handlers.Count - 1; index >= 0; index--)
+                        if (handlers[index].IsCompleted)
+                        {
+                            stage = LinuxControlFailureStage.HandlerJoin;
+                            await handlers[index].ConfigureAwait(false);
+                            handlers.RemoveAt(index);
+                        }
+                    if (handlers.Count == SupervisionWorkRegistry.MaximumActiveControls)
                     {
-                        stage = LinuxControlFailureStage.HandlerJoin;
-                        await handlers[index].ConfigureAwait(false);
-                        handlers.RemoveAt(index);
+                        stage = LinuxControlFailureStage.CapacityWait;
+                        await Task.WhenAny(handlers.Append(_exitIntent.Task).Append(_exitCommitted.Task).Append(naturalExit).Append(_cancellationFailed.Task))
+                            .WaitAsync(requests.Token).ConfigureAwait(false);
+                        continue;
                     }
-                if (handlers.Count == SupervisionWorkRegistry.MaximumActiveControls)
-                {
-                    stage = LinuxControlFailureStage.CapacityWait;
-                    await Task.WhenAny(handlers.Append(_exitIntent.Task).Append(_exitCommitted.Task).Append(naturalExit).Append(_cancellationFailed.Task))
+                    // This pause occurs before RegisterAccept's synchronous worker/name checks.
+                    // It is separate from the irreversible EXIT admission-close barrier.
+                    if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                    if (_n07 is not null)
+                    {
+                        stage = LinuxControlFailureStage.N07BeforeNextAccept;
+                        await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+                    }
+                    stage = LinuxControlFailureStage.Accept;
+                    SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
+                    lock (_executionGate)
+                    {
+                        if (_exitIntent.Task.IsCompleted) break;
+                        registeredAccept = _listener.RegisterAccept(peer, accepts.Token);
+                    }
+                    pending = registeredAccept.Task;
+                    registeredAccept.Dispatch(); // Actual accept work starts outside both admission gates.
+                    stage = LinuxControlFailureStage.AcceptJoin;
+                    var next = await Task.WhenAny(pending, _exitIntent.Task, _exitCommitted.Task, naturalExit, _cancellationFailed.Task)
                         .WaitAsync(requests.Token).ConfigureAwait(false);
-                    continue;
+                    if (ReferenceEquals(next, _cancellationFailed.Task)) await _cancellationSignal.ConfigureAwait(false);
+                    if (_exitIntent.Task.IsCompleted || !ReferenceEquals(next, pending)) break;
+                    stage = LinuxControlFailureStage.AcceptJoin;
+                    var connection = await pending.ConfigureAwait(false);
+                    pending = null;
+                    stage = LinuxControlFailureStage.ControlRegistration;
+                    var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    lock (_executionGate)
+                    {
+                        if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
+                        _n04?.ReserveNextAcceptBeforeHandlerDispatch();
+                        _n07?.ReserveNextAcceptBeforeHandlerDispatch();
+                        var control = _ledger.BeginControl();
+                        stage = LinuxControlFailureStage.HandlerDispatch;
+                        handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
+                    }
+                    dispatch.SetResult();
                 }
-                // This pause occurs before RegisterAccept's synchronous worker/name checks.
-                // It is separate from the irreversible EXIT admission-close barrier.
-                if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
-                if (_n07 is not null)
-                {
-                    stage = LinuxControlFailureStage.N07BeforeNextAccept;
-                    await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
-                }
-                stage = LinuxControlFailureStage.Accept;
-                SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
-                lock (_executionGate)
-                {
-                    if (_exitIntent.Task.IsCompleted) break;
-                    registeredAccept = _listener.RegisterAccept(peer, accepts.Token);
-                }
-                pending = registeredAccept.Task;
-                registeredAccept.Dispatch(); // Actual accept work starts outside both admission gates.
-                stage = LinuxControlFailureStage.AcceptJoin;
-                var next = await Task.WhenAny(pending, _exitIntent.Task, _exitCommitted.Task, naturalExit, _cancellationFailed.Task)
-                    .WaitAsync(requests.Token).ConfigureAwait(false);
-                if (ReferenceEquals(next, _cancellationFailed.Task)) await _cancellationSignal.ConfigureAwait(false);
-                if (_exitIntent.Task.IsCompleted || !ReferenceEquals(next, pending)) break;
-                stage = LinuxControlFailureStage.AcceptJoin;
-                var connection = await pending.ConfigureAwait(false);
-                pending = null;
-                stage = LinuxControlFailureStage.ControlRegistration;
-                var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                lock (_executionGate)
-                {
-                    if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
-                    _n04?.ReserveNextAcceptBeforeHandlerDispatch();
-                    _n07?.ReserveNextAcceptBeforeHandlerDispatch();
-                    var control = _ledger.BeginControl();
-                    stage = LinuxControlFailureStage.HandlerDispatch;
-                    handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
-                }
-                dispatch.SetResult();
             }
+            catch (Exception error) when (Recoverable(error))
+            {
+                _failures.Capture(stage, null, error,
+                    stage is LinuxControlFailureStage.Accept or LinuxControlFailureStage.AcceptJoin ? _listener.FirstFailure : null);
+                _sequence.RecordFailure();
+            }
+            finally
+            {
+                var ioJoined = true;
+                // Cancel and join this original added task under the same requests/root deadline.
+                try { cancellationLifetime.Cancel(); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                try { await _cancellationSignal.ConfigureAwait(false); }
+                catch (OperationCanceledException) when (cancellationLifetime.IsCancellationRequested) { }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                stage = LinuxControlFailureStage.AcceptCancel;
+                try { accepts.Cancel(); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+                // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
+                try { if (_n04 is not null) await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error))
+                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                try { if (_n07 is not null) await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error))
+                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
+                // closes all results first to interrupt their original I/O, as before.
+                var exitIntent = _exitIntent.Task.IsCompleted;
+                stage = LinuxControlFailureStage.ListenerClose;
+                try
+                {
+                    if (exitIntent) await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
+                    else await _listener.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
+                if (pending is not null)
+                {
+                    stage = LinuxControlFailureStage.PendingAcceptJoin;
+                    try { await pending.ConfigureAwait(false); }
+                    catch (Exception error) when (Recoverable(error)) { /* Listener drain independently latches unexpected failure; pending accept cancellation is expected. */ }
+                }
+                stage = LinuxControlFailureStage.HandlersJoin;
+                try { await Task.WhenAll(handlers).ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                if (exitIntent)
+                {
+                    stage = LinuxControlFailureStage.ListenerClose;
+                    try { await _listener.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
+                }
+                stage = LinuxControlFailureStage.DescendantsStop;
+                try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+                stage = LinuxControlFailureStage.ControlsJoin;
+                try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
+                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+                if (_n07 is not null && (pending is null || pending.IsCompleted)
+                    && handlers.All(task => task.IsCompleted) && _ledger.ActiveControls == 0)
+                    Interlocked.Exchange(ref _n07OriginalTasksCompleted, 1);
+                if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
+                    Interlocked.Exchange(ref _ioJoined, 1);
+            }
+            stage = LinuxControlFailureStage.FinalCancellation;
+            token.ThrowIfCancellationRequested();
+            stage = LinuxControlFailureStage.CleanupBound;
+            RequireCleanupBound();
+            stage = LinuxControlFailureStage.OwnerCheck;
+            _owner.RequireControlIdentity(default);
+            if (!_sequence.ExitAcknowledged || !_ledger.IsSettled)
+            {
+                _failures.Capture(naturalExit.IsCompleted && !_exitCommitted.Task.IsCompleted
+                    ? LinuxControlFailureStage.WorkerTerminalTaskCompleted : LinuxControlFailureStage.ProtocolIncomplete, null, null);
+                throw Rejected();
+            }
+            stage = LinuxControlFailureStage.CleanupBound;
+            RequireCleanupBound();
         }
         catch (Exception error) when (Recoverable(error))
         {
             _failures.Capture(stage, null, error,
-                stage is LinuxControlFailureStage.Accept or LinuxControlFailureStage.AcceptJoin ? _listener.FirstFailure : null);
-            _sequence.RecordFailure();
+            stage == LinuxControlFailureStage.PeerCheck ? _worker.IdentityFailure : null); throw;
         }
-        finally
-        {
-            var ioJoined = true;
-            // Cancel and join this original added task under the same requests/root deadline.
-            try { cancellationLifetime.Cancel(); }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            try { await _cancellationSignal.ConfigureAwait(false); }
-            catch (OperationCanceledException) when (cancellationLifetime.IsCancellationRequested) { }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            stage = LinuxControlFailureStage.AcceptCancel;
-            try { accepts.Cancel(); }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
-            // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
-            try { if (_n04 is not null) await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error))
-            { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            try { if (_n07 is not null) await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error))
-            { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
-            // closes all results first to interrupt their original I/O, as before.
-            var exitIntent = _exitIntent.Task.IsCompleted;
-            stage = LinuxControlFailureStage.ListenerClose;
-            try
-            {
-                if (exitIntent) await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
-                else await _listener.DisposeAsync().ConfigureAwait(false);
-            }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
-            if (pending is not null)
-            {
-                stage = LinuxControlFailureStage.PendingAcceptJoin;
-                try { await pending.ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { /* Listener drain independently latches unexpected failure; pending accept cancellation is expected. */ }
-            }
-            stage = LinuxControlFailureStage.HandlersJoin;
-            try { await Task.WhenAll(handlers).ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            if (exitIntent)
-            {
-                stage = LinuxControlFailureStage.ListenerClose;
-                try { await _listener.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
-            }
-            stage = LinuxControlFailureStage.DescendantsStop;
-            try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
-            stage = LinuxControlFailureStage.ControlsJoin;
-            try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-            if (_n07 is not null && (pending is null || pending.IsCompleted)
-                && handlers.All(task => task.IsCompleted) && _ledger.ActiveControls == 0)
-                Interlocked.Exchange(ref _n07OriginalTasksCompleted, 1);
-            if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
-                Interlocked.Exchange(ref _ioJoined, 1);
-        }
-        stage = LinuxControlFailureStage.FinalCancellation;
-        token.ThrowIfCancellationRequested();
-        stage = LinuxControlFailureStage.CleanupBound;
-        RequireCleanupBound();
-        stage = LinuxControlFailureStage.OwnerCheck;
-        _owner.RequireControlIdentity(default);
-        if (!_sequence.ExitAcknowledged || !_ledger.IsSettled)
-        {
-            _failures.Capture(naturalExit.IsCompleted && !_exitCommitted.Task.IsCompleted
-                ? LinuxControlFailureStage.WorkerTerminalTaskCompleted : LinuxControlFailureStage.ProtocolIncomplete, null, null);
-            throw Rejected();
-        }
-        stage = LinuxControlFailureStage.CleanupBound;
-        RequireCleanupBound();
-        }
-        catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(stage, null, error,
-            stage == LinuxControlFailureStage.PeerCheck ? _worker.IdentityFailure : null); throw; }
     }
 
     private async Task HandleRegisteredAsync(Task dispatch, LinuxControlConnection connection,
@@ -584,62 +600,107 @@ internal sealed class LinuxEmptyObservationControlServer
         EvidenceControlOperation? operation = null;
         try
         {
-        using var io = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
-        try
-        {
-            io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
-                TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
-            stage = LinuxControlFailureStage.RequestRead;
-            var request = await connection.ReadRequestAsync(io.Token).ConfigureAwait(false);
-            operation = request.Operation;
-            stage = LinuxControlFailureStage.RequestClassify;
-            byte[]? coverageResponse = null;
-            if (request is EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest)
+            using var io = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
+            try
             {
-                if (_coverage is null || !_sequence.ReadyAcknowledged || _ledger.IsWorkloadAdmissionClosed) throw Rejected();
-                _owner.RequireActive(io.Token);
-                // Request framing retained AdmissionSeconds. Actual declared work now uses the
-                // original job token, not a fresh admission timeout, and does not hold reply order.
-                io.Token.ThrowIfCancellationRequested();
-                io.CancelAfter(Timeout.InfiniteTimeSpan);
-                using var jobOperation = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
-                jobOperation.CancelAfter(_owner.Remaining);
-                switch (request)
+                io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
+                    TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
+                stage = LinuxControlFailureStage.RequestRead;
+                var request = await connection.ReadRequestAsync(io.Token).ConfigureAwait(false);
+                operation = request.Operation;
+                stage = LinuxControlFailureStage.RequestClassify;
+                byte[]? coverageResponse = null;
+                if (request is EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest
+                    or EvidenceApplicationStartControlRequest or EvidenceResourceWaitControlRequest)
                 {
-                    case EvidenceRunControlRequest run:
-                        var result = await _coverage.RunAsync(run, jobOperation.Token).ConfigureAwait(false);
-                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true, exit_code = result.ExitCode,
-                            stdout = result.Stdout, stderr = result.Stderr, output_truncated = result.OutputTruncated,
-                            received_bytes = result.ReceivedBytes });
-                        break;
-                    case EvidenceArtifactsControlRequest inventory:
-                        var reports = _coverage.Inventory(inventory.RelativeRoot, jobOperation.Token);
-                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true,
-                            artifacts = reports.Select(static item => new { path = item.RelativePath, length_bytes = item.Length }).ToArray() });
-                        break;
-                    case EvidenceArtifactControlRequest read:
-                        var bytes = _coverage.Read(read, jobOperation.Token);
-                        coverageResponse = EvidenceCanonicalJson.Serialize(new { ok = true, bytes_base64 = Convert.ToBase64String(bytes),
-                            end = _coverage.IsEnd(read.Path, read.Offset + bytes.Length, jobOperation.Token) });
-                        break;
+                    if (_coverage is null || !_sequence.ReadyAcknowledged || _ledger.IsWorkloadAdmissionClosed) throw Rejected();
+                    _owner.RequireActive(io.Token);
+                    // Request framing retained AdmissionSeconds. Actual declared work now uses the
+                    // original job token, not a fresh admission timeout, and does not hold reply order.
+                    io.Token.ThrowIfCancellationRequested();
+                    io.CancelAfter(Timeout.InfiniteTimeSpan);
+                    using var jobOperation = CancellationTokenSource.CreateLinkedTokenSource(rootToken);
+                    jobOperation.CancelAfter(_owner.Remaining);
+                    switch (request)
+                    {
+                        case EvidenceApplicationStartControlRequest app:
+                            if (_application is null) throw Rejected();
+                            var started = await _application.StartAsync(app, jobOperation.Token).ConfigureAwait(false);
+                            coverageResponse = EvidenceCanonicalJson.Serialize(new
+                            {
+                                ok = true,
+                                lease_id = started.LeaseId,
+                                apphost_pid = started.AppHostPid,
+                                application_uid = started.ApplicationUid,
+                                application_gid = started.ApplicationGid,
+                                cgroup = started.Cgroup,
+                                owned = true
+                            });
+                            break;
+                        case EvidenceResourceWaitControlRequest readiness:
+                            if (_application is null) throw Rejected();
+                            var ready = await _application.WaitAsync(readiness, jobOperation.Token).ConfigureAwait(false);
+                            coverageResponse = EvidenceCanonicalJson.Serialize(new
+                            {
+                                ok = true,
+                                lease_id = ready.LeaseId,
+                                resource_id = ready.ResourceId,
+                                application_uid = ready.ApplicationUid,
+                                cgroup = ready.Cgroup,
+                                kernel_peer_checked = true,
+                                http_status = ready.HttpStatus,
+                                healthy = true,
+                                received_bytes = ready.ReceivedBytes
+                            });
+                            break;
+                        case EvidenceRunControlRequest run:
+                            _application?.RequireReady(jobOperation.Token);
+                            var result = await _coverage.RunAsync(run, jobOperation.Token).ConfigureAwait(false);
+                            coverageResponse = EvidenceCanonicalJson.Serialize(new
+                            {
+                                ok = true,
+                                exit_code = result.ExitCode,
+                                stdout = result.Stdout,
+                                stderr = result.Stderr,
+                                output_truncated = result.OutputTruncated,
+                                received_bytes = result.ReceivedBytes
+                            });
+                            break;
+                        case EvidenceArtifactsControlRequest inventory:
+                            var reports = _coverage.Inventory(inventory.RelativeRoot, jobOperation.Token);
+                            coverageResponse = EvidenceCanonicalJson.Serialize(new
+                            {
+                                ok = true,
+                                artifacts = reports.Select(static item => new { path = item.RelativePath, length_bytes = item.Length }).ToArray()
+                            });
+                            break;
+                        case EvidenceArtifactControlRequest read:
+                            var bytes = _coverage.Read(read, jobOperation.Token);
+                            coverageResponse = EvidenceCanonicalJson.Serialize(new
+                            {
+                                ok = true,
+                                bytes_base64 = Convert.ToBase64String(bytes),
+                                end = _coverage.IsEnd(read.Path, read.Offset + bytes.Length, jobOperation.Token)
+                            });
+                            break;
+                    }
+                    _owner.RequireActive(jobOperation.Token);
                 }
-                _owner.RequireActive(jobOperation.Token);
-            }
-            isCleanupRequest = request is EvidenceStopControlRequest or EvidenceWaitControlRequest or EvidenceExitControlRequest;
-            if (isCleanupRequest)
-            {
-                stage = LinuxControlFailureStage.CleanupRegistration;
-                var cleanupToken = CleanupToken();
-                cleanupCancellation = cleanupToken.UnsafeRegister(static state =>
-                    ((CancellationTokenSource)state!).Cancel(), io);
-                cleanupToken.ThrowIfCancellationRequested();
-            }
-            // STOP closes work admission before waiting behind an earlier response. It never joins
-            // this control handler or the worker that issued the request.
-            if (request is EvidenceStopControlRequest)
-            {
-                stage = LinuxControlFailureStage.Stop;
-                var stopTask = _sequence.StopAsync(CleanupToken());
+                isCleanupRequest = request is EvidenceStopControlRequest or EvidenceWaitControlRequest or EvidenceExitControlRequest;
+                if (isCleanupRequest)
+                {
+                    stage = LinuxControlFailureStage.CleanupRegistration;
+                    var cleanupToken = CleanupToken();
+                    cleanupCancellation = cleanupToken.UnsafeRegister(static state =>
+                        ((CancellationTokenSource)state!).Cancel(), io);
+                    cleanupToken.ThrowIfCancellationRequested();
+                }
+                // STOP closes work admission before waiting behind an earlier response. It never joins
+                // this control handler or the worker that issued the request.
+                if (request is EvidenceStopControlRequest)
+                {
+                    stage = LinuxControlFailureStage.Stop;
+                    var stopTask = _sequence.StopAsync(CleanupToken());
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
                 {
@@ -649,13 +710,13 @@ internal sealed class LinuxEmptyObservationControlServer
 #endif
                 }
 #endif
-                await stopTask.ConfigureAwait(false);
-            }
-            // WAIT joins only an already owned STOP, outside response ordering. It never starts
-            // containment itself or holds the reply gate while that original procedure is pending.
-            else if (request is EvidenceWaitControlRequest)
-            {
-                stage = LinuxControlFailureStage.WaitJoin;
+                    await stopTask.ConfigureAwait(false);
+                }
+                // WAIT joins only an already owned STOP, outside response ordering. It never starts
+                // containment itself or holds the reply gate while that original procedure is pending.
+                else if (request is EvidenceWaitControlRequest)
+                {
+                    stage = LinuxControlFailureStage.WaitJoin;
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && Volatile.Read(ref _n16WorkClaimed) == 1)
                 {
@@ -673,8 +734,8 @@ internal sealed class LinuxEmptyObservationControlServer
                     await _n16StopStarted.Task.WaitAsync(io.Token).ConfigureAwait(false);
                 }
 #endif
-                await _sequence.JoinStartedStopAsync().ConfigureAwait(false);
-            }
+                    await _sequence.JoinStartedStopAsync().ConfigureAwait(false);
+                }
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
             else if (request is EvidenceAcceptedBlockedWorkControlRequest)
             {
@@ -718,82 +779,83 @@ internal sealed class LinuxEmptyObservationControlServer
                 await originalWork.WaitAsync(io.Token).ConfigureAwait(false);
             }
 #endif
-            stage = LinuxControlFailureStage.ReplyGate;
-            await _replyOrder.WaitAsync(io.Token).ConfigureAwait(false);
-            heldReplyOrder = true;
-            byte[] response;
-            switch (request)
-            {
-                case EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest:
-                    response = coverageResponse ?? throw Rejected();
-                    break;
-                case EvidenceReadyControlRequest:
-                    stage = LinuxControlFailureStage.ReadyAuthorization;
-                    _owner.RequireActive(io.Token);
-                    // Connect/read above kept its Admission bound. The fixed root-helper audit
-                    // now precedes admission and consumes this handler's original root/job token.
-                    io.Token.ThrowIfCancellationRequested();
-                    io.CancelAfter(Timeout.InfiniteTimeSpan);
-                    await connection.WritePreparationAsync((long)_owner.Remaining.TotalMilliseconds, io.Token).ConfigureAwait(false);
-                    if (_n04 is not null) await _n04.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
-                    io.Token.ThrowIfCancellationRequested(); _owner.RequireActive(io.Token);
-                    io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
-                        TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
-                    await connection.WriteAdmissionStartAsync(io.Token).ConfigureAwait(false);
-                    stage = LinuxControlFailureStage.ReadyClaim;
-                    claim = _sequence.ClaimReady();
-                    stage = LinuxControlFailureStage.ReadyData;
-                    response = _worker.CreateReadyData(io.Token).ReadyBytes;
-                    if (_n04 is not null) await _n04.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
-                    if (_n07 is not null) await _n07.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
-                    break;
-                case EvidenceStopControlRequest:
-                    stage = LinuxControlFailureStage.CleanupBound;
-                    RequireCleanupBound();
-                    stage = LinuxControlFailureStage.ResponseData;
-                    response = EvidenceCanonicalJson.Serialize(new { ok = true });
-                    break;
-                case EvidenceWaitControlRequest:
-                    stage = LinuxControlFailureStage.CleanupBound;
-                    RequireCleanupBound();
-                    stage = LinuxControlFailureStage.WaitClaim;
-                    claim = _sequence.ClaimWait();
-                    stage = LinuxControlFailureStage.ResponseData;
-                    response = EvidenceCanonicalJson.Serialize(new { ok = true, owned_exit = claim.Positive });
-                    break;
+                stage = LinuxControlFailureStage.ReplyGate;
+                await _replyOrder.WaitAsync(io.Token).ConfigureAwait(false);
+                heldReplyOrder = true;
+                byte[] response;
+                switch (request)
+                {
+                    case EvidenceRunControlRequest or EvidenceArtifactsControlRequest or EvidenceArtifactControlRequest
+                        or EvidenceApplicationStartControlRequest or EvidenceResourceWaitControlRequest:
+                        response = coverageResponse ?? throw Rejected();
+                        break;
+                    case EvidenceReadyControlRequest:
+                        stage = LinuxControlFailureStage.ReadyAuthorization;
+                        _owner.RequireActive(io.Token);
+                        // Connect/read above kept its Admission bound. The fixed root-helper audit
+                        // now precedes admission and consumes this handler's original root/job token.
+                        io.Token.ThrowIfCancellationRequested();
+                        io.CancelAfter(Timeout.InfiniteTimeSpan);
+                        await connection.WritePreparationAsync((long)_owner.Remaining.TotalMilliseconds, io.Token).ConfigureAwait(false);
+                        if (_n04 is not null) await _n04.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
+                        io.Token.ThrowIfCancellationRequested(); _owner.RequireActive(io.Token);
+                        io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
+                            TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
+                        await connection.WriteAdmissionStartAsync(io.Token).ConfigureAwait(false);
+                        stage = LinuxControlFailureStage.ReadyClaim;
+                        claim = _sequence.ClaimReady();
+                        stage = LinuxControlFailureStage.ReadyData;
+                        response = _worker.CreateReadyData(io.Token).ReadyBytes;
+                        if (_n04 is not null) await _n04.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+                        if (_n07 is not null) await _n07.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+                        break;
+                    case EvidenceStopControlRequest:
+                        stage = LinuxControlFailureStage.CleanupBound;
+                        RequireCleanupBound();
+                        stage = LinuxControlFailureStage.ResponseData;
+                        response = EvidenceCanonicalJson.Serialize(new { ok = true });
+                        break;
+                    case EvidenceWaitControlRequest:
+                        stage = LinuxControlFailureStage.CleanupBound;
+                        RequireCleanupBound();
+                        stage = LinuxControlFailureStage.WaitClaim;
+                        claim = _sequence.ClaimWait();
+                        stage = LinuxControlFailureStage.ResponseData;
+                        response = EvidenceCanonicalJson.Serialize(new { ok = true, owned_exit = claim.Positive });
+                        break;
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 case EvidenceAcceptedBlockedWorkControlRequest:
                     response = EvidenceCanonicalJson.Serialize(new { ok = true, work_joined = true });
                     break;
 #endif
-                case EvidenceExitControlRequest:
-                    stage = LinuxControlFailureStage.CleanupBound;
-                    RequireCleanupBound();
-                    stage = LinuxControlFailureStage.OwnerCheck;
-                    _owner.RequireControlIdentity(io.Token);
-                    stage = LinuxControlFailureStage.ExitClaim;
-                    claim = _sequence.ClaimExit();
-                    lock (_executionGate) _exitIntent.TrySetResult(); // Intent is not ACK or success.
-                    stage = LinuxControlFailureStage.ListenerClose;
-                    await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
-                    RequireCleanupBound();
-                    stage = LinuxControlFailureStage.ResponseData;
-                    response = EvidenceCanonicalJson.Serialize(new { ok = true });
-                    break;
-                default:
-                    throw Rejected();
-            }
-            stage = LinuxControlFailureStage.ResponseWrite;
-            await connection.WriteResponseAsync(response, io.Token).ConfigureAwait(false);
-            stage = LinuxControlFailureStage.ConnectionRelease;
-            await _listener.ReleaseAsync(connection).ConfigureAwait(false);
-            released = true;
-            stage = LinuxControlFailureStage.PostWriteCheck;
-            if (isCleanupRequest) RequireCleanupBound();
-            stage = LinuxControlFailureStage.OwnerCheck;
-            _owner.RequireControlIdentity(io.Token);
-            stage = LinuxControlFailureStage.PostWriteCheck;
-            if (isCleanupRequest) RequireCleanupBound();
+                    case EvidenceExitControlRequest:
+                        stage = LinuxControlFailureStage.CleanupBound;
+                        RequireCleanupBound();
+                        stage = LinuxControlFailureStage.OwnerCheck;
+                        _owner.RequireControlIdentity(io.Token);
+                        stage = LinuxControlFailureStage.ExitClaim;
+                        claim = _sequence.ClaimExit();
+                        lock (_executionGate) _exitIntent.TrySetResult(); // Intent is not ACK or success.
+                        stage = LinuxControlFailureStage.ListenerClose;
+                        await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
+                        RequireCleanupBound();
+                        stage = LinuxControlFailureStage.ResponseData;
+                        response = EvidenceCanonicalJson.Serialize(new { ok = true });
+                        break;
+                    default:
+                        throw Rejected();
+                }
+                stage = LinuxControlFailureStage.ResponseWrite;
+                await connection.WriteResponseAsync(response, io.Token).ConfigureAwait(false);
+                stage = LinuxControlFailureStage.ConnectionRelease;
+                await _listener.ReleaseAsync(connection).ConfigureAwait(false);
+                released = true;
+                stage = LinuxControlFailureStage.PostWriteCheck;
+                if (isCleanupRequest) RequireCleanupBound();
+                stage = LinuxControlFailureStage.OwnerCheck;
+                _owner.RequireControlIdentity(io.Token);
+                stage = LinuxControlFailureStage.PostWriteCheck;
+                if (isCleanupRequest) RequireCleanupBound();
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
             if (request is EvidenceAcceptedBlockedWorkControlRequest)
             {
@@ -810,10 +872,10 @@ internal sealed class LinuxEmptyObservationControlServer
 #endif
             }
 #endif
-            if (claim is not null)
-            {
-                stage = LinuxControlFailureStage.ReplyCommit;
-                _sequence.CompleteWrite(claim, true);
+                if (claim is not null)
+                {
+                    stage = LinuxControlFailureStage.ReplyCommit;
+                    _sequence.CompleteWrite(claim, true);
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
                 if (claim.Operation == EvidenceControlOperation.Wait && claim.Positive && Volatile.Read(ref _n16WorkClaimed) == 1)
                 {
@@ -823,56 +885,56 @@ internal sealed class LinuxEmptyObservationControlServer
 #endif
                 }
 #endif
-                var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
-                if (readyCommitted)
-                {
-                    Interlocked.Exchange(ref _negativeReadyCommitted, 1);
-                    _cancellationReady.TrySetResult(); // Only after original write/release/owner/CompleteWrite.
+                    var readyCommitted = claim.Operation == EvidenceControlOperation.Ready;
+                    if (readyCommitted)
+                    {
+                        Interlocked.Exchange(ref _negativeReadyCommitted, 1);
+                        _cancellationReady.TrySetResult(); // Only after original write/release/owner/CompleteWrite.
+                    }
+                    committedExit = claim.Operation == EvidenceControlOperation.Exit;
+                    claim = null;
+                    if (readyCommitted && _n04 is not null)
+                        await _n04.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
+                    if (readyCommitted && _n07 is not null)
+                        await _n07.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
                 }
-                committedExit = claim.Operation == EvidenceControlOperation.Exit;
-                claim = null;
-                if (readyCommitted && _n04 is not null)
-                    await _n04.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
-                if (readyCommitted && _n07 is not null)
-                    await _n07.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
             }
-        }
-        catch (Exception error) when (Recoverable(error))
-        {
-            _failures.Capture(stage, operation, error,
-                stage == LinuxControlFailureStage.ListenerClose ? _listener.FirstFailure : null);
-            if (claim is not null)
+            catch (Exception error) when (Recoverable(error))
             {
-                try { _sequence.CompleteWrite(claim, false); }
-                catch (EvidenceAdmissionException commitError) { _failures.Capture(LinuxControlFailureStage.HandlerFailureCommit, operation, commitError); /* Failed write remains consumed and latched. */ }
+                _failures.Capture(stage, operation, error,
+                    stage == LinuxControlFailureStage.ListenerClose ? _listener.FirstFailure : null);
+                if (claim is not null)
+                {
+                    try { _sequence.CompleteWrite(claim, false); }
+                    catch (EvidenceAdmissionException commitError) { _failures.Capture(LinuxControlFailureStage.HandlerFailureCommit, operation, commitError); /* Failed write remains consumed and latched. */ }
+                }
+                _sequence.RecordFailure();
             }
-            _sequence.RecordFailure();
-        }
-        finally
-        {
-            if (!released)
+            finally
             {
-                stage = LinuxControlFailureStage.ConnectionRelease;
-                try { await _listener.ReleaseAsync(connection).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error))
-                { _failures.Capture(stage, operation, error); Interlocked.Exchange(ref _connectionCloseFailed, 1); _sequence.RecordFailure(); }
-            }
-            stage = LinuxControlFailureStage.ReplyGateRelease;
-            if (heldReplyOrder) _replyOrder.Release();
-            stage = LinuxControlFailureStage.ControlRelease;
-            control.Dispose();
-            stage = LinuxControlFailureStage.CleanupRegistrationClose;
-            cleanupCancellation.Dispose();
-            stage = LinuxControlFailureStage.ExitCommit;
-            if (committedExit)
-            {
-                _exitCommitted.TrySetResult();
+                if (!released)
+                {
+                    stage = LinuxControlFailureStage.ConnectionRelease;
+                    try { await _listener.ReleaseAsync(connection).ConfigureAwait(false); }
+                    catch (Exception error) when (Recoverable(error))
+                    { _failures.Capture(stage, operation, error); Interlocked.Exchange(ref _connectionCloseFailed, 1); _sequence.RecordFailure(); }
+                }
+                stage = LinuxControlFailureStage.ReplyGateRelease;
+                if (heldReplyOrder) _replyOrder.Release();
+                stage = LinuxControlFailureStage.ControlRelease;
+                control.Dispose();
+                stage = LinuxControlFailureStage.CleanupRegistrationClose;
+                cleanupCancellation.Dispose();
+                stage = LinuxControlFailureStage.ExitCommit;
+                if (committedExit)
+                {
+                    _exitCommitted.TrySetResult();
 #if EVIDENCE_PRIVATE_N16
                 if (Volatile.Read(ref _n16WorkClaimed) == 1)
                     ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone.ExitCommitted);
 #endif
+                }
             }
-        }
         }
         catch (Exception error) when (Recoverable(error))
         {
@@ -882,21 +944,29 @@ internal sealed class LinuxEmptyObservationControlServer
         }
     }
 
-    private Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)
+    private async Task<SupervisionControlJoinFacts> StopEmptyDescendantsAsync(CancellationToken token)
     {
-        if (_coverage is not null) return _coverage.StopAndJoinAsync(token);
+        if (_application is not null)
+        {
+            // Dispatch both containment operations before awaiting either original task.
+            var application = _application.StopAndJoinAsync(token);
+            var producer = _coverage?.StopAndJoinAsync(token) ?? Task.FromResult(new SupervisionControlJoinFacts(true, true, true));
+            await Task.WhenAll(application, producer).ConfigureAwait(false);
+            return await producer.ConfigureAwait(false);
+        }
+        if (_coverage is not null) return await _coverage.StopAndJoinAsync(token).ConfigureAwait(false);
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
         if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled)
         {
             if (!_ledger.IsWorkloadAdmissionClosed) throw Rejected();
-            return StopAndJoinN16WorkAsync(token);
+            return await StopAndJoinN16WorkAsync(token).ConfigureAwait(false);
         }
 #endif
         _owner.RequireControlIdentity(token);
         if (!_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
         // This private server has no work-dispatch path or external workload registration API.
         // These are observations of the genuine empty descendant set, not worker exit assertions.
-        return Task.FromResult(new SupervisionControlJoinFacts(true, true, true));
+        return new SupervisionControlJoinFacts(true, true, true);
     }
 
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK

@@ -4,7 +4,7 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Immutable bounded v1 worker-descriptor and ready-response bytes, as data only.</summary>
+/// <summary>Immutable bounded v1/v2 worker-descriptor and ready-response bytes, as data only.</summary>
 /// <remarks>
 /// The caller must separately authenticate every process, account, output FD, deployment digest and original
 /// remaining allowance. This serializer performs no native operation, admission, channel authentication or
@@ -48,12 +48,13 @@ internal sealed class EvidenceWorkerDescriptorData
     /// <param name="entrySha256">64 lowercase hexadecimal characters; no bytes are hashed here.</param>
     /// <param name="policySha256">64 lowercase hexadecimal characters; no policy authority is issued.</param>
     /// <param name="remaining">Original positive frozen remainder, at most one hour; no timer is started.</param>
+    /// <param name="application">Optional complete root-selected compiled application facts; never caller registration authority.</param>
     /// <returns>Copied immutable JSON data only after both complete objects and existing structural parsers accept.</returns>
     /// <exception cref="EvidenceAdmissionException">Fixed ASEVD402 with no supplied text or inner exception.</exception>
     internal static EvidenceWorkerDescriptorData Create(EvidenceSupervisorRequest request, Guid generation,
         int workerPid, int brokerPid, LinuxRunAccountSnapshot accounts, LinuxWorkspaceLayout layout,
         EvidenceLinuxArtifactIdentity outputParentIdentity, string entrySha256, string policySha256,
-        TimeSpan remaining)
+        TimeSpan remaining, EvidenceLinuxApplicationDescriptor? application = null)
     {
         try
         {
@@ -71,7 +72,7 @@ internal sealed class EvidenceWorkerDescriptorData
                 && outputParentIdentity.Gid == accounts.WorkerGid);
 
             var descriptor = Serialize(writer => WriteDescriptor(writer, request, generation, workerPid,
-                brokerPid, accounts, layout, outputParentIdentity, entrySha256, policySha256));
+                brokerPid, accounts, layout, outputParentIdentity, entrySha256, policySha256, application));
             using (var document = JsonDocument.Parse(descriptor))
                 _ = EvidenceLinuxWorkerSupervisor.ParseWorkerDescriptor(document.RootElement);
             var ready = Serialize(writer =>
@@ -123,11 +124,11 @@ internal sealed class EvidenceWorkerDescriptorData
 
     private static void WriteDescriptor(Utf8JsonWriter writer, EvidenceSupervisorRequest request, Guid generation,
         int workerPid, int brokerPid, LinuxRunAccountSnapshot accounts, LinuxWorkspaceLayout layout,
-        EvidenceLinuxArtifactIdentity identity, string entry, string policy)
+        EvidenceLinuxArtifactIdentity identity, string entry, string policy, EvidenceLinuxApplicationDescriptor? application)
     {
         var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, generation).Value;
         writer.WriteStartObject();
-        writer.WriteString("schema", "evidence-worker-linux-v1");
+        writer.WriteString("schema", application is null ? "evidence-worker-linux-v1" : "evidence-worker-linux-v2");
         writer.WriteString("run_id", "csharp/" + generation.ToString("N"));
         writer.WriteNumber("worker_pid", workerPid); writer.WriteNumber("broker_pid", brokerPid);
         writer.WriteNumber("worker_uid", accounts.WorkerUid); writer.WriteNumber("worker_gid", accounts.WorkerGid);
@@ -157,6 +158,11 @@ internal sealed class EvidenceWorkerDescriptorData
         writer.WriteNumber("stopping_seconds", request.StoppingSeconds);
         writer.WriteString("diff_file", request.DiffFile); writer.WriteString("diff_sha256", request.DiffSha256);
         writer.WriteString("solution", request.Solution);
+        if (application is not null)
+        {
+            writer.WritePropertyName("application");
+            writer.WriteRawValue(EvidenceApplicationDescriptorData.Serialize(application));
+        }
         writer.WriteEndObject();
     }
 

@@ -1,5 +1,7 @@
 # Evidence.Supervision
 
+The [restricted application owner](application-execution.md) extends the same C# run owner, output budget and aggregate shutdown used for [producer execution](producer-execution.md). The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) records checkpoint validation separately from the final production cutover.
+
 > **Current integration status (2026-10-13):** The APIs and qualification procedures described below are now consolidated into the feature working tree from the reviewed source `1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38`. Preparation-time test counts and pending observations in individual sections describe their original handoffs. Current execution evidence and remaining requirements are tracked in the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) and [acceptance map](../../docs/evidence/issue779-acceptance-status.md). Ordinary builds select `None`; private qualification images cannot be packed, grant no Trusted capability, and do not complete the integrated native checkpoint.
 
 

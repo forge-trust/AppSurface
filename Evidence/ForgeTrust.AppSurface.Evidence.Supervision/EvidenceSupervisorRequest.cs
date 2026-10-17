@@ -4,12 +4,12 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Immutable checkpoint-one Linux launch metadata, without admission or native ownership authority.</summary>
+/// <summary>Immutable protected Linux launch metadata, without admission or native ownership authority.</summary>
 /// <remarks>
 /// Paths are canonical Linux spellings only: parsing neither opens them nor establishes ownership or absence of links.
 /// The root owner must independently authenticate retained deployment, policy, revisions and the original deadline.
-/// Runtime and tool roots may overlap; neither may overlap the subject. No process identities, commands, environment,
-/// unit policy, provider registration or proof can be supplied. Lists are detached read-only snapshots.
+/// Runtime and tool roots may overlap; neither may overlap the subject. An optional identity/digest pair selects only a compiled application; it cannot enroll one. No process
+/// identities, commands, environment, unit policy, provider registration or proof can be supplied. Lists are detached read-only snapshots.
 /// </remarks>
 internal sealed record EvidenceSupervisorRequest
 {
@@ -30,7 +30,7 @@ internal sealed record EvidenceSupervisorRequest
         "observation_producer_ids", "job_deadline_utc", "admission_seconds", "start_seconds", "collection_seconds",
         "cleanup_seconds", "stopping_seconds",
     ];
-    private static readonly string[] OptionalFields = ["diff_file", "diff_sha256", "solution"];
+    private static readonly string[] OptionalFields = ["diff_file", "diff_sha256", "solution", "application_id", "application_entry_digest"];
 
     private EvidenceSupervisorRequest() { }
 
@@ -81,6 +81,11 @@ internal sealed record EvidenceSupervisorRequest
     /// <summary>Gets an optional solution path strictly beneath the subject root.</summary>
     internal string? Solution { get; private init; }
 
+    /// <summary>Gets an optional compiled application identifier; it cannot enroll a registration.</summary>
+    internal string? ApplicationId { get; private init; }
+    /// <summary>Gets the exact compiled entry digest, present together with the identifier.</summary>
+    internal string? ApplicationEntryDigest { get; private init; }
+
     /// <summary>Parses a closed request into copied data before any OS or runtime interaction.</summary>
     /// <param name="utf8Json">One strict UTF-8 JSON object, at most 64 KiB and four levels deep.</param>
     /// <returns>Immutable lexical metadata; the owning root must independently validate all native bindings.</returns>
@@ -128,8 +133,16 @@ internal sealed record EvidenceSupervisorRequest
                 DiffFile = Optional(fields, "diff_file", AbsolutePath),
                 DiffSha256 = Optional(fields, "diff_sha256", value => Hex(value, 64)),
                 Solution = Optional(fields, "solution", AbsolutePath),
+                ApplicationId = Optional(fields, "application_id", value =>
+                {
+                    var id = Text(value, 96);
+                    Require(char.IsAsciiLetterOrDigit(id[0]) && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-'));
+                    return id;
+                }),
+                ApplicationEntryDigest = Optional(fields, "application_entry_digest", value => Hex(value, 64)),
             };
-            Require(request.StoppingSeconds <= request.CleanupSeconds
+            Require((request.ApplicationId is null) == (request.ApplicationEntryDigest is null)
+                && request.StoppingSeconds <= request.CleanupSeconds
                 && !Overlap(request.ToolRoot, request.SubjectRoot) && !Overlap(request.RuntimeRoot, request.SubjectRoot)
                 && Contained(request.RuntimeRoot, request.RuntimeHost) && Contained(request.ToolRoot, request.EntryPath)
                 && Contained(request.ToolRoot, request.PolicyFile)

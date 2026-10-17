@@ -12,7 +12,10 @@ public sealed class LinuxRunAccountsTests
         Assert.Equal("evwa123456789abcdef0123456789ab", names.Worker);
         Assert.Equal("evsa123456789abcdef0123456789ab", names.Subject);
         Assert.Equal("evra123456789abcdef0123456789ab", names.Results);
-        Assert.All(new[] { names.Worker, names.Subject, names.Results }, name =>
+        Assert.Equal("evaa123456789abcdef0123456789ab", names.Application);
+        Assert.Equal("evga123456789abcdef0123456789ab", names.ResourceAccess);
+        Assert.Equal(new[] { names.Worker, names.Subject, names.Results }, names.ReservedNames(includeApplication: false));
+        Assert.All(names.ReservedNames(includeApplication: true), name =>
         {
             Assert.Equal(31, name.Length);
             Assert.True(LinuxRunAccountNames.IsGenerated(name));
@@ -55,9 +58,20 @@ public sealed class LinuxRunAccountsTests
             Assert.DoesNotContain("--gid", command.Arguments);
             Assert.DoesNotContain("--groups", command.Arguments);
         }
+        var application = LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateUser, names.Application);
+        Assert.Equal("/usr/sbin/useradd", application.Executable);
+        Assert.Equal(new[] { "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", names.Application },
+            application.Arguments);
+        Assert.DoesNotContain("--uid", application.Arguments);
+        Assert.DoesNotContain("--gid", application.Arguments);
+        Assert.DoesNotContain("--groups", application.Arguments);
         var results = LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateResultsGroup, names.Results);
         Assert.Equal("/usr/sbin/groupadd", results.Executable);
         Assert.Equal(new[] { "--system", names.Results }, results.Arguments);
+        var resourceAccess = LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateResourceAccessGroup,
+            names.ResourceAccess);
+        Assert.Equal("/usr/sbin/groupadd", resourceAccess.Executable);
+        Assert.Equal(new[] { "--system", names.ResourceAccess }, resourceAccess.Arguments);
         Assert.Equal(new[] { "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8" },
             LinuxRunAccountCommand.Environment);
     }
@@ -69,6 +83,9 @@ public sealed class LinuxRunAccountsTests
         AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateUser, names.Results));
         AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, names.Results));
         AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateResultsGroup, names.Worker));
+        AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateResultsGroup, names.ResourceAccess));
+        AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateResourceAccessGroup, names.Results));
+        AssertClosed(() => LinuxRunAccountCommand.Create(LinuxRunAccountOperation.CreateUser, names.ResourceAccess));
         AssertClosed(() => LinuxRunAccountCommand.Create((LinuxRunAccountOperation)999, names.Worker));
         Assert.Equal("/usr/sbin/userdel", LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, names.Subject).Executable);
         Assert.Equal("/usr/sbin/groupdel", LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteGroup, names.Results).Executable);
@@ -119,6 +136,48 @@ public sealed class LinuxRunAccountsTests
     }
 
     [Fact]
+    public void OptionalApplicationProfileReservesItsUserAndResourceGroupInOrderBeforeDispatch()
+    {
+        var names = LinuxRunAccountNames.Create(Run);
+        var pending = new LinuxRunAccountReservations(names, includeApplication: true);
+        var creates = new[]
+        {
+            pending.ReserveNext(), pending.ReserveNext(), pending.ReserveNext(),
+            pending.ReserveNext(), pending.ReserveNext(),
+        };
+
+        Assert.Equal(new[] { names.Worker, names.Subject, names.Results, names.Application, names.ResourceAccess },
+            creates.Select(command => command.Arguments[^1]));
+        Assert.Equal(new[]
+        {
+            LinuxRunAccountOperation.CreateUser,
+            LinuxRunAccountOperation.CreateUser,
+            LinuxRunAccountOperation.CreateResultsGroup,
+            LinuxRunAccountOperation.CreateUser,
+            LinuxRunAccountOperation.CreateResourceAccessGroup,
+        }, creates.Select(command => command.Operation));
+        Assert.Equal(new[]
+        {
+            names.ResourceAccess, names.Application, names.Application, names.Results,
+            names.Subject, names.Subject, names.Worker, names.Worker,
+        }, pending.ReverseCleanup().Select(command => command.Arguments.Single()));
+        Assert.Equal(new[]
+        {
+            LinuxRunAccountOperation.DeleteGroup,
+            LinuxRunAccountOperation.DeleteUser,
+            LinuxRunAccountOperation.DeleteGroup,
+            LinuxRunAccountOperation.DeleteGroup,
+            LinuxRunAccountOperation.DeleteUser,
+            LinuxRunAccountOperation.DeleteGroup,
+            LinuxRunAccountOperation.DeleteUser,
+            LinuxRunAccountOperation.DeleteGroup,
+        }, pending.ReverseCleanup().Select(command => command.Operation));
+        pending.MarkFailed(); // Every attempted extra identity remains an obligation after uncertain dispatch.
+        Assert.Equal(8, pending.ReverseCleanup().Length);
+        AssertClosed(() => pending.ReserveNext());
+    }
+
+    [Fact]
     public void ValidIdentityDataNeedsBothNamedPrivateGroupsAndASeparateResultsGroup()
     {
         var data = Data();
@@ -128,8 +187,99 @@ public sealed class LinuxRunAccountsTests
         Assert.Equal(610u, snapshot.SubjectUid);
         Assert.Equal(611u, snapshot.SubjectGid);
         Assert.Equal(612u, snapshot.ResultsGid);
+        Assert.Equal(0u, snapshot.ApplicationUid);
+        Assert.Equal(0u, snapshot.ApplicationGid);
+        Assert.Equal(0u, snapshot.ResourceAccessGid);
+        var legacySnapshot = new LinuxRunAccountSnapshot(65010, 65011, 610, 611, 612);
+        Assert.Equal(0u, legacySnapshot.ApplicationUid);
+        Assert.Equal(0u, legacySnapshot.ApplicationGid);
+        Assert.Equal(0u, legacySnapshot.ResourceAccessGid);
         // These fixture numbers are just data; a second consistent mapping is also valid.
         Assert.Equal(710u, Parse(data with { Worker = data.Worker with { Uid = 710 } }).WorkerUid);
+    }
+
+    [Fact]
+    public void ApplicationSnapshotRequiresCompleteRecordsAndFiveDistinctGroupsAndThreeDistinctUsers()
+    {
+        var data = Data(includeApplication: true);
+        var snapshot = Parse(data);
+        Assert.Equal(620u, snapshot.ApplicationUid);
+        Assert.Equal(621u, snapshot.ApplicationGid);
+        Assert.Equal(613u, snapshot.ResourceAccessGid);
+        Assert.Equal(3, new[] { snapshot.WorkerUid, snapshot.SubjectUid, snapshot.ApplicationUid }.Distinct().Count());
+        Assert.Equal(5, new[] { snapshot.WorkerGid, snapshot.SubjectGid, snapshot.ApplicationGid,
+            snapshot.ResultsGid, snapshot.ResourceAccessGid }.Distinct().Count());
+
+        AssertClosed(() => LinuxRunAccountSnapshot.Parse(data.Names, data.Worker, data.Subject,
+            data.WorkerGroup, data.SubjectGroup, data.Results, data.Application));
+        AssertClosed(() => Parse(data with { Application = data.Application! with { Uid = data.Worker.Uid } }));
+        AssertClosed(() => Parse(data with
+        {
+            Application = data.Application! with { Uid = data.Subject.Uid },
+        }));
+        var otherNames = LinuxRunAccountNames.Create(Guid.Parse("b1234567-89ab-cdef-0123-456789abcdef"));
+        AssertClosed(() => Parse(data with
+        {
+            Application = data.Application! with { Name = data.Names.Worker },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ApplicationGroup = data.ApplicationGroup! with { Name = data.Names.Subject },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Name = otherNames.ResourceAccess },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            Application = data.Application! with { Gid = data.Worker.Gid },
+            ApplicationGroup = data.ApplicationGroup! with { Gid = data.Worker.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            Application = data.Application! with { Gid = data.Subject.Gid },
+            ApplicationGroup = data.ApplicationGroup! with { Gid = data.Subject.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            Application = data.Application! with { Gid = data.Results.Gid },
+            ApplicationGroup = data.ApplicationGroup! with { Gid = data.Results.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Gid = data.Results.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Gid = data.Worker.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Gid = data.Subject.Gid },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Gid = data.Application!.Gid },
+        }));
+    }
+
+    [Fact]
+    public void ApplicationAndResourceGroupsRejectRegisteredMembersAndPrimaryGroupMustMatch()
+    {
+        var data = Data(includeApplication: true);
+        AssertClosed(() => Parse(data with
+        {
+            ApplicationGroup = data.ApplicationGroup! with { Members = [data.Names.Subject] },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ResourceAccessGroup = data.ResourceAccessGroup! with { Members = [data.Names.Application] },
+        }));
+        AssertClosed(() => Parse(data with
+        {
+            ApplicationGroup = data.ApplicationGroup! with { Gid = 999 },
+        }));
+        Assert.Equal(613u, Parse(data).ResourceAccessGid);
     }
 
     [Theory]
@@ -211,10 +361,14 @@ public sealed class LinuxRunAccountsTests
     public void FactoryCannotAcceptMissingActualOwnerToCreateADataLease()
     {
         Assert.Throws<ArgumentNullException>(() => { _ = LinuxRunAccounts.CreateAsync(null!, default); });
+        Assert.Throws<ArgumentNullException>(() =>
+        {
+            _ = LinuxRunAccounts.CreateAsync(null!, default, includeApplication: true);
+        });
         Assert.Throws<ArgumentNullException>(() => new LinuxRunAccountReservations(null!));
     }
 
-    private static IdentityData Data()
+    private static IdentityData Data(bool includeApplication = false)
     {
         var names = LinuxRunAccountNames.Create(Run);
         return new(names,
@@ -222,11 +376,15 @@ public sealed class LinuxRunAccountsTests
             LinuxRunAccountUser.Parse(names.Subject, 610, 611, "/nonexistent", "/usr/sbin/nologin"),
             LinuxRunAccountGroup.Parse(names.Worker, 65011, []),
             LinuxRunAccountGroup.Parse(names.Subject, 611, []),
-            LinuxRunAccountGroup.Parse(names.Results, 612, []));
+            LinuxRunAccountGroup.Parse(names.Results, 612, []),
+            includeApplication ? LinuxRunAccountUser.Parse(names.Application, 620, 621, "/nonexistent", "/usr/sbin/nologin") : null,
+            includeApplication ? LinuxRunAccountGroup.Parse(names.Application, 621, []) : null,
+            includeApplication ? LinuxRunAccountGroup.Parse(names.ResourceAccess, 613, []) : null);
     }
 
     private static LinuxRunAccountSnapshot Parse(IdentityData data) => LinuxRunAccountSnapshot.Parse(data.Names,
-        data.Worker, data.Subject, data.WorkerGroup, data.SubjectGroup, data.Results);
+        data.Worker, data.Subject, data.WorkerGroup, data.SubjectGroup, data.Results, data.Application,
+        data.ApplicationGroup, data.ResourceAccessGroup);
 
     private static void AssertClosed(Action action)
     {
@@ -236,5 +394,6 @@ public sealed class LinuxRunAccountsTests
 
     private sealed record IdentityData(LinuxRunAccountNames Names, LinuxRunAccountUser Worker,
         LinuxRunAccountUser Subject, LinuxRunAccountGroup WorkerGroup, LinuxRunAccountGroup SubjectGroup,
-        LinuxRunAccountGroup Results);
+        LinuxRunAccountGroup Results, LinuxRunAccountUser? Application, LinuxRunAccountGroup? ApplicationGroup,
+        LinuxRunAccountGroup? ResourceAccessGroup);
 }

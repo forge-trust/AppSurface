@@ -16,6 +16,8 @@ internal enum LinuxProcessSamplingRole
     Owner,
     /// <summary>The generated nonroot subject producer service.</summary>
     Producer,
+    /// <summary>The generated restricted application and its native resource.</summary>
+    Application,
 }
 
 /// <summary>Four sampled Linux IDs. This value cannot authenticate a process.</summary>
@@ -137,6 +139,7 @@ internal static class LinuxProcessData
             LinuxProcessSamplingRole.Worker => "worker",
             LinuxProcessSamplingRole.Owner => "owner",
             LinuxProcessSamplingRole.Producer => "producer",
+            LinuxProcessSamplingRole.Application => "application",
             _ => throw LinuxProcessIdentity.Rejected(),
         };
         if (unit is null || pid is 0 or > int.MaxValue || uid == uint.MaxValue || gid == uint.MaxValue
@@ -320,6 +323,10 @@ internal sealed class LinuxProcessIdentity : IDisposable
     internal static LinuxProcessIdentity CaptureProducer(uint pid, uint uid, uint gid, LinuxUnitName unit, CancellationToken token) =>
         CaptureCore(pid, uid, gid, unit, LinuxProcessSamplingRole.Producer, token);
 
+    /// <summary>Captures an application member using actual proc handles, complete IDs and the selected group.</summary>
+    internal static LinuxProcessIdentity CaptureApplication(uint pid, uint uid, uint gid, LinuxUnitName unit, CancellationToken token) =>
+        CaptureCore(pid, uid, gid, unit, LinuxProcessSamplingRole.Application, token);
+
     private static LinuxProcessIdentity CaptureCore(uint pid, uint uid, uint gid, LinuxUnitName unit,
         LinuxProcessSamplingRole role, CancellationToken token)
     {
@@ -418,8 +425,14 @@ internal sealed class LinuxProcessIdentity : IDisposable
             }
             else if (Inspect(_handles[i], i < 2) != _metadata[i]) throw Rejected();
             var parent = i == 0 ? -100 : Fd(_handles[i == 1 ? 0 : 1]);
-            var name = i switch { 0 => "/proc", 1 => Pid.ToString(CultureInfo.InvariantCulture),
-                2 => "status", 3 => "stat", _ => "cgroup" };
+            var name = i switch
+            {
+                0 => "/proc",
+                1 => Pid.ToString(CultureInfo.InvariantCulture),
+                2 => "status",
+                3 => "stat",
+                _ => "cgroup"
+            };
             stage = i switch
             {
                 0 => LinuxControlFailureStage.ProcessNamedProcRoot,

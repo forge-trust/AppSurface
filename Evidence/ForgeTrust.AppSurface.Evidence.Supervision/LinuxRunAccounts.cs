@@ -54,6 +54,8 @@ internal sealed class LinuxRunAccountNames
         Worker = "evw" + suffix;
         Subject = "evs" + suffix;
         Results = "evr" + suffix;
+        Application = "eva" + suffix;
+        ResourceAccess = "evg" + suffix;
     }
 
     /// <summary>Gets the worker user and private primary group name.</summary>
@@ -62,11 +64,15 @@ internal sealed class LinuxRunAccountNames
     internal string Subject { get; }
     /// <summary>Gets the results supplementary group name.</summary>
     internal string Results { get; }
+    /// <summary>Gets the optional application user and private primary group name.</summary>
+    internal string Application { get; }
+    /// <summary>Gets the optional empty resource-access group name.</summary>
+    internal string ResourceAccess { get; }
 
-    /// <summary>Derives three at-most-31-character names from the actual owner generation.</summary>
+    /// <summary>Derives five at-most-31-character names from the actual owner generation.</summary>
     /// <remarks>
     /// The 28 hexadecimal suffix characters preserve 112 bits and fit the Linux account name limit.
-    /// The utility owner must first establish all three user/group names absent; a collision rejects,
+    /// The utility owner must first establish every selected user/group name absent; a collision rejects,
     /// never adopts a previous identity. Generating a name does not create or reserve an OS account.
     /// </remarks>
     internal static LinuxRunAccountNames Create(Guid runId)
@@ -78,8 +84,17 @@ internal sealed class LinuxRunAccountNames
     /// <summary>Checks only the closed generated grammar, with no shell or option metacharacters.</summary>
     internal static bool IsGenerated(string? name) => name is { Length: 31 }
         && (name.StartsWith("evw", StringComparison.Ordinal) || name.StartsWith("evs", StringComparison.Ordinal)
-            || name.StartsWith("evr", StringComparison.Ordinal))
+            || name.StartsWith("evr", StringComparison.Ordinal) || name.StartsWith("eva", StringComparison.Ordinal)
+            || name.StartsWith("evg", StringComparison.Ordinal))
         && name.AsSpan(3).IndexOfAnyExcept("0123456789abcdef") < 0;
+
+    /// <summary>Returns only names reserved by the selected account profile, in creation-check order.</summary>
+    internal ImmutableArray<string> ReservedNames(bool includeApplication) => includeApplication
+        ? [Worker, Subject, Results, Application, ResourceAccess]
+        : [Worker, Subject, Results];
+
+    internal static bool IsUserName(string name) => name.StartsWith("evw", StringComparison.Ordinal)
+        || name.StartsWith("evs", StringComparison.Ordinal) || name.StartsWith("eva", StringComparison.Ordinal);
 
     /// <summary>Creates a fixed grammar/data rejection without copying the rejected input.</summary>
     internal static LinuxRunAccountException Invalid() => new(LinuxRunAccountFailure.InvalidData);
@@ -88,7 +103,7 @@ internal sealed class LinuxRunAccountNames
 /// <summary>Closed account utilities. The values never dispatch a process.</summary>
 internal enum LinuxRunAccountOperation
 {
-    /// <summary>Create a worker or subject system user with its private group.</summary>
+    /// <summary>Create a worker, subject, or application system user with its private group.</summary>
     CreateUser,
     /// <summary>Create the private results group.</summary>
     CreateResultsGroup,
@@ -96,6 +111,8 @@ internal enum LinuxRunAccountOperation
     DeleteUser,
     /// <summary>Delete a previously reserved group.</summary>
     DeleteGroup,
+    /// <summary>Create the optional empty application resource-access group.</summary>
+    CreateResourceAccessGroup,
 }
 
 /// <summary>Immutable absolute utility and ArgumentList data, not a callable process or cleanup receipt.</summary>
@@ -119,7 +136,7 @@ internal sealed class LinuxRunAccountCommand
     internal static ImmutableArray<string> Environment { get; } =
         ["PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8"];
 
-    /// <summary>Creates only the existing system/no-login/no-home account policy.</summary>
+    /// <summary>Creates only the fixed system/no-login/no-home account and group policies.</summary>
     /// <remarks>
     /// No numeric UID/GID or supplementary membership can be selected. Fixture numeric identities are
     /// not production reservations: both forward and reverse NSS name checks remain required.
@@ -128,13 +145,16 @@ internal sealed class LinuxRunAccountCommand
     internal static LinuxRunAccountCommand Create(LinuxRunAccountOperation operation, string name)
     {
         if (!LinuxRunAccountNames.IsGenerated(name)) throw LinuxRunAccountNames.Invalid();
-        var user = name.StartsWith("evw", StringComparison.Ordinal) || name.StartsWith("evs", StringComparison.Ordinal);
         return operation switch
         {
-            LinuxRunAccountOperation.CreateUser when user => new(operation, "/usr/sbin/useradd",
+            LinuxRunAccountOperation.CreateUser when LinuxRunAccountNames.IsUserName(name) => new(operation, "/usr/sbin/useradd",
                 ["--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", name]),
-            LinuxRunAccountOperation.CreateResultsGroup when !user => new(operation, "/usr/sbin/groupadd", ["--system", name]),
-            LinuxRunAccountOperation.DeleteUser when user => new(operation, "/usr/sbin/userdel", [name]),
+            LinuxRunAccountOperation.CreateResultsGroup when name.StartsWith("evr", StringComparison.Ordinal) =>
+                new(operation, "/usr/sbin/groupadd", ["--system", name]),
+            LinuxRunAccountOperation.CreateResourceAccessGroup when name.StartsWith("evg", StringComparison.Ordinal) =>
+                new(operation, "/usr/sbin/groupadd", ["--system", name]),
+            LinuxRunAccountOperation.DeleteUser when LinuxRunAccountNames.IsUserName(name) =>
+                new(operation, "/usr/sbin/userdel", [name]),
             LinuxRunAccountOperation.DeleteGroup => new(operation, "/usr/sbin/groupdel", [name]),
             _ => throw LinuxRunAccountNames.Invalid(),
         };
@@ -151,27 +171,44 @@ internal sealed class LinuxRunAccountCommand
 internal sealed class LinuxRunAccountReservations
 {
     private readonly LinuxRunAccountNames _names;
+    private readonly bool _includeApplication;
     private readonly List<LinuxRunAccountCommand> _cleanup = [];
     private int _next;
     private bool _failed;
 
     /// <summary>Creates an empty data ledger for one generated name set.</summary>
-    internal LinuxRunAccountReservations(LinuxRunAccountNames names) =>
+    internal LinuxRunAccountReservations(LinuxRunAccountNames names, bool includeApplication = false)
+    {
         _names = names ?? throw new ArgumentNullException(nameof(names));
+        _includeApplication = includeApplication;
+    }
 
     /// <summary>Gets the sticky failure state; successful later data operations cannot clear it.</summary>
     internal bool Failed => _failed;
 
-    /// <summary>Reserves user and implicit private group before either useradd can run, then results group.</summary>
+    /// <summary>Reserves each user and implicit private group before useradd, then each explicit group.</summary>
     /// <returns>The next fixed create command; reservations are retained even if dispatch fails.</returns>
     internal LinuxRunAccountCommand ReserveNext()
     {
-        if (_failed || _next >= 3) throw LinuxRunAccountNames.Invalid();
-        var name = _next switch { 0 => _names.Worker, 1 => _names.Subject, _ => _names.Results };
-        var operation = _next < 2 ? LinuxRunAccountOperation.CreateUser : LinuxRunAccountOperation.CreateResultsGroup;
+        if (_failed || _next >= (_includeApplication ? 5 : 3)) throw LinuxRunAccountNames.Invalid();
+        var name = _next switch
+        {
+            0 => _names.Worker,
+            1 => _names.Subject,
+            2 => _names.Results,
+            3 => _names.Application,
+            _ => _names.ResourceAccess,
+        };
+        var operation = _next switch
+        {
+            0 or 1 or 3 => LinuxRunAccountOperation.CreateUser,
+            2 => LinuxRunAccountOperation.CreateResultsGroup,
+            _ => LinuxRunAccountOperation.CreateResourceAccessGroup,
+        };
         // Register implicit group first so reverse cleanup deletes its user before the group.
         _cleanup.Add(LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteGroup, name));
-        if (_next < 2) _cleanup.Add(LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, name));
+        if (LinuxRunAccountNames.IsUserName(name))
+            _cleanup.Add(LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, name));
         _next++;
         return LinuxRunAccountCommand.Create(operation, name);
     }
@@ -210,12 +247,13 @@ internal sealed record LinuxRunAccountGroup(string Name, uint Gid, ImmutableArra
 
 /// <summary>Consistent name/number identity data; constructing it is never worker admission or account ownership.</summary>
 internal sealed record LinuxRunAccountSnapshot(uint WorkerUid, uint WorkerGid, uint SubjectUid,
-    uint SubjectGid, uint ResultsGid)
+    uint SubjectGid, uint ResultsGid, uint ApplicationUid = 0, uint ApplicationGid = 0, uint ResourceAccessGid = 0)
 {
-    /// <summary>Checks the complete five-record private identity map and distinct UID/GID namespaces.</summary>
+    /// <summary>Checks the default five-record map or optional eight-record application identity map.</summary>
     internal static LinuxRunAccountSnapshot Parse(LinuxRunAccountNames names, LinuxRunAccountUser worker,
         LinuxRunAccountUser subject, LinuxRunAccountGroup workerGroup, LinuxRunAccountGroup subjectGroup,
-        LinuxRunAccountGroup resultsGroup)
+        LinuxRunAccountGroup resultsGroup, LinuxRunAccountUser? application = null,
+        LinuxRunAccountGroup? applicationGroup = null, LinuxRunAccountGroup? resourceAccessGroup = null)
     {
         ArgumentNullException.ThrowIfNull(names);
         ArgumentNullException.ThrowIfNull(worker);
@@ -228,12 +266,31 @@ internal sealed record LinuxRunAccountSnapshot(uint WorkerUid, uint WorkerGid, u
         _ = LinuxRunAccountGroup.Parse(workerGroup.Name, workerGroup.Gid, workerGroup.Members);
         _ = LinuxRunAccountGroup.Parse(subjectGroup.Name, subjectGroup.Gid, subjectGroup.Members);
         _ = LinuxRunAccountGroup.Parse(resultsGroup.Name, resultsGroup.Gid, resultsGroup.Members);
+        var hasApplication = application is not null || applicationGroup is not null || resourceAccessGroup is not null;
+        if (hasApplication)
+        {
+            if (application is null || applicationGroup is null || resourceAccessGroup is null)
+                throw new LinuxRunAccountException(LinuxRunAccountFailure.IdentityMismatch);
+            _ = LinuxRunAccountUser.Parse(application.Name, application.Uid, application.Gid, application.Home, application.Shell);
+            _ = LinuxRunAccountGroup.Parse(applicationGroup.Name, applicationGroup.Gid, applicationGroup.Members);
+            _ = LinuxRunAccountGroup.Parse(resourceAccessGroup.Name, resourceAccessGroup.Gid, resourceAccessGroup.Members);
+        }
         if (worker.Name != names.Worker || subject.Name != names.Subject || workerGroup.Name != names.Worker
             || subjectGroup.Name != names.Subject || resultsGroup.Name != names.Results
             || worker.Uid == subject.Uid || worker.Gid != workerGroup.Gid || subject.Gid != subjectGroup.Gid
             || workerGroup.Gid == subjectGroup.Gid || workerGroup.Gid == resultsGroup.Gid
             || subjectGroup.Gid == resultsGroup.Gid) throw new LinuxRunAccountException(LinuxRunAccountFailure.IdentityMismatch);
-        return new(worker.Uid, worker.Gid, subject.Uid, subject.Gid, resultsGroup.Gid);
+        if (!hasApplication) return new(worker.Uid, worker.Gid, subject.Uid, subject.Gid, resultsGroup.Gid);
+        if (application!.Name != names.Application || applicationGroup!.Name != names.Application
+            || resourceAccessGroup!.Name != names.ResourceAccess || application.Gid != applicationGroup.Gid
+            || application.Uid == worker.Uid || application.Uid == subject.Uid
+            || application.Gid == workerGroup.Gid || application.Gid == subjectGroup.Gid
+            || application.Gid == resultsGroup.Gid || applicationGroup.Gid == resourceAccessGroup.Gid
+            || resourceAccessGroup.Gid == workerGroup.Gid || resourceAccessGroup.Gid == subjectGroup.Gid
+            || resourceAccessGroup.Gid == resultsGroup.Gid)
+            throw new LinuxRunAccountException(LinuxRunAccountFailure.IdentityMismatch);
+        return new(worker.Uid, worker.Gid, subject.Uid, subject.Gid, resultsGroup.Gid,
+            application.Uid, application.Gid, resourceAccessGroup.Gid);
     }
 }
 
@@ -252,26 +309,39 @@ internal sealed class LinuxRunAccounts
     private readonly object _gate = new();
     private readonly LinuxOwnerActivation _owner;
     private readonly LinuxRunAccountNames _names;
+    private readonly bool _includeApplication;
     private readonly LinuxRunAccountReservations _reservations;
     private readonly List<LinuxAccountUtility> _utilities = [];
     private readonly LinuxAccountFailureLatch _failures = new();
     private LinuxWorkerProcess? _workerCustodyPending;
     private LinuxRunWorkspace? _workspaceCustodyPending;
     private LinuxProducerWorkspace? _producerWorkspacePending;
+    private LinuxApplicationWorkspace? _applicationWorkspacePending;
     private LinuxRunAccountSnapshot? _identities;
     private Task? _closeTask;
     private bool _quarantined;
+    private bool _applicationCustodyFailed;
 
-    private LinuxRunAccounts(LinuxOwnerActivation owner)
+    private LinuxRunAccounts(LinuxOwnerActivation owner, bool includeApplication)
     {
         _owner = owner;
+        _includeApplication = includeApplication;
         _names = LinuxRunAccountNames.Create(owner.RunId);
-        _reservations = new(_names);
+        _reservations = new(_names, includeApplication);
     }
 
     private LinuxRunAccountSnapshot Identities
     {
         get { RequireOwnedBy(_owner, default); return _identities!; }
+    }
+
+    private LinuxRunAccountSnapshot ApplicationIdentities
+    {
+        get
+        {
+            if (!_includeApplication) throw Failed();
+            return Identities;
+        }
     }
 
     /// <summary>Gets the actual created worker UID while account ownership remains active.</summary>
@@ -284,6 +354,15 @@ internal sealed class LinuxRunAccounts
     internal uint SubjectGid => Identities.SubjectGid;
     /// <summary>Gets the actual created results GID; this adds no membership or writable paths.</summary>
     internal uint ResultsGid => Identities.ResultsGid;
+    /// <summary>Gets the actual created application UID while optional application accounts remain active.</summary>
+    /// <exception cref="LinuxRunAccountException">Application accounts were not requested or ownership is inactive.</exception>
+    internal uint ApplicationUid => ApplicationIdentities.ApplicationUid;
+    /// <summary>Gets the actual created application private primary GID while ownership remains active.</summary>
+    /// <exception cref="LinuxRunAccountException">Application accounts were not requested or ownership is inactive.</exception>
+    internal uint ApplicationGid => ApplicationIdentities.ApplicationGid;
+    /// <summary>Gets the actual empty resource-access GID while optional application accounts remain active.</summary>
+    /// <exception cref="LinuxRunAccountException">Application accounts were not requested or ownership is inactive.</exception>
+    internal uint ResourceAccessGid => ApplicationIdentities.ResourceAccessGid;
     /// <summary>Gets whether unsafe/incomplete cleanup retained identities for root quarantine.</summary>
     internal bool IsQuarantined { get { lock (_gate) return _quarantined; } }
 
@@ -347,6 +426,25 @@ internal sealed class LinuxRunAccounts
         }
     }
 
+    /// <summary>Retains application storage so its native sealed state gates every account-ID deletion.</summary>
+    /// <remarks>
+    /// Retain this exact owner-bound workspace before creating application-owned storage. Account closure
+    /// rechecks its native sealed state before every deletion and after every utility attempt. An unsealed,
+    /// changed, or unverifiable workspace fails cleanup and leaves the identities quarantined.
+    /// </remarks>
+    internal void RetainApplicationForCustody(LinuxApplicationWorkspace workspace, LinuxOwnerActivation owner)
+    {
+        ArgumentNullException.ThrowIfNull(workspace);
+        if (!_includeApplication) throw Failed();
+        workspace.RequireAccountOwner(this, owner);
+        lock (_gate)
+        {
+            if (!ReferenceEquals(owner, _owner) || _applicationWorkspacePending is not null
+                || _identities is null || _closeTask is not null || _quarantined || _reservations.Failed) throw Failed();
+            _applicationWorkspacePending = workspace;
+        }
+    }
+
     /// <summary>Requires the original private workspace reservation, without granting account release.</summary>
     internal void RequireWorkspaceCustody(LinuxRunWorkspace workspace)
     {
@@ -374,11 +472,20 @@ internal sealed class LinuxRunAccounts
     }
 
     /// <summary>Authenticates the actual owner before constructing a private pending account owner.</summary>
-    internal static Task<LinuxRunAccounts> CreateAsync(LinuxOwnerActivation owner, CancellationToken token)
+    /// <param name="owner">The live run owner that owns utility dispatch and NSS inspection.</param>
+    /// <param name="token">The caller's original creation token.</param>
+    /// <param name="includeApplication">Whether to also create an isolated application user and resource group.</param>
+    /// <remarks>
+    /// The default retains the existing worker/subject/results profile. The optional application profile adds a
+    /// no-login/no-home user, its private primary group, and one empty resource-access group. The system allocates
+    /// every numeric identity; the factory accepts them only after complete forward and reverse NSS verification.
+    /// </remarks>
+    internal static Task<LinuxRunAccounts> CreateAsync(LinuxOwnerActivation owner, CancellationToken token,
+        bool includeApplication = false)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.ClaimAccountCreation(token);
-        return new LinuxRunAccounts(owner).CreateCoreAsync(token);
+        return new LinuxRunAccounts(owner, includeApplication).CreateCoreAsync(token);
     }
 
     private async Task<LinuxRunAccounts> CreateCoreAsync(CancellationToken token)
@@ -386,8 +493,9 @@ internal sealed class LinuxRunAccounts
         var stage = LinuxAccountPreparationStage.NamesAbsent;
         try
         {
-            await LinuxRunAccountNss.RequireNamesAbsentAsync(_owner, token).ConfigureAwait(false);
-            for (var i = 0; i < 3; i++)
+            await LinuxRunAccountNss.RequireNamesAbsentAsync(_owner, token, _includeApplication).ConfigureAwait(false);
+            var createCount = _includeApplication ? 5 : 3;
+            for (var i = 0; i < createCount; i++)
             {
                 stage = LinuxAccountPreparationStage.ReserveUtility;
                 _owner.RequireActive(token);
@@ -396,7 +504,7 @@ internal sealed class LinuxRunAccounts
                 await RunUtilityAsync(command, cleanup: false, token).ConfigureAwait(false);
             }
             stage = LinuxAccountPreparationStage.IdentityRead;
-            _identities = await LinuxRunAccountNss.ReadAsync(_owner, token).ConfigureAwait(false);
+            _identities = await LinuxRunAccountNss.ReadAsync(_owner, token, _includeApplication).ConfigureAwait(false);
             stage = LinuxAccountPreparationStage.OwnershipVerify;
             RequireOwnedBy(_owner, token);
             return this;
@@ -482,7 +590,8 @@ internal sealed class LinuxRunAccounts
                 if (_utilities.Any(static utility => !utility.PhysicallySettled)) throw Failed();
             }
             stage = LinuxAccountPreparationStage.FinalNamesAbsent;
-            await LinuxRunAccountNss.RequireNamesAbsentAfterCleanupAsync(_owner, deadline.Token).ConfigureAwait(false);
+            await LinuxRunAccountNss.RequireNamesAbsentAfterCleanupAsync(_owner, deadline.Token, _includeApplication)
+                .ConfigureAwait(false);
             stage = LinuxAccountPreparationStage.FinalOwnershipCheck;
             RequireCustody(custody, deadline.Token);
             _owner.RequireCleanup(deadline.Token);
@@ -498,6 +607,18 @@ internal sealed class LinuxRunAccounts
 
     private void RequireCustody(LinuxRunWorkspace.RootCustody? custody, CancellationToken token)
     {
+        LinuxApplicationWorkspace? applicationWorkspace;
+        lock (_gate)
+        {
+            if (_applicationCustodyFailed) throw Failed();
+            applicationWorkspace = _applicationWorkspacePending;
+        }
+        try { applicationWorkspace?.RequireSealedForAccountRelease(this, _owner, token); }
+        catch
+        {
+            lock (_gate) _applicationCustodyFailed = true;
+            throw;
+        }
         LinuxProducerWorkspace? producerWorkspace;
         lock (_gate) producerWorkspace = _producerWorkspacePending;
         producerWorkspace?.RequireSealedForAccountRelease(this, _owner, token);
@@ -549,24 +670,27 @@ internal static partial class LinuxRunAccountNss
     private const int MaximumSupplementaryGroups = 64;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    /// <summary>Reads five generated accounts, their reverse numeric mappings and both group lists.</summary>
+    /// <summary>Reads the selected generated accounts, their reverse numeric mappings and actual group lists.</summary>
     /// <returns>Copied consistent data only; no created account owner or admission.</returns>
-    internal static async Task<LinuxRunAccountSnapshot> ReadAsync(LinuxOwnerActivation owner, CancellationToken token)
+    internal static async Task<LinuxRunAccountSnapshot> ReadAsync(LinuxOwnerActivation owner, CancellationToken token,
+        bool includeApplication = false)
     {
         ArgumentNullException.ThrowIfNull(owner);
         owner.RequireActive(token);
         RequirePlatform();
         var names = LinuxRunAccountNames.Create(owner.RunId);
         // Await the original task directly, including when a synchronous NSS provider ignores cancellation.
-        var data = await Task.Run(() => Read(owner, names, token), CancellationToken.None).ConfigureAwait(false);
+        var data = await Task.Run(() => Read(owner, names, token, includeApplication), CancellationToken.None)
+            .ConfigureAwait(false);
         owner.RequireActive(token);
         return data;
     }
 
     /// <summary>Checks all generated names absent before future reservation/dispatch; unknown NSS fails.</summary>
     /// <remarks>Absence is an observation, not an exclusive reservation against other privileged writers.</remarks>
-    internal static Task RequireNamesAbsentAsync(LinuxOwnerActivation owner, CancellationToken token) =>
-        ObserveAbsenceAsync(owner, token, cleanup: false);
+    internal static Task RequireNamesAbsentAsync(LinuxOwnerActivation owner, CancellationToken token,
+        bool includeApplication = false) => ObserveAbsenceAsync(owner, token, cleanup: false,
+            includeApplication: includeApplication);
 
     /// <summary>Checks all reserved names absent after strict cleanup, even when new work was cancelled.</summary>
     /// <remarks>
@@ -574,8 +698,9 @@ internal static partial class LinuxRunAccountNss
     /// no successful deletion exit or expired creation gate can stand in for this observation. All pending
     /// utilities and consumer identities must already have settled before absence can permit release.
     /// </remarks>
-    internal static Task RequireNamesAbsentAfterCleanupAsync(LinuxOwnerActivation owner, CancellationToken token) =>
-        ObserveAbsenceAsync(owner, token, cleanup: true);
+    internal static Task RequireNamesAbsentAfterCleanupAsync(LinuxOwnerActivation owner, CancellationToken token,
+        bool includeApplication = false) => ObserveAbsenceAsync(owner, token, cleanup: true,
+            includeApplication: includeApplication);
 
     /// <summary>Observes a reserved deletion target absent, or verifies its known created identity before deletion.</summary>
     /// <remarks>
@@ -593,7 +718,7 @@ internal static partial class LinuxRunAccountNss
         var names = LinuxRunAccountNames.Create(owner.RunId);
         var name = command.Arguments[^1];
         if (command.Operation is not (LinuxRunAccountOperation.DeleteUser or LinuxRunAccountOperation.DeleteGroup)
-            || name != names.Worker && name != names.Subject && name != names.Results) throw Mismatch();
+            || !names.ReservedNames(includeApplication: true).Contains(name)) throw Mismatch();
         var absent = await Task.Run(() =>
         {
             Check(owner, token, cleanup: true);
@@ -603,8 +728,10 @@ internal static partial class LinuxRunAccountNss
                 if (user is null) return true;
                 if (expected is not null)
                 {
-                    var uid = name == names.Worker ? expected.WorkerUid : expected.SubjectUid;
-                    var gid = name == names.Worker ? expected.WorkerGid : expected.SubjectGid;
+                    var uid = name == names.Worker ? expected.WorkerUid
+                        : name == names.Subject ? expected.SubjectUid : expected.ApplicationUid;
+                    var gid = name == names.Worker ? expected.WorkerGid
+                        : name == names.Subject ? expected.SubjectGid : expected.ApplicationGid;
                     if (user.Uid != uid || user.Gid != gid || User(name, uid) != user) throw Mismatch();
                 }
                 RequirePrimaryOnly(user);
@@ -616,7 +743,9 @@ internal static partial class LinuxRunAccountNss
                 if (expected is not null)
                 {
                     var gid = name == names.Worker ? expected.WorkerGid
-                        : name == names.Subject ? expected.SubjectGid : expected.ResultsGid;
+                        : name == names.Subject ? expected.SubjectGid
+                        : name == names.Results ? expected.ResultsGid
+                        : name == names.Application ? expected.ApplicationGid : expected.ResourceAccessGid;
                     var reverse = Group(name, gid);
                     if (group.Gid != gid || reverse is null || reverse.Name != name || reverse.Gid != gid) throw Mismatch();
                 }
@@ -628,7 +757,8 @@ internal static partial class LinuxRunAccountNss
         return absent;
     }
 
-    private static async Task ObserveAbsenceAsync(LinuxOwnerActivation owner, CancellationToken token, bool cleanup)
+    private static async Task ObserveAbsenceAsync(LinuxOwnerActivation owner, CancellationToken token, bool cleanup,
+        bool includeApplication)
     {
         ArgumentNullException.ThrowIfNull(owner);
         Check(owner, token, cleanup);
@@ -636,7 +766,7 @@ internal static partial class LinuxRunAccountNss
         var names = LinuxRunAccountNames.Create(owner.RunId);
         await Task.Run(() =>
         {
-            foreach (var name in new[] { names.Worker, names.Subject, names.Results })
+            foreach (var name in names.ReservedNames(includeApplication))
             {
                 Check(owner, token, cleanup);
                 if (User(name, null) is not null) throw Mismatch();
@@ -648,7 +778,8 @@ internal static partial class LinuxRunAccountNss
         Check(owner, token, cleanup);
     }
 
-    private static LinuxRunAccountSnapshot Read(LinuxOwnerActivation owner, LinuxRunAccountNames names, CancellationToken token)
+    private static LinuxRunAccountSnapshot Read(LinuxOwnerActivation owner, LinuxRunAccountNames names,
+        CancellationToken token, bool includeApplication)
     {
         Check(owner, token);
         var worker = User(names.Worker, null) ?? throw Mismatch();
@@ -660,15 +791,34 @@ internal static partial class LinuxRunAccountNss
         var subjectGroup = Group(names.Subject, null) ?? throw Mismatch();
         Check(owner, token);
         var results = Group(names.Results, null) ?? throw Mismatch();
-        var snapshot = LinuxRunAccountSnapshot.Parse(names, worker, subject, workerGroup, subjectGroup, results);
-        foreach (var user in new[] { worker, subject })
+        LinuxRunAccountUser? application = null;
+        LinuxRunAccountGroup? applicationGroup = null;
+        LinuxRunAccountGroup? resourceAccessGroup = null;
+        if (includeApplication)
+        {
+            Check(owner, token);
+            application = User(names.Application, null) ?? throw Mismatch();
+            Check(owner, token);
+            applicationGroup = Group(names.Application, null) ?? throw Mismatch();
+            Check(owner, token);
+            resourceAccessGroup = Group(names.ResourceAccess, null) ?? throw Mismatch();
+        }
+        var snapshot = LinuxRunAccountSnapshot.Parse(names, worker, subject, workerGroup, subjectGroup, results,
+            application, applicationGroup, resourceAccessGroup);
+        LinuxRunAccountUser[] users = application is null
+            ? [worker, subject]
+            : [worker, subject, application];
+        foreach (var user in users)
         {
             Check(owner, token);
             if (User(user.Name, user.Uid) != user) throw Mismatch();
             Check(owner, token);
             RequirePrimaryOnly(user);
         }
-        foreach (var group in new[] { workerGroup, subjectGroup, results })
+        LinuxRunAccountGroup[] groups = applicationGroup is null
+            ? [workerGroup, subjectGroup, results]
+            : [workerGroup, subjectGroup, results, applicationGroup, resourceAccessGroup!];
+        foreach (var group in groups)
         {
             Check(owner, token);
             var reverse = Group(group.Name, group.Gid);

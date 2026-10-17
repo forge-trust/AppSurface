@@ -51,7 +51,7 @@ public sealed class SupervisionQuotaDrainTests
             Assert.Equal(4, pair.Stdout.ReceivedBytes);
             Assert.Equal(2, pair.Stderr.ReceivedBytes);
             Assert.Equal(6, pair.ReceivedBytes);
-            Assert.Equal(1, pair.Stdout.Prefix.Length);
+            Assert.Single(pair.Stdout.Prefix);
             Assert.Equal(new byte[] { 0x41 }, pair.Stdout.Prefix.ToArray());
             Assert.Empty(pair.Stderr.Prefix);
             Assert.Equal(5, pair.DiscardedBytes);

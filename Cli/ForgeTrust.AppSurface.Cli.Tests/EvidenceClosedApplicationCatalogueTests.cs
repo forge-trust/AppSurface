@@ -10,9 +10,12 @@ public sealed class EvidenceClosedApplicationCatalogueTests
     public void AuthenticatedDescriptorMapsAllNineRolesAndCompleteGrantsWithoutGrantingAdmission()
     {
         var entry = Candidate();
-        entry = entry with { BundleFiles = [.. entry.BundleFiles,
+        entry = entry with
+        {
+            BundleFiles = [.. entry.BundleFiles,
             new("apphost/dependency.dll", EvidenceClosedBundleRole.Dependency, 12, new string('c', 64), 0x124),
-            new("apphost/AppHost.deps.json", EvidenceClosedBundleRole.DependencyManifest, 23, new string('d', 64), 0x124)] };
+            new("apphost/AppHost.deps.json", EvidenceClosedBundleRole.DependencyManifest, 23, new string('d', 64), 0x124)]
+        };
         var descriptor = Descriptor(entry);
         var binding = EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy));
 
@@ -76,23 +79,26 @@ public sealed class EvidenceClosedApplicationCatalogueTests
             "v1" => descriptor with { Schema = "evidence-worker-linux-v1" },
             "unknown-schema" => descriptor with { Schema = "unknown-protocol-canary" },
             "missing-application" => descriptor with { Application = null },
-            _ => descriptor with { Application = change switch
+            _ => descriptor with
             {
-                "sdk-version" => application with { AspireSdkVersion = "unsupported-sdk-canary" },
-                "bad-id" => application with { ApplicationId = "invalid/id-canary" },
-                "bad-digest" => application with { EntryDigest = new string('A', 64) },
-                "unknown-role" => application with { BundleFiles = [application.BundleFiles[0] with { Role = (EvidenceLinuxApplicationBundleRole)999 }, .. application.BundleFiles.Skip(1)] },
-                "null-file" => application with { BundleFiles = [null!, .. application.BundleFiles.Skip(1)] },
-                "null-capabilities" => application with { Capabilities = null! },
-                "null-inputs" => application with { Capabilities = application.Capabilities with { ReadOnlyInputs = null! } },
-                "null-resources" => application with { Resources = null! },
-                "null-resource" => application with { Resources = [null!] },
-                "null-producers" => application with { Producers = null! },
-                "null-producer" => application with { Producers = [null!] },
-                "null-assertions" => application with { Producers = [application.Producers[0] with { AssertionIds = null! }] },
-                "root-application" => application with { ApplicationUid = 0 },
-                _ => application with { ResultsGid = application.ApplicationGid },
-            } },
+                Application = change switch
+                {
+                    "sdk-version" => application with { AspireSdkVersion = "unsupported-sdk-canary" },
+                    "bad-id" => application with { ApplicationId = "invalid/id-canary" },
+                    "bad-digest" => application with { EntryDigest = new string('A', 64) },
+                    "unknown-role" => application with { BundleFiles = [application.BundleFiles[0] with { Role = (EvidenceLinuxApplicationBundleRole)999 }, .. application.BundleFiles.Skip(1)] },
+                    "null-file" => application with { BundleFiles = [null!, .. application.BundleFiles.Skip(1)] },
+                    "null-capabilities" => application with { Capabilities = null! },
+                    "null-inputs" => application with { Capabilities = application.Capabilities with { ReadOnlyInputs = null! } },
+                    "null-resources" => application with { Resources = null! },
+                    "null-resource" => application with { Resources = [null!] },
+                    "null-producers" => application with { Producers = null! },
+                    "null-producer" => application with { Producers = [null!] },
+                    "null-assertions" => application with { Producers = [application.Producers[0] with { AssertionIds = null! }] },
+                    "root-application" => application with { ApplicationUid = 0 },
+                    _ => application with { ResultsGid = application.ApplicationGid },
+                }
+            },
         };
 
         var rejected = Assert.Throws<EvidenceAdmissionException>(() =>
@@ -140,6 +146,18 @@ public sealed class EvidenceClosedApplicationCatalogueTests
             },
         };
         RejectAudit(() => EvidenceClosedApplicationCatalogue.CreateBinding(descriptor, entry.Policy, Plan(entry.Policy)));
+    }
+
+    [Fact]
+    public void RootSelectionCannotEnrollEvenACompleteMatchingCandidate()
+    {
+        var entry = Candidate();
+        var binding = Binding(entry);
+        var error = Assert.Throws<EvidenceAdmissionException>(() => EvidenceClosedApplicationCatalogue.ResolveRoot(
+            entry.Id, binding.EntryDigest, entry.Policy, Plan(entry.Policy), binding.Identities));
+        Assert.Equal("ASEVD407", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain(entry.BuildId, error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -307,15 +325,18 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         var entry = Candidate();
         var binding = Binding(entry);
         var ids = binding.Identities;
-        binding = binding with { Identities = change switch
+        binding = binding with
         {
-            "root-worker" => ids with { WorkerUid = 0 },
-            "root-application" => ids with { ApplicationUid = 0 },
-            "same-producer-application" => ids with { ApplicationUid = ids.ProducerUid },
-            "same-worker-application" => ids with { ApplicationUid = ids.WorkerUid },
-            "application-results-group" => ids with { ApplicationGid = ids.ResultsGid },
-            _ => ids with { ResourceAccessGid = ids.ResultsGid },
-        } };
+            Identities = change switch
+            {
+                "root-worker" => ids with { WorkerUid = 0 },
+                "root-application" => ids with { ApplicationUid = 0 },
+                "same-producer-application" => ids with { ApplicationUid = ids.ProducerUid },
+                "same-worker-application" => ids with { ApplicationUid = ids.WorkerUid },
+                "application-results-group" => ids with { ApplicationGid = ids.ResultsGid },
+                _ => ids with { ResourceAccessGid = ids.ResultsGid },
+            }
+        };
 
         Reject(entry, binding);
     }
@@ -690,8 +711,11 @@ public sealed class EvidenceClosedApplicationCatalogueTests
             "registration-producer-declaration-null" => producer with { Declaration = null! },
             _ => producer,
         };
-        entry = entry with { Resources = [change == "registration-resource-null" ? null! : resource],
-            Producers = [change == "registration-producer-null" ? null! : producer, entry.Producers[1]] };
+        entry = entry with
+        {
+            Resources = [change == "registration-resource-null" ? null! : resource],
+            Producers = [change == "registration-producer-null" ? null! : producer, entry.Producers[1]]
+        };
         entry = change switch
         {
             "id" => entry with { Id = invalidId },
@@ -821,7 +845,8 @@ public sealed class EvidenceClosedApplicationCatalogueTests
         var entry = Candidate();
         var policy = entry.Policy with
         {
-            Id = new string('i', 128), Version = new string('v', 128),
+            Id = new string('i', 128),
+            Version = new string('v', 128),
             Profiles = [entry.Policy.Profiles[0], .. Enumerable.Range(1, 31)
                 .Select(static index => new EvidenceProfile("unused-" + index, EvidenceProfileScope.Targeted, [], [], []))],
             Rules = Enumerable.Range(0, 128).Select(index => new EvidencePolicyRule("rule-" + index,

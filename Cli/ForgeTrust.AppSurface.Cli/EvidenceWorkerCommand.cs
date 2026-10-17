@@ -24,9 +24,26 @@ internal sealed class EvidenceWorkerCommand
         {
             if (string.IsNullOrWhiteSpace(ControlChannel))
                 throw new EvidenceAdmissionException("ASEVD402", "An authenticated independent worker control channel is required.");
+#if EVIDENCE_PRIVATE_C3_SDK
+            var definition = ForgeTrust.AppSurface.Evidence.Planner.EvidencePrivateC3Registration.Definition;
+            var policy = definition.Policy;
+            var plan = new ForgeTrust.AppSurface.Evidence.Planner.EvidencePlanner().Resolve(policy,
+                [new NormalizedDiffPath("calculation/Calculation.cs")]);
+            var host = ForgeTrust.AppSurface.Evidence.Aspire.EvidenceHostBootstrap.Create(plan, registration =>
+            {
+                foreach (var resource in definition.Resources)
+                    registration.AddAspireHealthResource(resource.Declaration, resource.ResourceName);
+                foreach (var producer in definition.Producers)
+                    registration.AddProducer(producer.Declaration,
+                        ForgeTrust.AppSurface.Evidence.Coverage.EvidenceRestrictedCoverageProducerFactory.Create(producer.Declaration));
+            });
+            var manifest = await host.RunAsync(new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, ControlChannel),
+                console.RegisterCancellationHandler()).ConfigureAwait(false);
+#else
             var manifest = await EvidenceProtectedCliExecution.RunAsync(ControlChannel, console.RegisterCancellationHandler(),
                 diagnostic => WriteAllocationDiagnostic(console, diagnostic),
                 diagnostic => console.Error.WriteLine(EvidenceOriginalCancellationCheckpoint.Encode(diagnostic))).ConfigureAwait(false);
+#endif
             if (manifest.ClaimKind == EvidenceClaimKind.None)
                 throw new CommandException("ASEVD211: Evidence execution was incomplete. Inspect the protected failure manifest and use a fresh supervised run after owned exit.");
         }
