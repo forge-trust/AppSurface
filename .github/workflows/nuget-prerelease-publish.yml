@@ -208,7 +208,7 @@ jobs:
 
       - name: Download recovered producer by immutable ID
         if: ${{ steps.recovery.outputs.producer_found == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.recovery.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/package-artifacts
@@ -221,7 +221,7 @@ jobs:
 
       - name: Setup Node.js
         if: ${{ steps.recovery.outputs.producer_found != 'true' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           package-manager-cache: false
@@ -256,7 +256,7 @@ jobs:
       - name: Upload frozen producer bundle
         id: upload-producer
         if: ${{ success() && steps.recovery.outputs.producer_found != 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appsurface-prerelease-packages-${{ github.run_id }}
           path: ${{ runner.temp }}/package-artifacts
@@ -302,7 +302,7 @@ jobs:
           echo "expected_subject_sha256=$(jq -er '.subjectSha256' "$RESOLVED_BINDING")" >> "$GITHUB_OUTPUT"
 
       - name: Download exact producer bundle for issue 845 proof
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.binding.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/preflight-candidate
@@ -326,7 +326,7 @@ jobs:
 
       - name: Retain candidate preflight receipt and approved manifest
         id: upload-preflight-proof
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appsurface-prerelease-preflight-proof-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -337,7 +337,7 @@ jobs:
 
       - name: Upload package validation diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appsurface-prerelease-validation-diagnostics-${{ needs.validate-tag.outputs.package-version }}
           path: |
@@ -411,7 +411,7 @@ jobs:
 
       - name: Download recovered publication-start by immutable ID
         if: ${{ steps.start-recovery.outputs.publication_found == 'true' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.start-recovery.outputs.publication_artifact_id }}
           path: ${{ runner.temp }}/recovered-publication-start
@@ -466,19 +466,19 @@ jobs:
           echo "native_invocation_id=$invocation" >> "$GITHUB_OUTPUT"
 
       - name: Download frozen producer bundle by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
           path: ${{ runner.temp }}/package-artifacts
 
       - name: Download retained candidate preflight evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.pack-and-verify.outputs.preflight_artifact_id }}
           path: ${{ runner.temp }}/preflight-proof
 
       - name: Download original aggregate by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.candidate.outputs.aggregate_artifact_id }}
           path: ${{ runner.temp }}/tailwind-aggregate
@@ -531,7 +531,7 @@ jobs:
       - name: Upload publication-start receipt
         id: upload-start
         if: ${{ success() && steps.start-recovery.outputs.publication_found != 'true' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: publication-start-${{ github.run_id }}
           path: ${{ runner.temp }}/tailwind-publish-preflight-report/publication-start-receipt.json
@@ -556,7 +556,7 @@ jobs:
           echo "receipt_path=$receipt" >> "$GITHUB_OUTPUT"
 
       - name: Download authoritative publication-start by immutable ID
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ steps.start-binding.outputs.artifact_id }}
           path: ${{ runner.temp }}/authoritative-publication-start
@@ -625,7 +625,7 @@ jobs:
 
       - name: Upload publish ledger
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appsurface-prerelease-publish-log-${{ needs.validate-tag.outputs.package-version }}
           path: ${{ runner.temp }}/package-artifacts/package-publish-log.md
@@ -656,13 +656,13 @@ jobs:
             10.0.x
 
       - name: Download validated package artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
           path: ${{ runner.temp }}/package-artifacts
 
       - name: Download retained candidate preflight evidence
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           artifact-ids: ${{ needs.pack-and-verify.outputs.preflight_artifact_id }}
           path: ${{ runner.temp }}/preflight-proof
@@ -699,7 +699,7 @@ jobs:
 
       - name: Upload smoke install report
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: appsurface-prerelease-smoke-${{ needs.validate-tag.outputs.package-version }}
           path: |
