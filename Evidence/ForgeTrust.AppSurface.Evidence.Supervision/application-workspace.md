@@ -70,3 +70,17 @@ and `control/stderr.prefix` files beneath the selected root-owned generation. Ea
 single-link, exclusively created and at most 64 KiB, inside the root-only 0700 control directory.
 Raw bytes remain private and never appear in safe result JSON. Missing or failed diagnostic retention
 cannot replace the original execution/cleanup outcome or establish health.
+
+### Fresh marker descriptor access
+
+`Arm` exclusively creates the fixed `armed` file, writes the fixed bytes and sets root ownership and 0444
+mode. `OpenMarkerReadOnly` then reopens the same name through the retained scratch directory with mandatory
+openat2 and compares full inode/device/ownership/mode/length/time metadata against the actual creator FD
+before and after opening. The write-only creator closes before the original marker bytes are read through
+the new read-only FD. The held descriptor is read-only; no writable marker
+handle is transferred to the application. Rechecking a write-only creator with `RandomAccess.Read` is an
+EBADF error and cannot arm a run. A changed name/inode rejects and quarantines rather than falling back.
+
+The FD helper authenticates no application or root owner on its own: Linux tests use ordinary owned files
+to verify real descriptor access and deterministic name replacement. Full root ownership, contents, freshness,
+original deadlines and native application ownership remain `Arm`'s separate mandatory guards.

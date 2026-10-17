@@ -1,8 +1,10 @@
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
-/// <summary>Pure projection and inventory tests; these fixtures do not create Linux or account authority.</summary>
+/// <summary>Projection, inventory and ordinary owned-FD controls; none creates a protected workspace or account authority.</summary>
 public sealed class LinuxApplicationWorkspaceTests
 {
     private static readonly Guid RunId = Guid.Parse("7f05e071-9a9b-4f40-a211-c9b3064f22d8");
@@ -162,6 +164,57 @@ public sealed class LinuxApplicationWorkspaceTests
                 inode++, file.LengthBytes, file.Sha256));
         return rows.ToArray();
     }
+
+    [Fact]
+    public void LinuxCreatedWriteOnlyMarkerReopensAsSameReadonlyInode()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return;
+        var directory = Path.Combine(Path.GetTempPath(), "application-marker-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var parent = new SafeFileHandle((nint)OpenTestDirectory(directory, 0x10000 | 0x80000), ownsHandle: true);
+            Assert.False(parent.IsInvalid);
+            var path = Path.Combine(directory, "armed");
+            using var writer = File.OpenHandle(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
+            RandomAccess.Write(writer, "armed\n"u8, 0);
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+            Assert.Throws<IOException>(() => { _ = RandomAccess.Read(writer, new byte[6], 0); });
+            using var readable = LinuxApplicationWorkspace.OpenMarkerReadOnly(parent, writer, default);
+            writer.Dispose();
+            var bytes = new byte[6];
+            Assert.Equal(6, RandomAccess.Read(readable, bytes, 0));
+            Assert.Equal("armed\n"u8.ToArray(), bytes);
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead, File.GetUnixFileMode(path));
+            Assert.Throws<IOException>(() => RandomAccess.Write(readable, "changed"u8, 0));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
+    public void LinuxMarkerReopenRejectsDeterministicNameReplacement()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return;
+        var directory = Path.Combine(Path.GetTempPath(), "application-marker-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var parent = new SafeFileHandle((nint)OpenTestDirectory(directory, 0x10000 | 0x80000), ownsHandle: true);
+            Assert.False(parent.IsInvalid);
+            var path = Path.Combine(directory, "armed");
+            File.WriteAllText(path, "original");
+            using var original = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            File.Move(path, Path.Combine(directory, "held-original"));
+            File.WriteAllText(path, "replacement");
+            Reject(() => { using var rejected = LinuxApplicationWorkspace.OpenMarkerReadOnly(parent, original, default); });
+            Assert.Equal("original", File.ReadAllText(Path.Combine(directory, "held-original")));
+            Assert.Equal("replacement", File.ReadAllText(path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenTestDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
     private static void Reject(Action action)
     {

@@ -410,6 +410,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
                 RandomAccess.Write(marker, ArmedContents, 0);
                 if (Fchmod(marker, 0x124) != 0) throw LinuxApplicationWorkspaceLayout.Invalid();
                 var metadata = LinuxProtectedMetadata.From(StatFd(marker));
+                var readable = OpenMarkerReadOnly(_mountedScratch.Handle, marker, token);
+                marker.Dispose();
+                marker = readable;
                 var node = new WorkspaceNode(marker, _mountedScratch, "armed", 0, 0, false, 0x124, allowMount: false)
                 { Metadata = metadata };
                 _nodes.Add(node);
@@ -946,6 +949,29 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         {
             _deadline.Check(token);
         }
+    }
+
+    /// <summary>Reopens only the fixed marker as read-only after creation, preserving its exact sampled inode.</summary>
+    /// <param name="parent">Already retained containing directory; this helper creates no workspace authority.</param>
+    /// <param name="original">Actual creator descriptor retained after the exclusive write and final mode change.</param>
+    /// <param name="token">Original startup token; no deadline is created.</param>
+    /// <returns>A new read-only descriptor only if its actual metadata is unchanged.</returns>
+    /// <remarks>Requires Linux openat2. Root ownership, fixed bytes and freshness are separately checked by Arm;
+    /// the FD utility can also check ordinary owned test files without authenticating a root application.</remarks>
+    internal static SafeFileHandle OpenMarkerReadOnly(SafeFileHandle parent, SafeFileHandle original,
+        CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var expected = LinuxProtectedMetadata.From(StatFd(original));
+        var opened = OpenAt2(Fd(parent), "armed", ReadFileFlags, 0, ChildResolution);
+        try
+        {
+            if (LinuxProtectedMetadata.From(StatFd(opened)) != expected
+                || LinuxProtectedMetadata.From(StatFd(original)) != expected) throw LinuxApplicationWorkspaceLayout.Invalid();
+            token.ThrowIfCancellationRequested();
+            return opened;
+        }
+        catch { opened.Dispose(); throw; }
     }
 
     private void RequireMarkerBytes(WorkspaceNode marker, CancellationToken token)
