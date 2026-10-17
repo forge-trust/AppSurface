@@ -38,7 +38,7 @@ internal sealed partial class LinuxApplicationProcess
     private Task? _stop;
     private Task? _monitor;
     private readonly CancellationTokenSource _monitorStop = new();
-    private int _stopping;
+    private readonly SupervisionApplicationMonitorState _monitorState = new();
     private int _dispatchAttempted;
     private int _failed;
     private int _settled;
@@ -272,7 +272,7 @@ internal sealed partial class LinuxApplicationProcess
     private async Task StopCoreAsync(CancellationToken token)
     {
         var failed = false;
-        Interlocked.Exchange(ref _stopping, 1);
+        _monitorState.BeginStop();
         try { _monitorStop.Cancel(); } catch { failed = true; }
         try { await _lifetime.StopAndJoinAsync(StopUnitAsync, token).ConfigureAwait(false); }
         catch { failed = true; }
@@ -324,6 +324,8 @@ internal sealed partial class LinuxApplicationProcess
                 group_empty_twice = true,
                 pumps_joined = _output is null || _output.Drained,
                 received_bytes = _output?.ReceivedBytes ?? 0,
+                ledger_failure = _ledger.FirstFailure.ToString(),
+                monitor_failed = _monitorState.Failed,
                 main_code = _stoppedTerminal?.ExecMainCode,
                 main_status = _stoppedTerminal?.ExecMainStatus,
                 pending_start_joined = !_pending.Snapshot.StartReserved || _pending.Snapshot.StartJoined
@@ -342,10 +344,14 @@ internal sealed partial class LinuxApplicationProcess
     {
         try
         {
-            while (Volatile.Read(ref _stopping) == 0)
+            while (_monitorState.ShouldObserve)
             {
                 var token = _monitorStop.Token;
-                RequirePolling(token);
+                // The application remains owned when STOP closes new-work admission. Monitor that
+                // existing execution under the original control identity/deadline until its stop boundary.
+                _owner.RequireControlIdentity(token);
+                _input.Deadline.Check(token);
+                if (_budget.QuotaExceeded || _collect?.IsFaulted == true || _collect?.IsCanceled == true) throw Rejected();
                 var sample = await _monitorBackend!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
                 if (!_recipe!.IsRunning(sample) || sample.MainPid != _appHost!.Pid) throw Rejected();
                 _resource?.Recheck(token); _dcp?.Recheck(token);
@@ -354,7 +360,14 @@ internal sealed partial class LinuxApplicationProcess
             }
         }
         catch (OperationCanceledException) when (_monitorStop.IsCancellationRequested) { }
-        catch { _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed); throw; }
+        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        {
+            if (_monitorState.RecordObservationFailure())
+            {
+                _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
+                throw;
+            }
+        }
     }
 
     private static void EmitReadiness<T>(T value)

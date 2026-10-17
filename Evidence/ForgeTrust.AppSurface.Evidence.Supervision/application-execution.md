@@ -56,6 +56,16 @@ STOP is excluded from that descendant join. The application checks its stopped u
 emptiness twice, both actual EOFs and error-free output reconciliation before releasing storage.
 The external root OS lifetime contains managed or native calls that stop making progress.
 
+The live application monitor borrows the original control identity and deadline, rather than permission to
+admit new work. STOP closes that admission before native containment starts; using `RequireActive` in the
+already-owned monitor could incorrectly turn that normal transition into a workload failure.
+[`SupervisionApplicationMonitorState`](SupervisionApplicationMonitorState.cs) atomically orders observation
+failure against intentional stop. Failure recorded before stop stays latched. A late result from an in-flight
+observation after stop cannot retrospectively fail the live phase. This comparison state grants no authority:
+the original monitor task still joins, and unit, group, pending-start, output and custody checks remain required.
+The bounded `settled` diagnostic includes the closed ledger failure and monitor-failure bit so a negative
+owned-exit reply is distinguishable from successful physical cleanup.
+
 Scratch is unmounted and account-associated nodes are secured before the strict account owner deletes
 reusable identities. An uncertain start, failed pump, failed unmount or unsafe retained name quarantines
 those identities. Retrying a failed disposer cannot turn it into successful cleanup. The SDK's registered
