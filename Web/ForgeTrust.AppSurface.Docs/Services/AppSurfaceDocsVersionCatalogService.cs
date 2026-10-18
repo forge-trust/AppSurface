@@ -18,6 +18,8 @@ public sealed class AppSurfaceDocsVersionCatalogService
 {
     private const string MaxRewrittenFileSizeKey = "AppSurfaceDocs:Versioning:MaxRewrittenFileSizeBytes";
     private const string RewriteLimitDocsAnchor = "AppSurface Docs README section 'Published tree rewrite limit'";
+    private const string RecommendationContractDocsLink = "https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#published-version-catalog";
+    private const string RecommendationFix = "Correct or remove the row, store a canonical /docs route that resolves to an ordinary HTML file in this exact tree, then re-export and verify the archive.";
 
     private readonly record struct AvailabilityFailure(string PublicMessage, string InternalDetail);
 
@@ -42,6 +44,9 @@ public sealed class AppSurfaceDocsVersionCatalogService
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<AppSurfaceDocsVersionCatalogService> _logger;
     private readonly Lazy<AppSurfaceDocsResolvedVersionCatalog> _catalog;
+
+    /// <summary>Gets the validated product identity included in safe alias diagnostics before the first lazy load.</summary>
+    internal string InstanceName { get; init; } = "Default";
 
     /// <summary>
     /// Initializes a new instance of <see cref="AppSurfaceDocsVersionCatalogService"/>.
@@ -137,6 +142,10 @@ public sealed class AppSurfaceDocsVersionCatalogService
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath);
         }
 
+        // Capture ownership before any trusted-root or version-tree failure can return early.
+        var aliasResolver = new AppSurfaceDocsVersionAliasCatalogResolver(_docsUrlBuilder, _logger, InstanceName);
+        var aliasDeclaration = aliasResolver.Parse(root);
+
         var catalogDirectory = Path.GetDirectoryName(catalogPath) ?? _environment.ContentRootPath;
         string trustedReleaseRootPath;
         try
@@ -153,7 +162,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 "AppSurface Docs trusted release root configuration is invalid. Published release trees will stay unavailable.");
             return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(
                 catalogPath,
-                "Trusted release root path is invalid.");
+                "Trusted release root path is invalid.") with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateDirectory(
@@ -165,7 +178,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         {
             _logger.LogWarning(
                 "AppSurface Docs trusted release root is unavailable. Published release trees will stay unavailable.");
-            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue);
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath, trustedRootPublicIssue) with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         var seenVersions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -187,7 +204,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
                 ex,
                 "AppSurface Docs version catalog {CatalogPath} has an invalid top-level payload. Versioned release trees will stay unavailable.",
                 catalogPath);
-            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath);
+            return AppSurfaceDocsResolvedVersionCatalog.CreateUnavailable(catalogPath) with
+            {
+                Aliases = aliasResolver.Resolve(aliasDeclaration, [], targetResolutionAvailable: false),
+                IsAliasNamespaceActive = aliasDeclaration.IsActive
+            };
         }
 
         foreach (var versionEntry in versionEntries)
@@ -228,7 +249,11 @@ public sealed class AppSurfaceDocsVersionCatalogService
         }
 
         var recommendedVersionEntry = ResolveRecommendedVersion(recommendedVersion, versions, catalogPath);
-        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalogPath, versions, recommendedVersionEntry);
+        return new AppSurfaceDocsResolvedVersionCatalog(AppSurfaceDocsResolvedVersionCatalogStatus.Resolved, catalogPath, versions, recommendedVersionEntry)
+        {
+            Aliases = aliasResolver.Resolve(aliasDeclaration, versions),
+            IsAliasNamespaceActive = aliasDeclaration.IsActive
+        };
     }
 
     private string? LogAndIgnoreInvalidRecommendedVersion(string catalogPath, string issue)
@@ -620,6 +645,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
         var searchIndexValidationIssue = ValidateSearchIndexPayload(
             Path.Join(exactTreePath, "search-index.json"),
+            exactTreePath,
             new PublishedSearchIndexArchivePathContext(version),
             maxRewrittenFileSizeBytes);
         if (searchIndexValidationIssue is not null)
@@ -632,6 +658,7 @@ public sealed class AppSurfaceDocsVersionCatalogService
 
     private static AvailabilityFailure? ValidateSearchIndexPayload(
         string searchIndexPath,
+        string exactTreeRootPath,
         PublishedSearchIndexArchivePathContext pathContext,
         long maxRewrittenFileSizeBytes)
     {
@@ -686,6 +713,64 @@ public sealed class AppSurfaceDocsVersionCatalogService
                         InternalDetail: $"Version '{pathContext.Version}' search-index.json documents[{index}].path was rejected: category '{reason}', title '{SanitizeSearchIndexDiagnosticValue(title.GetString()!)}', value '{validation.RedactedValue}', expected root '/docs'.");
                 }
 
+                if (item.TryGetProperty("recommendedPages", out var recommendations))
+                {
+                    if (recommendations.ValueKind != JsonValueKind.Array)
+                    {
+                        return CreateRecommendationAvailabilityFailure(
+                            pathContext,
+                            index,
+                            recommendationIndex: null,
+                            "malformed recommendation list",
+                            "present 'recommendedPages' must be a JSON array, including when empty");
+                    }
+
+                    var recommendationIndex = 0;
+                    foreach (var recommendation in recommendations.EnumerateArray())
+                    {
+                        var schemaIssue = ValidateRecommendationRowSchema(recommendation);
+                        if (schemaIssue is not null)
+                        {
+                            return CreateRecommendationAvailabilityFailure(
+                                pathContext,
+                                index,
+                                recommendationIndex,
+                                "malformed recommendation row",
+                                schemaIssue);
+                        }
+
+                        var recommendationPath = recommendation.GetProperty("path").GetString()!;
+                        var recommendationPathValidation = PublishedSearchIndexDocumentPathPolicy.ValidateRecommendationArchivePath(
+                            recommendationPath,
+                            pathContext);
+                        if (!recommendationPathValidation.IsValid)
+                        {
+                            var reason = PublishedSearchIndexDocumentPathPolicy.ToDiagnosticCode(recommendationPathValidation.Reason);
+                            return CreateRecommendationAvailabilityFailure(
+                                pathContext,
+                                index,
+                                recommendationIndex,
+                                "unsafe recommendation URL",
+                                $"'path' was rejected with category '{reason}' and value '{recommendationPathValidation.RedactedValue}'");
+                        }
+
+                        if (!RecommendationTargetExistsInExactTree(
+                                exactTreeRootPath,
+                                recommendationPathValidation.NormalizedPath!,
+                                out var targetFailure))
+                        {
+                            return CreateRecommendationAvailabilityFailure(
+                                pathContext,
+                                index,
+                                recommendationIndex,
+                                "recommendation target is unavailable",
+                                $"{targetFailure} for redacted path '{RedactSearchIndexDiagnosticValue(recommendationPath)}'");
+                        }
+
+                        recommendationIndex++;
+                    }
+                }
+
                 index++;
             }
         }
@@ -703,6 +788,118 @@ public sealed class AppSurfaceDocsVersionCatalogService
     {
         var sanitized = new string(value.Trim().Select(ch => char.IsControl(ch) ? ' ' : ch).ToArray());
         return sanitized.Length <= 80 ? sanitized : sanitized[..80] + "...";
+    }
+
+    private static string? ValidateRecommendationRowSchema(JsonElement recommendation)
+    {
+        if (recommendation.ValueKind == JsonValueKind.Null)
+        {
+            return "row is null";
+        }
+
+        if (recommendation.ValueKind != JsonValueKind.Object)
+        {
+            return "row is not a JSON object";
+        }
+
+        foreach (var propertyName in new[] { "path", "title" })
+        {
+            if (!TryGetRequiredRecommendationString(recommendation, propertyName, out _, out var issue))
+            {
+                return issue;
+            }
+        }
+
+        // Title and path are the archive's link contract. Optional metadata is opaque to this boundary so old and
+        // future presentation fields remain compatible and cannot suppress an otherwise valid navigation link.
+        return null;
+    }
+
+    private static bool TryGetRequiredRecommendationString(
+        JsonElement recommendation,
+        string propertyName,
+        out string value,
+        out string issue)
+    {
+        value = string.Empty;
+        if (!recommendation.TryGetProperty(propertyName, out var propertyValue))
+        {
+            issue = $"required '{propertyName}' member is missing";
+            return false;
+        }
+
+        if (propertyValue.ValueKind != JsonValueKind.String)
+        {
+            issue = $"required '{propertyName}' must be a JSON string";
+            return false;
+        }
+
+        value = propertyValue.GetString() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsControl))
+        {
+            issue = $"required '{propertyName}' must be a nonblank JSON string without control characters";
+            return false;
+        }
+
+        issue = string.Empty;
+        return true;
+    }
+
+    private static bool RecommendationTargetExistsInExactTree(
+        string exactTreeRootPath,
+        string normalizedArchivePath,
+        out string failure)
+    {
+        var decodedPath = Uri.UnescapeDataString(normalizedArchivePath);
+        var relativePath = decodedPath.Length == DocsUrlBuilder.DocsEntryPath.Length
+            ? string.Empty
+            : decodedPath[(DocsUrlBuilder.DocsEntryPath.Length + 1)..];
+        var candidates = AppSurfaceDocsPublishedTreeHandler.BuildHtmlDocumentCandidatePaths(relativePath);
+        var foundUnsafeExistingCandidate = false;
+
+        foreach (var candidate in candidates)
+        {
+            if (AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+                    exactTreeRootPath,
+                    candidate,
+                    out var physicalFilePath,
+                    out _))
+            {
+                failure = string.Empty;
+                return true;
+            }
+
+            if (File.Exists(physicalFilePath) || Directory.Exists(physicalFilePath))
+            {
+                foundUnsafeExistingCandidate = true;
+            }
+        }
+
+        failure = foundUnsafeExistingCandidate
+            ? "no safe ordinary HTML candidate could be used (the route resolves through a non-ordinary file or reparse segment)"
+            : "no ordinary HTML candidate exists in the selected exact release tree";
+        return false;
+    }
+
+    private static AvailabilityFailure CreateRecommendationAvailabilityFailure(
+        PublishedSearchIndexArchivePathContext pathContext,
+        int documentIndex,
+        int? recommendationIndex,
+        string problem,
+        string cause)
+    {
+        var location = recommendationIndex is { } rowIndex
+            ? $"documents[{documentIndex}].recommendedPages[{rowIndex}]"
+            : $"documents[{documentIndex}].recommendedPages";
+        var fix = RecommendationFix;
+        var publicMessage = $"Published release tree has invalid recommended-page data at {location}. Correct the row and re-export the archive. See {RecommendationContractDocsLink}.";
+        var internalDetail = $"Version '{pathContext.Version}' search-index.json {location} was rejected: problem '{problem}', cause '{cause}'. Fix: {fix} Reference: {RecommendationContractDocsLink}.";
+        return new AvailabilityFailure(publicMessage, internalDetail);
+    }
+
+    private static string RedactSearchIndexDiagnosticValue(string value)
+    {
+        return $"<redacted:{value.Length}>";
     }
 }
 
@@ -775,6 +972,11 @@ public enum AppSurfaceDocsResolvedVersionCatalogStatus
 /// <see cref="AppSurfaceDocsVersionVisibility.Public" /> only. Public-but-unavailable releases remain in that list so the
 /// archive can surface their degraded status instead of pretending they do not exist.
 /// </para>
+/// <para>
+/// <see cref="Aliases"/> contains operator-facing alias resolution state in authored order. Consumers that render the
+/// public archive must first create a safe projection; <see cref="AppSurfaceDocsResolvedVersionAlias.ConfiguredVersion"/>
+/// may identify hidden configuration and must not be serialized into reader-facing markup.
+/// </para>
 /// </remarks>
 public sealed record AppSurfaceDocsResolvedVersionCatalog(
     AppSurfaceDocsResolvedVersionCatalogStatus Status,
@@ -782,6 +984,15 @@ public sealed record AppSurfaceDocsResolvedVersionCatalog(
     IReadOnlyList<AppSurfaceDocsResolvedVersion> Versions,
     AppSurfaceDocsResolvedVersion? RecommendedVersion)
 {
+    /// <summary>
+    /// Gets the resolved aliases in authored order. Invalid entries and every member of duplicate-name groups remain
+    /// available here for operator diagnostics.
+    /// </summary>
+    public IReadOnlyList<AppSurfaceDocsResolvedVersionAlias> Aliases { get; init; } = [];
+
+    /// <summary>Gets whether alias declarations activate ownership of the configured alias namespace.</summary>
+    public bool IsAliasNamespaceActive { get; init; }
+
     /// <summary>
     /// Gets the sentinel catalog result for hosts where versioning is disabled entirely.
     /// </summary>

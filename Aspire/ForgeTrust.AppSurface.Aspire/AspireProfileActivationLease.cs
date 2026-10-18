@@ -1,4 +1,5 @@
 using ForgeTrust.AppSurface.Core;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,15 +22,18 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
     private readonly object _disposeLock = new();
     private IHost? _host;
     private Task? _disposeTask;
+    private readonly IAsyncDisposable? _ownership;
 
     /// <summary>
     /// Initializes a lease and transfers ownership of the activation host to it.
     /// </summary>
     /// <param name="host">The unstarted AppSurface host that owns the profile's service provider.</param>
     /// <param name="profile">The profile resolved from <paramref name="host"/>.</param>
-    internal AspireProfileActivationLease(IHost host, TProfile profile)
+    /// <param name="ownership">Optional configured-activation ownership, including detached configuration trees.</param>
+    internal AspireProfileActivationLease(IHost host, TProfile profile, IAsyncDisposable? ownership = null)
     {
         _host = host;
+        _ownership = ownership;
         Profile = profile;
     }
 
@@ -89,13 +93,13 @@ internal sealed class AspireProfileActivationLease<TProfile> : IDisposable, IAsy
     private async Task DisposeOwnedHostAsync()
     {
         var host = Interlocked.Exchange(ref _host, null);
-        if (host is IAsyncDisposable asyncDisposable)
+        if (_ownership is not null)
         {
-            await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            await _ownership.DisposeAsync().ConfigureAwait(false);
         }
-        else
+        else if (host is not null)
         {
-            host?.Dispose();
+            await DisposeHostCoreAsync(host).ConfigureAwait(false);
         }
     }
 
@@ -135,34 +139,85 @@ internal static class AspireProfileActivator
     /// disposes the host before propagating the primary failure.
     /// </remarks>
     /// <exception cref="OperationCanceledException">Cancellation is requested before activation completes.</exception>
-    internal static async Task<AspireProfileActivationLease<TProfile>> ActivateAsync<TAppHost, TModule, TProfile>(
+    internal static Task<AspireProfileActivationLease<TProfile>> ActivateAsync<TAppHost, TModule, TProfile>(
+        CancellationToken cancellationToken)
+        where TAppHost : class
+        where TModule : IAppSurfaceHostModule, new()
+        where TProfile : AspireProfile =>
+        ActivateCoreAsync<TAppHost, TModule, TProfile>(null, null, false, cancellationToken);
+
+    /// <summary>
+    /// Activates a profile after final per-call configuration and services callbacks with early ownership observation.
+    /// </summary>
+    /// <typeparam name="TAppHost">The marker whose assembly pins activation identity.</typeparam>
+    /// <typeparam name="TModule">The module composed through ordinary AppSurface startup.</typeparam>
+    /// <typeparam name="TProfile">The profile resolved after both callbacks.</typeparam>
+    /// <param name="configureConfiguration">The optional final application-configuration callback.</param>
+    /// <param name="configureServices">The optional final service-collection callback.</param>
+    /// <param name="cancellationToken">A token checked around callbacks and profile construction.</param>
+    /// <returns>A lease owning the unstarted host and detached or partially constructed configuration.</returns>
+    /// <remarks>
+    /// The selected provider factory is retained, including later container precedence. Callback exceptions are
+    /// preserved for the Testing factory's phase diagnostics. Cleanup and logging failures cannot replace them.
+    /// </remarks>
+    internal static Task<AspireProfileActivationLease<TProfile>> ActivateConfiguredAsync<TAppHost, TModule, TProfile>(
+        Action<IConfigurationBuilder>? configureConfiguration,
+        Action<IServiceCollection>? configureServices,
+        CancellationToken cancellationToken)
+        where TAppHost : class
+        where TModule : IAppSurfaceHostModule, new()
+        where TProfile : AspireProfile =>
+        ActivateCoreAsync<TAppHost, TModule, TProfile>(configureConfiguration, configureServices, true, cancellationToken);
+
+    private static async Task<AspireProfileActivationLease<TProfile>> ActivateCoreAsync<TAppHost, TModule, TProfile>(
+        Action<IConfigurationBuilder>? configureConfiguration,
+        Action<IServiceCollection>? configureServices,
+        bool configured,
         CancellationToken cancellationToken)
         where TAppHost : class
         where TModule : IAppSurfaceHostModule, new()
         where TProfile : AspireProfile
     {
         cancellationToken.ThrowIfCancellationRequested();
-
-        var context = new StartupContext([], new TModule())
-        {
-            OverrideEntryPointAssembly = typeof(TAppHost).Assembly
-        };
-        var startup = (IAppSurfaceStartup)new AspireAppStartup<TModule>();
-        var host = startup.CreateHostBuilder(context).Build();
-
+        var ownership = configured ? new AspireProfileActivationHostBuilder() : null;
+        IHost? host = null;
         try
         {
+            var context = new StartupContext([], new TModule())
+            {
+                OverrideEntryPointAssembly = typeof(TAppHost).Assembly,
+                HostBuilderFactory = ownership is null ? null : ownership.ConfigureDefaults
+            };
+            var startup = (IAppSurfaceStartup)new AspireAppStartup<TModule>();
+            var builder = startup.CreateHostBuilder(context);
+            if (configured)
+            {
+                builder.ConfigureAppConfiguration((_, configuration) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    configureConfiguration?.Invoke(configuration);
+                    cancellationToken.ThrowIfCancellationRequested();
+                });
+                builder.ConfigureServices((_, services) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    configureServices?.Invoke(services);
+                    cancellationToken.ThrowIfCancellationRequested();
+                });
+            }
+
+            host = builder.Build();
             cancellationToken.ThrowIfCancellationRequested();
             var profile = host.Services.GetRequiredService<TProfile>();
             cancellationToken.ThrowIfCancellationRequested();
-            return new AspireProfileActivationLease<TProfile>(host, profile);
+            return new AspireProfileActivationLease<TProfile>(host, profile, ownership);
         }
         catch (Exception primaryException)
         {
             ILogger? cleanupLogger = null;
             try
             {
-                cleanupLogger = host.Services
+                cleanupLogger = host?.Services
                     .GetRequiredService<ILoggerFactory>()
                     .CreateLogger(typeof(AspireProfileActivator));
             }
@@ -173,7 +228,14 @@ internal static class AspireProfileActivator
 
             try
             {
-                await AspireProfileActivationLease<TProfile>.DisposeHostAsync(host).ConfigureAwait(false);
+                if (ownership is not null)
+                {
+                    await ownership.DisposeAsync().ConfigureAwait(false);
+                }
+                else if (host is not null)
+                {
+                    await AspireProfileActivationLease<TProfile>.DisposeHostAsync(host).ConfigureAwait(false);
+                }
             }
             catch (Exception cleanupException)
             {

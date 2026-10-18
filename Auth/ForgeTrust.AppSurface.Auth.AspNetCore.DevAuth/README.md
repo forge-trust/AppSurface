@@ -108,6 +108,397 @@ builder.Services.AddAppSurfaceDevAuth(builder.Environment, dev =>
 
 Only add local or proof environments that may safely expose fake personas. `AllowedEnvironmentNames` is a DevAuth activation allow-list, not a production security boundary.
 
+<a id="persona-selection-activation"></a>
+
+## Opt-In Persona Fixture Activation
+
+Use [`IAppSurfaceDevAuthPersonaSelectionHandler`](#persona-selection-activation) when selecting a configured local persona must prepare host-owned fixtures before DevAuth returns its normal redirect or control-page response. This is an optional, request-scoped hook. Without a registration, DevAuth keeps the existing selection behavior and does not add activation work or cancellation checks.
+
+The compiled source of truth is the complete [DevAuth example](../../examples/auth-aspnetcore-dev-auth/README.md#persona-fixture-activation). Its setup, handler, and fixture store below are source-extracted excerpts from one working project, not independent copy-and-run programs. The complete host is defined by [`Program.cs`](../../examples/auth-aspnetcore-dev-auth/Program.cs), [`LocalFixtureActivation.cs`](../../examples/auth-aspnetcore-dev-auth/LocalFixtureActivation.cs), [`LocalCandidateFixtureStore.cs`](../../examples/auth-aspnetcore-dev-auth/LocalCandidateFixtureStore.cs), and the [readiness and work routes](../../examples/auth-aspnetcore-dev-auth/LocalCandidatePages.cs), compiled by the [example project](../../examples/auth-aspnetcore-dev-auth/AuthAspNetCoreDevAuthExample.csproj). It retains the existing admin/viewer proof. Run the project to compile and start the full composition:
+
+```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project examples/auth-aspnetcore-dev-auth -- --urls http://127.0.0.1:5058
+```
+
+### Register the optional handler
+
+The sample uses normal dependency injection: one singleton process-local store and one scoped handler. The configured labeler and reviewer personas have distinct role policies and landing pages. The complete source also configures the package auth mapping and the existing admin/viewer personas.
+
+<!-- appsurface:snippet id="devauth-persona-activation-registration" file="examples/auth-aspnetcore-dev-auth/Program.cs" marker="devauth-persona-activation-registration" lang="csharp" -->
+```csharp
+using System.Security.Claims;
+using AuthAspNetCoreDevAuthExample;
+using ForgeTrust.AppSurface.Auth.AspNetCore;
+using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.Extensions.Options;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Admit only local authorities before any identity or fixture mutation.
+builder.Services.AddHostFiltering(options =>
+{
+    options.AllowedHosts = ["localhost", "127.0.0.1", "[::1]"];
+    options.AllowEmptyHosts = false;
+});
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddAppSurfacePolicy(
+        "OperatorsOnly",
+        policy => policy
+            .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .RequireClaim("role", "operator"));
+    options.AddAppSurfacePolicy(
+        "ViewersOnly",
+        policy => policy
+            .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .RequireClaim("role", "viewer"));
+    options.AddAppSurfacePolicy("LabelersOnly", policy => policy
+        .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser().RequireClaim("role", "labeler"));
+    options.AddAppSurfacePolicy("ReviewersOnly", policy => policy
+        .AddAuthenticationSchemes(AppSurfaceDevAuthDefaults.AuthenticationScheme)
+        .RequireAuthenticatedUser().RequireClaim("role", "reviewer"));
+});
+
+builder.Services.AddAppSurfaceAspNetCoreAuth(options => options.MapSubjectClaim("sub"));
+builder.Services.AddAppSurfaceDevAuth(builder.Environment, dev =>
+{
+    dev.Users.Add(
+        "admin",
+        user => user
+            .DisplayName("Local Admin")
+            .Subject("admin-1")
+            .Claim("role", "operator")
+            .Claim("tenant", "local-demo")
+            .LandingUrl("/"));
+    dev.Users.Add(
+        "viewer",
+        user => user
+            .DisplayName("Local Viewer")
+            .Subject("viewer-1")
+            .Claim("role", "viewer")
+            .Claim("tenant", "local-demo")
+            .LandingUrl("/viewer"));
+    dev.Users.Add("labeler", user => user.DisplayName("Local Labeler").Subject("labeler-1")
+        .Claim("role", "labeler").LandingUrl("/candidate/label"));
+    dev.Users.Add("reviewer", user => user.DisplayName("Local Reviewer").Subject("reviewer-1")
+        .Claim("role", "reviewer").LandingUrl("/candidate/review"));
+});
+
+builder.Services.AddSingleton<LocalCandidateFixtureStore>();
+builder.Services.AddScoped<IAppSurfaceDevAuthPersonaSelectionHandler, LocalFixtureActivation>();
+
+var app = builder.Build();
+
+app.UseHostFiltering();
+app.UseMiddleware<LocalFixtureActivationFailureMiddleware>();
+app.UseAuthentication();
+app.UseAuthorization();
+```
+<!-- /appsurface:snippet -->
+
+`AddScoped` is important because DevAuth resolves the optional, unkeyed service from the current selection request's `HttpContext.RequestServices`. Do not resolve it from the root provider, store it in singleton options, instantiate it at startup, or create another scope. DevAuth resolves one service, so a host with several preparation steps should compose them in this implementation rather than register an assumed ordered handler pipeline.
+
+### Implement activation and readiness
+
+The selected `persona` argument is the validated configured persona from the current POST. The incoming `HttpContext.User` and request cookies can still represent the previously selected persona; use `persona.Id` to choose the requested fixtures. The sample composes a stable shared candidate ensure with readiness for the selected role. Admin and viewer selections succeed as no-ops.
+
+<!-- appsurface:snippet id="devauth-persona-activation-handler" file="examples/auth-aspnetcore-dev-auth/LocalFixtureActivation.cs" marker="devauth-persona-activation-handler" lang="csharp" -->
+```csharp
+using ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth;
+
+namespace AuthAspNetCoreDevAuthExample;
+
+/// <summary>Composes shared scenario ensure and role readiness within the current selection request.</summary>
+/// <remarks>
+/// Registered scoped with a singleton store. Admin and viewer selections succeed without creating candidate data.
+/// Logs contain fixed outcomes, a request trace identifier and only recognized configured persona IDs. They never
+/// include cookies, claims or exception payloads. A real host can await persistence between ensure and readiness
+/// with a cooperative request token and a host-owned deadline; preparation must finish before normal return.
+/// </remarks>
+internal sealed class LocalFixtureActivation(
+    LocalCandidateFixtureStore store,
+    ILogger<LocalFixtureActivation> logger) : IAppSurfaceDevAuthPersonaSelectionHandler
+{
+    /// <inheritdoc />
+    public ValueTask ActivateAsync(
+        AppSurfaceDevAuthPersona persona,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        return RunAsync(persona, httpContext, cancellationToken, logger, token =>
+        {
+            // docs:snippet devauth-persona-activation-prepare:start
+            if (persona.Id is "labeler" or "reviewer")
+            {
+                store.Ensure();
+                token.ThrowIfCancellationRequested();
+                store.MarkReady(persona.Id);
+            }
+            // docs:snippet devauth-persona-activation-prepare:end
+
+            return ValueTask.CompletedTask;
+        });
+    }
+
+    /// <summary>Awaits one host preparation step with safe correlation logs and cooperative cancellation.</summary>
+    /// <param name="persona">Validated configured persona, normalized to a recognized ID for logging.</param>
+    /// <param name="httpContext">Current request used only for trace correlation.</param>
+    /// <param name="cancellationToken">Captured selection request token.</param>
+    /// <param name="logger">The scoped handler's logger; no exception or request payload is logged.</param>
+    /// <param name="prepare">Host composition that finishes readiness or throws. Never writes the response.</param>
+    /// <returns>A task that completes after preparation, the final cancellation check and success logging.</returns>
+    /// <remarks>
+    /// Persona, context, logger and preparation are required caller-owned inputs; this internal seam does not
+    /// validate null arguments. Cancellation and preparation failures are logged with fixed outcomes and rethrown;
+    /// logging failures also propagate. A failure does not undo fixture writes already made by preparation.
+    /// The intentionally internal composition boundary lets HTTP tests substitute deterministic partial failure or
+    /// cancellation while exercising the same logging policy. There is no runtime fault flag, extra service or retry.
+    /// </remarks>
+    internal static async ValueTask RunAsync(
+        AppSurfaceDevAuthPersona persona,
+        HttpContext httpContext,
+        CancellationToken cancellationToken,
+        ILogger<LocalFixtureActivation> logger,
+        Func<CancellationToken, ValueTask> prepare)
+    {
+        var safeId = persona.Id is "labeler" or "reviewer" or "admin" or "viewer" ? persona.Id : "other";
+        LogOutcome(logger, httpContext.TraceIdentifier, safeId, "start");
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await prepare(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            LogOutcome(logger, httpContext.TraceIdentifier, safeId, "success");
+        }
+        catch (OperationCanceledException)
+        {
+            LogOutcome(logger, httpContext.TraceIdentifier, safeId, "cancel");
+            throw;
+        }
+        catch (Exception)
+        {
+            LogOutcome(logger, httpContext.TraceIdentifier, safeId, "failure");
+            throw;
+        }
+    }
+
+    /// <summary>Writes the sample's safe structured correlation fields without serializing request or exception data.</summary>
+    internal static void LogOutcome(ILogger<LocalFixtureActivation> logger, string traceId, string safePersonaId, string outcome)
+    {
+        logger.LogInformation("Local fixture activation TraceId={TraceId} PersonaId={PersonaId} Outcome={Outcome}",
+            traceId, safePersonaId, outcome);
+    }
+}
+
+/// <summary>Signals a host-owned fixture preparation failure eligible for the sample's explicit retry policy.</summary>
+/// <remarks>Only this exception before response start is converted to the sample's fixed safe failure response.</remarks>
+internal sealed class LocalFixtureActivationException : Exception;
+
+/// <summary>Preserves the queued persona cookie while presenting the sample's narrow activation recovery policy.</summary>
+/// <remarks>
+/// Install after any outer general error handler and before authentication, authorization and endpoints.
+/// Unknown failures, cancellation and failures after response start propagate to the outer host pipeline.
+/// This sample does not guarantee cookie delivery under other hosts' exception middleware.
+/// </remarks>
+internal sealed class LocalFixtureActivationFailureMiddleware(RequestDelegate next)
+{
+    /// <summary>Fixed safe copy shown without exception details, response clearing or successful navigation.</summary>
+    internal const string FailureMessage = "Persona selection did not finish. Fixtures are not ready. Open /_appsurface/dev-auth/ and select the persona again.";
+
+    /// <summary>Runs the next middleware and handles only a typed activation failure before response start.</summary>
+    /// <param name="context">The current request whose queued headers are preserved during recovery.</param>
+    /// <returns>A task that completes after the downstream pipeline or the handled failure response.</returns>
+    /// <remarks>
+    /// A handled failure returns HTTP 500 with the fixed text/plain message and retains queued headers.
+    /// The response write observes RequestAborted. Cancellation, other failures and typed failures after response
+    /// start propagate; response-write failures also propagate. This middleware neither retries nor rolls back data.
+    /// </remarks>
+    public async Task InvokeAsync(HttpContext context)
+    {
+        try
+        {
+            await next(context);
+        }
+        catch (LocalFixtureActivationException) when (!context.Response.HasStarted)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "text/plain; charset=utf-8";
+            await context.Response.WriteAsync(FailureMessage, context.RequestAborted);
+        }
+    }
+}
+```
+<!-- /appsurface:snippet -->
+
+The sample-specific preparation lambda ensures the shared candidate only for labeler and reviewer, checks cancellation after ensure, and then marks the selected role ready. Admin and viewer remain no-ops. This is an excerpt from the complete handler composition below, not a standalone C# expression: `RunAsync` owns the cancellation checks around `prepare`, the one awaited step, and safe lifecycle logging shown in the preceding source block.
+
+<!-- appsurface:snippet id="devauth-persona-activation-prepare" file="examples/auth-aspnetcore-dev-auth/LocalFixtureActivation.cs" marker="devauth-persona-activation-prepare" lang="csharp" -->
+```csharp
+if (persona.Id is "labeler" or "reviewer")
+{
+    store.Ensure();
+    token.ThrowIfCancellationRequested();
+    store.MarkReady(persona.Id);
+}
+```
+<!-- /appsurface:snippet -->
+
+The sample store makes the candidate identity independent of the selected persona and returns immutable snapshots. Labeler readiness, reviewer readiness, labeling completion, and review completion are separate state. Its transitions are short synchronous operations under one lock; it does not hold a lock across asynchronous work.
+
+<!-- appsurface:snippet id="devauth-persona-fixture-store" file="examples/auth-aspnetcore-dev-auth/LocalCandidateFixtureStore.cs" marker="devauth-persona-fixture-store" lang="csharp" -->
+```csharp
+namespace AuthAspNetCoreDevAuthExample;
+
+/// <summary>
+/// Holds one synthetic, process-local scenario independently of the selected persona.
+/// </summary>
+/// <remarks>
+/// All transitions use a short synchronous lock. Activation and product actions only move readiness or completed
+/// work forward; reads never initialize data. Restarting the host resets the scenario. This sample supplies neither
+/// durable storage nor cross-process idempotence; a consuming host must choose those policies itself.
+/// </remarks>
+internal sealed class LocalCandidateFixtureStore
+{
+    /// <summary>The fixed fixture identity shared by both operator roles.</summary>
+    internal const string ScenarioKey = "candidate-review-demo-v1";
+
+    private readonly object _gate = new();
+    private LocalCandidateSnapshot? _candidate;
+
+    // missing --Ensure--> one candidate --MarkReady(role)--> role ready --TryComplete(role)--> completed
+    // Each arrow and Read holds only _gate; no logging, rendering, callbacks or await occurs inside it.
+    // Returning immutable records keeps earlier reads stable after later forward-only transitions.
+
+    /// <summary>Returns an immutable coherent snapshot, or null without creating a candidate.</summary>
+    internal LocalCandidateSnapshot? Read()
+    {
+        lock (_gate)
+        {
+            return _candidate;
+        }
+    }
+
+    /// <summary>Atomically ensures the shared candidate while preserving all existing readiness and work.</summary>
+    internal LocalCandidateSnapshot Ensure()
+    {
+        lock (_gate)
+        {
+            return _candidate ??= new LocalCandidateSnapshot("synthetic-candidate-001", false, false, false, false);
+        }
+    }
+
+    /// <summary>Marks an already ensured candidate ready for one configured operator; never creates data.</summary>
+    /// <param name="personaId">The validated configured labeler or reviewer ID.</param>
+    /// <exception cref="InvalidOperationException">No candidate exists, or the operator is unknown.</exception>
+    internal void MarkReady(string personaId)
+    {
+        lock (_gate)
+        {
+            var candidate = _candidate ?? throw new InvalidOperationException("Ensure the scenario before marking readiness.");
+            _candidate = personaId switch
+            {
+                "labeler" => candidate with { LabelerReady = true },
+                "reviewer" => candidate with { ReviewerReady = true },
+                _ => throw new InvalidOperationException("Unknown scenario operator."),
+            };
+        }
+    }
+
+    /// <summary>Completes only the ready operator's work; repeated completion is idempotent.</summary>
+    /// <param name="personaId">The configured operator ID chosen by the authorized host route.</param>
+    /// <returns>False for missing data, an unknown role or a role that is not ready. No data is ensured.</returns>
+    internal bool TryComplete(string personaId)
+    {
+        lock (_gate)
+        {
+            if (_candidate is not { } candidate || !candidate.IsReady(personaId))
+            {
+                return false;
+            }
+
+            _candidate = personaId == "labeler"
+                ? candidate with { LabelingCompleted = true }
+                : candidate with { ReviewCompleted = true };
+            return true;
+        }
+    }
+}
+
+/// <summary>An immutable point-in-time view of one shared candidate and its independent role state.</summary>
+/// <param name="Id">Stable synthetic candidate ID.</param>
+/// <param name="LabelerReady">Whether labeler activation has finished.</param>
+/// <param name="ReviewerReady">Whether reviewer activation has finished.</param>
+/// <param name="LabelingCompleted">Whether labeling work has completed.</param>
+/// <param name="ReviewCompleted">Whether review work has completed.</param>
+internal sealed record LocalCandidateSnapshot(
+    string Id,
+    bool LabelerReady,
+    bool ReviewerReady,
+    bool LabelingCompleted,
+    bool ReviewCompleted)
+{
+    /// <summary>Checks readiness for a configured role; unknown roles are never ready.</summary>
+    internal bool IsReady(string personaId) => personaId switch
+    {
+        "labeler" => LabelerReady,
+        "reviewer" => ReviewerReady,
+        _ => false,
+    };
+}
+```
+<!-- /appsurface:snippet -->
+
+In the complete sample, `GET /candidate/label` and `GET /candidate/review` only read state. They return HTTP 200 when the selected role is ready and HTTP 409 with an explicit POST reselection form when it is not. Those GETs never create or repair fixtures. Only successful explicit selection prepares readiness; role-protected completion POSTs change that role's work and return HTTP 303 to its page. Readiness means the handler finished successfully before normal navigation, not merely that a persona cookie or visible marker exists.
+
+### Request, response, and failure ownership
+
+For an admitted selection, DevAuth validates and looks up the configured persona, then queues its protected response cookie. It resolves the optional unkeyed handler from that request's service provider. A host with no handler follows the existing success path without the added `RequestAborted` checks. A handler factory or constructor exception occurs during resolution: it leaves the queued cookie header unmodified, invokes no handler, and occurs before DevAuth captures or checks `RequestAborted`. Only after resolution returns a handler does DevAuth perform these steps:
+
+1. Capture `HttpContext.RequestAborted` and throw if it is already cancelled.
+2. Call `ActivateAsync(persona, httpContext, cancellationToken)` once and await it.
+3. Check the same token again after normal completion, before either successful response branch.
+
+The await completes before both a safe local redirect and the control-page response. Guard failures and invalid persona IDs do not resolve the service. Control/status GETs, clearing the persona, authentication, and ordinary application requests do not activate fixtures. Selecting the same persona again is a new activation call; DevAuth does not cache success or promise exactly-once host writes.
+
+```text
+admission guards -> configured persona lookup -> queue protected Set-Cookie header
+                                           -> resolve optional request-scoped handler
+                                              ├─ absent: existing redirect/control response
+                                              ├─ resolution throws: host error pipeline
+                                              └─ present: capture RequestAborted
+                                                          -> pre-invocation cancellation check
+                                                          -> await ActivateAsync
+                                                          -> post-await cancellation check
+                                                          -> existing safe target resolution
+                                                          -> redirect or control-page response
+```
+
+Handler exceptions and cancellation skip both success response branches. The endpoint has queued a `Set-Cookie` header before resolution, but that does not prove a browser received it. Host exception middleware and transport behavior determine whether it is delivered, replaced, or discarded. A host's exception policy must account for that boundary; the package makes no cookie-delivery guarantee on failure.
+
+The handler must finish required preparation before it returns. It must not write or start the response, set navigation headers, or redirect; DevAuth owns successful navigation and the host pipeline owns failures. Compose multi-step work inside the one handler. If the host performs I/O, observe the supplied request token. A host may apply its own finite deadline by linking a deadline token with the supplied token for its downstream calls; the package has no activation timeout. A handler that ignores cancellation can continue holding the selection request open, and the post-await check can only prevent normal navigation after that handler returns.
+
+Cookie delivery and fixture writes are not atomic. The protected cookie is queued before handler resolution and invocation. A constructor or service-factory failure, activation exception, cancellation, or response-delivery failure can therefore leave the browser with the new persona while fixtures are missing or partially prepared. DevAuth does not catch, retry, compensate, or roll back host work. These failures bypass normal success navigation and propagate to the host's exception/cancellation pipeline. Keep ensure operations idempotent and atomic in the persistence system that owns the fixtures, and have fixture-dependent pages check readiness themselves.
+
+The sample demonstrates one host-owned error policy: only its typed `LocalFixtureActivationException` is rendered as a fixed HTTP 500 before the response starts; the middleware keeps the already queued `Set-Cookie`, adds no `Location`, does not call `Response.Clear`, and exposes no exception text. It is installed after any outer general error handler and before authentication, authorization, and endpoints. Arbitrary exceptions, cancellation, and typed failures after response start propagate. This policy is sample-specific. Other host middleware can replace or discard the cookie, so do not assume cookie delivery on errors outside that declared policy.
+
+### Recovery and local diagnostics
+
+| Failure | What to check | Safe recovery |
+| --- | --- | --- |
+| Handler resolution or construction fails | Check the scoped registration and constructor dependency graph, and correlate the host's error log using the request trace ID. The sample activation logger cannot emit a start record if DI fails before constructing or invoking the handler. | Fix the registration/factory failure, then explicitly select the persona again. Do not treat a cookie from the failed response as readiness. |
+| Preparation partially fails | Check the host's own readiness state. In the sample, the fixed HTTP 500 can retain the persona cookie, and the next role-page GET returns HTTP 409 without repairing state. | POST the same persona from the explicit reselection form after making the ensure operation safe to repeat. Preserve existing work when retrying. |
+| Request is cancelled | Use the request trace ID to find the sample's `Outcome=cancel` record when activation began, then check fixture readiness because cancellation may follow committed writes. | Let the request end; use the role page's read-only readiness result and explicitly reselect when preparation remains incomplete. Do not assume cancellation rolled back writes. |
+
+The sample logs only `TraceId`, a configured safe persona ID, and the fixed `start`, `success`, `failure`, or `cancel` outcome. Search the local host logs by the request's `TraceId` and inspect the corresponding activation record. Resolution failures happen before the handler logs and must be correlated through the host's normal request/error logging. Never diagnose this path by dumping cookies, claims, response bodies, or raw exception payloads.
+
+The sample's store is process-local and shared by one fixed scenario key, `candidate-review-demo-v1`; its synthetic ID and completed work survive persona switches and overlapping requests while the host process remains alive. Restarting the sample resets the candidate. The sample does not claim durable storage, cross-process uniqueness, or exactly-once effects. A real host chooses its persistence boundary, transaction/idempotence policy, concurrency control, deadlines, and compensation/retry rules.
+
 Open the persona lab:
 
 ```text
@@ -162,6 +553,7 @@ The host must provide `<meta name="viewport" content="width=device-width, initia
 - `AppSurfaceDevAuthDefaults.CookieName` is `.AppSurface.DevAuth.Persona`.
 - `AppSurfaceDevAuthDefaults.SubjectClaimType` is `sub`.
 - `AppSurfaceDevAuthOptions.Users` contains seeded local personas.
+- `IAppSurfaceDevAuthPersonaSelectionHandler.ActivateAsync(AppSurfaceDevAuthPersona persona, HttpContext httpContext, CancellationToken cancellationToken)` is the optional host callback for awaited fixture preparation after an admitted explicit persona selection. DevAuth resolves it from request services after queuing the protected cookie, invokes it at most once for that request, and checks `RequestAborted` before invocation and after normal completion. See [persona selection activation](#opt-in-persona-fixture-activation) for scope, response ownership, composition, failure, and recovery behavior.
 - `AppSurfaceDevAuthUserBuilder.LandingUrl(string landingUrl)` configures a selected persona's optional safe local fallback after selection. It is validated during registration and throws `ASDEV007` for blank, non-rooted, absolute, protocol-relative, backslash-containing, or control-character values.
 - `AppSurfaceDevAuthPersona.LandingUrl` exposes the immutable nullable configured landing URL. It is navigation metadata only; it is not a claim, cookie payload, status field, or authorization decision.
 - `AppSurfaceDevAuthOptions.SchemeName` overrides the registered authentication scheme. It defaults to `AppSurfaceDevAuthDefaults.AuthenticationScheme`.
@@ -337,6 +729,7 @@ Diagnostics, HTML, and status JSON do not include raw tokens, secrets, passwords
 - Call `UseAuthentication()` before endpoints that depend on selected personas.
 - Call `UseAuthorization()` before AppSurface policy-protected endpoints when your host uses normal ASP.NET Core authorization middleware.
 - Call `MapAppSurfaceDevAuth()` so the persona lab and status JSON exist.
+- Register at most one scoped `IAppSurfaceDevAuthPersonaSelectionHandler` only when a valid explicit selection must prepare host-owned fixtures before normal navigation; keep activation idempotent, readiness independently observable, and response handling in the host pipeline.
 - Add `AppSurfaceDevAuthDefaults.AuthenticationScheme` to policies that should evaluate DevAuth personas.
 - Use simple route-safe persona IDs such as `admin`, `viewer`, or `qa.local_1`; dot segments, sensitive-looking ids, query strings, fragments, encoded slashes, spaces, and other punctuation are rejected with `ASDEV006`.
 - Configure `LandingUrl(...)` only with a safe rooted local path. Unlike a request `returnUrl`, an unsafe configured landing URL stops registration with `ASDEV007`; DevAuth does not silently redirect it to `/`.

@@ -168,6 +168,31 @@ internal static class DurableCommandFingerprints
                 AppendObject(hash, retry.MaximumLeaseLifetime);
                 AppendObject(hash, retry.BackoffAlgorithm);
                 break;
+            case DurableWorkExecutionPolicy executionPolicy:
+                AppendTag(hash, CanonicalTypeTag.WorkExecutionPolicy);
+                AppendObject(hash, executionPolicy.RetryPolicy);
+                if (executionPolicy.AttemptPlan is { } attemptPlan)
+                {
+                    AppendTag(hash, CanonicalTypeTag.AttemptPlan);
+                    AppendObject(hash, attemptPlan.Version);
+                    AppendObject(hash, attemptPlan.ElapsedOffsets.Count);
+                    foreach (var offset in attemptPlan.ElapsedOffsets)
+                    {
+                        AppendObject(hash, offset);
+                    }
+
+                    AppendObject(hash, attemptPlan.MaximumCircuitDuration);
+                }
+                else
+                {
+                    AppendObject(hash, null);
+                }
+
+                break;
+            case DurableExecutionDeadline deadline:
+                AppendTag(hash, CanonicalTypeTag.ExecutionDeadline);
+                AppendObject(hash, deadline.NotAfterUtc);
+                break;
             case DurableSchedule schedule:
                 AppendTag(hash, CanonicalTypeTag.Schedule);
                 AppendSchedule(hash, schedule);
@@ -266,6 +291,9 @@ internal static class DurableCommandFingerprints
         TimeSpan = 7,
         EncodedPayload = 8,
         WorkRetryPolicy = 9,
+        WorkExecutionPolicy = 19,
+        AttemptPlan = 20,
+        ExecutionDeadline = 21,
         Schedule = 10,
         ScheduleTarget = 11,
         DurableDataClassification = 12,

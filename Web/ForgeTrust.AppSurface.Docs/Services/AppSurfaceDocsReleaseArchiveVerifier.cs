@@ -287,6 +287,30 @@ internal static class AppSurfaceDocsReleaseArchiveVerifier
             }
         }
 
+        foreach (var artifactPath in verifiedFrozenRouteManifest.CanonicalArtifactPaths)
+        {
+            if (!AppSurfaceDocsTrustedReleasePathGuard.TryValidateFileCandidate(
+                    exactTreePath, artifactPath, out _, out _))
+            {
+                failure = AppSurfaceDocsArchiveVerificationFailure.Create(
+                    "ASDOCSARCHIVE005",
+                    "Release archive canonical artifact is not an ordinary member of the exact tree.",
+                    $"Re-export '{artifactPath}' as an ordinary HTML file inside the selected exact tree.",
+                    artifactPath);
+                return false;
+            }
+
+            if (!files.ContainsKey(artifactPath))
+            {
+                failure = AppSurfaceDocsArchiveVerificationFailure.Create(
+                    "ASDOCSARCHIVE009",
+                    "Release archive canonical artifact is not covered by the release manifest.",
+                    $"Re-export the same exact tree so canonical artifact '{artifactPath}' is an ordinary HTML member covered by the release manifest.",
+                    artifactPath);
+                return false;
+            }
+        }
+
         archive = new AppSurfaceDocsVerifiedReleaseArchive(files, verifiedFrozenRouteManifest);
         return true;
     }
@@ -634,6 +658,9 @@ public sealed class AppSurfaceDocsVerifiedReleaseArchive
     /// Gets the number of files covered by the verified release manifest.
     /// </summary>
     public int FileCount => _filesByPath.Count;
+
+    /// <summary>Gets the verified immutable inventory used for startup namespace collision checks.</summary>
+    internal IEnumerable<string> CoveredPaths => _filesByPath.Keys;
 
     /// <summary>
     /// Gets the route manifest parsed from verified release archive bytes.

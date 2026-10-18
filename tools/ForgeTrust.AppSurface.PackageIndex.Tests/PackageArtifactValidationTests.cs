@@ -4887,6 +4887,14 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
         Assert.Contains("--exclude-test-project", coverageRunRequest.Arguments);
         Assert.Contains("**/Smoke.Browser.Tests.csproj", coverageRunRequest.Arguments);
+        var patchTargetGateRequest = Assert.Single(
+            commandRunner.Requests,
+            request => request.OperationName == "appsurface coverage gate patch targets");
+        var repositoryRootIndex = patchTargetGateRequest.Arguments.ToList().IndexOf("--repository-root");
+        Assert.InRange(repositoryRootIndex, 0, patchTargetGateRequest.Arguments.Count - 2);
+        Assert.Equal(
+            patchTargetGateRequest.WorkingDirectory,
+            patchTargetGateRequest.Arguments[repositoryRootIndex + 1]);
         Assert.Contains(
             "Smoke.Browser.Tests/Smoke.Browser.Tests.csproj",
             report.Commands.Single(command => command.OperationName == "appsurface coverage run").StandardOutput,
@@ -8763,7 +8771,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
                 "https://api.nuget.org/v3/index.json"),
             CancellationToken.None);
 
-        Assert.Equal(["ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Config"], report.Entries.Select(entry => entry.PackageId).ToArray());
+        Assert.Equal(["ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Web", "ForgeTrust.AppSurface.Config"], report.Entries.Select(entry => entry.PackageId).ToArray());
         Assert.All(report.Entries, entry => Assert.Equal(PackageSmokeInstallStatus.Restored, entry.Status));
         Assert.Equal(2, commandRunner.Requests.Count);
         Assert.Single(delays);
@@ -8772,6 +8780,7 @@ public sealed class PackageArtifactValidationTests : IDisposable
         var smokeProject = await File.ReadAllTextAsync(CombineSafeChildPath(workDirectory, "package-restore/Smoke.csproj"));
         Assert.Contains("Include=\"ForgeTrust.AppSurface.Web\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains("Include=\"ForgeTrust.AppSurface.Config\"", smokeProject, StringComparison.Ordinal);
+        Assert.Contains("Include=\"ForgeTrust.AppSurface.Core\"", smokeProject, StringComparison.Ordinal);
         Assert.Contains("NUGET_PACKAGES", commandRunner.Requests[0].Environment!.Keys);
     }
 

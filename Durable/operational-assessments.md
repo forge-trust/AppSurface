@@ -1,6 +1,6 @@
 # Adopt Durable operational assessments
 
-For schema-11 runtime heartbeat cleanup and its forward-only deployment procedure, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The schema 9→10 transcript below remains the historical runtime-health adoption proof.
+For the historical schema-11 runtime heartbeat cleanup rollout, use the [heartbeat retention operations guide](heartbeat-retention-operations.md). The current role recipe requires schema 12 and must not be run on an older store; use the recipe matching that historical package until the coordinated upgrade. The schema 9→10 transcript below remains the historical runtime-health adoption proof. For retry-policy choices, start with the [execution-policy guide](execution-policies-v1.md) and its [migration checklist](migrations/execution-policies-v1.md).
 
 This is the task guide for upgrading an existing PostgreSQL worker or external activator to the additive Durable
 operational-assessment contract. Start here if you need to decide whether activation is currently authorized, whether
@@ -24,6 +24,11 @@ PostgreSQL-enforced row isolation by lane.
 | Schema owner | [migration and roles](#migration-and-role-reconciliation) | Required schema and role boundary | Review, apply, and audit credentials |
 | Custom pump implementer | [custom composition](#custom-composition) | The four-kind public algebra | One shared singleton under both pump interfaces |
 | Rollback operator | [rollback](#rollback-to-v020-preview8) | Reader/writer compatibility range | Stop/disable activation and deploy the selected binary |
+
+For an external wake endpoint that needs a separate cooperative request deadline and common outcome/telemetry mapping,
+use the canonical [external activation reference](external-activation-v1.md) and its
+[authenticated reference host](../examples/durable-external-activation/README.md). The direct-admission recipe below
+remains useful when a caller intentionally owns the provider's four-kind attempt contract.
 
 This case is provider-first. Apply only migrations embedded in the exact package you are deploying, and verify
 `PostgreSqlDurableRuntimeSchemaManager.RequiredVersion` before rollout. The #794 package embeds
@@ -54,6 +59,13 @@ Console.WriteLine(
 heartbeat. `Draining` may remain activation-compatible while refusing a new pass. `Unavailable` fails closed for
 activation because compatibility was not established. `Healthy` with either compatibility flag false is also not
 activatable; synthetic snapshots must fail closed through the computed predicates.
+
+Before the first heartbeat, the PostgreSQL provider can return `State=NotStarted` with `ProblemCode=ASDUR404` because
+worker identity, heartbeat time, or active heartbeat epoch has not yet been observed. That is a valid initial health
+assessment, not a reason to rewrite provider state: `CanEnableActivation` may be true while `IsReady` remains false.
+Host-owned assessment responses preserve the observed state and code. External activation results retain `ASDUR404` or
+`ASDUR405` only for `Stale`; a successful `NotStarted` precheck omits the initial `ASDUR404` from the activation result.
+See the canonical [result validation matrix](external-activation-v1.md#closed-outcomes-and-host-status-mapping).
 
 `ObservedAtUtc` is a timestamp for the assessment: database statement time for an observed store, process time for an
 `Unavailable` assessment. Use `WasStoreObserved` as the provenance signal.
@@ -144,7 +156,9 @@ item-level external effects. Caller cancellation, exceptions escaping applicatio
 state, and finalization failures propagate. `Try` does not mean “never throws.”
 
 Existing hosts may continue using `IDurableRuntimePump.RunOnceAsync`; its source and binary shape remain supported.
-External activators should adopt `IDurableRuntimePumpAdmission` when they need execution certainty.
+External activators may keep direct `IDurableRuntimePumpAdmission` calls when they intentionally own the four-kind
+result mapping. A host adopting the standard health/deadline/outcome/telemetry lifecycle should use
+[`IDurableExternalActivationService`](external-activation-v1.md#existing-host-migration).
 
 Expected output is one and only one attempt classification:
 
@@ -224,8 +238,10 @@ direct Durable SQL access from its dispatcher, but it does not narrow the paired
 ## Migration and role reconciliation
 
 The following is the historical #794 schema-10 rollout sequence. The role recipe matching the #794 release was paired with
-migration 0010; the current packaged recipe also references the heartbeat-pruning function introduced by migration
-0011. For current package deployments, apply all migrations through 0011 before running the matching package recipe.
+migration 0010; the current packaged recipe references the heartbeat-pruning function introduced by migration 0011 and
+schema-12 execution-policy functions introduced by migration 0012. For current package deployments, apply all migrations
+through 0012 before running the matching package recipe. The current recipe cannot reconcile a schema-11-or-older store;
+use the matching historical package recipe until migration 0012 is applied.
 
 That historical #794 rollout was migration-first and forward-only:
 
@@ -252,7 +268,7 @@ That historical #794 rollout was migration-first and forward-only:
 6. Run schema `status` and `preflight`, verify the active epoch and StoreId, then smoke-test the old supported reader.
 7. Deploy the #794 binary, exercise health and both pump interfaces, and re-enable activation.
 
-For current package deployments, apply migration 0011 before running the matching released package's recipe with the
+For current package deployments, apply migration 0012 before running the matching released package's recipe with the
 complete reviewed version-1 `role_pairs_json` manifest. The #794 historical schema-10 reconciliation above is
 specific to that release and its single-pair recipe. The role recipe remains required after the applicable migration
 even when the function signature is unchanged. It must leave the
@@ -293,18 +309,20 @@ promise zero blocking. On any error keep Source closed and repair/roll forward w
 one-pair manifest, broad grant, or destructive schema rollback as recovery. Pair retirement and profile narrowing
 require a separately reviewed procedure.
 
-The schema-11-capable role recipe grants heartbeat pruning to every authorized runtime and no dispatcher. The current
-schema-11 CLI preflight still checks one runtime role and rejects the catalog after a second pair is enrolled. The
-[local walkthrough](../examples/durable-postgresql/README.md#version-1-role-pair-walkthrough) runs that preflight on
-the forwarding-only configuration before adding the second pair, then proves both pairs' SQL privileges and the
-forwarding workload. Keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
-replaces the single-runtime check with an exact restricted runtime-role set matching the manifest, policies, and
-function allowlists. Its release gate includes a real schema-10-to-11 upgrade and both-pair reproof.
+The historical schema-11 role recipe granted heartbeat pruning to every authorized runtime and no dispatcher. The
+current recipe retains that grant and additionally requires schema 12 for execution-policy functions; do not run it
+against a schema-11 store. The CLI
+preflight requires both `--role-pairs-file` and `--migration-owner-role`, including for one pair, and checks every
+manifest runtime against exact policy, ACL, role, function, and index evidence. The [complete-manifest walkthrough](../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough)
+shows a one-pair and full-plus-`work_only` invocation using explicit per-command environment-variable names. Keep
+activation closed until the [canonical four-stage checklist](heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+has actual matching candidate and public artifacts, distinct runtime credential results, both lane proofs, the
+continuous deployment-owner guard, and matching StoreId/nonempty epoch. Local/source proof alone is insufficient.
 
 For the historical #794 rollout, run this sequence from the
 [schema-10 source snapshot](https://github.com/forge-trust/AppSurface/tree/e0618ac8), with
 `APPSURFACE_DURABLE_MIGRATION_CONNECTION` naming the migration-owner connection. The current checkout's CLI applies
-through 0011 and does not produce this 9-to-10-only script.
+through 0012 and does not produce this 9-to-10-only script.
 
 ```console
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -318,7 +336,8 @@ $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
 # Review the generated file; for the historical #794 upgrade it must contain only migration 0010.
 
 # Historical #794 only: if the schema-9 function is not already owned by appsurface_durable_owner, run that
-# release's matching role recipe here before applying the migration. Never use the current recipe before 0011.
+# release's matching historical role recipe here before applying the migration. Never use the current recipe before
+# migration 0012; it cannot reconcile a schema-9 store.
 # Healthy installations skip this repair-only invocation.
 
 $ dotnet run --project Cli/ForgeTrust.AppSurface.Cli -- \
@@ -386,7 +405,7 @@ bash examples/durable-postgresql/run-local-proof.sh
 ```
 
 It creates a disposable loopback PostgreSQL 16.5 container, applies the current checked-in migrations through schema
-10 using the explicit CLI path, runs the canonical role recipe, initializes a development epoch, runs the real
+12 using the explicit CLI path, runs the current canonical role recipe, initializes a development epoch, runs the real
 Work/Flow/Schedule example, resolves both pump interfaces to the same PostgreSQL singleton, calls authoritative
 admission directly, and checks that worker startup performs no DDL.
 

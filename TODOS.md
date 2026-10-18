@@ -18,6 +18,26 @@
 **Priority:** P3
 **Depends on:** #779 hostile proof, a real external consumer and a separate signing/retention design.
 
+## DevAuth persona fixture activation (#772)
+
+### Host-owned durable or multi-process reference example
+
+**What:** Consider a durable or multi-process fixture example only after a concrete adopter demonstrates that the process-local [#772 design](docs/designs/issue-772-persona-scoped-fixture-activation.md) is insufficient.
+
+**Why:** A persistence example could explain transactional ensure, scenario-key uniqueness and cross-process consistency while preserving host ownership.
+
+**Pros:** Shows how a real host preserves one scenario and completed work across processes and restarts.
+
+**Cons:** Adds a persistence provider, credentials, cleanup, lifecycle and failure policy to maintain.
+
+**Context:** The planned delivery will prove one synthetic candidate with independent labeling/review progress in a single host process. It resets on restart and makes no durable or cross-process guarantee. Start with the [execution plan](docs/plans/issue-772-persona-scoped-fixture-activation.md) and the adopter's concrete failure before choosing storage. This follow-up adds no persistence work, telemetry or schedule to #772.
+
+**Effort:** L for a human team / M with agent assistance.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** Concrete adopter evidence; a host-selected persistence engine; scenario-key uniqueness and transaction design; an independently reviewed failure/recovery policy.
+
 ## Server-pushed RazorWire dialogs (#828 follow-up)
 
 - **What:** Design explicit server-pushed dialog commands after request-scoped #828 dialogs are adopted. **Why:** A live stream has no initiating request or current form owner, so the request/flow token contract from [#828](docs/designs/issue-828-server-selected-dialogs.md) cannot be reused unchanged. **Pros:** Supports genuinely asynchronous attention when an application has a user need. **Cons:** Adds replay, authorization, interruption, and multi-tab lifecycle decisions. **Context:** #828 intentionally supports only response-owned dialogs; keep hub replay and automatic presentation outside its first release. **Effort:** L human team / M CC + gstack. **Priority:** P3. **Depends on / blocked by:** #828 adoption evidence and a concrete server-initiated use case.
@@ -106,3 +126,35 @@
 
 - **What:** Add a source analyzer and optional codemod for legacy dotted AppSurface configuration-key call sites. **Why:** Runtime diagnostics can identify executed paths, but they cannot prove that every attribute, direct read, audit registration, provider mapping, and dormant branch has migrated. **Pros:** Gives maintainers a compile-time inventory and automates safe `.` to `:` replacements. **Cons:** The analyzer would freeze grammar and API assumptions too early if built before the typed key and migration diagnostics stabilize. **Context:** The logical-key contract deliberately keeps only one permanent colon syntax and uses bounded compatibility input; the analyzer should consume the final parser rules rather than reimplementing them. **Effort estimate:** L (human team) -> M with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable `AppSurfaceConfigKey`, application-boundary parser, diagnostic codes, and release-train policy.
 - **What:** Add a credentialed Google Secret Manager contract proof for explicit mappings, convention ids, versions, and exact provenance. **Why:** The fake transport proves AppSurface behavior but cannot prove deployed IAM, API resource validation, or response-name behavior. **Pros:** Catches provider drift before a release and validates the exact native-resource contract. **Cons:** Requires a dedicated project, credential rotation, cleanup, cost controls, and a trust-boundary design for CI. **Context:** Keep the default provider suite deterministic and value-safe; run the live proof as a separate protected release verification rather than enumerating unclaimed secrets. **Effort estimate:** M (human team) -> S with CC+gstack. **Priority:** P2. **Depends on / blocked by:** Stable Google codec/resource-claim contract and approved CI credential design.
+
+## Issue 866 follow-ups — deferred by autoplan
+
+Skoolit consumer implementation/adoption is separate future work in the [open case #1259](https://github.com/forge-trust/skoolit/issues/1259). AppSurface SDK implementation, testing, coverage, and the draft PR remain in scope independently.
+
+### C6: asynchronous preparation hooks
+
+**What:** Consider an async hook family only after a named consumer requires awaited setup.
+**Why:** It could support external setup without unsupported async-void callbacks; current Skoolit graph selection is synchronous.
+**Pros:** Explicit cancellation and awaited ownership. **Cons:** More overloads and lifecycle branches.
+**Context:** [The configured testing design](docs/designs/issue-866-pre-activation-testing-hooks.md) keeps synchronous actions. Gather the adopter's awaited operation before designing another API.
+**Effort:** human L / agent M
+**Priority:** P3
+**Depends on:** issue 866 adoption and concrete async demand.
+
+### C7: provider-specific replacement guidance
+
+**What:** Gather multiple provider-specific replacement needs before considering a general abstraction.
+**Why:** ConfigureContainer can override service-collection descriptors; stronger guarantees require real provider contracts.
+**Pros:** Clear consumer guidance across providers. **Cons:** Provider coupling and maintenance.
+**Context:** [The configured testing design](docs/designs/issue-866-pre-activation-testing-hooks.md) preserves default-provider and Autofac semantics; it does not promise universal last-wins behavior. Start with two concrete adopter cases.
+**Effort:** human L / agent M
+**Priority:** P3
+**Depends on:** current provider proof and at least two consumer needs.
+
+## Documentation alias publication preflight (#176 follow-up)
+
+- **What:** Consider a publish-time catalog validation command only when an adopter needs to reject an invalid alias before deploying. **Why:** #176 validates once in the host; a release pipeline may eventually need earlier feedback. **Pros:** Could reduce deploy-time configuration mistakes. **Cons:** Adds a public CLI contract and risks parser/verification drift. **Context:** Reuse the [#176 alias design](docs/designs/issue-176-version-aliases.md) and [implementation plan](docs/plans/issue-176-version-aliases.md), with the same normalization, duplicate, visibility and verified-target rules; do not build another parser. **Effort:** M human (1 day) / S agent (2–3 hours). **Priority:** P3. **Depends on / blocked by:** #176 runtime adoption and a concrete publication workflow requiring offline feedback. Deferred by autoplan CEO C5; no command implementation in #176.
+
+## Handoff consumer feasibility (#869 follow-up)
+
+- **What:** After a supported coordinated package is available, inventory the actual downstream authority/ledger writers and prove their lock order with a pinned public-package executor flow. **Why:** The [#869 framework plan](docs/plans/issue-869-transaction-bound-handoff-fence.md) proves the generic boundary; it cannot certify an application's competing writers or provider policy. **Pros:** Exposes implicit foreign-key/enqueue locks and confirms that the supported API replaces private SQL in a real integration. **Cons:** Depends on another repository's schema, release availability and consumer-owned provider/reconciliation choices. **Context:** Keep [Skoolit #735](https://github.com/forge-trust/skoolit/issues/735) blocked until its separately owned package upgrade and feasibility proof pass; no consumer business logic or activation is included in #869. **Effort:** M human (1–2 days) / M agent (3–6 hours), estimated after schema access. **Priority:** P3. **Depends on / blocked by:** Published supported package, identified adopter/owner and actual writer audit. User approved autoplan d1a on 2026-10-14: preserve the framework-first milestone and this separately owned downstream proof.

@@ -1,6 +1,6 @@
 # Durable contract diagnostics
 
-For schema-11 runtime heartbeat maintenance, use the [retention operations guide](../Durable/heartbeat-retention-operations.md#recover-and-diagnose). A pending migration 0011 preflight means the downtime migration has not been applied; drain workers, apply it as migration owner, reconcile roles, then require a passing runtime-role preflight. A migration advisory-lock or index table-lock timeout means activation remains closed until the blocker is resolved and the same forward migration succeeds. Role drift means rerun the canonical role recipe and structural preflight. Repeated prune failures mean inspect database reachability and exact grants, then retry or pause via a new provider registration. Cleanup failures alone do not change Work readiness.
+For schema-11 runtime heartbeat maintenance, use the [retention operations guide](../Durable/heartbeat-retention-operations.md#recover-and-diagnose) and its [complete runtime-set receipt checklist](../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist). A pending migration 0011 preflight means the downtime migration has not been applied; drain workers, apply it as migration owner, reconcile the complete reviewed manifest, then require one passing preflight under each distinct runtime credential. A migration advisory-lock, runtime-fence, or index table-lock timeout keeps activation closed until the blocker is resolved and the entire gate is rerun. The role recipe may refuse observed drift; follow the category-specific direction below and use a reviewed repair. Repeated prune failures mean inspect database reachability and exact grants, then retry or pause via a new provider registration. Cleanup failures alone do not change Work readiness.
 
 AppSurface Durable uses append-only `ASDURxxx` codes. Messages and operator history must contain safe Problem, Cause,
 Fix, and Docs guidance and must never include credentials, provider response bodies, tokenized URLs, email content, or
@@ -9,6 +9,166 @@ child-sensitive data.
 The Durable contract and PostgreSQL public-preview packages emit the codes below. Hosted-runtime diagnostics use only
 fixed, low-cardinality codes and never expose connection targets, notification payloads, scopes, aggregates, or trace
 context.
+
+## Canonical runtime diagnostic descriptors
+
+These entries provide shared problem, cause, fix, and documentation wording for provider health/admission codes and
+the non-mutating Durable runtime doctor. Health producers retain their existing snapshots, codes, and classification
+rules; the catalog does not change their factories. The catalog intentionally covers this affected set; other Durable
+and application-owned codes keep their existing owners and meanings.
+
+### ASDUR103 Store unavailable
+
+Problem: Store unavailable
+
+Cause: A PostgreSQL transport, permission, session-affinity, timeout, or cleanup failure prevented the bounded durable operation from completing.
+
+Fix: Restore PostgreSQL connectivity and read permissions, establish session affinity, or unblock the cooperative maintenance fence; retry only under application policy.
+
+### ASDUR108 Recovery epoch required
+
+Problem: Recovery epoch required
+
+Cause: The configured runtime epoch differs from the active store epoch.
+
+Fix: Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host.
+
+### ASDUR400 Durable schema is missing
+
+Problem: Durable schema is missing
+
+Cause: The Durable schema or migration history is not installed.
+
+Fix: Apply reviewed forward-only migrations with a migration-owner connection.
+
+### ASDUR401 Durable schema upgrade is required
+
+Problem: Durable schema upgrade is required
+
+Cause: Known migrations are pending in the installed Durable schema.
+
+Fix: Apply every known pending migration before this reader or writer.
+
+### ASDUR402 Durable schema version is too new or unsupported
+
+Problem: Durable schema version is too new or unsupported
+
+Cause: The installed reader or writer range excludes this package.
+
+Fix: Deploy compatible package code; do not bypass supported ranges.
+
+### ASDUR403 Durable schema history is inconsistent
+
+Problem: Durable schema history is inconsistent
+
+Cause: Recorded migration names, checksums, order, or metadata do not match the expected schema history.
+
+Fix: Compare ordered names and checksums; never rewrite applied history.
+
+### ASDUR404 Initial heartbeat not observed or activator stale
+
+Problem: Initial heartbeat not observed or activator stale
+
+Cause: NotStarted may mean the first worker heartbeat is absent; Stale means the observed heartbeat or sweep exceeded HeartbeatStaleAfter.
+
+Fix: For NotStarted, treat it as a compatible initial assessment and follow the host's activation policy. For Stale, inspect the configured runtime and role/schema prerequisites.
+
+### ASDUR408 Restricted runtime credential required
+
+Problem: Restricted runtime credential required
+
+Cause: The connected role has a prohibited attribute, membership, ownership, grant option, or heartbeat-table privilege.
+
+Fix: Use a dedicated restricted LOGIN runtime credential and complete the reviewed runtime-role preflight; do not use a migration owner.
+
+### ASDUR409 Heartbeat-retention capability unavailable
+
+Problem: Heartbeat-retention capability unavailable
+
+Cause: The retention function, its required permissions or configuration, or the retention index is missing or does not meet the schema 0011 contract.
+
+Fix: Review the schema 0011 retention function and index contract, apply an authorized repair, then rerun doctor and complete runtime preflight.
+
+### ASDUR410 No retained heartbeat for the selected worker
+
+Problem: No retained heartbeat for the selected worker
+
+Cause: No retained heartbeat matches the selected worker ID; the worker may not have started, the ID may differ, or retention may have removed the row.
+
+Fix: Verify the configured worker ID and host activation policy; rerun doctor after the worker records a heartbeat.
+
+### ASDUR411 Selected worker is draining
+
+Problem: Selected worker is draining
+
+Cause: The selected worker heartbeat records that the worker is refusing new passes while existing work drains.
+
+Fix: Let in-flight work finish and follow the host's drain or deployment procedure before expecting new claims.
+
+### ASDUR412 Selected heartbeat belongs to another runtime epoch
+
+Problem: Selected heartbeat belongs to another runtime epoch
+
+Cause: The retained heartbeat's runtime epoch does not match the configured and active store epoch.
+
+Fix: Resolve the authorized runtime-epoch mismatch, then rerun doctor with the host's configured epoch.
+
+### ASDUR413 Doctor input is invalid
+
+Problem: Doctor input is invalid
+
+Cause: A command option or selected environment value is absent or malformed.
+
+Fix: Provide required values through the selected environment variables, use a restricted runtime credential, and check supported options with appsurface durable doctor --help.
+
+### ASDUR414 Doctor was canceled by its caller
+
+Problem: Doctor was canceled by its caller
+
+Cause: The caller canceled the valid doctor request before it completed.
+
+Fix: Retry only when the caller intends a fresh diagnostic attempt.
+
+### ASDUR415 Doctor encountered an unexpected contract failure
+
+Problem: Doctor encountered an unexpected contract failure
+
+Cause: The CLI or provider returned malformed, contradictory, or otherwise unexpected doctor evidence.
+
+Fix: Verify the matching CLI and provider packages, investigate their contract compatibility and the canonical troubleshooting diagnostics, and retry only after resolving the mismatch.
+
+## Schema-11 complete runtime preflight
+
+The CLI preflight requires `--role-pairs-file` and `--migration-owner-role` for one or many pairs. See the [CLI contract](../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands) for exact input limits and checked catalog predicates and the [canonical staged workflow](../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist) for candidate, published, and deployment gates. The fixed categories below report only validated pair index/role identifiers. Unknown results use no raw server text. Never paste JSON, SQL, ACL text, connection values, provider exceptions, or secret values into an issue.
+
+| Category | Problem and likely cause | Safe action |
+| --- | --- | --- |
+| `manifest_input` | The file is unreadable or violates strict UTF-8/no-BOM, 64 KiB, depth-8, exact-shape, duplicate-property, type, pair-count, profile, or role-name limits. | Use the complete reviewed file (1–32 pairs), fix it through review, and pass the same exact file to the recipe and every runtime command. |
+| `connection_input` | The environment-variable name, secret value, or PostgreSQL connection configuration is invalid. | Correct the named environment variable without printing its value, then rerun with the unchanged reviewed manifest. |
+| `database_operation` | A read-only PostgreSQL operation failed. | Check server reachability, the reviewed role grants and session-affine package fence; verify owned resources released before repeating the complete gate. |
+| `role_resolution` | An expected dispatcher, runtime, or owner name does not resolve exactly once. | Check the reviewed spelling and database role provisioning; do not infer a substitute from catalogs. |
+| `role_alias` | Distinct manifest names or the owner resolve to an ambiguous or repeated identity. | Correct the reviewed role mapping so every expected name maps to a unique OID and the owner is disjoint. |
+| `runtime_role` | A runtime is not a restricted LOGIN leaf or has a prohibited role attribute. | Review role attributes and repair through the approved identity/role process; rerun every pair. |
+| `role_membership` | A runtime has an incoming or outgoing membership edge. | Review membership grants and remove only through an authorized reviewed change; rerun the full manifest. |
+| `runtime_ownership` | A runtime owns a database or package schema, relation, sequence, or function. | Review ownership and transfer it through the approved owner workflow; rerun all credentials. |
+| `caller_identity` | `session_user` and `current_user` cannot be resolved to the same identity. | Use a direct credential session without role switching; check the endpoint and connection configuration without exposing values. |
+| `caller_role` | The caller is outside the manifest runtimes and independent owner, or the runtime result does not match its expected pair. | Select the correct environment-variable name for this pass; owner diagnostics do not count as runtime evidence. |
+| `forced_rls` | Heartbeat row-level security is absent, disabled, or not forced. | Review schema/migration state and apply an authorized forward repair, then rerun complete preflight. |
+| `function_signature` | The pruning function's four-argument signature, integer/non-set result, or function kind differs. | Compare against the released migration/catalog contract and use a reviewed forward repair; do not edit migration history. |
+| `function_owner` | The schema, heartbeat table, retention function, due-health function, or owner policy does not match the independently reviewed owner. | Verify the owner input and perform only a reviewed ownership correction; do not accept a consistent but unexpected owner. |
+| `security_definer` | The retention function is not `SECURITY DEFINER` as required. | Review the function definition from the matching package/migration; repair forward and rerun all checks. |
+| `search_path` | The retention function has an unexpected search path. | Restore the exact reviewed function setting using the approved package procedure, then rerun. |
+| `heartbeat_policies` | Required heartbeat policies, owner policy, expressions, command, permissiveness, or exact count differ. | Inspect through an authorized catalog review; reconcile using the complete manifest only if the recipe accepts the observed state. |
+| `runtime_policy_set` | A managed runtime policy contains missing, extra, duplicate, PUBLIC, or unresolved targets, including on a noncurrent pair. | Compare raw targets with the reviewed complete manifest; never grant a wider set to make the check pass. |
+| `function_acl` | Pruning EXECUTE is missing for a runtime, has grant option, or includes an unexpected grantee. | Review the exact function ACL and default ACL; apply a reviewed narrow repair and rerun every pair. |
+| `due_health_acl` | Due-health EXECUTE does not match the expected owner-plus-runtime set. | Review the released role recipe and effective grants; do not infer authorization from one passing role. |
+| `runtime_table_privileges` | A runtime has effective heartbeat DELETE or TRUNCATE, including inherited/PUBLIC rights. | Trace direct and inherited grants, then remove excess rights only with review; rerun complete preflight. |
+| `retention_index` | The required index is absent, invalid/not ready, or differs in uniqueness, ordering, keys, opclass, predicate, or expression. | Verify migration 0011 and index state; use the downtime/forward-repair procedure and rerun. |
+| `catalog_result` | The query returned null, incomplete, contradictory, oversized, or otherwise unexpected catalog evidence. | Keep activation closed; inspect safe server health and supported schema state. Do not treat partial evidence as success. |
+| `cleanup` | Transaction rollback, explicit fence unlock, or physical connection disposal could not be confirmed. | Keep activation closed, allow owned resources to drain, inspect server/session health, then run every credential pass again. |
+| `timeout` | Connection, lock wait, query work, or cleanup exceeded the 30-second total (28-second work plus at most 2-second cleanup) or was canceled. | Resolve the direct endpoint/load/lock cause; do not increase connection timeouts or claim partial success. Rerun the entire combined gate under a fresh continuous guard. |
+
+The canonical recipe is idempotent for accepted state but can refuse drift it cannot safely reconcile. A recipe failure does not authorize ad-hoc grants or mean that rerunning it will repair every finding. The deployment owner must keep the full gate closed until a reviewed repair, all distinct runtime passes, both lane proofs, matching StoreId/nonempty epoch, and the continuous guard window are re-established.
 
 ## Available contract diagnostics
 
@@ -188,14 +348,43 @@ before any bounded retry.
 
 ## PostgreSQL Work provider diagnostics
 
+### Execution deadline and attempt-plan diagnostics
+
+The canonical [execution-policy reference](../Durable/execution-policies-v1.md) defines the exclusive timing
+boundaries. `ASDUR120` identifies a planned policy whose circuit closed or whose fixed slots are exhausted;
+`ASDUR121` identifies an absolute deadline. Legacy backoff keeps its existing `retry_policy_exhausted` code when its
+elapsed horizon closes. The safe timing reason distinguishes `deadline_elapsed`, `circuit_elapsed`,
+`elapsed_exhausted`, and `slots_exhausted`; pair it with lifecycle/effect state instead of treating one code as proof
+of no effect. `ASDUR106` remains primary when an admitted external effect is unresolved; deadline expiry may be recorded
+as a secondary safe reason but never settles effect truth.
+
+The PostgreSQL store preserves the first admission-closure timestamp and reason separately from the first observed
+deadline reach. An earlier `circuit_elapsed` or `slots_exhausted` closure remains the first recorded cause; a later
+observation at or after the deadline is retained independently in `execution_deadline_reached_at`. This internal
+storage witness is not a public API projection. Diagnose effect truth from the authorized Work/operator surfaces and
+safe lifecycle diagnostics below; neither timing witness establishes whether a provider effect occurred.
+
+| Observation | Meaning | Safe response |
+|---|---|---|
+| `ASDUR120` / `circuit_elapsed` or `slots_exhausted` | The planned policy's exclusive circuit closed or the immutable plan has no next slot | Do not edit accepted offsets or resubmit changed semantics under the same idempotency identity; use a new Work version for new policy |
+| `ASDUR121` / `deadline_elapsed` | The absolute deadline is reached and no effect remains unresolved | Treat the Work as timing-closed; do not release or retry it |
+| `retry_policy_exhausted` / `elapsed_exhausted` | A legacy retry policy's elapsed horizon is closed | Keep the legacy policy and retry semantics; only authorized proof/reconciliation may update effect truth |
+| `ASDUR106` with a timing reason | A permit or late result leaves external effect truth unresolved at a timing boundary | Reconcile or use the authorized manual-resolution path for that safety class; never infer NotApplied from expiry or a quarantined result |
+| `ASDUR104` / `ASDUR105` | Claim or lease fence is stale | Stop the attempt and reload current scoped Work; timing facts do not revive stale authority |
+
+These codes and reason labels are payload-free. Do not expose Work/scope IDs, provider keys, input/result bytes,
+exception text, or arbitrary plan-version strings in public logs or metrics. An observation can be a safe duplicate
+after expiry; compare the original accepted fingerprint before treating it as a new request. See the
+[schema-12 rollout checklist](../Durable/migrations/execution-policies-v1.md).
+
 | Code | Meaning | Safe response |
 |---|---|---|
 | `ASDUR101` | Active caller transaction required | Start and pass the intended transaction; the writer never creates one for this API. |
-| `ASDUR103` | Store unavailable | Roll back after PostgreSQL/connection errors; retry only under application policy. |
+| [`ASDUR103`](#asdur103-store-unavailable) | Store unavailable | Restore PostgreSQL connectivity and read permissions, establish session affinity, or unblock the cooperative maintenance fence; retry only under application policy. |
 | `ASDUR104` | Claim lost | Read current Work truth; never execute or complete with the stale claim. |
 | `ASDUR105` | Lease lost | Stop the attempt; it cannot acquire a permit or change current Work. |
 | `ASDUR107` | Scope disabled | Treat the scope as a permanent tombstone; do not recreate it. |
-| `ASDUR108` | Recovery epoch required | Rotate the epoch through deployment tooling after restore before releasing Work or Flow. |
+| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host. |
 | `ASDUR119` | Work discovery contract selection unavailable | Worker activation could not snapshot complete custom registry contracts | Correct `RegisteredContracts` and restart the host |
 | `ASDUR200` | Flow definition unavailable | Register required flow definition and version before starting or resuming instance. |
 | `ASDUR201` | Flow history incompatible | Definition fingerprint or step code changed; suspend instance and perform explicit migration. |
@@ -216,10 +405,10 @@ before any bounded retry.
 | `ASDUR218` | Repair descriptor upgrade required | Existing suspensions without V1 identity remain unsupported; `0008` and compatible writers support only future descriptors. |
 | `ASDUR219` | Repair evidence mismatch | Locked evidence changed or is incompatible; submit only a fresh assessment candidate. |
 | `ASDUR220` | Repair action unsupported | The retained state is outside the two supported assertions; preserve evidence. |
-| `ASDUR400` | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
-| `ASDUR401` | Durable schema upgrade is required | Apply every known pending migration before this reader/writer. |
-| `ASDUR402` | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |
-| `ASDUR403` | Durable schema history is inconsistent | Compare ordered names/checksums; never rewrite applied history. |
+| [`ASDUR400`](#asdur400-durable-schema-is-missing) | Durable schema is missing | Apply reviewed forward-only migrations with a migration-owner connection. |
+| [`ASDUR401`](#asdur401-durable-schema-upgrade-is-required) | Durable schema upgrade is required | Apply every known pending migration before this reader or writer. |
+| [`ASDUR402`](#asdur402-durable-schema-version-is-too-new-or-unsupported) | Durable schema version is too new or unsupported | Deploy compatible package code; do not bypass supported ranges. |
+| [`ASDUR403`](#asdur403-durable-schema-history-is-inconsistent) | Durable schema history is inconsistent | Compare ordered names and checksums; never rewrite applied history. |
 
 After an Npgsql exception, timeout, cancellation, connection loss, or server error, the caller must roll back.
 Diagnostics retain exception type, stack, inner exception, and SQLSTATE, but omit connection strings, credentials,
@@ -239,11 +428,22 @@ five-character SQLSTATE. Never log or serialize inner message text, detail, hint
 
 | Code | Problem | Typical cause | Safe action |
 |---|---|---|---|
-| `ASDUR103` | Store unavailable | PostgreSQL transport or timeout blocks a bounded runtime pass | Retry after the configured bounded delay and inspect only safe infrastructure telemetry. |
+| [`ASDUR103`](#asdur103-store-unavailable) | Store unavailable | A PostgreSQL transport, permission, session-affinity, timeout, or cleanup failure prevented the bounded durable operation from completing. | Restore PostgreSQL connectivity and read permissions, establish session affinity, or unblock the cooperative maintenance fence; retry only under application policy. |
 | `ASDUR406` | Wake listener retry | The advisory wake-listener connection disconnected or timed out | Polling remains authoritative; retry the listener after the configured bounded delay and alert separately from pass failures. |
-| `ASDUR404` | Activator stale | No current heartbeat or successful sweep inside `HeartbeatStaleAfter` | Check that exactly one compatible host or external activator is running, then inspect typed health and role/schema prerequisites. |
+| [`ASDUR404`](#asdur404-initial-heartbeat-not-observed-or-activator-stale) | Initial heartbeat not observed or activator stale | NotStarted may mean the first worker heartbeat is absent; Stale means the observed heartbeat or sweep exceeded HeartbeatStaleAfter. | For NotStarted, treat it as a compatible initial assessment and follow the host's activation policy. For Stale, inspect the configured runtime and role/schema prerequisites. The health probe preserves the observed code; activation results retain it only for Stale. |
 | `ASDUR405` | Worker identity conflict | Another live process owns the configured `WorkerId`, an old generation updated after takeover, or the same runtime instance already has an active pass | Assign a unique worker ID per replica, wait for stale/drain takeover rules, avoid overlapping local activation, and never edit the heartbeat row manually. |
-| `ASDUR400`–`ASDUR403` | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. |
-| `ASDUR108` | Recovery epoch required | The configured runtime epoch differs from the active store epoch | Perform authorized epoch initialization/rotation before enabling the worker host. |
+| [`ASDUR400`](#asdur400-durable-schema-is-missing)–[`ASDUR403`](#asdur403-durable-schema-history-is-inconsistent) | Incompatible runtime store | Missing, pending, unsupported, or inconsistent migration state | Apply reviewed migrations with the migration owner, rerun the role recipe, and deploy compatible code; startup intentionally performs no DDL. See each code's canonical entry for its specific action. |
+| [`ASDUR108`](#asdur108-recovery-epoch-required) | Recovery epoch required | The configured runtime epoch differs from the active store epoch. | Compare the configured runtime epoch with the deployed host configuration and correct an unintended mismatch. Initialize or rotate the store epoch only when reviewed recovery requires it, before enabling the worker host. |
+| [`ASDUR408`](#asdur408-restricted-runtime-credential-required) | Restricted runtime credential required | The connected role has a prohibited attribute, membership, ownership, grant option, or heartbeat-table privilege. | Use a dedicated restricted LOGIN runtime credential and complete the reviewed runtime-role preflight; do not use a migration owner. |
+| [`ASDUR409`](#asdur409-heartbeat-retention-capability-unavailable) | Heartbeat-retention capability unavailable | The retention function, its required permissions or configuration, or the retention index is missing or does not meet the schema 0011 contract. | Review the schema 0011 retention function and index contract, apply an authorized repair, then rerun doctor and complete runtime preflight. |
+| [`ASDUR410`](#asdur410-no-retained-heartbeat-for-the-selected-worker) | No retained heartbeat for the selected worker | No retained heartbeat matches the selected worker ID; the worker may not have started, the ID may differ, or retention may have removed the row. | Verify the configured worker ID and host activation policy; rerun doctor after the worker records a heartbeat. |
+| [`ASDUR411`](#asdur411-selected-worker-is-draining) | Selected worker is draining | The selected worker heartbeat records that the worker is refusing new passes while existing work drains. | Let in-flight work finish and follow the host's drain or deployment procedure before expecting new claims. |
+| [`ASDUR412`](#asdur412-selected-heartbeat-belongs-to-another-runtime-epoch) | Selected heartbeat belongs to another runtime epoch | The retained heartbeat's runtime epoch does not match the configured and active store epoch. | Resolve the authorized runtime-epoch mismatch, then rerun doctor with the host's configured epoch. |
+| [`ASDUR413`](#asdur413-doctor-input-is-invalid) | Doctor input is invalid | A command option or selected environment value is absent or malformed. | Provide required values through the selected environment variables, use a restricted runtime credential, and check supported options with appsurface durable doctor --help. |
+| [`ASDUR414`](#asdur414-doctor-was-canceled-by-its-caller) | Doctor was canceled by its caller | The caller canceled the valid doctor request before it completed. | Retry only when the caller intends a fresh diagnostic attempt. |
+| [`ASDUR415`](#asdur415-doctor-encountered-an-unexpected-contract-failure) | Doctor encountered an unexpected contract failure | The CLI or provider returned malformed, contradictory, or otherwise unexpected doctor evidence. | Verify the matching CLI and provider packages, investigate their contract compatibility and the canonical troubleshooting diagnostics, and retry only after resolving the mismatch. |
+| `ASDUR407` | External activation failed | Unexpected nonfatal setup/health failure before admission, or provider/execution/bookkeeping failure after admission | Use the activation phase to distinguish zero admission calls from an invoked pass; inspect persisted Work/effect state before any caller retry. Never use exception text as a result code. |
 
 The canonical activation path is the PostgreSQL package's [worker-host quickstart](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). It is a public-preview package; real PostgreSQL reference workloads and runtime tests remain the operational proof surface.
+
+For the exact ten service outcomes and HTTP projection, see the canonical [external activation operator table](../Durable/external-activation-v1.md#operator-actions-and-recovery). A host probe's `ProbeFailed/ASDUR407` means no assessment was obtained; it does not synthesize an `Unavailable` assessment. `ProbeCanceled` records request/transport cancellation. Neither probe result establishes execution or effect truth.

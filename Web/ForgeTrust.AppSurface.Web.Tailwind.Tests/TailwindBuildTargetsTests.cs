@@ -1,7 +1,9 @@
 extern alias TailwindTasks;
 
 using System.Collections;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Web.Tailwind.Internal;
 using Microsoft.Build.Framework;
@@ -50,6 +52,68 @@ public sealed class TailwindBuildTargetsTests : IDisposable
         Assert.Contains("TailwindReleaseManifestPath=\"$(_TailwindReleaseManifest)\"", targets, StringComparison.Ordinal);
         Assert.Contains("$(_TailwindVersionFile);$(_TailwindReleaseManifest)", targets, StringComparison.Ordinal);
         Assert.DoesNotContain("TailwindRuntimeBinaryResolutionEnabled", targets, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("linux-x64")]
+    [InlineData("linux-arm64")]
+    [InlineData("osx-x64")]
+    [InlineData("osx-arm64")]
+    [InlineData("win-x64")]
+    public async Task RuntimePackaging_DoesNotReadOrWriteTheAppBuildCache(string rid)
+    {
+        var manifest = TailwindReleaseManifest.LoadFromFile(GetReleaseManifestPath());
+        var binaryName = manifest.GetAsset(rid).BinaryName;
+        var cacheRoot = Path.Join(_tempRoot, "shared-root");
+        var appBinary = TailwindDownloadCache.GetRuntimeBinaryPath(cacheRoot, manifest.Version, rid, binaryName);
+        var packageBinary = TailwindDownloadCache.GetRuntimeBinaryPath(
+            Path.Join(cacheRoot, "runtime-packages"), manifest.Version, rid, binaryName);
+        var payload = "runtime package cache isolation"u8.ToArray();
+        var digest = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        foreach (var binary in new[] { appBinary, packageBinary })
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(binary)!);
+            await File.WriteAllBytesAsync(binary, payload);
+            await File.WriteAllTextAsync(Path.Join(Path.GetDirectoryName(binary)!, "sha256sums.txt"), $"{digest}  {binaryName}\n");
+        }
+
+        // Keep the app cache entry busy while verifying that packaging uses only its own files.
+        await using var heldAppBinary = new FileStream(appBinary, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var runtimeProject = Path.Join(Path.GetDirectoryName(GetTailwindProjectPath())!, "runtimes",
+            $"ForgeTrust.AppSurface.Web.Tailwind.Runtime.{rid}.csproj");
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        foreach (var argument in new[]
+        {
+            "msbuild", runtimeProject, "-nologo", "-target:ResolveTailwindBinary",
+            $"-property:TailwindDownloadCacheRoot={cacheRoot}",
+        })
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = Process.Start(startInfo)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        try
+        {
+            await process.WaitForExitAsync(timeout.Token);
+            Assert.True(process.ExitCode == 0, $"Runtime cache isolation failed: {await output}\n{await error}");
+            Assert.Equal(payload, await File.ReadAllBytesAsync(packageBinary));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+            }
+        }
     }
 
     [Fact]

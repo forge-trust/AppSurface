@@ -1,5 +1,7 @@
 # ForgeTrust.AppSurface.Durable.PostgreSql
 
+Use the [runtime doctor](../runtime-doctor.md) to inspect one connected store with a restricted runtime credential. Migration 0011 retention checks are local structural evidence; [complete deployment preflight](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist) requires its own reviewed inputs.
+
 For schema-11 runtime heartbeat cleanup, start with the [retention configuration and operations guide](../heartbeat-retention-operations.md). It gives the defaults, pause setting, exact migration commands, security boundary, capacity measurements, and forward-only recovery path.
 
 > **Public preview:** this package supplies explicit PostgreSQL schema management, Work, Flow, Schedule, an explicitly
@@ -18,6 +20,14 @@ The package references the adopter-facing
 [`ForgeTrust.AppSurface.Durable.Provider`](../ForgeTrust.AppSurface.Durable.Provider/README.md) SPI. Neither package
 depends on PostgreSQL.
 
+For fixed retry timing or an absolute execution deadline, read the canonical
+[execution-policy reference](../execution-policies-v1.md) before changing a Work version. Migration `0012` adds the
+opt-in columns and advances the reader/writer compatibility floor to schema 12; legacy rows remain on legacy timing.
+The ordered [migration checklist](../migrations/execution-policies-v1.md) requires a stop/drain, migration-owner apply,
+role/schema preflight, compatible package deployment, and a new immutable Work version. The runtime applies no DDL.
+The fresh-feed [packed-consumer gate](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/verify-packed-consumers.sh) includes the real PostgreSQL planned-policy proof
+and rejects skipped tests.
+
 ## Slice 7 discovery and reconciliation
 
 This provider is a public preview. Registration is passive: `AddAppSurfaceDurablePostgreSql` installs storage and runtime
@@ -26,11 +36,21 @@ start a worker, open a connection, or apply DDL. Continuous processing requires 
 [`AddWorkerHost()` opt-in](#run-a-worker-host). Startup validates the installed schema and active epoch and never
 applies DDL or advances migration history.
 
+Passive registration validates the runtime connection string's host and effective database before adding services.
+Specify `Database` explicitly, or provide an explicit username for Npgsql's same-as-username database default.
+Do not rely on an operating-system username or unsupported `PGHOST`/`PGDATABASE` defaults for physical target identity;
+see [Npgsql connection parameters](https://www.npgsql.org/doc/connection-string-parameters.html).
+The pump resolves its scoped handoff dependency during provider preparation, before acquiring an effect permit.
+A construction failure follows the existing `WorkContractUnavailable` completion path and does not leave a permit
+claiming provider work may have begun. The [handoff guide](../handoff-fence.md) explains the transaction target contract.
+
 The production migration order is `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`,
 `0004_schedule_protocol.sql`, `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`,
 `0007_flow_retention.sql`, `0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, and
-`0010_runtime_health_observation.sql` and `0011_runtime_heartbeat_retention.sql`, followed by the matching released
-provider package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. The package recipe is
+`0010_runtime_health_observation.sql`, `0011_runtime_heartbeat_retention.sql`, and
+[`0012_work_execution_policy.sql`](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.PostgreSql/Migrations/0012_work_execution_policy.sql), followed by the matching released provider
+package's `contentFiles/any/any/configure-postgresql-roles.sql` role recipe. Migration 0012 raises the reader/writer floor
+to schema 12 before any deadline-only or planned Work is accepted. The package recipe is
 byte-identical to the canonical [`Durable/configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
 source, as checked by packed-consumer verification. Prefer generating the Durable schema script offline, reviewing it,
 applying the forward-only migrations, running that package recipe with the complete reviewed manifest, and completing
@@ -48,8 +68,11 @@ local proof of these boundaries, not production operations guidance.
 
 The [operational-assessment adoption guide](../operational-assessments.md) is the complete existing-host and
 external-activator recipe. PostgreSQL health exposes the provider-neutral `WasStoreObserved`, `CanEnableActivation`,
-`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; call
-`IDurableRuntimePumpAdmission.TryRunOnceAsync` directly so health and admission cannot become a check-then-act pair.
+`CanAttemptPump`, and `IsReady` predicates. Use `CanAttemptPump` only as context; authoritative admission cannot be
+replaced by a check-then-act gate. For a generic external wake endpoint, compose the Provider package's
+[`IDurableExternalActivationService`](../external-activation-v1.md) with this passive provider. Keep direct
+`IDurableRuntimePumpAdmission.TryRunOnceAsync` calls for integrations that intentionally own the lower-level attempt
+mapping.
 
 | Attempt | Public fields | Meaning and remedy |
 | --- | --- | --- |
@@ -57,6 +80,19 @@ external-activator recipe. PostgreSQL health exposes the provider-neutral `WasSt
 | `Refused` | No result, no problem code | Local overlap, closed process gate, drain, active store pass, or worker-generation refusal. Wait or reconcile as appropriate. |
 | `Unavailable` | No result, `ASDUR103` | The store was not observed. Transport/pool, provider-deadline, and permission (`42501`) causes have different remedies. |
 | `Incompatible` | No result, `ASDUR108` or `ASDUR400`–`ASDUR403` | The store was observed and rejected the runtime. Follow schema or authorized epoch recovery. |
+
+### External activation host
+
+The [external activation reference](../external-activation-v1.md) defines the provider-neutral request budget,
+cancellation precedence, all ten outcomes, recovery rules, and activity tags. The executable
+[external activation example](../../examples/durable-external-activation/README.md) demonstrates a passive authenticated
+host alongside the existing [`AddWorkerHost()` continuous path](#run-a-worker-host). Neither activation choice changes
+schema, grants, Work acceptance, or PostgreSQL terminal bookkeeping.
+
+The health reader reports `NotStarted` with `ASDUR404` before it has observed the first heartbeat. This is a valid
+initial compatibility assessment, with activation enabled and readiness false. A host-owned assessment probe preserves
+the observed state and code. The external activation service accepts it but omits `ASDUR404` from an activation result
+unless the observed state is `Stale`; provider health behavior remains unchanged.
 
 The returned non-completed outcomes certify that this invocation did not enter `RunPassAsync`; they do not certify
 the status of another process or a lost response. Exceptions before or after execution retain their original semantics.
@@ -104,7 +140,8 @@ expose SQL, exception text, credentials, role names, payload identifiers, scope 
 For the #794 provider release, drain and stop every durable worker and Schedule writer, keep pre-`0009` workers
 stopped, generate and review the exact script, and verify that the configured migration owner owns the schema-9
 `runtime_due_dispatch_health(integer)` function. Repair owner drift with the #794 release's matching role recipe
-before migration if needed; do not use a current package recipe before migration 0011. Then apply migration
+before migration if needed; do not use the current package recipe before migration 0012 because it requires schema 12.
+For a schema-9 historical proof, use the matching historical recipe; apply migration
 `0010_runtime_health_observation` from schema 9 to 10 with that owner through the generated script or explicit CLI
 apply command, rerun the #794 release's matching role recipe
 for post-migration reconciliation, run status and preflight, smoke-test `v0.2.0-preview.8`, and deploy the new binary.
@@ -115,6 +152,45 @@ rollback to `v0.2.0-preview.8` keeps schema 10 in place and requires status, hea
 tests under the reconciled roles. A pre-`0009` binary is not a supported rollback target after the role recipe removes
 broad dispatcher access. See the [adoption guide](../operational-assessments.md#migration-and-role-reconciliation)
 for the complete rollout boundary and local-proof behavior.
+
+## Prepare an application handoff
+
+Resolve `IDurableWorkHandoffFence` through [PostgreSQL composition](#composition-requirement) in an actual active Work
+executor. Supply the exact caller-owned PostgreSQL `ReadCommitted` transaction targeting the configured store. The
+callback revalidates application authority and writes a conditional ledger entry using only that transaction and its
+connection, after the native locks are held. It runs at most once per call; sequential calls rely on application
+conditional writes to prevent duplicates.
+
+```text
+active native invocation
+  -> caller ReadCommitted transaction
+  -> native epoch / scope / Work / dispatch / exact permit locks
+  -> application authorization and conditional ledger write
+  -> final lifetime, cancellation, database lease / deadline check
+  -> HandoffPrepared (provisional)
+  -> caller commits and disposes transaction and connection
+  -> provider attempted -> accepted / rejected / ambiguous under existing provider safety
+```
+
+| Outcome | Caller action |
+| --- | --- |
+| Success, `HandoffPrepared=true` | Check cancellation, commit promptly, release resources, then apply existing provider-safety policy inside the invocation. |
+| Success, `HandoffPrepared=false` | Callback writes were removed; earlier unrelated writes may be committed. Do not send. |
+| Failed result | Use its bounded native problem code; no handoff is authorized. Stop provider I/O. |
+| Callback, SQL or cancellation exception | Exception propagates after feasible savepoint cleanup. Do not send. |
+| Cleanup failure | Roll back/dispose the outer transaction. Both causes are retained when applicable. |
+| Failed or uncertain commit | Reconcile the application ledger and existing native/provider safety before any send; an absent row can be inconclusive. |
+
+The service never completes or disposes the caller transaction, changes isolation or role, or retries the callback.
+Provider I/O belongs after transaction and connection disposal. The host supplies finite nonzero `lock_timeout`,
+`statement_timeout` and `idle_in_transaction_session_timeout`, with lock timeout below statement timeout, and bounds total
+transaction duration. Audit all authority/ledger writers for native-before-application lock ordering, including implicit
+foreign-key locks and [transactional enqueue](#accept-work). Only unrelated earlier writes can safely precede the fence.
+
+Start with the [complete handoff contract](../handoff-fence.md), including the application writer audit, safe refusal
+reference, uncertain-commit handling, and ready/cold verification prerequisites. The [public package consumer](https://github.com/forge-trust/AppSurface/tree/main/Durable/packed-consumers/PostgreSqlPolicyConsumer)
+is the executable integration entry, including [the complete database/commit/provider flow](../handoff-fence.md#internal-contracts-and-verification); [the #869 test plan](https://github.com/forge-trust/AppSurface/blob/main/docs/plans/issue-869-handoff-test-plan.md) tracks its
+required proof. Local package validation, published-package adoption, and deployment are separate milestones.
 
 ## First proof
 
@@ -141,6 +217,41 @@ Construct `PostgreSqlDurableRuntimeSchemaManager` with a migration-owner `Npgsql
 - `InitializeRuntimeEpochAsync` activates the first epoch exactly once; and
 - `RotateRuntimeEpochAsync` compare-and-swaps the active epoch after restore or an authorized recovery event.
 
+The CLI's unified read-only [complete runtime-set preflight](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+reuses migration-history compatibility through the provider's internal
+`ReadStatusInTransactionAsync(connection, transaction, cancellationToken)` seam. This method reads the same installed
+migration rows, verifies their names and SHA-256 checksums against the embedded catalog, and returns the same immutable
+status shape as `GetStatusAsync`. The caller must supply an open connection and its active transaction; the method
+rejects a closed connection or a transaction belonging to another connection, and Npgsql rejects a completed
+transaction when the status command is bound. Cancellation is passed to every status query and propagates to the caller.
+
+The preflight owns the connection, shared migration fence and read-only catalog transaction. The seam owns none of
+those resources: it never opens a connection, acquires a fence, selects an isolation level, or begins, commits,
+rolls back or disposes the transaction. This keeps compatibility and structural catalog checks in one caller-chosen
+snapshot. Call `GetStatusAsync` for ordinary status checks; use this internal seam only when a coordinated operation
+must combine the provider's compatibility result with other checks in its own transaction. A caller must set its
+transaction isolation and fence before this first status query, and must roll back or dispose the transaction if the
+read fails or is canceled. Do not call it with a transaction from a different connection or rely on it to provide
+snapshot consistency, migration exclusion, or cleanup by itself.
+
+For `durable schema preflight`, supply the complete reviewed version-1 pair file with required
+`--role-pairs-file` and the separately reviewed owner with required `--migration-owner-role`, even for one pair. The
+CLI reads strict UTF-8 without BOM once, up to 64 KiB/depth 8, validates 1–32 exact-shape pairs and explicit
+`full`/`work_only` profiles, rejects duplicate JSON properties and invalid or duplicate names, and resolves every
+original name exactly to a distinct OID. Owner and pair roles must be disjoint. The byte SHA-256 records file identity,
+not who reviewed or controls that file. See the [CLI input and result contract](../../Cli/ForgeTrust.AppSurface.Cli/README.md#durable-postgresql-schema-commands)
+and [canonical deployment checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
+
+Each CLI pass holds the shared package fence before one read-only RepeatableRead catalog snapshot on its own dedicated
+nonpooled, session-affine connection. Its total online deadline is 30 seconds, including connection and lock wait;
+catalog work is bounded to 28 seconds and cleanup gets up to 2 seconds. Transaction/statement poolers are unsupported.
+The result preserves StoreId and nullable runtime epoch but does not initialize or rotate either. It distinguishes the
+actual matching runtime credential from owner-only diagnostic evidence by requiring `session_user` and `current_user`
+to resolve to the same OID. A deployment requires a separate continuous owner guard across every runtime pass, lane
+proof, and activation; each distinct pair must pass under its own credential with matching reviewed StoreId and
+nonempty epoch. Guard loss invalidates all prior results. The command remains read-only and does not provide a public
+provider preflight API or authorize activation by itself.
+
 Runtime mutations take a shared, transaction-scoped advisory fence before validating the active epoch. Schema changes
 and epoch rotation take the exclusive package lock, so they wait for in-flight runtime transactions and prevent an old
 epoch from committing new durable state after rotation.
@@ -148,8 +259,13 @@ epoch from committing new durable state after rotation.
 Runtime roles never own schema or apply DDL. Apply the ordered migrations in numeric order:
 `0001_work_shared.sql`, `0002_forced_rls.sql`, `0003_flow_protocol.sql`, `0004_schedule_protocol.sql`,
 `0005_runtime_heartbeat.sql`, `0006_flow_trace_context.sql`, `0007_flow_retention.sql`,
-`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, `0010_runtime_health_observation.sql`, and
-`0011_runtime_heartbeat_retention.sql`.
+`0008_flow_repair.sql`, `0009_work_contract_discovery.sql`, `0010_runtime_health_observation.sql`,
+`0011_runtime_heartbeat_retention.sql`, and `0012_work_execution_policy.sql`.
+
+Before accepting deadline-only or planned Work, stop every connected package below the schema-12 reader/writer floor.
+Schema 12 leaves legacy rows and their v1 fingerprints unchanged; it adds persisted execution-policy facts for new
+opt-in Work. Use the [execution-policy migration checklist](../migrations/execution-policies-v1.md) to order the
+forward-only apply, package deployment, preflight, and new Work version.
 
 `0009_work_contract_discovery.sql` introduces registry-scoped Work discovery and the payload-free
 discovery function `appsurface_durable.discover_work_dispatch(text[], text[], integer)`. Its contract-lookup index and
@@ -203,7 +319,9 @@ dispatcher connections can use the new relations. Migration 0010 also verifies t
 owned by the configured migration principal. If that preflight exposes historical owner drift, use the
 [schema-10 single-pair role recipe](https://github.com/forge-trust/AppSurface/blob/e0618ac8/Durable/configure-postgresql-roles.sql)
 once as a repair before retrying migration 0010, then run it again after the migration for normal reconciliation.
-The current packaged recipe requires migration 0011 first.
+The current packaged recipe requires all migrations through `0012_work_execution_policy.sql` first; its grants include
+the authoritative execution clock and planned-offset validator introduced in schema 12. See the
+[execution-policy migration checklist](../migrations/execution-policies-v1.md) for the coordinated host upgrade.
 
 ## Run a worker host
 
@@ -299,12 +417,13 @@ not ready, including `NotStarted`, `Stale`, `Draining`, `Incompatible`, and `Una
 scope, aggregate, connection, or trace values. At shutdown, local admission closes synchronously before the host
 persists drain; already-permitted Work follows its ordinary cancellation/recovery path rather than inventing a result.
 
-For a cold path, first drain and stop every pre-`0009` worker because the role recipe intentionally removes its raw
-`dispatch` access. Apply every pending forward-only migration through `0011_runtime_heartbeat_retention.sql` with the migration owner, then use the matching released provider package's
+For a cold path, stop new submissions and drain and stop every producer, reader, dispatcher, operator tool, runtime,
+and scheduled activator that cannot read/write schema 12. Follow the [execution-policy migration checklist](../migrations/execution-policies-v1.md#adoption-and-rollback).
+Apply every pending forward-only migration through `0012_work_execution_policy.sql` with the migration owner, then use the matching released provider package's
 `contentFiles/any/any/configure-postgresql-roles.sql` with the complete reviewed manifest. Verify the active epoch and StoreId, deploy with `AddWorkerHost()` disabled, then enable it. Never destructively roll
-back a migration. After the role recipe runs, a pre-`0009` worker is not a compatible application rollback target because its dispatcher
-credential no longer has raw `dispatch` access; keep that worker stopped and roll forward to a `0009`-compatible binary instead. Do not
-restore the broad grant as a rollback shortcut.
+back a migration. After migration `0012`, recovery and application rollback require schema-12-compatible packages;
+keep every pre-floor package stopped. A pre-`0009` worker also loses raw `dispatch` access when the role recipe runs.
+Do not restore the broad grant as a rollback shortcut.
 
 ### Role recipe contract
 
@@ -363,11 +482,14 @@ Use a separate store or a separately designed PostgreSQL partition when independ
 separate failure domain is required. The three operational choices and their costs are summarized in the
 [adoption guide](../operational-assessments.md#shared-store-role-pair-choice).
 
-With schema 11, the recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current CLI
-structural preflight still checks one runtime role and rejects a two-pair catalog. Run it on the forwarding-only
-configuration before local enrollment; keep Source activation closed until [#795](https://github.com/forge-trust/AppSurface/issues/795)
-provides the exact runtime-set preflight and two-pair upgrade proof described in the
-[adoption guide](../operational-assessments.md#migration-and-role-reconciliation).
+The historical schema-11 recipe grants heartbeat pruning to every manifest runtime and no dispatcher. The current
+recipe also requires schema 12 for execution-policy functions; apply migration `0012` before using it, and use the
+matching historical package recipe when reconciling an older schema. Preflight consumes the complete reviewed set and
+checks every runtime, policy target, and function grantee; omission or an unexpected target fails closed. The
+[local walkthrough](../../examples/durable-postgresql/README.md#complete-manifest-preflight-walkthrough) illustrates
+one-pair and two-pair commands using disposable role names. Local source proof is not exact candidate or public package
+proof. Keep activation closed until the [four-stage evidence checklist](../heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+is satisfied by actual matching artifacts and the deployment's continuous guard.
 
 Omitting an installed pair is an error, never retirement. The recipe preserves healthy policy OIDs, targets,
 expressions, ACLs, owners, and effective grants on an identical rerun; it rejects unexpected extra principals and broader
@@ -682,8 +804,11 @@ and never replace authoritative discovery.
 
 ## Failure and effect safety
 
-Local preflight and expected domain outcomes leave an otherwise active transaction usable. PostgreSQL errors, timeout,
-network loss, server cancellation, or an aborting SQLSTATE require caller rollback. Savepoints are unsupported.
+For [transactional Work acceptance](#accept-work), local preflight and expected domain outcomes leave an otherwise
+active transaction usable. PostgreSQL errors, timeout, network loss, server cancellation, or an aborting SQLSTATE require
+caller rollback; the transaction writer does not provide savepoint recovery. The [handoff fence](../handoff-fence.md)
+has its own operation and callback savepoints and attempts cleanup before propagating errors. If handoff cleanup fails,
+the caller must roll back or dispose its outer transaction.
 The API method being called is the operation context: failures are not wrapped in a generic provider exception that
 would hide the concrete Npgsql type. Missing or incompatible schema failures expose safe `Status`; when PostgreSQL
 reveals missing schema during Work acceptance, `InnerException` preserves the original `PostgresException`, stack, and

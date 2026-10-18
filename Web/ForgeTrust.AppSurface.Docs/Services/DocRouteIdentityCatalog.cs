@@ -83,6 +83,7 @@ internal sealed class DocRouteIdentityCatalog
     ];
 
     private readonly Dictionary<string, DocRouteIdentity> _identityBySourcePath;
+    private readonly Dictionary<string, DocRouteIdentity> _identityByExactSourcePath;
     private readonly Dictionary<string, DocRouteIdentity> _identityByInternalPath;
     private readonly Dictionary<string, DocRouteIdentity> _identityByExactInternalPath;
     private readonly Dictionary<string, DocRouteIdentity> _publicIdentityByRoutePath;
@@ -92,6 +93,7 @@ internal sealed class DocRouteIdentityCatalog
 
     private DocRouteIdentityCatalog(
         Dictionary<string, DocRouteIdentity> identityBySourcePath,
+        Dictionary<string, DocRouteIdentity> identityByExactSourcePath,
         Dictionary<string, DocRouteIdentity> identityByInternalPath,
         Dictionary<string, DocRouteIdentity> identityByExactInternalPath,
         Dictionary<string, DocRouteIdentity> publicIdentityByRoutePath,
@@ -101,6 +103,7 @@ internal sealed class DocRouteIdentityCatalog
         IReadOnlyList<DocHarvestDiagnostic> diagnostics)
     {
         _identityBySourcePath = identityBySourcePath;
+        _identityByExactSourcePath = identityByExactSourcePath;
         _identityByInternalPath = identityByInternalPath;
         _identityByExactInternalPath = identityByExactInternalPath;
         _publicIdentityByRoutePath = publicIdentityByRoutePath;
@@ -125,6 +128,7 @@ internal sealed class DocRouteIdentityCatalog
 
         var publicWinners = ResolvePublicWinners(candidates, reservedRoutePaths, diagnostics);
         var identityBySourcePath = new Dictionary<string, DocRouteIdentity>(StringComparer.OrdinalIgnoreCase);
+        var identityByExactSourcePath = new Dictionary<string, DocRouteIdentity>(StringComparer.Ordinal);
         var identityByInternalPath = new Dictionary<string, DocRouteIdentity>(StringComparer.OrdinalIgnoreCase);
         var identityByExactInternalPath = new Dictionary<string, DocRouteIdentity>(StringComparer.OrdinalIgnoreCase);
         var publicIdentityByRoutePath = new Dictionary<string, DocRouteIdentity>(StringComparer.OrdinalIgnoreCase);
@@ -141,6 +145,7 @@ internal sealed class DocRouteIdentityCatalog
                 candidate.SourcePathIsMarkdown,
                 []);
             AddIdentity(identityBySourcePath, candidate.SourceLookupPath, identity);
+            AddIdentity(identityByExactSourcePath, candidate.SourceExactLookupPath, identity);
             AddInternalIdentity(identityByInternalPath, candidate.SourceLookupPath, identity);
             AddInternalIdentity(identityByInternalPath, candidate.PublicRouteLookupPath, identity);
             AddInternalIdentity(identityByInternalPath, candidate.LegacyHtmlLookupPath, identity);
@@ -190,6 +195,7 @@ internal sealed class DocRouteIdentityCatalog
 
         return new DocRouteIdentityCatalog(
             identityBySourcePath,
+            identityByExactSourcePath,
             identityByInternalPath,
             identityByExactInternalPath,
             publicIdentityByRoutePath,
@@ -236,6 +242,20 @@ internal sealed class DocRouteIdentityCatalog
         }
 
         return new DocRouteResolution(DocRouteResolutionKind.NotFound);
+    }
+
+    /// <summary>
+    /// Resolves only an ordinal exact source identity, without canonical/alias lookup precedence. Snapshot metadata and
+    /// recommendation facts use this after merge/deduplication so a source-shaped slug cannot impersonate another source.
+    /// Legitimate fragment sources remain linkable under the existing fragment contract.
+    /// </summary>
+    internal bool TryGetPublicRoutePathForSource(string sourcePath, out string publicRoutePath)
+    {
+        ArgumentNullException.ThrowIfNull(sourcePath);
+        if (_identityByExactSourcePath.TryGetValue(NormalizeExactRouteLookupPath(sourcePath), out var identity))
+            return TryReturnPublicLinkableRoute(identity, out publicRoutePath);
+        publicRoutePath = string.Empty;
+        return false;
     }
 
     internal bool TryGetPublicRoutePath(string path, out string publicRoutePath)

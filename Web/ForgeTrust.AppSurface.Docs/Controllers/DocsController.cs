@@ -1893,13 +1893,15 @@ public class DocsController : Controller
     /// This helper operates on the typed <see cref="DocsSearchIndexPayload" /> contract, which always exposes a top-level
     /// <see cref="DocsSearchIndexPayload.Documents" /> list. It does not inspect or reshape arbitrary JSON payloads, so
     /// callers that hold raw JSON without a top-level <c>documents</c> array must deserialize or otherwise handle that
-    /// mismatch before calling this method. Within the typed payload, only rooted
-    /// <see cref="DocsSearchIndexDocument.Path" /> values are rewritten. Non-rooted, blank, or otherwise unchanged values
+    /// mismatch before calling this method. Within the typed payload, rooted
+    /// <see cref="DocsSearchIndexDocument.Path" /> and nested recommendation paths are rewritten. Non-rooted, blank, or otherwise unchanged values
     /// such as <c>guide.html</c> are returned as-is, so callers should supply leading-slash browser paths for docs-local
     /// navigation when rebasing is expected. For example, rebasing a payload that contains
     /// <c>documents[0].path = "/docs/guide.html"</c> with <c>/some-base/</c> produces
     /// <c>/some-base/docs/guide.html</c>. The supplied path base is trimmed of trailing slashes before concatenation, and
-    /// the method is idempotent when <paramref name="requestPathBase" /> is null, empty, or <c>/</c>.
+    /// paths are unchanged when <paramref name="requestPathBase" /> is null, empty, or <c>/</c>. Recommendation rows and
+    /// their reason lists are detached even for an unchanged mount. Target identities, raw authored references and
+    /// explanations are preserved; no ranking runs during this projection.
     /// </remarks>
     internal static DocsSearchIndexPayload PrefixSearchIndexPathsForPathBase(
         DocsSearchIndexPayload payload,
@@ -1907,33 +1909,27 @@ public class DocsController : Controller
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (string.IsNullOrWhiteSpace(requestPathBase)
-            || string.Equals(requestPathBase, "/", StringComparison.Ordinal))
-        {
-            return payload;
-        }
-
-        var normalizedPathBase = requestPathBase.TrimEnd('/');
+        var normalizedPathBase = string.IsNullOrWhiteSpace(requestPathBase) || requestPathBase == "/"
+            ? string.Empty : requestPathBase.TrimEnd('/');
         var changed = false;
-        var documents = new DocsSearchIndexDocument[payload.Documents.Count];
-
-        for (var index = 0; index < payload.Documents.Count; index++)
+        string Prefix(string path)
         {
-            var document = payload.Documents[index];
-            if (string.IsNullOrWhiteSpace(document.Path)
-                || !document.Path.StartsWith("/", StringComparison.Ordinal))
-            {
-                documents[index] = document;
-                continue;
-            }
-
+            if (normalizedPathBase.Length == 0 || string.IsNullOrWhiteSpace(path) || !path.StartsWith("/", StringComparison.Ordinal))
+                return path;
             changed = true;
-            documents[index] = document with
-            {
-                Path = normalizedPathBase + document.Path
-            };
+            return normalizedPathBase + path;
         }
-
+        var documents = payload.Documents.Select(document =>
+        {
+            var path = Prefix(document.Path);
+            var recommendations = document.RecommendedPages.Select(row =>
+            {
+                // Even an unchanged mount owns a detached explanation array and row.
+                changed = true;
+                return row with { Path = Prefix(row.Path), ReasonCodes = row.ReasonCodes.ToArray() };
+            }).ToArray();
+            return document with { Path = path, RecommendedPages = recommendations };
+        }).ToArray();
         return changed ? payload with { Documents = documents } : payload;
     }
 
@@ -2206,9 +2202,26 @@ public class DocsController : Controller
             }
         }
 
+        DocPageLinkViewModel? ProjectLink(DocPageLinkViewModel? page)
+        {
+            if (page is null) return null;
+            // Views apply PathBaseAware once when rendering these app-relative links.
+            return page with
+            {
+                PageTypeBadge = page.PageTypeBadge is { } badge ? badge with { } : null
+            };
+        }
         return details with
         {
             Document = pathBaseAwareDoc,
+            PreviousPage = ProjectLink(details.PreviousPage),
+            NextPage = ProjectLink(details.NextPage),
+            RelatedPages = details.RelatedPages.Select(page => ProjectLink(page)!).ToArray(),
+            RecommendedPages = details.RecommendedPages.Select(row => row with
+            {
+                Page = ProjectLink(row.Page)!,
+                ReasonCodes = row.ReasonCodes.ToArray()
+            }).ToArray(),
             Title = resolvedTitle,
             CanonicalUrl = currentHref,
             Summary = summary,
@@ -2616,19 +2629,122 @@ public class DocsController : Controller
                 })
             .ToList();
 
+        const string invalidAliasMessage = "This release entry is not configured correctly.";
+        const string conflictingAliasMessage = "This release entry has conflicting definitions.";
+        const string unavailableAliasMessage = "This release entry is not currently available.";
+        var projectedAliases = new List<AppSurfaceDocsVersionAliasArchiveEntryViewModel>();
+        var projectedNames = new HashSet<string>(StringComparer.Ordinal);
+        var publicConflictNames = catalog.Aliases
+            .Where(
+                alias => alias.IsNameConflict
+                         && alias.IsDefinitionValid
+                         && alias.Visibility == AppSurfaceDocsVersionVisibility.Public
+                         && !string.IsNullOrWhiteSpace(alias.Name))
+            .Select(alias => alias.Name!)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var alias in catalog.Aliases)
+        {
+            if (string.IsNullOrWhiteSpace(alias.Name))
+            {
+                continue;
+            }
+
+            if (alias.IsNameConflict)
+            {
+                if (!projectedNames.Add(alias.Name))
+                {
+                    continue;
+                }
+
+                if (publicConflictNames.Contains(alias.Name))
+                {
+                    projectedAliases.Add(
+                        new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+                        {
+                            Name = alias.Name,
+                            AvailabilityMessage = conflictingAliasMessage
+                        });
+                }
+
+                continue;
+            }
+
+            if (!alias.IsDefinitionValid)
+            {
+                if (alias.HasExplicitPublicVisibility
+                    && alias.Visibility == AppSurfaceDocsVersionVisibility.Public)
+                {
+                    projectedAliases.Add(
+                        new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+                        {
+                            Name = alias.Name,
+                            AvailabilityMessage = invalidAliasMessage
+                        });
+                }
+
+                continue;
+            }
+
+            if (alias.Visibility != AppSurfaceDocsVersionVisibility.Public)
+            {
+                continue;
+            }
+
+            projectedAliases.Add(ProjectAliasArchiveEntry(alias, unavailableAliasMessage));
+        }
+
         return new AppSurfaceDocsVersionArchiveViewModel
         {
-            Heading = entryFallback ? "Published documentation versions" : "Documentation versions",
+            Heading = "Documentation versions",
             Description = entryFallback
                 ? "The stable docs entry is waiting for a healthy recommended release tree. You can keep reading the preview surface or open an exact published version below."
-                : "Choose the exact release you want to read, or keep using the current preview surface for unreleased work.",
+                : "Choose a moving label for a maintained entry point, or an exact release URL for a fixed citation.",
             AvailabilityMessage = catalog.AvailabilityIssue
                 ?? (entryFallback
                     ? $"No healthy recommended release tree is currently mounted at {PathBaseAware(_docsUrlBuilder.DocsEntryRootPath)}."
                     : null),
             PreviewHref = _docsUrlBuilder.BuildHomeUrl(),
             VersionsHref = _docsUrlBuilder.BuildVersionsUrl(),
-            Versions = versions
+            Versions = versions,
+            Aliases = projectedAliases
+        };
+    }
+
+    /// <summary>Projects resolved alias state into the reader-facing archive model.</summary>
+    /// <param name="alias">A public resolved alias already selected for the archive.</param>
+    /// <param name="unavailableAliasMessage">The safe fallback explanation for an unavailable alias.</param>
+    /// <returns>A row whose link, availability flag and explanation agree.</returns>
+    /// <remarks>
+    /// A row is linkable only when the alias reports availability, its target is public, and its root URL is nonblank.
+    /// Unavailable rows omit the link and explain why; hidden or unknown targets omit target metadata and use the safe
+    /// fallback message. Internal so tests can verify inconsistent resolved state without mocking the catalog loader.
+    /// </remarks>
+    internal static AppSurfaceDocsVersionAliasArchiveEntryViewModel ProjectAliasArchiveEntry(
+        AppSurfaceDocsResolvedVersionAlias alias,
+        string unavailableAliasMessage)
+    {
+        var publicTarget = alias.TargetVersion is { Visibility: AppSurfaceDocsVersionVisibility.Public } target
+            ? target
+            : null;
+        var targetIsKnownPublic = publicTarget is { Visibility: AppSurfaceDocsVersionVisibility.Public };
+        var linkable = alias.IsAvailable
+                       && targetIsKnownPublic
+                       && !string.IsNullOrWhiteSpace(alias.RootUrl);
+        return new AppSurfaceDocsVersionAliasArchiveEntryViewModel
+        {
+            Name = alias.Name ?? string.Empty,
+            Label = string.IsNullOrWhiteSpace(alias.Label) ? alias.Name ?? string.Empty : alias.Label,
+            Summary = alias.Summary,
+            TargetVersion = targetIsKnownPublic ? publicTarget!.Version : null,
+            SupportStateLabel = targetIsKnownPublic ? GetSupportStateLabel(publicTarget!.SupportState) : null,
+            AdvisoryLabel = targetIsKnownPublic ? GetAdvisoryLabel(publicTarget!.AdvisoryState) : null,
+            Href = linkable ? alias.RootUrl : null,
+            AvailabilityMessage = linkable
+                ? null
+                : targetIsKnownPublic
+                    ? alias.AvailabilityIssue ?? unavailableAliasMessage
+                    : unavailableAliasMessage,
+            IsAvailable = linkable
         };
     }
 

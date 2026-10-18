@@ -7,16 +7,18 @@ acceptance; external provider effects remain governed by the Work registration's
 ## Prerequisites
 
 - PostgreSQL 16+ through Docker/Testcontainers, or `APPSURFACE_POSTGRES_TEST_CONNECTION` pointing to PostgreSQL 16+.
-- A migration owner applies `0001` through `0011`, then runs the complete reviewed version-1 role-pair manifest with
+- A migration owner applies `0001` through `0012`, then runs the complete reviewed version-1 role-pair manifest with
   the matching released PostgreSQL provider package's
   [`configure-postgresql-roles.sql`](https://github.com/forge-trust/AppSurface/blob/main/Durable/configure-postgresql-roles.sql)
   at `contentFiles/any/any/configure-postgresql-roles.sql`. Use the `full` dispatcher profile for this Work-first
-  Schedule workload; profile selection is explicit for every pair. See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract).
+  Schedule workload; profile selection is explicit for every pair. The current recipe requires schema 12; use the
+  matching historical package recipe for an older-schema proof. See the [provider manifest and grant reference](ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
+  and [execution-policy migration checklist](migrations/execution-policies-v1.md).
 - The Schedule processor receives a dispatcher data source, a separate runtime data source, immutable Work registry,
   validated `PostgreSqlDurableWorkOptions`, and
   `PostgreSqlDurableScheduleOptions` containing the exact runtime role name.
 - The schedule processor must use the same dispatcher/runtime role transition as production: apply migrations through
-  `0011_runtime_heartbeat_retention.sql` and rerun the complete manifest with the matching package recipe before
+  `0012_work_execution_policy.sql` and rerun the complete manifest with the matching package recipe before
   enabling the hosted host; keep worker host disabled during this reference workload and use only a manually bounded
   pass.
 

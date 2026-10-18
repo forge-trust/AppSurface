@@ -22,7 +22,7 @@ public sealed class DurableSchemaContractTests
     }
 
     [Fact]
-    public void MigrationCatalog_IsExactlyElevenOrderedChecksummedResources()
+    public void MigrationCatalog_IsExactlyTwelveOrderedChecksummedResources()
     {
         var migrations = DurablePostgreSqlMigrationCatalog.Load();
 
@@ -221,6 +221,16 @@ public sealed class DurableSchemaContractTests
                 Assert.Equal("runtime_heartbeat_retention", eleventh.Name);
                 Assert.Equal(64, eleventh.Sha256.Length);
                 Assert.Equal(330, eleventh.CommandTimeoutSeconds);
+            },
+            twelfth =>
+            {
+                Assert.Equal(12, twelfth.Version);
+                Assert.Equal("work_execution_policy", twelfth.Name);
+                Assert.Equal(64, twelfth.Sha256.Length);
+                Assert.Contains("execution_deadline_reached_at", twelfth.Sql, StringComparison.Ordinal);
+                Assert.Contains("invocation_admitted_at", twelfth.Sql, StringComparison.Ordinal);
+                Assert.Contains("ix_dispatch_execution_discovery", twelfth.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET search_path = pg_catalog", twelfth.Sql, StringComparison.Ordinal);
             });
         Assert.Equal(migrations.Count, DurablePostgreSqlMigrationCatalog.RequiredVersion);
         Assert.Equal(migrations.Count, PostgreSqlDurableRuntimeSchemaManager.RequiredVersion);
@@ -358,11 +368,11 @@ public sealed class DurableSchemaContractTests
         Assert.Contains("0009_work_contract_discovery", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0010_runtime_health_observation", pendingOnly, StringComparison.Ordinal);
         Assert.Contains("0011_runtime_heartbeat_retention", pendingOnly, StringComparison.Ordinal);
-        Assert.Contains("minimum_reader_version = 1, maximum_reader_version = 11", pendingOnly, StringComparison.Ordinal);
-        Assert.Contains("minimum_writer_version = 1, maximum_writer_version = 11", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("minimum_reader_version = GREATEST(minimum_reader_version, 12), maximum_reader_version = 12", pendingOnly, StringComparison.Ordinal);
+        Assert.Contains("minimum_writer_version = GREATEST(minimum_writer_version, 12), maximum_writer_version = 12", pendingOnly, StringComparison.Ordinal);
         Assert.DoesNotContain("-- Migration", current, StringComparison.Ordinal);
         Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(-1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(12));
+        Assert.Throws<ArgumentOutOfRangeException>(() => manager.GenerateScript(13));
     }
 
     [Fact]
@@ -665,7 +675,7 @@ public sealed class DurableSchemaContractTests
         Assert.True(revokeBroadUpdate >= 0);
         Assert.True(grantScopedUpdate > revokeBroadUpdate);
         Assert.Contains(
-            "GRANT UPDATE (due_at, state, expected_revision, updated_at) ON appsurface_durable.dispatch",
+            "GRANT UPDATE (due_at, state, expected_revision, updated_at, execution_discovery_at) ON appsurface_durable.dispatch",
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -688,7 +698,7 @@ public sealed class DurableSchemaContractTests
             recipe,
             StringComparison.Ordinal);
         Assert.Contains(
-            "GRANT UPDATE (status, observed_at, details, runtime_epoch) ON appsurface_durable.effect_permit",
+            "GRANT UPDATE (status, observed_at, details, runtime_epoch, invocation_admitted_at) ON appsurface_durable.effect_permit",
             recipe,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

@@ -185,6 +185,47 @@ name with its payload, including a returned project number for a requested proje
 remain ordinal-exact, and a pinned numeric version cannot resolve to another version. Project ID/number equivalence is
 accepted from the configured client response; it is not inferred by lowercasing or merging identifiers.
 
+## Mapped lookup scheduling
+
+Mapped `IConfigManager.GetValue<T>` calls are synchronous and expose no cancellation-token parameter. A cold ordinary
+call that wins a new exact-resource flight runs `Fetch` inline, including the synchronous Google client call, on that
+same managed thread. A same-resource joiner waits on the published flight holder, shares its result, and cannot start
+another lookup; a tokenless joiner may block until the winner finishes. A warm successful cache hit skips flight
+creation. Completed flights are retired and are not a substitute for the successful-payload cache, so with
+`CacheTtl = null` a later sequential read performs another lookup.
+
+An internal token-bearing ordinary provider request uses a `TaskScheduler` worker if it wins a flight, so its caller
+can stop waiting promptly. An audit winner uses a `TaskScheduler` worker only after its operation scope successfully
+grants a remote-lookup lease. The worker does not inherit the caller's wait token: cancelling an owner or joiner ends
+only that caller's wait, and the shared synchronous client call may continue until `LookupTimeout`. A no-token startup
+caller that joins a flight already owned by an audit or cancellable request waits on that same worker-owned flight; it
+does not start a second client call just to run inline. An audit joiner of an inline startup flight creates no audit
+worker.
+
+An audit lease reservation acquired while the shared scope token is live is the admission boundary. A reservation granted before scope cancellation may publish its
+flight and queue its worker after cancellation, and the worker may enter the client after the aggregate deadline. The
+waiting audit caller then returns incomplete coverage and releases its caller-owned lease; the admitted call may finish
+later. Once the shared scope token is cancelled, a new request in that scope cannot reserve a lease or queue another
+worker. The lease therefore bounds starts admitted by one live audit scope, not the lifetime of a synchronous client
+call after its waiter has stopped. See the
+[request and audit-scope contract](../ForgeTrust.AppSurface.Config/ConfigProviderRequest.cs) and the
+[public audit report guide](../ForgeTrust.AppSurface.Config/README.md#configuration-audit-reports).
+
+These rules apply to mapped legacy provider reads. File-declared `Secret<T>` references use their direct synchronous
+client path and a remaining-time budget; they do not use the mapped-resource flight table. Follow the
+[file-declared reference guide](../ForgeTrust.AppSurface.Config/docs/file-secret-references.md) for that separate path.
+
+## Value-safe troubleshooting
+
+| Signal | Problem and likely cause | Safe next step |
+| --- | --- | --- |
+| `config-provider-failed` | A claimed lookup, response validation, UTF-8 decode, or typed conversion failed. The diagnostic deliberately withholds the raw Google exception and payload. | Check the host's selected identity and its `secretmanager.versions.access` grant, then verify the mapped project, secret, and pinned version and the configured lookup timeout. Use only the value-safe diagnostic's retryability and remediation fields; see [installation and identity setup](#install) and [typed values](#typed-values). |
+| `config-audit-deadline` | The aggregate audit deadline expired before all requested remote evidence completed. The report is incomplete; an already-admitted synchronous client call may still finish afterward. | Narrow the audited key set or bounded expansion, then review the validated `ConfigResourceOptions.AuditTimeout`, `MaxAuditRemoteLookups`, and `MaxAuditConcurrency` limits in the [Config resource options reference](../ForgeTrust.AppSurface.Config/ConfigResourceOptions.cs) and [audit guide](../ForgeTrust.AppSurface.Config/README.md#configuration-audit-reports). |
+| `OperationCanceledException` from an explicitly cancelled provider scope | The internal request scope was already cancelled. Ordinary public `IConfigManager.GetValue<T>` has no token parameter; public audit operations use their aggregate deadline. | In an internal provider integration, check who owns and cancels the scope token and ensure the scope remains alive through the caller's wait. Do not treat cancellation as a Google denial or retry it with secret data in logs; see the [request and audit-scope contract](../ForgeTrust.AppSurface.Config/ConfigProviderRequest.cs). |
+
+Never add secret values, payload bytes, credential material, raw exception text, or full resource names to benchmark
+output, application logs, or a support report. The provider's value-safe diagnostics are the troubleshooting evidence.
+
 ## Cache Behavior
 
 By default every lookup reads through the client. Set `CacheTtl` only when the app can tolerate delayed visibility after
@@ -209,8 +250,10 @@ or shorten a cached payload's lifetime. Failures are evicted after the shared fe
 retry. Child-reference payloads are decoded before entering their cache, so invalid UTF-8 is retried on the next
 request. For mapped legacy lookups, invalid UTF-8, failed typed conversion, and null conversion results evict their
 exact cached payload generation;
-a slow failed conversion cannot remove a newer successful entry. Concurrent misses for one exact resource share a
-side-effect-free `Lazy` fetch. Cancelling one request stops its waiter while the shared fetch continues for other callers.
+a slow failed conversion cannot remove a newer successful entry. Concurrent mapped misses for one exact full resource
+share one published flight. Candidate construction is side-effect-free; only the published winner starts the fetch,
+and compare-removal protects a replacement flight from late cleanup. Cancelling one request stops its waiter while the
+shared fetch continues for other callers.
 Already-cancelled callers throw before native claims, cached reads or client access; an expired audit deadline instead
 records `config-audit-deadline` as incomplete coverage. Ad-hoc claims are checked and bounded before network access.
 Resolved names also participate in ordinal resource claims. If two distinct logical keys resolve to one concrete name,
@@ -230,6 +273,22 @@ services.UseAppSurfaceGoogleSecretManagerClient(new FakeGoogleSecretManagerClien
 
 The seam returns payload bytes from a resource name and timeout. Test fakes can return deterministic bytes or throw
 Google `RpcException` instances so the provider's status mapping remains deterministic without network access.
+
+For a copyable proof through the mapped public configuration path, run the standalone
+[credential-free fake-client harness](../ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/README.md):
+
+```bash
+dotnet run --project Config/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks.csproj -c Release -- proof
+```
+
+It uses a synthetic mapped resource and an injected fake client only. A passing result reports that the cold winning
+caller and fake client used the same managed thread, same-resource joiners shared one client call, and the warm cache
+added no call; it prints none of the synthetic payload, resource name, or key. The proof intentionally exercises
+ordinary `IConfigManager.GetValue<T>`; it does not simulate cancellation or audit timing. The existing
+[file-declared secret reference example](../../examples/file-secret-references/README.md) proves a separate resolution path.
+The same sidecar contains the pinned baseline/candidate workload, captured
+[results with raw samples](../ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results/issue-819-comparison-2026-10-01.md),
+and a value-free [result template](../ForgeTrust.AppSurface.Config.GoogleSecretManager.Benchmarks/results-template.md).
 
 Use `UseAppSurfaceGoogleSecretTransferClient(...)` to replace the explicit transfer seam used by CLI transfer workflows:
 

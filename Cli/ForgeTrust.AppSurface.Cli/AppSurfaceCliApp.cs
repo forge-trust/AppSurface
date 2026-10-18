@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using CliFx;
+using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
@@ -57,15 +58,28 @@ internal static class AppSurfaceCliApp
     /// </remarks>
     internal static async Task RunAsync(string[] args, Action<ConsoleOptions>? configureOptions = null)
     {
-        var normalizedArguments = CoverageRunArgumentBinding.Normalize(args);
         var options = ConsoleOptions.Default with
         {
             OutputMode = ConsoleOutputMode.CommandFirst
         };
         configureOptions?.Invoke(options);
 
+        // Inspect original argv before normalization and StartupContext creation so malformed doctor tokens cannot
+        // reach CliFx's generic parser or be echoed in a framework diagnostic.
+        var doctorAdmission = DurableDoctorArgumentAdmission.Inspect(args);
+        if (doctorAdmission.IsDoctor && doctorAdmission.IsMalformed)
+        {
+            await WriteDoctorAdmissionFailureAsync(options, doctorAdmission.Format).ConfigureAwait(false);
+            return;
+        }
+
+        var normalizedArguments = CoverageRunArgumentBinding.Normalize(args);
+        var cliArguments = doctorAdmission.IsDoctor
+            ? DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(normalizedArguments.Arguments)
+            : normalizedArguments.Arguments;
+
         var module = new AppSurfaceCliModule();
-        var context = new StartupContext(normalizedArguments.Arguments, module)
+        var context = new StartupContext(cliArguments, module)
         {
             ConsoleOutputMode = options.OutputMode
         };
@@ -94,6 +108,7 @@ internal static class AppSurfaceCliApp
         services.AddTransient<EvidenceCliWorkflow>();
         services.AddTransient<TestResultsCleanupWorkflow>();
         services.AddSingleton<IDurableSchemaCommandService, DurableSchemaCommandService>();
+        services.AddSingleton<IDurableDoctorService, DurableDoctorService>();
         AddExportEngineServices(services);
         services.AddHttpClient<IAppSurfaceDocsHealthHttpClient, AppSurfaceDocsHealthHttpClient>(
             client => { client.Timeout = TimeSpan.FromSeconds(60); });
@@ -138,6 +153,52 @@ internal static class AppSurfaceCliApp
             CoverageTestArgumentValues.Value = previousTestArgumentValues;
         }
     }
+
+    private static async Task WriteDoctorAdmissionFailureAsync(ConsoleOptions options, string format)
+    {
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            foreach (var customRegistration in options.CustomRegistrations)
+            {
+                customRegistration(services);
+            }
+
+            await using var serviceProvider = services.BuildServiceProvider();
+            var configuredConsole = serviceProvider.GetService<IConsole>();
+            if (configuredConsole is not null)
+            {
+                await WriteAsync(configuredConsole).ConfigureAwait(false);
+            }
+            else
+            {
+                using var systemConsole = new SystemConsole();
+                await WriteAsync(systemConsole).ConfigureAwait(false);
+            }
+
+            async Task WriteAsync(IConsole console)
+            {
+                var result = DurableDoctorClassifier.Terminal(null, "invalid-input", ["input"]);
+                var output = DurableDoctorRenderer.Render(result, null, format);
+                if (output.Length == 0 || output[^1] != '\n')
+                {
+                    output += "\n";
+                }
+
+                await console.Output.WriteAsync(output).ConfigureAwait(false);
+                Environment.ExitCode = result.ExitCode;
+            }
+        }
+        catch (Exception exception) when (IsNonfatal(exception))
+        {
+            // A failing configured sink cannot safely report through that same sink.
+            Environment.ExitCode = 1;
+        }
+    }
+
+    private static bool IsNonfatal(Exception exception) => exception is not StackOverflowException
+        and not OutOfMemoryException and not AccessViolationException;
 
     /// <summary>Restores the literal test tokens bound through this invocation's opaque placeholders.</summary>
     /// <param name="arguments">CliFx-bound test argument tokens in order.</param>

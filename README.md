@@ -22,6 +22,14 @@ If your CI gate should distinguish an explicit low-risk change from an incomplet
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
+If a shared typed wrapper lives in a Domain assembly outside normal module
+discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
+and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
+
+For a connected Durable store, use the [non-mutating runtime doctor](./Durable/runtime-doctor.md) to inspect schema, epoch, retention capability and an optional selected heartbeat. Its clean result hands off to application composition verification.
+
+For Durable executors that need current domain authorization before a provider effect, see the
+[PostgreSQL application handoff fence](Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#prepare-an-application-handoff).
 
 ## Vision
 
@@ -69,7 +77,7 @@ This approach aims to:
 - [**AppSurface Auth adoption ladder**](./start-here/auth-adoption-ladder.md) - Start here when you need to choose between host-owned ASP.NET Core auth, AppSurface Auth contracts, Auth.AspNetCore, DevAuth, OIDC, Auth.Testing, and RazorWire-facing proof surfaces.
 - [**ForgeTrust.AppSurface.Auth**](./Auth/ForgeTrust.AppSurface.Auth/README.md) – Surface-neutral auth vocabulary for AppSurface modules, including user/session/context contracts, auth outcome results, durable external-subject to app-user-id mapping contracts, transition-bound delegated-agent approval contracts, passive login/logout prompts, passive audit event descriptions, and no runtime request or identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md) – ASP.NET Core adapter that maps existing host request auth context and named policies into AppSurface auth results without owning schemes, middleware, challenges, forbids, redirects, or identity-provider setup. Run the [Auth Web/RazorWire proof](./examples/auth-web-razorwire-proof/README.md) to see one host policy drive both API and rendered UI state.
-- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, an embeddable marker that stays fixed on desktop and flows with narrow layouts, a named fake scheme, a startup guard, explicit environment opt-in, and no production identity-provider behavior.
+- [**ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md) – Development-by-default selectable persona auth for local/proof AppSurface policy proofs, with a visible control page, optional request-scoped awaited fixture activation, safe landing targets, an embeddable marker, explicit environment opt-in, and no production identity-provider behavior.
 - [**ForgeTrust.AppSurface.Auth.AspNetCore.Oidc**](./Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md) – ASP.NET Core cookie + OIDC convenience registration with explicit AppSurface scheme names, conservative token defaults, passive prompt helpers, and safe diagnostics without silent default-scheme takeover or identity-provider ownership.
 - [**ForgeTrust.AppSurface.Auth.Aspire.Keycloak**](./Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md) – AppHost-only local Keycloak proof for real AppSurface OIDC sign-in, with deterministic realm import, a cached finite `RealmReady` gate, ordered consumer-owned local seed projects with scoped typed-secret bindings, secret-safe web projection, fixed-port diagnostics, and no runtime web dependency on Keycloak packages.
 - [**ForgeTrust.AppSurface.Auth.Testing**](./Auth/ForgeTrust.AppSurface.Auth.Testing/README.md) – Test-only ASP.NET Core harness for deterministic AppSurface auth personas, WebApplicationFactory integration tests, canonical auth result assertions, and ProblemDetails checks without becoming production authentication or Dev Auth.
@@ -93,7 +101,7 @@ This approach aims to:
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
 
-For bounded cleanup of old PostgreSQL runtime heartbeat identities, use the [schema-11 retention and deployment guide](./Durable/heartbeat-retention-operations.md).
+For bounded cleanup of old PostgreSQL runtime heartbeat identities and the complete reviewed-manifest preflight, use the [schema-11 retention and deployment guide](./Durable/heartbeat-retention-operations.md). Activation requires distinct credential evidence for every pair and the staged candidate/public/deployment receipts described there.
 
 The Durable packages are coordinated public previews. The [Durable operational-assessment adoption guide](./Durable/operational-assessments.md) is the task-oriented entry point for existing-host upgrades, the four-kind admission contract, schema/role rollout, diagnostics, and rollback. The [Slice 7 discovery and reconciliation guide](./Durable/README.md#slice-7-discovery-and-reconciliation) documents schema ownership, the `durable schema` command family, and the local proof boundary; production support remains outside the preview contract.
 
@@ -108,7 +116,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
 - [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
 - [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
-- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, and [independently configured named Docs products in one host](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
+- [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases), and [metadata-driven recommended next reads](./Web/ForgeTrust.AppSurface.Docs/README.md#recommended-next-reads). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers a [three-page next-read example](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#build-a-three-page-next-read-example) and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
 - [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
 - [**ForgeTrust.AppSurface.Web.Scalar**](./Web/ForgeTrust.AppSurface.Web.Scalar/README.md) – Optional module that serves the Scalar API reference UI when both Scalar and OpenAPI exposure gates allow it.
 
@@ -149,6 +157,8 @@ long-lived host processes are unsupported. See the
 ### [Aspire](./Aspire/README.md)
 
 - [**ForgeTrust.AppSurface.Aspire**](./Aspire/ForgeTrust.AppSurface.Aspire/README.md) – Local .NET Aspire AppHost composition with AppSurface modules, CLI-selectable profiles, reusable Aspire components, and native publish/verification integration for explicitly annotated resources.
+- [Aspire repository-relative assets](./Aspire/ForgeTrust.AppSurface.Aspire/README.md#repository-relative-assets) – Resolve checked-out asset paths independently of process working directory and test output.
+- [**ForgeTrust.AppSurface.Aspire.Testing**](./Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) – Typed profile testing with per-call pre-activation hooks; see its [configured graph-only proof](./Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof).
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Test/CI-only explicit EvidenceHost lifecycle for consumer-owned Aspire readiness and E2E producers, separate from the normal AppHost.
 
 ### [Deployment](./Deployment/README.md)
@@ -356,7 +366,19 @@ The [coverage-run watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-r
 ### Focused and sharded coverage
 
 `scripts/coverage-solution.sh` accepts no arguments and exists only for this
-repository's full run-and-gate policy. Use the public CLI when selecting a subset,
+repository's full run-and-gate policy. It enables VSTest's
+`console;verbosity=normal` logger so completed tests reach the
+[output-sensitive watchdog](./Cli/ForgeTrust.AppSurface.Cli/README.md#coverage-run-watchdog).
+A large suite can otherwise run healthy short tests for more than ten minutes
+while the minimal logger stays silent until its final summary. This keeps the
+existing ten-minute watchdog and nine-minute VSTest hang timer active; a hung
+test still produces no completion output. The
+[coverage progress fixture](./scripts/verify-coverage-progress-fixture.sh) proves
+that a quiet healthy sequence trips the watchdog, completion logging lets all
+tests finish, and a hung test still trips the same watchdog. Run it with
+`./scripts/verify-coverage-progress-fixture.sh`; its ten-second diagnostic budget
+keeps the probe short and does not change the full solution policy.
+Use the public CLI when selecting a subset,
 changing output, or merging shards:
 
 ```bash
@@ -430,7 +452,7 @@ The [examples](examples/README.md) directory contains sample applications that d
 how to use this project.
 
 - [Auth ASP.NET Core bridge example](examples/auth-aspnetcore-bridge/README.md) – proves an ASP.NET Core host-owned auth stack can flow named policy results into AppSurface auth contracts.
-- [Auth ASP.NET Core DevAuth example](examples/auth-aspnetcore-dev-auth/README.md) – shows a selectable local persona marker that stays fixed on desktop and reserves layout space on narrow screens.
+- [Auth ASP.NET Core DevAuth example](examples/auth-aspnetcore-dev-auth/README.md) – shows selectable local personas, request-scoped fixture activation for two operator roles, a shared candidate with independent progress, and the marker's responsive placement.
 - [Auth Web/RazorWire proof](examples/auth-web-razorwire-proof/README.md) – shows one host-owned ASP.NET Core policy driving both a Minimal API response and RazorWire-rendered auth state.
 - [Console app example](examples/console-app/README.md) – builds a simple command line
   application using [CliFx](https://github.com/Tyrrrz/CliFx) source-generated command
@@ -450,6 +472,7 @@ how to use this project.
   solo development before a remote vault exists.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
+- [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts. For the canonical legacy, deadline-only, and planned retry chooser, see the [execution-policy guide](Durable/execution-policies-v1.md).
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
   local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
   host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`

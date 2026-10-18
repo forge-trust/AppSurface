@@ -4,7 +4,7 @@ This is the operator and private-tool reference for the approved [#798 design](d
 
 ## Trust chain and authorities
 
-The validated tag checkout, repository identity, full source commit and coordinated package plan are the source authority. The producer runs `pack-and-verify` once, performs the existing local Linux consumer proof, and emits a package inventory (`package-artifact-manifest.json` v1) plus `tailwind-proof-subject.json` (`appsurface-tailwind-proof-subject-v1`). The subject freezes package version, producer run and attempt, source/repository, exact manifest SHA-256, Tailwind package ID/file/raw SHA-512, exact internal Tailwind release-manifest SHA-256, `net10.0` consumer framework, payload projection version 1, and sorted first-party closure (at the reviewed base, Core and Tailwind), each with ID/version/file/raw SHA-512.
+The validated tag checkout, repository identity, full source commit and coordinated package plan are the source authority. The producer runs `pack-and-verify` once, performs the existing local Linux consumer proof, and emits a package inventory (`package-artifact-manifest.unapproved.json` v1 for release publishing, `package-artifact-manifest.json` for manual rehearsal) plus `tailwind-proof-subject.json` (`appsurface-tailwind-proof-subject-v1`). The subject freezes package version, producer run and attempt, source/repository, exact manifest SHA-256, Tailwind package ID/file/raw SHA-512, exact internal Tailwind release-manifest SHA-256, `net10.0` consumer framework, payload projection version 1, and sorted first-party closure (at the reviewed base, Core and Tailwind), each with ID/version/file/raw SHA-512.
 
 The producer uploads that bundle once. The immutable upload artifact ID and SHA-256 of the exact serialized subject are separate protected producer outputs: the artifact ID cannot be embedded in the subject because upload assigns it afterward. The binding is expected repository/run + producer artifact ID + expected subject digest; that subject then binds manifest and package bytes. `download-artifact` receives the exact ID, and its `download-path` is the verifier's `--artifacts-input`. Do not select by latest name, merge host directories, or take expected IDs/hashes from receipt contents. The action's download path is transport context; the typed verifier recomputes subject, manifest, archive and payload digests. The download action does not return an artifact ID or digest output.
 
@@ -44,7 +44,7 @@ Consumer release mode, evidence aggregate/preflight, and Tailwind publisher comm
 
 ```text
 --artifacts-input <exact-producer-download-path>
---artifact-manifest <path-inside-bundle>/package-artifact-manifest.json
+--artifact-manifest <path-inside-bundle>/<selected-inventory-basename>
 --producer-subject <path-inside-bundle>/tailwind-proof-subject.json
 --producer-artifact-id <protected-producer-output>
 --expected-subject-sha256 <protected-producer-output>
@@ -53,7 +53,9 @@ Consumer release mode, evidence aggregate/preflight, and Tailwind publisher comm
 --source-commit <validated-full-commit>
 ```
 
-The manifest and subject must reside in the exact bundle directory returned by the ID-based download. Identity arguments are trusted workflow outputs/context, not values copied out of the evidence. Producer attempt is read from the subject only after the expected subject hash has been verified.
+The manifest and subject must reside in the exact bundle directory returned by the ID-based download. Native release consumers and aggregation select the frozen release inventory `package-artifact-manifest.unapproved.json`. Protected publish commands use `package-artifact-manifest.json` only after [candidate receipt validation and promotion](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845) copies the byte-identical approved inventory beside the downloaded bundle. Identity arguments are trusted workflow outputs/context, not values copied out of the evidence. Producer attempt is read from the subject only after the expected subject hash has been verified.
+
+The reusable [native workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/tailwind-native-host-evidence.yml) accepts optional string input `artifact_manifest_file`, defaulting to `package-artifact-manifest.json` for manual rehearsal. Release callers explicitly pass `package-artifact-manifest.unapproved.json`; preflight accepts only these two basenames. The native consumer, mutation probe and aggregate share that selection. There is no filename discovery, fallback or rename: a missing selected file fails the proof, and its exact bytes must match the producer subject. This inventory check proves candidate identity; publication still requires the separate PostgreSQL approval.
 
 ### Consumer: local and release modes
 
@@ -124,7 +126,7 @@ Release consumer invocation:
 dotnet "$PACKAGE_INDEX_DLL" verify-tailwind-consumer \
   --repo-root "$SOURCE_CHECKOUT" --mode release \
   --artifacts-input "$PRODUCER_DIRECTORY" \
-  --artifact-manifest "$PRODUCER_DIRECTORY/package-artifact-manifest.json" \
+  --artifact-manifest "$PRODUCER_DIRECTORY/package-artifact-manifest.unapproved.json" \
   --producer-subject "$PRODUCER_DIRECTORY/tailwind-proof-subject.json" \
   --producer-artifact-id "$PRODUCER_ARTIFACT_ID" \
   --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256" \
@@ -146,13 +148,13 @@ bash scripts/verify-tailwind-package-consumer.sh \
 
 That report is `local-only`; it cannot authorize publication. This is a rule-demonstration path, not a substitute for actual native release acceptance.
 
-For shell workflow steps, create a common argument array explicitly:
+For shell workflow steps, create a common argument array explicitly. Set `ARTIFACT_MANIFEST_FILE` to `package-artifact-manifest.unapproved.json` for release aggregation, or `package-artifact-manifest.json` for protected publication after candidate promotion (and for manual rehearsal):
 
 ```bash
 bundle_args=(
   --repo-root "$SOURCE_CHECKOUT"
   --artifacts-input "$PRODUCER_DIRECTORY"
-  --artifact-manifest "$PRODUCER_DIRECTORY/package-artifact-manifest.json"
+  --artifact-manifest "$PRODUCER_DIRECTORY/$ARTIFACT_MANIFEST_FILE"
   --producer-subject "$PRODUCER_DIRECTORY/tailwind-proof-subject.json"
   --producer-artifact-id "$PRODUCER_ARTIFACT_ID"
   --expected-subject-sha256 "$EXPECTED_SUBJECT_SHA256"

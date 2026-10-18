@@ -47,11 +47,27 @@ Provider I/O never occurs while a database transaction or connection is held.
 | Renew lease | Short scoped transaction; canonical lock order | Exact revision, attempt, lease/scope generation, epoch, owner, lifetime | Extends exact active lease; stale renewal changes nothing. |
 | Prepare | No store transaction | Registry decodes immutable contract/payload/safety | Produces landed prepared invocation; unavailable history suspends `ASDUR109` before permit. |
 | Acquire permit | Short scoped transaction; canonical lock order | Exact current claim, active scope/epoch, no pre-effect cancellation | Commits one immutable exact-fence permit before provider I/O. |
+| Prepare application handoff | Caller ReadCommitted transaction; shared migration fence then scope -> Work -> dispatch -> exact permit, followed by app locks | Active exact invocation, target/schema/StoreId/epoch, scope generation, claim/lease owner/activity, live lease/deadline, granted exact permit and opt-in admission | Application-owned callback once; provisional preparation until caller commit. Denial/exception/refusal removes callback writes; native locks remain through caller completion for callback outcomes. No native transition or provider I/O. See [handoff contract](handoff-fence.md). |
 | Complete | Short scoped transaction; canonical lock order | Exact permit/claim; result matches registration | Commits terminal fact, retry, or suspension; stale result is quarantined only. |
 | Cancel | Short scoped transaction; canonical lock order | Fingerprint and current state | Before permit terminalizes canceled-before-effect; after permit records intent and follows safety. |
 | Disable scope | One scoped transaction; canonical lock order | Active generation and actor/reason | Permanent tombstone and atomic suspension of nonterminal Work. |
 | Recover expired permits | Payload-free discovery then scoped candidate transaction | Every expired permit and exact Work fence | Safe classes may reclaim; unsafe classes suspend without repeating effects. |
-| Reconcile/resolve/release | Short scoped transaction; canonical lock order | Host authorization, command fingerprint, state/evidence/audit | Applies only the safety transition supported by evidence and appends history; recovery release moves exact current ambiguous evidence with the authorized epoch, safely releases when the current attempt has none, and rolls back if an expected exact move fails. |
+| Reconcile/resolve/release | Short scoped transaction; canonical lock order | Host authorization, command fingerprint, state/evidence/audit | Applies only the safety transition supported by evidence and appends history; recovery release moves exact ambiguous evidence with the authorized epoch and rolls back if an expected exact move fails. Legacy Work selects its current attempt; opted-in Work selects the most recent unresolved admitted permit, including an earlier attempt. Recovery releases with no uncertain effect retain ordinary timing checks. |
+
+## Prepare application handoff
+
+The [handoff fence](handoff-fence.md) validates an existing exact native invocation in the application's caller-owned
+`ReadCommitted` transaction. It acquires the shared migration fence before schema/StoreId/epoch checks, then the
+scope, Work, dispatch and exact permit rows in the global order. Application authority and ledger locks follow those
+native locks inside the callback. The validator handles legacy Work and opted-in invocation admission explicitly,
+uses current locked renewal facts, and never creates scope, grants another permit, consumes admission, or writes history.
+
+Successful preparation is provisional until caller commit. Callback denial, exception and post-callback refusal remove
+callback writes while retaining acquired native locks through caller completion; cancellation observed at the final
+check removes operation writes using the enclosing savepoint. Pre-callback refusal may release operation locks.
+The host owns finite lock, statement and idle-transaction limits and total transaction duration. Caller rollback grants
+no handoff; failed or ambiguous commit requires ledger reconciliation. Provider I/O follows resource release inside the
+current invocation and the existing [provider safety rules](#provider-effect-safety).
 
 ## Acceptance identity matrix
 
@@ -117,6 +133,28 @@ eligible_at = PostgreSQL clock_timestamp() + delay
 
 Calculation is cap-first and overflow safe, with no jitter or provider Retry-After. Unknown algorithms and invalid
 bounds fail before mutation.
+
+## Execution-policy v1
+
+The optional [execution-policy reference](execution-policies-v1.md) defines the additive deadline-only and fixed-plan
+contracts. Existing requests retain fingerprint schema v1 and completion-relative `exponential-v1` behavior. Opt-in
+requests use semantic fingerprint v2 and persist their immutable policy with acceptance. For a plan, offset `i` is
+anchored to accepted-at `A`, attempt number `i + 1` becomes eligible at `A + O[i]`, and the exclusive admission cutoff
+is the minimum of `A + MaximumCircuitDuration`, `A + MaximumElapsedTime`, and the optional deadline. For deadline-only
+policy it is the minimum of the elapsed horizon and absolute deadline; retry spacing remains legacy backoff.
+
+The PostgreSQL timestamp is sampled under the authoritative lock. Equality with a cutoff is closed. A request's
+acceptance instant is its insert time, so caller-owned transaction delay consumes the window. Overdue offsets are not
+rebased or automatically consumed: every next attempt still requires the existing safe sequential retry transition.
+The execution snapshot is descriptive; claim, effect permit, invocation admission, retry release, and completion must
+revalidate current fences and timing in the store. Deadline expiry never proves that an external effect did not occur.
+The store preserves two separate internal timing witnesses. `execution_admission_closed_at` and
+`execution_admission_closed_reason` retain the first observed admission closure and are never overwritten by a later
+cutoff. `execution_deadline_reached_at` independently retains the first authoritative observation at or after the
+absolute deadline, even when circuit or slot exhaustion closed admission earlier. These storage facts add no public API
+member.
+See the [outcome and diagnostics rules](../troubleshooting/durable-diagnostics.md#execution-deadline-and-attempt-plan-diagnostics)
+and [schema-12 migration procedure](migrations/execution-policies-v1.md).
 
 ## Caller-owned transaction contract
 

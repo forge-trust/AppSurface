@@ -783,7 +783,8 @@ public sealed class GoogleSecretManagerConfigProviderTests
         using var scope = new ConfigResolutionScope(
             auditOptions: new ConfigResourceOptions
             {
-                AuditTimeout = TimeSpan.FromMilliseconds(100),
+                // Leave time for the worker to enter the blocked fake client on busy CI hosts.
+                AuditTimeout = TimeSpan.FromSeconds(3),
                 MaxAuditRemoteLookups = 1,
                 MaxAuditConcurrency = 1
             });
@@ -793,6 +794,8 @@ public sealed class GoogleSecretManagerConfigProviderTests
         {
             var pending = Task.Run(() => provider.Resolve<string>(request));
             await client.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(scope.CancellationToken.IsCancellationRequested,
+                "Audit deadline elapsed before the fake client began its blocked lookup.");
             var result = await pending;
 
             Assert.Equal(ConfigProviderValueStatus.Terminal, result.Status);

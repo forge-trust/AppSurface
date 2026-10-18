@@ -47,6 +47,30 @@ package, or visibility. The first supported publication and any persisted deploy
 boundaries: whichever happens first freezes canonical bytes, and every later canonical-byte change requires a new schema
 id.
 
+## External activation v1 (#804)
+
+The Provider package adds four public activation contracts and one passive registration extension:
+
+- `DurableExternalActivationRequest` requires the existing `DurableRuntimePumpRequest` plus an explicit positive
+  cooperative `RequestBudget` within the .NET timer bound.
+- `DurableExternalActivationOutcomeKind` adds ten fixed outcomes without changing the existing four-kind
+  `DurableRuntimePumpAttemptKind` algebra or its numeric values.
+- `DurableExternalActivationResult` validates the closed observed-state/code/pump-result combinations and retains the
+  exact provider aggregate only for `Completed`.
+- `IDurableExternalActivationService.ActivateAsync` composes current health observation with exactly one authoritative
+  admission call and a separate caller token.
+- `DurableExternalActivationServiceCollectionExtensions.AddDurableExternalActivation()` repeat-safely registers the
+  singleton service, `TimeProvider.System`, and logging without creating a host, route, timer, connection, schema change,
+  or exporter.
+
+The namespace is `ForgeTrust.AppSurface.Durable.Provider`. The concrete service and per-invocation phase/clock/resource
+helper remain internal. Existing direct `IDurableRuntimePumpAdmission` and legacy `IDurableRuntimePump` callers retain
+their contracts and are not redirected. The
+[versioned activation reference](external-activation-v1.md) documents the decision to add this orchestration surface,
+its constraints, host ownership, failure mapping, and telemetry. The Provider
+[`PublicAPI.Shipped.txt`](https://github.com/forge-trust/AppSurface/blob/ecd81417065982d1803d26000fc7618a7c06108e/Durable/ForgeTrust.AppSurface.Durable.Provider/PublicAPI.Shipped.txt) snapshot remains the exhaustive
+member inventory.
+
 ## Slice 3 PostgreSQL API
 
 The public-preview `ForgeTrust.AppSurface.Durable.PostgreSql` package adds thirteen public types in three deliberate
@@ -133,3 +157,24 @@ internal. Existing registration constructors and request APIs remain supported; 
 provider execution boundary are unchanged. Flow uses compatible codecs from the same original source without relaxing
 its exact Work-registration reference requirement. The [API snapshot](https://github.com/forge-trust/AppSurface/blob/main/Durable/ForgeTrust.AppSurface.Durable/PublicAPI.Shipped.txt)
 records every member and generic constraint.
+
+## Deterministic execution-policy v1 (#765)
+
+The existing retry-policy and Work-request constructors, typed `Define`, `CreateRequest`, `DurableClaimedWork`, and
+`DurableWorkSnapshot` constructor signatures remain. The Durable package adds the closed immutable
+`DurableAttemptPlan`, `DurableExecutionDeadline`, `DurableWorkExecutionPolicy`, and `DurableWorkExecutionSnapshot`
+contracts; `DurableWork.DefineWithExecutionPolicy`, `DurableWorkRequest.CreateWithExecutionPolicy`, and
+`DurableWorkDefinition<TWork,TResult>.CreateRequestWithExecutionPolicy`; and read-only execution-policy/deadline
+projections. The Provider package adds named execution-aware claim and inspection factories while keeping old
+constructors and nullable legacy `Execution` projections. Core and Provider API snapshots remain the exhaustive member
+inventory.
+
+The [Testing checkpoint controller](ForgeTrust.AppSurface.Durable.Testing/README.md#execution-checkpoints-and-timing-observations)
+adds a cursor overload of `WaitForObservationAsync(name, afterSequence, maximumWait, cancellationToken)` for later
+attempt observations while preserving the original name-and-cancellation signature. Its [Testing API snapshot](https://github.com/forge-trust/AppSurface/blob/4732d187bc43af3d1b8e602caa9e8da56174d21b/Durable/ForgeTrust.AppSurface.Durable.Testing/PublicAPI.Shipped.txt)
+is the exhaustive helper inventory; checkpoint observations remain descriptive test facts.
+
+No PostgreSQL public type or Workers-envelope metadata is added for this feature. Storage schema `12` adds nullable
+execution fields without backfilling legacy rows. Existing requests keep v1 fingerprint bytes; opt-in requests use v2.
+The [canonical chooser/reference](execution-policies-v1.md) and [migration checklist](migrations/execution-policies-v1.md)
+cover defaults, validation, deadline semantics, safe effect truth, and rollout/rollback constraints.

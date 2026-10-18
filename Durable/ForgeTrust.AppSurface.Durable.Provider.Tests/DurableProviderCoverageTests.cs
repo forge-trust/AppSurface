@@ -595,6 +595,121 @@ public sealed class DurableProviderCoverageTests
         AssertClaimRejected(runtimeEpoch: "bad value");
     }
 
+    [Fact]
+    public async Task Accepted_execution_snapshot_is_preserved_through_claim_context_and_invocation()
+    {
+        var snapshot = CreateExecutionSnapshot();
+        var inputCodec = new StringCodec<TestInput>("test.input", value => value.Value, value => new TestInput(value));
+        var claim = DurableClaimedWork.CreateWithExecution(
+            Scope,
+            Work,
+            "activity",
+            "test.work",
+            "v1",
+            inputCodec.Encode(new TestInput("input")),
+            DurableProviderSafety.ProviderKeyed,
+            2,
+            3,
+            4,
+            "epoch",
+            snapshot);
+        var context = claim.ToExecutionContext();
+
+        Assert.Same(snapshot, claim.Execution);
+        Assert.Same(snapshot, context.Execution);
+
+        var resultCodec = new StringCodec<TestResult>("test.result", value => value.Value, value => new TestResult(value));
+        var registration = new DurableWorkRegistration<TestInput, TestResult, TestExecutor>(
+            "test.work",
+            "v1",
+            DurableProviderSafety.ProviderKeyed,
+            inputCodec,
+            resultCodec);
+        await using var services = new ServiceCollection().AddSingleton<TestExecutor>().BuildServiceProvider();
+
+        var invocation = DurableProviderWorkAdapter.Prepare(registration, services, claim);
+
+        Assert.Same(snapshot, invocation.Execution);
+        Assert.Null(CreateClaim(Payload).Execution);
+        Assert.Null(new DurableWorkExecutionContext(
+            Scope,
+            Work,
+            "test.work",
+            "v1",
+            Payload,
+            DurableProviderSafety.ProviderKeyed,
+            DurableWorkerExecutionIdentity.Create("activity", 2, 3, 4, "epoch")).Execution);
+    }
+
+    [Fact]
+    public void Provider_adapter_rejects_registration_returning_null_prepared_work()
+    {
+        var inputCodec = new StringCodec<TestInput>("test.input", value => value.Value, value => new TestInput(value));
+        var resultCodec = new StringCodec<TestResult>("test.result", value => value.Value, value => new TestResult(value));
+        var registration = new NullPreparedWorkRegistration(inputCodec, resultCodec);
+        using var services = new ServiceCollection().BuildServiceProvider();
+
+        var failure = Assert.Throws<ArgumentNullException>(() => DurableProviderWorkAdapter.Prepare(
+            registration,
+            services,
+            CreateClaim(inputCodec.Encode(new TestInput("input")))));
+
+        Assert.Equal("preparedWork", failure.ParamName);
+    }
+
+    [Fact]
+    public void Execution_snapshot_inspection_factories_preserve_legacy_constructors()
+    {
+        var execution = CreateExecutionSnapshot();
+        var snapshot = DurableWorkSnapshot.CreateWithExecution(
+            Scope,
+            Work,
+            "activity",
+            "test.work",
+            "v1",
+            DurableWorkState.Ready,
+            DurableProviderSafety.ProviderKeyed,
+            "activity",
+            0,
+            1,
+            LocalTime,
+            LocalTime,
+            LocalTime,
+            null,
+            null,
+            null,
+            execution);
+        var item = DurableWorkListItem.CreateWithExecution(
+            Work,
+            "activity",
+            "test.work",
+            "v1",
+            DurableWorkState.Ready,
+            DurableProviderSafety.ProviderKeyed,
+            0,
+            1,
+            LocalTime,
+            LocalTime,
+            LocalTime,
+            null,
+            false,
+            false,
+            execution);
+
+        Assert.Same(execution, snapshot.Execution);
+        Assert.Same(execution, item.Execution);
+        Assert.Null(CreateSnapshot().Execution);
+        Assert.Null(CreateListItem().Execution);
+        Assert.Throws<ArgumentNullException>(() => DurableWorkSnapshot.CreateWithExecution(
+            Scope, Work, "activity", "test.work", "v1", DurableWorkState.Ready,
+            DurableProviderSafety.ProviderKeyed, "activity", 0, 1, LocalTime, LocalTime,
+            LocalTime, null, null, null, null!));
+        Assert.Throws<ArgumentNullException>(() => DurableWorkListItem.CreateWithExecution(
+            Work, "activity", "test.work", "v1", DurableWorkState.Ready,
+            DurableProviderSafety.ProviderKeyed, 0, 1, LocalTime, LocalTime, LocalTime,
+            null, false, false, null!));
+    }
+
     private static DurableWorkSnapshot CreateSnapshot(
         DurableWorkState state = DurableWorkState.Succeeded,
         DurableProviderSafety safety = DurableProviderSafety.ProviderKeyed,
@@ -618,6 +733,18 @@ public sealed class DurableProviderCoverageTests
             LocalTime,
             terminalCode,
             Payload);
+
+    private static DurableWorkExecutionSnapshot CreateExecutionSnapshot()
+    {
+        var policy = DurableWorkExecutionPolicy.FromRetryPolicy(DurableWorkRetryPolicy.Default);
+        var deadline = new DurableExecutionDeadline(LocalTime.AddHours(1));
+        return new DurableWorkExecutionSnapshot(
+            policy,
+            deadline,
+            LocalTime,
+            nextEligibilityAtUtc: null,
+            deadline.NotAfterUtc);
+    }
 
     private static DurableWorkListItem CreateListItem(
         DurableWorkState state = DurableWorkState.Suspended,
@@ -808,6 +935,32 @@ public sealed class DurableProviderCoverageTests
             DurableWorkerEnvelope<TestInput> work,
             CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(DurableWorkExit<TestResult>.RetryBeforeEffect("app.gmail.sender_list_transient"));
+    }
+
+    private sealed class NullPreparedWorkRegistration(
+        IDurablePayloadCodec workCodec,
+        IDurablePayloadCodec resultCodec) : DurableWorkRegistration(
+            "test.work",
+            "v1",
+            DurableProviderSafety.ProviderKeyed,
+            workCodec,
+            resultCodec)
+    {
+        public override bool CanReconcile => false;
+
+        public override DurablePreparedWork Prepare(IServiceProvider services, DurableWorkExecutionContext work) => null!;
+
+        public override ValueTask<DurableEncodedPayload> InvokeAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public override ValueTask<DurableEncodedEffectReconciliation> ReconcileAsync(
+            IServiceProvider services,
+            DurableWorkExecutionContext work,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class StringCodec<T>(

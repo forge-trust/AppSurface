@@ -606,6 +606,14 @@
           "Microsoft.Extensions.Logging.Console": "[10.0.8, )"
         }
       },
+      "forgetrust.appsurface.dependency.autofac": {
+        "type": "Project",
+        "dependencies": {
+          "Autofac": "[9.1.0, )",
+          "Autofac.Extensions.DependencyInjection": "[11.0.0, )",
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
+        }
+      },
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },
@@ -663,6 +671,22 @@
           "Semver": "3.0.0",
           "StreamJsonRpc": "2.22.23",
           "System.IO.Hashing": "10.0.8"
+        }
+      },
+      "Autofac": {
+        "type": "CentralTransitive",
+        "requested": "[9.1.0, )",
+        "resolved": "9.1.0",
+        "contentHash": "onT/BcnnfWcQNXiuC7R/0h8ALQzRdsAI20gpB7nfrudXpFMXdVZKz1umdtHXDwjc/bmWEsrCBAxck3+Arnk15g=="
+      },
+      "Autofac.Extensions.DependencyInjection": {
+        "type": "CentralTransitive",
+        "requested": "[11.0.0, )",
+        "resolved": "11.0.0",
+        "contentHash": "/FSrJyYEsptkV9O3L95dTAoGO6XGSQFDENWHFcHxW0oQIEvW56Mgr01qO53EIEIDDvMFqszBU+uIm9fzGARLPQ==",
+        "dependencies": {
+          "Autofac": "9.1.0",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.4"
         }
       },
       "CliFx": {

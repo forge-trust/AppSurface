@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>ForgeTrust.AppSurface.Durable.LegacyCoreProviderAbiConsumer</AssemblyName>
+    <LegacyPackageVersion>0.2.0-preview.8</LegacyPackageVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode>true</RestoreLockedMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Durable.Provider"
+                      VersionOverride="[$(LegacyPackageVersion)]" />
+  </ItemGroup>
+
+  <Target Name="RequireLegacyCoreProviderPackage"
+          BeforeTargets="Restore;Build">
+    <Error Condition="'$(LegacyPackageVersion)' != '0.2.0-preview.8'"
+           Text="The Core/Provider ABI consumer must compile against the locked historical 0.2.0-preview.8 package graph." />
+  </Target>
+
+</Project>

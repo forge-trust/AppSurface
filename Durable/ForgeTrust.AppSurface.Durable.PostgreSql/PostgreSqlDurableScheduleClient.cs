@@ -1197,16 +1197,27 @@ internal sealed class PostgreSqlDurableScheduleStore
         var target = processing.Target.ToTargetSnapshot();
         var providerSafety = target.ProviderSafety
             ?? throw new InvalidOperationException("A persisted Work Schedule target omitted its provider safety mode.");
+        var registration = _workRegistry.GetRequired(target.RegisteredName, target.RegisteredVersion);
         var targetCommandId = new DurableCommandId(StableIdentity("schedule-work-command", occurrenceId));
         var targetIdempotencyKey = StableIdentity("schedule-work-idempotency", occurrenceId);
-        var request = new DurableWorkRequest(
-            processing.ScopeId,
-            targetCommandId,
-            targetIdempotencyKey,
-            target.RegisteredName,
-            target.RegisteredVersion,
-            target.Input,
-            providerSafety);
+        var request = registration.DefaultExecutionPolicy.AttemptPlan is not null
+            ? DurableWorkRequest.CreateWithExecutionPolicy(
+                processing.ScopeId,
+                targetCommandId,
+                targetIdempotencyKey,
+                target.RegisteredName,
+                target.RegisteredVersion,
+                target.Input,
+                providerSafety,
+                registration.DefaultExecutionPolicy)
+            : new DurableWorkRequest(
+                processing.ScopeId,
+                targetCommandId,
+                targetIdempotencyKey,
+                target.RegisteredName,
+                target.RegisteredVersion,
+                target.Input,
+                providerSafety);
         var writer = new PostgreSqlDurableWorkTransactionWriter(_dataSource, _workRegistry, _workOptions);
         var acceptance = await writer.EnqueueAsync(transaction, request, cancellationToken).ConfigureAwait(false);
         if (!acceptance.IsSuccess)

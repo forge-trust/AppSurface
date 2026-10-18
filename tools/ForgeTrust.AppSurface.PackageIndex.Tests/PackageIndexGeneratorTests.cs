@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.ReleaseContracts;
+using YamlDotNet.RepresentationModel;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
@@ -2115,6 +2117,126 @@ public sealed class PackageIndexGeneratorTests : IDisposable
         Assert.Equal(absolutePublishLog, absolute.PublishLogPath);
         Assert.Equal(absoluteSmokeWorkDirectory, absolute.SmokeWorkDirectory);
         Assert.Equal(absoluteSmokeReport, absolute.SmokeReportPath);
+    }
+
+    [Fact]
+    public void SmokeInstallOptions_BindRequiredPreflightIdentityAndReceipt()
+    {
+        var sourceCommit = new string('a', 40);
+        var parsed = CommandLineOptions.Parse(
+            [
+                "--preflight-source-commit", sourceCommit,
+                "--preflight-run-id", "release-run-845",
+                "--preflight-artifact-id", "producer-artifact-845",
+                "--preflight-candidate-receipt", "proof/candidate.receipt.json"
+            ],
+            _repositoryRoot);
+
+        var request = parsed.CreatePackageSmokeInstallRequest();
+        Assert.NotNull(request.PreflightProof);
+        Assert.Equal(sourceCommit, request.PreflightProof.SourceCommit);
+        Assert.Equal("release-run-845", request.PreflightProof.RunId);
+        Assert.Equal("producer-artifact-845", request.PreflightProof.ArtifactId);
+        Assert.Equal(Path.Join(_repositoryRoot, "proof", "candidate.receipt.json"), request.CandidatePreflightReceiptPath);
+        Assert.Equal(Path.Join(_repositoryRoot, "artifacts", "package-smoke", "preflight-published.receipt.json"), request.PublishedPreflightReceiptPath);
+    }
+
+    [Fact]
+    public void SmokeInstallOptions_ProductionRequiresAllPreflightArguments()
+    {
+        var defaults = CommandLineOptions.Parse([], _repositoryRoot);
+        Assert.Throws<PackageIndexException>(() => defaults.CreatePackageSmokeInstallRequest());
+        Assert.Null(defaults.CreatePackageSmokeInstallRequest(requirePreflightProof: false).PreflightProof);
+
+        var partial = CommandLineOptions.Parse(["--preflight-source-commit", new string('a', 40)], _repositoryRoot);
+        Assert.Throws<PackageIndexException>(() => partial.CreatePackageSmokeInstallRequest(requirePreflightProof: false));
+    }
+
+    [Theory]
+    [InlineData("nuget-stable-publish.yml")]
+    [InlineData("nuget-prerelease-publish.yml")]
+    public void ReleaseWorkflow_SmokeArgumentsBindDownloadedCandidateBundleAndProof(string workflowFile)
+    {
+        var yaml = new YamlStream();
+        using var reader = File.OpenText(TestPathUtils.PathUnder(FindSourceRepositoryRoot(), ".github", "workflows", workflowFile));
+        yaml.Load(reader);
+        var packJob = Node(Node(yaml.Documents.Single().RootNode, "jobs"), "pack-and-verify");
+        var packSteps = Assert.IsType<YamlSequenceNode>(Node(packJob, "steps")).Children.Cast<YamlMappingNode>();
+        var proofUpload = Assert.Single(packSteps, step =>
+            step.Children.TryGetValue(new YamlScalarNode("id"), out var id)
+            && (id as YamlScalarNode)?.Value == "upload-preflight-proof");
+        var proofArtifactName = Value(Node(proofUpload, "with"), "name");
+        Assert.Contains("${{ github.run_id }}-${{ github.run_attempt }}", proofArtifactName, StringComparison.Ordinal);
+        var smokeJob = Node(Node(yaml.Documents.Single().RootNode, "jobs"), "smoke-install");
+        var steps = Assert.IsType<YamlSequenceNode>(Node(smokeJob, "steps")).Children.Cast<YamlMappingNode>().ToArray();
+        YamlMappingNode Step(string name) => Assert.Single(steps, step => Value(step, "name") == name);
+
+        var bundleDownload = Node(Step("Download validated package artifacts"), "with");
+        var proofDownload = Node(Step("Download retained candidate preflight evidence"), "with");
+        Assert.Equal("${{ needs.pack-and-verify.outputs.producer_artifact_id }}", Value(bundleDownload, "artifact-ids"));
+        Assert.Equal("${{ needs.pack-and-verify.outputs.preflight_artifact_id }}", Value(proofDownload, "artifact-ids"));
+
+        var smokeStep = Step("Smoke install published packages");
+        var environment = Node(smokeStep, "env");
+        Assert.Equal(Value(bundleDownload, "path"), Value(environment, "PACKAGE_ARTIFACTS"));
+        var runnerTemp = Path.Join(_repositoryRoot, "runner-temp");
+        var bundleDirectory = Path.GetFullPath(ExpandExpressions(Value(bundleDownload, "path")));
+        var proofDirectory = Path.GetFullPath(ExpandExpressions(Value(proofDownload, "path")));
+        var smokeDirectory = Path.GetFullPath(ExpandExpressions(Value(environment, "SMOKE_WORK_DIR")));
+        var run = Value(smokeStep, "run");
+        Assert.Contains("smoke-install", run, StringComparison.Ordinal);
+        var arguments = new List<string>();
+        foreach (var match in Regex.Matches(run, "^\\s*(--[a-z-]+)\\s+\"([^\"]+)\"\\s*(?:\\\\)?\\s*$", RegexOptions.Multiline).Cast<Match>())
+        {
+            arguments.Add(match.Groups[1].Value);
+            arguments.Add(Expand(match.Groups[2].Value));
+        }
+
+        var request = CommandLineOptions.Parse(arguments.ToArray(), _repositoryRoot).CreatePackageSmokeInstallRequest();
+        var proof = Assert.IsType<DurablePreflightArtifactProofRequest>(request.PreflightProof);
+        Assert.Equal(bundleDirectory, proof.ArtifactDirectory);
+        Assert.Equal(Path.Join(bundleDirectory, "package-artifact-manifest.json"), request.ArtifactManifestPath);
+        Assert.Equal(request.ArtifactManifestPath, proof.ArtifactManifestPath);
+        Assert.Equal(request.ArtifactManifestPath, proof.ApprovedManifestPath);
+        Assert.Equal(new string('a', 40), proof.SourceCommit);
+        Assert.Equal("release-run-845", proof.RunId);
+        Assert.Equal("producer-artifact-845", proof.ArtifactId);
+        Assert.Equal(Path.Join(proofDirectory, "durable-preflight-candidate.receipt.json"), request.CandidatePreflightReceiptPath);
+        Assert.Equal(smokeDirectory, request.WorkDirectory);
+        Assert.Equal(Path.Join(smokeDirectory, "preflight-published.receipt.json"), request.PublishedPreflightReceiptPath);
+        Assert.Equal(request.PublishedPreflightReceiptPath, proof.ReceiptPath);
+        Assert.Equal(Path.Join(smokeDirectory, "package-smoke-report.md"), request.ReportPath);
+        var retention = Node(Step("Upload smoke install report"), "with");
+        var retainedPaths = Value(retention, "path").Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.GetFullPath(Expand(path))).ToArray();
+        Assert.Contains(request.ReportPath, retainedPaths);
+        Assert.Contains(proof.ReceiptPath, retainedPaths);
+        Assert.Contains(proof.ReceiptPath + ".carrier.json", retainedPaths);
+
+        string Expand(string value) => ExpandExpressions(value)
+            .Replace("$GITHUB_RUN_ID", "release-run-845", StringComparison.Ordinal)
+            .Replace("${PACKAGE_ARTIFACTS}", bundleDirectory, StringComparison.Ordinal)
+            .Replace("$PACKAGE_ARTIFACTS", bundleDirectory, StringComparison.Ordinal)
+            .Replace("${SMOKE_WORK_DIR}", smokeDirectory, StringComparison.Ordinal)
+            .Replace("$SMOKE_WORK_DIR", smokeDirectory, StringComparison.Ordinal);
+
+        string ExpandExpressions(string value) => value
+            .Replace("${{ runner.temp }}", runnerTemp, StringComparison.Ordinal)
+            .Replace("${{ needs.validate-tag.outputs.tag-commit }}", new string('a', 40), StringComparison.Ordinal)
+            .Replace("${{ needs.pack-and-verify.outputs.producer_artifact_id }}", "producer-artifact-845", StringComparison.Ordinal);
+
+        static YamlNode Node(YamlNode parent, string name) => Assert.IsType<YamlMappingNode>(parent).Children[new YamlScalarNode(name)];
+        static string Value(YamlNode parent, string name) => Assert.IsType<YamlScalarNode>(Node(parent, name)).Value!;
+    }
+
+    private static string FindSourceRepositoryRoot([System.Runtime.CompilerServices.CallerFilePath] string sourcePath = "")
+    {
+        for (var directory = new DirectoryInfo(Path.GetDirectoryName(sourcePath)!); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx"))) return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the repository root from this test source file.");
     }
 
     [Fact]

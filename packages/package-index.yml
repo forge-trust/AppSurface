@@ -151,11 +151,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 37
-    use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, and AppSurface policy proof without configuring an external identity provider.
-    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas with optional safe local `LandingUrl` recovery targets, protected persona cookie, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
-    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
+    use_when: Add this in Development-by-default ASP.NET Core hosts or explicit local/proof environments when package consumers need selectable fake personas, a visible local control page, AppSurface policy proof, or an awaited host-owned fixture activation on explicit selection without configuring an external identity provider.
+    includes: AppSurface DevAuth named authentication scheme, AddAppSurfaceDevAuth registration, explicit allowed environment names, MapAppSurfaceDevAuth control endpoints, AppSurfaceDevAuthMarker embeddable state overlay, seeded personas with optional safe local `LandingUrl` recovery targets, protected persona cookie, optional request-scoped `IAppSurfaceDevAuthPersonaSelectionHandler` resolved after cookie queuing and awaited before either success response, loopback-only status JSON, startup safety diagnostics, and ASDEV diagnostic codes.
+    does_not_include: Production authentication, OIDC, JWT validation, ASP.NET Identity, password handling, fixture persistence or readiness policy, exactly-once activation, host deadlines or retry/compensation policy, durable app-user mapping, user stores, tenant authority, audit sinks, deployment auth, automatic host HTML injection, RazorWire auth UI components, or Auth.Testing integration-test assertions.
     start_here_path: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; use the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) to keep DevAuth separate from Auth.Testing.
+    recipe_summary: Add `ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth` after `ForgeTrust.AppSurface.Auth.AspNetCore` only for Development hosts or explicit local/proof environments that need fake local personas to prove AppSurface policy results; register the optional scoped activation handler only when explicit persona selection must await host-owned fixture preparation. Follow the [Auth adoption ladder](../start-here/auth-adoption-ladder.md) and [compiled shared-candidate example](../examples/auth-aspnetcore-dev-auth/README.md#persona-fixture-activation) to keep readiness, persistence, and recovery host-owned and DevAuth separate from Auth.Testing.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Auth.AspNetCore
   - project: Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc.csproj
@@ -362,11 +362,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 47
-    use_when: Implement or host a durable runtime provider against the public provider, operator, health, drain, recovery, or verified-retention SPI.
-    includes: Runtime pump, health, drain, recovery inventory, operator mutation, claimed-work adaptation, provider command-fingerprint contracts, and the verified Flow-retention assessment, manifest, archive-package, receipt, hold, and purge contracts.
-    does_not_include: PostgreSQL storage, migrations, polling implementation, scheduling execution, hosted services, endpoints, telemetry implementation, or provider conformance evidence.
+    use_when: Implement or host a durable runtime provider, or compose an external activator using the public pump, activation, operator, health, drain, recovery, or verified-retention contracts.
+    includes: Runtime pump, passive external activation service and closed outcomes, canonical bounded activation activities, health, drain, recovery inventory, operator mutation, claimed-work adaptation, provider command-fingerprint contracts, and the verified Flow-retention assessment, manifest, archive-package, receipt, hold, and purge contracts.
+    does_not_include: PostgreSQL storage, migrations, polling implementation, scheduling execution, hosted services, HTTP routes, authentication, OpenTelemetry SDK or export configuration, or provider conformance evidence.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.Provider/README.md
-    recipe_summary: Reference the Provider SPI only when implementing or hosting a durable runtime; applications normally depend on `ForgeTrust.AppSurface.Durable` alone, while retention implementers and operators may also need `ForgeTrust.AppSurface.Durable.Provider` for the application-authorized retention contracts.
+    recipe_summary: Reference Provider when implementing or hosting a durable runtime or external activator. Compose `AddDurableExternalActivation()` with provider health and admission following the [external activation reference](../Durable/external-activation-v1.md); producer-only applications normally depend on `ForgeTrust.AppSurface.Durable` alone. Retention implementers and operators may also need Provider for application-authorized retention contracts.
     depends_on:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
@@ -380,12 +380,12 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 48
-    use_when: Add this when PostgreSQL must atomically own Work acceptance, crash-resumable Flow persistence, Work-first Schedule storage, verified per-Flow retention, and an explicit opt-in `AddWorkerHost()` activation path.
+    use_when: Add this when PostgreSQL must atomically own Work acceptance, crash-resumable Flow persistence, Work-first Schedule storage, and verified per-Flow retention, with explicit hosted or external activation.
     includes: Explicit ordered schema management, StoreId and runtime-epoch fencing, caller-owned Work acceptance, short-transaction Work and Flow clients, Work-first Schedule client and manual processor, payload-free dispatch, Flow waits/timers/activity projection, opt-in hosted background polling with health/drain reporting, versioned W3C causal-link persistence and crash proof, leases, effect permits, cancellation, terminal facts, verified per-Flow retention with a dedicated operator role and owner-run lifecycle capabilities, and real PostgreSQL conformance proof.
     does_not_include: Automatic background activation, automatic startup DDL, endpoints, telemetry implementation, exactly-once external effects, destructive down migrations, or production support.
     start_here_path: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
     recipe_summary: >-
-      Add the PostgreSQL provider when one database must atomically own Work, explicit one-transition Flow state, [Work-first Schedule storage](../Durable/schedule-protocol-v1.md), [versioned W3C causal evidence](../Durable/flow-trace-context-v1.md), and verified per-Flow retention. Start with the [local PostgreSQL tutorial](../examples/durable-postgresql/README.md): generate a reviewed script and preflight with `appsurface durable schema`, apply only with an explicit migration-owner environment variable, then use the [verified retention guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention) and explicit [`AddWorkerHost()` path](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host) when those capabilities are required.
+      Add the PostgreSQL provider when one database must atomically own Work, explicit one-transition Flow state, [Work-first Schedule storage](../Durable/schedule-protocol-v1.md), [versioned W3C causal evidence](../Durable/flow-trace-context-v1.md), and verified per-Flow retention. Start with the [local PostgreSQL tutorial](../examples/durable-postgresql/README.md): generate a reviewed script and run schema preflight with the complete reviewed role-pair manifest plus the separately reviewed migration owner for every runtime credential; apply only with an explicit migration-owner environment variable. Follow the [schema-12 adoption and rollback checklist](../Durable/migrations/execution-policies-v1.md#adoption-and-rollback) and [complete runtime-set preflight contract](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#explicit-schema-and-epoch-deployment), then choose the [passive external activation host](../examples/durable-external-activation/README.md) or explicit [`AddWorkerHost()` path](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#run-a-worker-host). See [verified retention guidance](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#verified-flow-retention) for operator capabilities.
     depends_on:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
@@ -618,11 +618,11 @@ packages:
     commercial_status: commercial_ready
     release_track: coordinated
     order: 61
-    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph must be created deterministically without invoking the asynchronous AppHost entry point.
-    includes: Typed AppHost, module, and profile selection; shared runtime graph composition; an Aspire-compatible configurable builder; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
+    use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph or constructor inputs must be selected per call without invoking the asynchronous AppHost entry point.
+    includes: Typed AppHost, module, and profile selection; CreateConfiguredAsync pre-activation configuration and service hooks; a pre-composition Aspire builder hook; immutable per-call scenario injection; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
     does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
-    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; native AppHosts should continue using Aspire's native testing API.
+    recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; use the [configured graph-only proof](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof) when per-call values must reach profile constructors, and keep native AppHosts on Aspire's native testing API.
     depends_on:
       - ForgeTrust.AppSurface.Aspire
     expected_dependency_package_ids:
@@ -831,6 +831,26 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 211
     note: Non-packable ASP.NET Core consumer fixture used by AppSurface Docs HTTP and Playwright regression tests.
+  - project: Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: This disposable exact-package consumer verifies PostgreSQL runtime preflight and is not distributed as a package.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 212
+    note: Non-packable release proof controller for complete runtime role sets, exact candidate and published package bytes, and guarded lane execution. See the [artifact proof reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845).
+  - project: Durable/compatibility/LegacyCoreProviderAbiConsumer/LegacyCoreProviderAbiConsumer.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: This independently compiled historical Core/Provider compatibility probe exists only to validate a consumer built against the retained preview package graph.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 213
+    note: Non-packable historical ABI consumer proof; it compiles against the exact locked legacy package version and is loaded by a separate current-package host.
   - project: Web/ForgeTrust.AppSurface.Web.Tailwind/runtimes/ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64.csproj
     classification: support
     publish_decision: support_publish

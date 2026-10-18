@@ -1,6 +1,8 @@
 # AppSurface CLI
 
-For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires a passing post-migration runtime-role preflight.
+Use [appsurface durable doctor](../../Durable/runtime-doctor.md) for a non-mutating store/runtime diagnosis in text or version-one JSON. It accepts environment-source names and optional paired worker/actual-threshold inputs, and supplies explicit exits and next actions.
+
+For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires the complete reviewed-manifest gate and the [combined deployment receipt procedure](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
 
 The **AppSurface CLI** is the command-line home for repository-level AppSurface workflows. It is packaged as a .NET tool with the command name `appsurface`.
 
@@ -54,7 +56,7 @@ The source-preview CLI ships the following explicit deployment command family:
 ```bash
 appsurface durable schema status
 appsurface durable schema script --from-version <reviewed-version>
-appsurface durable schema preflight
+appsurface durable schema preflight --role-pairs-file <reviewed-file> --migration-owner-role <reviewed-owner>
 appsurface durable schema apply --apply
 ```
 
@@ -69,11 +71,75 @@ publication protects readers from partial content, but it cannot make a director
 principal safe from path replacement. `apply --apply` has a 45-minute overall deadline for the current migration
 chain; migrations 0010 and 0011 each retain a 330-second command deadline. Plan the maintenance window with the
 [heartbeat retention operations guide](../../Durable/heartbeat-retention-operations.md).
-After migration 0011, `preflight` checks the pruning function's integer result and security settings, the
-ascending retention index, enabled and forced row level security, and the runtime role's isolation and lack of
-effective `DELETE`/`TRUNCATE` rights on the heartbeat table. Treat any named failed check as schema or role drift;
-repair it and rerun preflight before activating workers. The
-[operations guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11) describes the deployment order.
+Both `--role-pairs-file <path>` and `--migration-owner-role <name>` are required for every preflight, including a
+one-pair deployment. The file is the complete version-1 manifest also passed to the package role recipe; there is no
+default, partial input, inline JSON, or catalog-derived expected set. Credentials remain environment-variable-only
+through `--connection-env <NAME>`. Read the same unchanged file for each distinct runtime credential and retain its
+SHA-256 with the reviewed deployment record. The [canonical operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
+documents the four proof stages, recipe ordering, owner review, deadlines, guard lifetime, receipt contents, and closed
+gates.
+
+Input is read once before database access, strict UTF-8 without BOM, at most 64 KiB and depth 8. It requires exactly
+`version: 1`, `pairs`, 1–32 pairs, and exactly `dispatcher`, `runtime`, and `dispatcher_profile` in each pair;
+profiles are explicit `full` or `work_only`. Duplicate decoded JSON properties, comments, trailing commas, unknown or
+missing fields, wrong types, empty/control-containing names, duplicate role names across role kinds, and names over
+63 UTF-8 bytes fail. Names are preserved exactly and resolved by exact database name to unique OIDs. The independently
+reviewed owner uses the same name constraints, must resolve exactly once, and cannot overlap a pair role. Do not trim,
+case-fold, normalize, truncate, interpolate, or infer the owner from catalog state.
+
+One preflight is one read-only snapshot and one bounded operation: a dedicated nonpooled connection acquires the
+package shared migration/recipe/epoch fence before RepeatableRead, verifies schema-history compatibility and structural
+facts, completes and unlocks, then disposes before success. The endpoint must be session-affine; transaction- and
+statement-pooling proxies are unsupported. Ambient enlistment and multiplexing are disabled. The 30-second total
+online deadline includes connection and fence waits; work is limited to 28 seconds and cleanup may consume at most
+the remaining 2 seconds. Timeout, cancellation, broken transport, uncertain unlock, cleanup failure, or unknown result
+is a nonzero result with no success output. A one-slot runtime pool must not cause a nested connection acquisition.
+
+The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
+role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or
+database/package-object ownership; exact raw runtime targets on all managed policies; exactly the heartbeat runtime
+and owner policies with required expressions and forced RLS; expected owner agreement across schema, table, functions,
+owner policy, and ACL; exact owner-plus-runtime function ACLs with EXECUTE for every runtime and no grant option or
+unexpected grantees; no effective runtime heartbeat DELETE/TRUNCATE; the pruning function's exact four-argument
+signature, integer/non-set return, SECURITY DEFINER and search path; the due-health function's integer-argument
+identity, reviewed owner and complete runtime ACL; and a valid, ready, nonunique ascending retention index with the
+required keys and no predicate/expression. Raw target and ACL sets are checked before joins; all runtimes must pass,
+not merely one. Related #823 policy targets are checked for exact set consistency. This is not a general database
+doctor, a full function-body audit, or PostgreSQL-enforced lane row isolation.
+
+The safe success output contains schema compatibility, caller evidence kind and validated caller/pair, the explicit
+owner role, runtime count, manifest SHA-256, StoreId, and nullable active epoch. It contains no connection value,
+password, raw manifest, SQL, provider exception, or ACL text. The result distinguishes a manifest `runtime` credential from an `owner-diagnostic` caller. `session_user` and
+`current_user` must resolve to the same OID. Owner diagnostics can aid repair but never count toward runtime coverage;
+each distinct pair needs its own successful runtime credential. Results preserve StoreId and nullable active epoch.
+Preflight does not bootstrap or rotate epoch; deployment activation requires a matching StoreId and nonempty reviewed
+epoch across every runtime and lane proof.
+
+The CLI's individual result does not itself authorize activation. The deployment coordinator must hold a separate
+dedicated owner guard session continuously across all runtime invocations, both lane proofs, and activation. Any
+loss, cancellation, failed/partial pass, repeated credential, deployment-identity mismatch, or incomplete cleanup
+invalidates the whole set and requires a fresh complete rerun. See the canonical guide for the four exact candidate
+and published package scenarios. Source/integration proof is not exact-package proof, and a candidate receipt cannot
+substitute for restoring and verifying public-feed artifacts.
+
+Internally, the CLI owns an immutable validated request containing ordered pairs, distinct expected role names, the
+independently validated owner name, and SHA-256 of the original manifest bytes. `IDurableSchemaCommandService` accepts
+that request for one bounded operation and returns schema compatibility, evidence kind (`runtime` or
+`owner-diagnostic`), validated caller identity and pair index when applicable, StoreId, nullable epoch, and stable
+failed-check categories with optional validated pair/role identifiers. It carries no raw JSON, connection string, SQL,
+provider message, or unvalidated server-controlled role text. Cancellation flows through the bounded online operation;
+the operation owns and releases its data source, physical connection, fence, and transaction before success. This is a
+CLI-owned internal contract, not a public PostgreSQL provider preflight API. Ordinary schema compatibility callers
+continue to use provider status; the documented internal `ReadStatusInTransactionAsync` seam exists only to reuse
+compatibility checks inside this operation's already-owned snapshot.
+
+`DurableRoleManifest.ReadAsync(path, cancellationToken)` owns the file stream and delegates its single bounded read to the internal `ReadStreamAsync(stream, cancellationToken)` boundary. The stream overload reads forward from the current position, accepts at most 65,536 bytes, hashes and parses only complete input, and never seeks, retains, or disposes the caller-owned stream. It preserves partial-read cancellation and maps read failures to a fixed secret-safe input error. Internal callers must dispose their stream even when reading or validation fails; the public CLI continues to require a manifest file path.
+
+`ReadCallerAsync(connection, transaction, request, cancellationToken)` classifies the credential inside that same
+snapshot. It neither opens a connection nor changes session identity or owns the transaction. It resolves
+`session_user` and `current_user` to catalog OIDs and rejects an assumed role or changed backend before returning
+the validated runtime pair or owner-diagnostic identity. Keep this internal seam on the already fenced session;
+calling it alone cannot establish schema, structural, cleanup, or combined activation evidence.
 
 The preferred production flow remains: generate and review the offline schema script, apply all pending numbered
 migrations (currently through `0011`) in order, apply the complete version-1 role-pair manifest with the matching
@@ -86,9 +152,9 @@ operations guidance. The provider package's packaged recipe is checked byte-iden
 matched to the migration and hash the exact reviewed manifest file used for certificate evidence. See the
 [role manifest, grant profiles, and rollout contract](../../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md#role-recipe-contract)
 and the [operator migration/rollback sequence](../../Durable/operational-assessments.md#migration-and-role-reconciliation).
-For two pairs on schema 11, keep Source activation closed: the current preflight checks one runtime role, and
-[#795](https://github.com/forge-trust/AppSurface/issues/795) must prove the exact manifest runtime set before that
-preflight can certify the combined catalog.
+For one or multiple pairs, use the same complete reviewed manifest and explicit owner on every preflight. Missing,
+partial, mismatched, or failed evidence keeps activation closed; the role recipe may refuse drift and must not be
+described as an automatic repair for every failure. Follow [safe Durable diagnostics](../../troubleshooting/durable-diagnostics.md#schema-11-complete-runtime-preflight) and rerun the full reviewed set after repair.
 
 Future CLI authentication is design-only today. The [authenticated command design](docs/authenticated-command-design.md) keeps auth centered on protected command execution, uses `appsurface docs publish --archive ./dist/docs --site <site>` as the first protected command wedge, and requires browser/loopback PKCE, RFC 8628 device flow, CI no-prompt behavior, secure token-cache boundaries, `ASCLI1xx` diagnostics, and packed-tool readiness proof before auth commands ship.
 
@@ -701,6 +767,8 @@ Manifest and evidence schemas evolve additively and by version. Schema-1 readers
 #### Coverage Run Watchdog
 
 Every discovery, capability preflight, build, test, merge, diagnostics, and artifact phase has its own monotonic progress clock. Positive child-process output bytes and explicit phase transitions count as progress; output from one parallel project never resets another project's clock. `--heartbeat-interval` defaults to `30s` and accepts `0` to disable heartbeats. `--no-progress-timeout` defaults to `10m`. Durations use exactly `0` or a positive lowercase integer followed by `ms`, `s`, `m`, or `h`, with a 30-day maximum; zero is valid only for the heartbeat interval.
+
+The repository's [solution coverage script](https://github.com/forge-trust/AppSurface/blob/main/scripts/coverage-solution.sh) forwards `--logger "console;verbosity=normal"` so completed tests produce observable progress. Minimal console logging can withhold successful test results until the final summary, allowing a healthy sequence of short tests to exceed the no-progress budget. This logging choice keeps fail mode, the 10-minute watchdog, and the automatic VSTest hang policy unchanged; a test that stops producing output still times out. Run [`./scripts/verify-coverage-progress-fixture.sh`](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-coverage-progress-fixture.sh) to verify that a quiet healthy sequence fails, the same sequence with completion logging passes, and a deliberately hung test still fails. All three probes use the same isolated 10-second budget; they do not change the solution lane's defaults. Set `WORK_DIR` to retain the probe artifacts in a chosen directory, or omit it to use an owned temporary directory.
 
 `--watchdog fail` is the default: it cancels a stalled operation, requests whole-process-tree termination through supervisor-owned process leases, applies one bounded cleanup budget, attempts the incident artifact, and exits `124` with `ASCOV121`. `--watchdog warn` writes a classified warning and attempts to commit `coverage-watchdog.json`, then lets the run continue. The terminal diagnostic reports the artifact path only after atomic commit; `Artifact: unavailable` with `ASCOV122` means termination remains authoritative but no incident artifact was committed. `--watchdog off` disables stall classification but leaves explicitly configured heartbeats available. Both `warn` and `off` disable AppSurface's automatic VSTest hang timer. Watchdog artifacts contain normalized operation metadata, byte counts, safe switch names, and relative project/log paths—not raw output, argument values, environment values, or secrets.
 
@@ -1349,9 +1417,9 @@ Options:
 - `--environment`, `-e`: Host environment forwarded to the AppSurface Docs host. Defaults to `Production` for export.
 - `--startup-timeout-seconds`: Seconds to wait for the in-process AppSurface Docs host to start before failing fast. Defaults to `10`; use `0` to disable while investigating intentional pre-bind delays.
 
-Export does not expose `--port`, `--urls`, or `--all-hosts`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Before crawling, it reads the AppSurface Docs route manifest from the in-process host, registers every public canonical docs route as an export seed, registers redirect aliases for source-shaped Markdown URLs and declared aliases, and writes `.appsurface-docs-route-manifest.json` into the export root. After all final files are materialized, export writes `.appsurface-docs-release-manifest.json`, hashes it, and prints a copy-ready `"releaseManifestSha256": "..."` catalog snippet. This keeps unlinked-but-public docs pages exportable, gives each alias a proven canonical target before the selected redirect strategy materializes it, lets exact version archives preserve the route identity that existed when the release was captured, and gives the runtime a catalog-pinned integrity proof for mounted archive HTML, JavaScript, CSS, SVG, and search payloads. Export fails with `ASDOCSARCHIVE005` when unsupported hidden files such as `.nojekyll` or `.well-known/...` are present, so export exact releases to a clean directory before copying the pin. RazorWire `RWEXPORT00x` diagnostics come from the shared export engine: for `RWEXPORT003`, add/copy the missing browser asset, correct path casing, make the URL external/data/hash-only when appropriate, or remove the reference; for `RWEXPORT008`, keep exporter-managed artifact redirects on the same scheme, host, port, and app path, or model the destination as an external reference instead of a static artifact; for `RWEXPORT009`, remove symlinks, junctions, reparse points, or lexical escapes from the generated output tree before retrying. Do not hand-author `_redirects` inside the export output; use `--redirects netlify` so the exporter can validate and own that provider file. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
+Export does not expose `--port`, `--urls`, or `--all-hosts`. It binds `http://127.0.0.1:0` internally, resolves the actual Kestrel listener, crawls that URL, then stops the host. Before crawling, it reads the AppSurface Docs route manifest from the in-process host, registers every public canonical docs route as an export seed, registers redirect aliases for source-shaped Markdown URLs and declared aliases, and writes `.appsurface-docs-route-manifest.json` into the export root. After all final files are materialized, export writes `.appsurface-docs-release-manifest.json`, hashes it, and prints a copy-ready `"releaseManifestSha256": "..."` catalog snippet. Before release hashing, export replaces private canonical-live-URL staging data with validated whole-root ordinary HTML artifact mappings and declares `htmlUrlBase: "export-root"`; see [Frozen archive artifact routes](../../Web/ForgeTrust.AppSurface.Docs/README.md#frozen-archive-artifact-routes). Static HTML keeps publish-root URLs, while frozen search JSON keeps its distinct archive metadata paths. This keeps unlinked-but-public docs pages exportable, gives each alias a proven canonical target before the selected redirect strategy materializes it, lets exact version archives preserve the route identity that existed when the release was captured, and gives the runtime a catalog-pinned integrity proof for mounted archive HTML, JavaScript, CSS, SVG, and search payloads. Export fails with `ASDOCSARCHIVE005` when unsupported hidden files such as `.nojekyll` or `.well-known/...` are present, so export exact releases to a clean directory before copying the pin. RazorWire `RWEXPORT00x` diagnostics come from the shared export engine: for `RWEXPORT003`, add/copy the missing browser asset, correct path casing, make the URL external/data/hash-only when appropriate, or remove the reference; for `RWEXPORT008`, keep exporter-managed artifact redirects on the same scheme, host, port, and app path, or model the destination as an external reference instead of a static artifact; for `RWEXPORT009`, remove symlinks, junctions, reparse points, or lexical escapes from the generated output tree before retrying. Do not hand-author `_redirects` inside the export output; use `--redirects netlify` so the exporter can validate and own that provider file. Use the generic `razorwire export` command when exporting arbitrary RazorWire apps via `--url`, `--project`, or `--dll`; use `appsurface docs export` when AppSurface owns the AppSurface Docs repository host.
 
-Generated docs export artifacts use the RazorWire [generated export artifact boundary](../../Web/ForgeTrust.RazorWire.Cli/README.md#generated-export-artifact-boundary). The guard covers `.appsurface-docs-route-manifest.json`, exported HTML/CSS/assets, docs partials, redirect alias HTML, `_redirects`, and `.appsurface-docs-release-manifest.json`. `RWEXPORT009` is a local filesystem boundary failure; `RWEXPORT008` is still reserved for unsafe HTTP redirects while fetching exporter-managed artifacts.
+Generated docs export artifacts use the RazorWire [generated export artifact boundary](../../Web/ForgeTrust.RazorWire.Cli/README.md#generated-export-artifact-boundary). The guard covers `.appsurface-docs-route-manifest.json`, exported HTML/CSS/assets, docs partials, redirect alias HTML, `_redirects`, and `.appsurface-docs-release-manifest.json`. `RWEXPORT009` is a local filesystem boundary failure; `RWEXPORT008` is still reserved for unsafe HTTP redirects while fetching exporter-managed artifacts. Invalid nested recommendation data or missing same-tree HTML targets use [`RWEXPORT011`](../../Web/ForgeTrust.RazorWire.Cli/README.md#documentation-recommendation-export); correct the source data and re-export the complete tree before archive verification.
 
 For split-origin AppSurface Docs publishing, keep `--public-origin` on the static docs origin and add `--live-origin` for RazorWire-managed live calls:
 

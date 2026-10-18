@@ -679,6 +679,176 @@ body {
     background: var(--docs-color-surface-overlay-soft);
 }
 
+.docs-version-archive {
+    color: var(--docs-color-text-default);
+}
+
+.docs-version-archive__title {
+    color: var(--docs-color-text-strong);
+    overflow-wrap: anywhere;
+}
+
+.docs-version-archive__orientation {
+    color: var(--docs-color-text-muted);
+    font-size: 1rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-archive__section-title {
+    color: var(--docs-color-text-strong);
+    font-size: 1.5rem;
+    font-weight: 650;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-archive__availability {
+    color: var(--docs-color-link-visited);
+}
+
+.docs-version-archive__action {
+    min-height: 2.75rem;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: center;
+    text-decoration-thickness: 0.08em;
+    text-underline-offset: 0.2em;
+}
+
+.docs-version-archive__action:visited {
+    color: var(--docs-color-link-visited);
+}
+
+.docs-version-archive__action:hover {
+    color: var(--docs-color-link);
+}
+
+.docs-version-archive__action:focus-visible {
+    outline: var(--docs-focus-outline);
+    outline-offset: 3px;
+}
+
+.docs-version-alias-grid {
+    min-width: 0;
+}
+
+.docs-version-alias-row {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+    border-bottom: 1px solid var(--docs-color-border-muted);
+    padding-block: 1.25rem;
+}
+
+.docs-version-alias-row:first-child {
+    border-top: 1px solid var(--docs-color-border-muted);
+}
+
+.docs-version-alias-row__identity,
+.docs-version-alias-row__details,
+.docs-version-alias-row__action {
+    display: grid;
+    min-width: 0;
+    align-content: start;
+    gap: 0.5rem;
+}
+
+.docs-version-alias-row__label {
+    min-width: 0;
+    margin: 0;
+    color: var(--docs-color-text-strong);
+    font-size: 1.125rem;
+    font-weight: 700;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-alias-row__name {
+    justify-self: start;
+    color: var(--docs-color-text-muted);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-alias-card__target,
+.docs-version-alias-card__explanation {
+    min-width: 0;
+    margin: 0;
+    color: var(--docs-color-text-muted);
+    font-size: 1rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-alias-card__target code,
+.docs-version-alias-card__explanation code {
+    overflow-wrap: anywhere;
+}
+
+.docs-version-alias-card__warnings {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.docs-version-alias-card__badge {
+    display: inline-flex;
+    min-height: 1.75rem;
+    align-items: center;
+    border: 1px solid var(--docs-color-border-default);
+    border-radius: 9999px;
+    background: var(--docs-color-surface-panel);
+    padding: 0.25rem 0.65rem;
+    color: var(--docs-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.docs-version-alias-card__badge--warning {
+    border-color: var(--docs-color-border-default-strong);
+    color: var(--docs-color-link-visited);
+}
+
+@media (min-width: 640px) and (max-width: 1279px) {
+    .docs-version-archive {
+        padding-inline: 1rem;
+    }
+
+    .docs-version-alias-grid {
+        max-width: 64rem;
+    }
+}
+
+@media (min-width: 1280px) {
+    .docs-version-alias-row {
+        grid-template-columns: minmax(12rem, 0.8fr) minmax(0, 1.7fr) minmax(15rem, 1fr);
+        align-items: start;
+        gap: 1.5rem;
+    }
+
+    .docs-version-alias-row__action {
+        justify-items: start;
+    }
+}
+
+@media (max-width: 639px) {
+    .docs-version-archive {
+        padding-inline: 1rem;
+    }
+
+    .docs-version-alias-row {
+        padding-block: 1rem;
+    }
+}
+
 .docs-status-badge--recommended {
     border-color: var(--docs-color-border-accent-strong);
     background: var(--docs-color-brand-teal-wash);
@@ -736,6 +906,134 @@ body {
 
 .docs-page-badge--neutral {
     color: var(--docs-color-text-muted);
+}
+
+.docs-recommended-next {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.75rem;
+    font-family: var(--font-inter);
+}
+
+.docs-recommended-next__heading {
+    margin: 0;
+    color: var(--docs-color-text-strong);
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.docs-recommended-next__nav,
+.docs-recommended-next__list {
+    min-width: 0;
+}
+
+.docs-recommended-next__list {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.docs-recommended-next__item {
+    min-width: 0;
+    border-bottom: 1px solid var(--docs-color-border-muted);
+}
+
+.docs-recommended-next__item:last-child {
+    border-bottom: 0;
+}
+
+.docs-recommended-next__link {
+    display: flex;
+    min-width: 0;
+    min-height: 44px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    color: var(--docs-color-text-default);
+    text-decoration: none;
+}
+
+.docs-recommended-next__link:focus-visible {
+    outline: var(--docs-focus-outline);
+    /* Keep the ring inside the target when native focus scrolls it to the viewport edge. */
+    outline-offset: -3px;
+}
+
+.docs-recommended-next__link-body {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.docs-recommended-next__title-line {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.docs-recommended-next__title {
+    min-width: 0;
+    max-width: 100%;
+    color: var(--docs-color-link);
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    text-decoration: underline;
+    text-decoration-color: var(--docs-color-link-underline);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+}
+
+.docs-recommended-next__link:visited .docs-recommended-next__title {
+    color: var(--docs-color-link-visited);
+}
+
+.docs-recommended-next__badge {
+    max-width: 100%;
+    flex: 0 1 auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.docs-recommended-next__summary,
+.docs-recommended-next__reason {
+    color: var(--docs-color-text-muted);
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.docs-recommended-next__arrow {
+    flex: 0 0 auto;
+    color: var(--docs-color-text-muted);
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+@media (max-width: 639px) {
+    .docs-recommended-next__link {
+        align-items: flex-start;
+    }
+
+    .docs-recommended-next__arrow {
+        margin-top: 0.25rem;
+    }
+
+    .docs-recommended-next__badge {
+        white-space: normal;
+    }
 }
 
 .docs-metadata-chip {
@@ -1342,7 +1640,8 @@ body {
 }
 
 .docs-content :where(h2, h3, h4, h5, h6)[id],
-.docs-content--markdown .docs-rich-tabs__panel {
+.docs-content--markdown .docs-rich-tabs__panel,
+.docs-recommended-next__link {
     scroll-margin-top: 2rem;
 }
 
@@ -1445,7 +1744,8 @@ body {
     }
 
     .docs-content :where(h2, h3, h4, h5, h6)[id],
-    .docs-content--markdown .docs-rich-tabs__panel {
+    .docs-content--markdown .docs-rich-tabs__panel,
+    .docs-recommended-next__link {
         scroll-margin-top: 5rem;
     }
 }
@@ -1491,6 +1791,15 @@ body {
     .docs-content :where(h2, h3, h4, h5, h6)[id],
     .docs-content--markdown .docs-rich-tabs__panel {
         scroll-margin-top: 11rem;
+    }
+
+    /* Pages without an outline only need clearance for the mobile header. */
+    .docs-recommended-next__link {
+        scroll-margin-top: 5rem;
+    }
+
+    .docs-detail-layout--with-outline .docs-recommended-next__link {
+        scroll-margin-top: 9.5rem;
     }
 }
 

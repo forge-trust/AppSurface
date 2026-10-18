@@ -737,6 +737,9 @@
       "forgetrust.appsurface.deployment": {
         "type": "Project"
       },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
+      },
       "Aspire.Hosting": {
         "type": "CentralTransitive",
         "requested": "[13.4.4, )",

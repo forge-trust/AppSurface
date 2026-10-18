@@ -27,6 +27,7 @@ RUNTIME_EPOCH_FILE="$(mktemp -t appsurface-durable-proof-epoch.XXXXXX)"
 ROLE_SQL_FILE="$(mktemp -t appsurface-durable-proof-roles.XXXXXX)"
 LOCAL_PORT_FILE="$(mktemp -t appsurface-durable-proof-port.XXXXXX)"
 OMISSION_OUTPUT_FILE="$(mktemp -t appsurface-durable-proof-omission.XXXXXX)"
+FORWARDING_MANIFEST_FILE="$(mktemp -t appsurface-durable-proof-forwarding-manifest.XXXXXX)"
 INTERRUPT_REQUESTED=0
 LAUNCHING_FOREGROUND=0
 MAX_TIMEOUT_SECONDS=86400
@@ -77,7 +78,7 @@ cleanup_container() {
 }
 cleanup() {
   cleanup_container
-  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE" "$LOCAL_PORT_FILE" "$OMISSION_OUTPUT_FILE"
+  rm -f "$FOREGROUND_PID_FILE" "$RUNTIME_EPOCH_FILE" "$ROLE_SQL_FILE" "$LOCAL_PORT_FILE" "$OMISSION_OUTPUT_FILE" "$FORWARDING_MANIFEST_FILE"
 }
 terminate_foreground() {
   local pid="${FOREGROUND_PID:-}"
@@ -221,6 +222,7 @@ printf '[ok] durable schema applied through the package-required version\n'
 printf -v FORWARDING_ROLE_PAIRS_JSON \
   '{"version":1,"pairs":[{"dispatcher":"%s","runtime":"%s","dispatcher_profile":"full"}]}' \
   "$DISPATCHER_ROLE" "$RUNTIME_ROLE"
+printf '%s' "$FORWARDING_ROLE_PAIRS_JSON" > "$FORWARDING_MANIFEST_FILE"
 run_foreground docker exec -i "$CONTAINER_NAME" \
   psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE_NAME" \
   -v migration_owner_role="$MIGRATION_OWNER_ROLE" \
@@ -233,6 +235,8 @@ run_foreground dotnet run --project "$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli" \
   --configuration Release \
   --no-build \
   -- durable schema preflight \
+  --role-pairs-file "$FORWARDING_MANIFEST_FILE" \
+  --migration-owner-role "$MIGRATION_OWNER_ROLE" \
   --connection-env APPSURFACE_DURABLE_RUNTIME_CONNECTION
 printf '[ok] schema 11 single-pair structural preflight passed before second-pair enrollment\n'
 

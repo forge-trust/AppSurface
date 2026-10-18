@@ -541,6 +541,11 @@ public sealed class AdoptionMeasurementTests : IDisposable
         await RunGitAsync(repository, "init");
         await RunGitAsync(repository, "config", "user.name", "AppSurface Test");
         await RunGitAsync(repository, "config", "user.email", "appsurface@example.invalid");
+        // Value: protects=Git consumer fixtures do not inherit signing credentials; fails_when=fixture commits invoke a signer;
+        // why_new=existing revision assertions assume unsigned commits; seam=none
+        await RunGitAsync(repository, "config", "commit.gpgsign", "true");
+        await RunGitAsync(repository, "config", "gpg.format", "openpgp");
+        await RunGitAsync(repository, "config", "gpg.program", Path.Join(repository, "missing-test-signer"));
         await File.WriteAllTextAsync(
             Path.Join(repository, "selected.cs"),
             "baseline",
@@ -1294,6 +1299,9 @@ public sealed class AdoptionMeasurementTests : IDisposable
             RedirectStandardOutput = true,
             UseShellExecute = false,
         };
+        // Synthetic commits verify revision behavior without requiring the developer's signing credentials.
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add("commit.gpgsign=false");
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
