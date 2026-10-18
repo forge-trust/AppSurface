@@ -590,6 +590,121 @@ public sealed class SupervisionApplicationLifetimeTests
         Assert.True(lifetime.Joined);
     }
 
+    [Fact]
+    public async Task ThrowingStopCancellationCallbackCannotDetachStartOrSkipCleanup()
+    {
+        var lifetime = new SupervisionApplicationLifetime(new SupervisionWorkRegistry());
+        using var cleanup = new CancellationTokenSource();
+        var entered = Signal();
+        var release = Signal();
+        var callbackRan = false;
+        var stopCalls = 0;
+        var disposerRan = false;
+        lifetime.RegisterDisposer(token =>
+        {
+            Assert.Equal(cleanup.Token, token);
+            disposerRan = true;
+            return Task.CompletedTask;
+        });
+        var start = lifetime.StartAsync(async token =>
+        {
+            using var registration = token.Register(() =>
+            {
+                callbackRan = true;
+                throw new IOException("private-stop-signal-canary");
+            });
+            entered.TrySetResult();
+            await release.Task;
+            return "late-start";
+        }, default);
+        await entered.Task.WaitAsync(Guard);
+        var stop = lifetime.StopAndJoinAsync(token =>
+        {
+            Assert.Equal(cleanup.Token, token);
+            stopCalls++;
+            return Task.CompletedTask;
+        }, cleanup.Token);
+        try
+        {
+            Assert.True(callbackRan);
+            Assert.Equal(1, stopCalls);
+            Assert.False(stop.IsCompleted);
+            Assert.False(disposerRan);
+            Assert.False(lifetime.Joined);
+            release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start.WaitAsync(Guard));
+            var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => stop.WaitAsync(Guard));
+            Assert.Equal("ASEVD410", error.Code);
+            Assert.DoesNotContain("private-stop-signal-canary", error.ToString());
+            Assert.Null(error.InnerException);
+            Assert.Equal(2, stopCalls);
+            Assert.True(disposerRan);
+            Assert.True(lifetime.Failed);
+            Assert.True(lifetime.Joined);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await IgnoreCleanupFailure(start);
+            await IgnoreCleanupFailure(stop);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OrderedDisposersStayOwnedAfterAnEarlierDisposerFails(bool firstFails)
+    {
+        var lifetime = new SupervisionApplicationLifetime(new SupervisionWorkRegistry());
+        using var cleanup = new CancellationTokenSource();
+        var order = new List<int>();
+        var secondEntered = Signal();
+        var releaseSecond = Signal();
+        lifetime.RegisterDisposer(token =>
+        {
+            Assert.Equal(cleanup.Token, token);
+            order.Add(1);
+            return firstFails ? Task.FromException(new IOException("private-disposer-canary")) : Task.CompletedTask;
+        });
+        lifetime.RegisterDisposer(async token =>
+        {
+            Assert.Equal(cleanup.Token, token);
+            lifetime.RequireJoinedCleanupPhase();
+            order.Add(2);
+            secondEntered.TrySetResult();
+            await releaseSecond.Task;
+            order.Add(3);
+        });
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        var stop = lifetime.StopAndJoinAsync(_ => Task.CompletedTask, cleanup.Token);
+        try
+        {
+            await secondEntered.Task.WaitAsync(Guard);
+            Assert.Equal(new[] { 1, 2 }, order);
+            Assert.False(stop.IsCompleted);
+            Assert.False(lifetime.Joined);
+            Assert.Same(stop, lifetime.StopAndJoinAsync(_ => throw new InvalidOperationException("replayed-stop"), default));
+            releaseSecond.TrySetResult();
+            if (firstFails)
+            {
+                var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => stop.WaitAsync(Guard));
+                Assert.Equal("ASEVD410", error.Code);
+                Assert.DoesNotContain("private-disposer-canary", error.ToString());
+                Assert.Null(error.InnerException);
+            }
+            else await stop.WaitAsync(Guard);
+            Assert.Equal(new[] { 1, 2, 3 }, order);
+            Assert.True(lifetime.Joined);
+            Assert.Equal(firstFails, lifetime.Failed);
+            Assert.Same(stop, lifetime.StopAndJoinAsync(_ => throw new InvalidOperationException("replayed-stop"), default));
+        }
+        finally
+        {
+            releaseSecond.TrySetResult();
+            await IgnoreCleanupFailure(stop);
+        }
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static async Task IgnoreCleanupFailure(Task task)

@@ -240,6 +240,57 @@ public sealed class SupervisionQuotaDrainTests
         Assert.False(ledger.Successful);
     }
 
+    [Fact]
+    public async Task ThrowingExecutionStopSignalKeepsQuotaDrainFailedDespiteActualEofs()
+    {
+        using var stdout = PortableOutputPipe.Create();
+        using var stderr = PortableOutputPipe.Create();
+        using var budget = new SupervisionRunOutputBudget(receivedByteLimit: 1, drainOnQuotaExceeded: true);
+        var signalled = Signal();
+        using var registration = budget.StopToken.Register(() =>
+        {
+            signalled.TrySetResult();
+            throw new IOException("private-stop-callback-canary");
+        });
+        var collection = budget.CollectAsync(new(receivedByteLimit: 1, prefixByteLimit: 1),
+            stdout.Reader, stderr.Reader);
+        try
+        {
+            await Task.WhenAll(stdout.Reader.WaitForReadRequestAsync(1), stderr.Reader.WaitForReadRequestAsync(1)).WaitAsync(Guard);
+            await stdout.WriteAsync([0x41]);
+            await stdout.Reader.WaitForReadRequestAsync(2);
+            await stdout.WriteAsync([0x42]);
+            await signalled.Task.WaitAsync(Guard);
+            await stdout.Reader.WaitForReadRequestAsync(3);
+            Assert.True(budget.StopToken.IsCancellationRequested);
+            Assert.False(budget.PumpStopToken.IsCancellationRequested);
+            Assert.False(collection.IsCompleted);
+            await stderr.WriteAsync([0x43]);
+            stdout.CloseWriter();
+            stderr.CloseWriter();
+            var pair = await collection.WaitAsync(Guard);
+            var ledger = await budget.CompleteAsync().WaitAsync(Guard);
+            Assert.True(pair.Stdout.EndOfStream);
+            Assert.True(pair.Stderr.EndOfStream);
+            Assert.Equal(3, pair.ReceivedBytes);
+            Assert.Equal(3, ledger.ReceivedBytes);
+            Assert.Equal(SupervisionRunOutputFailure.QuotaExceeded, ledger.Failure);
+            Assert.True(ledger.QuotaExceeded);
+            Assert.True(ledger.StopSignalFailed);
+            Assert.True(ledger.DrainFailed);
+            Assert.False(ledger.Drained);
+            Assert.False(ledger.Successful);
+            Assert.False(budget.Drained);
+        }
+        finally
+        {
+            stdout.CloseWriter();
+            stderr.CloseWriter();
+            await collection.WaitAsync(Guard);
+            await budget.CompleteAsync().WaitAsync(Guard);
+        }
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private sealed class PortableOutputPipe : IDisposable
