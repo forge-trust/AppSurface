@@ -92,6 +92,46 @@ public sealed class QualificationImageBoundaryTests
         Assert.Contains("LinuxN12LeaderExitObservation", types);
     }
 
+    /// <summary>Native cancellation and failed-settlement capture procedures exist only in their private images.</summary>
+    [Fact]
+    public void PrivateCancellationSignalAndObservationImplementationsMatchTheirImages()
+    {
+        var methods = ReadMethodDefinitions();
+        var types = ReadTypeNames();
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+        Assert.Contains("LinuxOriginalCancellationSignal", types);
+        Assert.Contains("LinuxEmptyObservationControlServer.SignalCancellationOwnedAsync", methods);
+        Assert.Contains("LinuxEmptyObservationControlServer.CaptureCancellationSignal", methods);
+        Assert.Contains("LinuxWorkerProcess.CaptureCancellationJoinedObservation", methods);
+        Assert.Contains("LinuxWorkerProcess.CaptureJoinedOutputDiagnostic", methods);
+#else
+        Assert.DoesNotContain("LinuxOriginalCancellationSignal", types);
+        Assert.DoesNotContain("LinuxEmptyObservationControlServer.SignalCancellationOwnedAsync", methods);
+        Assert.DoesNotContain("LinuxEmptyObservationControlServer.CaptureCancellationSignal", methods);
+        Assert.DoesNotContain("LinuxWorkerProcess.CaptureCancellationJoinedObservation", methods);
+        Assert.DoesNotContain("LinuxWorkerProcess.CaptureJoinedOutputDiagnostic", methods);
+#endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11
+        Assert.Contains("LinuxWorkerProcess.CaptureFailedSettlementObservation", methods);
+#else
+        Assert.DoesNotContain("LinuxWorkerProcess.CaptureFailedSettlementObservation", methods);
+#endif
+#if EVIDENCE_PRIVATE_N11
+        Assert.Contains("LinuxWorkerProcess.ObserveStopJoinAsync", methods);
+#else
+        Assert.DoesNotContain("LinuxWorkerProcess.ObserveStopJoinAsync", methods);
+#endif
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_ACCEPTED_WORK
+        Assert.Contains("LinuxWorkerProcess.CaptureNegativeObservation", methods);
+#else
+        Assert.DoesNotContain("LinuxWorkerProcess.CaptureNegativeObservation", methods);
+#endif
+        Assert.Contains("LinuxFailedSettlementObservation", types);
+        Assert.Contains("LinuxNegativeKernelObservation", types);
+        Assert.Contains("LinuxJoinedWorkerOutputDiagnostic", types);
+        Assert.Contains("LinuxWorkerStopTiming", types);
+    }
+
     /// <summary>Portable procedure controls stay available independently of any native fixture implementation.</summary>
     [Fact]
     public void PortableOrderingDataRemainsInEveryImage()

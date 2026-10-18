@@ -70,11 +70,17 @@ internal static class LinuxEmptyObservationExecution
 #if EVIDENCE_PRIVATE_N07
         var n07FailureProjectionWriteAttempted = false;
 #endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
         var cancellationProjectionWritten = false;
         var cancellationProjectionWriteAttempted = false;
         var cancellationProjectionStage = LinuxCancellationProjectionStage.Unknown;
+#endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16
         var accountsClosedUnderCustody = false;
+#endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
         uint cancellationResultsGid = 0;
+#endif
 #if EVIDENCE_PRIVATE_N16
         var acceptedWorkProjectionWritten = false;
         var acceptedWorkProjectionWriteAttempted = false;
@@ -345,6 +351,7 @@ internal static class LinuxEmptyObservationExecution
                 }
                 catch (Exception error) when (Recoverable(error)) { } // Detached diagnostics never change the first fault or cleanup result.
 #endif
+#if EVIDENCE_PRIVATE_N11
             // Private N11 failure-only data comes from the original joined holders before custody
             // and account closure. Capture failure never clears or replaces the execution failure.
             if (EvidenceNativeQualification.WorkerStallEnabled && (failed || cleanupFailed)
@@ -367,6 +374,7 @@ internal static class LinuxEmptyObservationExecution
                     owner.RequireControlIdentity(cleanupToken);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
 #if EVIDENCE_PRIVATE_N04
             // Fixed private N04 image: copy facts only from the original joined holders, before
             // substituted-path custody can reject. This record cannot turn the failed run positive.
@@ -412,6 +420,7 @@ internal static class LinuxEmptyObservationExecution
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             // Fixed private cancellation image: original holder projection after server/native/pump joins.
             if (EvidenceNativeQualification.CancellationEnabled && failed && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
@@ -489,6 +498,7 @@ internal static class LinuxEmptyObservationExecution
                                 catch (Exception outputError) when (Recoverable(outputError)) { Record(outputError); }
                         }
                 }
+#endif
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
@@ -503,7 +513,9 @@ internal static class LinuxEmptyObservationExecution
                 {
                     phase = EvidenceNativeObservationPhase.AccountsClose;
                     await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16
                     accountsClosedUnderCustody = true;
+#endif
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
@@ -565,8 +577,10 @@ internal static class LinuxEmptyObservationExecution
         token.ThrowIfCancellationRequested();
         // The optional diagnostic is attached only after every original cleanup and deadline check.
         // No earlier first-fault projection can conceal a failed finalization behind this record.
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
         if (failed && cancellationProjectionWritten && accountsClosedUnderCustody && owner is not null)
             throw failures.Rejected(owner.RunId, cancellationResultsGid);
+#endif
 #if EVIDENCE_PRIVATE_N16
         if (failed && acceptedWorkProjectionWritten && accountsClosedUnderCustody && owner is not null)
             throw failures.RejectedWithN16Progress(n16ProgressDiagnostic, owner.RunId, acceptedWorkResultsGid,

@@ -51,10 +51,14 @@ internal sealed class LinuxEmptyObservationControlServer
     private int _localOwnersClosed;
     private int _connectionCloseFailed;
     private readonly LinuxControlFailureLatch _failures = new();
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
     private readonly TaskCompletionSource _cancellationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
     private readonly TaskCompletionSource _cancellationFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _cancellationSignal;
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
     private int _signalClaimed;
+#endif
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
     private readonly object _n16Gate = new();
     private readonly TaskCompletionSource _n16BodyEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -73,9 +77,11 @@ internal sealed class LinuxEmptyObservationControlServer
 #endif
 #endif
 
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
     /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
     internal bool CancellationSignalJoined => _cancellationSignal?.IsCompletedSuccessfully == true;
 
+#endif
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK
 #if EVIDENCE_PRIVATE_N16
     /// <summary>Projects private N16 past write/task events only after original server and native holder joins.</summary>
@@ -142,6 +148,7 @@ internal sealed class LinuxEmptyObservationControlServer
     private sealed record LinuxN16ProgressMark(LinuxN16ProgressDiagnostic.Milestone Milestone, long Timestamp);
 #endif
 
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
     /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
     /// <remarks>Successful syscall and READY observations still cannot establish caller-token delivery.</remarks>
     internal string CaptureCancellationSignal(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
@@ -165,6 +172,7 @@ internal sealed class LinuxEmptyObservationControlServer
         });
     }
 
+#endif
 #if EVIDENCE_PRIVATE_N09
     /// <summary>Rechecks and closes the actual N09 allocation holder after original worker joins.</summary>
     /// <remarks>The bounded metadata record is consistency data only and cannot establish native acceptance.</remarks>
@@ -190,6 +198,7 @@ internal sealed class LinuxEmptyObservationControlServer
     }
 #endif
 
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
     private async Task SignalCancellationOwnedAsync(Task dispatch, CancellationToken token)
     {
         await dispatch.ConfigureAwait(false);
@@ -216,6 +225,7 @@ internal sealed class LinuxEmptyObservationControlServer
         }
     }
 
+#endif
     /// <summary>Gets first caught server-fault data; this establishes no protocol or native outcome.</summary>
     internal LinuxControlFailure? FirstFailure => _failures.First;
 
@@ -448,9 +458,13 @@ internal sealed class LinuxEmptyObservationControlServer
             Task<LinuxControlConnection>? pending = null;
             using var cancellationLifetime = CancellationTokenSource.CreateLinkedTokenSource(requests.Token);
             var signalDispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             _cancellationSignal = EvidenceNativeQualification.CancellationEnabled
                 ? SignalCancellationOwnedAsync(signalDispatch.Task, cancellationLifetime.Token)
                 : Task.CompletedTask;
+#else
+            _cancellationSignal = Task.CompletedTask;
+#endif
             signalDispatch.SetResult(); // Task retained before its actual wait/syscall dispatch, outside gates.
             try
             {
@@ -937,7 +951,9 @@ internal sealed class LinuxEmptyObservationControlServer
                     if (readyCommitted)
                     {
                         Interlocked.Exchange(ref _negativeReadyCommitted, 1);
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
                         _cancellationReady.TrySetResult(); // Only after original write/release/owner/CompleteWrite.
+#endif
                     }
                     committedExit = claim.Operation == EvidenceControlOperation.Exit;
                     claim = null;

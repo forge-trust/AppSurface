@@ -7,7 +7,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
 /// <summary>Immutable bounded detached facts for a source-selected negative control, never native authority.</summary>
 /// <remarks>
-/// Production obtains this data only from <see cref="LinuxWorkerProcess.CaptureNegativeObservation"/> after
+/// Matching private images obtain this data only from the <see href="README.md#occupied-and-linked-allocation-slot-qualification">original native holder</see> after
 /// original holder, task, peer, group and output checks. <see cref="CreateDetached"/> intentionally accepts
 /// metadata for pure tests: matching JSON cannot authenticate its producer or recreate a live owner.
 /// Fixture source/image binding, actual expected allocation failure, unchanged filesystem objects,

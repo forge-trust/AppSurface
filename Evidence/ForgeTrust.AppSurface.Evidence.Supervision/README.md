@@ -1793,3 +1793,15 @@ images for portable tests. The PE metadata boundary test checks the actual N10
 type and N10/N12 method definitions in ordinary and matching private images;
 runtime qualification still requires the native containment checks and original
 cleanup joins described above.
+
+The private N08/N09 pidfd signal procedure and joined cancellation capture are
+also absent from ordinary images. Their implementations and failure-only root
+emitters compile only in those two images. N11 alone compiles its stop-timing
+observer and root failed-settlement emitter; the failed-settlement capture is
+shared only with N08/N09. Shared negative-kernel capture exists only for the
+selected negative images that consume it. The detached encoders and
+[`LinuxWorkerStopTiming`](LinuxWorkerStopTiming.cs) data procedures remain in every
+image for portable verification. These compile boundaries change no ordinary
+stop, native monitor, cgroup, output drain, custody or account-close requirement.
+The [finished-image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+check actual implementation absence as well as matching private-image presence.

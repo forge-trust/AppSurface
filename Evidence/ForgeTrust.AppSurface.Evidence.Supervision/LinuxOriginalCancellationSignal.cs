@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
 using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using Microsoft.Win32.SafeHandles;
@@ -40,3 +41,5 @@ internal static partial class LinuxOriginalCancellationSignal
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
     private static partial int PidFdSendSignal(long number, int pidfd, int signal, nint info, uint flags);
 }
+
+#endif
