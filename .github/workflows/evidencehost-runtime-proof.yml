@@ -48,7 +48,6 @@ jobs:
       DOTNET_NOLOGO: "1"
       MSBUILDDISABLENODEREUSE: "1"
       DOTNET_CLI_USE_MSBUILD_SERVER: "0"
-      NUGET_PACKAGES: ${{ runner.temp }}/checkpoint4-nuget
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -67,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
+          printf 'NUGET_PACKAGES=%s/checkpoint4-nuget\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           mkdir -m 0700 "$RUNNER_TEMP/checkpoint4-evidence"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json"
           python3 -B .github/issue779-checkpoint4/verify-cutover.py
