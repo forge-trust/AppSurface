@@ -1802,8 +1802,9 @@ emitters compile only in those two images. N11 alone compiles its stop-timing
 observer and root failed-settlement emitter; the failed-settlement capture is
 shared only with N08/N09. Shared negative-kernel capture exists only for the
 selected negative images that consume it. The detached encoders and
-[`LinuxWorkerStopTiming`](LinuxWorkerStopTiming.cs) data procedures remain in every
-image for portable verification. These compile boundaries change no ordinary
+[`LinuxWorkerStopTiming`](LinuxWorkerStopTiming.cs) data procedures follow the
+matching runtime selections in the [source-placement table](#private-diagnostic-data-source-placement);
+portable tests link the same physical implementations when the runtime omits them. These compile boundaries change no ordinary
 stop, native monitor, cgroup, output drain, custody or account-close requirement.
 The [finished-image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
 check actual implementation absence as well as matching private-image presence.

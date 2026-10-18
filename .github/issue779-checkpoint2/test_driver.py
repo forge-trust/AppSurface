@@ -400,6 +400,37 @@ class WorkspaceInspectionControls(unittest.TestCase):
    self.assertEqual('RuntimeError',result['error_kind']);self.assertFalse(result['native_authority']);self.assertEqual(0,result['nodes'])
 
 class DescriptorPublicationControls(unittest.TestCase):
+ def test_terminal_root_seal_requires_explicit_post_custody_observation(self):
+  import os,tempfile,types
+  from unittest.mock import patch
+  with tempfile.TemporaryDirectory() as directory:
+   path=Path(directory)/'worker-control.json';value={'schema':'evidence-worker-linux-v1','worker_pid':123}
+   path.write_bytes(json.dumps(value).encode());path.chmod(0o400)
+   actual=path.lstat()
+   # Project root identity onto real file metadata for this portable data-only observer control.
+   fields=('st_dev','st_ino','st_mode','st_nlink','st_uid','st_gid','st_size','st_mtime_ns','st_ctime_ns')
+   projected=types.SimpleNamespace(**{key:getattr(actual,key) for key in fields})
+   projected.st_uid=projected.st_gid=0
+   try:
+    with patch.object(native.os,'fstat',return_value=projected),patch.object(Path,'lstat',return_value=projected),patch.object(native.os,'geteuid',return_value=0):
+     with self.assertRaisesRegex(RuntimeError,'actual-descriptor-seal'):native.sealed_descriptor(path)
+     self.assertEqual(value,native.sealed_descriptor(path,after_custody=True))
+     projected.st_gid=123
+     with self.assertRaisesRegex(RuntimeError,'actual-descriptor-seal'):native.sealed_descriptor(path,after_custody=True)
+     projected.st_gid=0;projected.st_uid=123
+     with self.assertRaisesRegex(RuntimeError,'actual-descriptor-node'):native.sealed_descriptor(path,after_custody=True)
+     with self.assertRaisesRegex(RuntimeError,'actual-descriptor-phase'):native.sealed_descriptor(path,after_custody=1)
+   finally:path.chmod(0o600)
+
+ def test_post_custody_observation_retains_all_original_snapshot_guards(self):
+  import tempfile
+  for payload,mode in ((b'{"schema":',0o440),(b'',0o440),(b'{"schema":"evidence-worker-linux-v1"}',0o444)):
+   with self.subTest(mode=mode,payload=payload),tempfile.TemporaryDirectory() as directory:
+    path=Path(directory)/'worker-control.json';path.write_bytes(payload);path.chmod(mode)
+    try:
+     with self.assertRaises((RuntimeError,ValueError)):native.sealed_descriptor(path,after_custody=True)
+    finally:path.chmod(0o600)
+
  def test_partial_writable_v1_and_v2_data_remain_pending_until_actual_seal(self):
   import tempfile
   for schema in ('evidence-worker-linux-v1','evidence-worker-linux-v2'):

@@ -16,9 +16,10 @@ def require(ok,code):
  if not ok:raise RuntimeError(code)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':')).encode()
-def sealed_descriptor(path,expected_schema="evidence-worker-linux-v1"):
- """Observe only complete v1/v2 publication data; this supplies no worker authentication."""
+def sealed_descriptor(path,expected_schema="evidence-worker-linux-v1",*,after_custody=False):
+ """Observe publication data, or the root-only terminal seal after physical settlement; never authenticate."""
  require(expected_schema in ("evidence-worker-linux-v1","evidence-worker-linux-v2"),"actual-descriptor-expected-schema")
+ require(type(after_custody) is bool,"actual-descriptor-phase")
  try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
  except FileNotFoundError:return None
  try:
@@ -26,7 +27,8 @@ def sealed_descriptor(path,expected_schema="evidence-worker-linux-v1"):
   require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_uid==os.geteuid() and before.st_size<=65536,'actual-descriptor-node')
   mode=stat.S_IMODE(before.st_mode)
   if mode in (0o600,0o640):return None # Root is still writing/fsyncing before its existing 0440 seal.
-  require(mode==0o440 and before.st_size>0,'actual-descriptor-seal')
+  terminal_seal=after_custody and mode==0o400 and before.st_uid==before.st_gid==0
+  require((mode==0o440 or terminal_seal) and before.st_size>0,'actual-descriptor-seal')
   data=os.read(fd,65537);after=os.fstat(fd);named=path.lstat()
   identity=lambda value:(value.st_dev,value.st_ino,value.st_mode,value.st_nlink,value.st_uid,value.st_gid,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
   require(identity(before)==identity(after)==identity(named) and len(data)==before.st_size,'actual-descriptor-snapshot')
@@ -510,7 +512,7 @@ def execute_case(args,case,end,receipt):
   result['groups_empty']=True
   # Observe both generated names and numeric IDs through retained root-sealed directory metadata/descriptor.
   descriptor=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
-  d=sealed_descriptor(descriptor)
+  d=sealed_descriptor(descriptor,after_custody=True)
   if d is not None:
    identities=[('worker_uid','passwd',d['worker_uid']),('subject_uid','passwd',d['subject_uid']),('worker_gid','group',d['worker_gid']),('subject_gid','group',d['subject_gid'])]
    identities.append(('results_gid','group',result['observed_results_gid']))
