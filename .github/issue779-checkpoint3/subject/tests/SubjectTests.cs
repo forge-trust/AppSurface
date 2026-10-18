@@ -14,7 +14,7 @@ public sealed class SubjectTests
     [InlineData(8, 2, 99, 0)]
     public async Task Calculator_branches_are_exercised(int left, int right, int operation, int expected)
     {
-        if (operation == 0 && (Scenario.Kind is "cleanup-failure" or "ignored-cancel"))
+        if (operation == 0 && (Scenario.Kind is "cleanup-failure" or "ignored-cancel" or "scratch-fifo" or "scratch-hardlink" or "scratch-oversize"))
         {
             await SubjectFailureScenarios.Run(Scenario.Kind);
         }

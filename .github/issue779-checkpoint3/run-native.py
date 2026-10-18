@@ -2,6 +2,7 @@
 """Bounded real Linux consumers. C# owns runtime policy, processes, custody and cleanup."""
 import argparse, datetime, hashlib, importlib.util, json, os, platform, select, shutil, signal, socket, stat, struct, subprocess, sys, time, uuid
 from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'issue779-checkpoint2'))
 spec=importlib.util.spec_from_file_location('checkpoint2_helpers',Path(__file__).resolve().parents[1]/'issue779-checkpoint2/run-native.py')
 c2=importlib.util.module_from_spec(spec);spec.loader.exec_module(c2)
@@ -196,23 +197,40 @@ def remove_sealed_fixture_tree(path,generation,deadline):
  path.rmdir()
  return count
 
+def request_data(args,tool,runtime,definition,digest,subject,variant):
+ """Fixed root-selected C3 request data; no caller command or runtime capability."""
+ return {'schema':'evidence-supervisor-linux-v1','mode':'observation','tool_root':str(tool),'runtime_root':str(runtime),'runtime_host':str(runtime/'dotnet'),'entry_path':str(tool/'ForgeTrust.AppSurface.Cli.dll'),'policy_file':str(tool/'fixture-policy.json'),'subject_root':str(subject),'base_revision':args.base,'subject_revision':args.source,'workflow_identity':'issue779-csharp-checkpoint3','paths':['calculation/Calculation.cs'],'observation_profile_ids':['native-http-'+('normal' if variant=='sdk-normal' else variant)],'observation_producer_ids':['coverage'],'job_deadline_utc':(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=1200)).isoformat().replace('+00:00','Z'),'admission_seconds':30,'start_seconds':120,'collection_seconds':60,'cleanup_seconds':120,'stopping_seconds':10,'solution':str(subject/'Subject.csproj'),'application_id':definition['application_id'],'application_entry_digest':digest}
+
+def owner_command(runtime,tool,owner,armed,request_path):
+ """The unchanged fixed systemd owner recipe, shared by finite native controls."""
+ return ['/usr/bin/systemd-run','--quiet','--wait','--pipe','--unit='+owner,'--service-type=exec','--property=User=0','--property=Group=0','--property=Restart=no','--property=KillMode=control-group','--property=RuntimeMaxSec=1100','--property=TimeoutStopSec=10','--property=SendSIGKILL=yes','--property=FinalKillSignal=SIGKILL','--property=LimitCORE=0','--property=LimitNOFILE=65536','--property=ConditionPathExists='+str(armed),'--property=Environment='+' '.join(c2.FIXED),'--property=UnsetEnvironment='+' '.join(c2.ENV_NAMES),'/usr/bin/env','-i',*c2.FIXED,str(runtime/'dotnet'),str(tool/'ForgeTrust.AppSurface.Cli.dll'),'evidence','supervise','--request',str(request_path)]
+
 def execute(args,case,tools,runtime,end):
  variant=case if case in ('readiness','factory-stall','stuck-descendant','sdk-normal') else 'normal'
  tool,definition,digest=tools[variant];generation=uuid.uuid4().hex
  root=Path('/run')/('issue779-c3-case-'+generation);c2.create_traversable_root(root)
  subject=root/'subject';c2.copy_tree(args.subject,subject)
- scenario=subject/'Scenario.cs';kind='cancel' if case in ('cancel','stuck-descendant') else 'normal'
+ scenario=subject/'Scenario.cs';kind='cancel' if case in ('cancel','stuck-descendant') else case if case in ('scratch-fifo','scratch-hardlink','scratch-oversize') else 'normal'
  scenario.write_text('namespace NativePreparation.Subject; public static class Scenario { public static string Kind => "'+kind+'"; }\n')
  for p in (subject,*subject.rglob('*')):os.chown(p,0,0,follow_symlinks=False);p.chmod(0o555 if p.is_dir() else 0o444)
  owner='appsurface-evidence-owner-'+generation+'.service';appunit='appsurface-evidence-application-'+generation+'.service'
  units=[owner,'appsurface-evidence-worker-'+generation+'.service','appsurface-evidence-producer-'+generation+'.service',appunit]
- deadline=min(end,time.monotonic()+480);result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
- request={'schema':'evidence-supervisor-linux-v1','mode':'observation','tool_root':str(tool),'runtime_root':str(runtime),'runtime_host':str(runtime/'dotnet'),'entry_path':str(tool/'ForgeTrust.AppSurface.Cli.dll'),'policy_file':str(tool/'fixture-policy.json'),'subject_root':str(subject),'base_revision':args.base,'subject_revision':args.source,'workflow_identity':'issue779-csharp-checkpoint3','paths':['calculation/Calculation.cs'],'observation_profile_ids':['native-http-'+('normal' if variant=='sdk-normal' else variant)],'observation_producer_ids':['coverage'],'job_deadline_utc':(datetime.datetime.now(datetime.timezone.utc)+datetime.timedelta(seconds=1200)).isoformat().replace('+00:00','Z'),'admission_seconds':30,'start_seconds':120,'collection_seconds':60,'cleanup_seconds':120,'stopping_seconds':10,'solution':str(subject/'Subject.csproj'),'application_id':definition['application_id'],'application_entry_digest':digest}
+ if case in ('scratch-fifo','scratch-hardlink','scratch-oversize'):
+  import workspace_guards
+  deadline=workspace_guards.observation_deadline(end,480)
+ else:deadline=min(end,time.monotonic()+480)
+ result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
+ request=request_data(args,tool,runtime,definition,digest,subject,variant)
  request_path=root/'request.json';write(request_path,canonical(request))
+ guard_sentinel=None
+ if case in ('scratch-fifo','scratch-hardlink','scratch-oversize'):
+  import workspace_guards
+  guard_sentinel=root/'outside-sentinel';write(guard_sentinel,b'outside-owned-workspace-guard-sentinel\n')
+  guard_identity=workspace_guards.identity(guard_sentinel)
  guard=Path('/run/appsurface-evidence-owners');guard.mkdir(mode=0o700,exist_ok=True);require(guard.stat().st_uid==0 and stat.S_IMODE(guard.stat().st_mode)==0o700,'guard-parent')
  marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
  stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;held=None;descriptor=None;app=None;producer=None;resource=None;dcp=None;descendant=None;descendant_control=None;cancelled=False;factory=False;probe503=None;term_seen=False
- launch=['/usr/bin/systemd-run','--quiet','--wait','--pipe','--unit='+owner,'--service-type=exec','--property=User=0','--property=Group=0','--property=Restart=no','--property=KillMode=control-group','--property=RuntimeMaxSec=1100','--property=TimeoutStopSec=10','--property=SendSIGKILL=yes','--property=FinalKillSignal=SIGKILL','--property=LimitCORE=0','--property=LimitNOFILE=65536','--property=ConditionPathExists='+str(marker/'armed'),'--property=Environment='+' '.join(c2.FIXED),'--property=UnsetEnvironment='+' '.join(c2.ENV_NAMES),'/usr/bin/env','-i',*c2.FIXED,str(runtime/'dotnet'),str(tool/'ForgeTrust.AppSurface.Cli.dll'),'evidence','supervise','--request',str(request_path)]
+ launch=owner_command(runtime,tool,owner,marker/'armed',request_path)
  try:
   with stdout.open('xb') as out,stderr.open('xb') as err:
    process=subprocess.Popen(launch,stdin=subprocess.DEVNULL,stdout=out,stderr=err,start_new_session=True)
@@ -288,13 +306,19 @@ def execute(args,case,tools,runtime,end):
     require(held is not None,'actual-scratch-hold-before-disposal')
     storage=events(stderr,'evidence-application-storage-v1');require(any(e.get('phase')=='unmount-rejected' and e.get('errno')==16 for e in storage),'actual-ebusy-unmount-rejection')
    if case!='disposal-failure':result['output']=output_accounting(stderr)
-  result['accounts']=named_accounts(generation,case=='disposal-failure',deadline)
+  quarantined=case in ('disposal-failure','scratch-fifo','scratch-hardlink','scratch-oversize')
+  if case.startswith('scratch-'):
+   import workspace_guards
+   result['workspace_guard']=workspace_guards.require_producer_rejection(case,generation,descriptor,stderr)
+   require(workspace_guards.identity(guard_sentinel)==guard_identity and guard_sentinel.read_bytes()==b'outside-owned-workspace-guard-sentinel\n','producer-outside-sentinel-unchanged')
+   result['outside_sentinel_unchanged']=True;result['quarantined']=True
+  result['accounts']=named_accounts(generation,quarantined,deadline)
   numeric=[('passwd',descriptor['worker_uid']),('passwd',descriptor['subject_uid']),('passwd',descriptor['application']['application_uid']),
       ('group',descriptor['worker_gid']),('group',descriptor['subject_gid']),('group',descriptor['application']['application_gid']),
       ('group',descriptor['application']['results_gid']),('group',descriptor['application']['resource_access_gid'])]
   for table,number in numeric:
    looked=command(['/usr/bin/getent',table,str(number)],deadline,allowed=(0,2))
-   require(looked.returncode==(0 if case=='disposal-failure' else 2),'original-numeric-account-custody')
+   require(looked.returncode==(0 if quarantined else 2),'original-numeric-account-custody')
   result['passed']=True
  except BaseException as failure:
   result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
@@ -302,7 +326,10 @@ def execute(args,case,tools,runtime,end):
   # No fixture containment/repair upgrades the original result.
   if descendant_control is not None:descendant_control.close()
   if held is not None:os.close(held)
-  if process is not None and process.poll() is None:
+  if process is not None and case in ('scratch-fifo','scratch-hardlink','scratch-oversize') and (process.poll() is None or not result.get('passed')):
+   import workspace_guards
+   workspace_guards.contain_units(units,process,end)
+  elif process is not None and process.poll() is None:
    for unit in units:
     try:command(['/usr/bin/systemctl','stop',unit],min(end,time.monotonic()+15),allowed=(0,1,5))
     except Exception:pass
@@ -310,15 +337,16 @@ def execute(args,case,tools,runtime,end):
    except ProcessLookupError:pass
    process.wait(timeout=5)
   result['final_groups_empty']=c2.groups_empty(units)
-  for role in ('worker','producer'):
+  for role in (('worker','producer') if case in CASES else ()):
    try:result[role+'_diagnostics_retained']=c2.retain_producer_prefixes(generation,args.output,case,role)
    except (OSError,RuntimeError):result[role+'_diagnostics_retained']=False
-  try:result['application_prefixes_retained']=retain_application_prefixes(generation,args.output,case)
-  except (OSError,RuntimeError):result['application_prefixes_retained']=False
+  if case in CASES:
+   try:result['application_prefixes_retained']=retain_application_prefixes(generation,args.output,case)
+   except (OSError,RuntimeError):result['application_prefixes_retained']=False
   for name in ('owner.stdout','owner.stderr'):
    p=root/name
    if p.is_file() and p.stat().st_size<=MAX_LOG:shutil.copyfile(p,args.output/(case+'-'+name));(args.output/(case+'-'+name)).chmod(0o600)
-  if result.get('passed') and case!='disposal-failure':
+  if result.get('passed') and case not in ('disposal-failure','scratch-fifo','scratch-hardlink','scratch-oversize'):
    try:
     result['fixture_reclaimed_nodes']={}
     for prefix in ('appsurface-evidence-producer-data-','appsurface-app-'):
@@ -345,6 +373,11 @@ def main():
    result=execute(args,case,tools,runtime,end);receipt['cases'].append(result)
    if not result['passed']:break
   receipt['exit']=0 if len(receipt['cases'])==7 and all(c['passed'] for c in receipt['cases']) else 1
+  if receipt['exit']==0:
+   receipt['exit']=1 # A guard setup/inspection exception must not retain the earlier seven-case success.
+   import workspace_guards
+   receipt['workspace_guards']=workspace_guards.run(args,tools,runtime,end)
+   receipt['exit']=0 if len(receipt['workspace_guards'])==6 and all(c['passed'] for c in receipt['workspace_guards']) else 1
  finally:write(args.output/'native-receipt.json',canonical(receipt))
  return receipt['exit']
 if __name__=='__main__':raise SystemExit(main())

@@ -98,6 +98,7 @@ public sealed class NativeMeasurementTests
             foreach (var key in new[] { "group_empty_twice", "pumps_joined", "pending_start_joined" })
                 Assert.True(settled.GetProperty(key).GetBoolean());
         }
+        WorkspaceGuardMeasurement.Validate(root);
         var worker = Assert.Single(cases[0].GetProperty("worker_measurements").EnumerateArray());
         Assert.Equal("evidence-worker-measurement-v1", worker.GetProperty("schema").GetString());
         Assert.True(worker.GetProperty("original_pidfd_exit").GetBoolean());

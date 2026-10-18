@@ -1,9 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace NativePreparation.Subject;
 
-/// <summary>Fixed same-fixture controls for cleanup failure and ignored cancellation.</summary>
+/// <summary>Fixed same-fixture controls for unsafe scratch custody, cleanup failure and ignored cancellation.</summary>
 internal static class SubjectFailureScenarios
 {
     private const int ReadinessTimeoutSeconds = 30;
@@ -48,6 +49,11 @@ internal static class SubjectFailureScenarios
         ArgumentNullException.ThrowIfNull(kind);
         switch (kind)
         {
+            case "scratch-fifo":
+            case "scratch-hardlink":
+            case "scratch-oversize":
+                CreateUnsafeScratchNode(kind);
+                break;
             case "cleanup-failure":
                 CreateCleanupFailure();
                 break;
@@ -63,6 +69,36 @@ internal static class SubjectFailureScenarios
                 throw new InvalidOperationException("Unknown root-selected fixture scenario.");
         }
     }
+
+    private static void CreateUnsafeScratchNode(string kind)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("The scratch-node controls require Linux.");
+        var (_, temporary) = GetScratchPaths();
+        var path = Path.Combine(temporary, "checkpoint3-" + kind);
+        if (kind == "scratch-fifo")
+        {
+            if (MkFifo(path, 0x180) != 0)
+                throw new IOException("The fixed scratch FIFO could not be created.");
+            return; // No writer is opened: the owner must reject type before a potentially blocking read.
+        }
+        using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            if (kind == "scratch-oversize") file.SetLength(256L * 1024 * 1024 + 1);
+            else file.Write("owned scratch bytes"u8);
+            file.Flush(flushToDisk: true);
+        }
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        if (kind == "scratch-hardlink" && Link(path, path + "-linked") != 0)
+            throw new IOException("The fixed scratch hard link could not be created.");
+    }
+
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    private static extern int MkFifo([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
+
+    [DllImport("libc", EntryPoint = "link", SetLastError = true)]
+    private static extern int Link([MarshalAs(UnmanagedType.LPUTF8Str)] string original,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string linked);
 
     private static void CreateCleanupFailure()
     {

@@ -205,7 +205,7 @@ jobs:
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
 
-      - name: Run the seven native C3 application controls with source-bound supervisor measurement
+      - name: Run the seven application and six workspace rejection controls with source-bound measurement
         shell: bash
         run: |
           set -euo pipefail
@@ -232,6 +232,7 @@ jobs:
               binding[key + '_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
           native = json.loads((root / files['native_receipt']).read_bytes())
           assert native['exit'] == 0 and len(native['cases']) == 7 and all(c['passed'] for c in native['cases'])
+          assert len(native['workspace_guards']) == 6 and all(c['passed'] and c['groups_empty'] and c['final_groups_empty'] for c in native['workspace_guards'])
           (root / 'measurement-binding.json').write_text(json.dumps(binding, sort_keys=True))
           PY
 
