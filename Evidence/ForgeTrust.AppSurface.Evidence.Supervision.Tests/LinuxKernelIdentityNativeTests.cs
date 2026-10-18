@@ -161,15 +161,28 @@ public sealed class LinuxKernelIdentityNativeTests
         Assert.Null(rejected.InnerException);
     }
 
-    private sealed class TestUnit : IAsyncDisposable
+    /// <summary>Shared root-only native test helper; its default worker recipe is unchanged.</summary>
+    internal sealed class TestUnit : IAsyncDisposable
     {
         private static readonly TimeSpan CommandLimit = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan StartLimit = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan JoinLimit = TimeSpan.FromSeconds(15);
         private Task? _stop;
         private readonly Stopwatch _startClock = new();
+        private readonly string _executable;
 
-        internal TestUnit() => Unit = LinuxUnitName.Create(LinuxUnitRole.Worker, Guid.NewGuid());
+        internal TestUnit() : this(LinuxUnitRole.Worker, "/usr/bin/sleep") { }
+
+        private TestUnit(LinuxUnitRole role, string executable)
+        { Unit = LinuxUnitName.Create(role, Guid.NewGuid()); _executable = executable; }
+
+        /// <summary>Runs a test-owned absolute executable in the same bounded helper policy with an application unit name.</summary>
+        internal static TestUnit ForApplicationExecutable(string executable)
+        {
+            if (!Path.IsPathFullyQualified(executable) || !File.Exists(executable))
+                throw new ArgumentException("An existing test-owned absolute executable is required.", nameof(executable));
+            return new(LinuxUnitRole.Application, executable);
+        }
 
         internal LinuxUnitName Unit { get; }
         internal string GeneratedControlGroupPath => "/system.slice/" + Unit.Value;
@@ -192,7 +205,7 @@ public sealed class LinuxKernelIdentityNativeTests
                 "--property=KillMode=control-group",
                 "--property=RemainAfterExit=yes",
                 "--property=Restart=no",
-                "/usr/bin/sleep", "30",
+                _executable, "30",
             ], StartLimit).ConfigureAwait(false);
             RequireSuccess(result);
 
@@ -343,7 +356,7 @@ public sealed class LinuxKernelIdentityNativeTests
         private sealed record BoundedOutput(byte[] Bytes, bool Exceeded);
     }
 
-    private sealed class LinuxKernelIdentityFactAttribute : FactAttribute
+    internal sealed class LinuxKernelIdentityFactAttribute : FactAttribute
     {
         public LinuxKernelIdentityFactAttribute()
         {

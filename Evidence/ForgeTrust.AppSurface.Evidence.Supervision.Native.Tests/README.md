@@ -21,7 +21,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 | `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all six selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
 | `native-sdk.json` | Separate standard SDK-image report, hash-bound before the outer collector's standard report merge. |
-| `root-files.trx` | Hash-bound current-run passing root filesystem controls for all three expected classes; zero skips or failures. |
+| `root-files.trx` | Hash-bound current-run passing root filesystem/kernel controls for all four expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 
@@ -45,7 +45,7 @@ The runner requires root on Linux x86-64 with systemd 255 and executes seven ind
 
 The receipt is produced only after the harness checks the original root owner's terminal outcome, actual unit and cgroup state, and the case-specific process observations. The test requires all seven cases in order, each marked passed, empty final groups, and a settled application observation with the two empty-group checks, output-pump joins, and pending-start join. The runner also checks kernel process identity and account custody; normal and applicable negative cases require account removal, while the intentional disposal-failure case requires accounts to remain present. The ordinary output-accounting receipt requires registered stream pairs, reconciled received-byte counts, EOF on both streams, and no read failure. The disposal-failure case is intentionally a failed root outcome with quarantined identities, not a successful evidence publication.
 
-Coverage describes only code actually reached by the measured process. It proves that the source-bound Linux root path ran when the test finds the required hit in `LinuxEmptyObservationExecution.cs`; it does not presume hits from a force-killed process. Worker hits require the explicit source-pinned private-namespace handoff, not ordinary visibility across `PrivateTmp`. The SDK tool image stays uninstrumented, so this report does not claim its execution hits. It also does not claim every native process is instrumented or covered.
+Coverage describes only code actually reached by the measured process. It proves that the source-bound Linux root path ran when the test finds the required hit in `LinuxEmptyObservationExecution.cs`; it does not presume hits from a force-killed process. Worker hits require the explicit source-pinned private-namespace handoff, not ordinary visibility across `PrivateTmp`. SDK hits now require its separate instrumented image, source binding and standard report described above; the initial uninstrumented SDK runs supply no presumed counters. It does not claim every native process is instrumented or covered.
 
 ## Relationship to the full gate and trust
 
@@ -59,8 +59,8 @@ The application workflow additionally builds the ordinary root filesystem contro
 classes with the same C3 project graph, compiler and Release configuration. Before
 instrumentation it requires the test image's Supervision DLL/PDB hashes to match
 the native application's original module hashes. The pinned Coverlet Console runs
-only `LinuxProtectedNodeNativeTests`, `LinuxRetainedReportNativeTests`, and
-`LinuxKernelIdentityNativeTests` as actual
+only `LinuxProtectedNodeNativeTests`, `LinuxRetainedReportNativeTests`,
+`LinuxKernelIdentityNativeTests`, and `LinuxDcpIdentityNativeTests` as actual
 Linux x64 root on their own fresh `/run` trees. These tests exercise existing
 mandatory `openat2`, retained inode/name checks, bounded reads and real file
 mutation rejection; they create no supervisor, process lease or accepted proof.
@@ -70,7 +70,7 @@ those actual hits to the source-bound application report. No raw worker hit file
 is read or reconstructed. The workflow binds the real `root-files.trx` SHA-256 and
 requires positive executed/passed counts with zero failed or skipped cases before
 publishing the combined report. [`RootFilesystemMeasurement`](RootFilesystemMeasurement.cs)
-checks that bound TRX again in the solution lane, including all three expected test
+checks that bound TRX again in the solution lane, including all four expected test
 classes. Its [malformed-data controls](RootFilesystemMeasurementTests.cs) use
 labelled synthetic TRX solely to test validation and provide no execution credit.
 The standard solution command, coverage thresholds, exclusions and patch
@@ -86,6 +86,17 @@ AppSurface owner activation, worker admission, producer lease or accepted
 consumer proof; they verify kernel primitives only. They explicitly skip
 without Linux x64 root and a booted systemd manager; the prepared lane requires
 a zero-skip passing TRX, so that skip supplies no measurement credit.
+
+The [DCP identity primitive control](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxDcpIdentityNativeTests.cs)
+uses the same bounded helper policy with an application unit name and a fresh root-owned, read-only copy
+of `/usr/bin/sleep`. That is an executable-identity fixture, not an SDK DCP payload. The actual kernel
+capture must select its PID, reject wrong UID/GID and a different audited file, preserve cancellation
+without latching an integrity failure, and permanently reject named-file substitution even after the
+original inode is restored. Disposed identities reject. The helper remains owned before start and its
+original stop/group/pump joins finish before file deletion; failed teardown preserves the owned directory.
+The existing worker helper recipe stays unchanged. This control requires a fresh Linux zero-skip result;
+local compilation and an explicit macOS skip supply no native evidence. The seven C3 consumers remain
+responsible for real Aspire SDK/DCP execution and application lifecycle acceptance.
 
 ## Current verification boundary
 

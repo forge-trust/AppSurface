@@ -29,17 +29,19 @@ public sealed class RootFilesystemMeasurementTests
     [InlineData("outcome")]
     [InlineData("name")]
     [InlineData("missing-class")]
+    [InlineData("missing-dcp")]
     [InlineData("namespace")]
     [InlineData("entity")]
     [InlineData("oversize")]
     public void IncompleteOrForeignMeasurementsCannotValidate(string invalid)
     {
         var text = Encoding.UTF8.GetString(Trx());
-        if (invalid is "total" or "executed" or "passed") text = text.Replace(invalid + "=\"3\"", invalid + "=\"1\"", StringComparison.Ordinal);
+        if (invalid is "total" or "executed" or "passed") text = text.Replace(invalid + "=\"4\"", invalid + "=\"1\"", StringComparison.Ordinal);
         if (invalid is "failed" or "error" or "notExecuted" or "warning") text = text.Replace(invalid + "=\"0\"", invalid + "=\"1\"", StringComparison.Ordinal);
         if (invalid == "outcome") text = text.Replace("outcome=\"Passed\"", "outcome=\"Skipped\"", StringComparison.Ordinal);
         if (invalid == "name") text = text.Replace("LinuxProtectedNodeNativeTests", "ForeignTests", StringComparison.Ordinal);
         if (invalid == "missing-class") text = text.Replace("LinuxRetainedReportNativeTests", "LinuxProtectedNodeNativeTests", StringComparison.Ordinal);
+        if (invalid == "missing-dcp") text = text.Replace("LinuxDcpIdentityNativeTests", "LinuxKernelIdentityNativeTests", StringComparison.Ordinal);
         if (invalid == "namespace") text = text.Replace("http://microsoft.com/schemas/VisualStudio/TeamTest/2010", "urn:foreign", StringComparison.Ordinal);
         if (invalid == "entity") text = "<!DOCTYPE TestRun [<!ENTITY external SYSTEM 'file:///unavailable'>]>" + text;
         var bytes = invalid == "oversize" ? new byte[1024 * 1024 + 1] : Encoding.UTF8.GetBytes(text);
@@ -48,14 +50,14 @@ public sealed class RootFilesystemMeasurementTests
     }
 
     private static byte[] Trx() => Encoding.UTF8.GetBytes("""
-        <TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"><ResultSummary><Counters total="3" executed="3" passed="3" failed="0" error="0" notExecuted="0" warning="0" /></ResultSummary><Results><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxProtectedNodeNativeTests.Example" outcome="Passed" /><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxRetainedReportNativeTests.Example" outcome="Passed" /><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxKernelIdentityNativeTests.Example" outcome="Passed" /></Results></TestRun>
+        <TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010"><ResultSummary><Counters total="4" executed="4" passed="4" failed="0" error="0" notExecuted="0" warning="0" /></ResultSummary><Results><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxProtectedNodeNativeTests.Example" outcome="Passed" /><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxRetainedReportNativeTests.Example" outcome="Passed" /><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxKernelIdentityNativeTests.Example" outcome="Passed" /><UnitTestResult testName="ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxDcpIdentityNativeTests.Example" outcome="Passed" /></Results></TestRun>
         """);
 
     private static JsonDocument Binding(byte[] bytes, string invalid = "") => JsonDocument.Parse(JsonSerializer.Serialize(new
     {
         trx_sha256 = invalid == "hash" ? new string('0', 64) : Convert.ToHexStringLower(SHA256.HashData(bytes)),
-        executed = invalid == "binding-count" ? 4 : 3,
-        passed = 3,
+        executed = invalid == "binding-count" ? 5 : 4,
+        passed = 4,
         native_acceptance = invalid == "authority",
     }));
 }

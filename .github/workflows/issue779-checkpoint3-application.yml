@@ -256,7 +256,7 @@ jobs:
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-file-tests" <<'PY_ARGS'
           import json, sys
-          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxProtectedNodeNativeTests|FullyQualifiedName~LinuxRetainedReportNativeTests|FullyQualifiedName~LinuxKernelIdentityNativeTests', '--logger:trx;LogFileName=root-files.trx', '--ResultsDirectory:' + sys.argv[2]]
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxProtectedNodeNativeTests|FullyQualifiedName~LinuxRetainedReportNativeTests|FullyQualifiedName~LinuxKernelIdentityNativeTests|FullyQualifiedName~LinuxDcpIdentityNativeTests', '--logger:trx;LogFileName=root-files.trx', '--ResultsDirectory:' + sys.argv[2]]
           assert all(not any(c in value for c in '\n\r"\\') for value in values)
           print(' '.join('"' + value + '"' for value in values))
           PY_ARGS
@@ -278,7 +278,7 @@ jobs:
           assert all(int(counters.get(name, '0')) == 0 for name in ('failed', 'error', 'notExecuted', 'warning'))
           results = document.findall('.//{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}UnitTestResult')
           assert len(results) == int(counters['executed']) and all(row.attrib['outcome'] == 'Passed' for row in results)
-          expected = ('LinuxProtectedNodeNativeTests', 'LinuxRetainedReportNativeTests', 'LinuxKernelIdentityNativeTests')
+          expected = ('LinuxProtectedNodeNativeTests', 'LinuxRetainedReportNativeTests', 'LinuxKernelIdentityNativeTests', 'LinuxDcpIdentityNativeTests')
           assert all(any(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in results) for name in expected)
           binding_path = root / 'measurement-binding.json'
           binding = json.loads(binding_path.read_bytes())
