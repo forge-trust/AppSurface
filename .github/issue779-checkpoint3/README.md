@@ -68,3 +68,14 @@ real `protected-tool.dll`. On Linux, the denied tool mount can make the managed 
 the independent open attempt was denied. Before start, readiness and final join, the C# workspace separately
 requires the actual host file to be a root-owned, nonwritable, bounded managed PE/CLR image. Missing or invalid
 probe input therefore rejects at the root and cannot pass this negative control. No tool path is made readable.
+
+## Descriptor publication observation
+
+The [native runner](run-native.py) waits for the C# owner's existing `0440` descriptor seal before
+reading JSON. File creation alone is not publication: [`WriteDescriptor`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs)
+creates a writable file, writes and fsyncs it, then seals and retains it. The fixture treats its original
+`0600`/`0640` phase as pending within the existing case deadline. It checks a bounded, single-link regular
+file and unchanged retained/named metadata around the read; malformed sealed JSON still fails. This
+observer neither authenticates the worker nor replaces the C# peer, descriptor or runtime binding checks.
+The [portable tests](test_run_native.py) exercise real temporary file publication and rejection; they do
+not establish Linux consumer acceptance.

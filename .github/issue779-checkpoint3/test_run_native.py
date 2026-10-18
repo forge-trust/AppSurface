@@ -1,6 +1,7 @@
 """Portable fixture ordering only: pipe FDs and mocked signaling issue no native ownership."""
 import contextlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import signal
@@ -138,6 +139,66 @@ class DescendantControlTests(unittest.TestCase):
             control.close()
             with self.assertRaises(RuntimeError):
                 control.confirm(Path(directory))
+
+
+class DescriptorPublicationTests(unittest.TestCase):
+    def test_absent_empty_and_partial_writable_publications_remain_pending_until_sealed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "worker-control.json"
+            self.assertIsNone(runner.sealed_descriptor(path))
+            path.write_bytes(b"")
+            path.chmod(0o640)
+            self.assertIsNone(runner.sealed_descriptor(path))
+            path.write_bytes(b'{"schema":')
+            self.assertIsNone(runner.sealed_descriptor(path))
+            path.write_bytes(b'{"schema":"evidence-worker-linux-v2","worker_pid":123}')
+            self.assertIsNone(runner.sealed_descriptor(path))
+            path.chmod(0o440)
+            self.assertEqual({"schema": "evidence-worker-linux-v2", "worker_pid": 123},
+                             runner.sealed_descriptor(path))
+
+    def test_sealed_malformed_empty_wrong_schema_and_oversized_data_never_pass(self):
+        for data in (b"", b'{"schema":', b'{"schema":"wrong"}', b"x" * 65537):
+            with self.subTest(data_length=len(data)), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "worker-control.json"
+                path.write_bytes(data)
+                path.chmod(0o440)
+                with self.assertRaises((RuntimeError, ValueError)):
+                    runner.sealed_descriptor(path)
+
+    def test_links_and_public_modes_cannot_be_a_sealed_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "worker-control.json"
+            outside = Path(directory) / "outside"
+            outside.write_bytes(b'{"schema":"evidence-worker-linux-v2"}')
+            outside.chmod(0o440)
+            path.symlink_to(outside)
+            with self.assertRaises(OSError):
+                runner.sealed_descriptor(path)
+            path.unlink()
+            os.link(outside, path)
+            with self.assertRaises(RuntimeError):
+                runner.sealed_descriptor(path)
+            path.unlink()
+            path.write_bytes(outside.read_bytes())
+            path.chmod(0o444)
+            with self.assertRaises(RuntimeError):
+                runner.sealed_descriptor(path)
+            self.assertEqual(b'{"schema":"evidence-worker-linux-v2"}', outside.read_bytes())
+
+    def test_changed_retained_metadata_cannot_supply_a_descriptor(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "worker-control.json"
+            path.write_bytes(b'{"schema":"evidence-worker-linux-v2"}')
+            path.chmod(0o440)
+            actual_read = runner.os.read
+            def mutate(fd, count):
+                data = actual_read(fd, count)
+                path.chmod(0o640)
+                return data
+            with patch.object(runner.os, "read", side_effect=mutate):
+                with self.assertRaises(RuntimeError):
+                    runner.sealed_descriptor(path)
 
 
 if __name__ == "__main__":
