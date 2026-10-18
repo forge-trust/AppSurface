@@ -184,6 +184,10 @@ public sealed class WebAppEnvironmentComponent : IAspireComponent<ProjectResourc
 }
 ```
 
+## Dependency Security
+
+The repository [centrally pins MessagePack](../../Directory.Packages.props) to **2.5.303** for Aspire's transitive [StreamJsonRpc](https://www.nuget.org/packages/StreamJsonRpc) dependency. This is the patched 2.x release for [GHSA-qhrr-8q5h-9q3h](https://github.com/MessagePack-CSharp/MessagePack-CSharp/security/advisories/GHSA-qhrr-8q5h-9q3h), which prevents nested containers from reusing trailing bytes to justify excessive allocations. Keep this security floor when updating Aspire; an Aspire update alone does not guarantee a patched MessagePack resolution. A future move to MessagePack 3.x requires **3.1.9** or later for the same fix. Regenerate the affected NuGet lock files, including the `linux-x64` and `osx-arm64` AppHost variants, after changing the pin.
+
 ## AppHost Project References
 
 Aspire AppHost projects treat most `ProjectReference` entries as resources and generate typed classes in the `Projects` namespace. Keep the AppSurface library reference out of the resource graph and leave the app project as a resource:
