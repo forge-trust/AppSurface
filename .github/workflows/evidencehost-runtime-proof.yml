@@ -10,6 +10,13 @@ on:
       - 'Cli/**'
       - 'Aspire/**'
       - 'scripts/evidencehost-*'
+      - 'scripts/coverage-solution.sh'
+      - 'Directory.Build.*'
+      - 'Directory.Packages.props'
+      - 'packages/package-index.yml'
+      - 'tools/ForgeTrust.AppSurface.PackageIndex/**'
+      - 'ForgeTrust.AppSurface.slnx'
+      - 'global.json'
       - 'tests/evidencehost-consumer/**'
       - '.github/issue779-checkpoint*/**'
       - '.github/workflows/evidencehost-runtime-proof.yml'
@@ -20,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: evidencehost-csharp-cutover-${{ github.ref }}
+  group: evidencehost-csharp-cutover-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -41,7 +48,7 @@ jobs:
       DOTNET_NOLOGO: "1"
       MSBUILDDISABLENODEREUSE: "1"
       DOTNET_CLI_USE_MSBUILD_SERVER: "0"
-      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+      NUGET_PACKAGES: ${{ runner.temp }}/checkpoint4-nuget
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

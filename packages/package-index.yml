@@ -541,6 +541,16 @@ packages:
     note: Private coverage execution implementation restored only through first-party AppSurface CLI and Evidence workflow packages; it is not a direct-install integration surface.
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Evidence.Contracts
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: The protected CSharp runtime is bundled inside the AppSurface CLI tool and is not a standalone NuGet API.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 57
+    note: Internal Linux supervisor, worker, process ownership and retained artifact custody; consume only through the ordinary AppSurface CLI package.
   - project: Evidence/ForgeTrust.AppSurface.Evidence.Cli/ForgeTrust.AppSurface.Evidence.Cli.csproj
     release_guidance_variant: default
     classification: public
