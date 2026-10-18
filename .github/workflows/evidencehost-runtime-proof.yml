@@ -128,6 +128,8 @@ jobs:
             TestResults/coverage-merged/coverage.cobertura.xml
             TestResults/coverage-merged/coverage-gate.json
             TestResults/coverage-merged/patch-coverage*.json
+            TestResults/coverage-merged/coverage-patch-targets.json
+            TestResults/coverage-merged/coverage-patch-targets.md
             TestResults/coverage-merged/timings.json
             TestResults/coverage-merged/**/dotnet-test.log
             TestResults/coverage-merged/**/*.trx
