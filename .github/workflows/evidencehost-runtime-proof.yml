@@ -1,76 +1,107 @@
-name: EvidenceHost Linux runtime proof (candidate; no Trust acceptance)
-
-permissions:
-  contents: read
+name: EvidenceHost CSharp runtime cutover and coverage
 
 on:
+  push:
+    branches: [codex/issue779-checkpoint4-cutover-20261018]
   pull_request:
     branches: [main]
     paths:
       - 'Evidence/**'
-      - 'Cli/**/Evidence*'
-      - 'Cli/**/Coverage*'
-      - 'Cli/**/ForgeTrust.AppSurface.Cli*.csproj'
-      - 'Cli/**/packages.lock.json'
+      - 'Cli/**'
+      - 'Aspire/**'
+      - 'scripts/evidencehost-*'
       - 'tests/evidencehost-consumer/**'
-      - 'scripts/evidencehost-linux-launcher.py'
-      - 'scripts/verify-evidencehost-linux-runtime.sh'
+      - '.github/issue779-checkpoint*/**'
       - '.github/workflows/evidencehost-runtime-proof.yml'
+      - '.github/workflows/issue779-checkpoint*-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidencehost-csharp-cutover-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  linux-runtime-candidate:
-    name: Candidate proof — Observation only; no Trust acceptance
+  packaged-producer:
+    name: Packaged CSharp CLI producer and artifact custody
+    uses: ./.github/workflows/issue779-checkpoint2-producer.yml
+
+  application-consumers:
+    name: CSharp CLI and SDK application consumers
+    uses: ./.github/workflows/issue779-checkpoint3-application.yml
+
+  solution-coverage:
+    name: Unchanged solution and codecov patch gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
-      - name: Checkout candidate PR head
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          dotnet-version: 10.0.x
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+          dotnet-version: 10.0.401
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
         with:
           version: 11.1.3
-          run_install: false
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24
-
-      - name: Prepare pinned web assets required by the CLI build
+      - name: Bind source and verify retired runtime is absent
         run: |
           set -euo pipefail
+          umask 077
+          mkdir -m 0700 "$RUNNER_TEMP/checkpoint4-evidence"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json"
+          python3 -B .github/issue779-checkpoint4/verify-cutover.py
+          git rev-parse origin/main > "$RUNNER_TEMP/checkpoint4-evidence/comparison-base.txt"
+      - name: Restore the complete ordinary solution in locked mode
+        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode -p:EvidencePrivateQualification=None
+      - name: Build and verify repository web assets
+        run: |
           pnpm --dir Web install --frozen-lockfile
+          pnpm --dir Web run assets:typecheck
+          pnpm --dir Web run assets:test
           pnpm --dir Web run assets:build
-
-      - name: Run candidate Linux runtime proof (Observation only)
+          pnpm --dir Web run assets:verify
+      - name: Verify generated snippets and package index
+        run: |
+          dotnet run --project tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj -c Release --no-restore -- verify
+          dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj -c Release --no-restore -- verify
+      - name: Run the unchanged solution and patch coverage command
         env:
-          EVIDENCEHOST_PROOF_LABEL: candidate-no-trust-acceptance
-          EVIDENCEHOST_WORKFLOW_IDENTITY: ${{ github.workflow_ref }}
-          EVIDENCEHOST_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVIDENCEHOST_BASE_REVISION: ${{ github.event.pull_request.base.sha }}
-          EVIDENCEHOST_RUN_ID: ${{ github.run_id }}
-          EVIDENCEHOST_RUN_ATTEMPT: ${{ github.run_attempt }}
-          EVIDENCEHOST_OUTPUT_PARENT: ${{ runner.temp }}/evidencehost-runtime-proof
-        run: bash scripts/verify-evidencehost-linux-runtime.sh "$EVIDENCEHOST_OUTPUT_PARENT"
-
-      - name: Retain candidate JSON receipts and logs
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          BUILD_CONFIGURATION: Release
+          BUILD_NO_RESTORE: "true"
+          COVERAGE_PARALLELISM: "2"
+          APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
+        run: |
+          set -euo pipefail
+          ./scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
+      - name: Recheck source after all executions
+        if: always()
+        run: python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json" --verify
+      - name: Retain numerical reports and test diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: evidencehost-runtime-candidate-no-trust-${{ github.run_id }}-${{ github.run_attempt }}
+          name: issue779-checkpoint4-coverage-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/evidencehost-runtime-proof/*.json
-            ${{ runner.temp }}/evidencehost-runtime-proof/*.log
-            ${{ runner.temp }}/evidencehost-runtime-proof/**/*.json
-            ${{ runner.temp }}/evidencehost-runtime-proof/**/*.log
-          if-no-files-found: warn
-          retention-days: 7
+            ${{ runner.temp }}/checkpoint4-evidence
+            TestResults/coverage-merged/coverage.cobertura.xml
+            TestResults/coverage-merged/coverage-gate.json
+            TestResults/coverage-merged/patch-coverage*.json
+            TestResults/coverage-merged/timings.json
+            TestResults/coverage-merged/**/dotnet-test.log
+            TestResults/coverage-merged/**/*.trx
+          include-hidden-files: true
+          retention-days: 3
+          if-no-files-found: error

@@ -17,7 +17,7 @@ compatibility guidance, and readiness.
 
 The factory registration below describes the API shape for a future accepted resource lane. It currently
 fails with `ASEVD407` before factory invocation: no restricted Aspire child or resource capability map has
-been proved. A public resource-bearing profile also fails Observation admission with `ASEVD406`. The internal [compiled root-owned application path](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#observation-with-a-compiled-root-owned-application) additionally requires the actual authenticated v2 supervisor; public metadata and an armed-interface implementation cannot enable it. See the
+been enrolled in the production catalogue. Private compiled application controls are recorded in the [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md). A public resource-bearing profile also fails Observation admission with `ASEVD406`. The internal [compiled root-owned application path](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#observation-with-a-compiled-root-owned-application) additionally requires the actual authenticated v2 supervisor; public metadata and an armed-interface implementation cannot enable it. See the
 [EvidenceHost execution guide](../../start-here/evidencehost.md) for the dependency-free Observation candidate
 and the [migration guide](../../docs/evidence/evidencehost-migration.md) for rejected legacy calls. This example
 is not an executable quickstart for resource-backed work.
@@ -70,7 +70,7 @@ The factory returns inspectable sealed metadata. The host captures and validates
 
 Root stop/wait must establish physical exit of application and producer groups and completion of output pumps before local disposal or artifact collection. Local application disposal checks the lifecycle's joined pre-disposal phase; it adds no independent grace or timer. `OwnWorkStopped` is a final predicate that includes registered disposer tasks and must not be checked from inside one of those same tasks. Premature local disposal stays failed on retry. The [shared lifecycle contract](../ForgeTrust.AppSurface.Evidence.Contracts/README.md) describes stopping, cleanup and collection reserves. Startup failure follows that same stop/join path before disposal.
 
-Observation accepts only a protected dependency-free targeted profile and issues informational evidence. The registered verifier API and envelope-shaped values cannot enable Trusted runtime admission until a full protected consumer acceptance proof exists; current production context deliberately rejects Trusted with `ASEVD407`. The control-channel request alone grants no authority. The protected Linux launcher is the current candidate mechanism; full runtime acceptance is pending. macOS, Windows, direct in-process execution, and unrelated long-lived host processes are unsupported.
+Observation accepts only a protected dependency-free targeted profile and issues informational evidence. The registered verifier API and envelope-shaped values cannot enable Trusted runtime admission until a full protected consumer acceptance proof exists; current production context deliberately rejects Trusted with `ASEVD407`. The control-channel request alone grants no authority. The protected [C# supervisor](../ForgeTrust.AppSurface.Evidence.Supervision/README.md) now owns the runtime. CLI and SDK application checkpoints passed their recorded Linux revision; final [cutover and packaged-consumer acceptance](../../docs/evidence/issue779-csharp-runtime-cutover.md) remain separately tracked. macOS, Windows, direct in-process execution, and unrelated long-lived host processes are unsupported.
 
 ## Public extension points
 
@@ -82,7 +82,7 @@ Observation accepts only a protected dependency-free targeted profile and issues
 | `EvidenceHostRegistration` | Register each complete resource/producer declaration, optional deferred application factory, and verifier directly in code. Duplicate and ambient registration are rejected. |
 | `EvidenceHostOptions` | Retained for source compatibility; it cannot grant execution admission or change protected budgets. |
 
-For release scope, an accepted v1 envelope is represented as `ValidatedNotAttested`; that is intentionally weaker than independent artifact attestation and must be described honestly downstream. Runtime support is not available on a platform without the protected Linux launcher.
+For release scope, an accepted v1 envelope is represented as `ValidatedNotAttested`; that is intentionally weaker than independent artifact attestation and must be described honestly downstream. Runtime support requires the independently armed protected Linux C# supervisor; package restore alone supplies no authority.
 
 ## Pitfalls
 

@@ -62,3 +62,7 @@ reads through actual EOF within the original deadline; it never accepts coverage
 The [native cleanup guards](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-execution.md#quota-rejection-and-physical-cleanup)
 separately require physical process/group settlement, complete ledger drainage, sealed filesystem
 custody and strict account removal. The deliberate unsafe-workspace control must still quarantine.
+
+## Installed-tool consumer at checkpoint four
+
+The reusable [workflow](../workflows/issue779-checkpoint2-producer.yml) now obtains its ordinary image from a fresh [pack/install smoke check](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/packaging.md), rather than a developer publish directory. Its `tool_image` path is independently staged and audited by the unchanged C# owner. All seven actual producer/custody controls still run; only the report-mutation negative uses its separate nonpackable C2 image. The package dependency checks and fresh SDK compile/load do not replace those native results or establish Trusted admission.

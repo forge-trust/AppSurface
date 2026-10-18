@@ -1,6 +1,9 @@
 # Internal root Linux application lane
 
-[`evidencehost_linux_application.py`](../../scripts/evidencehost_linux_application.py) prepares the root half of the
+> **Historical fixture reference:** The Python runtime described here was retired at checkpoint four. Use the [C# runtime cutover](../../docs/evidence/issue779-csharp-runtime-cutover.md) for current ownership, execution and acceptance. Remaining broker/subject fixtures are protocol or preparation tests and grant no admission. Dated procedures below describe their original snapshots.
+
+
+[`evidencehost_linux_application.py`](../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) prepares the root half of the
 [v2 application protocol](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md#internal-restricted-application-protocol-v2-prerequisite).
 It is an internal source prerequisite. Production registrations are an **empty immutable tuple**; selection returns
 `ASEVD407`. Candidate audits, JSON, uploaded receipts and matching metadata cannot enroll or issue a lease.

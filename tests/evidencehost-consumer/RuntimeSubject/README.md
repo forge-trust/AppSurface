@@ -1,5 +1,8 @@
 # RuntimeSubject consumer fixture
 
+> **Historical fixture reference:** The Python runtime described here was retired at checkpoint four. Use the [C# runtime cutover](../../../docs/evidence/issue779-csharp-runtime-cutover.md) for current ownership, execution and acceptance. Remaining broker/subject fixtures are protocol or preparation tests and grant no admission. Dated procedures below describe their original snapshots.
+
+
 `RuntimeSubject.csproj` is a small VSTest/xUnit project used by the disposable Ubuntu 24.04
 EvidenceHost candidate workflow. The protected production CLI runs this project through its
 restricted coverage producer, collects Coverlet data, and emits the required Cobertura report.
@@ -12,7 +15,7 @@ output anchor, worker descriptor and socket, and worker environment and memory a
 to the subject. The test uses access/open probes only. It does not write to protected files or
 mutate host services, users, cgroups, or other infrastructure.
 
-Run it only through [`verify-evidencehost-linux-runtime.sh`](../../../scripts/verify-evidencehost-linux-runtime.sh)
+Run it only through [`verify-evidencehost-linux-runtime.sh`](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime)
 on the required disposable Ubuntu 24.04, systemd 255, cgroup-v2, x86_64 runner. The script also
 builds and runs the independent control-protocol and worker-lifecycle mechanism fixtures before
 launching the production CLI worker. Build and process steps have individual deadlines and fail
@@ -26,7 +29,7 @@ acceptance requires a separately reviewed protected workflow and an accepted con
 
 ### Protected runtime workspace
 
-The [runtime driver's workspace helpers](../runtime-proof.py) create a fresh
+The [runtime driver's workspace helpers](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) create a fresh
 `/run/appsurface-evidencehost-runtime-<32 lowercase hexadecimal UUID>` through a fixed root command.
 There is no caller-selected root path. The helper opens `/run` without following a link, requires
 its root ownership and absence of group/other write permissions, and exclusively creates the child;
@@ -49,7 +52,7 @@ sequence with mocked root ownership; a subsequent native run must establish actu
 
 ### Declared fixture projection
 
-The [runtime driver](../runtime-proof.py) projects an explicit six-file input set into its fresh
+The [runtime driver](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) projects an explicit six-file input set into its fresh
 `subject-source` directory: this fixture's `RuntimeSubject.csproj`, `Program.cs` and `packages.lock.json`,
 plus the repository-root `Directory.Build.props`, `Directory.Build.targets` and `Directory.Packages.props`.
 Every copied regular-file byte must match the original candidate source hash, within the aggregate
@@ -74,9 +77,9 @@ collects bounded artifacts from the protected root, checks the coverage bytes ag
 manifest metadata, and runs the published CLI's `evidence verify` command against the collected
 plan and manifest. That command recomputes structural bindings and re-resolves the policy;
 it grants no provenance or gate authority. The portable rejection regression checks are
-[`test_runtime_proof.py`](../test_runtime_proof.py).
+[`test_runtime_proof.py`](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime).
 
-The [launcher's subject-command pumps](../../../scripts/evidencehost-linux-launcher.py) separately
+The [launcher's subject-command pumps](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) separately
 acknowledge stdout and stderr only after actual binary EOF without a read/count/stop error. Each
 pump locks its EOF, failure and received-byte state; joining a terminated thread is insufficient.
 Before returning a command response or registering its results root, the broker requires both
@@ -84,12 +87,12 @@ pump acknowledgements and matches their received-byte sum to the command budget 
 increase. Retained prefixes may be truncated, but discarded bytes remain counted. A failed or
 unacknowledged pump permanently closes the lease, stops its owned units and denies owned-exit
 acknowledgement and artifact access; it cannot produce final successful output. Normal EOF after
-a quota stop retains the `ASEVD420` response. The [portable launcher controls](../test_linux_launcher.py)
+a quota stop retains the `ASEVD420` response. The [portable launcher controls](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime)
 exercise read exceptions in either pipe, short reads, prefix truncation and accounting mismatch.
 
 ## Provisional failure diagnostics
 
-The [root launcher](../../../scripts/evidencehost-linux-launcher.py) accepts the internal optional
+The [root launcher](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) accepts the internal optional
 `--diagnostic-directory` argument. It requires an existing absolute, non-symlink, root-owned directory
 with no group or other write permission. On failure it exclusively creates `launcher-failure.json`
 with no-follow semantics and mode `0600`; an occupied filename rejects before launch. Without the
@@ -102,7 +105,7 @@ For `worker-protocol-incomplete`, the record also snapshots the broker under its
 `broker_ready_seen`, `broker_wait_completed`, `broker_exited` and `broker_work_closed` are exact
 booleans; `broker_active_handlers` is an integer from 0 through 4096 and `broker_active_runs` from
 0 through 1. These observed flags locate a failed protocol checkpoint; they do not certify that
-a response was received or satisfy the [root completion contract](../../../scripts/evidencehost-linux-launcher.py).
+a response was received or satisfy the [root completion contract](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime).
 
 With the diagnostic option, only this launch's internally generated worker unit is queried through
 `/usr/bin/journalctl`. Collection and process reaping share a five-second deadline; only the first
@@ -148,7 +151,7 @@ Root account creation and cleanup use the fixed `/usr/sbin/useradd`, `/usr/sbin/
 A host command that cannot spawn records `host-command-start-failed`, its allowlisted operation
 and bounded numeric errno; no attempted argv, paths or operating-system exception text is published.
 
-The [runtime driver](../runtime-proof.py) requests this record for Observation only, reads a bounded
+The [runtime driver](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) requests this record for Observation only, reads a bounded
 protected file through root after failure, validates its closed schema, and publishes only those safe
 categories. A missing or invalid diagnostic cannot satisfy the proof. It reserves its driver-owned
 `0700` structural-verification directory before protecting the parent, then uses fresh `0600` local
@@ -156,7 +159,7 @@ plan/manifest copies after acknowledged exit. Neither diagnostics nor private co
 
 ### Private journal retention on a failed disposable run
 
-The [driver's `retain_private_worker_journal` helper](../runtime-proof.py) retains diagnostics after
+The [driver's `retain_private_worker_journal` helper](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) retains diagnostics after
 the root launcher exits unsuccessfully. Its isolated root command accepts only the generated `/run`
 workspace UUID and pinned device/inode; it accepts no arbitrary root path or file selector. It opens
 the fixed `launcher-worker-journal.log` through no-follow directory/file descriptors and requires a
@@ -176,5 +179,5 @@ The root-helper ownership overrides exist only for portable file controls; produ
 Retention is optional failure diagnosis. Missing/invalid journals, root-helper errors and local copy
 failures preserve the original launcher exit, safe cause, numeric status and checkpoint JSON. They
 never make execution pass. Success performs no private diagnostic collection. The [portable driver
-controls](../test_runtime_proof.py) verify fixed-name selection, file/link/mode/ownership/byte limits,
+controls](../../../docs/evidence/issue779-csharp-runtime-cutover.md#retired-runtime) verify fixed-name selection, file/link/mode/ownership/byte limits,
 identity drift, private destination permissions, canary isolation and original-failure preservation.

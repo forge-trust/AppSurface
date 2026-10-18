@@ -2,7 +2,7 @@
 
 The [restricted application owner](application-execution.md) extends the same C# run owner, output budget and aggregate shutdown used for [producer execution](producer-execution.md). The [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) records checkpoint validation separately from the final production cutover.
 
-> **Current integration status (2026-10-13):** The APIs and qualification procedures described below are now consolidated into the feature working tree from the reviewed source `1794a99f9f9857e923fdb2cc8cc81fe0bd5c8c38`. Preparation-time test counts and pending observations in individual sections describe their original handoffs. Current execution evidence and remaining requirements are tracked in the [migration plan](../../docs/plans/issue-779-csharp-supervision-migration.md) and [acceptance map](../../docs/evidence/issue779-acceptance-status.md). Ordinary builds select `None`; private qualification images cannot be packed, grant no Trusted capability, and do not complete the integrated native checkpoint.
+> **Current integration status (2026-10-18):** Checkpoints one (16 Linux controls), two (seven producer/custody controls), and three (seven application/CLI/SDK controls) passed their recorded native revisions. Runtime supervision now uses C# in the same executable; the Python runtime has been retired. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md) records the current packaging, consumer and unchanged coverage gates. Production application registration and Trusted acceptance remain closed. Dated preparation notes below are historical, not the current validation result.
 
 
 ## Account identity during teardown
@@ -56,11 +56,11 @@ It references Contracts and Planner; root composition does not load Coverage or 
 
 The [design](../../docs/designs/issue-779-csharp-supervision-core.md) and
 [checkpoint plan](../../docs/plans/issue-779-csharp-supervision-migration.md) define the migration.
-The current source composes a complete empty Observation run and connects it to the reserved supervisor
-entry as a guarded checkpoint candidate. The early worker entry retains real peer authentication.
+The current source composes empty, coverage and compiled-application Observations through the reserved supervisor
+entry. The early worker entry retains real peer authentication.
 Supported Linux root, protected launch inputs and actual single-use owner activation are checked before
-children start. Trusted OS bootstrap and all named Linux checkpoint controls remain unverified.
-No native checkpoint, Python cutover, or Trusted qualification follows from these types.
+children start. Actual Linux checkpoint results are linked in the [cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md).
+Types and portable tests alone do not establish native acceptance or Trusted qualification.
 
 ### N12: leader exit with an inherited output holder
 

@@ -50,7 +50,7 @@ The documentation record cannot authenticate facts or mint a lease. The protecte
 ## Provisional Linux mechanism preparation
 
 The [consumer fixture](../../tests/evidencehost-consumer/README.md) and
-[candidate workflow](../../.github/workflows/evidencehost-mechanism-proof.yml) now make the proposed mechanism
+[candidate workflow](issue779-csharp-runtime-cutover.md#retired-runtime) now make the proposed mechanism
 reviewable. PID 1 owns transient services with a deadline armed before callbacks, control-group termination,
 and a bounded final kill. Separate non-login accounts deny subject access to simulated protected tooling,
 worker state and output. Root owns tooling; the worker group has read access. The allocation probe tests

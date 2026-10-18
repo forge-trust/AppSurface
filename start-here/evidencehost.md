@@ -6,15 +6,14 @@ It is not a replacement for a test framework, coverage collector, GitHub Actions
 
 ## Current support status
 
-The requested runtime direction is a [C# supervision core](../docs/designs/issue-779-csharp-supervision-core.md), with supervisor and worker roles in the same protected AppSurface executable. The [migration plan](../docs/plans/issue-779-csharp-supervision-migration.md) starts with a small native worker proof. This is a design change; current execution support remains as described below.
+The runtime uses the [C# supervision core](../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md), with supervisor and worker roles in the same protected AppSurface executable. The legacy Python runtime is retired; Python remains only in repository preparation and test observation. The [cutover reference](../docs/evidence/issue779-csharp-runtime-cutover.md) distinguishes measured Linux checkpoints from packaged-consumer, coverage and Trusted release acceptance.
 
 The supported user workflow in this checkout is **planning and structural verification**. Trusted PR and release
 execution is not admitted on any provider or platform until the complete consumer and CI proofs are accepted.
-The Linux x86_64 systemd/cgroup mechanism was observed in CI on October 2, 2026, but that run did not validate
-the updated production broker or its complete consumer integration. Windows and macOS have no accepted worker
-mechanism. The restricted CLI coverage adapter is implemented, including broker-retained report collection and
-protected ReportGenerator execution, but the updated production broker and complete consumer path have not been
-validated in CI. The Trusted gate proof remains closed; do not use `appsurface evidence run` as an operational
+The Linux x86_64 worker, producer/custody, and application mechanisms passed their recorded C# checkpoints,
+including both CLI and SDK callers. Packaged-consumer and final repository coverage results are tracked
+separately in the [cutover record](../docs/evidence/issue779-csharp-runtime-cutover.md).
+Windows and macOS have no accepted native worker mechanism. The Trusted gate proof remains closed; do not use `appsurface evidence run` as an operational
 coverage or release gate.
 
 `doctor` reports planning prerequisites only and leaves protected execution facts `unverified`. `explain` resolves

@@ -16,7 +16,7 @@ This PR references #779 without closing it.
 2. Report protected execution facts as `unverified` in planning doctor for every profile and CI flag.
    Structural planning remains available without running resources/producers or creating a manifest.
 3. Submit the provisional Linux allocation and independent-supervision fixtures to the
-   [candidate workflow](../../.github/workflows/evidencehost-mechanism-proof.yml). Capture immutable
+   [candidate workflow](../evidence/issue779-csharp-runtime-cutover.md#retired-runtime). Capture immutable
    run/revision/artifact identifiers from an actual Ubuntu run before selecting the public provider seam.
 4. Resolve the release-route visual drift found during coverage diagnosis. The initial five-snapshot
    repair is superseded by the newer baselines merged from `main`; preserve its current release content

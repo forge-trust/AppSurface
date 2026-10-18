@@ -3,6 +3,7 @@ name: Issue 779 checkpoint 3 native Aspire application
 on:
   push:
     branches: [codex/issue779-checkpoint3-application-20261017]
+  workflow_call:
 
 permissions:
   contents: read

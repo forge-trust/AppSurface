@@ -549,7 +549,7 @@ that resolves a local namespace other than `Development`, `Local`, or `Dev` must
 
 ### `appsurface evidence`
 
-Use EvidenceHost to plan changed-risk evidence, explain selected obligations and inspect structural results. Start with the [EvidenceHost guide](../../start-here/evidencehost.md) and [migration reference](../../docs/evidence/evidencehost-migration.md). Trusted PR and release admission remains **closed on every provider and platform** until full consumer and CI proof is accepted. Linux x86_64 systemd/cgroup mechanism behavior was observed in CI on October 2, 2026, but the updated production broker and complete consumer integration were not validated there. Windows and macOS have no accepted worker mechanism. The [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) tracks the proof boundary. Use the existing [`coverage gate`](#appsurface-coverage-gate) for numeric coverage enforcement.
+Use EvidenceHost to plan changed-risk evidence, explain selected obligations and inspect structural results. Start with the [EvidenceHost guide](../../start-here/evidencehost.md) and [migration reference](../../docs/evidence/evidencehost-migration.md). Trusted PR and release admission remains **closed on every provider and platform** until full consumer and CI proof is accepted. The C# Linux worker, producer/custody and application checkpoints passed their recorded CI revisions. Final cutover, packaged consumers and full coverage are tracked in the [current acceptance record](../../docs/evidence/issue779-csharp-runtime-cutover.md). Windows and macOS have no accepted worker mechanism. The [consumer acceptance record](../../docs/evidence/issue779-consumer-acceptance.md) tracks the proof boundary. Use the existing [`coverage gate`](#appsurface-coverage-gate) for numeric coverage enforcement.
 
 ```bash
 appsurface evidence init --sample
@@ -567,17 +567,17 @@ The restricted coverage adapter launches the declared subject test command throu
 
 The v1 workflow has no outbound telemetry, no automatic assembly/test discovery, no Docker sandbox, no independent artifact attestation, and no semantic classifier that silently labels arbitrary getters or constructors low value. Keep generated-code exclusions and the coverage thresholds in the reviewed Evidence policy explicit. See the [EvidenceHost cookbook](../../guides/evidencehost-cookbook.md) for policy, E2E, release-envelope, and incomplete-profile patterns.
 
-#### Protected process roles during the C# migration
+#### Protected C# process roles
 
 The same protected executable supplies `evidence worker --control <socket>` and
 `evidence supervise --request <file>` through an early dispatcher before ordinary command discovery,
 service configuration or extension callbacks. These internal roles use exact bounded arguments and
-fixed help. The worker retains its actual root-peer authentication; supervisor execution remains closed
-while protected bootstrap and the native server are implemented. Normal CLI commands retain their
+fixed help. The worker authenticates the actual root peer; the supervisor implements guarded Linux
+coverage and compiled-application execution, retained artifact custody and strict cleanup. Normal CLI commands retain their
 existing configuration path. See the [C# supervision core](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md)
 and [migration checkpoints](../../docs/plans/issue-779-csharp-supervision-migration.md). Early managed
 dispatch does not clear runtime hooks that already executed during CLR startup; the protected launcher
-must sanitize startup before .NET starts.
+must sanitize startup before .NET starts. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md) records runtime retirement, packaged consumers and acceptance limits.
 
 ### `appsurface coverage run`
 

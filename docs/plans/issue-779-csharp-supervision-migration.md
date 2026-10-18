@@ -1,7 +1,7 @@
 # Plan: migrate EvidenceHost supervision to C#
 
 - Date: 2026-10-06
-- Status: Checkpoint 3 complete on source `4ce55f54`; checkpoint 4 cutover and full verification remain.
+- Status: Checkpoint 3 complete on source `4ce55f54`; checkpoint 4 runtime cutover implemented, packaged-consumer and unchanged full coverage validation in progress.
 - Design: [C# supervision core](../designs/issue-779-csharp-supervision-core.md).
 - Requirements retained: [#779 trust boundary](../designs/issue-779-evidencehost-trust-boundary.md), [57-group test plan](issue-779-evidencehost-test-plan.md), and [consumer acceptance](../evidence/issue779-consumer-acceptance.md).
 
@@ -143,6 +143,8 @@ coverage nor Trusted eligibility; the complete cutover and verification work bel
 **Exit gate:** real application startup/readiness and denied tool/output probes pass under actual OS identities; failed readiness, stalled factory, cancellation, stuck descendant, and disposal failure finish with the required absence of claims/publication. No uninstrumented native probe is credited as product branch coverage.
 
 ## Checkpoint 4: cutover and full verification
+
+The [cutover record](../evidence/issue779-csharp-runtime-cutover.md) links the current same-product workflow, retired runtime inventory, package consumer checks and claim limits. Source preparation is not a gate pass.
 
 ### Work
 
