@@ -67,6 +67,7 @@
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj" />
     <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj" />
+    <Project Path="Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests.csproj" />
   </Folder>
   <Folder Name="/Durable/">
     <Project Path="Durable/ForgeTrust.AppSurface.Durable.Testing/ForgeTrust.AppSurface.Durable.Testing.csproj" />

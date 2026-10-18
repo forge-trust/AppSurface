@@ -41,6 +41,7 @@ jobs:
 
   solution-coverage:
     name: Unchanged solution and codecov patch gates
+    needs: application-consumers
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -70,7 +71,34 @@ jobs:
           mkdir -m 0700 "$RUNNER_TEMP/checkpoint4-evidence"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json"
           python3 -B .github/issue779-checkpoint4/verify-cutover.py
+          python3 -B .github/issue779-checkpoint4/test_cutover.py
           git rev-parse origin/main > "$RUNNER_TEMP/checkpoint4-evidence/comparison-base.txt"
+      - name: Download current native measurement from the successful application lane
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint4-native-input
+      - name: Stage only fixed source-bound native measurement inputs
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p TestResults/issue779-native-measurement
+          cp "$RUNNER_TEMP/checkpoint4-native-input/measurement-binding.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/native-supervision.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
+          python3 -B - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          root = Path('TestResults/issue779-native-measurement').resolve()
+          settings = ET.Element('RunSettings')
+          collector = ET.SubElement(ET.SubElement(ET.SubElement(settings, 'DataCollectionRunSettings'), 'DataCollectors'), 'DataCollector', friendlyName='XPlat Code Coverage')
+          configuration = ET.SubElement(collector, 'Configuration')
+          ET.SubElement(configuration, 'MergeWith').text = str(root / 'native-supervision.json')
+          ET.SubElement(configuration, 'Format').text = 'cobertura'
+          ET.ElementTree(settings).write(root / 'native.runsettings', encoding='utf-8', xml_declaration=True)
+          PY
+          printf 'EVIDENCEHOST_NATIVE_MEASUREMENT=1\n' >> "$GITHUB_ENV"
       - name: Restore the complete ordinary solution in locked mode
         run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode -p:EvidencePrivateQualification=None
       - name: Build and verify repository web assets
@@ -102,7 +130,7 @@ jobs:
             --dotnet "$(readlink -f "$(command -v dotnet)")" \
             --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
             --command-timeout-seconds 4200 -- \
-            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 \
+            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 \
             /usr/bin/bash scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
       - name: Recheck source after all executions
         if: always()

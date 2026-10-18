@@ -40,7 +40,7 @@ Pure controls remain pure; only source-bound native runs establish actual system
 | Complete solution and patch coverage | Required at checkpoint four. | Exact [unchanged gate](issue779-coverage-gate.md); fixture coverage is not repository coverage. |
 | Production Trusted/platform acceptance | Closed. | Production catalogue and accepted-proof registry remain empty; no Windows/macOS native execution support is asserted. |
 
-The [runtime workflow](../../.github/workflows/evidencehost-runtime-proof.yml) calls the reusable [producer](../../.github/workflows/issue779-checkpoint2-producer.yml) and [application](../../.github/workflows/issue779-checkpoint3-application.yml) workflows on the same committed revision and runs the unchanged full coverage command independently. The ordinary producer image comes from a freshly packed and installed NuGet tool; the artifact-mutation image remains explicitly private and nonpackable. Application registration images are also private and nonpackable. Source captures before/after each lane bind committed bytes and modes. Neither a workflow definition nor a passing metadata assertion establishes execution.
+The [runtime workflow](../../.github/workflows/evidencehost-runtime-proof.yml) calls the reusable [producer](../../.github/workflows/issue779-checkpoint2-producer.yml) and [application](../../.github/workflows/issue779-checkpoint3-application.yml) workflows on the same committed revision and runs the unchanged full coverage command after the application lane supplies its current, source-bound native measurement. The ordinary producer image comes from a freshly packed and installed NuGet tool; the artifact-mutation image remains explicitly private and nonpackable. Application registration images are also private and nonpackable. Source captures before/after each lane bind committed bytes and modes. Neither a workflow definition nor a passing metadata assertion establishes execution.
 
 ## Checkpoint-four measured attempts
 
@@ -55,3 +55,27 @@ The subsequent full run at `d950f6e5` reached test execution but ended `ASCOV120
 Successful observations remain informational with no gate eligibility. Runtime cutover does not populate the compiled production application table, accept a consumer proof, grant secrets, or enable Trusted PR/release execution. Follow the [consumer acceptance contract](issue779-consumer-acceptance.md) and [protected gate reference](evidencehost-migration.md#protected-gate-and-artifacts) before changing that boundary.
 
 An unsuccessful join, deadline, output ledger, retained file, unmount or account close must keep the original failure. Do not publish a success record or reuse quarantined output or identities. A retry requires a fresh generation after physical containment is independently confirmed. Diagnostic retention cannot upgrade a failed run.
+
+## Measuring the native C# owner
+
+The [native measurement project](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md)
+consumes actual Coverlet hit data from the guarded root image. The application workflow builds the
+same Release configuration as the solution lane, instruments only its private CLI Supervision image
+with pinned Coverlet Console 10.0.1, and runs the original seven controls. Deployment audit sees the
+actual instrumented bytes. The SDK image stays uninstrumented. No profiler, runtime hook, additional
+write path or unit permission is granted for measurement; isolated worker temporary files and killed
+processes are not presumed to have contributed hits.
+
+The solution lane downloads only its successful application's current-run artifact, stages the four
+fixed source/measurement/receipt files, and configures the pinned collector's supported `MergeWith`
+setting. The Linux test rejects absent files, source or digest mismatch, incomplete controls, missing
+physical settlement and a report with no guarded root hits. This is measurement evidence, not runtime
+authority or an accepted consumer proof. The existing coverage script, exclusions, numerical thresholds,
+codecov semantics and default `origin/main` comparison are unchanged. A successful test or collector
+merge alone does not establish a numerical gate pass.
+
+At [source 3396c580](https://github.com/forge-trust/AppSurface/actions/runs/39141240670), all 55 solution
+test projects passed, but final merge stopped at `ASCOV114`: the fixture environment selected an empty
+NuGet cache instead of the cache restored by the workflow. The corrected child command explicitly
+passes that restored cache to the ordinary coverage wrapper. Its isolated protected producer still
+uses its separately staged SDK/package inputs. No numerical gate result is claimed for that attempt.

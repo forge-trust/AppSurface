@@ -1719,3 +1719,11 @@ for the required fresh native evidence.
 ## Declared coverage execution
 
 The internal [coverage execution reference](coverage-execution.md) describes the closed producer command, audited SDK/package inputs, shared stream accounting, retained report transport and final root custody. These components are checkpoint-two work; source validation alone does not establish genuine Linux coverage, accepted consumer proof or Trusted eligibility.
+
+## Native coverage measurement
+
+The [native measurement integration](../ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md)
+records actual guarded root execution from the same-source Linux application controls and imports
+those hits through the ordinary collector's supported merge. It supplies no runtime authority, private
+transport or production registration. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md#measuring-the-native-c-owner)
+describes the source/digest checks, isolated-process limits and unchanged complete coverage gate.

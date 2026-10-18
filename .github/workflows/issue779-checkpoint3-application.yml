@@ -128,7 +128,7 @@ jobs:
           tool="$RUNNER_TEMP/checkpoint3-tool"
           mkdir -m 0700 "$tool"
           timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3-restore.log" 2>&1
-          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$tool" > "$CHECKPOINT3_EVIDENCE/cli-c3-publish.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$tool" > "$CHECKPOINT3_EVIDENCE/cli-c3-publish.log" 2>&1
           mkdir -p "$tool/reportgenerator/net10.0"
           cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$tool/reportgenerator/net10.0/"
           test -s "$tool/ForgeTrust.AppSurface.Cli.dll"
@@ -141,7 +141,7 @@ jobs:
           sdk_tool="$RUNNER_TEMP/checkpoint3-sdk-tool"
           mkdir -m 0700 "$sdk_tool"
           timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-restore.log" 2>&1
-          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
           mkdir -p "$sdk_tool/reportgenerator/net10.0"
           cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$sdk_tool/reportgenerator/net10.0/"
           test -s "$sdk_tool/ForgeTrust.AppSurface.Cli.dll"
@@ -187,21 +187,55 @@ jobs:
           CHECKPOINT3_SDK_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"
           printf 'CHECKPOINT3_SDK_ROOT=%s\n' "$CHECKPOINT3_SDK_ROOT" >> "$GITHUB_ENV"
 
-      - name: Run the seven native C3 application controls under the root CSharp supervisor
+      - name: Install the pinned native measurement tool and bind original module bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint3-coverlet" > "$CHECKPOINT3_EVIDENCE/coverlet-install.log" 2>&1
+          console="$RUNNER_TEMP/checkpoint3-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
+          test -s "$console"
+          printf 'CHECKPOINT3_COVERLET=%s\n' "$console" >> "$GITHUB_ENV"
+          python3 -B - "$CHECKPOINT3_TOOL" "$CHECKPOINT3_EVIDENCE/original-supervision.json" "$GITHUB_SHA" <<'PY'
+          import hashlib, json, pathlib, sys
+          tool = pathlib.Path(sys.argv[1])
+          names = ('ForgeTrust.AppSurface.Evidence.Supervision.dll', 'ForgeTrust.AppSurface.Evidence.Supervision.pdb')
+          value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}}
+          pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
+          PY
+
+      - name: Run the seven native C3 application controls with source-bound supervisor measurement
         shell: bash
         run: |
           set -euo pipefail
           ulimit -c 0
-          timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint3/run-native.py \
-            --tool "$CHECKPOINT3_TOOL" \
-            --sdk-tool "$CHECKPOINT3_SDK_TOOL" \
-            --runtime "$CHECKPOINT3_SDK_ROOT" \
-            --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint3/subject" \
-            --prepared "$CHECKPOINT3_PREPARED/payload-preparation.json" \
-            --digests "$CHECKPOINT3_EVIDENCE/registration-digests.json" \
-            --output "$CHECKPOINT3_EVIDENCE/native" \
-            --source "$GITHUB_SHA" \
-            --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
+          target_args="$(python3 -B - "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" <<'PY'
+          import json, sys
+          evidence, tool, sdk_tool, runtime, prepared, workspace, source = sys.argv[1:]
+          args = ['-B', '.github/issue779-checkpoint4/run-measured-application.py', '--binding', evidence + '/instrumentation.json', '--original', evidence + '/original-supervision.json', '--', '--tool', tool, '--sdk-tool', sdk_tool, '--runtime', runtime, '--subject', workspace + '/.github/issue779-checkpoint3/subject', '--prepared', prepared + '/payload-preparation.json', '--digests', evidence + '/registration-digests.json', '--output', evidence + '/native', '--source', source, '--base', '416b30919e6c4d03b634d9d3fe558884b02f0b91']
+          assert all(not any(c in a for c in '\n\r"\\') for a in args)
+          print(' '.join('"' + a + '"' for a in args))
+          PY
+          )"
+          # Measurement runs outside the protected process; its target still arms the exact original OS owner.
+          # /tmp is the ordinary temporary root. Worker PrivateTmp stays isolated; no child hit is presumed visible.
+          timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
+            --target /usr/bin/python3 --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision" > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY'
+          import hashlib, json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          binding = json.loads((root / 'instrumentation.json').read_bytes())
+          files = {'coverage': 'native-supervision.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json'}
+          for key, name in files.items():
+              path = root / name
+              assert 0 < path.stat().st_size <= 8 * 1024 * 1024
+              binding[key + '_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
+          native = json.loads((root / files['native_receipt']).read_bytes())
+          assert native['exit'] == 0 and len(native['cases']) == 7 and all(c['passed'] for c in native['cases'])
+          (root / 'measurement-binding.json').write_text(json.dumps(binding, sort_keys=True))
+          PY
 
       - name: Recheck complete source after preparation, builds, and native execution
         if: always()
