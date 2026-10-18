@@ -292,9 +292,8 @@ public sealed class LinuxKernelIdentityNativeTests
             catch (Exception error) { failure = error; }
             finally
             {
-                if (!process.HasExited)
-                    try { process.Kill(entireProcessTree: true); }
-                    catch (Exception error) { failure ??= error; }
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (Exception error) { failure ??= error; }
                 try { await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false); }
                 catch (Exception error) { failure ??= error; }
                 if (!stdout.IsCompleted || !stderr.IsCompleted)
