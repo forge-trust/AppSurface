@@ -237,6 +237,59 @@ jobs:
           (root / 'measurement-binding.json').write_text(json.dumps(binding, sort_keys=True))
           PY
 
+      - name: Measure genuine root Linux retained-file controls with the pinned collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These tests call the existing mandatory openat2 factories on their own fresh /run trees.
+          # They grant no owner, account, worker admission or accepted consumer proof.
+          test_project=Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj
+          timeout --signal=KILL 180 dotnet build "$test_project" --no-restore -c Release -warnaserror -p:EvidencePrivateQualification=C3 -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:UseSharedCompilation=false > "$CHECKPOINT3_EVIDENCE/root-file-build.log" 2>&1
+          python3 -B - "$CHECKPOINT3_EVIDENCE/original-supervision.json" <<'PY_MODULE'
+          import hashlib, json, pathlib, sys
+          original = json.loads(pathlib.Path(sys.argv[1]).read_bytes())
+          directory = pathlib.Path('Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0')
+          for name, digest in original['files'].items():
+              assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == digest
+          PY_MODULE
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-file-tests" <<'PY_ARGS'
+          import json, sys
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxProtectedNodeNativeTests|FullyQualifiedName~LinuxRetainedReportNativeTests', '--logger:trx;LogFileName=root-files.trx', '--ResultsDirectory:' + sys.argv[2]]
+          assert all(not any(c in value for c in '\n\r"\\') for value in values)
+          print(' '.join('"' + value + '"' for value in values))
+          PY_ARGS
+          )"
+          # Same standard collector, real report merge: never synthesize hits or recover private worker files.
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$test_image" \
+            --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --merge-with "$CHECKPOINT3_EVIDENCE/native-supervision.json" \
+            --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision-combined" > "$CHECKPOINT3_EVIDENCE/root-file-driver.log" 2>&1
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY_BIND'
+          import hashlib, json, pathlib, sys, xml.etree.ElementTree as ET
+          root = pathlib.Path(sys.argv[1])
+          trx = root / 'root-file-tests/root-files.trx'
+          document = ET.parse(trx)
+          counters = document.find('.//{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}Counters').attrib
+          assert int(counters['executed']) > 0 and counters['executed'] == counters['passed']
+          assert all(int(counters.get(name, '0')) == 0 for name in ('failed', 'error', 'notExecuted', 'warning'))
+          results = document.findall('.//{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}UnitTestResult')
+          assert len(results) == int(counters['executed']) and all(row.attrib['outcome'] == 'Passed' for row in results)
+          expected = ('LinuxProtectedNodeNativeTests', 'LinuxRetainedReportNativeTests')
+          assert all(any(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in results) for name in expected)
+          binding_path = root / 'measurement-binding.json'
+          binding = json.loads(binding_path.read_bytes())
+          binding['root_file_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': int(counters['executed']), 'passed': int(counters['passed']), 'native_acceptance': False}
+          for suffix in ('json', 'cobertura.xml'):
+              combined = root / ('native-supervision-combined.' + suffix)
+              assert 0 < combined.stat().st_size <= 8 * 1024 * 1024
+              combined.replace(root / ('native-supervision.' + suffix))
+          binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
+          binding_path.write_text(json.dumps(binding, sort_keys=True))
+          PY_BIND
+
       - name: Recheck complete source after preparation, builds, and native execution
         if: always()
         shell: bash

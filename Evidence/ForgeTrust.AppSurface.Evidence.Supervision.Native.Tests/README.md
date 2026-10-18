@@ -8,18 +8,19 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 `NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and an actually changed supervision assembly hash, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero hits in `LinuxEmptyObservationExecution.cs`.
 
-`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all four files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
+`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all five files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
 Run the test as part of the complete [solution coverage gate](../../scripts/coverage-solution.sh) in the prepared runtime workflow. The project targets `net10.0` and uses the centrally pinned `coverlet.collector` 10.0.1 as a private test dependency. Its Linux-only `RunSettingsFilePath` is enabled by the same `EVIDENCEHOST_NATIVE_MEASUREMENT=1` property. A local invocation without prepared inputs is expected to skip; setting the flag manually selects the test and therefore requires the complete prepared input set and runsettings.
 
 ## Prepared inputs and merge settings
 
-The runtime workflow downloads the current application-lane artifact and copies exactly these four files into `TestResults/issue779-native-measurement`:
+The runtime workflow downloads the current application-lane artifact and copies exactly these five files into `TestResults/issue779-native-measurement`:
 
 | File | Meaning |
 | --- | --- |
-| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented supervision module hashes, and hashes of the other three inputs. |
+| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented supervision module hashes, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
+| `root-files.trx` | Hash-bound current-run passing root filesystem controls for both expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 
@@ -50,3 +51,25 @@ Coverage describes only code actually reached by the measured process. It proves
 The full gate remains the existing [`scripts/coverage-solution.sh`](../../scripts/coverage-solution.sh) command. It merges this native report through the standard collector and evaluates the same aggregate thresholds of 95% lines and 85% branches, plus the configured patch thresholds of 95% lines and 85% branches in Codecov patch-line mode. The gate's default 0.5 percentage-point tolerance applies, and the default patch comparison base is `origin/main` when no explicit base is supplied. This sidecar does not report that the gate has passed; the aggregate and patch reports from an executed full gate determine that result.
 
 The private fixture registrations are not production application-table entries. The production table remains empty, and the native receipt records `trusted_eligibility: false`. Passing measurement checks is neither production acceptance nor a Trusted proof. [Run 39146333953](https://github.com/forge-trust/AppSurface/actions/runs/39146333953) completed all seven instrumented Linux application controls on source `771d0538347998bdbcff0257fe5089c350ca68bc`. The [cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md) binds its artifact digest and complete source verification. Its separate numerical full-gate result was still pending when this observation was recorded; later changes require fresh measurements.
+
+## Root filesystem measurement
+
+The application workflow additionally builds the ordinary root filesystem control
+classes with the same C3 project graph, compiler and Release configuration. Before
+instrumentation it requires the test image's Supervision DLL/PDB hashes to match
+the native application's original module hashes. The pinned Coverlet Console runs
+only `LinuxProtectedNodeNativeTests` and `LinuxRetainedReportNativeTests` as actual
+Linux x64 root on their own fresh `/run` trees. These tests exercise existing
+mandatory `openat2`, retained inode/name checks, bounded reads and real file
+mutation rejection; they create no supervisor, process lease or accepted proof.
+
+The same pinned collector uses its supported `--merge-with` report setting to add
+those actual hits to the source-bound application report. No raw worker hit file
+is read or reconstructed. The workflow binds the real `root-files.trx` SHA-256 and
+requires positive executed/passed counts with zero failed or skipped cases before
+publishing the combined report. [`RootFilesystemMeasurement`](RootFilesystemMeasurement.cs)
+checks that bound TRX again in the solution lane, including both expected test
+classes. Its [malformed-data controls](RootFilesystemMeasurementTests.cs) use
+labelled synthetic TRX solely to test validation and provide no execution credit.
+The standard solution command, coverage thresholds, exclusions and patch
+comparison remain unchanged.

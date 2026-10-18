@@ -39,6 +39,8 @@ public sealed class NativeMeasurementTests
         var source = Read(directory, "source.json");
         var native = Read(directory, "native-receipt.json");
         var coverage = Read(directory, "native-supervision.json");
+        RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"),
+            Read(directory, "root-files.trx"));
         Validate(binding.RootElement, head.Trim(), source, native, coverage);
     }
 

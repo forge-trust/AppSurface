@@ -66,7 +66,7 @@ actual instrumented bytes. The SDK image stays uninstrumented. No profiler, runt
 write path or unit permission is granted for measurement; isolated worker temporary files and killed
 processes are not presumed to have contributed hits.
 
-The solution lane downloads only its successful application's current-run artifact, stages the four
+The solution lane downloads only its successful application's current-run artifact, stages the five
 fixed source/measurement/receipt files, and configures the pinned collector's supported `MergeWith`
 setting. The Linux test rejects absent files, source or digest mismatch, incomplete controls, missing
 physical settlement and a report with no guarded root hits. The regular [PR/main build](../../.github/workflows/build.yml) calls the same reusable consumer
@@ -156,3 +156,31 @@ now uses half of the existing stopping reserve for cooperative observations and 
 forces the same selected group under the original cleanup token. Its 52 focused procedure/unit
 controls passed locally; a new native seven-control run is required. No previous failure is upgraded
 by the source correction or the fixture's later containment.
+
+The measurement lane also runs [root retained-file controls](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#root-filesystem-measurement)
+through the existing mandatory Linux factories and standard pinned collector. The extra report is
+merged using Coverlet's supported report merge; no raw private-worker hit file is reconstructed.
+The image hashes and zero-skip root TRX are required before that input can reach the unchanged gate.
+This source preparation is not a measured coverage gain or a new native acceptance result.
+
+### Current numerical gate and remaining work
+
+The unchanged gate did reach numerical evaluation in
+[run 39150305318](https://github.com/forge-trust/AppSurface/actions/runs/39150305318).
+Aggregate coverage passed at 132,557/139,306 lines (95.1553%) and 60,113/69,949
+branches (85.9383%). Patch coverage failed: 13,016/16,264 fully covered changed
+lines (80.0295%) and 20,102/27,416 branch outcomes (73.3221%). The configured
+95%/85% thresholds and 0.5 percentage-point tolerance were unchanged. This is a
+failed gate, not permission to publish a completed checkpoint. The current
+source still needs a fresh passing solution and patch result.
+
+[Run 39153423641](https://github.com/forge-trust/AppSurface/actions/runs/39153423641)
+on `5608180be49d52d08d7aec4e25024bae3fa9e51e` passed all seven producer/artifact
+controls, including ignored cancellation after the stop correction. Its application
+lane passed six controls, then the disposal control's observer raised
+`JSONDecodeError` while polling the newly created descriptor; neither owner output
+stream had bytes. The artifact does not establish an application failure cause.
+Both artifacts' complete 3,239-file source captures matched Git blobs, SHA-256
+values and modes. The [observer correction](../../.github/issue779-checkpoint3/README.md#descriptor-publication-observation)
+waits for the existing descriptor seal; 12 portable controls pass, but the complete
+native matrix must run again. The numerical gate job for that attempt was skipped.
