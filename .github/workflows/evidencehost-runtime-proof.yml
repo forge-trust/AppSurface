@@ -67,6 +67,7 @@ jobs:
           mkdir -p TestResults/issue779-native-measurement
           cp "$RUNNER_TEMP/checkpoint4-native-input/measurement-binding.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/native-supervision.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/native-sdk.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/root-file-tests/root-files.trx" TestResults/issue779-native-measurement/

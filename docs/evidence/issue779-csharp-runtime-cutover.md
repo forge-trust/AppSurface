@@ -66,7 +66,7 @@ instrumented bytes. The [private C3 measurement fixture](../../.github/issue779-
 retains the authenticated worker's private temporary directory and copies genuine hit bytes unchanged after
 original normal exit. Coverlet's own tracker and reader perform all accumulation. The fixture is compiled
 out of ordinary images. Worker isolation, writable paths, capabilities, limits and deadlines remain unchanged.
-The SDK image stays uninstrumented, and killed-process or SDK-worker hits are not presumed.
+The initial measurement left the SDK image uninstrumented, and killed-process or SDK-worker hits were not presumed. The current [dual-image measurement preparation](../../.github/issue779-checkpoint4/measurement/README.md) adds a separate pinned SDK collector and source-bound report; it requires its own fresh Linux verification before any SDK counters can be credited.
 
 The solution lane downloads only its successful application's current-run artifact, stages the five
 fixed source/measurement/receipt files, and configures the pinned collector's supported `MergeWith`

@@ -41,9 +41,10 @@ public sealed class NativeMeasurementTests
         var source = Read(directory, "source.json");
         var native = Read(directory, "native-receipt.json");
         var coverage = Read(directory, "native-supervision.json", 32L * 1024 * 1024);
+        var sdkCoverage = Read(directory, "native-sdk.json", 32L * 1024 * 1024);
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"),
             Read(directory, "root-files.trx"));
-        Validate(binding.RootElement, head.Trim(), source, native, coverage);
+        Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
     }
 
     private static byte[] Read(string directory, string name, long maximum = 8L * 1024 * 1024)
@@ -58,23 +59,24 @@ public sealed class NativeMeasurementTests
         return data;
     }
 
-    private static void Validate(JsonElement binding, string head, byte[] source, byte[] native, byte[] coverage)
+    private static void Validate(JsonElement binding, string head, byte[] source, byte[] native, byte[] coverage, byte[] sdkCoverage)
     {
         Assert.Equal("issue779-native-instrumentation-v1", binding.GetProperty("schema").GetString());
         Assert.Equal(head, binding.GetProperty("source").GetString());
         Assert.Equal("coverlet.console/10.0.1", binding.GetProperty("collector").GetString());
-        foreach (var item in new[] { ("source_capture", source), ("native_receipt", native), ("coverage", coverage) })
+        foreach (var item in new[] { ("source_capture", source), ("native_receipt", native), ("coverage", coverage), ("sdk_coverage", sdkCoverage) })
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(item.Item2)), binding.GetProperty(item.Item1 + "_sha256").GetString());
+        foreach (var prefix in new[] { string.Empty, "sdk_" })
         foreach (var name in Modules)
         {
-            var original = binding.GetProperty("original").GetProperty(name).GetString();
-            var instrumented = binding.GetProperty("instrumented").GetProperty(name).GetString();
+            var original = binding.GetProperty(prefix + "original").GetProperty(name).GetString();
+            var instrumented = binding.GetProperty(prefix + "instrumented").GetProperty(name).GetString();
             Assert.Matches("^[0-9a-f]{64}$", original!);
             Assert.Matches("^[0-9a-f]{64}$", instrumented!);
             Assert.NotEqual(original, instrumented);
             var pdb = Path.ChangeExtension(name, ".pdb");
-            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty("original").GetProperty(pdb).GetString()!);
-            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty("instrumented").GetProperty(pdb).GetString()!);
+            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "original").GetProperty(pdb).GetString()!);
+            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "instrumented").GetProperty(pdb).GetString()!);
         }
         using var sourceDocument = JsonDocument.Parse(source);
         Assert.Equal(head, sourceDocument.RootElement.GetProperty("source").GetString());
@@ -112,6 +114,26 @@ public sealed class NativeMeasurementTests
             Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
             Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
         }
+        var sdkWorker = Assert.Single(cases[1].GetProperty("worker_measurements").EnumerateArray());
+        Assert.Equal("evidence-worker-measurement-v1", sdkWorker.GetProperty("schema").GetString());
+        Assert.True(sdkWorker.GetProperty("original_pidfd_exit").GetBoolean());
+        Assert.False(sdkWorker.GetProperty("native_acceptance").GetBoolean());
+        var sdkModules = sdkWorker.GetProperty("modules").EnumerateArray().ToArray();
+        Assert.Equal(Modules.Order(StringComparer.Ordinal), sdkModules.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
+        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" })
+        {
+            var row = Assert.Single(sdkModules, value => value.GetProperty("module").GetString() == name);
+            Assert.Equal("unchanged-worker-handoff", row.GetProperty("outcome").GetString());
+            Assert.Equal(binding.GetProperty("sdk_instrumented").GetProperty(name).GetString(), row.GetProperty("module_sha256").GetString());
+            Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
+            Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
+        }
+        using var sdkReport = JsonDocument.Parse(sdkCoverage);
+        Assert.Equal(Modules.Order(StringComparer.Ordinal), sdkReport.RootElement.EnumerateObject()
+            .Select(static value => Path.GetFileName(value.Name)).Order(StringComparer.Ordinal));
+        foreach (var name in new[] { "EvidenceHostBootstrap.cs", "EvidenceRestrictedAspireApplication.cs" })
+            Assert.Contains(sdkReport.RootElement.EnumerateObject().SelectMany(static module => module.Value.EnumerateObject()),
+                document => Path.GetFileName(document.Name) == name && HasHits(document.Value));
         using var report = JsonDocument.Parse(coverage);
         var modules = report.RootElement.EnumerateObject().ToArray();
         Assert.Equal(Modules.Order(StringComparer.Ordinal), modules.Select(static value => Path.GetFileName(value.Name)).Order(StringComparer.Ordinal));

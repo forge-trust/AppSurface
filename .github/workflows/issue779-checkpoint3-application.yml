@@ -50,6 +50,7 @@ jobs:
           set -euo pipefail
           mkdir -m 0700 "$CHECKPOINT3_EVIDENCE/tests"
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_run_native.py > "$CHECKPOINT3_EVIDENCE/runner-controls.log" 2>&1
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_measurement.py > "$CHECKPOINT3_EVIDENCE/measurement-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/core-restore.log" 2>&1
           timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --logger 'trx;LogFileName=core-supervision.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/core-test.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/cli-restore.log" 2>&1
@@ -195,11 +196,12 @@ jobs:
           console="$RUNNER_TEMP/checkpoint3-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
           test -s "$console"
           printf 'CHECKPOINT3_COVERLET=%s\n' "$console" >> "$GITHUB_ENV"
-          python3 -B - "$CHECKPOINT3_TOOL" "$CHECKPOINT3_EVIDENCE/original-supervision.json" "$GITHUB_SHA" <<'PY'
+          python3 -B - "$CHECKPOINT3_TOOL" "$CHECKPOINT3_EVIDENCE/original-supervision.json" "$GITHUB_SHA" "$CHECKPOINT3_SDK_TOOL" <<'PY'
           import hashlib, json, pathlib, sys
           tool = pathlib.Path(sys.argv[1])
           names = tuple(name + suffix for name in ('ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision') for suffix in ('.dll', '.pdb'))
-          value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}}
+          sdk_tool = pathlib.Path(sys.argv[4])
+          value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}, 'sdk_files': {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in names}}
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
 
@@ -208,29 +210,25 @@ jobs:
         run: |
           set -euo pipefail
           ulimit -c 0
-          target_args="$(python3 -B - "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" <<'PY'
-          import json, sys
-          evidence, tool, sdk_tool, runtime, prepared, workspace, source = sys.argv[1:]
-          args = ['-B', '.github/issue779-checkpoint4/run-measured-application.py', '--binding', evidence + '/instrumentation.json', '--original', evidence + '/original-supervision.json', '--', '--tool', tool, '--sdk-tool', sdk_tool, '--runtime', runtime, '--subject', workspace + '/.github/issue779-checkpoint3/subject', '--prepared', prepared + '/payload-preparation.json', '--digests', evidence + '/registration-digests.json', '--output', evidence + '/native', '--source', source, '--base', '416b30919e6c4d03b634d9d3fe558884b02f0b91']
-          assert all(not any(c in a for c in '\n\r"\\') for a in args)
-          print(' '.join('"' + a + '"' for a in args))
-          PY
-          )"
+          target_args="$(python3 -B .github/issue779-checkpoint4/measurement_arguments.py "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$CHECKPOINT3_COVERLET")"
           # Measurement runs outside the protected process; its target still arms the exact original OS owner.
-          # Worker PrivateTmp remains isolated. The private C3 fixture retains genuine first-worker hit bytes through its authenticated proc namespace before root exit.
+          # The inner collector instruments the separate SDK image before the same seven controls stage either image.
+          # It finishes its standard report before the outer collector reads --merge-with. No counters are rewritten.
+          # Worker PrivateTmp remains isolated; each image has distinct pinned tracker IDs and unchanged worker handoffs.
           timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
-            --target /usr/bin/python3 --targetargs "$target_args" \
+            --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
             --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --merge-with "$CHECKPOINT3_EVIDENCE/native-sdk.json" \
             --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision" > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
           sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY'
           import hashlib, json, pathlib, sys
           root = pathlib.Path(sys.argv[1])
           binding = json.loads((root / 'instrumentation.json').read_bytes())
-          files = {'coverage': 'native-supervision.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json'}
+          files = {'coverage': 'native-supervision.json', 'sdk_coverage': 'native-sdk.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json'}
           for key, name in files.items():
               path = root / name
-              assert 0 < path.stat().st_size <= (32 if key == 'coverage' else 8) * 1024 * 1024
+              assert 0 < path.stat().st_size <= (32 if key in ('coverage', 'sdk_coverage') else 8) * 1024 * 1024
               binding[key + '_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
           native = json.loads((root / files['native_receipt']).read_bytes())
           assert native['exit'] == 0 and len(native['cases']) == 7 and all(c['passed'] for c in native['cases'])

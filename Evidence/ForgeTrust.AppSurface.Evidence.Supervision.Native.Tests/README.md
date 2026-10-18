@@ -6,20 +6,21 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 ## Test surface and selection
 
-`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all six instrumented assemblies, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first normal control must also bind genuine CLI, Contracts and Coverage worker hit-file handoffs.
+`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all six instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts and Coverage worker hit-file handoffs. The SDK control additionally binds those handoffs and Aspire against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits.
 
-`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all five files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
+`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all six files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
 Run the test as part of the complete [solution coverage gate](../../scripts/coverage-solution.sh) in the prepared runtime workflow. The project targets `net10.0` and uses the centrally pinned `coverlet.collector` 10.0.1 as a private test dependency. Its Linux-only `RunSettingsFilePath` is enabled by the same `EVIDENCEHOST_NATIVE_MEASUREMENT=1` property. A local invocation without prepared inputs is expected to skip; setting the flag manually selects the test and therefore requires the complete prepared input set and runsettings.
 
 ## Prepared inputs and merge settings
 
-The runtime workflow downloads the current application-lane artifact and copies exactly these five files into `TestResults/issue779-native-measurement`:
+The runtime workflow downloads the current application-lane artifact and copies exactly these six files into `TestResults/issue779-native-measurement`:
 
 | File | Meaning |
 | --- | --- |
 | `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all six selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
+| `native-sdk.json` | Separate standard SDK-image report, hash-bound before the outer collector's standard report merge. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem controls for all three expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
