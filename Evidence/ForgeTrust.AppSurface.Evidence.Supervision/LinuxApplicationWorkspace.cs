@@ -187,9 +187,10 @@ internal sealed class LinuxApplicationWorkspaceLayout
     }
 
     /// <summary>Requires a closed, disjoint ASCII file inventory with the mandatory role cardinalities and limits.</summary>
+    /// <exception cref="EvidenceAdmissionException">A row, including a later row's path, is incomplete or invalid.</exception>
     internal static void ValidateFiles(IReadOnlyList<LinuxApplicationBundleFile> files)
     {
-        if (files is null || files.Count is < 6 or > 256 || files.Any(static file => file is null)
+        if (files is null || files.Count is < 6 or > 256 || files.Any(static file => file is null || file.RelativePath is null)
             || files.Select(static file => file.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != files.Count)
             throw Invalid();
         long total = 0;
