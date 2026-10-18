@@ -247,20 +247,18 @@ internal static class LinuxEmptyObservationExecution
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
 #endif
+#if EVIDENCE_PRIVATE_N07
             if (EvidenceNativeQualification.ParentReplacementEnabled && failed && !cleanupFailed
                 && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
                 {
                     var evidence = worker.CaptureFailureSettlement(input, owner, accounts, workspace, server, cleanupToken);
-#if EVIDENCE_PRIVATE_N07
                     n07FailureProjectionWriteAttempted = true; // A partial strict write forbids a second large record.
-#endif
                     await LinuxN07FailureEmitter.WriteAsync(evidence.Settlement, evidence.ReadyDescriptorSha256,
                         server.N07ExecutionStatus, cleanupToken).ConfigureAwait(false);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#if EVIDENCE_PRIVATE_N07
             // Earlier failed stop/monitor joins must not suppress the separate failure-only transfer.
             // The original-holder guard still rejects missing actual joins or committed READY.
             if (EvidenceNativeQualification.ParentReplacementEnabled && (failed || cleanupFailed)
@@ -365,6 +363,7 @@ internal static class LinuxEmptyObservationExecution
                     owner.RequireControlIdentity(cleanupToken);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#if EVIDENCE_PRIVATE_N04
             // Fixed private N04 image: copy facts only from the original joined holders, before
             // substituted-path custody can reject. This record cannot turn the failed run positive.
             if (EvidenceNativeQualification.PeerReplacementEnabled && (failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
@@ -385,6 +384,7 @@ internal static class LinuxEmptyObservationExecution
                     owner.RequireControlIdentity(cleanupToken);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+#endif
 #if EVIDENCE_PRIVATE_N09
             // The actual workspace holder was acquired before the original SIGINT. After
             // server/worker joins, recheck the empty slot and close both retained descriptors

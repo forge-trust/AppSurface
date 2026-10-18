@@ -135,3 +135,24 @@ exclusion, test expectation or gate policy changed. Raw merged coverage was 132,
 (95.1363%) and 60,095/69,945 branches (85.9175%); those values are not a full-gate pass, and the
 official patch result was not reached. The retained coverage artifact was verified against GitHub's
 SHA-256 `650318850432d88e0c87b76cf3c479e0e094cc67e541bc4709fbbf60b3ee1f10` before inspection.
+
+At [run 39150305318](https://github.com/forge-trust/AppSurface/actions/runs/39150305318), source
+`781f000fa9735bde18ad6db84fa0a1a34ed5428c` again passed all seven application controls, including
+both CLI and SDK callers. Artifact `12145158540` had SHA-256
+`e0f3dd05c55609603a2d89c5f67ce4debda69a7d3f81e1c6b73b5f49f6683307`; its complete 3,236-file
+capture matched Git blobs, file hashes and modes. Every application control confirmed both initial
+and final empty groups. The producer lane passed its first four controls but failed the fifth,
+`ignored-cancel`, so its remaining two controls were not reached. That artifact's SHA-256 was
+`a7e5d66bc898a5b31b4a57c760dd85e7e123e626a45d5217c3f6213553b79eb0`, with the same complete
+source verification.
+
+The failed producer state retained `deactivating/final-sigkill`, joined output pumps, and no double
+empty-group or physical-settlement receipt. The worker failed while requesting stop. The code gave
+systemd's automatic termination the worker's entire ten-second stopping allowance, leaving no
+reserved time for the response and final checks. This is a source-backed timing conflict; the
+artifact does not independently timestamp signal delivery. The
+[producer stop procedure](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/coverage-execution.md#bounded-producer-stop-escalation)
+now uses half of the existing stopping reserve for cooperative observations and then explicitly
+forces the same selected group under the original cleanup token. Its 52 focused procedure/unit
+controls passed locally; a new native seven-control run is required. No previous failure is upgraded
+by the source correction or the fixture's later containment.

@@ -45,7 +45,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxUnitProperties? _failedSettlementUnit;
     private LinuxCgroupSample? _failedSettlementGroup;
     private bool _failedSettlementGroupAfterPumps;
+#if EVIDENCE_PRIVATE_N07
     private LinuxN07FailureSettlement? _failureSettlement;
+#endif
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
     private readonly SupervisionDescendantObservation _descendant = new();
     private readonly LinuxWorkerStopTiming? _stopTiming = EvidenceNativeQualification.WorkerStallEnabled
@@ -119,6 +121,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _lifetime.StopJoined ? _output : null);
 #endif
 
+#if EVIDENCE_PRIVATE_N07
     /// <summary>Returns data observed by the original stderr pump for the selected private N07 image.</summary>
     internal Task<byte[]> N07Precleanup(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace)
@@ -147,6 +150,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         owner.RequireCleanupLaunchInput(input, token);
         return (data, ready);
     }
+#endif
 
 #if EVIDENCE_PRIVATE_N07
     /// <summary>Copies failure-only N07 data without accepting a rejected worker precleanup frame.</summary>
@@ -790,6 +794,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Even a failed inspection must attempt the original connection close, after all real task joins.
         try { _backend?.Dispose(); }
         catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
+#if EVIDENCE_PRIVATE_N07
         try
         {
             if (EvidenceNativeQualification.ParentReplacementEnabled
@@ -807,6 +812,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             }
         }
         catch (Exception) { } // Diagnostic construction cannot replace the original failed cleanup.
+#endif
         if (failed)
         {
             Interlocked.Exchange(ref _physicallySettled, 0);

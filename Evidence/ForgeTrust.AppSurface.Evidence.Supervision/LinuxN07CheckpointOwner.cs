@@ -1,9 +1,11 @@
+using ForgeTrust.AppSurface.Evidence.Contracts;
+#if EVIDENCE_PRIVATE_N07
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
-using ForgeTrust.AppSurface.Evidence.Contracts;
 using Microsoft.Win32.SafeHandles;
 using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxFileSystem;
+#endif
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
@@ -121,6 +123,7 @@ internal sealed class LinuxN07CheckpointOrder
         new("ASEVD410", "The fixed N07 checkpoint could not be established.");
 }
 
+#if EVIDENCE_PRIVATE_N07
 /// <summary>Fixed private-image N07 checkpoint, constructed only from the genuine original native holders.</summary>
 /// <remarks>
 /// There is no request, environment, callback, caller-PID or public selector. Only the compile-owned N07
@@ -424,3 +427,4 @@ internal sealed class LinuxN07CheckpointOwner
     [DllImport("libc", EntryPoint = "syscall", SetLastError = true)]
     private static extern long FchmodAt2(long number, int directory, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode, int flags);
 }
+#endif

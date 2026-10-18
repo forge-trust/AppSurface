@@ -1743,3 +1743,24 @@ records actual guarded root execution from the same-source Linux application con
 those hits through the ordinary collector's supported merge. It supplies no runtime authority, private
 transport or production registration. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md#measuring-the-native-c-owner)
 describes the source/digest checks, isolated-process limits and unchanged complete coverage gate.
+
+## Native qualification image boundary
+
+The N04 and N07 rendezvous implementations in
+[`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) and
+[`LinuxN07CheckpointOwner`](LinuxN07CheckpointOwner.cs) are compiled only into
+images selected with their matching [private qualification build symbol](../../Directory.Build.props).
+Ordinary `None`, C2 and C3 images contain neither native owner type nor its server
+and worker callsites. A false runtime selector alone was insufficient to remove
+these unused native implementations from shipped binaries. The portable ordering
+data classes remain available to their existing procedure controls; they grant no
+native capability. The ordinary authentication, admission, control drain, physical
+settlement and custody paths remain compiled and required.
+
+The [image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+read the finished PE type table without loading private owners. They check actual
+type absence in ordinary images and type presence only in the selected N04/N07
+build. Source-built variant tests verify compilation and data behavior; genuine
+Linux qualification still requires the matching source-bound native controls.
+This boundary is a product packaging constraint, not a coverage filter or an
+accepted proof registration.

@@ -30,10 +30,14 @@ internal sealed class LinuxEmptyObservationControlServer
     private readonly LinuxRunWorkspace _workspace;
     private LinuxCoverageControlOperations? _coverage;
     private LinuxApplicationProcess? _application;
+#if EVIDENCE_PRIVATE_N04
     private LinuxN04CheckpointOwner? _n04;
+#endif
+#if EVIDENCE_PRIVATE_N07
     private LinuxN07CheckpointOwner? _n07;
     private int _n07OriginalTasksCompleted;
     private int _n07LocalCloseAttemptCompleted;
+#endif
     private readonly SupervisionWorkRegistry _ledger = new();
     private readonly SupervisionControlSequence _sequence;
     private readonly SupervisionSingleAttempt _run = new();
@@ -333,6 +337,7 @@ internal sealed class LinuxEmptyObservationControlServer
         return _listener.RequireCustodySocket(_owner, _accounts, _workspace, token);
     }
 
+#if EVIDENCE_PRIVATE_N07
     internal string RequireN07FailedReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
     {
@@ -354,6 +359,7 @@ internal sealed class LinuxEmptyObservationControlServer
     {
         get { lock (_executionGate) return _execution is { IsCompleted: true } task ? task.Status : throw Rejected(); }
     }
+#endif
 
     /// <summary>Requires the original successful server task and all committed protocol steps before final-file claims.</summary>
     /// <remarks>Physical custody after a failed protocol remains possible, but cannot pass this success guard.</remarks>
@@ -371,10 +377,13 @@ internal sealed class LinuxEmptyObservationControlServer
         await dispatch.ConfigureAwait(false);
         try
         {
+#if EVIDENCE_PRIVATE_N04
             // Fixed private N04 image: acquisition belongs to the already registered original run.
             // No caller/environment selector or detached checkpoint task exists.
             if (EvidenceNativeQualification.PeerReplacementEnabled)
                 _n04 = LinuxN04CheckpointOwner.Create(_input, _owner, _accounts, _workspace, _listener, _worker, token);
+#endif
+#if EVIDENCE_PRIVATE_N07
             if (EvidenceNativeQualification.ParentReplacementEnabled)
             {
                 try
@@ -387,24 +396,31 @@ internal sealed class LinuxEmptyObservationControlServer
                     throw;
                 }
             }
+#endif
             await RunCoreAsync(token).ConfigureAwait(false);
         }
         finally
         {
             var closed = true;
+#if EVIDENCE_PRIVATE_N04
             if (_n04 is not null)
                 try { await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+#endif
+#if EVIDENCE_PRIVATE_N07
             if (_n07 is not null)
                 try { await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+#endif
             if (_coverage is not null)
                 try { _coverage.Dispose(); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+#if EVIDENCE_PRIVATE_N07
             Interlocked.Exchange(ref _n07LocalCloseAttemptCompleted, 1);
+#endif
             try { _replyOrder.Dispose(); }
             catch (Exception error) when (Recoverable(error))
             { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); }
@@ -461,12 +477,16 @@ internal sealed class LinuxEmptyObservationControlServer
                     }
                     // This pause occurs before RegisterAccept's synchronous worker/name checks.
                     // It is separate from the irreversible EXIT admission-close barrier.
+#if EVIDENCE_PRIVATE_N04
                     if (_n04 is not null) await _n04.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
+#endif
+#if EVIDENCE_PRIVATE_N07
                     if (_n07 is not null)
                     {
                         stage = LinuxControlFailureStage.N07BeforeNextAccept;
                         await _n07.BeforeNextAcceptAsync(requests.Token).ConfigureAwait(false);
                     }
+#endif
                     stage = LinuxControlFailureStage.Accept;
                     SupervisionAcceptOwnership<LinuxControlConnection>.RegisteredAccept registeredAccept;
                     lock (_executionGate)
@@ -489,8 +509,12 @@ internal sealed class LinuxEmptyObservationControlServer
                     lock (_executionGate)
                     {
                         if (_exitIntent.Task.IsCompleted) break; // Published result remains listener-owned for final close.
+#if EVIDENCE_PRIVATE_N04
                         _n04?.ReserveNextAcceptBeforeHandlerDispatch();
+#endif
+#if EVIDENCE_PRIVATE_N07
                         _n07?.ReserveNextAcceptBeforeHandlerDispatch();
+#endif
                         var control = _ledger.BeginControl();
                         stage = LinuxControlFailureStage.HandlerDispatch;
                         handlers.Add(HandleRegisteredAsync(dispatch.Task, connection, control, requests.Token));
@@ -528,12 +552,16 @@ internal sealed class LinuxEmptyObservationControlServer
                 try { accepts.Cancel(); }
                 catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
                 // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
+#if EVIDENCE_PRIVATE_N04
                 try { if (_n04 is not null) await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
+#endif
+#if EVIDENCE_PRIVATE_N07
                 try { if (_n07 is not null) await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error))
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
+#endif
                 // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
                 // closes all results first to interrupt their original I/O, as before.
                 stage = LinuxControlFailureStage.ListenerClose;
@@ -564,9 +592,11 @@ internal sealed class LinuxEmptyObservationControlServer
                 stage = LinuxControlFailureStage.ControlsJoin;
                 try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
+#if EVIDENCE_PRIVATE_N07
                 if (_n07 is not null && (pending is null || pending.IsCompleted)
                     && handlers.All(task => task.IsCompleted) && _ledger.ActiveControls == 0)
                     Interlocked.Exchange(ref _n07OriginalTasksCompleted, 1);
+#endif
                 if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
                     Interlocked.Exchange(ref _ioJoined, 1);
             }
@@ -809,7 +839,9 @@ internal sealed class LinuxEmptyObservationControlServer
                         io.Token.ThrowIfCancellationRequested();
                         io.CancelAfter(Timeout.InfiniteTimeSpan);
                         await connection.WritePreparationAsync((long)_owner.Remaining.TotalMilliseconds, io.Token).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N04
                         if (_n04 is not null) await _n04.AdmissionPreparedAsync(io.Token).ConfigureAwait(false);
+#endif
                         io.Token.ThrowIfCancellationRequested(); _owner.RequireActive(io.Token);
                         io.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
                             TimeSpan.FromSeconds(_input.Request.AdmissionSeconds).Ticks)));
@@ -818,8 +850,12 @@ internal sealed class LinuxEmptyObservationControlServer
                         claim = _sequence.ClaimReady();
                         stage = LinuxControlFailureStage.ReadyData;
                         response = _worker.CreateReadyData(io.Token).ReadyBytes;
+#if EVIDENCE_PRIVATE_N04
                         if (_n04 is not null) await _n04.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+#endif
+#if EVIDENCE_PRIVATE_N07
                         if (_n07 is not null) await _n07.ReadyPreparedAsync(io.Token).ConfigureAwait(false);
+#endif
                         break;
                     case EvidenceStopControlRequest:
                         stage = LinuxControlFailureStage.CleanupBound;
@@ -905,10 +941,14 @@ internal sealed class LinuxEmptyObservationControlServer
                     }
                     committedExit = claim.Operation == EvidenceControlOperation.Exit;
                     claim = null;
+#if EVIDENCE_PRIVATE_N04
                     if (readyCommitted && _n04 is not null)
                         await _n04.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
+#endif
+#if EVIDENCE_PRIVATE_N07
                     if (readyCommitted && _n07 is not null)
                         await _n07.ReadyCommittedAsync(io.Token).ConfigureAwait(false);
+#endif
                 }
             }
             catch (Exception error) when (Recoverable(error))

@@ -51,7 +51,11 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
     {
         _stdoutWrite = stdoutWrite;
         _stderrWrite = stderrWrite;
+#if EVIDENCE_PRIVATE_N07
         _n07 = EvidenceNativeQualification.ParentReplacementEnabled ? new() : null;
+#else
+        _n07 = null;
+#endif
         _ownership = new(stdout, stderr, stdoutWrite, stderrWrite, _n07);
     }
 
