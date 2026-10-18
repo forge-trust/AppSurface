@@ -184,6 +184,16 @@ procedure after parsing. An executable token, path or digest creates no permissi
 
 ## Pending work and control handlers
 
+If the worker exits or the request lifetime fails before EXIT intent, the
+[control server](LinuxEmptyObservationControlServer.cs) begins the owner's original cumulative
+teardown and calls [`SupervisionControlSequence.BeginFailedDrain`](SupervisionControlSequence.cs)
+before joining request handlers. A handler can be waiting for a descendant that this stop must end;
+joining that handler first would defer containment until the original job expired. The sequence
+retains one shared stop task and its first cleanup token, closes workload admission and permanently
+records protocol failure. The server still joins the original handlers, stop task, control ledger,
+listener and worker separately. Successful containment cannot acknowledge EXIT or clear failure.
+Orderly EXIT preserves the existing response-write ordering. No cleanup allowance is renewed.
+
 `SupervisionWorkRegistry.BeginWorkload` reserves ownership **before** asynchronous dispatch. Its explicit
 `Workload.Complete` is bookkeeping by the owner after pending dispatch and actual OS work settle. In the
 compile-owned private N16 image only, the server also registers its fixed managed blocked body before

@@ -507,6 +507,17 @@ internal sealed class LinuxEmptyObservationControlServer
             finally
             {
                 var ioJoined = true;
+                var exitIntent = _exitIntent.Task.IsCompleted;
+                Task? failedDrain = null;
+                if (!exitIntent)
+                {
+                    // A workload handler can await a descendant that only containment can release.
+                    // Start the original cleanup clock and stop before joining any such handler.
+                    stage = LinuxControlFailureStage.DescendantsStop;
+                    try { failedDrain = _sequence.BeginFailedDrain(CleanupToken()); }
+                    catch (Exception error) when (Recoverable(error))
+                    { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+                }
                 // Cancel and join this original added task under the same requests/root deadline.
                 try { cancellationLifetime.Cancel(); }
                 catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
@@ -525,7 +536,6 @@ internal sealed class LinuxEmptyObservationControlServer
                 { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); ioJoined = false; _sequence.RecordFailure(); }
                 // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
                 // closes all results first to interrupt their original I/O, as before.
-                var exitIntent = _exitIntent.Task.IsCompleted;
                 stage = LinuxControlFailureStage.ListenerClose;
                 try
                 {
@@ -549,7 +559,7 @@ internal sealed class LinuxEmptyObservationControlServer
                     catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
                 }
                 stage = LinuxControlFailureStage.DescendantsStop;
-                try { await _sequence.StopAsync(CleanupToken()).ConfigureAwait(false); }
+                try { await (failedDrain ?? _sequence.StopAsync(CleanupToken())).ConfigureAwait(false); }
                 catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
                 stage = LinuxControlFailureStage.ControlsJoin;
                 try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }

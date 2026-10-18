@@ -95,6 +95,21 @@ internal sealed class SupervisionControlSequence
         return stop;
     }
 
+    /// <summary>Starts shared descendant containment before draining handlers after an incomplete worker protocol.</summary>
+    /// <param name="token">The original owner's cumulative cleanup token, started before calling this method.</param>
+    /// <returns>The original stop task; callers must retain and join it as well as every control handler.</returns>
+    /// <remarks>
+    /// Call when the server loses its worker or request lifetime without EXIT intent. Failure is sticky even
+    /// if containment succeeds. Starting this task must precede handler joins because those handlers can be
+    /// waiting for the very descendant being stopped. Existing STOP ownership and its first token are retained.
+    /// This method creates no timer, native ownership, positive wait acknowledgement or worker-exit authority.
+    /// </remarks>
+    internal Task BeginFailedDrain(CancellationToken token)
+    {
+        RecordFailure();
+        return StopAsync(token);
+    }
+
     /// <summary>Joins an already registered stop without starting containment or closing work itself.</summary>
     /// <returns>A task that completes only after the original stop callback and workload drain have joined.</returns>
     /// <remarks>

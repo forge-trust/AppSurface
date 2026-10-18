@@ -82,7 +82,9 @@ def main():
         error = run("unsupported-owner", [*entry, "evidence", "supervise", "--request", str(work / "missing.json")], cwd=work, expected=1)
         if b"ASEVD402" not in error:
             raise ValueError("Unprivileged or unsupported supervisor did not reject.")
-        run("omitted-mode", [*entry, "evidence", "run"], cwd=work, expected=1)
+        omitted_mode = run("omitted-mode", [*entry, "evidence", "run"], cwd=work, expected=1)
+        if b"ASEVD401: Select --mode trusted or --mode observation explicitly." not in omitted_mode:
+            raise ValueError("The installed tool did not enforce explicit mode selection.")
         for name in ("Contracts", "Planner", "Coverage", "Aspire"):
             project = ROOT / ("Evidence/ForgeTrust.AppSurface.Evidence." + name) / ("ForgeTrust.AppSurface.Evidence." + name + ".csproj")
             run("sdk-pack-" + name.lower(), ["dotnet", "pack", str(project), *common])

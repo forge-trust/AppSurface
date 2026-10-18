@@ -139,6 +139,82 @@ public sealed class SupervisionControlSequenceTests
     }
 
     [Fact]
+    public async Task FailedServerDrainStopsDescendantBeforeItsBlockedHandlerCanJoin()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var workload = ledger.BeginWorkload();
+        var control = ledger.BeginControl();
+        var stopped = Gate();
+        var handlerEntered = Gate();
+        var releaseStop = Gate();
+        using var cleanup = new CancellationTokenSource();
+        var calls = 0;
+        var sequence = new SupervisionControlSequence(ledger, async token =>
+        {
+            Assert.Equal(cleanup.Token, token);
+            Assert.True(ledger.IsWorkloadAdmissionClosed);
+            Interlocked.Increment(ref calls);
+            await releaseStop.Task;
+            stopped.TrySetResult();
+            return Joined();
+        });
+        async Task Handler()
+        {
+            handlerEntered.SetResult();
+            try { await stopped.Task; }
+            finally { workload.Complete(); control.Complete(); }
+        }
+        var handler = Handler();
+        await handlerEntered.Task.WaitAsync(Guard);
+        var drain = sequence.BeginFailedDrain(cleanup.Token);
+        try
+        {
+            Assert.True(sequence.Failed);
+            Assert.False(handler.IsCompleted);
+            Assert.False(drain.IsCompleted);
+            Assert.True(sequence.IsWorkAdmissionClosed);
+            Assert.Same(drain, sequence.BeginFailedDrain(new CancellationToken(canceled: true)));
+        }
+        finally
+        {
+            releaseStop.TrySetResult();
+            await Task.WhenAll(handler, drain).WaitAsync(Guard);
+        }
+        Assert.Equal(1, calls);
+        Assert.Equal(0, ledger.ActiveControls);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.True(sequence.Failed);
+        Assert.False(sequence.ClaimWait().Positive);
+        Reject(() => sequence.ClaimExit());
+    }
+
+    [Fact]
+    public async Task FailedServerDrainRetainsAnExistingStopAndItsFirstCleanupToken()
+    {
+        var entered = Gate();
+        var release = Gate();
+        using var first = new CancellationTokenSource();
+        var sequence = new SupervisionControlSequence(new(), async token =>
+        {
+            Assert.Equal(first.Token, token);
+            entered.SetResult();
+            await release.Task;
+            return Joined();
+        });
+        var stop = sequence.StopAsync(first.Token);
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            Assert.Same(stop, sequence.BeginFailedDrain(new CancellationToken(canceled: true)));
+            Assert.True(sequence.Failed);
+            Assert.False(stop.IsCompleted);
+        }
+        finally { release.TrySetResult(); await stop.WaitAsync(Guard); }
+        Assert.False(sequence.ClaimWait().Positive);
+        Reject(() => sequence.ClaimExit());
+    }
+
+    [Fact]
     public async Task CancelIgnoringStopRemainsOwnedUntilBothActualTaskAndLedgerJoinThenFails()
     {
         var ledger = new SupervisionWorkRegistry(); var workload = ledger.BeginWorkload(); var entered = Gate();

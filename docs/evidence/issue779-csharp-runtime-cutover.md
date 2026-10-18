@@ -71,7 +71,9 @@ fixed source/measurement/receipt files, and configures the pinned collector's su
 setting. The Linux test rejects absent files, source or digest mismatch, incomplete controls, missing
 physical settlement and a report with no guarded root hits. The regular [PR/main build](../../.github/workflows/build.yml) calls the same reusable consumer
 lanes and stages the same current-run measurement before its existing coverage command. It preserves
-its original `HEAD^1` PR comparison and empty main comparison. The dedicated runtime workflow covers
+its original `HEAD^1` PR comparison and empty main comparison. That job pins the same 10.0.401
+SDK/compiler as the native lane so merged branch offsets come from the same compiler; setup still
+installs the current LTS runtime servicing patch. The dedicated runtime workflow covers
 feature pushes and manual validation; it does not duplicate PR runs. Both coverage jobs explicitly pass
 the restored NuGet cache, selected native-measurement flag and docs-evidence location through the
 broker fixture's closed child environment. The regular PR build's independent package/platform checks
@@ -105,3 +107,20 @@ six assignments before CLR startup. The worker uses its existing private tempora
 capabilities, input/output mounts, deadlines and other isolation settings remain unchanged. This does
 not change the hit-file location or infer hidden worker hits. A fresh seven-control Linux run and the
 complete numerical gate remain required.
+
+At [run 39146333953](https://github.com/forge-trust/AppSurface/actions/runs/39146333953), source
+`771d0538347998bdbcff0257fe5089c350ca68bc` passed all seven packaged producer/artifact controls and
+all seven CLI/SDK application controls. The downloaded artifacts had SHA-256
+`e9ad9f73c2a293fb8a69bf0ad65133f002d34e915ce460bf2c5a3e819d5f0703` and
+`196843ff312daa9e12fc709d2d29e29f665c1097f78f978b8f36e898c05b4d46`. Both complete 3,239-file
+source captures matched immutable Git blobs, SHA-256 values and modes. The actual application
+receipt confirmed final group emptiness for every case, and the native measurement contained
+guarded root execution hits. The mutex exception was absent. The 15-command package smoke also
+passed, including its two expected rejections. The separate full solution/patch gate was still
+pending at this observation; native fixture success is not a numerical gate pass.
+
+The subsequent [failed-handler drain correction](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#pending-work-and-control-handlers)
+starts the original descendant stop before joining handlers when a worker disappears without EXIT
+intent. Two deterministic barrier controls cover that ordering and retained first-stop ownership;
+the focused sequence/deadline suite passed 57/57 with zero compiler diagnostics. This local result
+does not replace a new native run or the final unchanged coverage gate on the corrected source.
