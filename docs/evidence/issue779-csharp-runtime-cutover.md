@@ -69,7 +69,15 @@ processes are not presumed to have contributed hits.
 The solution lane downloads only its successful application's current-run artifact, stages the four
 fixed source/measurement/receipt files, and configures the pinned collector's supported `MergeWith`
 setting. The Linux test rejects absent files, source or digest mismatch, incomplete controls, missing
-physical settlement and a report with no guarded root hits. This is measurement evidence, not runtime
+physical settlement and a report with no guarded root hits. The regular [PR/main build](../../.github/workflows/build.yml) calls the same reusable consumer
+lanes and stages the same current-run measurement before its existing coverage command. It preserves
+its original `HEAD^1` PR comparison and empty main comparison. The dedicated runtime workflow covers
+feature pushes and manual validation; it does not duplicate PR runs. Both coverage jobs explicitly pass
+the restored NuGet cache, selected native-measurement flag and docs-evidence location through the
+broker fixture's closed child environment. The regular PR build's independent package/platform checks
+continue alongside these required native jobs.
+
+This is measurement evidence, not runtime
 authority or an accepted consumer proof. The existing coverage script, exclusions, numerical thresholds,
 codecov semantics and default `origin/main` comparison are unchanged. A successful test or collector
 merge alone does not establish a numerical gate pass.
@@ -79,3 +87,21 @@ test projects passed, but final merge stopped at `ASCOV114`: the fixture environ
 NuGet cache instead of the cache restored by the workflow. The corrected child command explicitly
 passes that restored cache to the ordinary coverage wrapper. Its isolated protected producer still
 uses its separately staged SDK/package inputs. No numerical gate result is claimed for that attempt.
+
+### Named mutex prerequisite discovered by measurement
+
+[Run 39144415301](https://github.com/forge-trust/AppSurface/actions/runs/39144415301) at
+`87fa756597c5a18bce1cf08e67712e02c45b1f91` reached actual application readiness and physical
+settlement, then failed its normal control. Coverlet's process-exit tracker threw a named-mutex
+`IOException` in the worker and root image, so its zero-hit report is not acceptance or useful gate input.
+The captured SDK tree contained runtimes 10.0.12 and 10.0.13: the setup action installs the latest LTS
+runtime separately from the selected 10.0.401 SDK. A bounded Linux container probe with runtime
+10.0.13 reproduced the same mutex failure for root and nonroot under `HOME=/nonexistent`; each
+succeeded with `XDG_RUNTIME_DIR=/tmp`. This is a mutex prerequisite probe, not a systemd acceptance run.
+
+The closed [bootstrap environment](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#root-owner-activation-and-process-lifetime)
+now requires that literal sixth assignment for both reserved roles. The native fixture emits the same
+six assignments before CLR startup. The worker uses its existing private temporary filesystem;
+capabilities, input/output mounts, deadlines and other isolation settings remain unchanged. This does
+not change the hit-file location or infer hidden worker hits. A fresh seven-control Linux run and the
+complete numerical gate remain required.

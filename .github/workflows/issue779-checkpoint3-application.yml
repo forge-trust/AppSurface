@@ -218,7 +218,7 @@ jobs:
           )"
           # Measurement runs outside the protected process; its target still arms the exact original OS owner.
           # /tmp is the ordinary temporary root. Worker PrivateTmp stays isolated; no child hit is presumed visible.
-          timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp \
+          timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
             --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \

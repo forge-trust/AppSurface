@@ -121,11 +121,7 @@ internal sealed class LinuxWorkerUnit
                 "CORECLR_PROFILER_PATH_64", "COR_ENABLE_PROFILING", "COR_PROFILER", "COR_PROFILER_PATH",
                 "COMPlus_ReadyToRun", "COMPlus_ZapDisable"
             }),
-            ["Environment"] = VariantValue.Array(new[]
-            {
-                "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
-                "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp"
-            })
+            ["Environment"] = VariantValue.Array(LinuxOwnerFacts.FixedEnvironment.ToArray())
         });
 
     /// <summary>Creates only the fixed worker recipe, rejecting malformed or conflicting data.</summary>

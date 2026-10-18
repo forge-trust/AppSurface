@@ -419,7 +419,7 @@ enabled. The owner's activation timestamp and finite runtime plus stop must fit 
 monotonic job allowance; neither a new operation nor cleanup resets that deadline.
 
 The protected bootstrap clears inherited environment **before CLR startup** with one fixed
-`/usr/bin/env -i` command. Its 13 argv entries are the env executable, `-i`, the five ordered assignments
+`/usr/bin/env -i` command. Its 14 argv entries are the env executable, `-i`, the six ordered assignments
 in `LinuxOwnerFacts.FixedEnvironment`, then the pinned runtime host, managed entry, `evidence`,
 `supervise`, `--request` and retained request path. The service has no pass-through environment or
 environment files. Extra assignments, changed order or arguments reject. Runtime, entry and request
@@ -430,7 +430,13 @@ command and may contain `=` when otherwise canonical. The managed input owner st
 the configured service executable is env. `Type=exec` establishes initial env execution, not managed ready.
 
 `LinuxOwnerFacts.ManagedArguments(role, runtimeHost, entryPath, controlPath)` also supplies the worker's
-fixed 13-element argv. Only the two reserved roles are permitted. Worker uses `evidence worker --control`
+fixed 14-element argv. The sixth fixed assignment is `XDG_RUNTIME_DIR=/tmp`, selecting the existing
+runtime IPC temporary directory for named mutexes when `HOME=/nonexistent` is intentional. The
+[.NET runtime compatibility discussion](https://github.com/dotnet/runtime/issues/135726) describes why
+an unavailable home requires an explicit runtime directory. It is a
+literal, never a caller-selected pathname; missing or different values reject in both bootstrap argv
+and service environment. Worker `PrivateTmp` remains enabled, and no read/write mount is added.
+Only the two reserved roles are permitted. Worker uses `evidence worker --control`
 after the same command boundary; its existing 4096-byte deployment operand bound is retained, while
 supervisor operands are bounded to 4095 bytes. The worker recipe separately applies its 100-byte socket
 bound and protected/writable path disjointness. Runtime `=` is rejected for either role; positional entry

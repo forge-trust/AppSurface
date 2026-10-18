@@ -25,7 +25,7 @@ class DriverControls(unittest.TestCase):
   self.assertEqual('calculation/**',p['Rules'][0]['Pattern']);self.assertEqual([],p['Profiles'][0]['Resources'])
   self.assertEqual(['appsurface/coverage/behavioral-patch@1'],producer['AssertionIds'])
  def test_fixture_never_stamps_trusted_or_native_authority(self):
-  self.assertNotIn('Trusted',json.dumps(native.policy()));self.assertEqual(5,len(native.FIXED))
+  self.assertNotIn('Trusted',json.dumps(native.policy()));self.assertEqual(6,len(native.FIXED))
   self.assertEqual('HOME=/nonexistent',native.FIXED[1])
 
 class ProducerSamplingControls(unittest.TestCase):

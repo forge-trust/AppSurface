@@ -3,24 +3,6 @@ name: EvidenceHost CSharp runtime cutover and coverage
 on:
   push:
     branches: [codex/issue779-checkpoint4-cutover-20261018]
-  pull_request:
-    branches: [main]
-    paths:
-      - 'Evidence/**'
-      - 'Cli/**'
-      - 'Aspire/**'
-      - 'scripts/evidencehost-*'
-      - 'scripts/coverage-solution.sh'
-      - 'Directory.Build.*'
-      - 'Directory.Packages.props'
-      - 'packages/package-index.yml'
-      - 'tools/ForgeTrust.AppSurface.PackageIndex/**'
-      - 'ForgeTrust.AppSurface.slnx'
-      - 'global.json'
-      - 'tests/evidencehost-consumer/**'
-      - '.github/issue779-checkpoint*/**'
-      - '.github/workflows/evidencehost-runtime-proof.yml'
-      - '.github/workflows/issue779-checkpoint*-*.yml'
   workflow_dispatch:
 
 permissions:
@@ -130,7 +112,7 @@ jobs:
             --dotnet "$(readlink -f "$(command -v dotnet)")" \
             --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
             --command-timeout-seconds 4200 -- \
-            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 \
+            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
             /usr/bin/bash scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
       - name: Recheck source after all executions
         if: always()

@@ -19,6 +19,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  evidence-packaged-producer:
+    name: Packaged EvidenceHost producer and artifact custody
+    uses: ./.github/workflows/issue779-checkpoint2-producer.yml
+
+  evidence-native-measurement:
+    name: EvidenceHost application and source-bound native measurement
+    uses: ./.github/workflows/issue779-checkpoint3-application.yml
+
   config-package-contract:
     name: Config package contract (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -387,6 +395,7 @@ jobs:
         run: ./examples/durable-postgresql/run-local-proof.sh
 
   build:
+    needs: evidence-native-measurement
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -411,6 +420,32 @@ jobs:
             **/packages.lock.json
             **/packages.*.lock.json
 
+      - name: Download current native measurement from the successful application lane
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint4-native-input
+      - name: Stage only fixed source-bound native measurement inputs
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p TestResults/issue779-native-measurement
+          cp "$RUNNER_TEMP/checkpoint4-native-input/measurement-binding.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/native-supervision.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
+          python3 -B - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          root = Path('TestResults/issue779-native-measurement').resolve()
+          settings = ET.Element('RunSettings')
+          collector = ET.SubElement(ET.SubElement(ET.SubElement(settings, 'DataCollectionRunSettings'), 'DataCollectors'), 'DataCollector', friendlyName='XPlat Code Coverage')
+          configuration = ET.SubElement(collector, 'Configuration')
+          ET.SubElement(configuration, 'MergeWith').text = str(root / 'native-supervision.json')
+          ET.SubElement(configuration, 'Format').text = 'cobertura'
+          ET.ElementTree(settings).write(root / 'native.runsettings', encoding='utf-8', xml_declaration=True)
+          PY
+          printf 'EVIDENCEHOST_NATIVE_MEASUREMENT=1\n' >> "$GITHUB_ENV"
       - name: Restore .NET packages (locked, cache-aware)
         run: |
           start_seconds="$(date +%s)"
@@ -481,7 +516,21 @@ jobs:
           COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
-          ./scripts/coverage-solution.sh
+          set -euo pipefail
+          worker_uid="$(id -u)"
+          worker_gid="$(id -g)"
+          worker_groups="$(id -G | tr ' ' ',')"
+          timeout --signal=KILL 4320 sudo --non-interactive /usr/bin/python3 -B tests/evidencehost-consumer/test_execution_broker.py \
+            --worker-uid "$worker_uid" --worker-gid "$worker_gid" \
+            --worker-supplementary-groups "$worker_groups" \
+            --subject-uid 65533 --subject-gid 65531 \
+            --dotnet "$(readlink -f "$(command -v dotnet)")" \
+            --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
+            --command-timeout-seconds 4200 -- \
+            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 \
+            NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 \
+            COVERAGE_GATE_DIFF_BASE="$COVERAGE_GATE_DIFF_BASE" APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
+            /usr/bin/bash scripts/coverage-solution.sh
 
       - name: Upload docs outline layout evidence
         if: ${{ always() && !cancelled() }}

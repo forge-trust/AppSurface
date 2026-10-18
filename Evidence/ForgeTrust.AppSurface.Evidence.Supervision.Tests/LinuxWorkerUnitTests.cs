@@ -33,7 +33,7 @@ public sealed class LinuxWorkerUnitTests
         Assert.Equal(new[]
         {
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
-            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "/usr/share/dotnet/dotnet",
+            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp", "/usr/share/dotnet/dotnet",
             "/run/tool/appsurface.dll", "evidence", "worker", "--control", "/run/broker/control.sock"
         }, recipe.Arguments);
         var properties = recipe.Properties;
@@ -72,7 +72,7 @@ public sealed class LinuxWorkerUnitTests
             "CORECLR_PROFILER_PATH_64", "COR_ENABLE_PROFILING", "COR_PROFILER", "COR_PROFILER_PATH",
             "COMPlus_ReadyToRun", "COMPlus_ZapDisable"
         }, properties["UnsetEnvironment"].GetArray<string>());
-        Assert.Equal(new[] { "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp" }, properties["Environment"].GetArray<string>());
+        Assert.Equal(new[] { "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp" }, properties["Environment"].GetArray<string>());
     }
 
     [Fact]
@@ -107,11 +107,11 @@ public sealed class LinuxWorkerUnitTests
         using var error = BorrowedError();
         var recipe = Create(output, error, entry: "/run/tool/entry=one.dll", socket: "/run/broker/control=one.sock");
         Assert.Equal(LinuxOwnerFacts.BootstrapArgumentCount, recipe.Arguments.Count);
-        Assert.Equal("/usr/share/dotnet/dotnet", recipe.Arguments[7]);
-        Assert.Equal("/run/tool/entry=one.dll", recipe.Arguments[8]);
-        Assert.Equal("worker", recipe.Arguments[10]);
-        Assert.Equal("--control", recipe.Arguments[11]);
-        Assert.Equal("/run/broker/control=one.sock", recipe.Arguments[12]);
+        Assert.Equal("/usr/share/dotnet/dotnet", recipe.Arguments[8]);
+        Assert.Equal("/run/tool/entry=one.dll", recipe.Arguments[9]);
+        Assert.Equal("worker", recipe.Arguments[11]);
+        Assert.Equal("--control", recipe.Arguments[12]);
+        Assert.Equal("/run/broker/control=one.sock", recipe.Arguments[13]);
     }
 
     [Fact]

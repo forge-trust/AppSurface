@@ -25,8 +25,8 @@ internal sealed record LinuxOwnerFacts(LinuxUnitProperties Unit, string Restart,
     /// <remarks>This fixed pathname is a contract, not proof of the installed executable or its loader.</remarks>
     internal const string BootstrapExecutable = "/usr/bin/env";
 
-    /// <summary>Gets the complete fixed argv count: env, -i, five assignments and six runtime/role arguments.</summary>
-    internal const int BootstrapArgumentCount = 13;
+    /// <summary>Gets the complete fixed argv count: env, -i, six assignments and six runtime/role arguments.</summary>
+    internal const int BootstrapArgumentCount = 14;
 
     /// <summary>Projects compound-field metadata after the backend has checked native struct-array wire shape.</summary>
     /// <remarks>Portable variant-array fixtures are metadata only. The actual backend rejects them before this projection.</remarks>
@@ -60,7 +60,7 @@ internal sealed record LinuxOwnerFacts(LinuxUnitProperties Unit, string Restart,
             return new(LinuxUnitProperties.Parse(unit, service), Text(service["Restart"]), service["SendSIGKILL"].GetBool(),
                 service["FinalKillSignal"].GetInt32(), unit["ActiveEnterTimestampMonotonic"].GetUInt64(),
                 unit["ConditionResult"].GetBool(), conditions.AsReadOnly(), Text(command.GetItem(0)),
-                Strings(command.GetItem(1), BootstrapArgumentCount), command.GetItem(2).GetBool(), Strings(service["Environment"], 5),
+                Strings(command.GetItem(1), BootstrapArgumentCount), command.GetItem(2).GetBool(), Strings(service["Environment"], 6),
                 Strings(service["UnsetEnvironment"], 64), files.Count, Strings(service["PassEnvironment"], 0).Count);
         }
         catch (Exception error) when (error is KeyNotFoundException or InvalidOperationException or ArgumentException
@@ -99,7 +99,7 @@ internal sealed record LinuxOwnerFacts(LinuxUnitProperties Unit, string Restart,
     /// <param name="entryPath">Already protected, canonical absolute managed entry.</param>
     /// <param name="requestPath">Already protected, canonical absolute root request.</param>
     /// <remarks>
-    /// env -i precedes exactly five fixed assignments, followed by the unchanged runtime/entry and
+    /// env -i precedes exactly six fixed assignments, followed by the unchanged runtime/entry and
     /// supervise role arguments. No caller environment, extra env option or expansion syntax is accepted.
     /// The runtime host cannot contain '=' because env would consume it as another assignment before
     /// selecting a command. Canonical entry/request paths may contain '=' after that command boundary.
@@ -136,7 +136,7 @@ internal sealed record LinuxOwnerFacts(LinuxUnitProperties Unit, string Restart,
         return System.Array.AsReadOnly(new[]
         {
             BootstrapExecutable, "-i", FixedEnvironment[0], FixedEnvironment[1], FixedEnvironment[2],
-            FixedEnvironment[3], FixedEnvironment[4], runtimeHost, entryPath,
+            FixedEnvironment[3], FixedEnvironment[4], FixedEnvironment[5], runtimeHost, entryPath,
             "evidence", role == EvidenceProcessRole.Worker ? "worker" : "supervise",
             role == EvidenceProcessRole.Worker ? "--control" : "--request", controlPath
         });
@@ -159,10 +159,10 @@ internal sealed record LinuxOwnerFacts(LinuxUnitProperties Unit, string Restart,
     /// <summary>Gets the fixed per-generation path consumed before any dependent start.</summary>
     internal static string GuardPath(Guid id) => $"/run/appsurface-evidence-owners/{id:N}/armed";
 
-    /// <summary>Gets the five fixed assignments required in both service environment and bootstrap argv.</summary>
+    /// <summary>Gets the six fixed assignments required in both service environment and bootstrap argv.</summary>
     /// <remarks>Service Environment metadata alone does not prove that all inherited variables were cleared.</remarks>
     internal static IReadOnlyList<string> FixedEnvironment { get; } = System.Array.AsReadOnly(new[]
-        { "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp" });
+        { "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp" });
 
     /// <summary>Gets the fixed runtime-injection variables removed before the managed image starts.</summary>
     internal static IReadOnlyList<string> UnsafeEnvironment { get; } = System.Array.AsReadOnly(new[]

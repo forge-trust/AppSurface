@@ -19,7 +19,7 @@ public sealed class LinuxOwnerActivationTests
         Assert.Equal(LinuxOwnerFacts.GuardPath(Run), Assert.Single(sample.Conditions).Parameter);
         // Parser copies mutable wire arrays; later source replacement cannot change the sample.
         service["Environment"] = VariantValue.Array(new[] { "canary=secret" });
-        Assert.Equal(5, sample.Environment.Count);
+        Assert.Equal(6, sample.Environment.Count);
         Require(sample);
     }
 
@@ -243,11 +243,11 @@ public sealed class LinuxOwnerActivationTests
         var expected = new[]
         {
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
-            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "/runtime/dotnet", "/tool/app.dll",
+            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp", "/runtime/dotnet", "/tool/app.dll",
             "evidence", "supervise", "--request", "/run/request.json"
         };
         var arguments = LinuxOwnerFacts.BootstrapArguments("/runtime/dotnet", "/tool/app.dll", "/run/request.json");
-        Assert.Equal(13, arguments.Count);
+        Assert.Equal(14, arguments.Count);
         Assert.Equal(expected, arguments);
         Assert.Throws<NotSupportedException>(() => { ((IList<string>)arguments)[1] = "canary-option"; });
         var (unit, service) = Properties();
@@ -292,14 +292,14 @@ public sealed class LinuxOwnerActivationTests
             case "missing-i": arguments.RemoveAt(1); break;
             case "wrong-i": arguments[1] = "-u"; break;
             case "extra-argument": arguments.Add("canary-argument"); break;
-            case "extra-assignment": arguments.Insert(7, "DOTNET_STARTUP_HOOKS=canary"); break;
+            case "extra-assignment": arguments.Insert(8, "DOTNET_STARTUP_HOOKS=canary"); break;
             case "changed-assignment": arguments[2] = "PATH=/canary"; break;
             case "reordered-assignments": (arguments[2], arguments[3]) = (arguments[3], arguments[2]); break;
             case "missing-assignment": arguments.RemoveAt(2); break;
             case "duplicate-assignment": arguments[3] = arguments[2]; break;
-            case "direct-dotnet": arguments.RemoveRange(0, 7); break;
+            case "direct-dotnet": arguments.RemoveRange(0, 8); break;
             case "argv-zero": arguments[0] = "/bin/env"; break;
-            case "role": arguments[10] = "worker"; break;
+            case "role": arguments[11] = "worker"; break;
         }
         AssertClosed(() => Require(facts with { Arguments = arguments }));
     }
@@ -315,12 +315,34 @@ public sealed class LinuxOwnerActivationTests
     }
 
     [Theory]
-    [InlineData(7, "/runtime/${canary}/dotnet")]
-    [InlineData(7, "/runtime/%n/dotnet")]
-    [InlineData(8, "/tool/${canary}/app.dll")]
-    [InlineData(8, "/tool/%n/app.dll")]
-    [InlineData(12, "/run/${canary}/request.json")]
-    [InlineData(12, "/run/%n/request.json")]
+    [InlineData(null)]
+    [InlineData("XDG_RUNTIME_DIR=/canary")]
+    [InlineData("XDG_RUNTIME_DIR=relative")]
+    [InlineData("XDG_RUNTIME_DIR=/tmp/../canary")]
+    public void RuntimeIpcDirectoryMustBeTheFixedLiteralInBothBootstrapViews(string? assignment)
+    {
+        var valid = Sample();
+        Require(valid);
+        Assert.Equal("XDG_RUNTIME_DIR=/tmp", valid.Arguments[7]);
+        foreach (var argumentsOnly in new[] { true, false })
+        {
+            var changed = (argumentsOnly ? valid.Arguments : valid.Environment).ToList();
+            var index = argumentsOnly ? 7 : 5;
+            if (assignment is null) changed.RemoveAt(index);
+            else changed[index] = assignment;
+            AssertClosed(() => Require(argumentsOnly
+                ? valid with { Arguments = changed }
+                : valid with { Environment = changed }));
+        }
+    }
+
+    [Theory]
+    [InlineData(8, "/runtime/${canary}/dotnet")]
+    [InlineData(8, "/runtime/%n/dotnet")]
+    [InlineData(9, "/tool/${canary}/app.dll")]
+    [InlineData(9, "/tool/%n/app.dll")]
+    [InlineData(13, "/run/${canary}/request.json")]
+    [InlineData(13, "/run/%n/request.json")]
     public void MatchingMetadataCannotAuthorizeExpansionSyntaxInAnySuppliedBootstrapPath(int index, string path)
     {
         var facts = Sample();
@@ -328,7 +350,7 @@ public sealed class LinuxOwnerActivationTests
         arguments[index] = path;
         facts = facts with { Arguments = arguments };
         // Expected inputs match argv exactly; rejection must be the path contract, not an argv mismatch.
-        AssertClosed(() => facts.Require(Run, 123, arguments[7], arguments[8], arguments[12],
+        AssertClosed(() => facts.Require(Run, 123, arguments[8], arguments[9], arguments[13],
             Now, TimeSpan.FromSeconds(30)));
     }
 
@@ -352,9 +374,9 @@ public sealed class LinuxOwnerActivationTests
     {
         var facts = Sample();
         var arguments = facts.Arguments.ToArray();
-        arguments[7] = "/runtime/dot=net";
+        arguments[8] = "/runtime/dot=net";
         facts = facts with { Arguments = arguments };
-        AssertClosed(() => facts.Require(Run, 123, arguments[7], arguments[8], arguments[12],
+        AssertClosed(() => facts.Require(Run, 123, arguments[8], arguments[9], arguments[13],
             Now, TimeSpan.FromSeconds(30)));
     }
 
@@ -374,10 +396,10 @@ public sealed class LinuxOwnerActivationTests
     {
         var facts = Sample();
         var arguments = LinuxOwnerFacts.BootstrapArguments("/runtime/dotnet", entryPath, requestPath);
-        Assert.Equal("/runtime/dotnet", arguments[7]);
-        Assert.Equal(entryPath, arguments[8]);
-        Assert.Equal(requestPath, arguments[12]);
-        (facts with { Arguments = arguments }).Require(Run, 123, arguments[7], entryPath, requestPath,
+        Assert.Equal("/runtime/dotnet", arguments[8]);
+        Assert.Equal(entryPath, arguments[9]);
+        Assert.Equal(requestPath, arguments[13]);
+        (facts with { Arguments = arguments }).Require(Run, 123, arguments[8], entryPath, requestPath,
             Now, TimeSpan.FromSeconds(30));
     }
 
@@ -402,7 +424,7 @@ public sealed class LinuxOwnerActivationTests
         var argv = new[]
         {
             "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
-            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "/runtime/dotnet", "/tool/app.dll",
+            "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp", "/runtime/dotnet", "/tool/app.dll",
             "evidence", "supervise", "--request", "/run/request.json"
         };
         var service = new Dictionary<string, VariantValue>(StringComparer.Ordinal)
