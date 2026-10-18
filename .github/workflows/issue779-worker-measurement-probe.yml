@@ -64,7 +64,7 @@ jobs:
           target_args="\"$tool/Issue779.PrivateTmpProbe.dll\" coverage-parent \"$PROBE_EVIDENCE/tracker-result\""
           timeout --signal=KILL 90 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$host" "$console" "$tool/Issue779.PrivateTmpProbe.dll" \
-            --target "$host" --targetargs "$target_args" --include '[Issue779.PrivateTmpProbe]*' \
+            --target "$host" --targetargs "$target_args" --include '[Issue779.PrivateTmpProbe]*' --include-test-assembly \
             --format json --output "$PROBE_EVIDENCE/actual-tracker" > "$PROBE_EVIDENCE/tracker-driver.log" 2>&1
           sha256sum --check "$PROBE_EVIDENCE/original-modules.sha256"
           sudo --non-interactive python3 -B - "$PROBE_EVIDENCE" <<'PY_TRACKER'

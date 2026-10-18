@@ -67,3 +67,12 @@ integration. A passing helper report supplies **zero AppSurface coverage credit*
 and no consumer acceptance. Actual AppSurface integration would still require
 its authentic retained owner/worker handles, original deadlines and cleanup,
 exact module/PDB mapping, bounded capture and source-bound end-to-end controls.
+
+The helper is itself the collector entry module, so the diagnostic command uses
+`--include-test-assembly`. Despite that option's name, the pinned
+[GetCoverableModules implementation](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/coverlet.core/Helpers/InstrumentationHelper.cs)
+otherwise removes the entry module from the candidate set. The first tracker
+attempt omitted that switch and produced an empty report before child launch;
+that failed attempt is retained and supplies no tracker proof. This correction
+selects the trusted helper for instrumentation; production filters and gates do
+not change.
