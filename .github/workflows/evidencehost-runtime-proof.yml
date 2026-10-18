@@ -92,7 +92,18 @@ jobs:
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
           set -euo pipefail
-          ./scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
+          worker_uid="$(id -u)"
+          worker_gid="$(id -g)"
+          worker_groups="$(id -G | tr ' ' ',')"
+          timeout --signal=KILL 4320 sudo --non-interactive /usr/bin/python3 -B tests/evidencehost-consumer/test_execution_broker.py \
+            --worker-uid "$worker_uid" --worker-gid "$worker_gid" \
+            --worker-supplementary-groups "$worker_groups" \
+            --subject-uid 65533 --subject-gid 65531 \
+            --dotnet "$(readlink -f "$(command -v dotnet)")" \
+            --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
+            --command-timeout-seconds 4200 -- \
+            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 \
+            /usr/bin/bash scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
       - name: Recheck source after all executions
         if: always()
         run: python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json" --verify
