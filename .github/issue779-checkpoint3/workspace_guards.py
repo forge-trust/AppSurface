@@ -137,7 +137,9 @@ def application_case(args, case, tools, runtime, end):
     root = Path('/run') / ('issue779-c3-guard-' + generation)
     r.c2.create_traversable_root(root)
     normal, definition, digest = tools['normal']
-    tool = root / 'tool'
+    # Match the established C3 staging layout: keep duplicate package/tool inputs off /run.
+    # /run remains for this case's small request/subject/sentinel and C#-owned runtime workspaces.
+    tool = Path('/var/lib') / ('issue779-c3-guard-input-' + generation)
     r.c2.copy_tree(normal, tool)
     subject = root / 'subject'
     r.c2.copy_tree(args.subject, subject)
