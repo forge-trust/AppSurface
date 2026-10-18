@@ -24,6 +24,16 @@ The production application catalogue and Trusted proof registry remain closed.
 
 The legacy Python runtime and its active workflow/wrappers are retired. The [current C# cutover record](issue779-csharp-runtime-cutover.md) links the same-product root/worker roles, installed-tool/SDK packaging checks, reusable Linux consumer workflows and exact unchanged full coverage command. The work below remains a dated historical group audit. It must not be counted as a current 57-group pass or a Trusted enablement decision. New native and numerical results must bind the final committed source and are recorded separately.
 
+[Run 39146333953](https://github.com/forge-trust/AppSurface/actions/runs/39146333953) passed the seven
+packaged producer/artifact controls and seven application CLI/SDK controls on source
+`771d0538347998bdbcff0257fe5089c350ca68bc`. Both artifacts' complete 3,239-file source captures,
+immutable Git blobs, hashes and modes matched. The fresh installed CLI and SDK package smoke passed
+all 15 commands, including two expected rejections. The application positive cases produced real
+9/9 line and 7/7 branch coverage, while negative cases retained their required failure/quarantine
+outcomes. These fixture values are not solution or patch coverage. The separate unchanged full gate
+was still running at this observation. Subsequent failed-handler cleanup changes require their own
+final native and numerical verification; production Trusted registration remains closed.
+
 ## Execution boundary
 
 - The supplied `integration-pass2` ledger reports CLI 289 passed, repaired Aspire 41 passed, five isolated lifecycle cases, and 16 control-protocol cases from the predecessor. These are historical run results, not verification of later/current edits. The stored `resume-status.json` is an earlier checkpoint (CLI 289; Aspire 35 passed/4 failed; lifecycle 5; control 16) and predates the reported Aspire repair.

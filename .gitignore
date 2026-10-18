@@ -80,6 +80,8 @@ junit.xml
 .DS_Store
 
 # Tooling output
+__pycache__/
+*.py[cod]
 .codex-review
 /full_comments.json
 /reviewer_comments.json
