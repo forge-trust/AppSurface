@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Supervision;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
@@ -301,6 +302,235 @@ public sealed class LinuxProtectedNodeNativeTests
             new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromMinutes(1))));
         Assert.Throws<EvidenceAdmissionException>(() => deployment.Recheck(CancellationToken.None));
     }
+
+    [LinuxRootX64Fact]
+    public void ProducerCopiesNestedAuditedBytesIntoTwoActualDirectoriesWithOneBudget()
+    {
+        using var fixture = CopyFixture(("nested/a.bin", "abc"u8.ToArray()), ("nested/z.bin", "defg"u8.ToArray()));
+        using var first = CopyDestination(fixture, "first");
+        using var second = CopyDestination(fixture, "second");
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        var budget = new LinuxProducerCopyBudget();
+        var deadline = new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30));
+        LinuxProducerFileTree.Copy(source, first, CopyUid, CopyGid, budget, deadline, default);
+        LinuxProducerFileTree.Copy(source, second, CopyUid, CopyGid, budget, deadline, default);
+        Assert.Equal(8, budget.Nodes);
+        Assert.Equal(14, budget.Bytes);
+        foreach (var name in new[] { "first", "second" })
+        {
+            var root = fixture.PathFor("private/" + name);
+            Assert.Equal(new[] { "nested" }, Directory.GetDirectories(root).Select(System.IO.Path.GetFileName));
+            AssertCopyMetadata(root + "/nested", directory: true);
+            AssertCopyMetadata(root + "/nested/a.bin", directory: false);
+            AssertCopyMetadata(root + "/nested/z.bin", directory: false);
+            Assert.Equal("abc"u8.ToArray(), File.ReadAllBytes(root + "/nested/a.bin"));
+            Assert.Equal("defg"u8.ToArray(), File.ReadAllBytes(root + "/nested/z.bin"));
+        }
+        Assert.False(first.IsClosed);
+        Assert.False(second.IsClosed);
+        Assert.Equal(CopyUid, InspectCopyDescriptor(first).Uid);
+        source.Recheck(default);
+        Assert.Equal("abc", File.ReadAllText(fixture.PathFor("source/nested/a.bin")));
+    }
+
+    [LinuxRootX64Fact]
+    public void LaterCopyCollisionPreservesEarlierCopyOriginalSentinelAndAllReservations()
+    {
+        using var fixture = CopyFixture(("a.bin", "abc"u8.ToArray()), ("z.bin", "defg"u8.ToArray()));
+        using var destination = CopyDestination(fixture, "selected");
+        var sentinel = fixture.WriteFile("private/selected/z.bin", "outside original"u8.ToArray(), ReadOnlyFile);
+        using var original = File.OpenHandle(sentinel, FileMode.Open, FileAccess.Read);
+        var before = InspectCopyDescriptor(original);
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        var budget = new LinuxProducerCopyBudget();
+        Assert.Throws<IOException>(() => LinuxProducerFileTree.Copy(source, destination, CopyUid, CopyGid,
+            budget, new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)), default));
+        Assert.Equal(3, budget.Nodes);
+        Assert.Equal(7, budget.Bytes);
+        Assert.Equal("abc", File.ReadAllText(fixture.PathFor("private/selected/a.bin")));
+        Assert.Equal("outside original", File.ReadAllText(sentinel));
+        using var named = File.OpenHandle(sentinel, FileMode.Open, FileAccess.Read);
+        Assert.Equal(before, InspectCopyDescriptor(named));
+        Assert.Equal(before, InspectCopyDescriptor(original));
+        Assert.False(destination.IsClosed);
+        source.Recheck(default);
+    }
+
+    [LinuxRootX64Fact]
+    public void NestedCopyCollisionCannotAdoptAnExistingSymlinkOrChangeItsOutsideDirectory()
+    {
+        using var fixture = CopyFixture(("nested/a.bin", "abc"u8.ToArray()));
+        using var destination = CopyDestination(fixture, "selected");
+        fixture.CreateDirectory("outside", PrivateDirectory);
+        var sentinel = fixture.WriteFile("outside/sentinel", "outside bytes"u8.ToArray(), ReadOnlyFile);
+        using var original = File.OpenHandle(sentinel, FileMode.Open, FileAccess.Read);
+        var before = InspectCopyDescriptor(original);
+        fixture.CreateSymbolicLink("private/selected/nested", fixture.PathFor("outside"));
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        var budget = new LinuxProducerCopyBudget();
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxProducerFileTree.Copy(source, destination,
+            CopyUid, CopyGid, budget, new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)), default));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal(2, budget.Nodes);
+        Assert.Equal(0, budget.Bytes);
+        Assert.False(File.Exists(fixture.PathFor("outside/a.bin")));
+        Assert.Equal("outside bytes", File.ReadAllText(sentinel));
+        Assert.Equal(before, InspectCopyDescriptor(original));
+        Assert.NotNull(new DirectoryInfo(fixture.PathFor("private/selected/nested")).LinkTarget);
+        Assert.False(destination.IsClosed);
+    }
+
+    [LinuxRootX64Fact]
+    public void ReplacedRetainedCopySourceRejectsBeforeDestinationCreationOrFileReservation()
+    {
+        using var fixture = CopyFixture(("payload.bin", "original bytes"u8.ToArray()));
+        using var destination = CopyDestination(fixture, "selected");
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        File.Move(fixture.PathFor("source/payload.bin"), fixture.PathFor("private/held-original"));
+        fixture.WriteFile("source/payload.bin", "original bytes"u8.ToArray(), ReadOnlyFile);
+        var budget = new LinuxProducerCopyBudget();
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxProducerFileTree.Copy(source, destination,
+            CopyUid, CopyGid, budget, new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)), default));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal(1, budget.Nodes);
+        Assert.Equal(0, budget.Bytes);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.PathFor("private/selected")));
+        Assert.Equal("original bytes", File.ReadAllText(fixture.PathFor("private/held-original")));
+        Assert.Equal("original bytes", File.ReadAllText(fixture.PathFor("source/payload.bin")));
+        Assert.False(destination.IsClosed);
+    }
+
+    [LinuxRootX64Fact]
+    public void CancelledCopyKeepsTheOriginalTokenUntouchedDestinationAndZeroReservations()
+    {
+        using var fixture = CopyFixture(("payload.bin", "original bytes"u8.ToArray()));
+        using var destination = CopyDestination(fixture, "selected");
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var budget = new LinuxProducerCopyBudget();
+        var error = Assert.Throws<OperationCanceledException>(() => LinuxProducerFileTree.Copy(source, destination,
+            CopyUid, CopyGid, budget, new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)), cancelled.Token));
+        Assert.Equal(cancelled.Token, error.CancellationToken);
+        Assert.Equal(0, budget.Nodes);
+        Assert.Equal(0, budget.Bytes);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(fixture.PathFor("private/selected")));
+        Assert.False(destination.IsClosed);
+        Assert.Equal(CopyUid, InspectCopyDescriptor(destination).Uid);
+        source.Recheck(default);
+    }
+
+    [LinuxRootX64Fact]
+    public void RealKernelWriteFailureLeavesTheBorrowedAuditedSourceUsableForAnIndependentDestination()
+    {
+        var bytes = Enumerable.Range(0, 65553).Select(static index => (byte)(index % 251)).ToArray();
+        using var fixture = CopyFixture(("payload.bin", bytes));
+        using var source = LinuxProtectedDeployment.Open(fixture.PathFor("source"), default);
+        var deadline = new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30));
+        using (var good = File.OpenHandle(fixture.PathFor("private/first.bin"), FileMode.CreateNew, FileAccess.Write))
+            source.CopyFile("payload.bin", good, default, deadline);
+        Assert.Equal(bytes, File.ReadAllBytes(fixture.PathFor("private/first.bin")));
+
+        // Actual kernel character-device rejection, not an injected callback or a producer/account claim.
+        // This controls the retained-file I/O failure path; it does not model a regular destination's disk quota.
+        using (var full = File.OpenHandle("/dev/full", FileMode.Open, FileAccess.Write))
+        {
+            Assert.Equal(0x2000, InspectCopyDescriptor(full).Mode & 0xf000);
+            Assert.ThrowsAny<IOException>(() => source.CopyFile("payload.bin", full, default, deadline));
+            Assert.False(full.IsClosed);
+        }
+        source.Recheck(default);
+        Assert.Equal(bytes, File.ReadAllBytes(fixture.PathFor("source/payload.bin")));
+        using (var fresh = File.OpenHandle(fixture.PathFor("private/second.bin"), FileMode.CreateNew, FileAccess.Write))
+            source.CopyFile("payload.bin", fresh, default, deadline);
+        Assert.Equal(bytes, File.ReadAllBytes(fixture.PathFor("private/second.bin")));
+    }
+
+    // These IDs describe actual test-owned filesystem nodes, never authenticated or reserved run accounts.
+    private const uint CopyUid = 12345;
+    private const uint CopyGid = 12346;
+
+    private static RootFixture CopyFixture(params (string Relative, byte[] Bytes)[] files)
+    {
+        var fixture = RootFixture.Create();
+        try
+        {
+            fixture.SetMode(fixture.Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            fixture.CreateDirectory("source", ReadOnlyDirectory);
+            fixture.CreateDirectory("private", PrivateDirectory);
+            foreach (var file in files) fixture.WriteFile("source/" + file.Relative, file.Bytes, ReadOnlyFile);
+            foreach (var directory in Directory.EnumerateDirectories(fixture.PathFor("source"), "*", SearchOption.AllDirectories))
+                fixture.SetMode(directory, ReadOnlyDirectory);
+            fixture.SetMode(fixture.PathFor("source"), ReadOnlyDirectory);
+            return fixture;
+        }
+        catch { fixture.Dispose(); throw; }
+    }
+
+    private static SafeFileHandle CopyDestination(RootFixture fixture, string name)
+    {
+        fixture.CreateDirectory("private/" + name, PrivateDirectory);
+        var path = fixture.PathFor("private/" + name);
+        Assert.Equal(0, ChownCopyDirectory(path, CopyUid, CopyGid));
+        var fd = OpenCopyDirectory(path, 0x10000 | 0x80000);
+        Assert.True(fd >= 0);
+        return new((nint)fd, ownsHandle: true);
+    }
+
+    private static void AssertCopyMetadata(string path, bool directory)
+    {
+        using var handle = directory
+            ? new SafeFileHandle((nint)OpenCopyDirectory(path, 0x10000 | 0x80000), ownsHandle: true)
+            : File.OpenHandle(path, FileMode.Open, FileAccess.Read);
+        Assert.False(handle.IsInvalid);
+        var actual = InspectCopyDescriptor(handle);
+        Assert.Equal(CopyUid, actual.Uid);
+        Assert.Equal(CopyGid, actual.Gid);
+        Assert.Equal((ushort)(directory ? 0x41c0 : 0x8180), actual.Mode);
+        if (!directory) Assert.Equal(1u, actual.LinkCount);
+    }
+
+    private static LinuxProtectedMetadata InspectCopyDescriptor(SafeFileHandle handle)
+    {
+        var held = false;
+        try
+        {
+            handle.DangerousAddRef(ref held);
+            Assert.Equal(0, StatxCopy(handle.DangerousGetHandle().ToInt32(), string.Empty, 0x1000, 0x7ff, out var value));
+            return new(value.DeviceMajor, value.DeviceMinor, value.Inode, value.Uid, value.Gid,
+                value.Mode, value.Nlink, value.Size, value.ChangeSeconds, value.ChangeNanoseconds,
+                value.ModifySeconds, value.ModifyNanoseconds);
+        }
+        finally { if (held) handle.DangerousRelease(); }
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 256)]
+    private struct CopyStatxData
+    {
+        [FieldOffset(16)] internal uint Nlink;
+        [FieldOffset(20)] internal uint Uid;
+        [FieldOffset(24)] internal uint Gid;
+        [FieldOffset(28)] internal ushort Mode;
+        [FieldOffset(32)] internal ulong Inode;
+        [FieldOffset(40)] internal ulong Size;
+        [FieldOffset(96)] internal long ChangeSeconds;
+        [FieldOffset(104)] internal uint ChangeNanoseconds;
+        [FieldOffset(112)] internal long ModifySeconds;
+        [FieldOffset(120)] internal uint ModifyNanoseconds;
+        [FieldOffset(136)] internal uint DeviceMajor;
+        [FieldOffset(140)] internal uint DeviceMinor;
+    }
+
+    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
+    private static extern int StatxCopy(int directory, [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags, uint mask, out CopyStatxData value);
+
+    [DllImport("libc", EntryPoint = "chown", SetLastError = true)]
+    private static extern int ChownCopyDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint uid, uint gid);
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenCopyDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
     private sealed class LinuxRootX64FactAttribute : FactAttribute
     {

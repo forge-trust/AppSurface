@@ -126,7 +126,6 @@ internal sealed class LinuxProducerWorkspace : IDisposable
 {
     private const ulong DirectoryFlags = 0x10000 | 0x80000;
     private const ulong PathFlags = 0x200000 | 0x80000;
-    private const ulong DestinationFileFlags = 0x01 | 0x40 | 0x80 | 0x20000 | 0x80000;
     private const ulong ReadFileFlags = 0x80000 | 0x800;
     private const ulong ParentResolution = 0x02 | 0x04 | 0x08;
     private const ulong ChildResolution = ParentResolution | 0x01;
@@ -489,58 +488,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         _inputDeadline.Check(token);
     }
 
-    private void CopyTree(LinuxProtectedDeployment source, DirectoryNode destination, CancellationToken token)
-    {
-        _inputDeadline.Check(token);
-        var names = source.FileNames;
-        if (names.Count is < 1 or > LinuxProducerWorkspaceLayout.MaximumNodes) throw LinuxProducerWorkspaceLayout.Invalid();
-        var directories = new Dictionary<string, SafeFileHandle>(StringComparer.Ordinal);
-        var ownedDirectories = new List<SafeFileHandle>();
-        _copyBudget.ReserveDirectory(); // The already prepared destination root participates in the full copy inventory.
-        try
-        {
-            foreach (var relative in names)
-            {
-                _inputDeadline.Check(token);
-                var parts = ValidateRelativeFile(relative);
-                var parent = destination.Handle;
-                var prefix = string.Empty;
-                for (var i = 0; i < parts.Length - 1; i++)
-                {
-                    prefix = prefix.Length == 0 ? parts[i] : prefix + "/" + parts[i];
-                    if (!directories.TryGetValue(prefix, out var handle))
-                    {
-                        _copyBudget.ReserveDirectory();
-                        if (MkdirAt(Fd(parent), parts[i], PrivatePermissions) != 0)
-                            throw LinuxProducerWorkspaceLayout.Invalid();
-                        handle = OpenAt2(Fd(parent), parts[i], DirectoryFlags, 0, ChildResolution);
-                        ownedDirectories.Add(handle);
-                        SetOwnershipAndMode(handle, _layout.Accounts.SubjectUid, _layout.Accounts.SubjectGid,
-                            PrivatePermissions);
-                        var metadata = LinuxProtectedMetadata.From(StatFd(handle));
-                        LinuxProducerWorkspaceLayout.RequireDirectory(metadata, _layout.Accounts.SubjectUid,
-                            _layout.Accounts.SubjectGid, PrivatePermissions);
-                        RequireSameNamed(parent, parts[i], metadata);
-                        directories.Add(prefix, handle);
-                    }
-                    parent = handle;
-                }
-
-                _inputDeadline.Check(token);
-                var expectedLength = source.RequireFileLength(relative, token, _inputDeadline);
-                _copyBudget.ReserveFile(expectedLength);
-                using var file = OpenAt2(Fd(parent), parts[^1], DestinationFileFlags, PrivateFilePermissions,
-                    ChildResolution);
-                SetOwnershipAndMode(file, _layout.Accounts.SubjectUid, _layout.Accounts.SubjectGid,
-                    PrivateFilePermissions);
-                source.CopyFile(relative, file, token, _inputDeadline);
-                var copied = LinuxProtectedMetadata.From(StatFd(file));
-                RequireCopiedFile(copied);
-                if (copied.Length != (ulong)expectedLength) throw LinuxProducerWorkspaceLayout.Invalid();
-            }
-        }
-        finally { CloseHandles(ownedDirectories); }
-    }
+    private void CopyTree(LinuxProtectedDeployment source, DirectoryNode destination, CancellationToken token) =>
+        LinuxProducerFileTree.Copy(source, destination.Handle, _layout.Accounts.SubjectUid,
+            _layout.Accounts.SubjectGid, _copyBudget, _inputDeadline, token);
 
     private DirectoryNode OpenAncestor(DirectoryNode? parent, string name, CancellationToken token, bool allowMount)
     {
@@ -755,32 +705,11 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         }
     }
 
-    private static void RequireCopiedFile(LinuxProtectedMetadata value)
-    {
-        if (!LinuxWorkspaceMetadata.MatchesCopiedProducerFile(value))
-            throw LinuxProducerWorkspaceLayout.Invalid();
-    }
-
     private static void RequireSealedMetadata(LinuxProtectedMetadata terminal, LinuxProtectedMetadata original,
         bool directory, ushort permissions)
     {
         if (!LinuxWorkspaceMetadata.MatchesProducerSeal(terminal, original, directory, permissions))
             throw LinuxProducerWorkspaceLayout.Invalid();
-    }
-
-    private static string[] ValidateRelativeFile(string relative)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(relative) || StrictUtf8.GetByteCount(relative) > 4095
-                || relative.Any(static c => char.IsControl(c) || c is '\\' or ':' or '\0'))
-                throw LinuxProducerWorkspaceLayout.Invalid();
-            var parts = relative.Split('/');
-            if (parts.Any(static part => part.Length is < 1 or > 255 || part is "." or ".."))
-                throw LinuxProducerWorkspaceLayout.Invalid();
-            return parts;
-        }
-        catch (EncoderFallbackException) { throw LinuxProducerWorkspaceLayout.Invalid(); }
     }
 
     private static string[] ReadNames(SafeFileHandle directory, CancellationToken token)

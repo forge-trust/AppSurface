@@ -49,6 +49,99 @@ public sealed class LinuxProducerWorkspaceTests
         Assert.Throws<EvidenceAdmissionException>(() => LinuxProducerWorkspaceLayout.Create(Guid.NewGuid(),
             Accounts, "/run/input", solution));
 
+    [Theory]
+    [InlineData("generation")]
+    [InlineData("accounts")]
+    [InlineData("solution")]
+    [InlineData("worker-uid-zero")]
+    [InlineData("worker-uid-max")]
+    [InlineData("subject-uid-zero")]
+    [InlineData("subject-uid-max")]
+    [InlineData("worker-gid-zero")]
+    [InlineData("worker-gid-max")]
+    [InlineData("subject-gid-zero")]
+    [InlineData("subject-gid-max")]
+    [InlineData("results-gid-zero")]
+    [InlineData("results-gid-max")]
+    [InlineData("shared-uid")]
+    [InlineData("shared-primary-gid")]
+    [InlineData("worker-results-gid")]
+    [InlineData("subject-results-gid")]
+    public void LayoutRejectsOneIncompleteOrOverlappingIdentityBeforeProjectingAnyPaths(string mutation)
+    {
+        var runId = Guid.Parse("a487f5b8-f334-4bbe-ae4e-586cbf585d0b");
+        var accounts = Accounts;
+        string? solution = "/run/layout-canary/Subject.csproj";
+        LinuxProducerWorkspaceLayout Create() => LinuxProducerWorkspaceLayout.Create(runId, accounts, "/run/layout-canary", solution);
+        Assert.EndsWith("/subject/Subject.csproj", Create().SolutionPath, StringComparison.Ordinal);
+        switch (mutation)
+        {
+            case "generation": runId = Guid.Empty; break;
+            case "accounts": accounts = null!; break;
+            case "solution": solution = null; break;
+            case "worker-uid-zero": accounts = accounts with { WorkerUid = 0 }; break;
+            case "worker-uid-max": accounts = accounts with { WorkerUid = uint.MaxValue }; break;
+            case "subject-uid-zero": accounts = accounts with { SubjectUid = 0 }; break;
+            case "subject-uid-max": accounts = accounts with { SubjectUid = uint.MaxValue }; break;
+            case "worker-gid-zero": accounts = accounts with { WorkerGid = 0 }; break;
+            case "worker-gid-max": accounts = accounts with { WorkerGid = uint.MaxValue }; break;
+            case "subject-gid-zero": accounts = accounts with { SubjectGid = 0 }; break;
+            case "subject-gid-max": accounts = accounts with { SubjectGid = uint.MaxValue }; break;
+            case "results-gid-zero": accounts = accounts with { ResultsGid = 0 }; break;
+            case "results-gid-max": accounts = accounts with { ResultsGid = uint.MaxValue }; break;
+            case "shared-uid": accounts = accounts with { SubjectUid = accounts.WorkerUid }; break;
+            case "shared-primary-gid": accounts = accounts with { SubjectGid = accounts.WorkerGid }; break;
+            case "worker-results-gid": accounts = accounts with { ResultsGid = accounts.WorkerGid }; break;
+            case "subject-results-gid": accounts = accounts with { ResultsGid = accounts.SubjectGid }; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Create());
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("/run/layout-canary", error.ToString());
+    }
+
+    [Theory]
+    [InlineData("inode")]
+    [InlineData("uid")]
+    [InlineData("gid")]
+    [InlineData("file-type")]
+    [InlineData("group-search")]
+    [InlineData("other-read")]
+    [InlineData("set-id")]
+    public void DirectoryComparisonRequiresTheExactPrivateDirectoryData(string mutation)
+    {
+        var original = new LinuxProtectedMetadata(1, 2, 3, Accounts.SubjectUid, Accounts.SubjectGid,
+            0x41c0, 2, 0, 0, 0, 0, 0);
+        LinuxProducerWorkspaceLayout.RequireDirectory(original, Accounts.SubjectUid, Accounts.SubjectGid, 0x1c0);
+        var changed = mutation switch
+        {
+            "inode" => original with { Inode = 0 },
+            "uid" => original with { Uid = Accounts.WorkerUid },
+            "gid" => original with { Gid = Accounts.WorkerGid },
+            "file-type" => original with { Mode = 0x81c0 },
+            "group-search" => original with { Mode = 0x41c8 },
+            "other-read" => original with { Mode = 0x41c4 },
+            "set-id" => original with { Mode = 0x49c0 },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProducerWorkspaceLayout.RequireDirectory(changed, Accounts.SubjectUid, Accounts.SubjectGid, 0x1c0));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void OpaqueResultsTokenAcceptsAsciiClassesAndExactBoundsButNeverControlOrUnicodePaths()
+    {
+        Assert.True(LinuxProducerWorkspaceLayout.IsResultsToken("A"));
+        Assert.True(LinuxProducerWorkspaceLayout.IsResultsToken("Coverage-Az09"));
+        Assert.True(LinuxProducerWorkspaceLayout.IsResultsToken(new string('Z', 96)));
+        Assert.False(LinuxProducerWorkspaceLayout.IsResultsToken(null!));
+        Assert.False(LinuxProducerWorkspaceLayout.IsResultsToken("\0"));
+        Assert.False(LinuxProducerWorkspaceLayout.IsResultsToken("é"));
+    }
+
     [Fact]
     public void ResultsTokenGrammarCannotSelectAPath()
     {
