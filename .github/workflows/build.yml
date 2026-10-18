@@ -531,7 +531,7 @@ jobs:
             /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 \
             NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 \
             COVERAGE_GATE_DIFF_BASE="$COVERAGE_GATE_DIFF_BASE" APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
-            /usr/bin/bash scripts/coverage-solution.sh
+            /usr/bin/bash ./scripts/coverage-solution.sh
 
       - name: Upload docs outline layout evidence
         if: ${{ always() && !cancelled() }}

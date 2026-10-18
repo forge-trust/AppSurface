@@ -124,3 +124,14 @@ starts the original descendant stop before joining handlers when a worker disapp
 intent. Two deterministic barrier controls cover that ordering and retained first-stop ownership;
 the focused sequence/deadline suite passed 57/57 with zero compiler diagnostics. This local result
 does not replace a new native run or the final unchanged coverage gate on the corrected source.
+
+The same source `771d0538` completed all 57 solution project selections and merged real native input,
+but the wrapper exited `ASCOV120` before numerical gating: the CLI suite passed 3,181 of 3,182 cases.
+Its existing `CoverageSolutionScriptTests.BuildWorkflow_ShouldUseCoverageSolutionScriptForDefaultLane`
+required the canonical `./scripts/coverage-solution.sh` spelling, while the workflow invoked the same
+file as `scripts/coverage-solution.sh`. Both workflow calls now use the canonical relative spelling.
+The existing 36-case script/workflow suite passed after that correction. No wrapper, threshold,
+exclusion, test expectation or gate policy changed. Raw merged coverage was 132,522/139,297 lines
+(95.1363%) and 60,095/69,945 branches (85.9175%); those values are not a full-gate pass, and the
+official patch result was not reached. The retained coverage artifact was verified against GitHub's
+SHA-256 `650318850432d88e0c87b76cf3c479e0e094cc67e541bc4709fbbf60b3ee1f10` before inspection.

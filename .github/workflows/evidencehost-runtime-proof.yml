@@ -113,7 +113,7 @@ jobs:
             --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
             --command-timeout-seconds 4200 -- \
             /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
-            /usr/bin/bash scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
+            /usr/bin/bash ./scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
       - name: Recheck source after all executions
         if: always()
         run: python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json" --verify

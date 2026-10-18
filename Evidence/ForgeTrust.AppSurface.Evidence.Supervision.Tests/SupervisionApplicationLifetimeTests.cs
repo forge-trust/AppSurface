@@ -67,6 +67,40 @@ public sealed class SupervisionApplicationLifetimeTests
     }
 
     [Fact]
+    public async Task StartRegistrationRejectedByClosedSharedRegistryIsStickyAndNeverDispatches()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        Assert.True(await ledger.CloseAndJoinWorkloadsAsync().WaitAsync(Guard));
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        var startCalls = 0;
+        var stopCalls = 0;
+
+        var start = lifetime.StartAsync(_ =>
+        {
+            startCalls++;
+            return Task.FromResult("unexpected");
+        }, default);
+        await Assert.ThrowsAsync<EvidenceAdmissionException>(() => start.WaitAsync(Guard));
+
+        Assert.Equal(0, startCalls);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+
+        await lifetime.StopAndJoinAsync(_ =>
+        {
+            stopCalls++;
+            return Task.CompletedTask;
+        }, default).WaitAsync(Guard);
+
+        Assert.Equal(1, stopCalls);
+        Assert.True(lifetime.Joined);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
+    [Fact]
     public async Task PendingLateStartIsJoinedBeforeTheSecondStopCall()
     {
         var lifetime = new SupervisionApplicationLifetime(new SupervisionWorkRegistry());
@@ -261,6 +295,27 @@ public sealed class SupervisionApplicationLifetimeTests
         });
 
         await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        var invalidResourceCallbacks = 0;
+        foreach (var resourceId in new[] { string.Empty, " ", "\t\n" })
+        {
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.WaitResourceAsync(resourceId, _ =>
+                {
+                    invalidResourceCallbacks++;
+                    return Task.FromResult(true);
+                }, default);
+            });
+        }
+        Assert.Equal(0, invalidResourceCallbacks);
+
+        var lateDisposerCalls = 0;
+        Assert.Throws<EvidenceAdmissionException>(() => lifetime.RegisterDisposer(_ =>
+        {
+            lateDisposerCalls++;
+            return Task.CompletedTask;
+        }));
+
         Assert.Equal(2, await lifetime.WaitResourceAsync("resource", _ => Task.FromResult(2), default).WaitAsync(Guard));
         Assert.Equal(3, await lifetime.WaitResourceAsync("Resource", _ => Task.FromResult(3), default).WaitAsync(Guard));
         Assert.Throws<EvidenceAdmissionException>(() =>
@@ -269,6 +324,42 @@ public sealed class SupervisionApplicationLifetimeTests
         });
 
         await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.Equal(0, lateDisposerCalls);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
+    [Fact]
+    public async Task ReadinessRegistrationRejectedByClosedSharedRegistryIsStickyAndNeverDispatches()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        Assert.True(await ledger.CloseAndJoinWorkloadsAsync().WaitAsync(Guard));
+        var readinessCalls = 0;
+        var stopCalls = 0;
+
+        var readiness = lifetime.WaitResourceAsync("database", _ =>
+        {
+            readinessCalls++;
+            return Task.FromResult(true);
+        }, default);
+        await Assert.ThrowsAsync<EvidenceAdmissionException>(() => readiness.WaitAsync(Guard));
+
+        Assert.Equal(0, readinessCalls);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+
+        await lifetime.StopAndJoinAsync(_ =>
+        {
+            stopCalls++;
+            return Task.CompletedTask;
+        }, default).WaitAsync(Guard);
+
+        Assert.Equal(1, stopCalls);
+        Assert.True(lifetime.Joined);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
         Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
     }
 
@@ -452,6 +543,34 @@ public sealed class SupervisionApplicationLifetimeTests
             await IgnoreCleanupFailure(readiness!);
             await IgnoreCleanupFailure(stop);
         }
+    }
+
+    [Fact]
+    public async Task JoinedCleanupPhaseIsRejectedInsideStartAndReadinessProcedures()
+    {
+        var lifetime = new SupervisionApplicationLifetime(new SupervisionWorkRegistry());
+        var startGuardRejected = false;
+        var readinessGuardRejected = false;
+
+        await lifetime.StartAsync(_ =>
+        {
+            try { lifetime.RequireJoinedCleanupPhase(); }
+            catch (EvidenceAdmissionException) { startGuardRejected = true; }
+            return Task.FromResult("started");
+        }, default).WaitAsync(Guard);
+
+        await lifetime.WaitResourceAsync("database", _ =>
+        {
+            try { lifetime.RequireJoinedCleanupPhase(); }
+            catch (EvidenceAdmissionException) { readinessGuardRejected = true; }
+            return Task.FromResult(true);
+        }, default).WaitAsync(Guard);
+
+        Assert.True(startGuardRejected);
+        Assert.True(readinessGuardRejected);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Joined);
+        Assert.False(lifetime.Failed);
     }
 
     [Fact]

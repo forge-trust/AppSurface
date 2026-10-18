@@ -247,6 +247,70 @@ public sealed class SupervisionOutputCollectorTests
     }
 
     [Theory]
+    [InlineData(-1)]
+    [InlineData(16 * 1024 + 1)]
+    public async Task CollectAsync_InvalidReadCountFailsWithoutChargingBytesAndJoinsItsSibling(int count)
+    {
+        using var stdout = new GatedStream(returnedCount: count);
+        using var stderr = new GatedStream();
+        var collection = new SupervisionOutputCollector().CollectAsync(stdout, stderr, default);
+        try
+        {
+            await Task.WhenAll(stdout.Entered.Task, stderr.Entered.Task).WaitAsync(Guard);
+            stdout.Release();
+            await stderr.CancellationObserved.Task.WaitAsync(Guard);
+            var result = await collection.WaitAsync(Guard);
+            Assert.False(result.Successful);
+            Assert.False(result.Drained);
+            Assert.Equal(SupervisionOutputFailure.ReadFailed, result.Failure);
+            Assert.Equal(SupervisionOutputFailure.ReadFailed, result.Stdout.Failure);
+            Assert.Equal(SupervisionOutputFailure.Cancelled, result.Stderr.Failure);
+            Assert.False(result.Stdout.EndOfStream);
+            Assert.False(result.Stderr.EndOfStream);
+            Assert.Equal(0, result.ReceivedBytes);
+            Assert.Empty(result.Stdout.Prefix);
+            Assert.Empty(result.Stderr.Prefix);
+        }
+        finally
+        {
+            stdout.Release();
+            stderr.Release();
+            await collection.WaitAsync(Guard);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CollectAsync_OriginalStderrFrameIsObservedOnlyAfterItsBytesFitTheBudget(bool overflow)
+    {
+        var frame = SupervisionCancellationPhaseObservation.ExpectedFrame;
+        var phase = new SupervisionCancellationPhaseObservation();
+        var collector = new SupervisionOutputCollector(frame.Length - (overflow ? 1 : 0), 0);
+        collector.ObserveCancellation(phase);
+        using var stdout = new MemoryStream();
+        using var stderr = new FragmentedStream(frame);
+        var result = await collector.CollectAsync(stdout, stderr, default).WaitAsync(Guard);
+        Assert.Equal(frame.Length, result.ReceivedBytes);
+        Assert.Equal(frame.Length, result.Stderr.ReceivedBytes);
+        Assert.Empty(result.Stderr.Prefix);
+        Assert.Equal(!overflow, result.Successful);
+        Assert.Equal(overflow, result.QuotaExceeded);
+        if (overflow)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => phase.Observed);
+            Assert.False(result.Stderr.EndOfStream);
+            Assert.Equal(SupervisionOutputFailure.QuotaExceeded, result.Failure);
+        }
+        else
+        {
+            await phase.Observed.WaitAsync(Guard);
+            Assert.True(result.Stdout.EndOfStream);
+            Assert.True(result.Stderr.EndOfStream);
+        }
+    }
+
+    [Theory]
     [InlineData(0, 0)]
     [InlineData(-1, 0)]
     [InlineData(16 * 1024 * 1024 + 1, 0)]
@@ -276,7 +340,8 @@ public sealed class SupervisionOutputCollectorTests
         byte[]? bytes = null,
         bool ignoreCancellation = false,
         bool readFailure = false,
-        bool cancellationFailure = false) : Stream
+        bool cancellationFailure = false,
+        int? returnedCount = null) : Stream
     {
         private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private bool _read;
@@ -316,6 +381,7 @@ public sealed class SupervisionOutputCollectorTests
             await pendingRead.ConfigureAwait(false);
 
             if (readFailure) throw new IOException("private-read-canary");
+            if (returnedCount is { } invalid) return invalid;
             var value = bytes ?? [];
             value.AsMemory().CopyTo(buffer);
             return value.Length;
@@ -332,5 +398,11 @@ public sealed class SupervisionOutputCollectorTests
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class FragmentedStream(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            base.ReadAsync(buffer[..Math.Min(1, buffer.Length)], cancellationToken);
     }
 }

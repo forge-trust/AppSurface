@@ -258,6 +258,72 @@ public sealed class SupervisionTeardownDeadlineTests
         Assert.Equal(1, clock.CreatedTimers);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EarlyTimerRearmFailureLatchesAndCancelsBorrowers(bool throwOnChange)
+    {
+        var clock = new ManualClock { FailChangeCall = 3, ThrowOnChangeFailure = throwOnChange };
+        var deadline = new SupervisionTeardownDeadline(clock);
+        deadline.Begin(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        var token = deadline.Token;
+        using var borrower = CancellationTokenSource.CreateLinkedTokenSource(token);
+
+        clock.Advance(TimeSpan.FromSeconds(2));
+        clock.FireEarly();
+
+        Assert.True(token.IsCancellationRequested);
+        Assert.True(borrower.IsCancellationRequested);
+        Reject(() => deadline.Begin(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)));
+        Reject(() => { _ = deadline.Remaining; });
+        Reject(() => { _ = deadline.Token; });
+        Reject(() => deadline.Dispose());
+        Assert.Equal(1, clock.DisposedTimers);
+    }
+
+    [Fact]
+    public void ThrowingCancellationCallbackIsSanitizedAndTimerCleanupStillRuns()
+    {
+        var clock = new ManualClock();
+        var deadline = new SupervisionTeardownDeadline(clock);
+        deadline.Begin(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        var token = deadline.Token;
+        var callbackCalls = 0;
+        using var callback = token.Register(() =>
+        {
+            callbackCalls++;
+            throw new IOException("private-cancellation-canary");
+        });
+
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        Assert.True(token.IsCancellationRequested);
+        Assert.Equal(1, callbackCalls);
+        Reject(() => deadline.Begin(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)));
+        Reject(() => { _ = deadline.Remaining; });
+        Reject(() => deadline.Dispose());
+        Assert.Equal(1, clock.DisposedTimers);
+    }
+
+    [Fact]
+    public void TimerDisposeFailureStillDisposesSourceAndLatchesOwner()
+    {
+        var clock = new ManualClock { ThrowOnTimerDispose = true };
+        var deadline = new SupervisionTeardownDeadline(clock);
+        deadline.Begin(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        var token = deadline.Token;
+        _ = token.WaitHandle;
+
+        Reject(() => deadline.Dispose());
+
+        Assert.True(token.IsCancellationRequested);
+        Assert.Equal(1, clock.DisposedTimers);
+        Assert.Throws<ObjectDisposedException>(() => { _ = token.WaitHandle; });
+        deadline.Dispose();
+        Assert.Equal(1, clock.DisposedTimers);
+        Assert.Throws<ObjectDisposedException>(() => { _ = deadline.Cancellation; });
+    }
+
     [Fact]
     public void PreBeginBorrowersReceiveLateExpiryWithoutStartingOrRenewingTheSchedule()
     {
@@ -383,6 +449,9 @@ public sealed class SupervisionTeardownDeadlineTests
         internal long Timestamp { get; set; }
         internal DateTimeOffset Utc { get; set; } = new(2026, 10, 6, 0, 0, 0, TimeSpan.Zero);
         internal Action? OnCreate { get; set; }
+        internal int FailChangeCall { get; set; }
+        internal bool ThrowOnChangeFailure { get; set; }
+        internal bool ThrowOnTimerDispose { get; set; }
         internal int CreatedTimers { get; private set; }
         internal int DisposedTimers { get; set; }
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
@@ -410,9 +479,15 @@ public sealed class SupervisionTeardownDeadlineTests
     {
         private long? _due;
         private bool _disposed;
+        private int _changeCalls;
         public bool Change(TimeSpan dueTime, TimeSpan period)
         {
             if (_disposed) return false;
+            if (++_changeCalls == clock.FailChangeCall)
+            {
+                if (clock.ThrowOnChangeFailure) throw new IOException("private-timer-canary");
+                return false;
+            }
             Assert.Equal(Timeout.InfiniteTimeSpan, period);
             _due = dueTime == Timeout.InfiniteTimeSpan ? null : clock.Timestamp + dueTime.Ticks;
             return true;
@@ -432,6 +507,7 @@ public sealed class SupervisionTeardownDeadlineTests
             if (_disposed) return;
             _disposed = true;
             clock.DisposedTimers++;
+            if (clock.ThrowOnTimerDispose) throw new IOException("private-timer-dispose-canary");
         }
         public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
     }
