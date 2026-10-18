@@ -446,6 +446,92 @@ public sealed class LinuxProtectedNodeNativeTests
         Assert.Equal(bytes, File.ReadAllBytes(fixture.PathFor("private/second.bin")));
     }
 
+    [LinuxRootX64Fact]
+    public async Task ActualRootPipeFactoryKeepsCollectionAndDisposalPendingUntilTheLastDuplicateWriterCloses()
+    {
+        LinuxOutputPipes? pipes = null;
+        FileStream? outputWriter = null;
+        FileStream? errorWriter = null;
+        Task<SupervisionOutputReceipt>? collection = null;
+        Task? disposal = null;
+        var guard = TimeSpan.FromSeconds(10);
+        try
+        {
+            pipes = LinuxOutputPipes.Create();
+            var originalOutput = pipes.StandardOutput;
+            var originalError = pipes.StandardError;
+            outputWriter = DuplicatePipeWriter(originalOutput);
+            errorWriter = DuplicatePipeWriter(originalError);
+            var first = InspectCopyDescriptor(originalOutput);
+            var second = InspectCopyDescriptor(originalError);
+            Assert.Equal(0x1000, first.Mode & 0xf000);
+            Assert.Equal(0x1000, second.Mode & 0xf000);
+            Assert.NotEqual(first.Inode, second.Inode);
+            Assert.Equal(first, InspectCopyDescriptor(outputWriter.SafeFileHandle));
+            Assert.Equal(second, InspectCopyDescriptor(errorWriter.SafeFileHandle));
+            var descriptorFlags = PipeFcntl(outputWriter.SafeFileHandle, 1, 0);
+            Assert.True(descriptorFlags >= 0);
+            Assert.Equal(1, descriptorFlags & 1); // Actual FD_CLOEXEC, never a failed -1 query.
+            collection = pipes.BeginCollectAsync(default, receivedByteLimit: 128, prefixByteLimit: 64);
+            Assert.Same(collection, pipes.JoinAsync());
+            await outputWriter.WriteAsync("actual output"u8.ToArray());
+            await outputWriter.FlushAsync();
+            await errorWriter.WriteAsync("actual error"u8.ToArray());
+            await errorWriter.FlushAsync();
+            errorWriter.Dispose();
+            errorWriter = null;
+            pipes.CloseWriteCopies();
+            Assert.True(originalOutput.IsClosed);
+            Assert.True(originalError.IsClosed);
+            Assert.False(collection.IsCompleted); // The genuine duplicate still holds the stdout write endpoint.
+            disposal = pipes.DisposeAsync().AsTask();
+            Assert.Same(disposal, pipes.DisposeAsync().AsTask());
+            Assert.False(disposal.IsCompleted);
+            outputWriter.Dispose();
+            outputWriter = null;
+            var receipt = await collection.WaitAsync(guard);
+            await disposal.WaitAsync(guard);
+            Assert.True(receipt.Successful);
+            Assert.True(receipt.Stdout.EndOfStream);
+            Assert.True(receipt.Stderr.EndOfStream);
+            Assert.Equal(25, receipt.ReceivedBytes);
+            Assert.Equal("actual output"u8.ToArray(), receipt.Stdout.Prefix.ToArray());
+            Assert.Equal("actual error"u8.ToArray(), receipt.Stderr.Prefix.ToArray());
+        }
+        finally
+        {
+            try { outputWriter?.Dispose(); }
+            finally
+            {
+                try { errorWriter?.Dispose(); }
+                finally
+                {
+                    if (pipes is not null)
+                    {
+                        try { pipes.CloseWriteCopies(); }
+                        finally
+                        {
+                            try { if (collection is not null) await collection.WaitAsync(guard); }
+                            finally { await (disposal ?? pipes.DisposeAsync().AsTask()).WaitAsync(guard); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static FileStream DuplicatePipeWriter(SafeFileHandle borrowed)
+    {
+        var descriptor = PipeFcntl(borrowed, 1030, 3); // F_DUPFD_CLOEXEC; the original handle stays borrowed.
+        Assert.True(descriptor >= 0);
+        var owned = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        try { return new FileStream(owned, FileAccess.Write, bufferSize: 4096); }
+        catch { owned.Dispose(); throw; }
+    }
+
+    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static extern int PipeFcntl(SafeFileHandle handle, int command, int value);
+
     // These IDs describe actual test-owned filesystem nodes, never authenticated or reserved run accounts.
     private const uint CopyUid = 12345;
     private const uint CopyGid = 12346;

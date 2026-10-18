@@ -347,6 +347,63 @@ public sealed class LinuxOutputPipesTests
     }
 
     [Theory]
+    [InlineData("none")]
+    [InlineData("write")]
+    [InlineData("read")]
+    public async Task ClosedRunLedgerRejectsDispatchAndPreservesTheFirstCleanupFailure(string closeFailure)
+    {
+        var expected = closeFailure == "write" ? SupervisionOutputPipeFailure.CloseFailed : SupervisionOutputPipeFailure.CollectionFailed;
+        using var budget = new SupervisionRunOutputBudget();
+        await budget.CompleteAsync().WaitAsync(Guard);
+        GatedReadStream stdout = closeFailure == "read" ? new CloseBarrierStream(fail: true) : new GatedReadStream();
+        var stderr = new GatedReadStream();
+        var firstWrite = new CountedWriteCloser(fail: closeFailure == "write");
+        var secondWrite = new CountedWriteCloser();
+        var owner = new SupervisionOutputPipeOwnership(stdout, stderr, firstWrite, secondWrite);
+        if (stdout is CloseBarrierStream close) close.ReleaseClose();
+        Task<SupervisionOutputReceipt>? collection = null;
+        Task? disposal = null;
+        try
+        {
+            collection = owner.BeginCollectAsync(default, runBudget: budget);
+            Assert.Same(collection, owner.JoinAsync());
+            var collectionError = await Assert.ThrowsAsync<SupervisionOutputPipeException>(() => collection.WaitAsync(Guard));
+            Assert.Equal(SupervisionOutputPipeFailure.CollectionFailed, collectionError.Failure);
+            Assert.Null(collectionError.InnerException);
+            Assert.DoesNotContain("registration", collectionError.ToString(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(0, stdout.ReadCount);
+            Assert.Equal(0, stderr.ReadCount);
+            disposal = owner.DisposeAsync().AsTask();
+            Assert.Same(disposal, owner.DisposeAsync().AsTask());
+            var disposeError = await Assert.ThrowsAsync<SupervisionOutputPipeException>(() => disposal.WaitAsync(Guard));
+            Assert.Equal(expected, disposeError.Failure);
+            Assert.Null(disposeError.InnerException);
+            Assert.DoesNotContain("private-canary", disposeError.ToString());
+            Assert.Equal(1, stdout.DisposeCount);
+            Assert.Equal(1, stderr.DisposeCount);
+            Assert.Equal(1, firstWrite.CloseCount);
+            Assert.Equal(1, secondWrite.CloseCount);
+            Assert.Same(disposal, owner.DisposeAsync().AsTask());
+        }
+        finally
+        {
+            stdout.ReleaseEof();
+            stderr.ReleaseEof();
+            if (stdout is CloseBarrierStream pendingClose) pendingClose.ReleaseClose();
+            try
+            {
+                if (collection is not null) await collection.WaitAsync(Guard);
+            }
+            catch (SupervisionOutputPipeException) { }
+            finally
+            {
+                try { await (disposal ?? owner.DisposeAsync().AsTask()).WaitAsync(Guard); }
+                catch (SupervisionOutputPipeException) { }
+            }
+        }
+    }
+
+    [Theory]
     [InlineData(0L, 1)]
     [InlineData(-1L, 1)]
     [InlineData(16_777_217L, 1)]
