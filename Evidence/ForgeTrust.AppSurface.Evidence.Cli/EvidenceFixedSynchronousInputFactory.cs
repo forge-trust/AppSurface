@@ -6,7 +6,7 @@ namespace ForgeTrust.AppSurface.Evidence.Cli;
 /// <summary>Implements the compile-selected private N11 synchronous input-factory stall.</summary>
 /// <remarks>
 /// <see cref="CreateForProtectedRole"/> returns an instance only in the N11 build; ordinary builds
-/// return null and retain the normal input factory. The caller invokes <see cref="StallBeforeReturningTask"/>
+/// return null and retain the normal input factory. The N11 caller invokes its private blocking method
 /// inside the existing tracked Admission callback after authenticated READY. Before entering that callback,
 /// the caller registers this helper's disposer with the existing <see cref="EvidenceWorkerExecution"/>.
 /// The fixed ARM marker is written only after registration succeeds; the registered callback writes its
@@ -25,7 +25,11 @@ internal sealed class EvidenceFixedSynchronousInputFactory
     /// <summary>Creates the fixed stall helper only when the whole image was compiled for N11.</summary>
     /// <returns>The N11 helper, or null for every other qualification and the ordinary build.</returns>
     internal static EvidenceFixedSynchronousInputFactory? CreateForProtectedRole() =>
+#if EVIDENCE_PRIVATE_N11
         EvidenceNativeQualification.WorkerStallEnabled ? new EvidenceFixedSynchronousInputFactory() : null;
+#else
+        null;
+#endif
 
     /// <summary>Registers the fixed marker callback with the actual worker lifecycle before tracked admission.</summary>
     /// <param name="execution">The existing lifecycle that owns worker cleanup.</param>
@@ -62,6 +66,7 @@ internal sealed class EvidenceFixedSynchronousInputFactory
         errorWriter.WriteLine("FIXTURE_N11_INPUT_FACTORY_ENTERED");
     }
 
+#if EVIDENCE_PRIVATE_N11
     /// <summary>Writes the fixed N11 entry marker, then blocks synchronously before returning an operation task.</summary>
     /// <returns>No value; the method blocks indefinitely in the intended private qualification image.</returns>
     /// <remarks>The marker is diagnostic data only. No successful task, cleanup or settlement is implied.</remarks>
@@ -71,4 +76,5 @@ internal sealed class EvidenceFixedSynchronousInputFactory
         Thread.Sleep(Timeout.Infinite);
         throw new InvalidOperationException("The fixed synchronous input factory unexpectedly returned.");
     }
+#endif
 }

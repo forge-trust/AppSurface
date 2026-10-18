@@ -134,3 +134,10 @@ Protected CLI collection and compiled v2 SDK applications share the [fixed termi
 CLI `TotalMilliseconds` records elapsed monotonic worker execution through collection entry, including resource
 readiness when present; zero stage fields may remain unreported. These metrics do not reset budgets or prove
 physical exit. Root custody still verifies the original files and joined runtime before completion.
+
+The deliberate `StallBeforeReturningTask` body and its protected resolver call
+compile only with `EVIDENCE_PRIVATE_N11`. Ordinary images contain neither that
+blocking method nor an emitted call to it, and their factory returns null directly.
+The existing marker and disposer ordering APIs stay available for portable
+metadata controls. [Finished-image tests](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceNativeQualificationTests.cs)
+inspect that method boundary; this supplies no Linux execution or cleanup claim.

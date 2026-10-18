@@ -101,9 +101,13 @@ internal static class EvidenceProtectedCliExecution
 
             var resolved = await execution.ExecuteAsync(EvidenceRunStage.Admission,
                 TimeSpan.FromSeconds(descriptor.AdmissionSeconds),
+#if EVIDENCE_PRIVATE_N11
                 async token => fixedInputFactory is null
                     ? await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false)
                     : await fixedInputFactory.StallBeforeReturningTask().ConfigureAwait(false),
+#else
+                async token => await EvidenceProtectedWorkerInputs.ResolveAsync(descriptor, token).ConfigureAwait(false),
+#endif
                 callerCancellation).ConfigureAwait(false);
             if (resolved.Outcome != EvidenceWorkerStageOutcome.Passed)
                 throw execution.TerminalException as EvidenceAdmissionException

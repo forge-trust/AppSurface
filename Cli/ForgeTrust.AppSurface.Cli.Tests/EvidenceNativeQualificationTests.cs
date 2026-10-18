@@ -1,3 +1,4 @@
+using System.Reflection.Metadata;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -6,6 +7,27 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Build-selection and original callback controls; no native owner, lease or accepted proof.</summary>
 public sealed class EvidenceNativeQualificationTests
 {
+    /// <summary>Reads finished metadata without invoking the deliberate private stall.</summary>
+    [Fact]
+    public void SynchronousNativeStallIsAbsentFromOrdinaryProductImages()
+    {
+        using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Cli.dll"));
+        using var image = new System.Reflection.PortableExecutable.PEReader(file);
+        var reader = image.GetMetadataReader();
+        var holder = Assert.Single(reader.TypeDefinitions.Select(reader.GetTypeDefinition),
+            type => reader.GetString(type.Name) == "EvidenceFixedSynchronousInputFactory");
+        var methods = holder.GetMethods().Select(handle => reader.GetString(reader.GetMethodDefinition(handle).Name)).ToArray();
+#if EVIDENCE_PRIVATE_N11
+        Assert.Contains("StallBeforeReturningTask", methods);
+        Assert.NotNull(EvidenceFixedSynchronousInputFactory.CreateForProtectedRole());
+#else
+        Assert.DoesNotContain("StallBeforeReturningTask", methods);
+        Assert.Null(EvidenceFixedSynchronousInputFactory.CreateForProtectedRole());
+#endif
+        Assert.Contains("WriteInputFactoryEnteredMarker", methods);
+        Assert.Contains("RegisterDisposer", methods);
+    }
+
 #if !EVIDENCE_PRIVATE_N04
     [Fact]
     public async Task OrdinaryChangedPeerRejectionDoesNotWaitForAnOpenSocketOrSendRequestBytes()
