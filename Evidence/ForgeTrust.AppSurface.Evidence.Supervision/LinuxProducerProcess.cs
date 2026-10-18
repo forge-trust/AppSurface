@@ -410,12 +410,37 @@ internal sealed class LinuxProducerProcess
     {
         if (Volatile.Read(ref _dispatchAttempted) == 0) return;
         _owner.RequireCleanup(token);
-        using var stopDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        stopDeadline.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
-            TimeSpan.FromSeconds(_input.Request.StoppingSeconds).Ticks)));
-        using var stop = await LinuxSystemdBackend.ConnectAsync(stopDeadline.Token).ConfigureAwait(false);
-        await stop.StopUnitAsync(Unit, stopDeadline.Token).ConfigureAwait(false);
-        _owner.RequireCleanup(stopDeadline.Token);
+        // systemd's TimeoutStopUSec equals the worker's entire stopping allowance. Waiting for
+        // that automatic KILL races the worker's own stop deadline. Spend only half of the existing
+        // reserve on TERM, then force the same selected group and retain time for physical checks.
+        var grace = TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
+            TimeSpan.FromSeconds(_input.Request.StoppingSeconds).Ticks) / 2);
+        await SupervisionProducerStop.RunAsync(grace, async ct =>
+        {
+            using var stop = await LinuxSystemdBackend.ConnectAsync(ct).ConfigureAwait(false);
+            await stop.StopUnitAsync(Unit, ct).ConfigureAwait(false);
+        }, async ct =>
+        {
+            using var observations = await LinuxSystemdBackend.ConnectAsync(ct).ConfigureAwait(false);
+            while (true)
+            {
+                _owner.RequireCleanup(ct);
+                var sample = await observations.ReadUnitAsync(Unit, ct).ConfigureAwait(false);
+                _lastStopObservation = sample;
+                if (_recipe!.HasStopped(sample)
+                    && (_process is null || sample.ExecMainPid == _process.Pid)
+                    && LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, ct))) return;
+                await Task.Delay(ObservationInterval, ct).ConfigureAwait(false);
+            }
+        }, async ct =>
+        {
+            // A grace cancellation can abort its connection. Authenticate a fresh containment
+            // connection under the original cleanup token rather than retrying canceled I/O.
+            using var containment = await LinuxSystemdBackend.ConnectAsync(ct).ConfigureAwait(false);
+            await containment.StopUnitAsync(Unit, ct).ConfigureAwait(false);
+            await containment.KillUnitAsync(Unit, ct).ConfigureAwait(false);
+        }, token).ConfigureAwait(false);
+        _owner.RequireCleanup(token);
     }
 
     private void RequirePollingBindings(CancellationToken token)

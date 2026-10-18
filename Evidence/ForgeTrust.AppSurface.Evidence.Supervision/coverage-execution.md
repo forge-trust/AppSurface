@@ -35,3 +35,25 @@ After every registered collection task joins, the root may emit one `evidence-co
 After physical producer settlement and original pump joins, an unsuccessful RUN may retain its already-bounded stdout/stderr prefixes using [LinuxProducerFailureOutput](LinuxProducerFailureOutput.cs). Only the two fixed names `stdout.prefix` and `stderr.prefix` are created under a fresh `/run/appsurface-evidence-producer-diagnostics-<generation>` root:root0700 directory, each root:root0600/single-link and at most1MiB. The holder uses mandatory descriptor-relative no-follow operations and the original teardown token; it adds no pipe reader or process. Missing/failed retention never replaces the original unsuccessful RUN or proves cleanup. Native fixtures may copy these private bytes without echoing them to diagnose SDK/test startup. This root contains no subject-owned nodes and cannot authorize account release.
 
 The same private generation additionally retains bounded `state.json` with one closed producer operation stage, optional normal/stopped execution code/status, and original pending-start/stop state. These fields identify whether a genuine failed test exit or the monitor's own validation caused rejection. No raw exception or output enters this JSON. The native harness separately samples only the generated producer cgroup's numeric memory/tasks counters and closed event names while it observes the actual process; sampled peaks are lower bounds and absence is unknown, never zero. Neither observation changes limits or establishes acceptance.
+
+## Bounded producer stop escalation
+
+[`LinuxProducerProcess`](LinuxProducerProcess.cs) uses
+[`SupervisionProducerStop.RunAsync`](SupervisionProducerStop.cs) inside the existing
+[pending-start stop/join/stop sequence](SupervisionPendingStart.cs). A systemd
+`StopUnit` reply starts termination; it does not mean that a child which ignores
+SIGTERM has left the group. The cooperative slice is half the smaller of the
+original stopping reserve and current cleanup remainder. If matching stopped-unit
+and empty-group observations do not complete within that slice, a fresh
+authenticated connection requests stop and SIGKILL for the same generated unit
+using the original cleanup token. This leaves time inside the existing stopping
+reserve for the worker's reply and final checks. No configured deadline or unit
+policy is extended.
+
+The internal callback API separates joined stop requests, cooperative observation
+and forced containment for procedure tests. A callback return grants no physical
+exit or artifact custody. The real holder still joins its original start/monitor
+and both output pumps, then requires two matching stopped-unit and empty kernel
+group observations. Cleanup cancellation or forced-containment failure remains a
+failure. An ignored cancellation cannot detach a dispatched callback; the outer
+root lifetime remains responsible for a stall.
