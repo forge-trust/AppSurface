@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 internal static class RootFilesystemMeasurement
 {
     private static readonly XNamespace Trx = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
-    private static readonly string[] Classes = ["LinuxProtectedNodeNativeTests", "LinuxRetainedReportNativeTests"];
+    private static readonly string[] Classes = ["LinuxProtectedNodeNativeTests", "LinuxRetainedReportNativeTests", "LinuxKernelIdentityNativeTests"];
 
     /// <summary>Requires exact passing counters, expected case names and a hash-bound real TRX.</summary>
     internal static void Validate(JsonElement binding, byte[] bytes)
@@ -23,7 +23,7 @@ internal static class RootFilesystemMeasurement
         Assert.Equal(Trx + "TestRun", document.Root!.Name);
         var counters = Assert.Single(document.Descendants(Trx + "Counters"));
         var total = Number(counters, "total");
-        Assert.InRange(total, 2, 128);
+        Assert.InRange(total, Classes.Length, 128);
         Assert.Equal(total, Number(counters, "executed"));
         Assert.Equal(total, Number(counters, "passed"));
         foreach (var name in new[] { "failed", "error", "notExecuted", "warning" }) Assert.Equal(0, Number(counters, name));

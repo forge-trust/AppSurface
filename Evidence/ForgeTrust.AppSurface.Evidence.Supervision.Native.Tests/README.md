@@ -20,7 +20,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 | --- | --- |
 | `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented supervision module hashes, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
-| `root-files.trx` | Hash-bound current-run passing root filesystem controls for both expected classes; zero skips or failures. |
+| `root-files.trx` | Hash-bound current-run passing root filesystem controls for all three expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 
@@ -58,7 +58,8 @@ The application workflow additionally builds the ordinary root filesystem contro
 classes with the same C3 project graph, compiler and Release configuration. Before
 instrumentation it requires the test image's Supervision DLL/PDB hashes to match
 the native application's original module hashes. The pinned Coverlet Console runs
-only `LinuxProtectedNodeNativeTests` and `LinuxRetainedReportNativeTests` as actual
+only `LinuxProtectedNodeNativeTests`, `LinuxRetainedReportNativeTests`, and
+`LinuxKernelIdentityNativeTests` as actual
 Linux x64 root on their own fresh `/run` trees. These tests exercise existing
 mandatory `openat2`, retained inode/name checks, bounded reads and real file
 mutation rejection; they create no supervisor, process lease or accepted proof.
@@ -68,8 +69,19 @@ those actual hits to the source-bound application report. No raw worker hit file
 is read or reconstructed. The workflow binds the real `root-files.trx` SHA-256 and
 requires positive executed/passed counts with zero failed or skipped cases before
 publishing the combined report. [`RootFilesystemMeasurement`](RootFilesystemMeasurement.cs)
-checks that bound TRX again in the solution lane, including both expected test
+checks that bound TRX again in the solution lane, including all three expected test
 classes. Its [malformed-data controls](RootFilesystemMeasurementTests.cs) use
 labelled synthetic TRX solely to test validation and provide no execution credit.
 The standard solution command, coverage thresholds, exclusions and patch
 comparison remain unchanged.
+
+The kernel identity class owns a fresh generated test unit before starting a
+fixed nonroot `/usr/bin/sleep` under the actual host manager. It samples the
+original proc handles, complete UID/GID tuples, start time and exact cgroup,
+checks cancellation and mismatch rejection, then explicitly stops/KILLs that
+selected unit and joins its utility processes and bounded pumps. A 30-second
+OS runtime cap is independent of the command deadlines. The tests issue no
+AppSurface owner activation, worker admission, producer lease or accepted
+consumer proof; they verify kernel primitives only. They explicitly skip
+without Linux x64 root and a booted systemd manager; the prepared lane requires
+a zero-skip passing TRX, so that skip supplies no measurement credit.
