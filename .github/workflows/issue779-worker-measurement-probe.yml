@@ -1,0 +1,85 @@
+name: Issue 779 isolated private tmp measurement prerequisite
+
+on:
+  push:
+    branches: [codex/issue779-worker-measurement-probe-20261018]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  namespace-lifetime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+      MSBUILDDISABLENODEREUSE: "1"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Compile the dependency-free diagnostic and bind source
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/namespace-probe-evidence"
+          mkdir -m 0700 "$evidence"
+          printf 'PROBE_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          project=.github/issue779-checkpoint4/namespace-probe/NamespaceProbe.csproj
+          timeout --signal=KILL 120 dotnet restore "$project" --locked-mode --disable-parallel -warnaserror > "$evidence/restore.log" 2>&1
+          timeout --signal=KILL 120 dotnet build "$project" --no-restore -c Release -warnaserror -p:UseSharedCompilation=false -o "$RUNNER_TEMP/namespace-probe-build" > "$evidence/build.log" 2>&1
+      - name: Observe actual private tmp data after its original nonroot leader exits
+        shell: bash
+        run: |
+          set -euo pipefail
+          host="$(readlink -f "$(command -v dotnet)")"
+          case "$host" in /home/*|/root/*|/run/user/*) exit 1 ;; esac
+          tool="/var/lib/issue779-private-tmp-probe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          sudo --non-interactive install -d -o root -g root -m 0755 "$tool"
+          sudo --non-interactive cp -R "$RUNNER_TEMP/namespace-probe-build/." "$tool/"
+          sudo --non-interactive chown -R root:root "$tool"
+          sudo --non-interactive find "$tool" -type d -exec chmod 0555 {} +
+          sudo --non-interactive find "$tool" -type f -exec chmod 0444 {} +
+          sha256sum "$tool/Issue779.PrivateTmpProbe.dll" "$tool/Issue779.PrivateTmpProbe.pdb" > "$PROBE_EVIDENCE/original-modules.sha256"
+          timeout --signal=KILL 90 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$host" "$tool/Issue779.PrivateTmpProbe.dll" parent "$PROBE_EVIDENCE/result" > "$PROBE_EVIDENCE/driver.log" 2>&1
+          sha256sum --check "$PROBE_EVIDENCE/original-modules.sha256"
+      - name: Retain bounded data without granting coverage or acceptance
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --non-interactive chown -R "$(id -u):$(id -g)" "$PROBE_EVIDENCE"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$PROBE_EVIDENCE/source.json" --verify
+          python3 -B - "$PROBE_EVIDENCE" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          assert sum(p.stat().st_size for p in root.rglob('*') if p.is_file()) <= 8 * 1024 * 1024
+          path = root / 'result/receipt.json'
+          assert path.is_file() and 0 < path.stat().st_size <= 16384
+          data = json.loads(path.read_bytes())
+          assert data['schema'] == 'issue779-private-tmp-exit-probe-v1'
+          assert data['native_acceptance'] is False and data['coverage_credit'] is False
+          assert data['exit'] == 0 and data['cleanup_complete'] is True
+          assert data['private_tmp_distinct'] is True and data['original_pidfd_exit_observed'] is True
+          assert data['uid'] == data['gid'] == 65534 and data['child_exit_code'] == 0
+          assert type(data['retained_data_reachable']) is bool
+          # Either reachability outcome is a measured OS prerequisite result, never invented hits.
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: issue779-private-tmp-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/namespace-probe-evidence
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
