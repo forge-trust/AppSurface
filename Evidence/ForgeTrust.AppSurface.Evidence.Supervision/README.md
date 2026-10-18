@@ -1752,9 +1752,10 @@ The N04 and N07 rendezvous implementations in
 images selected with their matching [private qualification build symbol](../../Directory.Build.props).
 Ordinary `None`, C2 and C3 images contain neither native owner type nor its server
 and worker callsites. A false runtime selector alone was insufficient to remove
-these unused native implementations from shipped binaries. The portable ordering
-data classes remain available to their existing procedure controls; they grant no
-native capability. The ordinary authentication, admission, control drain, physical
+these unused native implementations from shipped binaries. Private ordering and
+diagnostic data implementations now follow their matching private image too.
+Their existing procedure controls compile the same physical source in the test
+assembly only when the runtime omits it; they grant no native capability. The ordinary authentication, admission, control drain, physical
 settlement and custody paths remain compiled and required.
 
 The [image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
@@ -1770,9 +1771,10 @@ The same binary boundary applies to the native slot-mutation fixture in
 allocation fixture in [`LinuxRunWorkspace.N09`](LinuxRunWorkspace.N09.cs). N05/N06
 compile only their slot helper and its original-handle fallback; N09 compiles only
 its retained allocation holder and fallback. The shared descriptor-relative name
-reader is compiled for those three variants. The detached slot/allocation
-observation encoders stay available to their ordinary metadata controls and grant
-no native ownership. Actual artifact allocation, root custody and ordinary handle
+reader is compiled for those three variants. The detached slot encoder follows
+N05/N06, while its unchanged data controls link the same implementation when the
+ordinary runtime omits it. The N09 allocation codec retains its existing shared
+placement. Neither grants native ownership. Actual artifact allocation, root custody and ordinary handle
 closure remain required in every image.
 
 The same boundary now covers the N10 and N12 native implementation paths. The
@@ -1809,3 +1811,26 @@ check actual implementation absence as well as matching private-image presence.
 ## Validation-only worker measurement
 
 The [C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) is compiled into private C3/C3Sdk validation images only. Its three worker-holder call sites retain an already authenticated worker's private temporary directory before descriptor publication, capture genuine pinned tracker bytes after the original normal exit, and close the extra handles after the original monitor joins. The ordinary executable contains neither those call sites nor the fixture type, verified through PE metadata. It grants no admission, process owner, artifact custody, proof or production registration. Product environment, isolation, permissions, budgets and cleanup order are unchanged. The fixture reference documents the pinned format dependency, actual helper proof, first-worker-only scope and current native integration requirement.
+
+### Private diagnostic data source placement
+
+The [supervision test project](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj) defines `EVIDENCE_QUALIFICATION_DATA_TESTS` locally and conditionally links each single physical fixture source only when its runtime image omits that source. This test-only symbol is not propagated to production project references. Existing inner native-owner guards still require their original private image; linking data/order source does not compile a native owner into an unselected test assembly. No new friend assembly, public API or coverage exclusion is added.
+
+| Fixture family | Runtime selection |
+| --- | --- |
+| Negative kernel observation | N04, N05, N06, N08, N09, N13, N14, N16 |
+| Failed settlement and worker-stop timing data | N07, N08, N09, N11 |
+| N07 order, failure settlement and emitter | N07 |
+| N04 order | N04 |
+| Joined worker diagnostic | N08, N09 |
+| Slot-negative observation | N05, N06 |
+
+The same implementation remains exercised by its existing data/procedure tests in every supported test selection; actual PE checks assert runtime absence/presence independently. Authentication, systemd ownership, process identity, work admission, original task/pump joins, filesystem custody and account release remain in the ordinary runtime. The shared output collector exposes its existing Contracts-defined received-byte and retained-prefix constants as internal data aliases used by its own constructor and guard. Limits stay 16 MiB received/1 MiB retained per stream. Private N04/N07 order and joined-diagnostic rejections use the existing fixed `ASEVD410` backend error; their diagnostic-only problem wording is standardized, with no supplied text or inner exception.
+
+### Producer failure-state encoding
+
+[`LinuxProducerFailureState.Encode`](LinuxProducerFailureState.cs) is the data-only encoder used by [`LinuxProducerFailureOutput.Retain`](LinuxProducerFailureOutput.cs). Use the encoder to check the closed diagnostic schema without opening root files or constructing an owner. Persisting bytes still requires the original native retainer's platform, reference-bound owner, cleanup token, prefix checks, and exclusive descriptor-relative root-only files. Encoding cannot establish the observations it describes.
+
+The API takes joined output data, one fixed stage, optional normal/stopped/last-stop samples, the pending-start snapshot, four settlement/failure flags, and an optional captured PID. It returns canonical UTF-8 JSON with the existing 22 members. Stages are `binding`, `results`, `pipes`, `backend`, `start`, `running`, `identity`, `normal-exit`, and `settlement`; other values reject fixed `ASEVD402`. Optional absent facts remain null. Active/substate text is reduced to `active`, `inactive`, `deactivating`, `failed`, `running`, `exited`, `dead`, `stop`, `stop-sigterm`, `stop-sigkill`, `stop-post`, `final-sigterm`, `final-sigkill`, or `unknown`.
+
+The members are `schema`, `stage`, `normal_code`, `normal_status`, `stopped_code`, `stopped_status`, `start_reserved`, `start_joined`, `stop_joined`, `pending_failure`, `physically_settled`, `cleanup_failed`, `group_empty_twice`, `pump_joined`, `captured_pid`, `last_main_pid`, `last_exec_pid`, `last_code`, `last_status`, `last_active`, `last_substate`, and `output_drained`. Raw stream prefixes, unit names, paths and exception text are absent. Numeric failure facts are preserved rather than converted to success; a drained stream pair is not physical-exit or custody proof. The extraction preserves the native caller's owner-before-encoding order and all filesystem checks.

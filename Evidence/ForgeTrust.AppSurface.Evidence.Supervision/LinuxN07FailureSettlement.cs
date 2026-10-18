@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N07 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -81,7 +82,7 @@ internal sealed class LinuxN07FailureSettlement
                 || (terminal.ActiveState == "failed" && terminal.SubState == "failed"))) throw Rejected();
         if (output.Stdout is null || output.Stderr is null
             || !LinuxAccountUtility.GroupEmpty(group) || !output.Successful
-            || output.ReceivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes
+            || output.ReceivedByteLimit is <= 0 or > SupervisionOutputCollector.MaximumReceivedByteLimit
             ) throw Rejected();
         RequireStream(output.Stdout); RequireStream(output.Stderr);
         if (output.Stdout.ReceivedBytes != 0 || output.Stderr.Prefix.Length > MaximumPrivateStderrBytes) throw Rejected();
@@ -167,3 +168,5 @@ internal sealed class LinuxN07FailureSettlement
     }
     private static InvalidOperationException Rejected() => new("N07 failure settlement data rejected.");
 }
+
+#endif

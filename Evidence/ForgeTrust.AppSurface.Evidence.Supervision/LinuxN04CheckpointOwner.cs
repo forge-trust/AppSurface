@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using ForgeTrust.AppSurface.Evidence.Contracts;
 #if EVIDENCE_PRIVATE_N04
 using System.Net.Sockets;
@@ -129,7 +130,7 @@ internal sealed class LinuxN04CheckpointOrder
     internal void MarkFailed() { lock (_gate) _failed = true; }
 
     internal static EvidenceAdmissionException Rejected() =>
-        new("ASEVD410", "The fixed N04 checkpoint could not be established.");
+        LinuxSystemdBackend.InvalidControl();
 }
 
 #if EVIDENCE_PRIVATE_N04
@@ -404,4 +405,6 @@ internal sealed class LinuxN04CheckpointOwner
     [DllImport("libc", EntryPoint = "syscall", SetLastError = true)]
     private static extern long FchmodAt2(long number, int directory, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode, int flags);
 }
+#endif
+
 #endif

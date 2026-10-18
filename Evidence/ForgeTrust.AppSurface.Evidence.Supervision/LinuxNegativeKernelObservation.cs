@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N13 || EVIDENCE_PRIVATE_N14 || EVIDENCE_PRIVATE_N16 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -77,7 +78,7 @@ internal sealed class LinuxNegativeKernelObservation
                     || (terminal.ActiveState == "failed" && terminal.SubState == "failed"))) throw Rejected();
             if (!LinuxAccountUtility.GroupEmpty(group) || output.Stdout is null || output.Stderr is null
                 || !output.Successful
-                || output.ReceivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+                || output.ReceivedByteLimit is <= 0 or > SupervisionOutputCollector.MaximumReceivedByteLimit)
                 throw Rejected();
             RequireStream(output.Stdout);
             RequireStream(output.Stderr);
@@ -146,7 +147,7 @@ internal sealed class LinuxNegativeKernelObservation
         try
         {
             if (generation == Guid.Empty || output is null || output.Stdout is null || output.Stderr is null
-                || output.ReceivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+                || output.ReceivedByteLimit is <= 0 or > SupervisionOutputCollector.MaximumReceivedByteLimit)
                 throw Rejected();
             RequireStream(output.Stdout);
             RequireStream(output.Stderr);
@@ -205,3 +206,5 @@ internal sealed class LinuxNegativeKernelObservation
     private static InvalidOperationException Rejected() =>
         new("ASEVD410: Negative kernel observation data rejected.");
 }
+
+#endif

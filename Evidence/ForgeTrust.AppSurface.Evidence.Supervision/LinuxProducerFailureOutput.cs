@@ -17,28 +17,10 @@ internal static class LinuxProducerFailureOutput
     {
         LinuxProtectedDeployment.RequirePlatform();
         owner.RequireCleanupLaunchInput(input, token);
-        if (stage is not ("binding" or "results" or "pipes" or "backend" or "start" or "running"
-            or "identity" or "normal-exit" or "settlement")) throw LinuxProtectedDeployment.InvalidDeployment();
-        var state = EvidenceCanonicalJson.Serialize(new
-        {
-            schema = "evidence-producer-failure-state-v1", stage,
-            normal_code = normal?.ExecMainCode, normal_status = normal?.ExecMainStatus,
-            stopped_code = stopped?.ExecMainCode, stopped_status = stopped?.ExecMainStatus,
-            start_reserved = pending.StartReserved, start_joined = pending.StartJoined,
-            stop_joined = pending.StopJoined, pending_failure = pending.FirstFailure.ToString(),
-            physically_settled = physicallySettled, cleanup_failed = cleanupFailed,
-            group_empty_twice = groupEmptyTwice, pump_joined = pumpJoined,
-            captured_pid = capturedPid, last_main_pid = lastStop?.MainPid,
-            last_exec_pid = lastStop?.ExecMainPid, last_code = lastStop?.ExecMainCode,
-            last_status = lastStop?.ExecMainStatus, last_active = ClosedState(lastStop?.ActiveState),
-            last_substate = ClosedState(lastStop?.SubState), output_drained = output.Drained,
-        });
+        var state = LinuxProducerFailureState.Encode(output, stage, normal, stopped, pending,
+            physicallySettled, cleanupFailed, groupEmptyTwice, pumpJoined, capturedPid, lastStop);
         RetainCore(input, owner, output, "producer", state, token);
     }
-
-    private static string ClosedState(string? value) => value is "active" or "inactive" or "deactivating"
-        or "failed" or "running" or "exited" or "dead" or "stop" or "stop-sigterm" or "stop-sigkill"
-        or "stop-post" or "final-sigterm" or "final-sigkill" ? value : "unknown";
 
     /// <summary>Retains original joined worker output without creating another reader or settlement assertion.</summary>
     /// <remarks>The original worker supplies its receipt after its stop task and collector join; missing physical proof remains missing.</remarks>

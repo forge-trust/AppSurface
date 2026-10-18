@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -33,7 +34,7 @@ internal static class LinuxJoinedWorkerOutputDiagnostic
             if (!Enum.IsDefined(output.Failure) || output.ReceivedBytes < 0
                 || output.Stdout.ReceivedBytes > long.MaxValue - output.Stderr.ReceivedBytes
                 || output.ReceivedBytes != output.Stdout.ReceivedBytes + output.Stderr.ReceivedBytes
-                || output.ReceivedByteLimit is <= 0 or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+                || output.ReceivedByteLimit is <= 0 or > SupervisionOutputCollector.MaximumReceivedByteLimit)
                 throw Rejected();
         }
         var stderr = output?.Stderr;
@@ -87,7 +88,7 @@ internal static class LinuxJoinedWorkerOutputDiagnostic
     {
         if (stream is null || stream.Prefix.IsDefault || stream.ReceivedBytes < 0
             || stream.ReceivedBytes < stream.Prefix.Length || !Enum.IsDefined(stream.Failure)
-            || stream.Prefix.Length > EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream)
+            || stream.Prefix.Length > SupervisionOutputCollector.MaximumRetainedPrefixBytes)
             throw Rejected();
     }
 
@@ -100,5 +101,7 @@ internal static class LinuxJoinedWorkerOutputDiagnostic
         _ => throw Rejected()
     };
 
-    private static EvidenceAdmissionException Rejected() => new("ASEVD410", "The private joined output diagnostic was rejected.");
+    private static EvidenceAdmissionException Rejected() => LinuxSystemdBackend.InvalidControl();
 }
+
+#endif

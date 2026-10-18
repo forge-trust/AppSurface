@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);EVIDENCE_QUALIFICATION_DATA_TESTS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,20 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj" />
+  </ItemGroup>
+
+  <!-- Compile the same private DATA implementation in the tests only when the runtime omits it.
+       Existing inner native-owner guards still require their actual private image selection. -->
+  <ItemGroup>
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxNegativeKernelObservation.cs" Link="QualificationData/LinuxNegativeKernelObservation.cs" Condition="'$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N13' and '$(EvidencePrivateQualification)' != 'N14' and '$(EvidencePrivateQualification)' != 'N16'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxFailedSettlementObservation.cs" Link="QualificationData/LinuxFailedSettlementObservation.cs" Condition="'$(EvidencePrivateQualification)' != 'N07' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N11'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxWorkerStopTiming.cs" Link="QualificationData/LinuxWorkerStopTiming.cs" Condition="'$(EvidencePrivateQualification)' != 'N07' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N11'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureSettlement.cs" Link="QualificationData/LinuxN07FailureSettlement.cs" Condition="'$(EvidencePrivateQualification)' != 'N07'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureEmitter.cs" Link="QualificationData/LinuxN07FailureEmitter.cs" Condition="'$(EvidencePrivateQualification)' != 'N07'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN04CheckpointOwner.cs" Link="QualificationData/LinuxN04CheckpointOwner.cs" Condition="'$(EvidencePrivateQualification)' != 'N04'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07CheckpointOwner.cs" Link="QualificationData/LinuxN07CheckpointOwner.cs" Condition="'$(EvidencePrivateQualification)' != 'N07'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxJoinedWorkerOutputDiagnostic.cs" Link="QualificationData/LinuxJoinedWorkerOutputDiagnostic.cs" Condition="'$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs" Link="QualificationData/LinuxSlotNegativeObservation.cs" Condition="'$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06'" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
@@ -164,3 +165,5 @@ internal enum LinuxWorkerStopMilestone
     /// <summary>Original lifetime stop task joined, including fault.</summary>
     StopJoined,
 }
+
+#endif

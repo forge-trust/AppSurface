@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Text;
 using System.Text.Json;
 
@@ -89,3 +90,5 @@ internal static class LinuxSlotNegativeObservation
         && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
     private static InvalidOperationException Rejected() => new("ASEVD410: Private slot observation rejected.");
 }
+
+#endif

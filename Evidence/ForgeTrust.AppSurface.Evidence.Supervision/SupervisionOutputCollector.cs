@@ -80,6 +80,10 @@ internal sealed record SupervisionOutputReceipt(
 /// </remarks>
 internal sealed class SupervisionOutputCollector
 {
+    /// <summary>Shared received-byte policy ceiling, exposed as data rather than workload authority.</summary>
+    internal const long MaximumReceivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes;
+    /// <summary>Shared retained-prefix policy ceiling; bytes remain data, never physical-exit proof.</summary>
+    internal const int MaximumRetainedPrefixBytes = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream;
     private const int ReadBufferBytes = 16 * 1024;
     private readonly long _receivedByteLimit;
     private readonly int _prefixByteLimit;
@@ -100,15 +104,15 @@ internal sealed class SupervisionOutputCollector
     /// <param name="receivedByteLimit">Positive shared limit, at most the Contracts 16 MiB maximum.</param>
     /// <param name="prefixByteLimit">Retained bytes per stream, from zero through the Contracts 1 MiB maximum.</param>
     internal SupervisionOutputCollector(
-        long receivedByteLimit = EvidenceRunBudgetLimits.MaximumProcessOutputBytes,
-        int prefixByteLimit = EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream)
+        long receivedByteLimit = MaximumReceivedByteLimit,
+        int prefixByteLimit = MaximumRetainedPrefixBytes)
     {
-        if (receivedByteLimit <= 0 || receivedByteLimit > EvidenceRunBudgetLimits.MaximumProcessOutputBytes)
+        if (receivedByteLimit <= 0 || receivedByteLimit > MaximumReceivedByteLimit)
         {
             throw new ArgumentOutOfRangeException(nameof(receivedByteLimit));
         }
 
-        if (prefixByteLimit < 0 || prefixByteLimit > EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream)
+        if (prefixByteLimit < 0 || prefixByteLimit > MaximumRetainedPrefixBytes)
         {
             throw new ArgumentOutOfRangeException(nameof(prefixByteLimit));
         }

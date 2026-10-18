@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Security.Cryptography;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -112,7 +113,7 @@ internal sealed class LinuxFailedSettlementObservation
                     || group.DeviceMinor is not null || group.KernelInode is not null)) throw Rejected();
             RequireStream(output.Stdout); RequireStream(output.Stderr);
             if (!Enum.IsDefined(output.Failure) || output.ReceivedBytes < 0 || output.ReceivedByteLimit is <= 0
-                or > EvidenceRunBudgetLimits.MaximumProcessOutputBytes
+                or > SupervisionOutputCollector.MaximumReceivedByteLimit
                 || output.ReceivedBytes != checked(output.Stdout.ReceivedBytes + output.Stderr.ReceivedBytes))
                 throw Rejected();
             var complete = output.Successful && output.DiscardedBytes == 0
@@ -196,10 +197,12 @@ internal sealed class LinuxFailedSettlementObservation
     private static void RequireStream(SupervisionOutputStreamReceipt value)
     {
         if (value is null || value.Prefix.IsDefault || value.ReceivedBytes < value.Prefix.Length
-            || value.Prefix.Length > EvidenceRunBudgetLimits.RetainedOutputPrefixBytesPerStream
+            || value.Prefix.Length > SupervisionOutputCollector.MaximumRetainedPrefixBytes
             || !Enum.IsDefined(value.Failure)) throw Rejected();
     }
 
     private static InvalidOperationException Rejected() =>
         new("ASEVD410: Original failed-settlement observation data rejected.");
 }
+
+#endif

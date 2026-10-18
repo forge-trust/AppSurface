@@ -44,7 +44,11 @@ public sealed class QualificationImageBoundaryTests
         Assert.DoesNotContain("N09AllocationSlot", names);
 #endif
         Assert.Contains("LinuxN09AllocationObservation", names);
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
         Assert.Contains("LinuxSlotNegativeObservation", names);
+#else
+        Assert.DoesNotContain("LinuxSlotNegativeObservation", names);
+#endif
     }
 
     /// <summary>Private pending-start and descendant implementations follow their exact image selectors.</summary>
@@ -126,19 +130,40 @@ public sealed class QualificationImageBoundaryTests
 #else
         Assert.DoesNotContain("LinuxWorkerProcess.CaptureNegativeObservation", methods);
 #endif
+#if EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N11
         Assert.Contains("LinuxFailedSettlementObservation", types);
-        Assert.Contains("LinuxNegativeKernelObservation", types);
-        Assert.Contains("LinuxJoinedWorkerOutputDiagnostic", types);
         Assert.Contains("LinuxWorkerStopTiming", types);
+#else
+        Assert.DoesNotContain("LinuxFailedSettlementObservation", types);
+        Assert.DoesNotContain("LinuxWorkerStopTiming", types);
+#endif
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_ACCEPTED_WORK
+        Assert.Contains("LinuxNegativeKernelObservation", types);
+#else
+        Assert.DoesNotContain("LinuxNegativeKernelObservation", types);
+#endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+        Assert.Contains("LinuxJoinedWorkerOutputDiagnostic", types);
+#else
+        Assert.DoesNotContain("LinuxJoinedWorkerOutputDiagnostic", types);
+#endif
     }
 
-    /// <summary>Portable procedure controls stay available independently of any native fixture implementation.</summary>
+    /// <summary>Shared owners remain in every image; private ordering data exists only in its selected runtime image.</summary>
     [Fact]
-    public void PortableOrderingDataRemainsInEveryImage()
+    public void SharedOwnersRemainAndPrivateOrderingDataMatchesItsImage()
     {
         var names = ReadTypeNames();
+#if EVIDENCE_PRIVATE_N04
         Assert.Contains("LinuxN04CheckpointOrder", names);
+#else
+        Assert.DoesNotContain("LinuxN04CheckpointOrder", names);
+#endif
+#if EVIDENCE_PRIVATE_N07
         Assert.Contains("LinuxN07CheckpointOrder", names);
+#else
+        Assert.DoesNotContain("LinuxN07CheckpointOrder", names);
+#endif
         Assert.Contains("LinuxEmptyObservationControlServer", names);
         Assert.Contains("LinuxWorkerProcess", names);
     }

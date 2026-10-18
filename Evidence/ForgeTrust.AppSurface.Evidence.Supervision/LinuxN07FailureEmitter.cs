@@ -1,3 +1,4 @@
+#if EVIDENCE_PRIVATE_N07 || EVIDENCE_QUALIFICATION_DATA_TESTS
 using System.Text;
 using System.Text.Json;
 
@@ -48,3 +49,5 @@ internal static class LinuxN07FailureEmitter
         cleanupToken.ThrowIfCancellationRequested();
     }
 }
+
+#endif
