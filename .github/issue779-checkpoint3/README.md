@@ -71,7 +71,7 @@ probe input therefore rejects at the root and cannot pass this negative control.
 
 ## Descriptor publication observation
 
-The [native runner](run-native.py) waits for the C# owner's existing `0440` descriptor seal before
+The [native runner](run-native.py) delegates to the shared [C2 sealed-publication observer](../issue779-checkpoint2/run-native.py), selecting the v2 schema. It waits for the C# owner's existing `0440` descriptor seal before
 reading JSON. File creation alone is not publication: [`WriteDescriptor`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunWorkspace.cs)
 creates a writable file, writes and fsyncs it, then seals and retains it. The fixture treats its original
 `0600`/`0640` phase as pending within the existing case deadline. It checks a bounded, single-link regular

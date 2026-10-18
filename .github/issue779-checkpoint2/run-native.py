@@ -16,6 +16,25 @@ def require(ok,code):
  if not ok:raise RuntimeError(code)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':')).encode()
+def sealed_descriptor(path,expected_schema="evidence-worker-linux-v1"):
+ """Observe only complete v1/v2 publication data; this supplies no worker authentication."""
+ require(expected_schema in ("evidence-worker-linux-v1","evidence-worker-linux-v2"),"actual-descriptor-expected-schema")
+ try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+ except FileNotFoundError:return None
+ try:
+  before=os.fstat(fd)
+  require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_uid==os.geteuid() and before.st_size<=65536,'actual-descriptor-node')
+  mode=stat.S_IMODE(before.st_mode)
+  if mode in (0o600,0o640):return None # Root is still writing/fsyncing before its existing 0440 seal.
+  require(mode==0o440 and before.st_size>0,'actual-descriptor-seal')
+  data=os.read(fd,65537);after=os.fstat(fd);named=path.lstat()
+  identity=lambda value:(value.st_dev,value.st_ino,value.st_mode,value.st_nlink,value.st_uid,value.st_gid,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+  require(identity(before)==identity(after)==identity(named) and len(data)==before.st_size,'actual-descriptor-snapshot')
+  value=json.loads(data)
+  require(type(value) is dict and value.get('schema')==expected_schema,'actual-descriptor-schema')
+  return value
+ finally:os.close(fd)
+
 def create_traversable_root(path):
  # mkdir's requested mode is filtered by the private harness umask; set exact traversal afterward.
  path.mkdir(mode=0o700)
@@ -403,8 +422,10 @@ def execute_case(args,case,end,receipt):
       raw=Path('/run/appsurface-evidence-'+generation+'/raw-results')
       if raw.exists() and raw.stat().st_gid!=0:result['observed_results_gid']=raw.stat().st_gid
      descriptor_path=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
-     if producer_observed is None and descriptor_path.is_file():
-      producer_observed=sample_producer(units[2],json.loads(descriptor_path.read_bytes()),case_end,result.setdefault('pending_producer_identity',{}))
+     if producer_observed is None:
+      published=sealed_descriptor(descriptor_path)
+      if published is not None:
+       producer_observed=sample_producer(units[2],published,case_end,result.setdefault('pending_producer_identity',{}))
      if producer_observed is not None:
       try:sample_cgroup_counters(units[2],result.setdefault('producer_cgroup_counters',{}),producer_observed,case_end)
       except (OSError,ValueError,RuntimeError):result['counter_sample_failed']=True
@@ -489,8 +510,8 @@ def execute_case(args,case,end,receipt):
   result['groups_empty']=True
   # Observe both generated names and numeric IDs through retained root-sealed directory metadata/descriptor.
   descriptor=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
-  if descriptor.exists():
-   d=json.loads(descriptor.read_bytes())
+  d=sealed_descriptor(descriptor)
+  if d is not None:
    identities=[('worker_uid','passwd',d['worker_uid']),('subject_uid','passwd',d['subject_uid']),('worker_gid','group',d['worker_gid']),('subject_gid','group',d['subject_gid'])]
    identities.append(('results_gid','group',result['observed_results_gid']))
    for key,table,number in identities:
@@ -504,8 +525,8 @@ def execute_case(args,case,end,receipt):
   result['failure_category']=str(e) if isinstance(e,RuntimeError) else type(e).__name__
   try:
    descriptor=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
-   if groups_empty(units) and descriptor.is_file():
-    identity=json.loads(descriptor.read_bytes())
+   identity=sealed_descriptor(descriptor)
+   if groups_empty(units) and identity is not None:
     diagnostic=inspect_failed_workspace(Path('/run/appsurface-evidence-producer-data-'+generation),identity['subject_uid'],identity['subject_gid'],case_end)
     write(args.output/(case+'-workspace-inspection.json'),canonical(diagnostic))
   except Exception:pass # A diagnostic failure cannot replace the actual failed control.

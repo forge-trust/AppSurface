@@ -20,22 +20,8 @@ def events(path,schema):
  return result
 
 def sealed_descriptor(path):
- """Observe only a complete root publication; this supplies no worker authentication."""
- try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
- except FileNotFoundError:return None
- try:
-  before=os.fstat(fd)
-  require(stat.S_ISREG(before.st_mode) and before.st_nlink==1 and before.st_uid==os.geteuid() and before.st_size<=65536,'actual-descriptor-node')
-  mode=stat.S_IMODE(before.st_mode)
-  if mode in (0o600,0o640):return None # Root is still writing/fsyncing before its existing 0440 seal.
-  require(mode==0o440 and before.st_size>0,'actual-descriptor-seal')
-  data=os.read(fd,65537);after=os.fstat(fd);named=path.lstat()
-  identity=lambda value:(value.st_dev,value.st_ino,value.st_mode,value.st_nlink,value.st_uid,value.st_gid,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
-  require(identity(before)==identity(after)==identity(named) and len(data)==before.st_size,'actual-descriptor-snapshot')
-  value=json.loads(data)
-  require(type(value) is dict and value.get('schema')=='evidence-worker-linux-v2','actual-v2-descriptor')
-  return value
- finally:os.close(fd)
+ """Share the same sealed-publication observer as C2, selecting only the v2 data schema."""
+ return c2.sealed_descriptor(path,"evidence-worker-linux-v2")
 
 def process_sample(pid,uid,gid,unit):
  require(type(pid) is int and pid>0,'actual-pid')

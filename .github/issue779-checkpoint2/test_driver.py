@@ -399,4 +399,51 @@ class WorkspaceInspectionControls(unittest.TestCase):
    result=native.inspect_failed_workspace(Path(tmp),os.getuid(),os.getgid(),time.monotonic()-1)
    self.assertEqual('RuntimeError',result['error_kind']);self.assertFalse(result['native_authority']);self.assertEqual(0,result['nodes'])
 
+class DescriptorPublicationControls(unittest.TestCase):
+ def test_partial_writable_v1_and_v2_data_remain_pending_until_actual_seal(self):
+  import tempfile
+  for schema in ('evidence-worker-linux-v1','evidence-worker-linux-v2'):
+   with self.subTest(schema=schema),tempfile.TemporaryDirectory() as directory:
+    path=Path(directory)/'worker-control.json'
+    self.assertIsNone(native.sealed_descriptor(path,schema))
+    for mode in (0o600,0o640):
+     path.write_bytes(b'{"schema":');path.chmod(mode)
+     self.assertIsNone(native.sealed_descriptor(path,schema))
+    value={'schema':schema,'worker_pid':123}
+    path.write_bytes(json.dumps(value).encode());path.chmod(0o440)
+    self.assertEqual(value,native.sealed_descriptor(path,schema))
+    path.chmod(0o600)
+ def test_sealed_invalid_data_and_schema_cannot_pass(self):
+  import tempfile
+  for payload in (b'',b'{"schema":',b'{"schema":"evidence-worker-linux-v2"}',b'x'*65537):
+   with self.subTest(length=len(payload)),tempfile.TemporaryDirectory() as directory:
+    path=Path(directory)/'worker-control.json';path.write_bytes(payload);path.chmod(0o440)
+    with self.assertRaises((RuntimeError,ValueError)):native.sealed_descriptor(path)
+    path.chmod(0o600)
+  with self.assertRaises(RuntimeError):native.sealed_descriptor(Path('/not-opened'),'unknown')
+ def test_link_or_public_mode_cannot_supply_an_observation_and_outside_bytes_survive(self):
+  import os,tempfile
+  with tempfile.TemporaryDirectory() as directory:
+   path=Path(directory)/'worker-control.json';outside=Path(directory)/'outside'
+   payload=b'{"schema":"evidence-worker-linux-v1"}';outside.write_bytes(payload);outside.chmod(0o440)
+   path.symlink_to(outside)
+   with self.assertRaises(OSError):native.sealed_descriptor(path)
+   path.unlink();os.link(outside,path)
+   with self.assertRaises(RuntimeError):native.sealed_descriptor(path)
+   path.unlink();path.write_bytes(payload);path.chmod(0o444)
+   with self.assertRaises(RuntimeError):native.sealed_descriptor(path)
+   self.assertEqual(payload,outside.read_bytes())
+   path.chmod(0o600);outside.chmod(0o600)
+ def test_retained_or_named_metadata_change_cannot_complete_snapshot(self):
+  import os,tempfile
+  from unittest.mock import patch
+  with tempfile.TemporaryDirectory() as directory:
+   path=Path(directory)/'worker-control.json';path.write_bytes(b'{"schema":"evidence-worker-linux-v1"}');path.chmod(0o440)
+   read=os.read
+   def mutate(fd,count):
+    data=read(fd,count);path.chmod(0o640);return data
+   with patch.object(native.os,'read',side_effect=mutate):
+    with self.assertRaises(RuntimeError):native.sealed_descriptor(path)
+   path.chmod(0o600)
+
 if __name__=='__main__':unittest.main()
