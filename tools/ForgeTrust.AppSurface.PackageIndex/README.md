@@ -276,6 +276,19 @@ The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/m
 
 The optional `NativeAcquisition` field records validated same-directory executable paths, version and SHA-256 hashes as soon as tool acquisition succeeds, even when initialization subsequently fails. It is separate from `NativeTools`, which is retained only after a successful native smoke. Acquisition has no verified server version and does not certify startup, authentication, cleanup or publication. Failure before validation leaves it absent. Use it to match a Windows initialization failure to its actual binary rather than inferring a version from the runner image.
 
+Native `pg_ctl start` opts into the internal [command runner's](PackagePublishing.cs)
+`ExternalCapturePolicy.CompleteOnProcessExit` policy. PostgreSQL's Windows launcher retains a command-shell
+child for the server lifetime, which can keep inherited output handles open after `pg_ctl` exits
+([upstream explanation](https://www.postgresql.org/message-id/28290.1500946432@sss.pgh.pa.us)). Waiting for
+those streams to reach EOF would consume the setup deadline even after successful startup. The policy ends
+only output observation on direct-child exit, retains the actual exit code, and preserves command cancellation
+and the shared setup deadline. Captures whose EOF was not observed have their existing truncation flag set and
+carry an `output incomplete after process exit` marker; retained bytes stay under the configured cap.
+The policy defaults to false and must not be used for complete structured-output proofs. All other commands,
+including authentication, version probes and cleanup, still drain to EOF. A successful launcher exit alone
+does not prove readiness: owned-postmaster identity, the listening port, SCRAM authentication and matching
+server version remain required before the native smoke proceeds. Raw child diagnostics remain private.
+
 For a failed native callback, `FailurePhase` projects a closed observation stage: `native-acquisition`,
 `native-initdb`, `native-startup`, `native-ownership`, `native-authentication`, `native-smoke-execution`, or
 `native-cleanup`. Initialization results further distinguish `native-initdb-exit` (verified nonzero exit),
@@ -284,6 +297,14 @@ bootstrap result), and `native-initdb-termination` (termination or stream settle
 outcome normally becomes `native-cleanup` when uncertain termination prevents safe removal of the owned root.
 Legacy or otherwise unclassified initialization failures retain `native-initdb`. These labels identify observed
 outcomes, not underlying causes; for example, an exit label does not diagnose a credential or console problem.
+Startup observations distinguish `native-port-check` (the selected port's pre-start check),
+`native-start-command` (the pg_ctl adapter failed without a structured result), `native-start-command-exit`
+(a nonzero pg_ctl exit other than the runner's -1 sentinel), `native-start-command-incomplete` (the -1 sentinel),
+and `native-server-version` (the probe failed or its identity did not match the acquired tools).
+The incomplete label does not prove a timeout: the [external command runner](PackagePublishing.cs) also uses
+-1 for launch and adapter failures. None of these labels includes child output, paths, credentials or exception
+text, and none changes the setup deadline, cleanup checks or rejection of failed proof. Older receipts with
+`native-startup` cannot be retrospectively classified; rerun on the failing host with the same candidate inputs.
 Unannotated or unsupported stages retain `native-smoke`. The internal `NativePostgreSqlFailure`
 helper preserves the first typed annotation on an exception and copies only supported stages into sanitized
 setup wrappers through `CopyAnnotation(source, target)`. Existing target annotations take precedence; missing

@@ -273,7 +273,9 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                 {
                     "initdb" => NativePostgreSqlFailureStage.InitDb,
                     "SCRAM authentication" => NativePostgreSqlFailureStage.Authentication,
-                    "pg_ctl start" or "loopback port check" or "server version verification" => NativePostgreSqlFailureStage.Startup,
+                    "loopback port check" => NativePostgreSqlFailureStage.PortCheck,
+                    "pg_ctl start" => NativePostgreSqlFailureStage.StartCommand,
+                    "server version verification" => NativePostgreSqlFailureStage.ServerVersion,
                     _ => NativePostgreSqlFailureStage.Ownership
                 });
                 throw failure;
@@ -464,14 +466,19 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
             "starting the private native PostgreSQL cluster",
             remaining,
             password: null,
-            cancellationToken);
+            cancellationToken,
+            completeOnProcessExit: true);
         _startCommandTimedOut = startResult.ExitCode == -1;
         if (startResult.ExitCode != 0)
         {
-            throw new PackageIndexException(
+            var startFailure = new PackageIndexException(
                 startResult.ExitCode == -1
                     ? "Native PostgreSQL pg_ctl start timed out; child diagnostics were suppressed."
                     : $"Native PostgreSQL pg_ctl start failed with exit code {startResult.ExitCode}; child diagnostics were suppressed.");
+            NativePostgreSqlFailure.Annotate(startFailure, startResult.ExitCode == -1
+                ? NativePostgreSqlFailureStage.StartCommandIncomplete
+                : NativePostgreSqlFailureStage.StartCommandExit);
+            throw startFailure;
         }
 
         _failurePhase = "postmaster verification";
@@ -750,7 +757,8 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
         int timeoutMilliseconds,
         string? password,
         CancellationToken cancellationToken,
-        bool suppressRunnerExceptions = false)
+        bool suppressRunnerExceptions = false,
+        bool completeOnProcessExit = false)
     {
         var environment = GetPostgreSqlEnvironmentOverrides();
         if (password is not null)
@@ -770,7 +778,7 @@ internal sealed class DurableTemplateNativePostgreSql : IAsyncDisposable
                     timeoutDescription,
                             Math.Max(1, timeoutMilliseconds),
                     environment,
-                    new ExternalCapturePolicy(CapturedOutputLimitBytes)),
+                    new ExternalCapturePolicy(CapturedOutputLimitBytes, CompleteOnProcessExit: completeOnProcessExit)),
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -1806,7 +1814,17 @@ internal enum NativePostgreSqlFailureStage
     /// <summary>The bootstrap adapter failed before a structured result was available.</summary>
     InitDbAdapter,
     /// <summary>initdb or its output streams could not be verified stopped.</summary>
-    InitDbTermination
+    InitDbTermination,
+    /// <summary>The selected loopback port was already occupied or its pre-start check failed.</summary>
+    PortCheck,
+    /// <summary>The pg_ctl startup adapter failed before a structured result was available.</summary>
+    StartCommand,
+    /// <summary>The pg_ctl startup command returned a nonzero exit code other than the runner's -1 sentinel.</summary>
+    StartCommandExit,
+    /// <summary>The pg_ctl startup runner returned -1, which can represent a timeout or launch/adapter failure.</summary>
+    StartCommandIncomplete,
+    /// <summary>The server-version probe failed or did not match the acquired tool identity.</summary>
+    ServerVersion
 }
 
 /// <summary>Attaches and projects closed native stages without inspecting or retaining exception diagnostics.</summary>
@@ -1851,6 +1869,11 @@ internal static class NativePostgreSqlFailure
         NativePostgreSqlFailureStage.InitDbTimeout => "native-initdb-timeout",
         NativePostgreSqlFailureStage.InitDbAdapter => "native-initdb-adapter",
         NativePostgreSqlFailureStage.InitDbTermination => "native-initdb-termination",
+        NativePostgreSqlFailureStage.PortCheck => "native-port-check",
+        NativePostgreSqlFailureStage.StartCommand => "native-start-command",
+        NativePostgreSqlFailureStage.StartCommandExit => "native-start-command-exit",
+        NativePostgreSqlFailureStage.StartCommandIncomplete => "native-start-command-incomplete",
+        NativePostgreSqlFailureStage.ServerVersion => "native-server-version",
         _ => null
     };
 }

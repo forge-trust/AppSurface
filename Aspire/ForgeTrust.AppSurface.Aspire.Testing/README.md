@@ -12,6 +12,8 @@ Do not use it as a replacement for [Aspire's native testing API](https://learn.m
 
 Version 1 of this preview is compiled and tested against `Aspire.Hosting` and `Aspire.Hosting.Testing` **13.4.4**, which is the package's minimum Aspire version. Consumers may select a later Aspire version without a NuGet exact-version conflict, but that combination is not AppSurface-verified. Advancing Aspire should include re-verifying the complete delegated `IDistributedApplicationTestingBuilder` surface, packed-package consumer compilation, failed-build cleanup, and build/start/disposal integration proof.
 
+The packed package also carries a transitive `MessagePack` dependency floor of **2.5.303**. Keep that floor when overriding central package versions: earlier versions are affected by [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h). NuGet audit remains enabled so consumers continue to receive advisory checks for their complete resolved graph.
+
 Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates the verified singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. If a consumer-selected Aspire version changes that registration shape, AppSurface emits a `System.Diagnostics.Trace` warning and continues through Aspire without the additional failed-build cleanup. This preserves potentially compatible builds while making the cleanup limitation explicit.
 
 <!-- appsurface-release-guidance: begin -->

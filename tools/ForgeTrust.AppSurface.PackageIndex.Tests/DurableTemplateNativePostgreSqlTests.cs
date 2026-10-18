@@ -67,6 +67,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         Assert.All(fixture.Runner.Requests, request =>
         {
             Assert.NotNull(request.CapturePolicy);
+            Assert.Equal(request.OperationName == "pg_ctl start", request.CapturePolicy.CompleteOnProcessExit);
             Assert.All(request.Environment!.Where(pair => pair.Key != "PGPASSWORD"), pair => Assert.Null(pair.Value));
         });
 
@@ -434,6 +435,11 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     [InlineData(8, "native-initdb-timeout")]
     [InlineData(9, "native-initdb-adapter")]
     [InlineData(10, "native-initdb-termination")]
+    [InlineData(11, "native-port-check")]
+    [InlineData(12, "native-start-command")]
+    [InlineData(13, "native-start-command-exit")]
+    [InlineData(14, "native-start-command-incomplete")]
+    [InlineData(15, "native-server-version")]
     public void NativeAnnotationCopyRetainsOnlySupportedPrivateStage(int? stage, string? expected)
     {
         var source = new IOException("private-detail");
@@ -1002,6 +1008,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
 
         Assert.Contains("loopback port check", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("native-port-check", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl start");
         Assert.False(Directory.Exists(fixture.OwnedRoot));
         Assert.True(fixture.Runtime.Listening);
@@ -1162,12 +1169,28 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAdapterFailureProjectsOnlyItsClosedStageAndCleansOwnedRoot()
+    {
+        using var fixture = new NativeClusterFixture(_root);
+        fixture.Runner.ThrowOnStart = true;
+
+        var error = await Assert.ThrowsAsync<PackageIndexException>(() => fixture.StartAsync());
+
+        Assert.Equal("native-start-command", NativePostgreSqlFailure.ReadReceiptPhase(error));
+        Assert.DoesNotContain("sensitive-start-adapter-output", error.ToString(), StringComparison.Ordinal);
+        Assert.False(fixture.Runtime.ServerRunning);
+        Assert.False(Directory.Exists(fixture.OwnedRoot));
+        Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
+    }
+
+    [Fact]
     public async Task StartFailureCleansRootAndLateServerAfterTimedOutStartIsStopped()
     {
         using (var failedStart = new NativeClusterFixture(_root))
         {
             failedStart.Runner.StartExitCode = 7;
-            await Assert.ThrowsAsync<PackageIndexException>(() => failedStart.StartAsync());
+            var failedStartError = await Assert.ThrowsAsync<PackageIndexException>(() => failedStart.StartAsync());
+            Assert.Equal("native-start-command-exit", NativePostgreSqlFailure.ReadReceiptPhase(failedStartError));
             Assert.False(failedStart.Runtime.ServerRunning);
             Assert.False(Directory.Exists(failedStart.OwnedRoot));
         }
@@ -1176,6 +1199,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         lateStart.Runner.StartExitCode = -1;
         var error = await Assert.ThrowsAsync<PackageIndexException>(() => lateStart.StartAsync());
         Assert.Contains("pg_ctl start", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("native-start-command-incomplete", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.Contains(lateStart.Runner.Requests, request => request.OperationName == "pg_ctl stop");
         Assert.False(lateStart.Runtime.ServerRunning);
         Assert.False(Directory.Exists(lateStart.OwnedRoot));
@@ -1423,6 +1447,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         var bootstrap = Assert.IsType<NativePostgreSqlBootstrapRequest>(fixture.Bootstrap.Request);
         var secret = bootstrap.StandardInput.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)[0];
         Assert.Contains("server version verification", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("native-server-version", NativePostgreSqlFailure.ReadReceiptPhase(error));
         Assert.DoesNotContain("sensitive-server-version-output", error.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
         Assert.Single(fixture.Runner.Requests, request => request.OperationName == "psql authentication probe");
@@ -2411,6 +2436,7 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         internal bool RejectAuthentication { get; set; }
         internal Func<ExternalCommandRequest, ExternalCommandResult>? AuthenticationProbeHandler { get; set; }
         internal int StartExitCode { get; set; }
+        internal bool ThrowOnStart { get; set; }
         internal bool LateListenerOnly { get; set; }
         internal string ServerVersionOutput { get; set; } = "16.5|160005\n";
         internal ExternalCommandResult? ServerVersionResult { get; set; }
@@ -2433,6 +2459,10 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             }
             if (name == "pg_ctl" && request.Arguments.LastOrDefault() == "start")
             {
+                if (ThrowOnStart)
+                {
+                    throw new InvalidOperationException("sensitive-start-adapter-output");
+                }
                 var logIndex = Array.IndexOf(request.Arguments.ToArray(), "-l");
                 if (logIndex >= 0)
                 {
