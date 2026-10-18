@@ -20,12 +20,12 @@ def main():
     if os.geteuid() != 0 or source != original['source']:
         raise ValueError('measurement-source-owner')
     rows = {}
-    for name in ('ForgeTrust.AppSurface.Evidence.Supervision.dll', 'ForgeTrust.AppSurface.Evidence.Supervision.pdb'):
+    for name in original['files']:
         data = (tool / name).read_bytes()
         if not 0 < len(data) <= 32 * 1024 * 1024:
             raise ValueError('measurement-module-size')
         rows[name] = hashlib.sha256(data).hexdigest()
-    if rows['ForgeTrust.AppSurface.Evidence.Supervision.dll'] == original['files']['ForgeTrust.AppSurface.Evidence.Supervision.dll']:
+    if set(rows) != set(original['files']) or any(rows[name] == digest for name, digest in original['files'].items() if name.endswith('.dll')):
         raise ValueError('measurement-instrumentation-missing')
     value = {'schema': 'issue779-native-instrumentation-v1', 'source': source,
              'collector': 'coverlet.console/10.0.1', 'original': original['files'], 'instrumented': rows}

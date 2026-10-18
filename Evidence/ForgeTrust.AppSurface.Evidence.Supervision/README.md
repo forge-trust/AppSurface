@@ -1805,3 +1805,7 @@ image for portable verification. These compile boundaries change no ordinary
 stop, native monitor, cgroup, output drain, custody or account-close requirement.
 The [finished-image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
 check actual implementation absence as well as matching private-image presence.
+
+## Validation-only worker measurement
+
+The [C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) is compiled into private C3/C3Sdk validation images only. Its three worker-holder call sites retain an already authenticated worker's private temporary directory before descriptor publication, capture genuine pinned tracker bytes after the original normal exit, and close the extra handles after the original monitor joins. The ordinary executable contains neither those call sites nor the fixture type, verified through PE metadata. It grants no admission, process owner, artifact custody, proof or production registration. Product environment, isolation, permissions, budgets and cleanup order are unchanged. The fixture reference documents the pinned format dependency, actual helper proof, first-worker-only scope and current native integration requirement.

@@ -33,6 +33,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxSystemdBackend? _backend;
     private LinuxSystemdBackend? _observations;
     private LinuxProcessIdentity? _worker;
+#if EVIDENCE_PRIVATE_C3
+    private LinuxWorkerMeasurement? _measurement;
+#endif
     private LinuxWorkerUnit? _recipe;
     private CancellationTokenSource? _jobDeadline;
     private CancellationTokenSource? _outputDeadline;
@@ -676,6 +679,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(25), startup.Token).ConfigureAwait(false);
             }
             RequireActive(startup.Token);
+#if EVIDENCE_PRIVATE_C3
+            _measurement = LinuxWorkerMeasurement.TryCapture(_worker, startup.Token);
+#endif
             _workspace.WriteDescriptor(Descriptor(_worker, _owner.Remaining).DescriptorBytes, startup.Token);
             _worker.Recheck(startup.Token);
             RequireActive(startup.Token);
@@ -707,6 +713,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 {
                     _owner.RequireControlIdentity(token);
                     _naturalTerminal = facts;
+#if EVIDENCE_PRIVATE_C3
+                    if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 0) _measurement?.CaptureNormalExit(facts, token);
+#endif
                     if (facts.ExecMainCode != 1 || facts.ExecMainStatus != 0)
                         Interlocked.Exchange(ref _failed, 1); // Failed work, not failed physical cleanup.
                     return facts;
@@ -898,6 +907,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         catch { failed = true; }
         try { await _listener.DisposeAsync().ConfigureAwait(false); }
         catch { failed = true; }
+#if EVIDENCE_PRIVATE_C3
+        try { _measurement?.Dispose(); }
+        catch { failed = true; }
+#endif
         try { _worker?.Dispose(); }
         catch { failed = true; }
         foreach (var source in new[] { _jobDeadline, _outputDeadline, _cleanupDeadline })

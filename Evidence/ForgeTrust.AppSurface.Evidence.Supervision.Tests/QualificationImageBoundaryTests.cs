@@ -143,6 +143,18 @@ public sealed class QualificationImageBoundaryTests
         Assert.Contains("LinuxWorkerProcess", names);
     }
 
+    /// <summary>Raw tracker capture is validation-only and cannot ship in the ordinary C# owner.</summary>
+    [Fact]
+    public void PrivateWorkerMeasurementIsAbsentFromOrdinaryImages()
+    {
+        var types = ReadTypeNames();
+#if EVIDENCE_PRIVATE_C3
+        Assert.Contains("LinuxWorkerMeasurement", types);
+#else
+        Assert.DoesNotContain("LinuxWorkerMeasurement", types);
+#endif
+    }
+
     private static HashSet<string> ReadMethodReferences()
     {
         using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Supervision.dll"));

@@ -198,7 +198,7 @@ jobs:
           python3 -B - "$CHECKPOINT3_TOOL" "$CHECKPOINT3_EVIDENCE/original-supervision.json" "$GITHUB_SHA" <<'PY'
           import hashlib, json, pathlib, sys
           tool = pathlib.Path(sys.argv[1])
-          names = ('ForgeTrust.AppSurface.Evidence.Supervision.dll', 'ForgeTrust.AppSurface.Evidence.Supervision.pdb')
+          names = tuple(name + suffix for name in ('ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision') for suffix in ('.dll', '.pdb'))
           value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}}
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
@@ -217,11 +217,11 @@ jobs:
           PY
           )"
           # Measurement runs outside the protected process; its target still arms the exact original OS owner.
-          # /tmp is the ordinary temporary root. Worker PrivateTmp stays isolated; no child hit is presumed visible.
+          # Worker PrivateTmp remains isolated. The private C3 fixture retains genuine first-worker hit bytes through its authenticated proc namespace before root exit.
           timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
             --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision" > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
           sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY'
           import hashlib, json, pathlib, sys
@@ -230,7 +230,7 @@ jobs:
           files = {'coverage': 'native-supervision.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json'}
           for key, name in files.items():
               path = root / name
-              assert 0 < path.stat().st_size <= 8 * 1024 * 1024
+              assert 0 < path.stat().st_size <= (32 if key == 'coverage' else 8) * 1024 * 1024
               binding[key + '_sha256'] = hashlib.sha256(path.read_bytes()).hexdigest()
           native = json.loads((root / files['native_receipt']).read_bytes())
           assert native['exit'] == 0 and len(native['cases']) == 7 and all(c['passed'] for c in native['cases'])
@@ -249,8 +249,11 @@ jobs:
           import hashlib, json, pathlib, sys
           original = json.loads(pathlib.Path(sys.argv[1]).read_bytes())
           directory = pathlib.Path('Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0')
-          for name, digest in original['files'].items():
-              assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == digest
+          dependency_names = ('ForgeTrust.AppSurface.Evidence.Supervision', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner')
+          for module in dependency_names:
+              for suffix in ('.dll', '.pdb'):
+                  name = module + suffix
+                  assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == original['files'][name]
           PY_MODULE
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-file-tests" <<'PY_ARGS'
@@ -284,7 +287,7 @@ jobs:
           binding['root_file_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': int(counters['executed']), 'passed': int(counters['passed']), 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-combined.' + suffix)
-              assert 0 < combined.stat().st_size <= 8 * 1024 * 1024
+              assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
               combined.replace(root / ('native-supervision.' + suffix))
           binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
           binding_path.write_text(json.dumps(binding, sort_keys=True))
@@ -303,7 +306,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" "$CHECKPOINT3_EVIDENCE"
-          python3 -B .github/issue779-checkpoint2/check-retention.py "$CHECKPOINT3_EVIDENCE"
+          python3 -B .github/issue779-checkpoint3/check-retention.py "$CHECKPOINT3_EVIDENCE"
 
       - name: Retain source, generated registration, preparation, digest, and bounded native receipts
         if: always() && steps.retention.outcome == 'success'

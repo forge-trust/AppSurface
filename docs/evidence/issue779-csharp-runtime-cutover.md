@@ -59,12 +59,14 @@ An unsuccessful join, deadline, output ledger, retained file, unmount or account
 ## Measuring the native C# owner
 
 The [native measurement project](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md)
-consumes actual Coverlet hit data from the guarded root image. The application workflow builds the
-same Release configuration as the solution lane, instruments only its private CLI Supervision image
-with pinned Coverlet Console 10.0.1, and runs the original seven controls. Deployment audit sees the
-actual instrumented bytes. The SDK image stays uninstrumented. No profiler, runtime hook, additional
-write path or unit permission is granted for measurement; isolated worker temporary files and killed
-processes are not presumed to have contributed hits.
+consumes actual Coverlet hit data from the guarded root and first normal worker. The application workflow
+builds the same Release configuration as the solution lane and instruments exactly CLI, Contracts, Planner,
+Coverage, Aspire and Supervision with pinned Coverlet Console 10.0.1. Deployment audit sees the actual
+instrumented bytes. The [private C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md)
+retains the authenticated worker's private temporary directory and copies genuine hit bytes unchanged after
+original normal exit. Coverlet's own tracker and reader perform all accumulation. The fixture is compiled
+out of ordinary images. Worker isolation, writable paths, capabilities, limits and deadlines remain unchanged.
+The SDK image stays uninstrumented, and killed-process or SDK-worker hits are not presumed.
 
 The solution lane downloads only its successful application's current-run artifact, stages the five
 fixed source/measurement/receipt files, and configures the pinned collector's supported `MergeWith`
@@ -184,3 +186,9 @@ Both artifacts' complete 3,239-file source captures matched Git blobs, SHA-256
 values and modes. The [observer correction](../../.github/issue779-checkpoint3/README.md#descriptor-publication-observation)
 waits for the existing descriptor seal; 12 portable controls pass, but the complete
 native matrix must run again. The numerical gate job for that attempt was skipped.
+
+## Latest measured gate and worker-measurement work
+
+[Run 39155973682](https://github.com/forge-trust/AppSurface/actions/runs/39155973682) on `4f146641808ec1e24eb91023d522183a270b8d45` passed all 57 project execution records and both native consumer lanes. The unchanged numerical gate still failed `ASCOV020`: aggregate lines 132,573/138,529 (95.70%) and conditions 60,081/69,263 (86.74%) passed; patch fully covered lines 13,065/15,487 (84.36%) and conditions 20,048/26,056 (76.94%) failed. At those fixed denominators, the effective 94.5/84.5% requirements need 1,571 more fully covered lines and 1,970 conditions. Its coverage artifact `12148249302` is SHA-256 `aba10828b6a523c5707f4a62cbe8c528c1685559fd8f02eb07db4f3b60278ea8`. These are measured deficits, not predicted gains from individual tests.
+
+The later source `995d2e1d8675764a4153e220d18b4a68b4f427d9` passed all seven producer, seven application, and 28 root filesystem/kernel controls in [run 39158246121](https://github.com/forge-trust/AppSurface/actions/runs/39158246121); its separate unchanged gate completed with aggregate 95.82% lines/86.91% branches passing and patch 85.41% lines/77.74% branches failing (`ASCOV020`). The new six-module worker measurement and 140 recipe boundary controls require a fresh run. The isolated worker-only helper proof is linked in the [native measurement reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#current-verification-boundary), and supplies no AppSurface coverage or Trusted acceptance itself. No gate threshold, comparison base, Codecov rule or exclusion has been changed.

@@ -6,7 +6,7 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 ## Test surface and selection
 
-`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and an actually changed supervision assembly hash, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero hits in `LinuxEmptyObservationExecution.cs`.
+`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all six instrumented assemblies, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first normal control must also bind genuine CLI, Contracts and Coverage worker hit-file handoffs.
 
 `LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all five files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
@@ -18,7 +18,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 
 | File | Meaning |
 | --- | --- |
-| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented supervision module hashes, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
+| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all six selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem controls for all three expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
@@ -26,11 +26,11 @@ The runtime workflow downloads the current application-lane artifact and copies 
 
 After those copies succeed, the workflow writes `native.runsettings` with the standard `XPlat Code Coverage` collector, `Format` set to `cobertura`, and `MergeWith` set to the absolute path of `native-supervision.json`. Coverlet's collector reads `MergeWith` as a supported setting. That behavior is present in the pinned Coverlet source at commit [`d21b5b6a08d48f51405ba2c5c5660f91a565776d`](https://github.com/coverlet-coverage/coverlet/tree/d21b5b6a08d48f51405ba2c5c5660f91a565776d), in [`CoverletSettingsParser.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverletSettingsParser.cs) and [`CoverageWrapper.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverageWrapper.cs). The collector remains the driver for the test run and merge; the project does not use `coverlet.msbuild`.
 
-The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain the supervision module and at least one executed line in `LinuxEmptyObservationExecution.cs`. A JSON file's presence or a plausible percentage alone cannot pass these checks.
+The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain exactly the six selected modules, an executed root path in `LinuxEmptyObservationExecution.cs`, and an executed worker `ConnectAsync` path. First-worker raw-hit hashes must match the unchanged host handoff and the instrumented module hashes. A JSON file's presence or a plausible percentage alone cannot pass these checks.
 
 ## Instrumentation and native controls
 
-In the application workflow, Coverlet Console 10.0.1 instruments the private CLI tool's supervision assembly before the measurement wrapper starts the native runner. The wrapper records the instrumented module hash, then the runner stages that private tool for the Linux cases. The original and instrumented hashes are retained in the binding so the test can distinguish actual instrumented execution from an uninstrumented or substituted module. This measurement does not change the production build or deployment, add a runtime hook, change grants, or alter the protected supervisor's policy.
+In the application workflow, Coverlet Console 10.0.1 instruments exactly the private CLI, Contracts, Planner, Coverage, Aspire and Supervision modules before the wrapper starts the original native runner. Every original/instrumented DLL and PDB hash is bound. The [private C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) retains the actual worker's private temporary directory before descriptor publication, then copies its genuine first-normal-worker hit bytes unchanged after original normal exit. The root tracker and standard collector perform all counter accumulation and interpretation. This fixture is absent from ordinary images; no production environment, grant, deadline or supervision policy changes.
 
 The runner requires root on Linux x86-64 with systemd 255 and executes seven independently bounded cases through the real C# root supervisor:
 
@@ -44,7 +44,7 @@ The runner requires root on Linux x86-64 with systemd 255 and executes seven ind
 
 The receipt is produced only after the harness checks the original root owner's terminal outcome, actual unit and cgroup state, and the case-specific process observations. The test requires all seven cases in order, each marked passed, empty final groups, and a settled application observation with the two empty-group checks, output-pump joins, and pending-start join. The runner also checks kernel process identity and account custody; normal and applicable negative cases require account removal, while the intentional disposal-failure case requires accounts to remain present. The ordinary output-accounting receipt requires registered stream pairs, reconciled received-byte counts, EOF on both streams, and no read failure. The disposal-failure case is intentionally a failed root outcome with quarantined identities, not a successful evidence publication.
 
-Coverage describes only code actually reached by the measured process. It proves that the source-bound Linux root path ran when the test finds the required hit in `LinuxEmptyObservationExecution.cs`; it does not presume hits from a force-killed process or from a worker hidden by `PrivateTmp`. The SDK tool image stays uninstrumented, so this report does not claim its execution hits. It also does not claim every native process is instrumented or covered.
+Coverage describes only code actually reached by the measured process. It proves that the source-bound Linux root path ran when the test finds the required hit in `LinuxEmptyObservationExecution.cs`; it does not presume hits from a force-killed process. Worker hits require the explicit source-pinned private-namespace handoff, not ordinary visibility across `PrivateTmp`. The SDK tool image stays uninstrumented, so this report does not claim its execution hits. It also does not claim every native process is instrumented or covered.
 
 ## Relationship to the full gate and trust
 
@@ -85,3 +85,9 @@ AppSurface owner activation, worker admission, producer lease or accepted
 consumer proof; they verify kernel primitives only. They explicitly skip
 without Linux x64 root and a booted systemd manager; the prepared lane requires
 a zero-skip passing TRX, so that skip supplies no measurement credit.
+
+## Current verification boundary
+
+[Run 39158246121](https://github.com/forge-trust/AppSurface/actions/runs/39158246121) on source `995d2e1d8675764a4153e220d18b4a68b4f427d9` passed the seven producer controls, seven application controls, and all 28 real root filesystem/kernel controls with no skipped native cases. Complete 3,244-file source/Git-blob/hash/mode bindings and artifact digests were verified. That run predates the six-module worker handoff; it supplies no evidence for the new integration.
+
+The separate helper [run 39161202323](https://github.com/forge-trust/AppSurface/actions/runs/39161202323) verified original pidfd exit, retained private data, identical actual worker/host hit hashes, and a child-only method with both branches executed. Its full source and artifact bindings were verified. It supplied zero AppSurface coverage credit. The AppSurface integration requires a fresh successful native run and unchanged full gate; local C3/None image checks and metadata tests are insufficient.
