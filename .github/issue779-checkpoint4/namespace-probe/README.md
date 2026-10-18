@@ -42,3 +42,28 @@ tracker-file capture and unchanged-byte handoff to the pinned collector, plus a
 worker-only executed path in the resulting report. No such hits or coverage gain
 are claimed by this probe. The [solution/patch gate](../../../scripts/coverage-solution.sh)
 and all production isolation, deadlines and trust requirements remain unchanged.
+
+## Actual pinned tracker handoff probe
+
+`coverage-parent` is the additional root-only diagnostic mode. The pinned Coverlet
+Console 10.0.1 instruments the helper first. A metadata-only reader requires the
+exact tracker constructor tail emitted by the pinned [instrumenter source](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/coverlet.core/Instrumentation/Instrumenter.cs),
+including its generated GUID, fixed `/tmp` name, candidate count and tracker
+fields. An unknown layout rejects rather than guessing a mapping.
+
+After the same actual identity/namespace/exit procedure, the parent reads the
+nonroot child's genuine tracker file through the retained directory handle. It
+requires the exact count/length, safe node metadata, stable bytes and nonnegative
+counters. It copies those bytes unchanged into an exclusive root-owned host
+`/tmp` file. It does not manufacture, add or translate counters. On parent exit,
+Coverlet's own tracker accumulates the parent's counts through its normal code;
+Coverlet's standard reader produces the report. The workflow requires an executed
+`ChildOnly` method, which the root parent never calls.
+
+This bridge intentionally depends on pinned tracker-file and IL formats; there
+is no claim that it is a public Coverlet raw-hit import API. The source-pinned
+probe verifies the actual mechanism before any production-worker measurement
+integration. A passing helper report supplies **zero AppSurface coverage credit**
+and no consumer acceptance. Actual AppSurface integration would still require
+its authentic retained owner/worker handles, original deadlines and cleanup,
+exact module/PDB mapping, bounded capture and source-bound end-to-end controls.

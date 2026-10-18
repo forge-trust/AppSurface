@@ -53,6 +53,39 @@ jobs:
           timeout --signal=KILL 90 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$host" "$tool/Issue779.PrivateTmpProbe.dll" parent "$PROBE_EVIDENCE/result" > "$PROBE_EVIDENCE/driver.log" 2>&1
           sha256sum --check "$PROBE_EVIDENCE/original-modules.sha256"
+      - name: Verify an actual worker-only Coverlet path through unchanged hit bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 120 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/probe-coverlet" > "$PROBE_EVIDENCE/coverlet-install.log" 2>&1
+          host="$(readlink -f "$(command -v dotnet)")"
+          tool="/var/lib/issue779-private-tmp-probe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          console="$RUNNER_TEMP/probe-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
+          target_args="\"$tool/Issue779.PrivateTmpProbe.dll\" coverage-parent \"$PROBE_EVIDENCE/tracker-result\""
+          timeout --signal=KILL 90 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$host" "$console" "$tool/Issue779.PrivateTmpProbe.dll" \
+            --target "$host" --targetargs "$target_args" --include '[Issue779.PrivateTmpProbe]*' \
+            --format json --output "$PROBE_EVIDENCE/actual-tracker" > "$PROBE_EVIDENCE/tracker-driver.log" 2>&1
+          sha256sum --check "$PROBE_EVIDENCE/original-modules.sha256"
+          sudo --non-interactive python3 -B - "$PROBE_EVIDENCE" <<'PY_TRACKER'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          data = json.loads((root / 'tracker-result/receipt.json').read_bytes())
+          assert data['exit'] == 0 and data['cleanup_complete'] is True
+          assert data['worker_hit_handoff'] is True
+          assert data['worker_hit_sha256'] == data['host_handoff_sha256']
+          assert data['native_acceptance'] is False and data['coverage_credit'] is False
+          coverage_path = root / 'actual-tracker.json'
+          assert 0 < coverage_path.stat().st_size <= 2 * 1024 * 1024
+          coverage = json.loads(coverage_path.read_bytes())
+          methods = [method for docs in coverage.values() for classes in docs.values()
+                     for methods in classes.values() for name, method in methods.items() if '::ChildOnly(' in name]
+          assert len(methods) == 1 and any(hit > 0 for hit in methods[0]['Lines'].values())
+          # No application report is produced or merged; this proves the collector mechanism only.
+          (root / 'tracker-proof.json').write_text(json.dumps({'schema': 'issue779-actual-worker-hit-probe-v1',
+              'worker_only_method_observed': True, 'unchanged_handoff': True,
+              'appsurface_coverage_credit': False, 'native_acceptance': False}, sort_keys=True))
+          PY_TRACKER
       - name: Retain bounded data without granting coverage or acceptance
         if: always()
         shell: bash

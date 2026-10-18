@@ -1,3 +1,7 @@
+using System.Buffers.Binary;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -32,7 +36,7 @@ internal static class Probe
         if (args.Length == 2 && args[0] == "child" && Guid.TryParseExact(args[1], "N", out var parsed)
             && args[1] == parsed.ToString("N"))
             return await ChildAsync(args[1]).ConfigureAwait(false);
-        if (args.Length != 2 || args[0] != "parent" || GetUid() != 0 || GetEffectiveUid() != 0
+        if (args.Length != 2 || args[0] is not ("parent" or "coverage-parent") || GetUid() != 0 || GetEffectiveUid() != 0
             || !Path.IsPathFullyQualified(args[1])) return 65;
         var output = args[1];
         if (Path.Exists(output)) return 65;
@@ -44,7 +48,7 @@ internal static class Probe
             ["native_acceptance"] = false, ["coverage_credit"] = false,
         };
         Exception? failure = null;
-        try { await ParentAsync(generation, unit, report).ConfigureAwait(false); }
+        try { await ParentAsync(generation, unit, report, args[0] == "coverage-parent").ConfigureAwait(false); }
         catch (Exception error) { failure = error; report["failure_category"] = error.GetType().Name; }
         finally
         {
@@ -87,6 +91,7 @@ internal static class Probe
     private static async Task<int> ChildAsync(string generation)
     {
         if (GetUid() != ChildId || GetGid() != ChildId) return 65;
+        if (ChildOnly(true) + ChildOnly(false) != 83) return 65;
         var ready = "/tmp/issue779-release-" + generation;
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
@@ -104,10 +109,11 @@ internal static class Probe
         return ReadFile(ready, 128).AsSpan().SequenceEqual(Release) ? 0 : 65;
     }
 
-    private static async Task ParentAsync(string generation, string unit, Dictionary<string, object?> report)
+    private static async Task ParentAsync(string generation, string unit, Dictionary<string, object?> report, bool copyTracker)
     {
         var host = Environment.ProcessPath ?? throw new IOException();
         var entry = typeof(Probe).Assembly.Location;
+        var plan = copyTracker ? TrackerPlan.Read(entry) : null;
         report["stage"] = "unit-start";
         await UtilityAsync("/usr/bin/systemd-run",
         [
@@ -195,6 +201,94 @@ internal static class Probe
         if (metadata != after || !actual.AsSpan().SequenceEqual(Payload)) throw new IOException();
         report["retained_data_reachable"] = true;
         report["data_sha256"] = Convert.ToHexStringLower(SHA256.HashData(actual));
+        if (plan is not null)
+        {
+            report["stage"] = "actual-tracker-handoff";
+            var hitFd = OpenAt(fd, Path.GetFileName(plan.Path), 0x80000 | 0x20000 | 0x800);
+            if (hitFd < 0) throw new IOException();
+            using var hit = new SafeFileHandle(hitFd, ownsHandle: true);
+            var initial = Inspect(hitFd);
+            if (initial.Uid != ChildId || initial.Gid != ChildId || initial.Nlink != 1
+                || initial.Mode is not (0x8180 or 0x81a4) || initial.Size != (ulong)(4 * (plan.Candidates + 1))) throw new IOException();
+            using var hits = new FileStream(hit, FileAccess.Read);
+            var bytes = Read(hits, 512 * 1024);
+            if (initial != Inspect(hitFd) || bytes.Length != 4 * (plan.Candidates + 1)
+                || BinaryPrimitives.ReadInt32LittleEndian(bytes) != plan.Candidates) throw new IOException();
+            for (var offset = 4; offset < bytes.Length; offset += 4)
+                if (BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset)) < 0) throw new IOException();
+            // Copy unchanged real bytes. Only Coverlet's tracker and standard reader interpret/add counts.
+            using (var hostHit = new FileStream(plan.Path, new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write,
+                UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            })) { hostHit.Write(bytes); hostHit.Flush(flushToDisk: true); }
+            var copied = ReadFile(plan.Path, 512 * 1024);
+            if (!bytes.AsSpan().SequenceEqual(copied)) throw new IOException();
+            report["worker_hit_handoff"] = true;
+            report["worker_hit_candidates"] = plan.Candidates;
+            report["worker_hit_sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            report["host_handoff_sha256"] = Convert.ToHexStringLower(SHA256.HashData(copied));
+            report["instrumented_module_sha256"] = plan.ModuleSha256;
+        }
+    }
+
+    // The root parent never calls this method. Its positive report hits must originate in the child.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static int ChildOnly(bool first) => first ? 41 : 42;
+
+    private sealed record TrackerPlan(string Path, int Candidates, string ModuleSha256)
+    {
+        internal static TrackerPlan Read(string module)
+        {
+            var bytes = ReadFile(module, 4 * 1024 * 1024);
+            using var stream = new MemoryStream(bytes, writable: false);
+            using var image = new PEReader(stream);
+            var reader = image.GetMetadataReader();
+            var trackers = reader.TypeDefinitions.Where(handle => reader.GetString(reader.GetTypeDefinition(handle).Namespace)
+                == "Coverlet.Core.Instrumentation.Tracker").ToArray();
+            if (trackers.Length != 1) throw new IOException();
+            var type = reader.GetTypeDefinition(trackers[0]);
+            var name = reader.GetString(type.Name);
+            var prefix = System.IO.Path.GetFileNameWithoutExtension(module) + "_";
+            if (!name.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(name[prefix.Length..], "D", out var id)
+                || name[prefix.Length..] != id.ToString("D")) throw new IOException();
+            var constructors = type.GetMethods().Select(reader.GetMethodDefinition)
+                .Where(method => reader.GetString(method.Name) == ".cctor").ToArray();
+            if (constructors.Length != 1) throw new IOException();
+            var il = image.GetMethodBody(constructors[0].RelativeVirtualAddress).GetILBytes() ?? throw new IOException();
+            // Exact pinned 10.0.1 Instrumenter tail; reject another layout rather than guess mapping.
+            if (il.Length < 38) throw new IOException();
+            var tail = il.AsSpan(il.Length - 38);
+            if (tail[0] != 0x20 || tail[5] != 0x8d || tail[10] != 0x80 || tail[15] != 0x72 || tail[20] != 0x80
+                || tail[25] != 0x16 || tail[26] != 0x80 || tail[31] != 0x17 || tail[32] != 0x80 || tail[37] != 0x2a) throw new IOException();
+            var count = BinaryPrimitives.ReadInt32LittleEndian(tail[1..]);
+            if (count is < 1 or > 131071) throw new IOException();
+            var element = MetadataTokens.EntityHandle(BinaryPrimitives.ReadInt32LittleEndian(tail[6..]));
+            if (element.Kind != HandleKind.TypeReference) throw new IOException();
+            var elementType = reader.GetTypeReference((TypeReferenceHandle)element);
+            if (reader.GetString(elementType.Namespace) != "System" || reader.GetString(elementType.Name) != "Int32"
+                || elementType.ResolutionScope.Kind != HandleKind.AssemblyReference) throw new IOException();
+            var core = reader.GetAssemblyReference((AssemblyReferenceHandle)elementType.ResolutionScope);
+            if (reader.GetString(core.Name) is not ("System.Runtime" or "System.Private.CoreLib")) throw new IOException();
+            string Field(int offset, byte[] signature)
+            {
+                var token = BinaryPrimitives.ReadInt32LittleEndian(il.AsSpan(il.Length - 38 + offset));
+                var handle = MetadataTokens.EntityHandle(token);
+                if (handle.Kind != HandleKind.FieldDefinition) throw new IOException();
+                var field = reader.GetFieldDefinition((FieldDefinitionHandle)handle);
+                if (field.GetDeclaringType() != trackers[0]
+                    || (field.Attributes & System.Reflection.FieldAttributes.Static) == 0
+                    || !reader.GetBlobBytes(field.Signature).AsSpan().SequenceEqual(signature)) throw new IOException();
+                return reader.GetString(field.Name);
+            }
+            if (Field(11, [0x06, 0x1d, 0x08]) != "HitsArray" || Field(21, [0x06, 0x0e]) != "HitsFilePath"
+                || Field(27, [0x06, 0x02]) != "SingleHit" || Field(33, [0x06, 0x02]) != "FlushHitFile") throw new IOException();
+            var textToken = BinaryPrimitives.ReadInt32LittleEndian(tail[16..]);
+            if ((textToken & unchecked((int)0xff000000)) != 0x70000000) throw new IOException();
+            var path = reader.GetUserString(MetadataTokens.UserStringHandle(textToken & 0xffffff));
+            if (path != "/tmp/" + name) throw new IOException();
+            return new(path, count, Convert.ToHexStringLower(SHA256.HashData(bytes)));
+        }
     }
 
     private static ulong Sample(uint pid, string unit)
