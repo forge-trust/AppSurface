@@ -6,6 +6,77 @@ namespace ForgeTrust.AppSurface.Caching.Tests;
 
 public class MemoTests : IDisposable
 {
+    [Fact]
+    public void ExplicitClockConstructorRejectsMissingDependenciesAndNonpositiveFailureWindows()
+    {
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        Assert.Equal("cache", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(null!, TimeSpan.FromSeconds(1), TimeProvider.System)).ParamName);
+        Assert.Equal("timeProvider", Assert.Throws<ArgumentNullException>(() =>
+            new Memo(cache, TimeSpan.FromSeconds(1), null!)).ParamName);
+        foreach (var duration in new[] { TimeSpan.Zero, TimeSpan.FromTicks(-1) })
+            Assert.Equal("failureCacheDuration", Assert.Throws<ArgumentOutOfRangeException>(() =>
+                new Memo(cache, duration, TimeProvider.System)).ParamName);
+    }
+
+    [Fact]
+    public async Task DrainingJoinsTheOriginalRefreshAndCallerCancellationDoesNotCancelIt()
+    {
+        var clock = new MemoClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromSeconds(1), clock);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        var workToken = new CancellationToken(canceled: true);
+        var policy = CachePolicy.AbsoluteWithStaleWhileRevalidate(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        Task<int> Read() => memo.GetAsync(async token =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) return 1;
+            workToken = token;
+            entered.TrySetResult();
+            return await release.Task;
+        }, policy, callerFilePath: "controlled-refresh", callerLineNumber: 1);
+
+        try
+        {
+            Assert.Equal(1, await Read());
+            clock.Advance(TimeSpan.FromMilliseconds(1100));
+            Assert.Equal(1, await Read().WaitAsync(TimeSpan.FromSeconds(5)));
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var waitCancellation = new CancellationTokenSource();
+            var cancelledWait = memo.DrainBackgroundRefreshesAsync(waitCancellation.Token);
+            Assert.False(cancelledWait.IsCompleted);
+            waitCancellation.Cancel();
+            var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWait);
+            Assert.Equal(waitCancellation.Token, error.CancellationToken);
+            Assert.False(workToken.CanBeCanceled);
+            Assert.False(release.Task.IsCompleted);
+            var joined = memo.DrainBackgroundRefreshesAsync();
+            Assert.False(joined.IsCompleted);
+            release.SetResult(2);
+            await joined.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(2, await Read());
+            Assert.Equal(2, calls);
+        }
+        finally
+        {
+            release.TrySetResult(2);
+            await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        await memo.DrainBackgroundRefreshesAsync(); // No pending refresh is also a completed snapshot.
+        memo.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => { _ = memo.DrainBackgroundRefreshesAsync(); });
+    }
+
+    private sealed class MemoClock : TimeProvider, Microsoft.Extensions.Internal.ISystemClock
+    {
+        private long _ticks = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
+        public DateTimeOffset UtcNow => GetUtcNow();
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+        internal void Advance(TimeSpan elapsed) => Interlocked.Add(ref _ticks, elapsed.Ticks);
+    }
+
     private sealed class Wrapper<T>
     {
         public async Task<T> Get(IMemo memo, T value)

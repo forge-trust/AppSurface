@@ -263,11 +263,14 @@ public sealed class RecommendationSnapshotTests
         Assert.All(rows.Take(2), row => Assert.Equal("authored", row.Source));
     }
 
-    [Fact]
-    public async Task FailedStaleRefreshAndExpiredFailure_ShouldPreserveTheExistingFiniteCacheContract()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailedStaleRefreshAndExpiredFailure_ShouldPreserveTheExistingFiniteCacheContract(bool expireBeforeRefresh)
     {
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        using var memo = new Memo(cache, TimeSpan.FromMilliseconds(100));
+        var clock = new SnapshotClock();
+        using var cache = new MemoryCache(new MemoryCacheOptions { Clock = clock });
+        using var memo = new Memo(cache, TimeSpan.FromMilliseconds(100), clock);
         var environment = A.Fake<IWebHostEnvironment>();
         A.CallTo(() => environment.ContentRootPath).Returns(Path.GetTempPath());
         var harvester = A.Fake<IDocHarvester>();
@@ -288,31 +291,70 @@ public sealed class RecommendationSnapshotTests
         var failingSanitize = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         A.CallTo(() => sanitizer.Sanitize(A<string>._)).ReturnsLazily((string html) =>
         {
-            if (fail) { failingSanitize.TrySetResult(); throw new InvalidOperationException("Controlled snapshot failure"); }
+            if (Volatile.Read(ref fail)) { failingSanitize.TrySetResult(); throw new InvalidOperationException("Controlled snapshot failure"); }
             return html;
         });
         var aggregator = new DocAggregator([harvester], new AppSurfaceDocsOptions { CacheExpirationMinutes = 1d / 60 },
             environment, memo, sanitizer, NullLogger<DocAggregator>.Instance);
-        var first = (await aggregator.GetDocDetailsAsync("source"))!;
-        var firstCompletedAt = DateTimeOffset.UtcNow;
-        // The actual Memo clock has no injectable clock; use its one-second minimum TTL and control the factory itself.
-        await Task.Delay(TimeSpan.FromMilliseconds(1100));
-        var stale = (await aggregator.GetDocDetailsAsync("source"))!;
-        await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(first.RecommendedPages.Select(row => row.Page.Href), stale.RecommendedPages.Select(row => row.Page.Href));
-        fail = true;
-        refreshRelease.SetResult([Page("Source", "source.md", "guide"), Page("New", "new.md", "example")]);
-        await failingSanitize.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal("Example", Assert.Single((await aggregator.GetDocDetailsAsync("source"))!.RecommendedPages).Page.Title);
-        var untilExpired = firstCompletedAt.AddMilliseconds(2200) - DateTimeOffset.UtcNow;
-        if (untilExpired > TimeSpan.Zero) await Task.Delay(untilExpired);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => aggregator.GetDocDetailsAsync("source"));
-        // Invalidation starts a new generation, preserving no unlimited last-good fallback across explicit rebuilds.
-        aggregator.InvalidateCache();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => aggregator.GetSearchIndexPayloadAsync());
-        fail = false;
-        aggregator.InvalidateCache();
-        Assert.Equal("Example", Assert.Single((await aggregator.GetDocDetailsAsync("source"))!.RecommendedPages).Page.Title);
+        var first = await aggregator.GetDocDetailsAsync("source");
+        Assert.NotNull(first);
+        clock.Advance(TimeSpan.FromMilliseconds(expireBeforeRefresh ? 2200 : 1100));
+        var second = aggregator.GetDocDetailsAsync("source");
+        try
+        {
+            await refreshStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (expireBeforeRefresh)
+            {
+                Assert.False(second.IsCompleted); // Expired callers must wait; the held factory cannot return stale data.
+            }
+            else
+            {
+                var stale = await second.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.NotNull(stale);
+                Assert.Equal(first.RecommendedPages.Select(row => row.Page.Href), stale.RecommendedPages.Select(row => row.Page.Href));
+            }
+            Volatile.Write(ref fail, true);
+            refreshRelease.SetResult([Page("Source", "source.md", "guide"), Page("New", "new.md", "example")]);
+            await failingSanitize.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            if (expireBeforeRefresh)
+                await Assert.ThrowsAsync<InvalidOperationException>(() => second.WaitAsync(TimeSpan.FromSeconds(5)));
+            else
+            {
+                var staleAfterFailure = await aggregator.GetDocDetailsAsync("source");
+                Assert.NotNull(staleAfterFailure);
+                Assert.Equal("Example", Assert.Single(staleAfterFailure.RecommendedPages).Page.Title);
+                clock.Advance(TimeSpan.FromMilliseconds(1100));
+                await Assert.ThrowsAsync<InvalidOperationException>(() => aggregator.GetDocDetailsAsync("source"));
+            }
+            // Invalidation starts a new generation, preserving no unlimited fallback across explicit rebuilds.
+            aggregator.InvalidateCache();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => aggregator.GetSearchIndexPayloadAsync());
+            Volatile.Write(ref fail, false);
+            aggregator.InvalidateCache();
+            var recovered = await aggregator.GetDocDetailsAsync("source");
+            Assert.NotNull(recovered);
+            Assert.Equal("Example", Assert.Single(recovered.RecommendedPages).Page.Title);
+        }
+        finally
+        {
+            refreshRelease.TrySetResult([Page("Source", "source.md", "guide")]);
+            try { await second.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (InvalidOperationException) when (expireBeforeRefresh) { }
+            finally { await memo.DrainBackgroundRefreshesAsync().WaitAsync(TimeSpan.FromSeconds(5)); }
+        }
+    }
+
+    private sealed class SnapshotClock : TimeProvider, Microsoft.Extensions.Internal.ISystemClock
+    {
+        private long _ticks = new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero).Ticks;
+        public DateTimeOffset UtcNow => GetUtcNow();
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+        internal void Advance(TimeSpan elapsed)
+        {
+            if (elapsed < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(elapsed));
+            Interlocked.Add(ref _ticks, elapsed.Ticks);
+        }
     }
 
     [Theory]
