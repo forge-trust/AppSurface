@@ -15,6 +15,9 @@ public sealed class EvidenceProcessEntryPointTests
         var previousExit = Environment.ExitCode;
         try
         {
+            // CommandService deliberately preserves an existing process failure. This invocation
+            // models a fresh process; other tests in the host may have left a nonzero exit code.
+            Environment.ExitCode = 0;
             await ProgramEntryPoint.RunAsync(["--help"], options =>
             {
                 calls++;
