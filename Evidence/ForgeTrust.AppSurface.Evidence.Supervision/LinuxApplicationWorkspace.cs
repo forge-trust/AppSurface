@@ -1124,35 +1124,30 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
 
     private void RequireSourceDirectory(LinuxProtectedNode node, string relative)
     {
-        var metadata = node.Metadata;
-        if (metadata.Uid != 0 || metadata.Gid != 0 || metadata.Mode != (ushort)(0x4000 | BundleDirectoryMode)
-            || metadata.Inode == 0) throw LinuxApplicationWorkspaceLayout.Invalid();
+        RequireProtectedDirectory(node.Metadata);
         _sourceDirectoryHandles[relative] = node;
     }
 
     private static void RequireProtectedDirectory(LinuxProtectedMetadata metadata)
     {
-        if (metadata.Uid != 0 || metadata.Gid != 0 || metadata.Mode != (ushort)(0x4000 | BundleDirectoryMode)
-            || metadata.Inode == 0) throw LinuxApplicationWorkspaceLayout.Invalid();
+        if (!LinuxWorkspaceMetadata.MatchesDirectory(metadata, 0, 0, BundleDirectoryMode))
+            throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 
     private static void RequireFileMetadata(LinuxProtectedMetadata metadata, LinuxApplicationBundleFile file, uint mode)
     {
-        if (metadata.Uid != 0 || metadata.Gid != 0 || metadata.Mode != (ushort)(0x8000 | mode)
-            || metadata.Inode == 0 || metadata.LinkCount != 1 || metadata.Length != (ulong)file.LengthBytes)
+        if (!LinuxWorkspaceMetadata.MatchesApplicationFile(metadata, file.LengthBytes, mode))
             throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 
     private static void RequireDirectory(LinuxProtectedMetadata metadata, uint uid, uint gid, ushort mode)
     {
-        if (metadata.Uid != uid || metadata.Gid != gid || metadata.Inode == 0
-            || metadata.Mode != (ushort)(0x4000 | mode)) throw LinuxApplicationWorkspaceLayout.Invalid();
+        if (!LinuxWorkspaceMetadata.MatchesDirectory(metadata, uid, gid, mode)) throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 
     private static void RequireAncestor(LinuxProtectedMetadata metadata)
     {
-        if (metadata.Uid != 0 || metadata.Gid != 0) throw LinuxApplicationWorkspaceLayout.Invalid();
-        metadata.RequireAncestor(sharedTraversal: true);
+        LinuxWorkspaceMetadata.RequireApplicationAncestor(metadata);
     }
 
     private void RequireDirectoryNames(SafeFileHandle directory, IReadOnlyCollection<string> expected, CancellationToken token)

@@ -131,8 +131,8 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private const ulong ParentResolution = 0x02 | 0x04 | 0x08;
     private const ulong ChildResolution = ParentResolution | 0x01;
     private const ushort RootPermissions = 0x1c9; // 0711.
-    private const ushort PrivatePermissions = 0x1c0; // 0700.
-    private const ushort PrivateFilePermissions = 0x180; // 0600.
+    private const ushort PrivatePermissions = LinuxWorkspaceMetadata.ProducerDirectoryMode; // 0700.
+    private const ushort PrivateFilePermissions = LinuxWorkspaceMetadata.ProducerFileMode; // 0600.
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     private readonly object _gate = new();
@@ -746,14 +746,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private static void RequireMutableMetadata(LinuxProtectedMetadata value, bool directory,
         uint uid, uint gid, bool sealedTree)
     {
-        var type = value.Mode & 0xf000;
-        var permissions = value.Mode & 0x1ff;
-        if (value.Inode == 0 || value.Uid != uid || value.Gid != gid
-            || type != (directory ? 0x4000 : 0x8000) || (value.Mode & 0x0e00) != 0
-            || (permissions & 0x12) != 0
-            || (directory ? sealedTree && permissions != PrivatePermissions
-                : value.LinkCount != 1 || value.Length > LinuxProducerWorkspaceLayout.MaximumFileBytes
-                    || sealedTree && permissions != PrivateFilePermissions))
+        if (!LinuxWorkspaceMetadata.MatchesMutableProducer(value, directory, uid, gid, sealedTree))
         {
             EmitSealGuard(new { reason = "node-metadata", directory, sealed_tree = sealedTree,
                 expected_uid = uid, expected_gid = gid, actual_uid = value.Uid, actual_gid = value.Gid,
@@ -764,19 +757,14 @@ internal sealed class LinuxProducerWorkspace : IDisposable
 
     private static void RequireCopiedFile(LinuxProtectedMetadata value)
     {
-        if (value.Inode == 0 || value.Uid == 0 || value.Gid == 0 || (value.Mode & 0xf000) != 0x8000
-            || value.LinkCount != 1 || value.Mode != (ushort)(0x8000 | PrivateFilePermissions)
-            || value.Length is 0 or > LinuxProducerWorkspaceLayout.MaximumFileBytes)
+        if (!LinuxWorkspaceMetadata.MatchesCopiedProducerFile(value))
             throw LinuxProducerWorkspaceLayout.Invalid();
     }
 
     private static void RequireSealedMetadata(LinuxProtectedMetadata terminal, LinuxProtectedMetadata original,
         bool directory, ushort permissions)
     {
-        if (terminal.DeviceMajor != original.DeviceMajor || terminal.DeviceMinor != original.DeviceMinor
-            || terminal.Inode != original.Inode || terminal.Uid != 0 || terminal.Gid != 0
-            || terminal.Mode != (ushort)((directory ? 0x4000 : 0x8000) | permissions)
-            || (!directory && (terminal.LinkCount != 1 || terminal.Length != original.Length)))
+        if (!LinuxWorkspaceMetadata.MatchesProducerSeal(terminal, original, directory, permissions))
             throw LinuxProducerWorkspaceLayout.Invalid();
     }
 
