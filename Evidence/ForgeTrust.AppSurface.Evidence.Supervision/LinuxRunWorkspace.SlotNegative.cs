@@ -7,6 +7,7 @@ using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxFileSystem;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
 internal sealed partial class LinuxRunWorkspace
 {
     private const string SlotSentinelName = "allocation-sentinel";
@@ -170,3 +171,5 @@ internal sealed partial class LinuxRunWorkspace
     private static extern long ReadLinkAt(int directory, [MarshalAs(UnmanagedType.LPUTF8Str)] string name,
         [Out] byte[] buffer, nuint length);
 }
+
+#endif

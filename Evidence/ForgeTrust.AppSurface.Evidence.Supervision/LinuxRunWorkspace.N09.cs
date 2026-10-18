@@ -60,6 +60,7 @@ internal static class LinuxN09AllocationObservation
 
 internal sealed partial class LinuxRunWorkspace
 {
+#if EVIDENCE_PRIVATE_N09
     private N09AllocationSlot? _n09AllocationSlot;
 
     internal bool HasN09AllocationSlot { get { lock (_gate) return _n09AllocationSlot is not null; } }
@@ -183,6 +184,8 @@ internal sealed partial class LinuxRunWorkspace
         return (parentMetadata, slotMetadata);
     }
 
+#endif
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N09
     private static IReadOnlyList<string> ReadN09Names(SafeFileHandle directory)
     {
         using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
@@ -198,6 +201,8 @@ internal sealed partial class LinuxRunWorkspace
         return names.Order(StringComparer.Ordinal).ToArray();
     }
 
+#endif
+#if EVIDENCE_PRIVATE_N09
     private sealed class N09AllocationSlot(SafeFileHandle parent, SafeFileHandle slot,
         LinuxProtectedMetadata parentMetadata, LinuxProtectedMetadata slotMetadata)
     {
@@ -207,4 +212,5 @@ internal sealed partial class LinuxRunWorkspace
         internal LinuxProtectedMetadata SlotMetadata { get; } = slotMetadata;
         internal bool BeforeSignalVerified { get; set; }
     }
+#endif
 }

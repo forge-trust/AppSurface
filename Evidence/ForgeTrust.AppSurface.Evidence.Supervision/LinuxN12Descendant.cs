@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
+#if EVIDENCE_PRIVATE_N12
 using System.Reflection;
 using System.Runtime.InteropServices;
+#endif
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
@@ -56,6 +58,7 @@ internal static partial class LinuxN12Descendant
         return start;
     }
 
+#if EVIDENCE_PRIVATE_N12
     /// <summary>Starts only the current image after the genuine worker procedure returned, then publishes the acknowledged PID.</summary>
     /// <remarks>
     /// The process object is retained before Start. A five-second ACK cap is linked to the original caller;
@@ -93,6 +96,7 @@ internal static partial class LinuxN12Descendant
         await error.FlushAsync(token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
     }
+#endif
 
     /// <summary>Reads one bounded child ACK from the parent-owned private pipe; cancellation/error never supplies an ACK.</summary>
     internal static async Task ReadReadyAsync(Stream stream, int expectedPid, CancellationToken token)
@@ -122,6 +126,7 @@ internal static partial class LinuxN12Descendant
         throw Rejected();
     }
 
+#if EVIDENCE_PRIVATE_N12
     /// <summary>Checks its actual parent and holds inherited output until the original OS unit terminates it.</summary>
     /// <remarks>The role reads no descriptor, performs no ready/control request, allocates no artifacts and returns no claim.</remarks>
     internal static async Task HoldOutputAsync(string parentPid, CancellationToken token)
@@ -151,12 +156,15 @@ internal static partial class LinuxN12Descendant
             || RuntimeInformation.ProcessArchitecture != Architecture.X64 || RuntimeInformation.OSArchitecture != Architecture.X64
             || GetUid() is 0 or uint.MaxValue || GetGid() is 0 or uint.MaxValue) throw Rejected();
     }
+#endif
 
     internal static EvidenceAdmissionException Rejected() => new("ASEVD410", "The private descendant checkpoint could not complete.");
 
+#if EVIDENCE_PRIVATE_N12
     [LibraryImport("libc", EntryPoint = "getppid")] private static partial int GetParentPid();
     [LibraryImport("libc", EntryPoint = "getuid")] private static partial uint GetUid();
     [LibraryImport("libc", EntryPoint = "getgid")] private static partial uint GetGid();
+#endif
 }
 
 /// <summary>Bounded first stderr-frame data from the original received-byte-charged pump, never a second reader.</summary>

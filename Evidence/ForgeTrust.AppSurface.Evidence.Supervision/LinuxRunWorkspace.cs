@@ -454,6 +454,7 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
             _closed = true;
             var handles = _nodes.Select(static node => node.Handle).ToList();
             if (_descriptor is not null) handles.Add(_descriptor);
+#if EVIDENCE_PRIVATE_N09
             if (_n09AllocationSlot is not null)
             {
                 // Defensive owner-lifetime fallback. The N09 execution normally closes these
@@ -462,12 +463,15 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
                 handles.Add(_n09AllocationSlot.Parent);
                 _n09AllocationSlot = null;
             }
+#endif
+#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
             if (_slotNegativeFixture is not null)
             {
                 handles.Add(_slotNegativeFixture.Occupied);
                 handles.Add(_slotNegativeFixture.Sentinel);
                 _slotNegativeFixture = null;
             }
+#endif
             if (!Close(handles)) { _quarantined = true; throw LinuxWorkspaceLayout.Invalid(); }
     }
 

@@ -2,6 +2,7 @@ using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
+#if EVIDENCE_PRIVATE_N10
 /// <summary>Private N10 rendezvous and bounded observations for the original pending-start lifetime.</summary>
 /// <remarks>
 /// The start frame is emitted only after the original validated StartTransientUnit reply. The same
@@ -158,3 +159,4 @@ internal sealed class LinuxN10PendingStartCheckpoint
         return bytes;
     }
 }
+#endif

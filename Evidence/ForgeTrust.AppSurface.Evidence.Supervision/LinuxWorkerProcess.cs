@@ -49,10 +49,14 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxN07FailureSettlement? _failureSettlement;
 #endif
     private readonly SupervisionCancellationPhaseObservation _cancellationPhase = new();
+#if EVIDENCE_PRIVATE_N12
     private readonly SupervisionDescendantObservation _descendant = new();
+#endif
     private readonly LinuxWorkerStopTiming? _stopTiming = EvidenceNativeQualification.WorkerStallEnabled
         ? new(TimeProvider.System) : null;
+#if EVIDENCE_PRIVATE_N12
     private LinuxN12LeaderExitObservation? _leaderExitObservation;
+#endif
 #if EVIDENCE_PRIVATE_N10
     private readonly LinuxN10PendingStartCheckpoint _n10PendingStart = new();
     private int _n10StopProcedureCalls;
@@ -479,6 +483,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         }
     }
 
+#if EVIDENCE_PRIVATE_N12
     /// <summary>Captures N12 live child/group and unfinished output only after the original leader monitor joined, before stop.</summary>
     /// <remarks>
     /// The private frame is PID data, not authentication. This actual holder captures the child through
@@ -519,6 +524,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         _owner.RequireCleanup(default);
         return bytes;
     }
+#endif
 
     /// <summary>Closes startup and shares pending containment, full startup join, group and pump finalization.</summary>
     /// <remarks>
@@ -588,7 +594,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _pipes = LinuxOutputPipes.Create();
             _ = _pipes.BeginCollectAsync(_outputDeadline.Token, cancellationPhase:
                 EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null,
+#if EVIDENCE_PRIVATE_N12
                 descendant: EvidenceNativeQualification.DescendantEnabled ? _descendant : null,
+#endif
                 runBudget: _runOutput);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(_jobDeadline.Token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,

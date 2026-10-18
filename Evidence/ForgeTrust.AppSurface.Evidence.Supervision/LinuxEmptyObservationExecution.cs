@@ -148,12 +148,15 @@ internal static class LinuxEmptyObservationExecution
             server.RequireSuccessfulCompletion(job.Token);
             phase = EvidenceNativeObservationPhase.WorkerExit;
             await worker.WaitForExitAsync().ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N12
             if (EvidenceNativeQualification.DescendantEnabled)
                 await worker.ObserveLeaderExitWithDescendantAsync(job.Token).ConfigureAwait(false);
+#endif
             phase = EvidenceNativeObservationPhase.WorkerStop;
             await worker.StopAndJoinAsync().ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkerCompletion;
             worker.RequireSuccessfulCompletion();
+#if EVIDENCE_PRIVATE_N12
             if (EvidenceNativeQualification.DescendantEnabled)
             {
                 var bytes = worker.CaptureJoinedDescendantObservation();
@@ -164,6 +167,7 @@ internal static class LinuxEmptyObservationExecution
                 await error.FlushAsync(owner.RootTeardownToken).ConfigureAwait(false);
                 owner.RequireCleanup(default);
             }
+#endif
             if (runOutput is not null && !(await runOutput.CompleteAsync().ConfigureAwait(false)).Successful) throw Rejected();
             phase = EvidenceNativeObservationPhase.BeginTeardown;
             owner.BeginRootTeardown();

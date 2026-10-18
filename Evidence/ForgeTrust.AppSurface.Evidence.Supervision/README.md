@@ -1764,3 +1764,32 @@ build. Source-built variant tests verify compilation and data behavior; genuine
 Linux qualification still requires the matching source-bound native controls.
 This boundary is a product packaging constraint, not a coverage filter or an
 accepted proof registration.
+
+The same binary boundary applies to the native slot-mutation fixture in
+[`LinuxRunWorkspace.SlotNegative`](LinuxRunWorkspace.SlotNegative.cs) and the retained
+allocation fixture in [`LinuxRunWorkspace.N09`](LinuxRunWorkspace.N09.cs). N05/N06
+compile only their slot helper and its original-handle fallback; N09 compiles only
+its retained allocation holder and fallback. The shared descriptor-relative name
+reader is compiled for those three variants. The detached slot/allocation
+observation encoders stay available to their ordinary metadata controls and grant
+no native ownership. Actual artifact allocation, root custody and ordinary handle
+closure remain required in every image.
+
+The same boundary now covers the N10 and N12 native implementation paths. The
+[N10 pending-start checkpoint](LinuxN10PendingStartCheckpoint.cs), its worker
+observation field and capture method, stop-call counter, and failure-only emit
+block compile only with `EVIDENCE_PRIVATE_N10`. The existing tests are likewise
+private to N10. The matching selected image retains the original validated start
+reply trigger and original pending-start, stop, final-sample and output joins;
+ordinary images contain no N10 checkpoint type or worker capture member.
+
+The [N12 same-image descendant launch and hold procedures](LinuxN12Descendant.cs)
+and the [worker's native child observation and joined capture](LinuxWorkerProcess.cs)
+compile only with `EVIDENCE_PRIVATE_N12`. The CLI's holder dispatch and post-worker
+launch calls, and the supervisor's pre-stop sample and post-join receipt calls,
+share that exact symbol. N12's `ParsePid`, `CreateStartInfo`, `ReadReadyAsync`, and
+`SupervisionDescendantObservation` data helpers remain available in ordinary
+images for portable tests. The PE metadata boundary test checks the actual N10
+type and N10/N12 method definitions in ordinary and matching private images;
+runtime qualification still requires the native containment checks and original
+cleanup joins described above.

@@ -35,11 +35,13 @@ internal static class EvidenceProcessEntryPoint
         try
         {
             var selected = EvidenceProcessRoleParser.Parse(arguments);
+#if EVIDENCE_PRIVATE_N12
             if (selected.Role == EvidenceProcessRole.OutputHolder)
             {
                 await LinuxN12Descendant.HoldOutputAsync(selected.Path!, console.RegisterCancellationHandler()).ConfigureAwait(false);
                 return 0;
             }
+#endif
             if (selected.Help)
             {
                 await console.Output.WriteLineAsync(selected.Role == EvidenceProcessRole.Worker
@@ -66,8 +68,10 @@ internal static class EvidenceProcessEntryPoint
             }
 
             await new EvidenceWorkerCommand { ControlChannel = selected.Path }.ExecuteAsync(console).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_N12
             if (EvidenceNativeQualification.DescendantEnabled)
                 await LinuxN12Descendant.StartAfterWorkerAsync(console.RegisterCancellationHandler()).ConfigureAwait(false);
+#endif
             return 0;
         }
         catch (EvidenceNativeObservationException error) when (supervisorSelected)
