@@ -76,12 +76,17 @@ internal sealed class LinuxWorkerMeasurement : IDisposable
     }
 
     /// <summary>Copies unchanged bytes only after retained systemd execution facts and original pidfd exit.</summary>
-    internal void CaptureNormalExit(LinuxUnitProperties terminal, CancellationToken token)
+    internal void CaptureNormalExit(LinuxUnitProperties terminal, CancellationToken token) => CaptureExit(terminal, 0, token);
+
+    /// <summary>Measures only the private SDK control's natural status1; no execution-success condition changes.</summary>
+    internal void CaptureFailedNormalExit(LinuxUnitProperties terminal, CancellationToken token) => CaptureExit(terminal, 1, token);
+
+    private void CaptureExit(LinuxUnitProperties terminal, int expectedStatus, CancellationToken token)
     {
         if (!OperatingSystem.IsLinux()) throw new IOException();
         token.ThrowIfCancellationRequested();
         if (_copied || terminal.ExecMainPid != _worker.Pid || terminal.MainPid != 0
-            || terminal.ExecMainCode != 1 || terminal.ExecMainStatus != 0 || !Exited(_notification)) throw new IOException();
+            || terminal.ExecMainCode != 1 || terminal.ExecMainStatus != expectedStatus || !Exited(_notification)) throw new IOException();
         _copied = true;
         var deadline = new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(5));
         var rows = new List<object>();
@@ -115,9 +120,14 @@ internal sealed class LinuxWorkerMeasurement : IDisposable
                 worker_sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), host_sha256 = Convert.ToHexStringLower(SHA256.HashData(actual)), module_sha256 = plan.ModuleSha256 });
         }
         deadline.Check(token);
-        Console.Error.WriteLine(JsonSerializer.Serialize(new { schema = "evidence-worker-measurement-v1", pid = _worker.Pid,
-            start_time = _worker.StartTimeTicks, uid = _worker.Uid, gid = _worker.Gid, cgroup = _worker.ControlGroup,
-            original_pidfd_exit = true, modules = rows, native_acceptance = false }));
+        if (expectedStatus == 0)
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { schema = "evidence-worker-measurement-v1", pid = _worker.Pid,
+                start_time = _worker.StartTimeTicks, uid = _worker.Uid, gid = _worker.Gid, cgroup = _worker.ControlGroup,
+                original_pidfd_exit = true, modules = rows, native_acceptance = false }));
+        else
+            Console.Error.WriteLine(JsonSerializer.Serialize(new { schema = "evidence-worker-measurement-v2", pid = _worker.Pid,
+                start_time = _worker.StartTimeTicks, uid = _worker.Uid, gid = _worker.Gid, cgroup = _worker.ControlGroup,
+                original_pidfd_exit = true, normal_exit_code = expectedStatus, modules = rows, native_acceptance = false }));
     }
 
     /// <summary>Closes measurement-only handles after the original monitor joins, attempting every close.</summary>

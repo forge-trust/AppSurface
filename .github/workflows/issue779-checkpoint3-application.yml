@@ -205,6 +205,28 @@ jobs:
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
 
+      - name: Measure the separate SDK failed-test consumer before the unchanged original matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          target_args="$(python3 -B .github/issue779-checkpoint4/measurement_arguments.py --failure-target "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$CHECKPOINT3_COVERLET")"
+          common=(--evidence "$CHECKPOINT3_EVIDENCE" --tool "$CHECKPOINT3_TOOL" --sdk-tool "$CHECKPOINT3_SDK_TOOL" --runtime "$CHECKPOINT3_SDK_ROOT" --prepared "$CHECKPOINT3_PREPARED" --workspace "$GITHUB_WORKSPACE" --source "$GITHUB_SHA" --base 416b30919e6c4d03b634d9d3fe558884b02f0b91)
+          set +e
+          timeout --signal=KILL 900 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_SDK_TOOL/ForgeTrust.AppSurface.Cli.dll" \
+            --target /usr/bin/python3 --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --format json --output "$CHECKPOINT3_EVIDENCE/native-sdk-failure" > "$CHECKPOINT3_EVIDENCE/sdk-test-failure-diagnostics.log" 2>&1
+          collector_exit=$?
+          timeout --signal=KILL 30 sudo --non-interactive python3 -B .github/issue779-checkpoint4/sdk_failure.py finalize --collector-exit "$collector_exit" "${common[@]}"
+          finalize_exit=$?
+          set -e
+          echo "sdk_failure_collector_exit=$collector_exit sdk_failure_finalize_exit=$finalize_exit"
+          if (( collector_exit != 0 )); then exit "$collector_exit"; fi
+          exit "$finalize_exit"
+
       - name: Run the seven application and six workspace rejection controls with source-bound measurement
         shell: bash
         run: |
@@ -212,7 +234,8 @@ jobs:
           ulimit -c 0
           target_args="$(python3 -B .github/issue779-checkpoint4/measurement_arguments.py "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$CHECKPOINT3_COVERLET")"
           # Measurement runs outside the protected process; its target still arms the exact original OS owner.
-          # The inner collector instruments the separate SDK image before the same seven controls stage either image.
+          # The inner collector instruments the restored SDK image afresh before the original matrix stages either image.
+          # Its supported merge also consumes the completed negative partition; no original matrix timeout is increased.
           # It finishes its standard report before the outer collector reads --merge-with. No counters are rewritten.
           # Worker PrivateTmp remains isolated; each image has distinct pinned tracker IDs and unchanged worker handoffs.
           timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
@@ -225,7 +248,7 @@ jobs:
           import hashlib, json, pathlib, sys
           root = pathlib.Path(sys.argv[1])
           binding = json.loads((root / 'instrumentation.json').read_bytes())
-          files = {'coverage': 'native-supervision.json', 'sdk_coverage': 'native-sdk.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json'}
+          files = {'coverage': 'native-supervision.json', 'sdk_coverage': 'native-sdk.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json', 'sdk_failure_coverage': 'native-sdk-failure.json', 'sdk_failure_receipt': 'native/sdk-test-failure.json'}
           for key, name in files.items():
               path = root / name
               assert 0 < path.stat().st_size <= (32 if key in ('coverage', 'sdk_coverage') else 8) * 1024 * 1024

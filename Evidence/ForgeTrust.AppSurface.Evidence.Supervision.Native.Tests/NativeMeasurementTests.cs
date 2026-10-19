@@ -45,6 +45,13 @@ public sealed class NativeMeasurementTests
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"),
             Read(directory, "root-files.trx"));
         Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
+        const string producerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs";
+        var producerSource = File.ReadAllBytes(Path.Join(repo, producerPath));
+        using var sourceBinding = JsonDocument.Parse(source);
+        Assert.Equal(sourceBinding.RootElement.GetProperty("files").GetProperty(producerPath).GetProperty("sha256").GetString(),
+            Convert.ToHexStringLower(SHA256.HashData(producerSource)));
+        SdkFailureMeasurement.Validate(binding.RootElement, head.Trim(), Read(directory, "sdk-test-failure.json"),
+            Read(directory, "native-sdk-failure.json"), System.Text.Encoding.UTF8.GetString(producerSource));
     }
 
     private static byte[] Read(string directory, string name, long maximum = 8L * 1024 * 1024)

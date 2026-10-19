@@ -111,7 +111,8 @@ def output_accounting(stderr):
  require(all(p['stdout_eof'] and p['stderr_eof'] and p['failure']=='None' for p in pairs),'actual-all-eof')
  return row
 
-def stage(args,end):
+def stage(args,end,*,sdk_only=False):
+ require(type(sdk_only) is bool,'closed-staging-selector')
  prep=json.loads(args.prepared.read_bytes());digests=json.loads(args.digests.read_bytes())
  require(prep['schema']=='issue779-c3-preparation-input-v1' and digests['schema']=='issue779-c3-registration-digests-v1','preparation-shape')
  entries={e['application_id']:e['application_entry_digest'] for e in digests['entries']}
@@ -119,7 +120,7 @@ def stage(args,end):
  parent=Path('/var/lib')/('issue779-c3-input-'+uuid.uuid4().hex);c2.create_traversable_root(parent)
  runtime=parent/'runtime';inventory={'runtime':c2.copy_tree(args.runtime,runtime),'deployments':{}}
  tools={}
- for key in ('normal','sdk-normal','readiness','factory-stall','stuck-descendant'):
+ for key in (('sdk-normal',) if sdk_only else ('normal','sdk-normal','readiness','factory-stall','stuck-descendant')):
   variant='normal' if key=='sdk-normal' else key;data=prep['variants'][variant]
   tool=parent/key;c2.copy_tree(args.sdk_tool if key=='sdk-normal' else args.tool,tool)
   bundle=tool/'application';c2.copy_tree(Path(data['application_path']),bundle)
@@ -206,16 +207,16 @@ def owner_command(runtime,tool,owner,armed,request_path):
  return ['/usr/bin/systemd-run','--quiet','--wait','--pipe','--unit='+owner,'--service-type=exec','--property=User=0','--property=Group=0','--property=Restart=no','--property=KillMode=control-group','--property=RuntimeMaxSec=1100','--property=TimeoutStopSec=10','--property=SendSIGKILL=yes','--property=FinalKillSignal=SIGKILL','--property=LimitCORE=0','--property=LimitNOFILE=65536','--property=ConditionPathExists='+str(armed),'--property=Environment='+' '.join(c2.FIXED),'--property=UnsetEnvironment='+' '.join(c2.ENV_NAMES),'/usr/bin/env','-i',*c2.FIXED,str(runtime/'dotnet'),str(tool/'ForgeTrust.AppSurface.Cli.dll'),'evidence','supervise','--request',str(request_path)]
 
 def execute(args,case,tools,runtime,end):
- variant=case if case in ('readiness','factory-stall','stuck-descendant','sdk-normal') else 'normal'
+ variant='sdk-normal' if case=='sdk-test-failure' else case if case in ('readiness','factory-stall','stuck-descendant','sdk-normal') else 'normal'
  tool,definition,digest=tools[variant];generation=uuid.uuid4().hex
  root=Path('/run')/('issue779-c3-case-'+generation);c2.create_traversable_root(root)
  subject=root/'subject';c2.copy_tree(args.subject,subject)
- scenario=subject/'Scenario.cs';kind='cancel' if case in ('cancel','stuck-descendant') else case if case in ('scratch-fifo','scratch-hardlink','scratch-oversize') else 'normal'
+ scenario=subject/'Scenario.cs';kind='test-failure' if case=='sdk-test-failure' else 'cancel' if case in ('cancel','stuck-descendant') else case if case in ('scratch-fifo','scratch-hardlink','scratch-oversize') else 'normal'
  scenario.write_text('namespace NativePreparation.Subject; public static class Scenario { public static string Kind => "'+kind+'"; }\n')
  for p in (subject,*subject.rglob('*')):os.chown(p,0,0,follow_symlinks=False);p.chmod(0o555 if p.is_dir() else 0o444)
  owner='appsurface-evidence-owner-'+generation+'.service';appunit='appsurface-evidence-application-'+generation+'.service'
  units=[owner,'appsurface-evidence-worker-'+generation+'.service','appsurface-evidence-producer-'+generation+'.service',appunit]
- if case in ('scratch-fifo','scratch-hardlink','scratch-oversize'):
+ if case in ('scratch-fifo','scratch-hardlink','scratch-oversize','sdk-test-failure'):
   import workspace_guards
   deadline=workspace_guards.observation_deadline(end,480)
  else:deadline=min(end,time.monotonic()+480)
@@ -284,7 +285,7 @@ def execute(args,case,tools,runtime,end):
   require(descriptor is not None and app is not None,'actual-apphost-before-control')
   require(c2.groups_empty(units),'original-all-groups-empty');result['groups_empty']=True
   observed=events(stderr,'evidence-application-native-v1');result['application_observations']=observed
-  result['worker_measurements']=events(stderr,'evidence-worker-measurement-v1')
+  result['worker_measurements']=events(stderr,'evidence-worker-measurement-v2' if case=='sdk-test-failure' else 'evidence-worker-measurement-v1')
   settled=[e for e in observed if e['phase']=='settled'];require(len(settled)==1 and settled[0]['group_empty_twice'] and settled[0]['pumps_joined'] and settled[0]['pending_start_joined'],'actual-application-settlement')
   if case in ('normal','sdk-normal'):
    require(code==0,'positive-root-exit');summary=json.loads(stdout.read_bytes());require(summary.get('ExecutionVerdict')=='Passed' and summary.get('CleanupCompleted') is True and summary.get('ClaimKind')=='ObservationOnly','actual-root-result')
@@ -298,6 +299,11 @@ def execute(args,case,tools,runtime,end):
    write(args.output/(case+'-manifest.json'),final.read_bytes());result['coverage']=coverage.attrib;result['output']=output_accounting(stderr);require(result['output']['registered_pairs']==3,'all-three-stream-pairs')
   else:
    require(code!=0 and not stdout.read_bytes(),'negative-no-root-success')
+   if case=='sdk-test-failure':
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'issue779-checkpoint4'))
+    import sdk_failure
+    result['sdk_failure']=sdk_failure.inspect_case(generation,descriptor,producer,stderr,observed,end)
+    require(settled[0]['main_code']==1 and settled[0]['main_status']==0,'failed-producer-cooperative-application-exit')
    if case=='readiness':require(dcp is not None and resource is not None and probe503 is not None and probe503['status']==503,'actual-authenticated-503')
    if case=='factory-stall':require(factory and dcp is None and not any(e['phase']=='ready' for e in observed),'actual-factory-stall-before-dcp')
    if case in ('cancel','stuck-descendant'):require(cancelled and producer is not None,'actual-running-cancellation')
@@ -319,6 +325,7 @@ def execute(args,case,tools,runtime,end):
   for table,number in numeric:
    looked=command(['/usr/bin/getent',table,str(number)],deadline,allowed=(0,2))
    require(looked.returncode==(0 if quarantined else 2),'original-numeric-account-custody')
+   if case=='sdk-test-failure':result.setdefault('numeric_accounts',[]).append({'table':table,'id':number,'absent':looked.returncode==2})
   result['passed']=True
  except BaseException as failure:
   result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
@@ -326,7 +333,7 @@ def execute(args,case,tools,runtime,end):
   # No fixture containment/repair upgrades the original result.
   if descendant_control is not None:descendant_control.close()
   if held is not None:os.close(held)
-  if process is not None and case in ('scratch-fifo','scratch-hardlink','scratch-oversize') and (process.poll() is None or not result.get('passed')):
+  if process is not None and case in ('scratch-fifo','scratch-hardlink','scratch-oversize','sdk-test-failure') and (process.poll() is None or not result.get('passed')):
    import workspace_guards
    workspace_guards.contain_units(units,process,end)
   elif process is not None and process.poll() is None:

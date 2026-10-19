@@ -712,6 +712,21 @@ internal sealed class LinuxEmptyObservationControlServer
                         case EvidenceRunControlRequest run:
                             _application?.RequireReady(jobOperation.Token);
                             var result = await _coverage.RunAsync(run, jobOperation.Token).ConfigureAwait(false);
+#if EVIDENCE_PRIVATE_C3_SDK
+                            if (result.ExitCode == 1)
+                            {
+                                if (_application is null) throw LinuxSystemdBackend.InvalidControl();
+                                _application.RequireReady(jobOperation.Token);
+                                // Private observation before the response permits SDK failure cleanup. This rechecks
+                                // original live identities/readiness state; it does not perform another HTTP probe.
+                                Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+                                {
+                                    schema = "evidence-sdk-producer-failure-v1", producer_exit_code = result.ExitCode,
+                                    application_unit = _application.Unit.Value, original_application_ready_guard = true,
+                                    native_acceptance = false
+                                }));
+                            }
+#endif
                             coverageResponse = EvidenceCanonicalJson.Serialize(new
                             {
                                 ok = true,

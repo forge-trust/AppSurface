@@ -715,6 +715,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                     _naturalTerminal = facts;
 #if EVIDENCE_PRIVATE_C3
                     if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 0) _measurement?.CaptureNormalExit(facts, token);
+#if EVIDENCE_PRIVATE_C3_SDK
+                    else if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 1) _measurement?.CaptureFailedNormalExit(facts, token);
+#endif
 #endif
                     if (facts.ExecMainCode != 1 || facts.ExecMainStatus != 0)
                         Interlocked.Exchange(ref _failed, 1); // Failed work, not failed physical cleanup.
