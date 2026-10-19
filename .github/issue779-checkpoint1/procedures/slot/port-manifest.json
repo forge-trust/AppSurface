@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 5068,
-      "sha256": "5e9e335d5662b65830729cedbe854b4457bb748452c155f52b78ff6bf6fb9581"
+      "bytes": 6321,
+      "sha256": "ef888abbab88bfa047c83d64930ce31d7c70d5dbed6c00fc6292004d0e354f79"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -73,6 +73,21 @@
     "scope": "pin_file uses same physical full before tuple for size and nlink; ancestor combines UID/mode stat per component; physical hash/finaltuple/walks unchanged",
     "time_gain_measured": false
   },
+  "source50_record_framing": {
+    "cases": [
+      "N04",
+      "N05",
+      "N06",
+      "N08"
+    ],
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_tests": [
+      "../../test_n08_record_framing.py",
+      "../../test_n04_join_diagnostic.py"
+    ],
+    "scope": "N03 publisher emits terminal LF through jq -cS; strict parser unchanged. N04 adds closed numeric failure diagnostic only."
+  },
   "wrappers": [
     {
       "changes": [
@@ -99,7 +114,7 @@
       "historical_sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d",
       "native_execution": false,
       "ported_path": "checkpoint-n04.sh",
-      "ported_sha256": "1afabcba842269b5e53b0aa760eb4a8f080210c7cec38fde5548fadea9ec112c",
+      "ported_sha256": "78b61a18afeb69e46dd512567bf3a212278e90ca0d12f992f06005408dc92f97",
       "selector": "N04"
     },
     {
@@ -113,7 +128,7 @@
       "historical_sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e",
       "native_execution": false,
       "ported_path": "checkpoint-n05.sh",
-      "ported_sha256": "8b97859a9c4ef34d0c0f3b36f4e32fef095b94824163e8e874ec4be5d7d798c8",
+      "ported_sha256": "cf879f6ab50ec4c4e60a195de944fb218c1a4a338be652632fa2127a84e0d5dc",
       "selector": "N05"
     },
     {
@@ -127,7 +142,7 @@
       "historical_sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761",
       "native_execution": false,
       "ported_path": "checkpoint-n06.sh",
-      "ported_sha256": "cdbdbf54152d9e2bd27005ace2e853acff4ee0972bde2671be58e4af9e30e533",
+      "ported_sha256": "6b1a6c6134ce2b1b2782da4161a63c9b9fc1a7ad63d9bb23a19f37d53d22f1e8",
       "selector": "N06"
     },
     {
@@ -155,7 +170,7 @@
       "historical_sha256": "f6f17cf58811c3093f07b2a39817b45eeebfc5052431c85d4c9cfb29604cc384",
       "native_execution": false,
       "ported_path": "checkpoint-n08.sh",
-      "ported_sha256": "5476c64ade87366876ba8ae869fe2f95f4a15565b6ba1563ec653c9e42951f07",
+      "ported_sha256": "ab81bb23cd1b18afb917b7e22799f5a840c855ceccd3206f8c0b921d9e15f4e4",
       "selector": "N08"
     }
   ]

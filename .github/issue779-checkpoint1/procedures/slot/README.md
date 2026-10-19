@@ -82,3 +82,24 @@ source-variable changes or attempts to reassign the snapshot fail closed. The
 [portable controls](../../test_negative_source_binding.py) extract that exact
 comparison from each live script and exercise it with ordinary values under a
 nonroot shell; they do not run the native procedure or claim an EUID/native pass.
+
+## N03 prerequisite record framing
+
+The N04, N05, N06 and N08 publishers serialize the original closed N03 result
+with `jq -cS`, which includes its terminal LF, before the existing deadline check
+and atomic rename. `jq -j` suppressed that LF and made the retained bytes fail
+these fixtures' strict data parsers after the native work. The parsers and their
+identity, image, EOF and digest checks remain unchanged. The
+[publisher regressions](../../test_n08_record_framing.py) exercise all four live
+serialization blocks, their partial-write failure path and the strict parser's
+missing-LF rejection. They test record framing only and issue no native credit.
+
+## N04 joined-outcome diagnostic
+
+Before the unchanged `N04-owned-outcomes` rejection, the fixed shell now emits
+`N04_JOINED_OUTCOMES` with the helper and root launch join statuses, whether each
+registration was retired, and whether root stdout was empty. These are existing
+numeric results and three Boolean values; no path or raw output is included.
+The [diagnostic controls](../../test_n04_join_diagnostic.py) exercise the actual
+guard's accepted tuple and each rejected neighbor. The diagnostic neither proves
+the inner failure cause nor changes any native acceptance or cleanup condition.

@@ -11,8 +11,8 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 7579,
-      "sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35"
+      "bytes": 10425,
+      "sha256": "d57aa3c2e7b6c691c6f1a8f568100ed88320d36bd2567c33a473edb18662b806"
     },
     "adapter.py": {
       "bytes": 4405,
@@ -27,8 +27,8 @@
       "sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
     },
     "check_stall_record.py": {
-      "bytes": 17146,
-      "sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
+      "bytes": 23145,
+      "sha256": "ef270352ae7a030d83e27483250df4625ea4b02987be6313eb3bdc9b67db5229"
     },
     "checkpoint-n11.sh": {
       "bytes": 99944,
@@ -44,11 +44,11 @@
     },
     "parser-pins.tsv": {
       "bytes": 336,
-      "sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
+      "sha256": "23c998c8c9e38a35d75fbeef4e937123a7b32afa2f94e52a076279f1d067700b"
     },
     "records.py": {
-      "bytes": 24073,
-      "sha256": "6f73e1077af6fe6126271ef1a4dcd916c39702215f5b82e2b15e106e41729a7f"
+      "bytes": 26939,
+      "sha256": "299cfac1e5e5a3df1abe8375003298e4a2c94c533f090001ed4ef77f15fbdb49"
     },
     "retain-native.sh": {
       "bytes": 13572,
@@ -59,8 +59,8 @@
       "sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
     },
     "stall_capture.py": {
-      "bytes": 23052,
-      "sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
+      "bytes": 24310,
+      "sha256": "58d06809a59fa5393bf8cafaa0296e944e5fec9364e95ae74b1f1d17fc741c4d"
     }
   },
   "git_mutations": false,
@@ -72,8 +72,8 @@
       "historical_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
     },
     "check_stall_record.py": {
-      "byte_unchanged": true,
-      "current_sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487",
+      "byte_unchanged": false,
+      "current_sha256": "ef270352ae7a030d83e27483250df4625ea4b02987be6313eb3bdc9b67db5229",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/check_stall_record.py",
       "historical_sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
     },
@@ -84,8 +84,8 @@
       "historical_sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
     "parser-pins.tsv": {
-      "byte_unchanged": true,
-      "current_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684",
+      "byte_unchanged": false,
+      "current_sha256": "23c998c8c9e38a35d75fbeef4e937123a7b32afa2f94e52a076279f1d067700b",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/parser-pins.tsv",
       "historical_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
     },
@@ -102,8 +102,8 @@
       "historical_sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
     },
     "stall_capture.py": {
-      "byte_unchanged": true,
-      "current_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79",
+      "byte_unchanged": false,
+      "current_sha256": "58d06809a59fa5393bf8cafaa0296e944e5fec9364e95ae74b1f1d17fc741c4d",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/stall_capture.py",
       "historical_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
     }
@@ -189,7 +189,6 @@
     "exact_object",
     "inspect_retention",
     "validate_negative_archive",
-    "validate_n11_capture",
     "validate_required_archive"
   ],
   "remaining": [
@@ -242,6 +241,12 @@
     "portable_controls": "../../test_failed_fixture_retention.py",
     "scope": "failure-only unchanged actual archive retention before original exception rethrow",
     "success_path_unchanged": true
+  },
+  "source50_callback_settlement": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_test": "../../test_n11_settled_callback.py",
+    "scope": "Separate strict callback-failed/root-settled data contract; historical failed/false-settlement codec retained. No production or native clock change."
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

@@ -1080,7 +1080,7 @@ n03_run() (
    if left >/dev/null; then try_bounded mv -T -- "$n03log/failure.pending" "$n03log/failure.json" || :; fi
    printf 'N03_INCONCLUSIVE_OR_REJECTED:RETAINED\n' >&2; exit 1
   fi
-  try_bounded jq -jcS -n --arg source "$source_revision" --argjson worker "$sampled_pid" --argjson broker "$broker_actual_pid" \
+  try_bounded jq -cS -n --arg source "$source_revision" --argjson worker "$sampled_pid" --argjson broker "$broker_actual_pid" \
    '{schema:"issue779-n03-peer-observation-v1",control:"N03",status:"observed",source_commit:$source,worker_pid:$worker,broker_pid:$broker,worker_exit:1,broker_exit:0,worker_stdout_bytes:0,asevd402_observed:true,kernel_peer_bound_to_owned_worker:true,request_bytes:0,sent_bytes:0,ready_request_observed:false,descriptor_supplied:false,owned_process_groups_joined:true,stream_custody:"private-files-after-original-process-reap",native_acceptance:false,systemd_worker_authority:false}' >"$n03log/result.pending" || code=1
   left >/dev/null || code=1; ((code==0)) || exit 1
   try_bounded mv -T -- "$n03log/result.pending" "$n03log/result.json" || exit 1
@@ -1387,7 +1387,15 @@ set +e
 join_owned n04_launch_pid; n04_helper_exit=$?
 join_owned launch_pid; negative_launch=$?
 set -e
-[[ $n04_helper_exit == 0 && $negative_launch == 1 && -z $n04_launch_pid && -z $launch_pid && ! -s $log/n01.stdout ]] || fail N04-owned-outcomes
+if [[ $n04_helper_exit != 0 || $negative_launch != 1 || -n $n04_launch_pid || -n $launch_pid || -s $log/n01.stdout ]]; then
+ helper_retired=0; root_retired=0; stdout_empty=0
+ [[ -n $n04_launch_pid ]] || helper_retired=1
+ [[ -n $launch_pid ]] || root_retired=1
+ [[ -s $log/n01.stdout ]] || stdout_empty=1
+ printf 'N04_JOINED_OUTCOMES:helper=%d:root=%d:helper_retired=%d:root_retired=%d:stdout_empty=%d\n' \
+  "$n04_helper_exit" "$negative_launch" "$helper_retired" "$root_retired" "$stdout_empty" >&2
+ fail N04-owned-outcomes
+fi
 [[ $(bounded stat -c '%u:%g:%a:%h' "$log/n01.stderr") == 0:0:600:1 && $(bounded stat -c %s "$log/n01.stderr") -le 6144 ]] || fail N04-root-stream
 [[ $(bounded stat -c '%u:%g:%a:%h' "$log/n04-helper.stdout") == 0:0:600:1 && $(bounded stat -c %s "$log/n04-helper.stdout") -le 4096 && ! -s $log/n04-helper.stderr ]] || fail N04-helper-stream
 pin_file "$descriptor" "$descriptor_sha" 65536;pin_file "$request" "$request_sha" 65536

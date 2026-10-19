@@ -15,6 +15,9 @@ MAX_RAW_BYTES = 32768
 ARMED = b"FIXTURE_N11_DISPOSER_ARMED\n"
 ENTERED = b"FIXTURE_N11_INPUT_FACTORY_ENTERED\n"
 INVOKED = b"FIXTURE_N11_DISPOSER_INVOKED"
+CALLBACK_FAIL_FAST = b"Owned Evidence callback or write remained active after its bounded grace."
+CALLBACK_FAIL_STACK = (b"StopAndJoinAsync", b"WaitWithinStopDeadlineAsync", b"FatalTermination")
+SETTLED_CALLBACK_OUTCOME = "worker lifecycle fail-stop, then root physical settlement"
 TOP = {"schema", "generation", "worker_unit", "process", "ready", "lifetime",
        "pending_start", "monitor", "terminal", "cgroup", "pumps", "observation_only",
        "native_authority", "native_acceptance"}
@@ -121,9 +124,10 @@ def _stream(value, raw):
     _require(decoded == raw and base64.b64encode(decoded).decode("ascii") == encoded)
 
 
-def check_stall_record(record, *, worker_stdout, worker_stderr, expected_generation,
-                       expected_pid, expected_starttime_ticks, expected_uid, expected_gid,
-                       expected_descriptor_sha256, expected_stopping_ms=None):
+def _check_stall_record(record, *, worker_stdout, worker_stderr, expected_generation,
+                        expected_pid, expected_starttime_ticks, expected_uid, expected_gid,
+                        expected_descriptor_sha256, expected_stopping_ms=None,
+                        settled_callback_failure=False):
     """Check supplied records against independently retained original full bytes.
 
     An accepted result is data consistency only. It requires original joined tasks,
@@ -152,9 +156,19 @@ def check_stall_record(record, *, worker_stdout, worker_stderr, expected_generat
                            parse_constant=lambda _: _require(False))
         _require(type(value) is dict and set(value) == TOP | {"stop_timing"})
         stop_timing = check_stop_timing(value.get("stop_timing"), expected_stopping_ms=expected_stopping_ms)
-        # N11 is a failed-path record: preserve false settlement while requiring the
-        # original bounded stop, terminal/group observations, joined monitor/pumps and EOF.
-        _require(stop_timing["bounded_failed_stop"] is True)
+        if settled_callback_failure:
+            # This branch records lifecycle fail-stop followed by root physical
+            # settlement; the root stop is not claimed as the cause of worker exit.
+            _require(stop_timing["proof"] is True and stop_timing["bounded_failed_stop"] is True)
+            timing = value["stop_timing"]
+            _require(type(timing["settlement_published_ms"]) is int
+                     and timing["stop_joined_ms"] <= timing["stopping_ms"]
+                     and timing["stop_joined_ms"] <= timing["job_remaining_ms"])
+            _require(CALLBACK_FAIL_FAST in worker_stderr
+                     and all(token in worker_stderr for token in CALLBACK_FAIL_STACK))
+        else:
+            # Preserve the historical failed-path predicate exactly.
+            _require(stop_timing["bounded_failed_stop"] is True)
         unit = "appsurface-evidence-worker-" + expected_generation + ".service"
         _require(value["schema"] == "issue779-n11-original-failed-settlement-v1"
                  and value["generation"] == expected_generation and value["worker_unit"] == unit)
@@ -174,23 +188,32 @@ def check_stall_record(record, *, worker_stdout, worker_stderr, expected_generat
                  and value["ready"]["descriptor_sha256"] == expected_descriptor_sha256)
         lifetime = value["lifetime"]
         _object(lifetime, ("startup_joined", "stop_joined", "failed", "physically_settled"))
-        _require(lifetime["startup_joined"] is True and lifetime["stop_joined"] is True
-                 and lifetime["failed"] is True and lifetime["physically_settled"] is False
-                 and value["stop_timing"]["settlement_published_ms"] is None)
+        _require(lifetime["startup_joined"] is True and lifetime["stop_joined"] is True)
+        if settled_callback_failure:
+            _require(lifetime["failed"] is False and lifetime["physically_settled"] is True)
+        else:
+            _require(lifetime["failed"] is True and lifetime["physically_settled"] is False
+                     and value["stop_timing"]["settlement_published_ms"] is None)
         pending = value["pending_start"]
         _object(pending, ("start_reserved", "started", "start_joined", "closed", "stop_joined",
                           "first_failure"))
         _require(all(pending[name] is True for name in
                      ("start_reserved", "started", "start_joined", "closed", "stop_joined")))
-        _require(pending["first_failure"] in
-                 ("None", "StartFailed", "StartCancelled", "StopFailed", "StopCancelled"))
-        _require(value["monitor"] in ("Completed", "Faulted", "Cancelled"))
+        if settled_callback_failure:
+            _require(pending["first_failure"] == "None")
+        else:
+            _require(pending["first_failure"] in
+                     ("None", "StartFailed", "StartCancelled", "StopFailed", "StopCancelled"))
+        _require(value["monitor"] in (("Completed",) if settled_callback_failure
+                                       else ("Completed", "Faulted", "Cancelled")))
         terminal = value["terminal"]
         _object(terminal, ("exec_main_pid", "exec_main_code", "exec_main_status"))
         _integer(terminal["exec_main_pid"], 1, (1 << 31) - 1)
         _integer(terminal["exec_main_code"], 1, 6)
         _integer(terminal["exec_main_status"], 1, 255)
         _require(terminal["exec_main_pid"] == expected_pid)
+        if settled_callback_failure:
+            _require(terminal["exec_main_code"] == 3 and terminal["exec_main_status"] == 6)
         group = value["cgroup"]
         _object(group, ("exists", "populated", "frozen", "device_major", "device_minor", "inode",
                         "after_pumps"))
@@ -219,12 +242,85 @@ def check_stall_record(record, *, worker_stdout, worker_stderr, expected_generat
                  and pumps["received_bytes"] <= pumps["received_byte_limit"])
         _require(value["observation_only"] is True and value["native_authority"] is False
                  and value["native_acceptance"] is False)
+        if settled_callback_failure:
+            return {"schema": "issue779-n11-settled-callback-failure-data-v1",
+                    "outcome": SETTLED_CALLBACK_OUTCOME, "callback_failed": True,
+                    "streams_matched": True, "monitor": value["monitor"],
+                    "physically_settled": True,
+                    "settlement_published_ms": value["stop_timing"]["settlement_published_ms"],
+                    "stop_timing": stop_timing, "native_authority": False,
+                    "native_acceptance": False}
         return {"schema": "issue779-n11-detached-data-consistency-v1", "streams_matched": True,
                 "monitor": value["monitor"], "physically_settled": lifetime["physically_settled"],
                 "stop_timing": stop_timing, "native_authority": False, "native_acceptance": False}
     except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, RecursionError,
             binascii.Error):
         raise StallRecordRejected("stall-data-rejected") from None
+
+
+def check_stall_record(record, *, worker_stdout, worker_stderr, expected_generation,
+                       expected_pid, expected_starttime_ticks, expected_uid, expected_gid,
+                       expected_descriptor_sha256, expected_stopping_ms=None):
+    """Validate the historical N11 failed/false-settlement record.
+
+    The signature and result schema are the original public data-check API. The
+    supplied record and full stdout/stderr bytes must bind to the expected
+    generation, worker identity, unit and committed descriptor. Startup, stop
+    and pending-start tasks must be joined; READY must be committed; the stream
+    must contain the exact armed/entered markers once, contain no disposer
+    invocation, and match joined EOF, byte counts, hashes and pump metadata. The
+    terminal must be nonzero, the final cgroup sample must be empty and taken
+    after pumps, and the original bounded failed-stop predicate must hold. This
+    historical schema requires ``failed=True``, ``physically_settled=False`` and
+    no settlement publication; unsuccessful monitor state is preserved.
+
+    Args:
+        record: Original bounded JSON record bytes, optionally newline terminated.
+        worker_stdout: Independently retained complete stdout bytes (must be empty).
+        worker_stderr: Independently retained complete stderr bytes.
+        expected_generation: Expected lowercase 32-character generation identifier.
+        expected_pid: Expected worker PID.
+        expected_starttime_ticks: Expected Linux process start time.
+        expected_uid: Expected UID repeated in all four captured UID slots.
+        expected_gid: Expected GID repeated in all four captured GID slots.
+        expected_descriptor_sha256: Expected lowercase SHA-256 descriptor digest.
+        expected_stopping_ms: Optional original stopping allowance to bind exactly.
+
+    Returns:
+        The closed ``issue779-n11-detached-data-consistency-v1`` result. Its
+        native authority and acceptance fields are always false.
+
+    Raises:
+        StallRecordRejected: If any shape, identity, lifecycle, timing, stream,
+            pump, terminal or cgroup consistency predicate fails.
+
+    Expected identity values are caller-supplied comparison data; they do not
+    establish credentials or native authority. The common predicates live in
+    :func:`_check_stall_record`. For callback fail-stop followed by physical
+    settlement, use :func:`check_callback_failed_settled_record`, which has a
+    distinct strict outcome schema and leaves this historical contract intact.
+    """
+    return _check_stall_record(record, worker_stdout=worker_stdout, worker_stderr=worker_stderr,
+        expected_generation=expected_generation, expected_pid=expected_pid,
+        expected_starttime_ticks=expected_starttime_ticks, expected_uid=expected_uid,
+        expected_gid=expected_gid, expected_descriptor_sha256=expected_descriptor_sha256,
+        expected_stopping_ms=expected_stopping_ms)
+
+
+def check_callback_failed_settled_record(record, *, worker_stdout, worker_stderr,
+                                         expected_generation, expected_pid,
+                                         expected_starttime_ticks, expected_uid, expected_gid,
+                                         expected_descriptor_sha256, expected_stopping_ms=None):
+    """Strict detached data for lifecycle fail-stop followed by physical settlement.
+
+    The root's stop sequence and worker fail-fast evidence are both required, but
+    the result does not claim that root stop caused the worker's termination.
+    """
+    return _check_stall_record(record, worker_stdout=worker_stdout, worker_stderr=worker_stderr,
+        expected_generation=expected_generation, expected_pid=expected_pid,
+        expected_starttime_ticks=expected_starttime_ticks, expected_uid=expected_uid,
+        expected_gid=expected_gid, expected_descriptor_sha256=expected_descriptor_sha256,
+        expected_stopping_ms=expected_stopping_ms, settled_callback_failure=True)
 def check_launch_timing(record, *, expected_generation, expected_source, expected_request_sha256,
                         expected_job_deadline_utc):
     """Validate retained launch arithmetic as detached data, never as a physical-exit receipt.

@@ -44,7 +44,41 @@ is checked against real NSS; the root adapter cannot substitute a protected owne
 
 ## Native behavior and clocks
 
-N11 is the real synchronous factory stall, original failed stop/frame capture and preserved quarantine.
+N11 is the real synchronous factory stall and preserved quarantine. Its historical
+failed/false-settlement record remains one supported outcome. A separate strict
+data outcome now describes **worker lifecycle fail-stop, then root physical
+settlement** when the callback's original bounded stop path reaches the fixed
+fail-fast and the root later records physical settlement. The root stop is not
+claimed as the cause of worker exit. The canonical [N11 checkpoint goal](../../../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-1-one-real-supervised-worker)
+and source-owned [`StopAndJoinAsync`](../../../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs#L505),
+[`WaitWithinStopDeadlineAsync`](../../../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs#L588),
+and [`FatalTermination`](../../../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceWorkerExecution.cs#L701)
+describe the lifecycle. The fixed callback message is emitted only after the
+original bounded callback join fails; the retained worker stderr must also carry
+the three source method tokens.
+
+`check_stall_record(record, *, worker_stdout, worker_stderr, expected_generation,
+expected_pid, expected_starttime_ticks, expected_uid, expected_gid,
+expected_descriptor_sha256, expected_stopping_ms=None)` retains its original
+failed/false-settlement contract and result schema. Use
+`check_callback_failed_settled_record` with the same arguments only for the
+strict settled-callback record. It requires failed=false, physical settlement,
+all original startup/stop/pending-start joins, `first_failure=None`, completed
+monitor, terminal code3/status6, the exact armed/entered/no-disposer stream,
+the fixed fail-fast message and stack tokens, joined EOF/byte/hash/pump checks,
+empty final cgroup data, and both full timing proofs within the original stop
+and job allowances. It returns a separate closed consistency schema with the
+actual publication time and fixed lifecycle outcome label. Both checkers are
+detached data validators and return native authority/acceptance false.
+
+`stall_capture.parse_original` selects the new checker from the original frame's
+physical-settlement bit and requires the exact bounded ASEVD410/worker-terminal
+failure context. It never retries the legacy checker after a new-branch failure.
+`records.py` reparses the retained original frame and requires the matching
+closed consistency schema and exact byte bindings. Neither schema waives the
+source, image, identity, pump, cgroup, NSS, quarantine, output, or deadline
+checks. Portable controls establish data consistency only; a fresh complete
+Linux capture remains required for native N11 credit.
 
 Fixture600/cleanup30 remain unchanged. N11 creates the original240-second request once and selects its owner runtime from that original remaining budget.
 The earlier outer absolute deadline remains in force; no native retry or renewed
@@ -99,9 +133,12 @@ their success does not qualify a Linux native case or simulate a protected owner
 [port-manifest.json](port-manifest.json) records relative historical paths, hashes,
 source files and static invariance. [historical-to-current.patch](historical-to-current.patch)
 shows only the historical provenance boundary replacement and sixth env literal.
-All native suffixes are literal-equal after those allowed substitutions. Readable
-record predicates are AST-equal excluding docstring indentation changed by nesting.
-Original dispatcher/retainer bytes and N11 capture/parser modules are unchanged.
+The historical patch records the initial port only. The native shell, dispatcher
+and retainer remain unchanged by the settled-callback correction. The
+`check_stall_record` historical data contract remains supported; the current
+parser and capture modules now add the separate strict settled-callback contract
+described above. `validate_n11_capture` recomputes that contract from the original
+bytes; the other identity, custody and quarantine predicates remain in force.
 Parent/Godel owns inventory registration. Independent review, portable validation,
 actual current helper publication and fresh Linux native execution remain required.
 No all16-ready or coverage-gain claim is made.

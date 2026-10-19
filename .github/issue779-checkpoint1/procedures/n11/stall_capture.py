@@ -19,7 +19,7 @@ import re
 import stat
 import time
 
-from check_stall_record import check_stall_record
+from check_stall_record import check_callback_failed_settled_record, check_stall_record
 from root_stall_frame import parse_root_stall_frame
 
 MAX_FRAME = 70 * 1024 - 1
@@ -103,6 +103,26 @@ def requested_deadline(request, descriptor_deadline):
     return value["job_deadline_utc"]
 
 
+def callback_failed_settled_branch(record, failure):
+    """Select only the exact retained root frame for callback fail-stop settlement."""
+    lifetime = record.get("lifetime") if type(record) is dict else None
+    if type(lifetime) is not dict or lifetime.get("physically_settled") is not True:
+        return False
+    control = failure.get("control_failure") if type(failure) is dict else None
+    require(failure.get("phase") == "ServerRun"
+            and failure.get("error_kind") == "Admission"
+            and failure.get("diagnostic_code") == "ASEVD410"
+            and failure.get("account_failure") is None
+            and failure.get("custody_failure") is None
+            and type(control) is dict
+            and set(control) == {"stage", "operation", "error_kind", "diagnostic_code"}
+            and control["stage"] == "WorkerTerminalTaskCompleted"
+            and control["operation"] is None
+            and control["error_kind"] == "Unknown"
+            and control["diagnostic_code"] is None)
+    return True
+
+
 def _parse_original(frame, descriptor, *, request, generation, source, base, entry_sha, policy_sha,
                     runtime_relative_host, workflow):
     require(type(generation) is str and re.fullmatch("[0-9a-f]{32}", generation)
@@ -115,6 +135,7 @@ def _parse_original(frame, descriptor, *, request, generation, source, base, ent
     require(type(workflow) is str and 0 < len(workflow.encode()) <= 4096
             and not any(ord(c) < 32 or ord(c) == 127 for c in workflow))
     record, failure = parse_root_stall_frame(frame)
+    settled_callback_failure = callback_failed_settled_branch(record, failure)
     require(set(failure) == FAILURE_KEYS
             and failure["phase"] in ("ServerRun", "ServerCompletion", "WorkerExit", "WorkerCompletion")
             and failure["error_kind"] in ("Admission", "ControlLine", "Cancelled", "InvalidOperation")
@@ -178,7 +199,9 @@ def _parse_original(frame, descriptor, *, request, generation, source, base, ent
     record_bytes = frame.split(b"\n", 1)[0] + b"\n"
     request_value = decode(request, 65536)
     expected_stopping_ms = request_value["stopping_seconds"] * 1000
-    consistency = check_stall_record(record_bytes, worker_stdout=raw["stdout"], worker_stderr=raw["stderr"],
+    checker = (check_callback_failed_settled_record if settled_callback_failure
+               else check_stall_record)
+    consistency = checker(record_bytes, worker_stdout=raw["stdout"], worker_stderr=raw["stderr"],
         expected_generation=generation, expected_pid=d["worker_pid"],
         expected_starttime_ticks=record["process"]["starttime_ticks"], expected_uid=d["worker_uid"],
         expected_gid=d["worker_gid"], expected_descriptor_sha256=digest(descriptor),

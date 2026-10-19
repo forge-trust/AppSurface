@@ -187,28 +187,62 @@ def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
             policy_sha=capture['policy_sha256'], runtime_relative_host='dotnet',
             workflow=request.get('workflow_identity'))
         consistency = capture['consistency']
-        require(type(consistency) is dict and set(consistency) ==
-                {'schema','streams_matched','monitor','physically_settled','stop_timing','native_authority','native_acceptance'}
-                and consistency['schema'] == 'issue779-n11-detached-data-consistency-v1'
-                and consistency['streams_matched'] is True
-                and consistency['monitor'] in ('Faulted','Cancelled')
-                and consistency['physically_settled'] is False
-                and type(consistency['stop_timing']) is dict
-                and set(consistency['stop_timing']) == {'present','proof','schema','missing_fields','clock_origin',
-                                                         'bounded_failed_stop','failed_stop_missing_fields'}
-                and type(consistency['stop_timing']['present']) is bool
-                and type(consistency['stop_timing']['proof']) is bool
-                and consistency['stop_timing']['proof'] is False
-                and consistency['stop_timing']['bounded_failed_stop'] is True
-                and type(consistency['stop_timing']['missing_fields']) is list
-                and all(type(name) is str for name in consistency['stop_timing']['missing_fields'])
-                and 'settlement_published_ms' in consistency['stop_timing']['missing_fields']
-                and consistency['stop_timing']['failed_stop_missing_fields'] == []
-                and consistency['stop_timing']['clock_origin'] == 'LinuxWorkerStopTiming.Begin'
-                and (consistency['stop_timing']['schema'] == 'issue779-original-worker-stop-timing-v1'
-                     if consistency['stop_timing']['present'] else consistency['stop_timing']['schema'] is None)
-                and consistency['native_authority'] is False and consistency['native_acceptance'] is False
-                and consistency == checked, 'n11-recomputed-consistency')
+        if checked.get('schema') == 'issue779-n11-detached-data-consistency-v1':
+            # Preserve the historical failed/false-settlement contract verbatim.
+            require(type(consistency) is dict and set(consistency) ==
+                    {'schema','streams_matched','monitor','physically_settled','stop_timing','native_authority','native_acceptance'}
+                    and consistency['schema'] == 'issue779-n11-detached-data-consistency-v1'
+                    and consistency['streams_matched'] is True
+                    and consistency['monitor'] in ('Faulted','Cancelled')
+                    and consistency['physically_settled'] is False
+                    and type(consistency['stop_timing']) is dict
+                    and set(consistency['stop_timing']) == {'present','proof','schema','missing_fields','clock_origin',
+                                                             'bounded_failed_stop','failed_stop_missing_fields'}
+                    and type(consistency['stop_timing']['present']) is bool
+                    and type(consistency['stop_timing']['proof']) is bool
+                    and consistency['stop_timing']['proof'] is False
+                    and consistency['stop_timing']['bounded_failed_stop'] is True
+                    and type(consistency['stop_timing']['missing_fields']) is list
+                    and all(type(name) is str for name in consistency['stop_timing']['missing_fields'])
+                    and 'settlement_published_ms' in consistency['stop_timing']['missing_fields']
+                    and consistency['stop_timing']['failed_stop_missing_fields'] == []
+                    and consistency['stop_timing']['clock_origin'] == 'LinuxWorkerStopTiming.Begin'
+                    and (consistency['stop_timing']['schema'] == 'issue779-original-worker-stop-timing-v1'
+                         if consistency['stop_timing']['present'] else consistency['stop_timing']['schema'] is None)
+                    and consistency['native_authority'] is False and consistency['native_acceptance'] is False
+                    and consistency == checked, 'n11-recomputed-consistency')
+        elif checked.get('schema') == 'issue779-n11-settled-callback-failure-data-v1':
+            settled_record = decode_data(original_records['original-failed-settlement.json'])
+            lifetime = settled_record['lifetime']
+            timing = settled_record['stop_timing']
+            require(type(consistency) is dict and set(consistency) ==
+                    {'schema','outcome','callback_failed','streams_matched','monitor','physically_settled',
+                     'settlement_published_ms','stop_timing','native_authority','native_acceptance'}
+                    and consistency['schema'] == 'issue779-n11-settled-callback-failure-data-v1'
+                    and consistency['outcome'] == 'worker lifecycle fail-stop, then root physical settlement'
+                    and consistency['callback_failed'] is True
+                    and consistency['streams_matched'] is True
+                    and consistency['monitor'] == 'Completed'
+                    and lifetime['failed'] is False and lifetime['physically_settled'] is True
+                    and consistency['physically_settled'] is True
+                    and type(consistency['settlement_published_ms']) is int
+                    and consistency['settlement_published_ms'] == timing['settlement_published_ms']
+                    and type(consistency['stop_timing']) is dict
+                    and set(consistency['stop_timing']) == {'present','proof','schema','missing_fields','clock_origin',
+                                                             'bounded_failed_stop','failed_stop_missing_fields'}
+                    and consistency['stop_timing']['present'] is True
+                    and consistency['stop_timing']['proof'] is True
+                    and consistency['stop_timing']['bounded_failed_stop'] is True
+                    and consistency['stop_timing']['missing_fields'] == []
+                    and consistency['stop_timing']['failed_stop_missing_fields'] == []
+                    and consistency['stop_timing']['clock_origin'] == 'LinuxWorkerStopTiming.Begin'
+                    and consistency['stop_timing']['schema'] == 'issue779-original-worker-stop-timing-v1'
+                    and timing['stop_joined_ms'] <= timing['stopping_ms']
+                    and timing['stop_joined_ms'] <= timing['job_remaining_ms']
+                    and consistency['native_authority'] is False and consistency['native_acceptance'] is False
+                    and consistency == checked, 'n11-recomputed-settled-callback-consistency')
+        else:
+            require(False, 'n11-recomputed-consistency-schema')
         require(all(name in raw and raw[name] == content for name, content in original_records.items()),
                 'n11-original-framed-record-binding')
         require(capture['job_deadline_utc'] == request.get('job_deadline_utc'), 'n11-original-deadline-binding')

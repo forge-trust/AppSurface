@@ -766,3 +766,17 @@ The same correction separates the retained lifetime's cleanup join from its unch
 original cleanup procedure and source close completed without fault. The native worker additionally
 requires final physical settlement before local disposal and root custody. No execution failure flag,
 unit/PID/group/pump check or account-release guard is cleared.
+
+
+### 2026-10-19: distinguish failed callback work from physical settlement
+
+The current [N11 data contract](../../.github/issue779-checkpoint1/procedures/n11/README.md#native-behavior-and-clocks)
+keeps the historical failed/false-settlement codec and separately validates the
+observed case where the worker lifecycle fail-stops an unjoined synchronous
+callback and the root subsequently joins the exited worker, pumps and empty
+cgroup. The new closed result requires the original fatal marker and source
+method tokens, kernel code 3/status 6, both original timing bounds, exact stream
+bytes and all existing quarantine/output/NSS observations. It does not claim that
+the root stop request caused the worker exit. This is a verifier correction,
+not a C# runtime, timeout, capability, admission or coverage-policy change. A
+fresh complete N11 Linux capture is still required before crediting the control.
