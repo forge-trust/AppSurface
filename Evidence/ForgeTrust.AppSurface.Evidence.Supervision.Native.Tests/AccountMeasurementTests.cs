@@ -97,7 +97,8 @@ public sealed class AccountMeasurementTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate(rebind));
     }
 
-    private sealed class Fixture
+    /// <summary>Reusable detached packet builder for data-only lineage controls; no native holders are constructed.</summary>
+    internal sealed class Fixture
     {
         internal const string AccountPath = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs";
         internal const string OwnerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
@@ -191,5 +192,76 @@ public sealed class AccountMeasurementTests
                     Binding[item.Item1 + "_sha256"] = Convert.ToHexStringLower(SHA256.HashData(item.Item2));
             AccountMeasurement.Validate(Head, _variant, source, JsonSerializer.SerializeToUtf8Bytes(Binding), native, coverage);
         }
+
+        internal void ConfigureMerged()
+        {
+            Binding["schema"] = "issue779-c4-account-measurement-v2";
+            Source["files"]![AccountMeasurement.WitnessSource]!["sha256"] = AccountMeasurement.WitnessSourceSha256;
+            Source["files"]![AccountPath]!["sha256"] = AccountMeasurement.PartialSourceSha256;
+            var creation = _variant == "C4Accounts";
+            var declaring = creation
+                ? "ForgeTrust.AppSurface.Evidence.Supervision.LinuxAccountMeasurement/<RunAsync>d__2"
+                : "ForgeTrust.AppSurface.Evidence.Supervision.LinuxRunAccounts/<PrepareAccountMeasurementCollisionAsync>d__56";
+            var method = "System.Void " + declaring + "::MoveNext()";
+            Binding["current_witness"] = new JsonObject { ["document"] = AccountMeasurement.WitnessSource,
+                ["declaring_type"] = declaring, ["method"] = method,
+                ["source_sha256"] = AccountMeasurement.WitnessSourceSha256,
+                ["partial_source_sha256"] = AccountMeasurement.PartialSourceSha256 };
+            Supervision[AccountMeasurement.WitnessSource] = new JsonObject
+            {
+                [declaring] = new JsonObject { [method] = new JsonObject
+                    { ["Lines"] = new JsonObject { [creation ? "60" : "290"] = 1 } } }
+            };
+        }
+
+        internal (byte[] Source, byte[] Binding, byte[] Native, byte[] Coverage) Packets()
+        {
+            var source = JsonSerializer.SerializeToUtf8Bytes(Source);
+            var native = JsonSerializer.SerializeToUtf8Bytes(Native);
+            var coverage = JsonSerializer.SerializeToUtf8Bytes(Report);
+            foreach (var item in new[] { ("source_capture", source), ("native_receipt", native), ("coverage", coverage) })
+                Binding[item.Item1 + "_sha256"] = Convert.ToHexStringLower(SHA256.HashData(item.Item2));
+            return (source, JsonSerializer.SerializeToUtf8Bytes(Binding), native, coverage);
+        }
+
+        internal void ValidateMerged()
+        {
+            var packet = Packets();
+            AccountMeasurement.ValidateMerged(Head, _variant, packet.Source, packet.Binding, packet.Native, packet.Coverage);
+        }
+    }
+
+    /// <summary>Existing prior shipping-source hits cannot stand in for this variant's source-bound witness.</summary>
+    [Theory]
+    [InlineData("C4Accounts", "valid")]
+    [InlineData("C4AccountRollback", "valid")]
+    [InlineData("C4Accounts", "zero")]
+    [InlineData("C4AccountRollback", "zero")]
+    [InlineData("C4Accounts", "source")]
+    [InlineData("C4AccountRollback", "partial")]
+    [InlineData("C4Accounts", "method")]
+    [InlineData("C4AccountRollback", "span")]
+    [InlineData("C4Accounts", "schema")]
+    public void MergedPacketsRequireTheirOwnExactWitness(string variant, string mutation)
+    {
+        var fixture = new Fixture(variant);
+        fixture.ConfigureMerged();
+        fixture.ValidateMerged();
+        if (mutation == "valid") return;
+        var witness = fixture.Binding["current_witness"]!;
+        var declaring = witness["declaring_type"]!.GetValue<string>();
+        var method = witness["method"]!.GetValue<string>();
+        var lines = fixture.Supervision[AccountMeasurement.WitnessSource]![declaring]![method]!["Lines"]!.AsObject();
+        switch (mutation)
+        {
+            case "zero": foreach (var key in lines.Select(static row => row.Key).ToArray()) lines[key] = 0; break;
+            case "source": witness["source_sha256"] = new string('d', 64); break;
+            case "partial": witness["partial_source_sha256"] = new string('d', 64); break;
+            case "method": witness["method"] = "System.Void Other::MoveNext()"; break;
+            case "span": lines.Clear(); lines["1"] = 1; break;
+            case "schema": fixture.Binding["schema"] = "issue779-c4-account-measurement-v1"; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.ThrowsAny<Exception>(() => fixture.ValidateMerged());
     }
 }

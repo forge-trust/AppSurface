@@ -37,13 +37,14 @@ public sealed class NativeMeasurementTests
             }
         }
         Assert.Equal(0, process.ExitCode);
-        using var binding = JsonDocument.Parse(Read(directory, "measurement-binding.json"));
+        var bindingBytes = Read(directory, "measurement-binding.json");
+        using var binding = JsonDocument.Parse(bindingBytes);
         var source = Read(directory, "source.json");
         var native = Read(directory, "native-receipt.json");
         var coverage = Read(directory, "native-supervision.json", 32L * 1024 * 1024);
         var sdkCoverage = Read(directory, "native-sdk.json", 32L * 1024 * 1024);
-        RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"),
-            Read(directory, "root-files.trx"));
+        var rootTrx = Read(directory, "root-files.trx");
+        RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"), rootTrx);
         Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
         const string producerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs";
         var producerSource = File.ReadAllBytes(Path.Join(repo, producerPath));
@@ -52,6 +53,22 @@ public sealed class NativeMeasurementTests
             Convert.ToHexStringLower(SHA256.HashData(producerSource)));
         SdkFailureMeasurement.Validate(binding.RootElement, head.Trim(), Read(directory, "sdk-test-failure.json"),
             Read(directory, "native-sdk-failure.json"), System.Text.Encoding.UTF8.GetString(producerSource));
+        var creation = ReadAccount("accounts-creation", "C4Accounts");
+        var rollback = ReadAccount("accounts-rollback", "C4AccountRollback");
+        AccountMeasurementLineage.Validate(source, bindingBytes, coverage, native, rootTrx,
+            creation.Binding, creation.Coverage, creation.Native, rollback.Binding, rollback.Coverage, rollback.Native);
+
+        (byte[] Binding, byte[] Coverage, byte[] Native) ReadAccount(string folder, string variant)
+        {
+            var accountDirectory = Path.Join(directory, folder);
+            var accountSource = Read(accountDirectory, "source.json");
+            Assert.Equal(source, accountSource); // The complete original source capture, not only a claimed commit.
+            var accountBinding = Read(accountDirectory, "measurement-binding.json");
+            var accountCoverage = Read(accountDirectory, "native-accounts.json", 32L * 1024 * 1024);
+            var accountNative = Read(accountDirectory, "native-accounts-receipt.json");
+            AccountMeasurement.ValidateMerged(head.Trim(), variant, accountSource, accountBinding, accountNative, accountCoverage);
+            return (accountBinding, accountCoverage, accountNative);
+        }
     }
 
     private static byte[] Read(string directory, string name, long maximum = 8L * 1024 * 1024)

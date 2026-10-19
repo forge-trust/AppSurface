@@ -21,13 +21,27 @@ jobs:
     name: CSharp CLI and SDK application consumers
     uses: ./.github/workflows/issue779-checkpoint3-application.yml
 
-  account-mechanisms:
-    name: Genuine account creation and reserved rollback mechanisms
+  account-creation:
+    name: Genuine account creation with the successful C3 measurement
+    needs: application-consumers
     uses: ./.github/workflows/issue779-checkpoint4-accounts.yml
+    with:
+      variant: C4Accounts
+      prior_kind: c3
+      prior_artifact_name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
+
+  account-rollback:
+    name: Genuine reserved rollback with the successful account measurement
+    needs: account-creation
+    uses: ./.github/workflows/issue779-checkpoint4-accounts.yml
+    with:
+      variant: C4AccountRollback
+      prior_kind: accounts
+      prior_artifact_name: ${{ needs.account-creation.outputs.artifact_name }}
 
   solution-coverage:
     name: Unchanged solution and codecov patch gates
-    needs: application-consumers
+    needs: [application-consumers, account-creation, account-rollback]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -64,6 +78,16 @@ jobs:
         with:
           name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/checkpoint4-native-input
+      - name: Download the successful account creation lineage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.account-creation.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-account-creation-input
+      - name: Download the successful account rollback lineage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.account-rollback.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-account-rollback-input
       - name: Stage only fixed source-bound native measurement inputs
         run: |
           set -euo pipefail
@@ -77,6 +101,15 @@ jobs:
           cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/root-file-tests/root-files.trx" TestResults/issue779-native-measurement/
+          # Preserve the original C3 report/binding for NativeMeasurementTests.
+          # The parent-owned account validator must validate both staged lineage directories.
+          for variant in creation rollback; do
+            destination="TestResults/issue779-native-measurement/accounts-$variant"
+            mkdir -m 0700 "$destination"
+            for name in source.json measurement-binding.json native-accounts.json native-accounts-receipt.json; do
+              cp "$RUNNER_TEMP/checkpoint4-account-$variant-input/$name" "$destination/$name"
+            done
+          done
           python3 -B - <<'PY'
           from pathlib import Path
           from xml.etree import ElementTree as ET
@@ -84,7 +117,7 @@ jobs:
           settings = ET.Element('RunSettings')
           collector = ET.SubElement(ET.SubElement(ET.SubElement(settings, 'DataCollectionRunSettings'), 'DataCollectors'), 'DataCollector', friendlyName='XPlat Code Coverage')
           configuration = ET.SubElement(collector, 'Configuration')
-          ET.SubElement(configuration, 'MergeWith').text = str(root / 'native-supervision.json')
+          ET.SubElement(configuration, 'MergeWith').text = str(root / 'accounts-rollback/native-accounts.json')
           ET.SubElement(configuration, 'Format').text = 'cobertura'
           ET.ElementTree(settings).write(root / 'native.runsettings', encoding='utf-8', xml_declaration=True)
           PY

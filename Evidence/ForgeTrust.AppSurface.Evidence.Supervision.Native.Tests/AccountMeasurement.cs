@@ -11,12 +11,16 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 /// sourceCaptureBytes to equal its independently verified full parent capture. No Git or filesystem refresh
 /// occurs here. Restoration is the driver's finalization precondition: the current binding has original and
 /// instrumented maps, not an invented restored map. A valid comparison does not establish physical cleanup.
-/// Each input is limited to 1 byte–8 MiB and JSON depth 64. Optional binding lineage metadata is left to the caller;
+/// Raw API inputs and all nonreport inputs are limited to 1 byte–8 MiB and JSON depth 64; only ValidateMerged's
+/// report allows 32 MiB. Optional binding lineage metadata is left to the lineage comparison/caller;
 /// the native driver, nested receipt, identity and module-map shapes remain closed to their current contracts.
 /// </remarks>
 internal static class AccountMeasurement
 {
     private const int MaximumBytes = 8 * 1024 * 1024;
+    internal const string WitnessSource = ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs";
+    internal const string WitnessSourceSha256 = "6810182cb7a93c8928f7aca9a8e55d575b7d4e2ebc0a85f3d0cb64c4ed4135fa";
+    internal const string PartialSourceSha256 = "25270ce8685d934fc35c65de82118354acabe4d65861355e9b9727d5512fc2b6";
     private const string AccountsSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs";
     private const string OwnerSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
@@ -35,7 +39,22 @@ internal static class AccountMeasurement
     /// <param name="nativeReceiptBytes">Original native-accounts-receipt.json bytes, including the nested C# data receipt.</param>
     /// <param name="coverageBytes">Unmodified standard native-accounts.json report, before any future supported merge.</param>
     internal static void Validate(string expectedHead, string variant, byte[] sourceCaptureBytes, byte[] bindingBytes,
-        byte[] nativeReceiptBytes, byte[] coverageBytes)
+        byte[] nativeReceiptBytes, byte[] coverageBytes) =>
+        ValidateCore(expectedHead, variant, sourceCaptureBytes, bindingBytes, nativeReceiptBytes, coverageBytes, merged: false);
+
+    /// <summary>Checks a v2 merged packet and its current-variant-only witness; only coverage may use 32 MiB.</summary>
+    /// <remarks>
+    /// Arguments have the same meaning as Validate. This does not verify predecessor lineage: call
+    /// AccountMeasurementLineage.Validate before consuming a merged report. The source hashes, generated
+    /// names and method spans below are the reviewed immutable mapping, not a filesystem lookup. Changes
+    /// to either partial require an explicit mapping review. All nonreport inputs retain the 8 MiB bound.
+    /// </remarks>
+    internal static void ValidateMerged(string expectedHead, string variant, byte[] sourceCaptureBytes, byte[] bindingBytes,
+        byte[] nativeReceiptBytes, byte[] coverageBytes) =>
+        ValidateCore(expectedHead, variant, sourceCaptureBytes, bindingBytes, nativeReceiptBytes, coverageBytes, merged: true);
+
+    private static void ValidateCore(string expectedHead, string variant, byte[] sourceCaptureBytes, byte[] bindingBytes,
+        byte[] nativeReceiptBytes, byte[] coverageBytes, bool merged)
     {
         Assert.Matches("^[0-9a-f]{40}$", expectedHead);
         Assert.Contains(variant, new[] { "C4Accounts", "C4AccountRollback" });
@@ -43,7 +62,7 @@ internal static class AccountMeasurement
         using var bindingDocument = Parse(bindingBytes);
         using var nativeDocument = Parse(nativeReceiptBytes);
         // Standard report paths/type/method names are case-sensitive, unlike the closed state data.
-        using var reportDocument = Parse(coverageBytes, StringComparer.Ordinal);
+        using var reportDocument = Parse(coverageBytes, StringComparer.Ordinal, merged ? 32 * 1024 * 1024 : MaximumBytes);
         var source = sourceDocument.RootElement;
         var binding = bindingDocument.RootElement;
         var native = nativeDocument.RootElement;
@@ -66,7 +85,7 @@ internal static class AccountMeasurement
             ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs", ".github/issue779-checkpoint4/run-accounts.py" })
             Hash(files.GetProperty(path).GetProperty("sha256"));
 
-        Assert.Equal("issue779-c4-account-measurement-v1", binding.GetProperty("schema").GetString());
+        Assert.Equal(merged ? "issue779-c4-account-measurement-v2" : "issue779-c4-account-measurement-v1", binding.GetProperty("schema").GetString());
         Assert.Equal(expectedHead, binding.GetProperty("source").GetString());
         Assert.Equal(variant, binding.GetProperty("variant").GetString());
         Assert.Equal("coverlet.console/10.0.1", binding.GetProperty("collector").GetString());
@@ -154,6 +173,7 @@ internal static class AccountMeasurement
             report.EnumerateObject().Select(static module => Leaf(module.Name)).Order(StringComparer.Ordinal));
         var supervision = Assert.Single(report.EnumerateObject(), static module => Leaf(module.Name)
             == "ForgeTrust.AppSurface.Evidence.Supervision.dll").Value;
+        if (merged) ValidateWitness(binding.GetProperty("current_witness"), files, supervision, variant);
         foreach (var path in new[] { AccountsSource, OwnerSource })
         {
             var documents = supervision.EnumerateObject().Where(row => row.Name.Replace('\\', '/') == path
@@ -167,15 +187,40 @@ internal static class AccountMeasurement
         }
     }
 
+    private static void ValidateWitness(JsonElement witness, JsonElement files, JsonElement supervision, string variant)
+    {
+        Properties(witness, ["document", "declaring_type", "method", "source_sha256", "partial_source_sha256"]);
+        Assert.Equal(WitnessSource, witness.GetProperty("document").GetString());
+        Assert.Equal(WitnessSourceSha256, files.GetProperty(WitnessSource).GetProperty("sha256").GetString());
+        Assert.Equal(PartialSourceSha256, files.GetProperty(AccountsSource).GetProperty("sha256").GetString());
+        Assert.Equal(WitnessSourceSha256, witness.GetProperty("source_sha256").GetString());
+        Assert.Equal(PartialSourceSha256, witness.GetProperty("partial_source_sha256").GetString());
+        var creation = variant == "C4Accounts";
+        var declaring = creation
+            ? "ForgeTrust.AppSurface.Evidence.Supervision.LinuxAccountMeasurement/<RunAsync>d__2"
+            : "ForgeTrust.AppSurface.Evidence.Supervision.LinuxRunAccounts/<PrepareAccountMeasurementCollisionAsync>d__56";
+        var method = "System.Void " + declaring + "::MoveNext()";
+        Assert.Equal(declaring, witness.GetProperty("declaring_type").GetString());
+        Assert.Equal(method, witness.GetProperty("method").GetString());
+        var document = Assert.Single(supervision.EnumerateObject(), static row => row.Name.Replace('\\', '/') == WitnessSource
+            || row.Name.Replace('\\', '/').EndsWith("/" + WitnessSource, StringComparison.Ordinal));
+        var lines = document.Value.GetProperty(declaring).GetProperty(method).GetProperty("Lines");
+        Assert.True(lines.EnumerateObject().Any(line => int.TryParse(line.Name, NumberStyles.None,
+            CultureInfo.InvariantCulture, out var number) && number >= (creation ? 28 : 284)
+            && number <= (creation ? 219 : 295) && line.Name == number.ToString(CultureInfo.InvariantCulture)
+            && line.Value.TryGetInt64(out var hits) && hits > 0),
+            "Prior account/owner hits cannot replace the current compiled variant's method witness.");
+    }
+
     private static string Leaf(string path) => path.Replace('\\', '/').Split('/')[^1];
     private static string Digest(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     private static void Hash(JsonElement value) => Assert.Matches("^[0-9a-f]{64}$", value.GetString()!);
     private static void Properties(JsonElement value, IEnumerable<string> names) =>
         Assert.Equal(names.Order(StringComparer.Ordinal), value.EnumerateObject().Select(static row => row.Name).Order(StringComparer.Ordinal));
 
-    private static JsonDocument Parse(byte[] bytes, StringComparer? comparer = null)
+    private static JsonDocument Parse(byte[] bytes, StringComparer? comparer = null, int maximum = MaximumBytes)
     {
-        Assert.InRange(bytes.Length, 1, MaximumBytes);
+        Assert.InRange(bytes.Length, 1, maximum);
         var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 64 });
         try { Unique(document.RootElement, comparer ?? StringComparer.OrdinalIgnoreCase); return document; }
         catch { document.Dispose(); throw; }

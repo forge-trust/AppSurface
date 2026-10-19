@@ -1,27 +1,39 @@
 # Source-bound account mechanism measurements; no accepted consumer or production proof.
 name: Issue 779 private account mechanism controls
 on:
-  workflow_dispatch:
   workflow_call:
+    inputs:
+      variant:
+        required: true
+        type: string
+      prior_artifact_name:
+        required: true
+        type: string
+      prior_kind:
+        required: true
+        type: string
+    outputs:
+      artifact_name:
+        value: ${{ jobs.accounts.outputs.artifact_name }}
 permissions:
   contents: read
 jobs:
   accounts:
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [C4Accounts, C4AccountRollback]
+    outputs:
+      artifact_name: ${{ steps.paths.outputs.artifact_name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     concurrency:
-      group: issue779-c4-accounts-${{ github.sha }}-${{ matrix.variant }}
+      group: issue779-c4-accounts-${{ github.sha }}-${{ inputs.variant }}
       cancel-in-progress: false
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
       MSBUILDDISABLENODEREUSE: "1"
       DOTNET_CLI_USE_MSBUILD_SERVER: "0"
-      C4_VARIANT: ${{ matrix.variant }}
+      C4_VARIANT: ${{ inputs.variant }}
+      C4_PRIOR_KIND: ${{ inputs.prior_kind }}
+      C4_PRIOR_ARTIFACT: ${{ inputs.prior_artifact_name }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -33,10 +45,17 @@ jobs:
         with:
           dotnet-version: 10.0.401
       - name: Capture complete clean source and define private destinations
+        id: paths
         shell: bash
         run: |
           set -euo pipefail
           umask 077
+          case "$C4_VARIANT:$C4_PRIOR_KIND" in
+            C4Accounts:c3|C4AccountRollback:accounts) ;;
+            *) exit 1 ;;
+          esac
+          printf 'artifact_name=issue779-c4-accounts-%s-%s-%s\n' "$C4_VARIANT" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          printf 'C4_PRIOR=%s/checkpoint4-account-prior\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
           evidence="$RUNNER_TEMP/checkpoint4-accounts-$C4_VARIANT"
           mkdir -m 0700 "$evidence"
           printf 'C4_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
@@ -45,6 +64,31 @@ jobs:
           printf 'C4_RUNTIME=%s\n' "$runtime" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_run_accounts.py > "$evidence/driver-controls.log" 2>&1
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_account_lineage.py >> "$evidence/driver-controls.log" 2>&1
+      - name: Download the known successful prior measurement artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.prior_artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-account-prior-download
+      - name: Stage only fixed prior lineage inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -m 0700 "$C4_PRIOR"
+          download="$RUNNER_TEMP/checkpoint4-account-prior-download"
+          cp "$download/source.json" "$C4_PRIOR/source.json"
+          cp "$download/measurement-binding.json" "$C4_PRIOR/measurement-binding.json"
+          if [[ "$C4_PRIOR_KIND" == c3 ]]; then
+            cp "$download/native-supervision.json" "$C4_PRIOR/coverage.json"
+            cp "$download/native/native-receipt.json" "$C4_PRIOR/native-receipt.json"
+            cp "$download/root-file-tests/root-files.trx" "$C4_PRIOR/root-files.trx"
+          else
+            cp "$download/native-accounts.json" "$C4_PRIOR/coverage.json"
+            cp "$download/native-accounts-receipt.json" "$C4_PRIOR/native-receipt.json"
+          fi
+          # No write is permitted after staging; bind/target/finalize recheck all input hashes.
+          chmod 0400 "$C4_PRIOR"/*
       - name: Build only this same-source private account image
         shell: bash
         run: |
@@ -55,28 +99,36 @@ jobs:
           console="$RUNNER_TEMP/c4-account-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
           test -s "$console"
           printf 'C4_COVERLET=%s\n' "$console" >> "$GITHUB_ENV"
-          python3 -B .github/issue779-checkpoint4/run-accounts.py bind --variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA"
+          common=(--variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA"
+                  --prior-kind "$C4_PRIOR_KIND" --prior-artifact-name "$C4_PRIOR_ARTIFACT"
+                  --merge-report "$C4_PRIOR/coverage.json" --merge-binding "$C4_PRIOR/measurement-binding.json"
+                  --merge-source "$C4_PRIOR/source.json" --merge-native "$C4_PRIOR/native-receipt.json")
+          if [[ "$C4_PRIOR_KIND" == c3 ]]; then common+=(--merge-root-trx "$C4_PRIOR/root-files.trx"); fi
+          python3 -B .github/issue779-checkpoint4/run-accounts.py bind "${common[@]}"
       - name: Standard pinned collection around the genuine protected owner
         shell: bash
         run: |
           set -euo pipefail
           umask 077
           ulimit -c 0
-          common=(--variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA")
-          target_args="$(python3 -B - "$C4_VARIANT" "$C4_TOOL" "$C4_RUNTIME" "$C4_EVIDENCE" "$GITHUB_SHA" <<'PY'
+          common=(--variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA"
+                  --prior-kind "$C4_PRIOR_KIND" --prior-artifact-name "$C4_PRIOR_ARTIFACT"
+                  --merge-report "$C4_PRIOR/coverage.json" --merge-binding "$C4_PRIOR/measurement-binding.json"
+                  --merge-source "$C4_PRIOR/source.json" --merge-native "$C4_PRIOR/native-receipt.json")
+          if [[ "$C4_PRIOR_KIND" == c3 ]]; then common+=(--merge-root-trx "$C4_PRIOR/root-files.trx"); fi
+          target_args="$(python3 -B - "${common[@]}" <<'PY_ARGS'
           import sys
           sys.path.insert(0, '.github/issue779-checkpoint4')
           from measurement_arguments import arguments
-          variant, tool, runtime, evidence, source = sys.argv[1:]
-          print(arguments(['-B', '.github/issue779-checkpoint4/run-accounts.py', 'run', '--variant', variant,
-                           '--tool', tool, '--runtime', runtime, '--evidence', evidence, '--source', source]))
-          PY
+          print(arguments(['-B', '.github/issue779-checkpoint4/run-accounts.py', 'run', *sys.argv[1:]]))
+          PY_ARGS
           )"
           set +e
           timeout --signal=KILL 1260 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$C4_RUNTIME/dotnet" "$C4_COVERLET" "$C4_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
             --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --merge-with "$C4_PRIOR/coverage.json" \
             --format json --output "$C4_EVIDENCE/native-accounts" > "$C4_EVIDENCE/collector.log" 2>&1
           collector_exit=$?
           timeout --signal=KILL 30 sudo --non-interactive python3 -B .github/issue779-checkpoint4/run-accounts.py finalize --collector-exit "$collector_exit" "${common[@]}"
@@ -95,11 +147,11 @@ jobs:
         run: |
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" "$C4_EVIDENCE"
-          python3 -B .github/issue779-checkpoint3/check-retention.py "$C4_EVIDENCE"
+          python3 -B .github/issue779-checkpoint4/check-account-retention.py "$C4_EVIDENCE"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always() && steps.retention.outcome == 'success'
         with:
-          name: issue779-c4-accounts-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: issue779-c4-accounts-${{ inputs.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.C4_EVIDENCE }}
           include-hidden-files: true
           retention-days: 1
