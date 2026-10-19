@@ -88,7 +88,39 @@ The six-module measurement artifact uses a dedicated [retention checker](check-r
 
 ## Native workspace rejection controls
 
-The [finite workspace fixture](workspace_guards.py) runs six additional controls after the original seven application consumers. It uses the same fixed [C# owner request and launch recipe](run-native.py), compiled registration, unit policy and original 1,800-second matrix bound. Python only prepares immutable inputs and observes the C# runtime. Every new case must fail with its expected original closed diagnostic, retain account quarantine, observe empty generated groups before fixture containment, and leave an outside root-owned sentinel unchanged. A failed setup, incomplete case list or failed final group check fails the lane. Each new control reserves 60 seconds for actual containment inside the existing matrix clock and refuses to launch without that reserve. A failed or timed-out manager stop cannot skip the separate whole-unit KILL attempt; killing only the systemd-run client is insufficient.
+The [finite workspace fixture](workspace_guards.py) runs six additional controls only after all seven original application consumers pass. It uses the same fixed [C# owner request and launch recipe](run-native.py), compiled registration and unit policy, under one separate fixed 900-second orchestration partition. Python only prepares immutable inputs and observes the C# runtime. Every new case must fail with its expected original closed diagnostic, retain account quarantine, observe empty generated groups before fixture containment, and leave an outside root-owned sentinel unchanged. A failed setup, incomplete case list or failed final group check fails the lane. Each new control reserves 60 seconds for actual containment inside the shared guard-partition clock and refuses to launch without that reserve. A failed or timed-out manager stop cannot skip the separate whole-unit KILL attempt; killing only the systemd-run client is insufficient.
+
+
+[`run_partitions(args, end)`](run-native.py) retains the supplied original matrix end
+unchanged for staging and all seven original controls. `main` still starts that clock
+at 1800 seconds before staging. Only after all seven return passing receipts does the
+orchestrator sample its clock once and call the six-guard fixture with `now + 900`.
+That second bound covers guard setup, observation and the existing 60-second containment
+reserve; it is never restarted per guard. Any original failure prevents guard dispatch.
+A guard exception or incomplete/failed six-case result leaves the existing aggregate
+schema failed, preserving the original seven results without manufacturing a guard pass.
+
+[Source32 run 39200766342](https://github.com/forge-trust/AppSurface/actions/runs/39200766342)
+exposed the shared-clock defect: the verified artifact's original seven receipts ended
+at 04:55:30, 04:58:42, 05:01:28, 05:05:44, 05:08:42, 05:11:44 and 05:14:08 UTC.
+Three bundle guards then passed by 05:15:52, followed by FIFO at 05:18:18 and hardlink
+at 05:20:42. The final oversize case had only about 17 seconds before the old matrix's
+observation cutoff around 05:20:59, and recorded `root-terminal-before-deadline` at
+05:21:06 after containment. Its empty final groups establish containment, not the
+expected oversize rejection. Step15 publicly recorded only exit1; the individual
+artifact receipts and their timestamps identify the shortened fixture window.
+
+The original 480-second case ceiling, protected-request 1200-second deadline, 120-second
+startup bound, 1100-second root-owner runtime, unit limits and actual containment
+procedure are unchanged. The separate 900-second guard clock remains finite and shared:
+the existing minimum with its remaining time can still shorten a later observation, so
+it does not promise every guard a full 480 seconds. Incomplete work still fails. The
+workflow's enclosing harness allowance must cover both partitions; this does not extend
+any product deadline. The [portable orchestration controls](test_run_native.py) use a
+fake clock and detached procedure data to check ordering, failure propagation, one fresh
+guard clock and the unchanged seven-plus-six schema. They create no owner or native
+acceptance. This correction has no fresh Linux pass yet; the full guard result still
+requires genuine execution.
 
 Three fresh normal-deployment copies are staged under generated root-owned `/var/lib/issue779-c3-guard-input-*` directories, matching the existing C3 tool-input staging. Large duplicated package inputs do not consume `/run`; the small request/subject/sentinel and C#-owned runtime workspaces retain their original layout. Each copy contains exactly one input change: an extra empty 0555 application directory, same-length changed declared-input bytes, or a 0555 declared-input mode in place of 0444. Generic protected-input auditing can accept these safe objects; the compiled application inventory must reject them at `WorkspaceCreate` with `ASEVD410`, before publishing a worker descriptor. The compiled entry and requested digest remain unchanged. The fixture records actual root ownership and node metadata rather than inventing an application lease.
 

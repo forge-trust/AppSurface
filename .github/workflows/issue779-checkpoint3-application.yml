@@ -15,7 +15,7 @@ concurrency:
 jobs:
   linux-native-application:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 65
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
@@ -252,10 +252,11 @@ jobs:
           target_args="$(python3 -B .github/issue779-checkpoint4/measurement_arguments.py "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_TOOL" "$CHECKPOINT3_SDK_TOOL" "$CHECKPOINT3_SDK_ROOT" "$CHECKPOINT3_PREPARED" "$GITHUB_WORKSPACE" "$GITHUB_SHA" "$CHECKPOINT3_COVERLET")"
           # Measurement runs outside the protected process; its target still arms the exact original OS owner.
           # The inner collector instruments the restored SDK image afresh before the original matrix stages either image.
-          # Its supported merge also consumes the completed negative partition; no original matrix timeout is increased.
+          # Its supported merge also consumes the completed negative partition. The original seven-case
+          # clock stays 1800 seconds; the six subsequent guards have a separate fixed 900-second clock.
           # It finishes its standard report before the outer collector reads --merge-with. No counters are rewritten.
           # Worker PrivateTmp remains isolated; each image has distinct pinned tracker IDs and unchanged worker handoffs.
-          timeout --signal=KILL 1920 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+          timeout --signal=KILL 2820 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
             --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \

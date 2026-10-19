@@ -374,14 +374,16 @@ def execute(args,case,tools,runtime,end):
   write(args.output/(case+'.json'),canonical(result))
  return result
 
-def main():
- parser=argparse.ArgumentParser()
- for name in ('tool','sdk-tool','runtime','subject','prepared','digests','output'):parser.add_argument('--'+name,type=Path,required=True)
- parser.add_argument('--source',required=True);parser.add_argument('--base',required=True);args=parser.parse_args();os.umask(0o077)
- require(os.geteuid()==0 and sys.platform=='linux' and platform.machine()=='x86_64','native-root-linux-x64')
- # Seven independently bounded executions also pay for protected SDK/bundle preparation.
- # This matrix clock is not a job, owner, case or cleanup deadline.
- end=time.monotonic()+1800;require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
+def run_partitions(args,end):
+ """Run original seven under their supplied bound, then one fresh fixed 900-second guard partition.
+
+ args is the original parsed CLI namespace; end is its absolute monotonic matrix end.
+ The actual entry point authenticates the platform before calling this orchestration function.
+ Its existing stage/execute operations retain every native guard. Detached test outcomes only
+ verify ordering; they establish no owner, native execution, admission or measured coverage.
+ The second clock is shared by all six guards, not renewed for each case. Exceptions retain
+ a failed aggregate, and the original seven-case results are never promoted to a guard pass.
+ """
  args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
  receipt={'schema':'issue779-csharp-checkpoint3-native-v1','source':args.source,'base':args.base,'exit':1,'cases':[],'trusted_eligibility':False}
  try:
@@ -392,9 +394,20 @@ def main():
   receipt['exit']=0 if len(receipt['cases'])==7 and all(c['passed'] for c in receipt['cases']) else 1
   if receipt['exit']==0:
    receipt['exit']=1 # A guard setup/inspection exception must not retain the earlier seven-case success.
+   guard_end=time.monotonic()+900
    import workspace_guards
-   receipt['workspace_guards']=workspace_guards.run(args,tools,runtime,end)
+   receipt['workspace_guards']=workspace_guards.run(args,tools,runtime,guard_end)
    receipt['exit']=0 if len(receipt['workspace_guards'])==6 and all(c['passed'] for c in receipt['workspace_guards']) else 1
  finally:write(args.output/'native-receipt.json',canonical(receipt))
  return receipt['exit']
+
+def main():
+ parser=argparse.ArgumentParser()
+ for name in ('tool','sdk-tool','runtime','subject','prepared','digests','output'):parser.add_argument('--'+name,type=Path,required=True)
+ parser.add_argument('--source',required=True);parser.add_argument('--base',required=True);args=parser.parse_args();os.umask(0o077)
+ require(os.geteuid()==0 and sys.platform=='linux' and platform.machine()=='x86_64','native-root-linux-x64')
+ # The original matrix still pays for protected SDK/bundle preparation within 1800 seconds.
+ # These orchestration clocks do not replace job, owner, case or cleanup deadlines.
+ end=time.monotonic()+1800;require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
+ return run_partitions(args,end)
 if __name__=='__main__':raise SystemExit(main())
