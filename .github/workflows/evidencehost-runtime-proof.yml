@@ -16,6 +16,8 @@ jobs:
   packaged-producer:
     name: Packaged CSharp CLI producer and artifact custody
     uses: ./.github/workflows/issue779-checkpoint2-producer.yml
+    with:
+      measure_roots: true
 
   application-consumers:
     name: CSharp CLI and SDK application consumers

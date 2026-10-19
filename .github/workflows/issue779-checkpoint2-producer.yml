@@ -3,6 +3,11 @@ on:
   push:
     branches: [codex/issue779-checkpoint2-producer-20261016]
   workflow_call:
+    inputs:
+      measure_roots:
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -62,7 +67,43 @@ jobs:
           cp -R "$CHECKPOINT2_TOOL/nuget" "$RUNNER_TEMP/checkpoint2-tool-c2/nuget"
           export CHECKPOINT2_SDK_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"
           printf 'CHECKPOINT2_SDK_ROOT=%s\n' "$CHECKPOINT2_SDK_ROOT" >> "$GITHUB_ENV"
+      - name: Install the pinned standalone root measurement collector
+        if: inputs.measure_roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_roots.py > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
+          timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint2-coverlet" > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-install.log" 2>&1
+      - name: Measure the unchanged seven controls through standard root collectors
+        if: inputs.measure_roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            RUNNER_TEMP="$RUNNER_TEMP" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" GITHUB_SHA="$GITHUB_SHA" CHECKPOINT2_TOOL="$CHECKPOINT2_TOOL" CHECKPOINT2_SDK_ROOT="$CHECKPOINT2_SDK_ROOT" \
+            /usr/bin/python3 -B - > "$RUNNER_TEMP/checkpoint2-evidence/native-driver.log" 2>&1 <<'PY_ROOTS'
+          from pathlib import Path
+          from types import SimpleNamespace
+          import os
+          import subprocess
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from producer_roots import BASE, SELF, collector, common
+          temporary = Path(os.environ['RUNNER_TEMP'])
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          data = SimpleNamespace(tool=Path(os.environ['CHECKPOINT2_TOOL']), mutation_tool=temporary / 'checkpoint2-tool-c2',
+              runtime=Path(os.environ['CHECKPOINT2_SDK_ROOT']), subject=workspace / '.github/issue779-checkpoint2/subject',
+              evidence=temporary / 'checkpoint2-evidence', source=os.environ['GITHUB_SHA'], base=BASE)
+          prefix = ['/usr/bin/python3', '-B', str(SELF)]
+          subprocess.run([*prefix, 'bind', *common(data)], check=True)
+          outer_exit = subprocess.run(collector(data, False), check=False).returncode
+          finalizer = subprocess.run([*prefix, 'finalize', *common(data), '--collector-exit', str(outer_exit)], check=False)
+          raise SystemExit(outer_exit if outer_exit else finalizer.returncode)
+          PY_ROOTS
       - name: Execute real CSharp coverage and failure controls under systemd
+        if: ${{ !inputs.measure_roots }}
         shell: bash
         run: |
           set -euo pipefail
