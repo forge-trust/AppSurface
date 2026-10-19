@@ -162,9 +162,8 @@ def execute(context, *, deadline):
     owner.save(reviewed / "check_n15_records.py", parser_raw)
     os.chmod(reviewed / "check_n15_records.py", 0o444)
     os.chmod(reviewed, 0o555)
-    empty_helper = retained / "empty-audit-helper"
-    empty_helper.mkdir(mode=0o555)
     auditor = load("procedures/os_audit.py", capture, deadline=deadline)
+    empty_helper = auditor.create_empty_helper(retained / "empty-audit-helper", deadline=min(deadline, original_work_end))
     audit = auditor.Audit(min(original_work_end - 5, deadline - 5, time.monotonic() + 60))
     audit.initialize_tools()
     audit_raw = audit.build(str(prepared["roots"]["runtime"]), str(prepared["roots"]["tool"]), False, str(empty_helper))

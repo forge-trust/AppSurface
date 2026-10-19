@@ -17,9 +17,9 @@
       "sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7"
     },
     "adapter.py": {
-      "bytes": 14028,
+      "bytes": 14065,
       "mode": "0644",
-      "sha256": "f9bf28968c3633627a036a1d2e1df5189b6acb68a3f996eb8c0dc4eb778e0570"
+      "sha256": "6959ec36d23b3ee280a930325f229a5c310bd56e57fded0aea9b8059bae426b0"
     },
     "checkpoint-n15-pending-start-death.sh": {
       "bytes": 11824,
@@ -209,6 +209,14 @@
   "required_helpers": [],
   "retainer_byte_equal": true,
   "schema": "issue779-n15-current-native-port-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/n15/adapter.py"
+    ]
+  },
   "source_only": true,
   "static_validation": {
     "all_live_chain_pins_match_current_files": true,

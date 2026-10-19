@@ -45,8 +45,8 @@
       "sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71"
     },
     "procedures/n16/adapter.py": {
-      "bytes": 18478,
-      "sha256": "5bdf29c02acffcd7518c6ad0ecd67d52c2fca024f14b2d2f3b4e12d3259b0636"
+      "bytes": 18491,
+      "sha256": "19f7853dd3919b83ca813610de194f5facc5d2c0d775fb20f3d26c4a10b8eec0"
     },
     "procedures/n16/checkpoint-n16-accepted-work.sh": {
       "bytes": 79466,
@@ -71,6 +71,14 @@
   "native_execution": false,
   "ported_sha256": "529ddf88cf7330f17fcc2a82b2b29ae6b27a0ea07bd9896326df94ae5af32ffd",
   "schema": "issue779-checkpoint1-procedure-port-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/n16/adapter.py"
+    ]
+  },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "utility_definitions_ast_equal": {
     "Rejected": true,

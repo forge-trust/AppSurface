@@ -1,16 +1,16 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 2769,
-      "sha256": "1eb0b8159a8ffdceae67b3d29e0d85a7e3b393115b77a8b9299162080ae8fef5"
+      "bytes": 3754,
+      "sha256": "825275ff5ae1d5bf7935192db056964c8be7e85104fb6476cfdaec266c3abd7b"
     },
     "adapter.py": {
       "bytes": 2323,
       "sha256": "4210464e68a6660aa28bf74df6c2ead7bbcaeecb570ce3d2f447705c9f4801e4"
     },
     "bridge.py": {
-      "bytes": 25553,
-      "sha256": "fcbf5da8fb298039f3205fa4453b8b14a9e97e8d603afc2a984083fce5b39c5d"
+      "bytes": 25743,
+      "sha256": "a7c69ec0c4ca68bc5066f349904baff5b505d8e0d87b04cf33d55a263bf22595"
     },
     "helpers.py": {
       "bytes": 4579,
@@ -31,6 +31,15 @@
     "N04/N05/N06/N08 raw N03-member binding without nonexistent enclosing digest field"
   ],
   "schema": "issue779-current-slot-ports-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/slot/README.md",
+      ".github/issue779-checkpoint1/procedures/slot/bridge.py"
+    ]
+  },
   "wrappers": [
     {
       "changes": [

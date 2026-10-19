@@ -62,10 +62,20 @@ are unchanged. `run_bounded` respects the earlier outer bound and gives the
 original shell its existing30-second cleanup interval. Any timeout, nonzero or
 unjoined child is a failure; it cannot produce a successful case row.
 
+On the existing `owner-terminal-not-sigkill` failure, the common shell now emits
+one closed `issue779-owner-terminal-diagnostic-v1` JSON line to the already-private
+fixture stderr. It retains numeric `ExecMainCode`, `ExecMainStatus` and `MainPID`,
+plus closed active/substate enums. Missing, duplicate or malformed fields become
+null/unknown. No raw property, unit path, exception or command text is emitted.
+The original `ExecMainCode == 2` and `ExecMainStatus == 9` requirement, signals,
+clocks and failure result are unchanged. These facts diagnose a failed check;
+they cannot make a failed N14 pass. The [portable diagnostic/guard controls](../../test_owner_terminal_diagnostic.py)
+execute only this shell fragment and establish no native behavior.
+
 The native common's PID/starttime/UID/GID/cgroup checks, accepted phase, presignal
 rereads, original systemd activation timer, exact signal, dependent worker checks,
 launcher ownership/join, EOFs, empty positive output, account identity retention
-and quarantine predicates are byte-unchanged from the handed-off current shell.
+and quarantine predicates are unchanged from the handed-off current shell.
 The shell still preserves quarantined generation resources; the adapter never
 repairs, deletes or reuses them.
 

@@ -6,6 +6,16 @@ mutation was executed. Ordinary product qualification remains closed.
 
 ## Entry and prerequisites
 
+The shared [bridge](bridge.py) uses case-sensitive JSON member names through
+`pairs(items)` and `decode(raw)`. Exact duplicate names are rejected at every
+depth, including different JSON escapes that decode to the same name. Distinct
+Linux file/directory map names such as `Assets` and `assets` are preserved.
+Closed receipt, image and packet schemas still reject extra or differently
+cased outer fields; field types, byte bounds, hashes and modes are unchanged.
+The [focused parser controls](../../test_json_keys.py) include actual source44
+None build-map rows and exact-duplicate/closed-field negative neighbors for
+both bridges. Passing data controls establishes no N11/N12 native outcome.
+
 `adapter.execute(context, *, deadline)` uses the same13-key root context as the
 [owner-death bridge](../owner-death/README.md#entry-contract). It adopts the shared
 dispatcher's existing root-owned0700 output containing exactly the five root600

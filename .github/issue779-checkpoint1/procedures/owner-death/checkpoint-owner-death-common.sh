@@ -64,6 +64,27 @@ require_original_owner_budget(){
 }
 unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus; }
 field(){ bounded_exec awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1)}' <<<"$1"; }
+# BEGIN OWNER TERMINAL DIAGNOSTIC
+owner_terminal_diagnostic(){
+ local facts=$1 line key value seen= code=null status=null main=null state=unknown sub=unknown
+ while IFS= read -r line; do
+  key=${line%%=*}; value=${line#*=}
+  case "$key" in ExecMainCode|ExecMainStatus|MainPID|ActiveState|SubState) ;; *) continue ;; esac
+  case " $seen " in
+   *" $key "*) case "$key" in ExecMainCode) code=null ;; ExecMainStatus) status=null ;; MainPID) main=null ;; ActiveState) state=unknown ;; SubState) sub=unknown ;; esac; continue ;;
+  esac
+  seen+=" $key"
+  case "$key" in
+   ExecMainCode) [[ $value =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((10#$value<=255)) && code=$value ;;
+   ExecMainStatus) [[ $value =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((10#$value<=255)) && status=$value ;;
+   MainPID) [[ $value =~ ^(0|[1-9][0-9]{0,9})$ ]] && ((10#$value<=2147483647)) && main=$value ;;
+   ActiveState) case "$value" in active|activating|deactivating|inactive|failed) state=$value ;; esac ;;
+   SubState) case "$value" in running|dead|failed|start|start-pre|start-post|stop|stop-sigterm|stop-sigkill|final-sigterm|final-sigkill|auto-restart) sub=$value ;; esac ;;
+  esac
+ done <<<"$facts"
+ printf '{"schema":"issue779-owner-terminal-diagnostic-v1","exec_main_code":%s,"exec_main_status":%s,"main_pid":%s,"active_state":"%s","sub_state":"%s"}\n' "$code" "$status" "$main" "$state" "$sub" >&2
+}
+# END OWNER TERMINAL DIAGNOSTIC
 systemd_policy_usec(){ case "$1:$2" in RuntimeMaxUSec:2min|RuntimeMaxUSec:120000000) printf '%s' 120000000 ;; TimeoutStopUSec:5s|TimeoutStopUSec:5000000) printf '%s' 5000000 ;; *) return 1 ;; esac; }
 unit_absent(){ [[ $(systemctl_bounded show "$1" -p LoadState --value 2>/dev/null || :) == not-found ]]; }
 name_absent(){ local kind=$1 name=$2 code=0; bounded_exec getent "$kind" "$name" >/dev/null 2>&1 || code=$?; [[ $code == 2 ]]; }
@@ -535,7 +556,7 @@ owner_terminal=$(unit_sample "$owner") || fail owner-terminal-sample
 worker_terminal=$(unit_sample "$worker") || fail worker-terminal-sample
 owner_state=$(field "$owner_terminal" ActiveState); worker_state=$(field "$worker_terminal" ActiveState)
 [[ $owner_state =~ ^(inactive|failed)$ && $worker_state =~ ^(inactive|failed)$ && $(field "$owner_terminal" MainPID) == 0 && $(field "$worker_terminal" MainPID) == 0 ]] || fail units-not-terminal
-[[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || fail owner-terminal-not-sigkill
+[[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-not-sigkill; }
 [[ $(field "$owner_terminal" SubState) =~ ^(dead|failed)$ && $(field "$worker_terminal" SubState) =~ ^(dead|failed)$ ]] || fail unit-terminal-substate
 [[ -d $stage && ! -L $stage && $(stat -Lc '%u:%g:%a' "$stage") == 0:0:555 && -d $private && ! -L $private && $(stat -Lc '%u:%g:%a' "$private") == 0:0:700 ]] || fail quarantine-workspace-custody
 for pid in "$owner_pid" "$worker_pid"; do pid_absent "$pid" || fail original-process-remains; done

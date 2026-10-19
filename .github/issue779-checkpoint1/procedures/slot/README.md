@@ -6,6 +6,23 @@ CLI, runtime and helper images, performs the same-host OS/ELF audit, and runs th
 fixed historical native procedures with their original clocks and predicates.
 The C# executable remains the production supervisor and worker.
 
+## JSON names and Linux inventory paths
+
+`pairs(items)` and `decode(raw)` in the [bridge](bridge.py) reject duplicate
+JSON member names by exact, case-sensitive comparison at every object depth.
+They preserve distinct Linux inventory paths such as `Assets` and `assets`;
+neither path is renamed, combined or discarded. JSON escape spellings that
+decode to the same name still count as duplicates. Receipt, image and packet
+schemas continue to require their exact closed field sets, so `Root` is not an
+alias for `root`. All existing type, byte, hash, mode and native validations
+still apply after decoding.
+
+Source44's verified None publication contained both directory names and was
+rejected before native staging by the old case-folding decoder. The
+[focused controls](../../test_json_keys.py) retain a small projection of those
+actual build-map rows, exercise both bridges, and reject exact duplicates and
+outer schema aliases. These are parser/data controls, not a native result.
+
 ## Retained evidence API
 
 `execute_case(context, *, deadline)` requires the dispatcher's exact existing

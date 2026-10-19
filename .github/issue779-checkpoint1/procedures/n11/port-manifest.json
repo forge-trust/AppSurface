@@ -11,16 +11,16 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 6094,
-      "sha256": "85848b9b2f20b43c32af992a448fd389d2e372be828ee46d2175875f4b6c66f8"
+      "bytes": 6788,
+      "sha256": "4442b190203afd3025023877a7fbb368184ead03aee45360e8096662c375d9bf"
     },
     "adapter.py": {
       "bytes": 4405,
       "sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d"
     },
     "bridge.py": {
-      "bytes": 23743,
-      "sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab"
+      "bytes": 23933,
+      "sha256": "a9e0d4550fb5090abe9fee528ee349929e77aaad6509f6247682ca5cda5598a4"
     },
     "capture_stall.py": {
       "bytes": 1165,
@@ -227,6 +227,15 @@
     "procedures/native_process.py",
     "procedures/os_audit.py"
   ],
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/n11/README.md",
+      ".github/issue779-checkpoint1/procedures/n11/bridge.py"
+    ]
+  },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true
 }

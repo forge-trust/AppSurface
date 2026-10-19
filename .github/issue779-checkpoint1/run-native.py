@@ -37,6 +37,87 @@ ADAPTERS = {
 }
 RUN_SECONDS = 900
 WORKFLOW = re.compile(r"github-actions-[1-9][0-9]*-[1-9][0-9]*\Z")
+AUDIT_CATEGORIES = frozenset((
+    "ELF-row-bound", "OS-before-after", "OS-node-before-after", "additional-helper-count",
+    "additional-helper-overlap", "alias-before-after", "alias-changed", "alias-integer-bound",
+    "alias-link-bound", "alias-metadata", "alias-root-escape", "alias-row-bound", "alias-step-bound",
+    "alias-target", "audit-byte-bound", "cache-format", "cache-row-bound", "cache-soname",
+    "command-deadline", "command-output-bound", "command-reserve", "deadline", "deadline-input",
+    "dependency-row-bound", "dependency-shape", "dependency-unresolved-or-ambiguous",
+    "deployment-before-after", "deployment-link", "directory-changed", "file-bound-or-shape",
+    "file-changed", "file-growth", "file-hash-changed", "file-open-substitution", "file-row-bound",
+    "identity-changed", "interpreter-shape", "metadata-command-failed", "named-file-changed",
+    "node-bound", "os-file-shape", "os-metadata", "os-parent", "os-tool-not-ELF",
+    "output-ancestor", "output-metadata", "output-parent-changed", "output-parent-link",
+    "output-parent-substitution", "output-private-parent", "output-write", "path-shape",
+    "python-alternate-bootstrap", "python-stdlib-before-after", "python-stdlib-byte-bound",
+    "python-stdlib-directory-changed", "python-stdlib-empty", "python-stdlib-node-bound",
+    "python-stdlib-node-kind", "reap-deadline", "required-os-tool-missing", "runpath-directory",
+    "runpath-directory-missing", "runpath-shape", "sealed-directory", "sealed-file", "sealed-root",
+    "tree-byte-bound", "tree-node-bound", "tree-special-node", "unsupported-ELF-ABI",
+    "unsupported-ELF-header", "unsupported-RUNPATH", "unsupported-cache-abi",
+    "unsupported-inherited-RPATH", "unsupported-loader-feature",
+))
+VERIFICATION_CATEGORIES = frozenset((
+    "native-linux-root-required", "workflow-identity", "output-already-exists", "output-parent-alias",
+    "source-git", "source-git-identity", "source-not-clean", "source-file", "source-complete-set",
+    "read-node", "read-open-substitution", "read-growth", "read-final-substitution",
+    "verification-deadline", "command-log-binding", "command-log-diagnostic",
+    "image-file-binding", "image-inventory", "plan-binding", "native-run-deadline",
+    "native-retained-evidence", "aggregate-retained-evidence",
+))
+
+
+def failure_diagnostic(error):
+    """Project a failure to fixed categories and a source-owned stage, never raw text.
+
+    A traceback is inspected only for exact fixed source filenames and function
+    names; neither filenames nor stack text are returned. Audit rejection text is
+    usable only for its fixed error class, trusted source frame and allowlist.
+    OS errno is a direct bounded integer, without filenames or nested exceptions.
+    This record cannot turn an unsuccessful run into a native result.
+    """
+    frames = []
+    trace = error.__traceback__
+    while trace is not None and len(frames) < 64:
+        code = trace.tb_frame.f_code
+        frames.append((code.co_filename, code.co_name))
+        trace = trace.tb_next
+    audit_path = str(HERE / "procedures/os_audit.py")
+    audit = any(path == audit_path for path, _ in frames)
+    stage = "driver"
+    for path, function in frames:
+        if path == str(HERE / "run-native.py"):
+            stage = {"prepare": "plan-preparation", "run": "native-dispatch",
+                     "aggregate": "reconciliation"}.get(function, stage)
+        elif path == str(HERE / "procedures/owner-death/adapter.py"):
+            stage = {"_context": "adapter-inputs", "prepare_verified_inputs": "input-staging",
+                     "_copy_tree": "input-staging", "_copy_file": "input-staging",
+                     "materialize": "fixture-materialization", "run_bounded": "native-dispatch"}.get(function, stage)
+        elif path == str(HERE / "procedures/slot/helpers.py"):
+            stage = "helper-preparation"
+        elif path == audit_path:
+            stage = {"initialize_tools": "audit-initialize", "build": "audit-build",
+                     "inventory": "audit-inventory"}.get(function, stage)
+    kind = "input"
+    category = "input-or-verification-failure"
+    if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+        kind, category = "timeout", "native-deadline"
+    elif isinstance(error, OSError):
+        kind, category = "os", "native-os-error"
+    elif isinstance(error, subprocess.SubprocessError):
+        kind, category = "process", "native-process-error"
+    elif audit and type(error).__name__ == "AuditError":
+        kind, category = "audit", "audit-rejected"
+        if len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in AUDIT_CATEGORIES:
+            category = "audit-" + error.args[0]
+    elif isinstance(error, binding.Rejected) and len(error.args) == 1 and type(error.args[0]) is str and error.args[0] in VERIFICATION_CATEGORIES:
+        category = error.args[0]
+    number = getattr(error, "errno", None) if isinstance(error, OSError) else None
+    return {"schema": "issue779-checkpoint1-driver-failure-v1", "category": category,
+            "stage": stage, "error_kind": kind,
+            "errno": number if type(number) is int and 1 <= number <= 4095 else None,
+            "exit": 1, "native_acceptance": False, "coverage_credit": False}
 
 
 def ready(selector, inventory):
@@ -326,9 +407,7 @@ def main(argv=None):
         return 0
     except Exception as error:
         # No raw path, source text, shell output or private process prefix.
-        category = str(error) if isinstance(error, binding.Rejected) else "input-or-verification-failure"
-        print(json.dumps({"schema": "issue779-checkpoint1-driver-failure-v1", "category": category,
-                          "exit": 1, "native_acceptance": False, "coverage_credit": False}), file=sys.stderr)
+        print(json.dumps(failure_diagnostic(error), sort_keys=True), file=sys.stderr)
         return 1
 
 

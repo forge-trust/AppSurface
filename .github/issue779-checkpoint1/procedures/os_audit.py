@@ -79,6 +79,93 @@ def root_node(info, directory=False):
         reject("os-parent")
 
 
+def create_empty_helper(path, *, deadline):
+    """Create only a fresh empty-audit-helper directory and explicitly seal0555.
+
+    This is ordinary metadata preparation, not root custody or an OS trust
+    grant. The caller owns the canonical parent and must exclude concurrent
+    writers; no privileged UID is required here. The complete native Audit
+    still checks actual root ownership, protected ancestors and exact modes.
+    The fixed leaf is created exclusively0700, opened without following links,
+    and fchmod'ed0555 independently of the usual000/077 umask. The original
+    absolute monotonic deadline bounds every phase. Existing nodes are never
+    adopted, replaced or removed. A failure retains any partial new directory;
+    the caller must discard that failed generation. Returns its canonical Path.
+    """
+    from pathlib import Path
+
+    parent_fd = helper_fd = None
+
+    def check():
+        if (type(deadline) not in (int, float) or not math.isfinite(deadline)
+                or time.monotonic() >= deadline):
+            reject("empty-helper-deadline")
+
+    def need(condition, category):
+        if not condition:
+            reject("empty-helper-" + category)
+
+    def named():
+        return os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+
+    try:
+        check()
+        path = Path(path)
+        canonical_path(str(path))
+        need(path.name == "empty-audit-helper"
+             and path.parent.resolve(strict=True) == path.parent, "path")
+        uid, gid = os.geteuid(), os.getegid()
+        parent = path.parent.lstat()
+        need(stat.S_ISDIR(parent.st_mode) and parent.st_uid == uid and parent.st_gid == gid
+             and stat.S_IMODE(parent.st_mode) in (0o700, 0o555), "parent")
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        check()
+        parent_fd = os.open(path.parent, flags)
+        need(identity(parent) == identity(os.fstat(parent_fd))
+             == identity(path.parent.lstat()), "parent-open")
+        check()
+        os.mkdir(path.name, mode=0o700, dir_fd=parent_fd)
+        parent_after = os.fstat(parent_fd)
+        need(identity(parent_after)[:5] == identity(parent)[:5]
+             and identity(parent_after) == identity(path.parent.lstat()), "parent-create")
+        check()
+        first = named()
+        need(stat.S_ISDIR(first.st_mode) and first.st_uid == uid and first.st_gid == gid
+             and stat.S_IMODE(first.st_mode) == 0o700, "created-node")
+        helper_fd = os.open(path.name, flags, dir_fd=parent_fd)
+        need(identity(first) == identity(os.fstat(helper_fd)) == identity(named())
+             and not os.listdir(helper_fd), "opened-node")
+        check()
+        os.fchmod(helper_fd, 0o555)
+        after = os.fstat(helper_fd)
+        expected = (first.st_dev, first.st_ino, stat.S_IFDIR | 0o555, first.st_uid,
+                    first.st_gid, first.st_nlink, first.st_size, first.st_mtime_ns,
+                    after.st_ctime_ns)
+        need(identity(after) == expected == identity(named())
+             and not os.listdir(helper_fd), "sealed-node")
+        need(identity(parent_after) == identity(os.fstat(parent_fd))
+             == identity(path.parent.lstat()), "parent-final")
+        need(identity(after) == identity(os.fstat(helper_fd)) == identity(named()), "helper-final")
+        check()
+        return path
+    except AuditError as error:
+        if str(error).startswith("empty-helper-"):
+            raise
+        raise AuditError("empty-helper-path") from None
+    except (OSError, TypeError, ValueError, RuntimeError, OverflowError):
+        raise AuditError("empty-helper-io") from None
+    finally:
+        close_failed = False
+        for fd in (helper_fd, parent_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    close_failed = True
+        if close_failed:
+            raise AuditError("empty-helper-close") from None
+
+
 class Audit:
     """Holds sampled identities, not authority. One caller monotonic expiry owns all I/O."""
 

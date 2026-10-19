@@ -36,11 +36,15 @@ def sha(raw):
 
 
 def pairs(items):
-    value, folded = {}, set()
+    """Reject exact duplicate JSON names; Linux inventory paths are case-sensitive.
+
+    Closed receipt/envelope field sets are validated separately. Case folding
+    here would reject legitimate distinct published paths such as Assets/assets.
+    """
+    value = {}
     for key, item in items:
-        need(type(key) is str and key.casefold() not in folded, "json-member")
+        need(type(key) is str and key not in value, "json-member")
         value[key] = item
-        folded.add(key.casefold())
     return value
 
 

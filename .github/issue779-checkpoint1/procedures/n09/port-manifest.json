@@ -18,9 +18,9 @@
       "sha256": "78db41734a76883f995536d08e5b5c63071904752e54063d4f75d4bc2e013b50"
     },
     "adapter.py": {
-      "bytes": 14476,
+      "bytes": 14494,
       "mode": "0644",
-      "sha256": "e71c7e91a241d347b5be93d1ec2c0b7c11ce63a3f971e37bb97c70f8ef457ca4"
+      "sha256": "d831027202187e2dd2f5735be23a13b5fd257eb46865d96d12c4a6440b0a2d79"
     },
     "cancellation_adapter.py": {
       "bytes": 20289,
@@ -91,6 +91,14 @@
     "retain-native.sh"
   ],
   "schema": "issue779-current-n09-port-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/n09/adapter.py"
+    ]
+  },
   "source_ready": true,
   "status": "portable-data-controls-pass-fresh-linux-required"
 }

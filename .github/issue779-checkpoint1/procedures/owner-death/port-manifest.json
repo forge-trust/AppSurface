@@ -17,8 +17,8 @@
   ],
   "current_parent_integration_files": {
     "README.md": {
-      "bytes": 7315,
-      "sha256": "69215da79b492a4799be2d60b1460ed7e670f32e2a35608f88c2d96a94316b85"
+      "bytes": 8064,
+      "sha256": "0aa1ce2fdfea8224023318ae8a2fa07c45019c8fd5859fee942f5e1bac3407cb"
     },
     "adapter.py": {
       "bytes": 32881,
@@ -223,6 +223,20 @@
       "unchanged_since_handoff": true
     }
   ],
+  "source44_followup": {
+    "current_common": {
+      "bytes": 46214,
+      "mode": "0644",
+      "sha256": "77f37b81fe77767714407e4e0021b3c0767dcb98c69c4c8d947f15546aabe777",
+      "success_predicates_unchanged": true
+    },
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/owner-death/README.md"
+    ]
+  },
   "static_checks": [
     "Python AST syntax parse only; no procedure imported/executed",
     "All18 retained historical workspace functions/classes AST-equal",

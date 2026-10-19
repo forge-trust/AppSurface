@@ -149,9 +149,8 @@ def execute(context, *, deadline):
     pins = "".join(name + "\t" + capture["files"][PREFIX + LOCAL + name]["sha256"] + "\n" for name in PARSERS[:3])
     owner.save(reviewed / "projection-parser-pins.tsv", pins.encode())
     os.chmod(reviewed / "projection-parser-pins.tsv", 0o444)
-    empty_helper = retained / "empty-audit-helper"
-    empty_helper.mkdir(mode=0o555)
     audit_module = load("procedures/os_audit.py", capture, deadline=deadline)
+    empty_helper = audit_module.create_empty_helper(retained / "empty-audit-helper", deadline=deadline)
     auditor = audit_module.Audit(min(deadline - 5, time.monotonic() + 60))
     auditor.initialize_tools()
     audit = auditor.build(str(prepared["roots"]["runtime"]), str(prepared["roots"]["tool"]), False, str(empty_helper))

@@ -26,9 +26,9 @@
       "sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6"
     },
     "adapter.py": {
-      "bytes": 17359,
+      "bytes": 17377,
       "mode": "0644",
-      "sha256": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628"
+      "sha256": "4838518a6e07f2ef2b2195a79a10a98b52b4a42b443c373ab021300bb98c935d"
     },
     "checkpoint-n10-pending-start.sh": {
       "bytes": 88969,
@@ -148,6 +148,14 @@
   },
   "required_helpers": [],
   "schema": "issue779-n10-current-native-port-v1",
+  "source44_followup": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "scope": "case-sensitive Linux maps, explicit empty-helper modes, or failure-only terminal diagnostics as applicable",
+    "updated_paths": [
+      ".github/issue779-checkpoint1/procedures/n10/adapter.py"
+    ]
+  },
   "static_validation": {
     "defined_portable_test_methods": 7,
     "python_ast_sources": 4,

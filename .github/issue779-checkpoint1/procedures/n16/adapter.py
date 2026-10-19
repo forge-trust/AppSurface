@@ -201,10 +201,9 @@ def execute(context, *, deadline):
         stage.save(reviewed / Path(rel).name, raw)
         os.chmod(reviewed / Path(rel).name, 0o444)
     os.chmod(reviewed, 0o555)
-    empty_helper = retained / "empty-audit-helper"
-    empty_helper.mkdir(mode=0o555)
     process = load("procedures/native_process.py", capture, deadline=deadline)
     auditor = load("procedures/os_audit.py", capture, deadline=deadline)
+    empty_helper = auditor.create_empty_helper(retained / "empty-audit-helper", deadline=deadline)
     # Audit is a metadata-only library; every original OS/ELF/stdlib predicate is
     # retained. Root entry lets it inspect these root-private copies directly.
     audit = auditor.Audit(min(deadline - 5, time.monotonic() + 60))

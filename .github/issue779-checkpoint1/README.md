@@ -5,6 +5,16 @@ fixed compile selectors: ordinary `None` runs N01–N03, and N04–N16 each run 
 named case. Historical captures, images, review flags, command rows and TRX facts
 are not runtime inputs. C1 is uninstrumented and supplies no coverage credit.
 
+Native-driver failures retain a closed `issue779-checkpoint1-driver-failure-v1`
+record with `category`, `stage`, `error_kind`, nullable direct numeric `errno`
+(1–4095), `exit: 1`, `native_acceptance: false`, and `coverage_credit: false`.
+[`failure_diagnostic`](run-native.py) identifies only fixed source-owned stages
+such as input staging, helper preparation, audit initialization/build/inventory,
+dispatch and reconciliation. Fixed audit rejection codes are allowlisted; unknown
+messages use a fixed fallback. No traceback, filename, command, exception text or
+private process output is included. A diagnostic cannot replace a missing native
+record, authorize a retry, change a guard or make a failed control pass.
+
 ## Entry points and publication data
 
 `publish.py` is the parent-owned publisher. Its receipt records the actual CLI
@@ -166,3 +176,15 @@ peer helper; N11/N12 and other callers keep the empty default. Every helper is
 inventoried before and after and its ELF closure is inspected even when
 `include_tool` is false. All original OS/ELF/hash/alias, membership, deadline and
 output bounds apply to the additional helper; it cannot replace or waive peer.
+
+For N09, N10, N15 and N16, which require an empty helper image,
+[`create_empty_helper(path, *, deadline)`](procedures/os_audit.py) creates only a
+fresh `empty-audit-helper` directory under a canonical caller-owned retained
+parent. It exclusively creates the directory, retains no-follow directory FDs,
+checks identities and emptiness, then explicitly sets `0555` before the unchanged
+audit. This avoids umask `077` turning a requested `0555` creation into `0500`.
+The original absolute deadline applies; N15 also keeps its earlier work deadline.
+Existing nodes are rejected and partial failed generations are retained, never
+adopted or removed. The helper prepares metadata only; root ownership, protected
+ancestors, complete hashes and OS/ELF qualification still come from the actual
+audit. The [ordinary-file controls](test_empty_helper.py) claim no native result.
