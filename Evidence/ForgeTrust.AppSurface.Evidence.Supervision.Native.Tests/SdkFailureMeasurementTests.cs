@@ -19,6 +19,23 @@ public sealed class SdkFailureMeasurementTests
     }
 
     [Theory]
+    [InlineData("worker-file-absent")]
+    [InlineData("prior-root-file-unchanged")]
+    public void OptionalUnusedRowsCannotStandInForRequiredWorkerHandoffs(string outcome)
+    {
+        var fixture = new Fixture();
+        foreach (var index in new[] { 2, 5 })
+        {
+            var row = fixture.Root["worker_measurements"]![0]!["modules"]![index]!.AsObject();
+            row["outcome"] = outcome;
+            row.Remove("worker_sha256"); row.Remove("cached_sha256"); row.Remove("host_sha256");
+        }
+        fixture.Validate();
+        fixture.Root["worker_measurements"]![0]!["modules"]![0]!["outcome"] = outcome;
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
+    [Theory]
     [InlineData("passed")]
     [InlineData("finalized")]
     [InlineData("restored_originals")]
@@ -45,6 +62,14 @@ public sealed class SdkFailureMeasurementTests
     [InlineData("app-exit")]
     [InlineData("worker-exit")]
     [InlineData("worker-pidfd")]
+    [InlineData("worker-cache")]
+    [InlineData("optional-cache")]
+    [InlineData("optional-image")]
+    [InlineData("optional-outcome")]
+    [InlineData("support-bytes")]
+    [InlineData("worker-phase")]
+    [InlineData("worker-ack")]
+    [InlineData("worker-live")]
     [InlineData("worker-binding")]
     [InlineData("worker-bytes")]
     [InlineData("original-map")]
@@ -78,6 +103,14 @@ public sealed class SdkFailureMeasurementTests
             case "ready-guard": info["original_application_ready_guard"]!["original_application_ready_guard"] = false; break;
             case "app-exit": root["application_observations"]![0]!["main_status"] = 1; break;
             case "worker-exit": worker["normal_exit_code"] = 0; break;
+            case "support-bytes": root["exit_support"]!["ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll"] = new string('d', 64); break;
+            case "worker-cache": worker["modules"]![0]!["cached_sha256"] = new string('d', 64); break;
+            case "optional-cache": worker["modules"]![2]!["cached_sha256"] = new string('d', 64); break;
+            case "optional-image": worker["modules"]![2]!["module_sha256"] = new string('d', 64); break;
+            case "optional-outcome": worker["modules"]![2]!["outcome"] = "private-canary"; break;
+            case "worker-phase": worker["capture_phase"] = "terminal"; break;
+            case "worker-ack": worker["acknowledged_before_original_exit"] = false; break;
+            case "worker-live": worker["cached_original_pid_live"] = false; break;
             case "worker-pidfd": worker["original_pidfd_exit"] = false; break;
             case "worker-binding": worker["pid"] = 999; break;
             case "worker-bytes": worker["modules"]![0]!["host_sha256"] = new string('d', 64); break;
@@ -109,7 +142,7 @@ public sealed class SdkFailureMeasurementTests
                     instrumented[module + suffix] = new string('b', 64);
                 }
                 handoffs.Add(new JsonObject { ["module"] = module + ".dll", ["outcome"] = "unchanged-worker-handoff",
-                    ["module_sha256"] = new string('b', 64), ["worker_sha256"] = new string('c', 64), ["host_sha256"] = new string('c', 64) });
+                    ["module_sha256"] = new string('b', 64), ["cached_sha256"] = new string('c', 64), ["worker_sha256"] = new string('c', 64), ["host_sha256"] = new string('c', 64) });
                 Report[module + ".dll"] = new JsonObject();
             }
             Report["ForgeTrust.AppSurface.Evidence.Coverage.dll"] = new JsonObject
@@ -138,9 +171,18 @@ public sealed class SdkFailureMeasurementTests
                 ["phase"] = "settled", ["main_code"] = 1, ["main_status"] = 0, ["monitor_failed"] = false,
                 ["group_empty_twice"] = true, ["pumps_joined"] = true, ["pending_start_joined"] = true
             } };
+            var support = new JsonObject
+            {
+                ["ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll"] = new string('e', 64),
+                ["ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.pdb"] = new string('f', 64)
+            };
+            Root["exit_support"] = support;
+            _binding["exit_support"] = support.DeepClone();
             Root["worker_measurements"] = new JsonArray { new JsonObject
             {
-                ["schema"] = "evidence-worker-measurement-v2", ["normal_exit_code"] = 1, ["original_pidfd_exit"] = true,
+                ["schema"] = "evidence-worker-measurement-v3", ["normal_exit_code"] = 1, ["original_pidfd_exit"] = true,
+                ["capture_phase"] = "pre_exit_after_original_handlers", ["cached_original_pid_live"] = true,
+                ["acknowledged_before_original_exit"] = true, ["barrier_nonce_sha256"] = new string('c', 64),
                 ["native_acceptance"] = false, ["pid"] = 200, ["uid"] = 1001, ["gid"] = 1002,
                 ["start_time"] = 1234, ["cgroup"] = "/system.slice/fixture.service", ["modules"] = handoffs
             } };

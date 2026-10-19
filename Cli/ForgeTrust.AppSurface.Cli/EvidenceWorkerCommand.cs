@@ -45,7 +45,12 @@ internal sealed class EvidenceWorkerCommand
                 diagnostic => console.Error.WriteLine(EvidenceOriginalCancellationCheckpoint.Encode(diagnostic))).ConfigureAwait(false);
 #endif
             if (manifest.ClaimKind == EvidenceClaimKind.None)
+            {
+#if EVIDENCE_PRIVATE_C3_SDK && EVIDENCE_PRIVATE_SDK_EXIT_BARRIER
+                ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.WorkerExitBarrier.Arm();
+#endif
                 throw new CommandException("ASEVD211: Evidence execution was incomplete. Inspect the protected failure manifest and use a fresh supervised run after owned exit.");
+            }
         }
         catch (EvidenceAdmissionException exception) { throw new CommandException(exception.Message); }
         catch (Exception exception) when (exception is System.Text.Json.JsonException or IOException or UnauthorizedAccessException

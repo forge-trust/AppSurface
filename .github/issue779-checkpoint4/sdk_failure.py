@@ -16,6 +16,7 @@ import time
 from measurement_arguments import MODULES
 
 NAMES = tuple(name + suffix for name in MODULES for suffix in ('.dll', '.pdb'))
+SUPPORT_NAMES = tuple('ForgeTrust.AppSurface.Evidence.ExitBarrier.Support' + suffix for suffix in ('.dll', '.pdb'))
 STATE_FIELDS = set(('schema stage normal_code normal_status stopped_code stopped_status start_reserved '
                     'start_joined stop_joined pending_failure physically_settled cleanup_failed '
                     'group_empty_twice pump_joined captured_pid last_main_pid last_exec_pid last_code '
@@ -399,10 +400,36 @@ def image_rows(tool):
     return result
 
 
+def support_rows(tool):
+    """Bind the two uninstrumented support files without granting execution or admission."""
+    rows = {}
+    for name in SUPPORT_NAMES:
+        path = tool / name
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                    and 0 < before.st_size <= 1024 * 1024, 'support-size')
+            body = bytearray()
+            while len(body) <= before.st_size:
+                part = os.read(fd, min(65536, before.st_size + 1 - len(body)))
+                if not part: break
+                body.extend(part)
+            require(len(body) == before.st_size and identity(before) == identity(os.fstat(fd))
+                    == identity(path.lstat()), 'support-stability')
+            rows[name] = hashlib.sha256(body).hexdigest()
+        finally:
+            os.close(fd)
+    return rows
+
+
 def require_worker(worker, expected, instrumented):
-    require(worker['schema'] == 'evidence-worker-measurement-v2' and type(worker['normal_exit_code']) is int
+    require(worker['schema'] == 'evidence-worker-measurement-v3' and type(worker['normal_exit_code']) is int
             and worker['normal_exit_code'] == 1 and worker['original_pidfd_exit'] is True
-            and worker['native_acceptance'] is False, 'failed-worker-measurement')
+            and worker['native_acceptance'] is False
+            and worker['capture_phase'] == 'pre_exit_after_original_handlers'
+            and worker['cached_original_pid_live'] is True and worker['acknowledged_before_original_exit'] is True
+            and re.fullmatch('[0-9a-f]{64}', worker['barrier_nonce_sha256']), 'failed-worker-measurement')
     for key, descriptor_key in [('pid', 'worker_pid'), ('uid', 'worker_uid'), ('gid', 'worker_gid')]:
         value = worker[key]
         require(type(value) is int and 0 < value < 4294967295 and value == expected[descriptor_key], 'worker-binding')
@@ -415,7 +442,7 @@ def require_worker(worker, expected, instrumented):
         if row['module'] in required or row['outcome'] == 'unchanged-worker-handoff':
             require(row['outcome'] == 'unchanged-worker-handoff'
                     and re.fullmatch('[0-9a-f]{64}', row['worker_sha256'])
-                    and row['worker_sha256'] == row['host_sha256'], 'worker-handoff')
+                    and row['worker_sha256'] == row['cached_sha256'] == row['host_sha256'], 'worker-handoff')
         else:
             require(row['outcome'] in ('worker-file-absent', 'prior-root-file-unchanged'), 'worker-unused-module')
 
@@ -463,6 +490,8 @@ def execute(args):
     end = time.monotonic() + 840
     originals = strict_json((args.evidence / 'original-supervision.json').read_bytes())
     require(originals['source'] == args.source and set(originals['sdk_files']) == set(NAMES), 'source-originals')
+    require(set(originals['exit_support']) == set(SUPPORT_NAMES)
+            and support_rows(args.sdk_tool) == originals['exit_support'], 'support-original')
     instrumented = image_rows(args.sdk_tool)
     require(all(instrumented[name] != originals['sdk_files'][name] for name in NAMES if name.endswith('.dll')), 'instrumentation')
     temporary = args.evidence.parent / 'checkpoint3-sdk-failure-work'
@@ -471,6 +500,7 @@ def execute(args):
     case_args.prepared = args.prepared / 'payload-preparation.json'
     case_args.digests = args.evidence / 'registration-digests.json'
     tools, runtime = r.stage(case_args, end, sdk_only=True)
+    require(support_rows(tools['sdk-normal'][0]) == originals['exit_support'], 'support-staged')
     observer = PassiveTmpObserver()
     case_args.sdk_tmp_observer = observer
     try:
@@ -485,7 +515,8 @@ def execute(args):
     require(result.get('root_exit') == 1 and len(result.get('worker_measurements', [])) == 1, 'natural-failed-worker')
     require_worker(result['worker_measurements'][0], result['sdk_failure']['worker'], instrumented)
     result.update({'schema': 'issue779-sdk-failed-producer-v1', 'source': args.source,
-                   'sdk_original': originals['sdk_files'], 'sdk_instrumented': instrumented, 'finalized': False})
+                   'sdk_original': originals['sdk_files'], 'sdk_instrumented': instrumented,
+                   'exit_support': originals['exit_support'], 'finalized': False})
     r.write(temporary / 'provisional.json', r.canonical(result))
 
 
@@ -518,6 +549,8 @@ def finalize(args):
     result = strict_json((temporary / 'provisional.json').read_bytes())
     require(result['source'] == args.source == originals['source'] and result['sdk_original'] == originals['sdk_files'], 'final-source')
     require(image_rows(args.sdk_tool) == originals['sdk_files'], 'restored-originals')
+    require(set(originals['exit_support']) == set(SUPPORT_NAMES) and result['exit_support'] == originals['exit_support']
+            and support_rows(args.sdk_tool) == originals['exit_support'], 'support-restored')
     report = args.evidence / 'native-sdk-failure.json'
     require(report.is_file() and not report.is_symlink() and 0 < report.stat().st_size <= REPORT_LIMIT, 'completed-report')
     capture = strict_json((args.evidence / 'source.json').read_bytes())

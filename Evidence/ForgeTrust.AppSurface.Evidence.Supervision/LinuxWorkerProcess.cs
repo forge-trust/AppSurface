@@ -681,6 +681,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             RequireActive(startup.Token);
 #if EVIDENCE_PRIVATE_C3
             _measurement = LinuxWorkerMeasurement.TryCapture(_worker, startup.Token);
+#if EVIDENCE_PRIVATE_C3_SDK
+            _measurement?.PrepareFailedExitBarrier(_input.Request.JobDeadlineUtc, startup.Token);
+#endif
 #endif
             _workspace.WriteDescriptor(Descriptor(_worker, _owner.Remaining).DescriptorBytes, startup.Token);
             _worker.Recheck(startup.Token);
@@ -708,6 +711,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 // The worker may exit naturally: owner/input remain live, proc liveness is not demanded here.
                 _owner.RequireCleanupLaunchInput(_input, token);
                 RequireOutputNotFailed();
+#if EVIDENCE_PRIVATE_C3_SDK
+                _measurement?.ObserveFailedExitBarrier(token);
+#endif
                 var facts = await _observations!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
                 if (_recipe!.HasExitedExecution(facts, _worker!.Pid))
                 {

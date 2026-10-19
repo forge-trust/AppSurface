@@ -19,7 +19,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// not change. A prior root hit file is left unchanged, so only the first normal worker contributes;
 /// subsequent root processes accumulate their own counters through Coverlet's original implementation.
 /// </remarks>
-internal sealed class LinuxWorkerMeasurement : IDisposable
+internal sealed partial class LinuxWorkerMeasurement : IDisposable
 {
     internal static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision"];
@@ -79,7 +79,13 @@ internal sealed class LinuxWorkerMeasurement : IDisposable
     internal void CaptureNormalExit(LinuxUnitProperties terminal, CancellationToken token) => CaptureExit(terminal, 0, token);
 
     /// <summary>Measures only the private SDK control's natural status1; no execution-success condition changes.</summary>
-    internal void CaptureFailedNormalExit(LinuxUnitProperties terminal, CancellationToken token) => CaptureExit(terminal, 1, token);
+    internal void CaptureFailedNormalExit(LinuxUnitProperties terminal, CancellationToken token)
+    {
+#if EVIDENCE_PRIVATE_C3_SDK
+        if (_exitCache is not null) { CommitFailedExitCache(terminal, token); return; }
+#endif
+        CaptureExit(terminal, 1, token);
+    }
 
     private void CaptureExit(LinuxUnitProperties terminal, int expectedStatus, CancellationToken token)
     {
@@ -133,8 +139,17 @@ internal sealed class LinuxWorkerMeasurement : IDisposable
     /// <summary>Closes measurement-only handles after the original monitor joins, attempting every close.</summary>
     public void Dispose()
     {
-        try { _temporary.Dispose(); }
-        finally { try { _hostTemporary.Dispose(); } finally { _notification.Dispose(); } }
+        try
+        {
+#if EVIDENCE_PRIVATE_C3_SDK
+            CloseExitBarrier();
+#endif
+        }
+        finally
+        {
+            try { _temporary.Dispose(); }
+            finally { try { _hostTemporary.Dispose(); } finally { _notification.Dispose(); } }
+        }
     }
 
     private static SafeFileHandle? OpenOptional(SafeFileHandle directory, string name)

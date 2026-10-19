@@ -139,10 +139,18 @@ jobs:
         run: |
           set -euo pipefail
           cli=Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+          support_project=.github/issue779-checkpoint4/exit-barrier/WorkerExitBarrier.csproj
+          : > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log"
+          support_output="$RUNNER_TEMP/checkpoint3-exit-support"
+          timeout --signal=KILL 120 dotnet restore "$support_project" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          timeout --signal=KILL 120 dotnet build "$support_project" --no-restore -c Release -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false -o "$support_output" >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          export EvidenceSdkExitBarrierAssembly="$support_output/ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll"
+          test -s "$EvidenceSdkExitBarrierAssembly"
+          test -s "$support_output/ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.pdb"
           sdk_tool="$RUNNER_TEMP/checkpoint3-sdk-tool"
           mkdir -m 0700 "$sdk_tool"
           timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-restore.log" 2>&1
-          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
           mkdir -p "$sdk_tool/reportgenerator/net10.0"
           cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$sdk_tool/reportgenerator/net10.0/"
           test -s "$sdk_tool/ForgeTrust.AppSurface.Cli.dll"
@@ -202,6 +210,9 @@ jobs:
           names = tuple(name + suffix for name in ('ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision') for suffix in ('.dll', '.pdb'))
           sdk_tool = pathlib.Path(sys.argv[4])
           value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}, 'sdk_files': {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in names}}
+          support_names = ['ForgeTrust.AppSurface.Evidence.ExitBarrier.Support' + suffix for suffix in ('.dll', '.pdb')]
+          value['exit_support'] = {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in support_names}
+          assert all(0 < (sdk_tool / name).stat().st_size < 1024 * 1024 for name in support_names)
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
 
@@ -244,10 +255,14 @@ jobs:
             --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
             --merge-with "$CHECKPOINT3_EVIDENCE/native-sdk.json" \
             --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision" > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
-          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY'
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_SDK_TOOL" <<'PY'
           import hashlib, json, pathlib, sys
           root = pathlib.Path(sys.argv[1])
           binding = json.loads((root / 'instrumentation.json').read_bytes())
+          original = json.loads((root / 'original-supervision.json').read_bytes())
+          sdk_tool = pathlib.Path(sys.argv[2])
+          assert {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in original['exit_support']} == original['exit_support']
+          binding['exit_support'] = original['exit_support']
           files = {'coverage': 'native-supervision.json', 'sdk_coverage': 'native-sdk.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json', 'sdk_failure_coverage': 'native-sdk-failure.json', 'sdk_failure_receipt': 'native/sdk-test-failure.json'}
           for key, name in files.items():
               path = root / name

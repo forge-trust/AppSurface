@@ -18,6 +18,23 @@
     <DefineConstants>$(DefineConstants);EVIDENCE_CLI_ADAPTER</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidenceSdkExitBarrierAssembly)' != ''">
+    <DefineConstants>$(DefineConstants);EVIDENCE_PRIVATE_SDK_EXIT_BARRIER</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidenceSdkExitBarrierAssembly)' != ''">
+    <Reference Include="ForgeTrust.AppSurface.Evidence.ExitBarrier.Support">
+      <HintPath>$(EvidenceSdkExitBarrierAssembly)</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="RequirePrivateSdkExitBarrierAssembly" BeforeTargets="ResolveReferences"
+          Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidenceSdkExitBarrierAssembly)' != ''">
+    <Error Condition="!Exists('$(EvidenceSdkExitBarrierAssembly)')"
+           Text="The explicitly selected private SDK exit support assembly must already exist." />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\..\Console\ForgeTrust.AppSurface.Console\ForgeTrust.AppSurface.Console.csproj" />
     <ProjectReference Include="..\..\Config\ForgeTrust.AppSurface.Config.GoogleSecretManager\ForgeTrust.AppSurface.Config.GoogleSecretManager.csproj" />

@@ -181,19 +181,45 @@ class FailureDiagnosticDataTests(unittest.TestCase):
         self.assertEqual('/evidence/native-sdk', original[-1])
         with self.assertRaises(ValueError): arguments.failure_target(*['relative', *values[1:]])
 
+    def test_actual_support_binding_rejects_missing_unsafe_or_changed_private_measurement_bytes(self):
+        for mutation in ('valid', 'missing', 'symlink', 'hardlink', 'fifo', 'empty', 'oversize', 'changed'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                for name in subject.SUPPORT_NAMES: (root / name).write_bytes(b'uninstrumented support sample')
+                original = subject.support_rows(root)
+                path = root / subject.SUPPORT_NAMES[0]
+                if mutation == 'missing': path.unlink()
+                if mutation == 'symlink': path.unlink(); path.symlink_to(root / subject.SUPPORT_NAMES[1])
+                if mutation == 'hardlink': os.link(path, root / 'other')
+                if mutation == 'fifo': path.unlink(); os.mkfifo(path, 0o600)
+                if mutation == 'empty': path.write_bytes(b'')
+                if mutation == 'oversize':
+                    with path.open('r+b') as stream: stream.truncate(1024 * 1024 + 1)
+                if mutation == 'changed':
+                    path.write_bytes(b'different support bytes')
+                    self.assertNotEqual(original, subject.support_rows(root))
+                elif mutation == 'valid': self.assertEqual(original, subject.support_rows(root))
+                else:
+                    with self.assertRaises((RuntimeError, OSError)): subject.support_rows(root)
+
     def test_required_worker_handoffs_bind_to_this_failed_image_before_report_consumption(self):
         images = {name + '.dll': 'a' * 64 for name in arguments.MODULES}
         expected = {'worker_pid': 10, 'worker_uid': 11, 'worker_gid': 12, 'cgroup': '/system.slice/fixture.service'}
-        worker = {'schema': 'evidence-worker-measurement-v2', 'normal_exit_code': 1,
+        worker = {'schema': 'evidence-worker-measurement-v3', 'normal_exit_code': 1,
                   'original_pidfd_exit': True, 'native_acceptance': False, 'start_time': 123,
+                  'capture_phase': 'pre_exit_after_original_handlers', 'cached_original_pid_live': True,
+                  'acknowledged_before_original_exit': True, 'barrier_nonce_sha256': 'c' * 64,
                   'pid': 10, 'uid': 11, 'gid': 12, 'cgroup': expected['cgroup'],
                   'modules': [{'module': name, 'module_sha256': digest, 'outcome': 'unchanged-worker-handoff',
-                               'worker_sha256': 'b' * 64, 'host_sha256': 'b' * 64} for name, digest in images.items()]}
+                               'worker_sha256': 'b' * 64, 'cached_sha256': 'b' * 64, 'host_sha256': 'b' * 64} for name, digest in images.items()]}
         subject.require_worker(worker, expected, images)
-        for field, value in [('pid', 99), ('normal_exit_code', 0), ('original_pidfd_exit', False)]:
+        for field, value in [('pid', 99), ('normal_exit_code', 0), ('original_pidfd_exit', False),
+                             ('schema', 'evidence-worker-measurement-v2'), ('capture_phase', 'terminal'),
+                             ('cached_original_pid_live', False), ('acknowledged_before_original_exit', False),
+                             ('barrier_nonce_sha256', 'canary')]:
             candidate = json.loads(json.dumps(worker)); candidate[field] = value
             with self.subTest(field=field), self.assertRaises(RuntimeError): subject.require_worker(candidate, expected, images)
-        for field, value in [('module_sha256', 'c' * 64), ('host_sha256', 'c' * 64), ('outcome', 'worker-file-absent')]:
+        for field, value in [('module_sha256', 'c' * 64), ('host_sha256', 'c' * 64), ('cached_sha256', 'c' * 64), ('outcome', 'worker-file-absent')]:
             candidate = json.loads(json.dumps(worker)); candidate['modules'][0][field] = value
             with self.subTest(field=field), self.assertRaises(RuntimeError): subject.require_worker(candidate, expected, images)
 

@@ -292,7 +292,7 @@ def execute(args,case,tools,runtime,end):
   require(descriptor is not None and app is not None,'actual-apphost-before-control')
   require(c2.groups_empty(units),'original-all-groups-empty');result['groups_empty']=True
   observed=events(stderr,'evidence-application-native-v1');result['application_observations']=observed
-  result['worker_measurements']=events(stderr,'evidence-worker-measurement-v2' if case=='sdk-test-failure' else 'evidence-worker-measurement-v1')
+  result['worker_measurements']=events(stderr,'evidence-worker-measurement-v3' if case=='sdk-test-failure' else 'evidence-worker-measurement-v1')
   settled=[e for e in observed if e['phase']=='settled'];require(len(settled)==1 and settled[0]['group_empty_twice'] and settled[0]['pumps_joined'] and settled[0]['pending_start_joined'],'actual-application-settlement')
   if case in ('normal','sdk-normal'):
    require(code==0,'positive-root-exit');summary=json.loads(stdout.read_bytes());require(summary.get('ExecutionVerdict')=='Passed' and summary.get('CleanupCompleted') is True and summary.get('ClaimKind')=='ObservationOnly','actual-root-result')

@@ -121,11 +121,24 @@ internal static class SdkFailureMeasurement
             Assert.Equal(binding.GetProperty("sdk_original").GetProperty(name).GetString(), original);
             if (name.EndsWith(".dll", StringComparison.Ordinal)) Assert.NotEqual(original, instrumented);
         }
+        var supportNames = new[] { "ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll", "ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.pdb" };
+        Assert.Equal(supportNames.Order(StringComparer.Ordinal), root.GetProperty("exit_support").EnumerateObject()
+            .Select(static row => row.Name).Order(StringComparer.Ordinal));
+        foreach (var name in supportNames)
+        {
+            var digest = root.GetProperty("exit_support").GetProperty(name).GetString();
+            Assert.Matches("^[0-9a-f]{64}$", digest!);
+            Assert.Equal(binding.GetProperty("exit_support").GetProperty(name).GetString(), digest);
+        }
         var worker = Assert.Single(root.GetProperty("worker_measurements").EnumerateArray());
-        Assert.Equal("evidence-worker-measurement-v2", worker.GetProperty("schema").GetString());
+        Assert.Equal("evidence-worker-measurement-v3", worker.GetProperty("schema").GetString());
         Assert.Equal(1, worker.GetProperty("normal_exit_code").GetInt32());
         Assert.True(worker.GetProperty("original_pidfd_exit").GetBoolean());
         Assert.False(worker.GetProperty("native_acceptance").GetBoolean());
+        Assert.Equal("pre_exit_after_original_handlers", worker.GetProperty("capture_phase").GetString());
+        Assert.True(worker.GetProperty("cached_original_pid_live").GetBoolean());
+        Assert.True(worker.GetProperty("acknowledged_before_original_exit").GetBoolean());
+        Assert.Matches("^[0-9a-f]{64}$", worker.GetProperty("barrier_nonce_sha256").GetString()!);
         var expected = info.GetProperty("worker");
         foreach (var item in new[] { ("pid", "worker_pid"), ("uid", "worker_uid"), ("gid", "worker_gid") })
         {
@@ -138,14 +151,21 @@ internal static class SdkFailureMeasurement
         var rows = worker.GetProperty("modules").EnumerateArray().ToArray();
         Assert.Equal(Modules.Select(static name => name + ".dll").Order(StringComparer.Ordinal),
             rows.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
-        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll",
-            "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" })
+        var required = new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll",
+            "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" }.ToHashSet(StringComparer.Ordinal);
+        foreach (var row in rows)
         {
-            var row = Assert.Single(rows, item => item.GetProperty("module").GetString() == name);
-            Assert.Equal("unchanged-worker-handoff", row.GetProperty("outcome").GetString());
+            var name = row.GetProperty("module").GetString()!;
             Assert.Equal(root.GetProperty("sdk_instrumented").GetProperty(name).GetString(), row.GetProperty("module_sha256").GetString());
-            Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
-            Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
+            var outcome = row.GetProperty("outcome").GetString();
+            if (required.Contains(name) || outcome == "unchanged-worker-handoff")
+            {
+                Assert.Equal("unchanged-worker-handoff", outcome);
+                Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
+                Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("cached_sha256").GetString());
+                Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
+            }
+            else Assert.Contains(outcome, new[] { "worker-file-absent", "prior-root-file-unchanged" });
         }
         using var report = JsonDocument.Parse(coverage);
         Assert.Equal(Modules.Select(static name => name + ".dll").Order(StringComparer.Ordinal),
