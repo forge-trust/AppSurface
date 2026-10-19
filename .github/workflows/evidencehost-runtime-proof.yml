@@ -51,6 +51,7 @@ jobs:
       DOTNET_NOLOGO: "1"
       MSBUILDDISABLENODEREUSE: "1"
       DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+      COVERAGE_GATE_DIFF_BASE: "1991280e8af049db592ebcb705cbf66f4b4c6e8b"
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -74,7 +75,9 @@ jobs:
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/checkpoint4-evidence/source.json"
           python3 -B .github/issue779-checkpoint4/verify-cutover.py
           python3 -B .github/issue779-checkpoint4/test_cutover.py
-          git rev-parse origin/main > "$RUNNER_TEMP/checkpoint4-evidence/comparison-base.txt"
+          test "$(git rev-parse "$COVERAGE_GATE_DIFF_BASE^{commit}")" = "$COVERAGE_GATE_DIFF_BASE"
+          git merge-base --is-ancestor "$COVERAGE_GATE_DIFF_BASE" "$GITHUB_SHA"
+          git rev-parse "$COVERAGE_GATE_DIFF_BASE" > "$RUNNER_TEMP/checkpoint4-evidence/comparison-base.txt"
       - name: Download current native measurement from the successful application lane
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -155,7 +158,7 @@ jobs:
             --dotnet "$(readlink -f "$(command -v dotnet)")" \
             --reportgenerator-package "$NUGET_PACKAGES/reportgenerator/5.5.10/tools/net10.0" \
             --command-timeout-seconds 4200 -- \
-            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
+            /usr/bin/env BUILD_CONFIGURATION=Release BUILD_NO_RESTORE=true COVERAGE_PARALLELISM=2 COVERAGE_GATE_DIFF_BASE="$COVERAGE_GATE_DIFF_BASE" NUGET_PACKAGES="$NUGET_PACKAGES" EVIDENCEHOST_NATIVE_MEASUREMENT=1 APP_SURFACE_TEST_ARTIFACTS_DIR="$APP_SURFACE_TEST_ARTIFACTS_DIR" \
             /usr/bin/bash ./scripts/coverage-solution.sh 2>&1 | tee "$RUNNER_TEMP/checkpoint4-evidence/coverage.log"
       - name: Recheck source after all executions
         if: always()

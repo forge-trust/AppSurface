@@ -166,3 +166,14 @@ The dependency-data guard rejects the reproduced broken image, accepts the corre
 image, and checks its actual bytes across instrumentation/staging/restoration.
 These loader/data checks establish no worker admission or native runtime success;
 a fresh complete Linux run remains required. Runtime policy and deadlines are unchanged.
+
+## Fixed patch comparison
+
+The [cutover workflow](../../workflows/evidencehost-runtime-proof.yml) supplies the
+existing `COVERAGE_GATE_DIFF_BASE` setting as
+`1991280e8af049db592ebcb705cbf66f4b4c6e8b`, verifies it is an ancestor of the selected
+source, records it, and explicitly passes it through the test-broker command.
+A later `origin/main` update cannot replace this original gate comparison. The
+canonical script, Codecov full-condition rule, thresholds, tolerance and exclusions
+are unchanged. Native fixture request base `416b30919e6c4d03b634d9d3fe558884b02f0b91`
+is separate input data and must not replace the gate's comparison commit.
