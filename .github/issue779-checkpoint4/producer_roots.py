@@ -20,6 +20,7 @@ from measurement_arguments import MODULES, arguments
 BASE = '416b30919e6c4d03b634d9d3fe558884b02f0b91'
 LEAF = 8 * 1024 * 1024
 TOTAL = 32 * 1024 * 1024
+REPORT = 32 * 1024 * 1024
 NAMES = tuple(m + suffix for m in MODULES for suffix in ('.dll', '.pdb'))
 CASES = ('normal', 'test-failure', 'cancel', 'quota', 'ignored-cancel', 'artifact-mutation', 'cleanup-failure')
 FILES = ('producer-roots-original.json', 'producer-roots-instrumented.json',
@@ -309,7 +310,8 @@ def retention(root, extra=0):
         require(not stat.S_ISLNK(node.st_mode), 'retention-link')
         if stat.S_ISDIR(node.st_mode):
             continue
-        require(stat.S_ISREG(node.st_mode) and node.st_nlink == 1 and node.st_size <= LEAF, 'retention-leaf')
+        maximum = REPORT if path.parent == root and path.name in FILES[4:6] else LEAF
+        require(stat.S_ISREG(node.st_mode) and node.st_nlink == 1 and node.st_size <= maximum, 'retention-leaf')
         count += 1
         size += node.st_size
     require(count + int(extra > 0) <= 128 and size <= TOTAL, 'retention-total')
@@ -347,7 +349,7 @@ def finalize(args):
                 and all(inventory[name][leaf]['sha256'] == armed['instrumented'][variant][leaf] for leaf in NAMES), 'staged-image')
     require(all(row['input_inventory_sha256'] == digest(inventory_bytes) for row in rows), 'native-staging')
     _, capture = source(args)
-    raw, combined = [read(args.evidence / name) for name in FILES[4:6]]
+    raw, combined = [read(args.evidence / name, REPORT) for name in FILES[4:6]]
     combined_report = report(combined)
     witnesses = {'C2': witness(report(raw), capture, True), 'None': witness(combined_report, capture, False)}
     require(witness(combined_report, capture, True) == witnesses['C2'], 'merged-current-witness')

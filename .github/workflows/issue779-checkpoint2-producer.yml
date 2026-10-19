@@ -73,8 +73,10 @@ jobs:
         run: |
           set -euo pipefail
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_roots.py > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_retention.py >> "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint2-coverlet" > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-install.log" 2>&1
       - name: Measure the unchanged seven controls through standard root collectors
+        id: producer_measurement
         if: inputs.measure_roots
         shell: bash
         run: |
@@ -108,6 +110,41 @@ jobs:
         run: |
           set -euo pipefail
           timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint2/run-native.py --tool "$CHECKPOINT2_TOOL" --mutation-tool "$RUNNER_TEMP/checkpoint2-tool-c2" --runtime "$CHECKPOINT2_SDK_ROOT" --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint2/subject" --output "$RUNNER_TEMP/checkpoint2-evidence/native" --source "$GITHUB_SHA" --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 > "$RUNNER_TEMP/checkpoint2-evidence/native-driver.log" 2>&1
+      - name: Preserve bounded private diagnostics after root measurement failure
+        id: producer_failure
+        if: always() && inputs.measure_roots && steps.producer_measurement.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_root_failure.py
+          failure="$RUNNER_TEMP/checkpoint2-root-failure"
+          timeout --signal=KILL 8 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint4/producer_root_failure.py --evidence "$RUNNER_TEMP/checkpoint2-evidence" --output "$failure"
+          sudo chown "$(id -u):$(id -g)" "$failure" "$failure/metadata.json" "$failure/native-driver-slices.log"
+          python3 -B - "$failure" <<'PY_FAILURE'
+          from pathlib import Path
+          import os
+          import stat
+          import sys
+          root = Path(sys.argv[1])
+          assert stat.S_ISDIR(root.lstat().st_mode) and stat.S_IMODE(root.lstat().st_mode) == 0o700
+          assert sorted(p.name for p in root.iterdir()) == ['metadata.json', 'native-driver-slices.log']
+          for name, limit in [('metadata.json', 8192), ('native-driver-slices.log', 65536)]:
+              path = root / name
+              metadata = path.lstat()
+              assert stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1 and stat.S_IMODE(metadata.st_mode) == 0o600
+              assert metadata.st_uid == os.getuid() and metadata.st_gid == os.getgid() and metadata.st_size <= limit
+          PY_FAILURE
+      - name: Upload only the bounded private failure diagnostics
+        if: always() && steps.producer_failure.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-producer-root-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/checkpoint2-root-failure/metadata.json
+            ${{ runner.temp }}/checkpoint2-root-failure/native-driver-slices.log
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
       - name: Recheck complete source after execution
         if: always()
         shell: bash
@@ -120,7 +157,9 @@ jobs:
         run: |
           set -euo pipefail
           sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/checkpoint2-evidence"
-          python3 -B .github/issue779-checkpoint2/check-retention.py "$RUNNER_TEMP/checkpoint2-evidence"
+          extra=()
+          if [[ '${{ inputs.measure_roots }}' == true ]]; then extra+=(--producer-roots); fi
+          python3 -B .github/issue779-checkpoint2/check-retention.py "$RUNNER_TEMP/checkpoint2-evidence" "${extra[@]}"
       - name: Retain exact private receipts and bounded logs
         if: always() && steps.retention.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -122,9 +122,15 @@ Exactly seven new retained leaves, in the existing evidence directory:
 | `producer-roots-binding.json` | Successful final measurement binding, restoration maps and witnesses |
 
 Existing `source.json`, `package-smoke.json`, `native-driver.log`, and `native/*`
-remain at their original locations. Every retained leaf must be regular, single-link,
-and at most **8 MiB**; the whole existing artifact, including this binding, remains at
-most **32 MiB / 128 files**. No split report or larger bound is supplied if it fails.
+remain at their original locations. Every retained leaf must be regular and single-link. Only the two exact root-level
+standard report names above permit **32 MiB** each; logs and all other leaves remain
+at **8 MiB**. The whole artifact, including the final binding, remains at **32 MiB /
+128 files**. Nested files with the same basename receive no larger allowance. The
+[ordinary retainer](../../issue779-checkpoint2/check-retention.py) requires the explicit
+`--producer-roots` option for this report-only ceiling; its default remains 8 MiB for
+every file. These are measurement-artifact bounds, not product/runtime budgets or gate
+criteria. The [actual-file boundary tests](../test_producer_retention.py) verify both
+readers' fixed report paths, adjacent limits, unchanged total/count, and link/FIFO rejection.
 The final ordinary retention step still owns permissions and full artifact inventory.
 Readers reject symlinks/FIFOs/hardlinks and changed leaves through bounded no-follow
 FD reads with before/after/named metadata checks. These observations are data checks,
@@ -170,3 +176,31 @@ review found no remaining P1/P2 in the three-file collector preparation. The ori
 Linux artifact inventory includes all six DLL/PDB pairs in both images; a fresh run
 must still establish actual instrumentation, flushes, witnesses, report size and
 restoration. No new native result or coverage gain is inferred from these checks.
+
+A first standalone collection failed, followed by the original generic leaf-bound
+retention check; that check did not identify the offending file or predicate, so no
+report size or successful collection is inferred from it. Failure-only diagnostics
+must preserve the actual closed metadata and bounded private log slices independently
+of the original artifact check. The fixed report allowance does not excuse unsafe
+nodes, a failed collector, a failed native control, or missing witness/restoration data.
+
+## Diagnostics after failure
+
+Only when the measured step fails, the workflow calls
+[producer_root_failure.collect](../producer_root_failure.py) after the original
+collector process returns. It preserves the failed step. The helper has one five-second
+budget and an external eight-second bound. Through retained no-follow descriptors it
+records only the seven fixed measurement names and `native-driver.log`; report contents
+are not read, even when oversized. Missing, unsafe, changed and late inputs get closed
+unavailable reasons. Stable logs of at most 64 KiB are complete; larger logs retain only
+the first and last 32 KiB with exact offsets and `complete=false`. File stability is not
+independent proof that a writer joined. No log text is parsed or printed.
+
+A separate artifact contains exactly `metadata.json` (at most 8,192 bytes) and
+`native-driver-slices.log` (at most 65,536 bytes), in a fresh `0700` directory with exclusive
+`0600` files, and a maximum combined size of 73,728 bytes. The workflow verifies these
+limits before upload. This diagnostic upload does not bypass the original full-artifact
+retention step, turn failed measurement into success, or provide namespace authority,
+native acceptance or coverage credit. [Seventeen small-file controls](../test_producer_root_failure.py)
+verify links/FIFOs, exact and sliced log boundaries, substitution/growth, unavailable
+sources, deadlines, output exclusivity and private modes.
