@@ -115,3 +115,54 @@ ceiling, unsafe destinations and finalization before the original collector fail
 These controls create temporary data only; they establish neither a native worker
 failure cause nor a successful runtime measurement. Source29/30 startup cancellation
 remains undiagnosed until fresh retained worker bytes are actually inspected.
+
+
+## SDK support dependency data
+
+[`support_dependency_data(tool)`](../sdk_failure.py) validates only the two generated
+CLI runtime metadata files. It opens the tool directory and each fixed leaf without
+following its final symlink, uses nonblocking reads, requires single-link regular
+files, and verifies retained/named metadata before and after bounded reads. The CLI
+`.deps.json` ceiling is 1 MiB; `.runtimeconfig.json` is 64 KiB. A final named check
+covers both leaves before parsing. Ancestors are not authenticated by this data API;
+the original native deployment guards retain that responsibility.
+
+JSON rejects duplicate exact member names and non-JSON constants. Package and asset
+names remain ordinal and case-sensitive, so legitimate differently cased filenames
+are not conflated. Required structural keys must use their exact spelling. Unrelated
+metadata is allowed and discarded. The selected runtime target must be
+`.NETCoreApp,Version=v10.0`; one CLI project library must depend on exactly version
+`0.2.0.0` of `ForgeTrust.AppSurface.Evidence.ExitBarrier.Support`. Its sole versioned
+library row must be `reference`, with exactly its support DLL as the runtime asset
+and assembly/file versions `0.2.0.0`. Runtime configuration requires `net10.0` and
+exactly the NETCore and ASP.NET framework names, both `10.0.0`; framework order is
+irrelevant. No dependency file is edited or assembled by this reader.
+
+The result schema is `issue779-sdk-support-dependency-v1`, containing only the two
+original byte lengths/SHA-256 values and validated fixed target/version metadata,
+with `native_acceptance=false`. The workflow must capture this complete value as
+`original-supervision.json.exit_support_runtime` before instrumentation. The SDK
+controller compares the current published metadata and staged metadata to that value;
+the provisional receipt retains it and finalization requires the same original value
+after standard collector restoration. Missing or changed bindings fail closed. This
+API does not load an assembly, invoke the exit barrier, authenticate a process, issue
+admission, or establish coverage gain. Existing runtime/owner/collector guards remain
+required. The corresponding `SupportDependencyDataTests` in the
+[small-file controls](../test_sdk_failure.py) use temporary file data only.
+
+### Private SDK dependency regeneration
+
+The source31 Linux worker failed before running identity capture with a missing
+`ForgeTrust.AppSurface.Evidence.ExitBarrier.Support` assembly. A fresh local
+C3 → C3Sdk restore/publish sequence reproduced the same loader failure: the helper
+DLL was copied, but the incremental build reused C3's `.deps.json` without its
+helper reference. SDK 10.0.401's dependency-file incremental inputs do not include
+that changing raw reference. The [private workflow](../../workflows/issue779-checkpoint3-application.yml)
+now performs a nonincremental C3Sdk build, then publishes with `--no-build` using
+the same configuration, generated registration, helper path and variant. This
+regenerates dependency metadata through the SDK; no JSON graph is hand-edited.
+The local corrected image reaches the expected fixed invalid-control rejection.
+The dependency-data guard rejects the reproduced broken image, accepts the corrected
+image, and checks its actual bytes across instrumentation/staging/restoration.
+These loader/data checks establish no worker admission or native runtime success;
+a fresh complete Linux run remains required. Runtime policy and deadlines are unchanged.

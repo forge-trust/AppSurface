@@ -150,7 +150,10 @@ jobs:
           sdk_tool="$RUNNER_TEMP/checkpoint3-sdk-tool"
           mkdir -m 0700 "$sdk_tool"
           timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" > "$CHECKPOINT3_EVIDENCE/cli-c3sdk-restore.log" 2>&1
-          timeout --signal=KILL 180 dotnet publish "$cli" --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          # This raw reference changes between C3 and C3Sdk, but it is not a dependency-file
+          # incremental input in SDK 10.0.401. Rebuild the private graph before publishing it.
+          timeout --signal=KILL 180 dotnet build "$cli" --no-restore --no-incremental -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish "$cli" --no-build --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -o "$sdk_tool" >> "$CHECKPOINT3_EVIDENCE/cli-c3sdk-publish.log" 2>&1
           mkdir -p "$sdk_tool/reportgenerator/net10.0"
           cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$sdk_tool/reportgenerator/net10.0/"
           test -s "$sdk_tool/ForgeTrust.AppSurface.Cli.dll"
@@ -212,6 +215,9 @@ jobs:
           value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}, 'sdk_files': {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in names}}
           support_names = ['ForgeTrust.AppSurface.Evidence.ExitBarrier.Support' + suffix for suffix in ('.dll', '.pdb')]
           value['exit_support'] = {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in support_names}
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from sdk_failure import support_dependency_data
+          value['exit_support_runtime'] = support_dependency_data(sdk_tool)
           assert all(0 < (sdk_tool / name).stat().st_size < 1024 * 1024 for name in support_names)
           pathlib.Path(sys.argv[2]).write_text(json.dumps(value, sort_keys=True))
           PY
@@ -263,6 +269,10 @@ jobs:
           sdk_tool = pathlib.Path(sys.argv[2])
           assert {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in original['exit_support']} == original['exit_support']
           binding['exit_support'] = original['exit_support']
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from sdk_failure import support_dependency_data
+          assert support_dependency_data(sdk_tool) == original['exit_support_runtime']
+          binding['exit_support_runtime'] = original['exit_support_runtime']
           files = {'coverage': 'native-supervision.json', 'sdk_coverage': 'native-sdk.json', 'native_receipt': 'native/native-receipt.json', 'source_capture': 'source.json', 'sdk_failure_coverage': 'native-sdk-failure.json', 'sdk_failure_receipt': 'native/sdk-test-failure.json'}
           for key, name in files.items():
               path = root / name

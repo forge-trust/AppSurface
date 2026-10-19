@@ -425,6 +425,124 @@ def support_rows(tool):
     return rows
 
 
+
+SUPPORT_LIBRARY = 'ForgeTrust.AppSurface.Evidence.ExitBarrier.Support/0.2.0.0'
+SUPPORT_ASSEMBLY = 'ForgeTrust.AppSurface.Evidence.ExitBarrier.Support'
+SUPPORT_RUNTIME_FILES = {'ForgeTrust.AppSurface.Cli.deps.json': 1024 * 1024,
+                         'ForgeTrust.AppSurface.Cli.runtimeconfig.json': 64 * 1024}
+
+
+def _read_dependency_leaf(root, name, maximum):
+    """Read one fixed regular leaf through its retained directory; never follow or block on a FIFO."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=root)
+    try:
+        before = os.fstat(fd)
+        require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                and 0 < before.st_size <= maximum, 'support-runtime-file')
+        body = bytearray()
+        while len(body) <= before.st_size:
+            part = os.read(fd, min(65536, before.st_size + 1 - len(body)))
+            if not part:
+                break
+            body.extend(part)
+        require(len(body) == before.st_size and identity(before) == identity(os.fstat(fd))
+                == identity(os.stat(name, dir_fd=root, follow_symlinks=False)), 'support-runtime-stability')
+        return bytes(body), identity(before)
+    finally:
+        os.close(fd)
+
+
+def _dependency_json(body):
+    """Reject duplicate exact JSON names; dependency/package/asset names retain ordinal case."""
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            require(key not in result, 'support-runtime-json-members')
+            result[key] = value
+        return result
+    def constant(_):
+        raise ValueError('non-json-constant')
+    try:
+        value = json.loads(body, object_pairs_hook=pairs, parse_constant=constant)
+    except (ValueError, UnicodeError, RecursionError):
+        raise RuntimeError('sdk-failure-support-runtime-json') from None
+    require(type(value) is dict, 'support-runtime-json')
+    return value
+
+
+def support_dependency_data(tool):
+    """Validate the published net10 CLI support graph and return hashes/closed metadata only.
+
+    The two bounded no-follow, single-link regular files must retain their named metadata
+    through reading both leaves. This checks data, not assembly loading, native execution,
+    ownership or acceptance. No dependency bytes, properties or assembly counters are edited.
+    """
+    root = None
+    try:
+        root = os.open(tool, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        before = os.fstat(root)
+        bodies, snapshots = {}, {}
+        for name, maximum in SUPPORT_RUNTIME_FILES.items():
+            bodies[name], snapshots[name] = _read_dependency_leaf(root, name, maximum)
+        for name, expected in snapshots.items():
+            require(identity(os.stat(name, dir_fd=root, follow_symlinks=False)) == expected,
+                    'support-runtime-stability')
+        after, named = os.fstat(root), os.stat(tool, follow_symlinks=False)
+        keys = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid)
+        require(keys(before) == keys(after) == keys(named), 'support-runtime-directory')
+    except OSError:
+        raise RuntimeError('sdk-failure-support-runtime-file') from None
+    finally:
+        if root is not None:
+            os.close(root)
+    deps = _dependency_json(bodies['ForgeTrust.AppSurface.Cli.deps.json'])
+    config = _dependency_json(bodies['ForgeTrust.AppSurface.Cli.runtimeconfig.json'])
+    runtime_target = deps.get('runtimeTarget')
+    require(type(runtime_target) is dict and runtime_target.get('name') == '.NETCoreApp,Version=v10.0',
+            'support-runtime-target')
+    target_name = runtime_target['name']
+    targets, libraries = deps.get('targets'), deps.get('libraries')
+    require(type(targets) is dict and type(libraries) is dict and type(targets.get(target_name)) is dict,
+            'support-runtime-graph')
+    target = targets[target_name]
+    cli = [name for name in libraries if name.startswith('ForgeTrust.AppSurface.Cli/')]
+    require(len(cli) == 1 and type(libraries[cli[0]]) is dict
+            and libraries[cli[0]].get('type') == 'project', 'support-runtime-cli')
+    roots = [name for name in target if name.startswith('ForgeTrust.AppSurface.Cli/')]
+    require(roots == cli and type(target[cli[0]]) is dict, 'support-runtime-cli')
+    dependencies = target[cli[0]].get('dependencies')
+    require(type(dependencies) is dict and dependencies.get(SUPPORT_ASSEMBLY) == '0.2.0.0',
+            'support-runtime-cli-dependency')
+    helper = libraries.get(SUPPORT_LIBRARY)
+    require(type(helper) is dict and helper.get('type') == 'reference'
+            and [name for name in libraries if name.startswith(SUPPORT_ASSEMBLY + '/')] == [SUPPORT_LIBRARY],
+            'support-runtime-library')
+    helper_target = target.get(SUPPORT_LIBRARY)
+    require(type(helper_target) is dict
+            and [name for name in target if name.startswith(SUPPORT_ASSEMBLY + '/')] == [SUPPORT_LIBRARY],
+            'support-runtime-entry')
+    runtime = helper_target.get('runtime')
+    require(type(runtime) is dict and set(runtime) == {SUPPORT_ASSEMBLY + '.dll'}, 'support-runtime-entry')
+    assembly = runtime[SUPPORT_ASSEMBLY + '.dll']
+    require(type(assembly) is dict and assembly.get('assemblyVersion') == '0.2.0.0'
+            and assembly.get('fileVersion') == '0.2.0.0', 'support-runtime-version')
+    options = config.get('runtimeOptions')
+    require(type(options) is dict and options.get('tfm') == 'net10.0' and 'framework' not in options
+            and 'includedFrameworks' not in options, 'support-runtime-framework')
+    frameworks = options.get('frameworks')
+    expected = {'Microsoft.NETCore.App': '10.0.0', 'Microsoft.AspNetCore.App': '10.0.0'}
+    require(type(frameworks) is list and len(frameworks) == 2
+            and all(type(row) is dict and type(row.get('name')) is str
+                    and row['name'] in expected and row.get('version') == expected[row['name']]
+                    for row in frameworks)
+            and {row['name'] for row in frameworks} == set(expected), 'support-runtime-framework')
+    return {'schema': 'issue779-sdk-support-dependency-v1',
+            'files': {name: {'sha256': hashlib.sha256(body).hexdigest(), 'bytes': len(body)}
+                      for name, body in bodies.items()},
+            'runtime_target': target_name, 'tfm': 'net10.0', 'helper_library': SUPPORT_LIBRARY,
+            'assembly_version': '0.2.0.0', 'file_version': '0.2.0.0', 'native_acceptance': False}
+
+
 def require_worker(worker, expected, instrumented):
     require(worker['schema'] == 'evidence-worker-measurement-v3' and type(worker['normal_exit_code']) is int
             and worker['normal_exit_code'] == 1 and worker['original_pidfd_exit'] is True
@@ -603,6 +721,7 @@ def execute(args):
     require(originals['source'] == args.source and set(originals['sdk_files']) == set(NAMES), 'source-originals')
     require(set(originals['exit_support']) == set(SUPPORT_NAMES)
             and support_rows(args.sdk_tool) == originals['exit_support'], 'support-original')
+    require(support_dependency_data(args.sdk_tool) == originals['exit_support_runtime'], 'support-runtime-original')
     instrumented = image_rows(args.sdk_tool)
     require(all(instrumented[name] != originals['sdk_files'][name] for name in NAMES if name.endswith('.dll')), 'instrumentation')
     temporary = args.evidence.parent / 'checkpoint3-sdk-failure-work'
@@ -612,6 +731,7 @@ def execute(args):
     case_args.digests = args.evidence / 'registration-digests.json'
     tools, runtime = r.stage(case_args, end, sdk_only=True)
     require(support_rows(tools['sdk-normal'][0]) == originals['exit_support'], 'support-staged')
+    require(support_dependency_data(tools['sdk-normal'][0]) == originals['exit_support_runtime'], 'support-runtime-staged')
     observer = PassiveTmpObserver()
     case_args.sdk_tmp_observer = observer
     try:
@@ -628,7 +748,8 @@ def execute(args):
     require_worker(result['worker_measurements'][0], result['sdk_failure']['worker'], instrumented)
     result.update({'schema': 'issue779-sdk-failed-producer-v1', 'source': args.source,
                    'sdk_original': originals['sdk_files'], 'sdk_instrumented': instrumented,
-                   'exit_support': originals['exit_support'], 'finalized': False})
+                   'exit_support': originals['exit_support'],
+                   'exit_support_runtime': originals['exit_support_runtime'], 'finalized': False})
     r.write(temporary / 'provisional.json', r.canonical(result))
 
 
@@ -664,6 +785,8 @@ def finalize(args):
     require(image_rows(args.sdk_tool) == originals['sdk_files'], 'restored-originals')
     require(set(originals['exit_support']) == set(SUPPORT_NAMES) and result['exit_support'] == originals['exit_support']
             and support_rows(args.sdk_tool) == originals['exit_support'], 'support-restored')
+    require(result['exit_support_runtime'] == originals['exit_support_runtime']
+            == support_dependency_data(args.sdk_tool), 'support-runtime-restored')
     report = args.evidence / 'native-sdk-failure.json'
     require(report.is_file() and not report.is_symlink() and 0 < report.stat().st_size <= REPORT_LIMIT, 'completed-report')
     capture = strict_json((args.evidence / 'source.json').read_bytes())

@@ -530,5 +530,165 @@ class WorkerStartupDiagnosticDataTests(unittest.TestCase):
             self.assertFalse((evidence / 'native').exists())
 
 
+
+class SupportDependencyDataTests(unittest.TestCase):
+    """Actual small files with the published CLI graph shape; no CLR loading or native authority."""
+
+    @staticmethod
+    def fixture():
+        helper = subject.SUPPORT_LIBRARY
+        deps = {'runtimeTarget': {'name': '.NETCoreApp,Version=v10.0', 'signature': ''},
+                'targets': {'.NETCoreApp,Version=v10.0': {
+                    'ForgeTrust.AppSurface.Cli/0.1.0': {'dependencies': {subject.SUPPORT_ASSEMBLY: '0.2.0.0'}},
+                    helper: {'runtime': {subject.SUPPORT_ASSEMBLY + '.dll': {
+                        'assemblyVersion': '0.2.0.0', 'fileVersion': '0.2.0.0'}},
+                        'compile': {subject.SUPPORT_ASSEMBLY + '.dll': {}}},
+                    'Other/1.0.0': {'runtime': {'Case.dll': {}, 'case.dll': {}}}}},
+                'libraries': {'ForgeTrust.AppSurface.Cli/0.1.0': {'type': 'project'},
+                              helper: {'type': 'reference', 'serviceable': False, 'sha512': ''},
+                              'Other/1.0.0': {'type': 'package'}},
+                'private-canary': 'discarded'}
+        config = {'runtimeOptions': {'tfm': 'net10.0', 'frameworks': [
+            {'name': 'Microsoft.NETCore.App', 'version': '10.0.0'},
+            {'name': 'Microsoft.AspNetCore.App', 'version': '10.0.0'}],
+            'configProperties': {'System.Reflection.Metadata.MetadataUpdater.IsSupported': False}}}
+        return deps, config
+
+    @staticmethod
+    def save(root, deps, config):
+        for name, value in zip(subject.SUPPORT_RUNTIME_FILES, (deps, config)):
+            (root / name).write_bytes(json.dumps(value).encode())
+
+    def test_real_files_return_only_fixed_metadata_and_exact_byte_bindings(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self.save(root, *self.fixture())
+            with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+                result = subject.support_dependency_data(root)
+            self.assertEqual('', out.getvalue() + err.getvalue())
+            self.assertEqual('issue779-sdk-support-dependency-v1', result['schema'])
+            self.assertEqual(subject.SUPPORT_LIBRARY, result['helper_library'])
+            self.assertFalse(result['native_acceptance'])
+            self.assertNotIn('private-canary', json.dumps(result))
+            for name, row in result['files'].items():
+                body = (root / name).read_bytes()
+                self.assertEqual({'bytes': len(body), 'sha256': subject.hashlib.sha256(body).hexdigest()}, row)
+
+    def test_each_single_graph_mutation_rejects_after_the_valid_neighbor(self):
+        for mutation in ('cli-dependency', 'cli-dependency-version', 'runtime-entry', 'library',
+                         'reference-type', 'assembly-version', 'file-version', 'runtime-target',
+                         'cli-root-missing', 'cli-root-duplicate', 'helper-version-duplicate',
+                         'runtime-entry-type', 'graph-type', 'tfm', 'framework-version',
+                         'framework-duplicate', 'framework-type', 'runtime-options-type'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); deps, config = self.fixture(); self.save(root, deps, config)
+                subject.support_dependency_data(root)
+                target = deps['targets']['.NETCoreApp,Version=v10.0']
+                helper = target[subject.SUPPORT_LIBRARY]
+                if mutation == 'cli-dependency': target['ForgeTrust.AppSurface.Cli/0.1.0']['dependencies'].pop(subject.SUPPORT_ASSEMBLY)
+                if mutation == 'cli-dependency-version': target['ForgeTrust.AppSurface.Cli/0.1.0']['dependencies'][subject.SUPPORT_ASSEMBLY] = '0.1.0.0'
+                if mutation == 'runtime-entry': helper['runtime'].pop(subject.SUPPORT_ASSEMBLY + '.dll')
+                if mutation == 'library': deps['libraries'].pop(subject.SUPPORT_LIBRARY)
+                if mutation == 'reference-type': deps['libraries'][subject.SUPPORT_LIBRARY]['type'] = 'package'
+                if mutation == 'assembly-version': helper['runtime'][subject.SUPPORT_ASSEMBLY + '.dll']['assemblyVersion'] = '0.1.0.0'
+                if mutation == 'file-version': helper['runtime'][subject.SUPPORT_ASSEMBLY + '.dll']['fileVersion'] = '0.1.0.0'
+                if mutation == 'runtime-target': deps['runtimeTarget']['name'] = 'private-canary'
+                if mutation == 'cli-root-missing': deps['libraries'].pop('ForgeTrust.AppSurface.Cli/0.1.0')
+                if mutation == 'cli-root-duplicate': deps['libraries']['ForgeTrust.AppSurface.Cli/0.2.0'] = {'type': 'project'}
+                if mutation == 'helper-version-duplicate': deps['libraries'][subject.SUPPORT_ASSEMBLY + '/0.1.0.0'] = {'type': 'reference'}
+                if mutation == 'runtime-entry-type': helper['runtime'] = []
+                if mutation == 'graph-type': deps['targets'] = []
+                if mutation == 'tfm': config['runtimeOptions']['tfm'] = 'net9.0'
+                if mutation == 'framework-version': config['runtimeOptions']['frameworks'][0]['version'] = '9.0.0'
+                if mutation == 'framework-duplicate': config['runtimeOptions']['frameworks'][1] = config['runtimeOptions']['frameworks'][0]
+                if mutation == 'framework-type': config['runtimeOptions']['frameworks'] = {}
+                if mutation == 'runtime-options-type': config['runtimeOptions'] = []
+                self.save(root, deps, config)
+                with self.assertRaisesRegex(RuntimeError, '^sdk-failure-support-runtime-') as error:
+                    subject.support_dependency_data(root)
+                self.assertNotIn('private-canary', str(error.exception))
+
+    def test_duplicate_exact_members_and_malformed_json_reject_without_casefolding_assets(self):
+        for name in subject.SUPPORT_RUNTIME_FILES:
+            for mutation in ('duplicate-root', 'duplicate-nested', 'malformed', 'constant', 'wrong-root'):
+                with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp); self.save(root, *self.fixture()); subject.support_dependency_data(root)
+                    path = root / name; body = path.read_bytes()
+                    if mutation == 'duplicate-root': body = b'{"same":1,"same":2}'
+                    if mutation == 'duplicate-nested': body = b'{"nested":{"same":1,"same":2}}'
+                    if mutation == 'malformed': body = b'{private-canary'
+                    if mutation == 'constant': body = b'{"other":NaN}'
+                    if mutation == 'wrong-root': body = b'[]'
+                    path.write_bytes(body)
+                    with self.assertRaisesRegex(RuntimeError, '^sdk-failure-support-runtime-'):
+                        subject.support_dependency_data(root)
+
+    def test_nonregular_link_missing_empty_and_oversize_files_reject_before_reading_fifo(self):
+        for name, maximum in subject.SUPPORT_RUNTIME_FILES.items():
+            for mutation in ('directory', 'symlink', 'hardlink', 'fifo', 'missing', 'empty', 'oversize'):
+                with self.subTest(name=name, mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp); self.save(root, *self.fixture()); subject.support_dependency_data(root)
+                    path = root / name
+                    if mutation == 'directory': path.unlink(); path.mkdir()
+                    if mutation == 'symlink': path.unlink(); path.symlink_to(root / 'private-canary')
+                    if mutation == 'hardlink': os.link(path, root / 'private-canary')
+                    if mutation == 'fifo': path.unlink(); os.mkfifo(path)
+                    if mutation == 'missing': path.unlink()
+                    if mutation == 'empty': path.write_bytes(b'')
+                    if mutation == 'oversize':
+                        with path.open('r+b') as stream: stream.truncate(maximum + 1)
+                    with self.assertRaisesRegex(RuntimeError, '^sdk-failure-support-runtime-file$') as error:
+                        subject.support_dependency_data(root)
+                    self.assertIsNone(error.exception.__cause__)
+
+    def test_actual_midread_growth_or_named_replacement_rejects_and_closes_read_fds(self):
+        for mutation in ('growth', 'replacement'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp); self.save(root, *self.fixture()); subject.support_dependency_data(root)
+                original_read = os.read; fds = set(); changed = False
+                path = root / 'ForgeTrust.AppSurface.Cli.deps.json'
+                def read(fd, count):
+                    nonlocal changed
+                    body = original_read(fd, count); fds.add(fd)
+                    if body and not changed:
+                        changed = True
+                        if mutation == 'growth':
+                            with path.open('ab') as stream: stream.write(b' ')
+                        else:
+                            replacement = root / 'replacement'; replacement.write_bytes(path.read_bytes())
+                            replacement.replace(path)
+                    return body
+                with patch.object(subject.os, 'read', side_effect=read):
+                    with self.assertRaisesRegex(RuntimeError, '^sdk-failure-support-runtime-stability$'):
+                        subject.support_dependency_data(root)
+                self.assertTrue(changed)
+                for fd in fds:
+                    with self.assertRaises(OSError): os.fstat(fd)
+
+    def test_second_file_read_cannot_hide_a_change_to_the_first_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); self.save(root, *self.fixture()); subject.support_dependency_data(root)
+            original = subject._read_dependency_leaf
+            def read(fd, name, maximum):
+                result = original(fd, name, maximum)
+                if name.endswith('runtimeconfig.json'):
+                    path = root / 'ForgeTrust.AppSurface.Cli.deps.json'
+                    path.write_bytes(path.read_bytes() + b' ')
+                return result
+            with patch.object(subject, '_read_dependency_leaf', side_effect=read):
+                with self.assertRaisesRegex(RuntimeError, '^sdk-failure-support-runtime-stability$'):
+                    subject.support_dependency_data(root)
+
+    def test_changed_valid_bytes_change_binding_without_rewriting_either_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); deps, config = self.fixture(); self.save(root, deps, config)
+            original = subject.support_dependency_data(root)
+            config['runtimeOptions']['configProperties']['unrelated'] = True
+            self.save(root, deps, config)
+            before = {name: (root / name).read_bytes() for name in subject.SUPPORT_RUNTIME_FILES}
+            changed = subject.support_dependency_data(root)
+            self.assertNotEqual(original, changed)
+            self.assertEqual(before, {name: (root / name).read_bytes() for name in subject.SUPPORT_RUNTIME_FILES})
+
+
 if __name__ == '__main__':
     unittest.main()
