@@ -231,6 +231,7 @@ def execute(args,case,tools,runtime,end):
  guard=Path('/run/appsurface-evidence-owners');guard.mkdir(mode=0o700,exist_ok=True);require(guard.stat().st_uid==0 and stat.S_IMODE(guard.stat().st_mode)==0o700,'guard-parent')
  marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
  stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;held=None;descriptor=None;app=None;producer=None;resource=None;dcp=None;descendant=None;descendant_control=None;cancelled=False;factory=False;probe503=None;term_seen=False
+ tmp_observer=getattr(args,'sdk_tmp_observer',None) if case=='sdk-test-failure' else None
  launch=owner_command(runtime,tool,owner,marker/'armed',request_path)
  try:
   with stdout.open('xb') as out,stderr.open('xb') as err:
@@ -241,6 +242,9 @@ def execute(args,case,tools,runtime,end):
     if descriptor is None:descriptor=sealed_descriptor(path)
     scratch=Path('/run/appsurface-app-'+generation+'/scratch')
     if descriptor is not None:
+     if tmp_observer is not None:
+      try:tmp_observer.arm_once(descriptor,units[1],process_sample,deadline)
+      except Exception:pass # Passive diagnostic errors never change the original case result.
      a=descriptor['application'];uid=a['application_uid'];gid=a['application_gid'];facts=c2.show(appunit,deadline)
      if app is None and int(facts.get('MainPID','0')):
       try:app=process_sample(int(facts['MainPID']),uid,gid,appunit)
@@ -278,6 +282,9 @@ def execute(args,case,tools,runtime,end):
        if entered.is_file() and entered.read_bytes()==b'cancel':
         if case=='stuck-descendant':descendant_control.require_live()
         command(['/usr/bin/systemctl','kill','--kill-whom=main','--signal=INT',owner],deadline);cancelled=True
+    if tmp_observer is not None:
+     try:tmp_observer.drain()
+     except Exception:pass
     if process.poll() is not None:break
     time.sleep(.1)
    require(process.poll() is not None,'root-terminal-before-deadline');code=process.wait(timeout=5)
@@ -331,6 +338,9 @@ def execute(args,case,tools,runtime,end):
   result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
  finally:
   # No fixture containment/repair upgrades the original result.
+  if tmp_observer is not None:
+   try:tmp_observer.finish()
+   except Exception:pass
   if descendant_control is not None:descendant_control.close()
   if held is not None:os.close(held)
   if process is not None and case in ('scratch-fifo','scratch-hardlink','scratch-oversize','sdk-test-failure') and (process.poll() is None or not result.get('passed')):

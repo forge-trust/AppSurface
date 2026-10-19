@@ -61,6 +61,10 @@ internal static class SdkFailureMeasurement
         var tests = state.GetProperty("tests");
         foreach (var item in new[] { ("failed", 1), ("passed", 5), ("skipped", 0), ("total", 6) })
             Assert.Equal(item.Item2, tests.GetProperty(item.Item1).GetInt32());
+        var branchMarker = info.GetProperty("test_branch_marker");
+        Assert.True(branchMarker.GetProperty("sealed_root_owned").GetBoolean());
+        Assert.Equal(12, branchMarker.GetProperty("bytes").GetInt32());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData("test-failure"u8)), branchMarker.GetProperty("sha256").GetString());
         var accounts = root.GetProperty("accounts").EnumerateArray().ToArray();
         var numeric = root.GetProperty("numeric_accounts").EnumerateArray().ToArray();
         Assert.Equal(8, accounts.Length);

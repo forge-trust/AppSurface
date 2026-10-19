@@ -32,6 +32,8 @@ public sealed class SdkFailureMeasurementTests
     [InlineData("producer-status")]
     [InlineData("producer-join")]
     [InlineData("actual-test-count")]
+    [InlineData("marker-owner")]
+    [InlineData("marker-bytes")]
     [InlineData("account-presence")]
     [InlineData("numeric-account")]
     [InlineData("duplicate-account")]
@@ -64,6 +66,8 @@ public sealed class SdkFailureMeasurementTests
             case "producer-status": info["producer"]!["normal_status"] = 0; break;
             case "producer-join": info["producer"]!["pump_joined"] = false; break;
             case "actual-test-count": info["producer"]!["tests"]!["failed"] = 0; break;
+            case "marker-owner": info["test_branch_marker"]!["sealed_root_owned"] = false; break;
+            case "marker-bytes": info["test_branch_marker"]!["sha256"] = new string('d', 64); break;
             case "account-presence": root["accounts"]![0]!["present"] = true; break;
             case "numeric-account": root["numeric_accounts"]![0]!["absent"] = false; break;
             case "duplicate-account": root["accounts"]![1] = root["accounts"]![0]!.DeepClone(); break;
@@ -149,6 +153,8 @@ public sealed class SdkFailureMeasurementTests
                 ["worker"] = new JsonObject { ["worker_pid"] = 200, ["worker_uid"] = 1001, ["worker_gid"] = 1002, ["cgroup"] = "/system.slice/fixture.service" },
                 ["account_binding"] = new JsonObject { ["worker_uid"] = 1001, ["worker_gid"] = 1002, ["subject_uid"] = 1003, ["subject_gid"] = 1004,
                     ["application_uid"] = 1005, ["application_gid"] = 1006, ["results_gid"] = 1007, ["resource_access_gid"] = 1008 },
+                ["test_branch_marker"] = new JsonObject { ["sealed_root_owned"] = true, ["bytes"] = 12,
+                    ["sha256"] = Convert.ToHexStringLower(SHA256.HashData("test-failure"u8)) },
                 ["producer"] = new JsonObject { ["normal_code"] = 1, ["normal_status"] = 1, ["captured_pid"] = 123, ["cleanup_failed"] = false,
                     ["native_acceptance"] = false, ["pending_failure"] = "None", ["physically_settled"] = true, ["group_empty_twice"] = true,
                     ["pump_joined"] = true, ["output_drained"] = true, ["tests"] = new JsonObject { ["failed"] = 1, ["passed"] = 5, ["skipped"] = 0, ["total"] = 6 } }

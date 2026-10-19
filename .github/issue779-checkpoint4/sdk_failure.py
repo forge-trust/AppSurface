@@ -1,6 +1,7 @@
 """One finite SDK failed-test observation, not an application/process owner or acceptance authority."""
 from pathlib import Path
 import argparse
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -9,6 +10,7 @@ import os
 import platform
 import re
 import stat
+import struct
 import time
 
 from measurement_arguments import MODULES
@@ -20,6 +22,200 @@ STATE_FIELDS = set(('schema stage normal_code normal_status stopped_code stopped
                     'last_status last_active last_substate output_drained').split())
 PREFIX_LIMIT = 1024 * 1024
 REPORT_LIMIT = 8 * 1024 * 1024
+EVENT_BATCH_BYTES = 32 * 1024
+EVENT_BATCH_LIMIT = 8
+EVENT_LIMIT = 2048
+EVENT_HEADER = struct.Struct('=iIII')
+EVENT_MASK = 0x100 | 0x8 | 0x200  # IN_CREATE, IN_CLOSE_WRITE, IN_DELETE only.
+TRACKER_NAMES = tuple(re.compile(re.escape(module.encode('ascii')) +
+                      rb'_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+                      for module in MODULES)
+
+
+class PassiveTmpEvents:
+    """Bounded event metadata only; matching a module-prefix/GUID is not an exact tracker binding.
+
+    No filename or hit bytes survive parsing. Missing events never prove absence, including when
+    arming was late, a watch was lost, or any budget/queue/parser limit made observation incomplete.
+    The eight batches and 2048 records are lifetime bounds, not renewed by each controller poll.
+    """
+
+    def __init__(self):
+        self.rows = [{'module': module, 'create': 0, 'close_write': 0, 'delete': 0} for module in MODULES]
+        self.batches = self.events = self.ignored_events = 0
+        self.overflow = self.parse_error = self.watch_lost = self.limit_reached = False
+
+    def feed(self, data, watch):
+        """Consume one complete kernel-read batch; malformed or foreign records close observation."""
+        if self.overflow or self.parse_error or self.watch_lost or self.limit_reached:
+            return
+        if self.batches >= EVENT_BATCH_LIMIT:
+            self.limit_reached = True
+            return
+        self.batches += 1
+        if type(data) is not bytes or not 0 < len(data) <= EVENT_BATCH_BYTES or type(watch) is not int or watch < 0:
+            self.parse_error = True
+            return
+        offset = 0
+        while offset < len(data):
+            if self.events >= EVENT_LIMIT:
+                self.limit_reached = True
+                return
+            if len(data) - offset < EVENT_HEADER.size:
+                self.parse_error = True
+                return
+            wd, mask, cookie, size = EVENT_HEADER.unpack_from(data, offset)
+            offset += EVENT_HEADER.size
+            if size > 256 or size % 4 or size > len(data) - offset:
+                self.parse_error = True
+                return
+            name = data[offset:offset + size]
+            offset += size
+            self.events += 1
+            if mask & 0x4000:  # IN_Q_OVERFLOW has no filename and wd == -1.
+                self.overflow = True
+                return
+            if wd != watch or cookie != 0:
+                self.parse_error = True
+                return
+            if mask == 0x8000 and not size:  # IN_IGNORED: the kernel removed the watch.
+                self.watch_lost = True
+                return
+            if mask & ~(EVENT_MASK | 0x40000000) or not mask & EVENT_MASK or not size:
+                self.parse_error = True
+                return
+            end = name.find(b'\0')
+            if end <= 0 or any(name[end:]):
+                self.parse_error = True
+                return
+            name = name[:end]
+            index = next((i for i, pattern in enumerate(TRACKER_NAMES) if pattern.fullmatch(name)), None)
+            if index is None or mask & 0x40000000:  # Directories are not hit-file events.
+                self.ignored_events += 1
+                continue
+            for bit, field in ((0x100, 'create'), (0x8, 'close_write'), (0x200, 'delete')):
+                if mask & bit:
+                    self.rows[index][field] += 1
+        if self.events == EVENT_LIMIT or self.batches == EVENT_BATCH_LIMIT:
+            self.limit_reached = True
+
+
+class PassiveTmpObserver:
+    """SDK-negative Python fixture observation; no process control, hit recovery or acceptance authority.
+
+    Arm once around the existing real process sampler (which checks all four UID/GID values),
+    intentionally following /proc/<pid>/root and /proc/self/fd kernel links. The retained directory
+    is watched, never enumerated or read for counters. Errors become closed flags only. Finish in
+    the controller's finally before its original outcome is consumed; every owned FD is attempted.
+    """
+
+    def __init__(self):
+        self.data = PassiveTmpEvents()
+        self.temporary = self.notification = self.watch = None
+        self.attempted = self.armed = self.identity_checked = self.finished = False
+        self.unavailable = True
+        self.read_error = self.close_error = self.deadline_reached = False
+        self.end = None
+
+    def arm_once(self, descriptor, unit, sample, end):
+        """Attempt once after the real descriptor, using only its original case deadline and sampler."""
+        if self.attempted or self.finished:
+            return
+        self.attempted = True
+        self.end = end
+        try:
+            check_deadline(end)
+            if platform.system() != 'Linux':
+                return
+            pid, uid, gid = (descriptor[key] for key in ('worker_pid', 'worker_uid', 'worker_gid'))
+            require(type(pid) is int and 0 < pid <= 2147483647
+                    and all(type(value) is int and 0 < value < 4294967295 for value in (uid, gid)), 'event-identity')
+            before = sample(pid, uid, gid, unit)
+            require((before['pid'], before['uid'], before['gid']) == (pid, uid, gid)
+                    and before['cgroup'] == descriptor['cgroup'] and type(before['starttime']) is int
+                    and before['starttime'] > 0, 'event-identity')
+            self.temporary = os.open('/proc/' + str(pid) + '/root/tmp',
+                                     os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+            metadata = os.fstat(self.temporary)
+            require(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == 0 and metadata.st_gid == 0
+                    and metadata.st_ino > 0, 'event-directory')
+            keys = ('pid', 'uid', 'gid', 'starttime', 'cgroup')
+            after = sample(pid, uid, gid, unit)
+            require(all(before[key] == after[key] for key in keys), 'event-identity')
+            check_deadline(end)
+            libc = ctypes.CDLL(None, use_errno=True)
+            init = libc.inotify_init1
+            init.argtypes, init.restype = [ctypes.c_int], ctypes.c_int
+            add = libc.inotify_add_watch
+            add.argtypes, add.restype = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32], ctypes.c_int
+            self.notification = init(os.O_NONBLOCK | os.O_CLOEXEC)
+            require(self.notification >= 0, 'event-unavailable')
+            self.watch = add(self.notification, ('/proc/self/fd/' + str(self.temporary)).encode('ascii'),
+                             EVENT_MASK | 0x01000000)  # IN_ONLYDIR; follow this intentionally retained FD.
+            require(self.watch >= 0, 'event-unavailable')
+            final = sample(pid, uid, gid, unit)
+            retained = os.fstat(self.temporary)
+            require(all(before[key] == final[key] for key in keys)
+                    and (metadata.st_dev, metadata.st_ino, metadata.st_mode, metadata.st_uid, metadata.st_gid)
+                    == (retained.st_dev, retained.st_ino, retained.st_mode, retained.st_uid, retained.st_gid), 'event-identity')
+            check_deadline(end)
+            self.identity_checked = self.armed = True
+            self.unavailable = False
+        except Exception:
+            self._close()
+
+    def drain(self):
+        """Read only the nonblocking notification FD within lifetime byte/record bounds and case end."""
+        if not self.armed or self.finished or self.read_error:
+            return
+        try:
+            while not (self.data.overflow or self.data.parse_error or self.data.watch_lost or self.data.limit_reached):
+                if time.monotonic() >= self.end:
+                    self.deadline_reached = True
+                    return
+                try:
+                    batch = os.read(self.notification, EVENT_BATCH_BYTES)
+                except BlockingIOError:
+                    return
+                if not batch:
+                    self.read_error = True
+                    return
+                self.data.feed(batch, self.watch)
+        except Exception:
+            self.read_error = True
+
+    def _close(self):
+        for name in ('notification', 'temporary'):
+            fd = getattr(self, name)
+            setattr(self, name, None)
+            if fd is not None and fd >= 0:
+                try:
+                    os.close(fd)
+                except Exception:
+                    self.close_error = True
+
+    def finish(self):
+        """Emit at most one small closed packet to the existing private collector stdout log."""
+        if self.finished:
+            return
+        try:
+            self.drain()
+        finally:
+            self._close()
+            self.finished = True
+        packet = {'schema': 'issue779-sdk-private-tmp-events-v1', 'arm_attempted': self.attempted, 'armed': self.armed,
+                  'identity_checked': self.identity_checked, 'unavailable': self.unavailable,
+                  'overflow': self.data.overflow, 'parse_error': self.data.parse_error,
+                  'watch_lost': self.data.watch_lost, 'limit_reached': self.data.limit_reached,
+                  'deadline_reached': self.deadline_reached, 'read_error': self.read_error,
+                  'close_error': self.close_error, 'batches': self.data.batches,
+                  'events': self.data.events, 'ignored_events': self.data.ignored_events,
+                  'modules': self.data.rows, 'exact_tracker_binding': False,
+                  'absence_proof': False, 'native_acceptance': False}
+        try:
+            print(json.dumps(packet, sort_keys=True), flush=True)
+        except Exception:
+            pass  # A diagnostic sink failure must not replace the original controller outcome.
 
 
 def require(value, category):
@@ -47,13 +243,13 @@ def identity(metadata):
             metadata.st_nlink, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns)
 
 
-def read_leaf(root, name, limit, uid, gid, end):
+def read_leaf(root, name, limit, uid, gid, end, *, permissions=0o600):
     check_deadline(end)
     fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=root)
     try:
         before = os.fstat(fd)
         require(stat.S_ISREG(before.st_mode) and before.st_uid == uid and before.st_gid == gid
-                and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600
+                and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == permissions
                 and 0 <= before.st_size <= limit, 'diagnostic-file')
         body = bytearray()
         while len(body) <= before.st_size:
@@ -99,7 +295,10 @@ def read_failure(generation, expected_pid, end, *, parent=Path('/run'), uid=0, g
             require(state['cleanup_failed'] is False and state['pending_failure'] == 'None', 'producer-cleanup')
             summaries = re.findall(rb'Failed!\s*-\s*Failed:\s*(\d+),\s*Passed:\s*(\d+),\s*Skipped:\s*(\d+),\s*Total:\s*(\d+),', stdout + b'\n' + stderr)
             require(len(summaries) == 1 and tuple(map(int, summaries[0])) == (1, 5, 0, 6), 'actual-test-summary')
-            require(b'Root-selected test-failure scenario.' in stdout + stderr, 'actual-test-failure')
+            # The unchanged --verbosity quiet command emits the failed row, not Assert.Fail's message.
+            failed_row = (rb'NativePreparation\.Subject\.Tests\.SubjectTests\.Calculator_branches_are_exercised'
+                          rb'\(left:\s*1,\s*right:\s*2,\s*operation:\s*0,\s*expected:\s*3\)\s*\[FAIL\]')
+            require(len(re.findall(failed_row, stderr)) == 1, 'actual-test-failure')
             require(identity(before) == identity(os.fstat(root))
                     and identity(before) == identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)), 'diagnostic-root-stability')
             check_deadline(end)
@@ -124,6 +323,41 @@ def driver():
     return module
 
 
+def read_case_marker(generation, end, *, parent=Path('/run'), uid=0, gid=0):
+    """Require the real durable pre-assert marker after producer scratch was sealed; data only, never admission."""
+    require(type(generation) is str and re.fullmatch('[0-9a-f]{32}', generation), 'generation')
+    owned, nodes = [], []
+    try:
+        check_deadline(end)
+        root = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        owned.append(root)
+        metadata = os.fstat(root)
+        require(metadata.st_uid == uid and metadata.st_gid == gid and not metadata.st_mode & 0o022, 'marker-parent')
+        names = ('appsurface-evidence-producer-data-' + generation, 'scratch', 'tmp')
+        for index, name in enumerate(names):
+            check_deadline(end)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=root)
+            owned.append(child)
+            before = os.fstat(child)
+            require(before.st_uid == uid and before.st_gid == gid and before.st_ino > 0
+                    and stat.S_IMODE(before.st_mode) in ((0o700, 0o711) if index == 0 else (0o700,)), 'marker-directory')
+            nodes.append((root, name, child, before))
+            root = child
+        body = read_leaf(root, 'checkpoint2-case-entered', 64, uid, gid, end, permissions=0o600)
+        require(body == b'test-failure', 'actual-test-marker')
+        for parent_fd, name, child, before in reversed(nodes):
+            require(identity(before) == identity(os.fstat(child))
+                    and identity(before) == identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)), 'marker-stability')
+        check_deadline(end)
+        return {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest(), 'sealed_root_owned': True}
+    finally:
+        failed = False
+        for fd in reversed(owned):
+            try: os.close(fd)
+            except OSError: failed = True
+        if failed: raise RuntimeError('sdk-failure-marker-close')
+
+
 def inspect_case(generation, descriptor, producer, stderr, observations, end):
     r = driver()
     require(producer is not None, 'actual-producer')
@@ -136,6 +370,7 @@ def inspect_case(generation, descriptor, producer, stderr, observations, end):
             and packet['application_unit'] == 'appsurface-evidence-application-' + generation + '.service', 'ready-guard')
     require(any(row.get('phase') == 'ready' and row.get('dcp_checked') is True for row in observations), 'original-readiness')
     state = read_failure(generation, producer['pid'], end)
+    marker = read_case_marker(generation, end)
     path = Path('/run/appsurface-evidence-' + generation + '/output/evidence/evidence-manifest.json')
     require(path.stat().st_size <= 1024 * 1024, 'manifest-bound')
     manifest = strict_json(path.read_bytes())
@@ -145,7 +380,7 @@ def inspect_case(generation, descriptor, producer, stderr, observations, end):
     require(len(rows) == 1 and rows[0]['Outcome'] == 'Failed' and rows[0].get('Artifacts') in (None, [])
             and rows[0]['SatisfiedAssertionIds'] == [] and rows[0]['Diagnostic'] == 'The restricted coverage process exited with code 1.', 'failed-producer')
     r.c2.verify_sealed_output(path.parent)
-    return {'original_application_ready_guard': packet, 'producer': state,
+    return {'original_application_ready_guard': packet, 'producer': state, 'test_branch_marker': marker,
             'manifest_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'execution_verdict': 'Incomplete', 'claim_kind': 'None', 'eligibility': 'None', 'cleanup_completed': True,
             'producer_result': {'outcome': rows[0]['Outcome'], 'diagnostic': rows[0]['Diagnostic'],
@@ -236,7 +471,15 @@ def execute(args):
     case_args.prepared = args.prepared / 'payload-preparation.json'
     case_args.digests = args.evidence / 'registration-digests.json'
     tools, runtime = r.stage(case_args, end, sdk_only=True)
-    result = r.execute(case_args, 'sdk-test-failure', tools, runtime, end)
+    observer = PassiveTmpObserver()
+    case_args.sdk_tmp_observer = observer
+    try:
+        result = r.execute(case_args, 'sdk-test-failure', tools, runtime, end)
+    finally:
+        try:
+            observer.finish()
+        except Exception:
+            pass  # Even an unexpected observer error cannot replace original execution failure.
     print(json.dumps(closed_case_result(result), sort_keys=True), flush=True)
     require(result.get('passed') is True and result.get('groups_empty') is True and result.get('final_groups_empty') is True, 'original-control')
     require(result.get('root_exit') == 1 and len(result.get('worker_measurements', [])) == 1, 'natural-failed-worker')

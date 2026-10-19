@@ -1,14 +1,19 @@
 """Real small-file reader and closed argument data only; no collector, runtime owner or native claim."""
 from pathlib import Path
 import json
+import io
 import os
 import tempfile
 import time
 import unittest
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import measurement_arguments as arguments
 import sdk_failure as subject
+
+FAILED_ROW = (b'[xUnit.net 00:00:01] NativePreparation.Subject.Tests.SubjectTests.'
+              b'Calculator_branches_are_exercised(left: 1, right: 2, operation: 0, expected: 3) [FAIL]\n')
 
 
 class FailureDiagnosticDataTests(unittest.TestCase):
@@ -39,7 +44,7 @@ class FailureDiagnosticDataTests(unittest.TestCase):
             state[key] = True
         self.save(root / 'state.json', json.dumps(state).encode())
         self.save(root / 'stdout.prefix', b'Failed! - Failed: 1, Passed: 5, Skipped: 0, Total: 6, Duration: 1ms\nprivate-canary')
-        self.save(root / 'stderr.prefix', b'Root-selected test-failure scenario.\n')
+        self.save(root / 'stderr.prefix', FAILED_ROW)
         return root, state
 
     @staticmethod
@@ -98,12 +103,39 @@ class FailureDiagnosticDataTests(unittest.TestCase):
                 self.save(root / 'stdout.prefix', body)
                 with self.assertRaises(RuntimeError): self.read(parent)
 
-    def test_summary_without_actual_fixed_failure_message_rejects(self):
+    def test_summary_without_the_actual_quiet_failed_case_row_rejects(self):
         with tempfile.TemporaryDirectory() as temp:
             parent = Path(temp).resolve()
             root, _ = self.fixture(parent)
             self.save(root / 'stderr.prefix', b'other failure')
             with self.assertRaises(RuntimeError): self.read(parent)
+
+    def test_actual_durable_marker_requires_sealed_private_root_ownership_and_exact_bytes(self):
+        for mutation in ('valid', 'wrong-bytes', 'wrong-mode', 'hardlink', 'symlink', 'fifo', 'missing'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temp:
+                parent = Path(temp).resolve()
+                root = parent / ('appsurface-evidence-producer-data-' + self.generation)
+                root.mkdir(mode=0o711)
+                scratch = root / 'scratch'; scratch.mkdir(mode=0o700)
+                nested = scratch / 'tmp'; nested.mkdir(mode=0o700)
+                marker = nested / 'checkpoint2-case-entered'
+                marker.write_bytes(b'test-failure'); marker.chmod(0o600)
+                if mutation == 'wrong-bytes':
+                    marker.write_bytes(b'normal')
+                if mutation == 'wrong-mode': marker.chmod(0o400)
+                if mutation == 'hardlink': os.link(marker, parent / 'owned-other-link')
+                if mutation == 'symlink': marker.unlink(); marker.symlink_to(parent / 'missing')
+                if mutation == 'fifo': marker.unlink(); os.mkfifo(marker, 0o400)
+                if mutation == 'missing': marker.unlink()
+                read = lambda: subject.read_case_marker(self.generation, time.monotonic() + 5,
+                    parent=parent, uid=os.getuid(), gid=os.getgid())
+                if mutation == 'valid':
+                    result = read()
+                    self.assertEqual(12, result['bytes'])
+                    self.assertTrue(result['sealed_root_owned'])
+                    self.assertEqual(subject.hashlib.sha256(b'test-failure').hexdigest(), result['sha256'])
+                else:
+                    with self.assertRaises((RuntimeError, OSError)): read()
 
     def test_actual_link_fifo_writable_missing_and_extra_nodes_reject_without_reading_the_fifo(self):
         for mutation in ('symlink', 'hardlink', 'fifo', 'mode', 'missing', 'extra', 'oversize'):
@@ -181,6 +213,159 @@ class FailureDiagnosticDataTests(unittest.TestCase):
             report['ForgeTrust.AppSurface.Evidence.Coverage.dll']['EvidenceRestrictedCoverageProducer.cs']['Producer']['RunAsync']['Lines']['2'] = 1
             path.write_bytes(body + b'changed')
             with self.assertRaises(RuntimeError): subject.require_failed_report(json.dumps(report).encode(), workspace, capture)
+
+
+class PassiveTmpEventDataTests(unittest.TestCase):
+    watch = 7
+    tracker = arguments.MODULES[0].encode('ascii') + b'_01234567-89ab-cdef-0123-456789abcdef'
+
+    @staticmethod
+    def record(name=b'', mask=0x100, watch=7, cookie=0):
+        payload = name + b'\0' if name else b''
+        payload += b'\0' * (-len(payload) % 4)
+        return subject.EVENT_HEADER.pack(watch, mask, cookie, len(payload)) + payload
+
+    def valid(self):
+        data = subject.PassiveTmpEvents()
+        data.feed(self.record(self.tracker, 0x100) + self.record(self.tracker, 0x8)
+                  + self.record(self.tracker, 0x200), self.watch)
+        self.assertFalse(data.parse_error)
+        self.assertEqual((1, 1, 1), tuple(data.rows[0][key] for key in ('create', 'close_write', 'delete')))
+        return data
+
+    def test_module_prefix_guid_events_count_without_retaining_names_or_counter_bytes(self):
+        data = self.valid()
+        for i, module in enumerate(arguments.MODULES[1:], 1):
+            name = module.encode('ascii') + b'_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+            data.feed(self.record(name, 0x108), self.watch)
+            self.assertEqual((1, 1, 0), tuple(data.rows[i][key] for key in ('create', 'close_write', 'delete')))
+        self.assertNotIn('01234567', json.dumps(data.rows))
+        self.assertEqual(8, data.events)
+
+    def test_unknown_names_paths_uppercase_guids_and_directories_are_not_file_counts(self):
+        self.valid()
+        data = subject.PassiveTmpEvents()
+        names = [b'private-canary', b'/tmp/' + self.tracker, self.tracker + b'.extra',
+                 self.tracker.upper(), self.tracker.replace(b'01234567-', b'0123456-')]
+        for name in names:
+            data.feed(self.record(name), self.watch)
+        data.feed(self.record(self.tracker, 0x40000100), self.watch)
+        self.assertEqual(6, data.ignored_events)
+        self.assertFalse(data.parse_error)
+        self.assertTrue(all(row['create'] == row['close_write'] == row['delete'] == 0 for row in data.rows))
+        self.assertNotIn('private-canary', json.dumps(data.__dict__))
+
+    def test_overflow_is_explicit_and_later_records_do_not_become_absence_evidence(self):
+        data = self.valid()
+        data.feed(self.record(mask=0x4000, watch=-1) + self.record(self.tracker), self.watch)
+        self.assertTrue(data.overflow)
+        self.assertEqual(1, data.rows[0]['create'])
+        data.feed(self.record(self.tracker), self.watch)
+        self.assertEqual(1, data.rows[0]['create'])
+
+    def test_kernel_watch_removal_closes_observation_without_a_delete_claim(self):
+        data = self.valid()
+        data.feed(self.record(mask=0x8000), self.watch)
+        self.assertTrue(data.watch_lost)
+        self.assertEqual(1, data.rows[0]['delete'])
+
+    def test_malformed_headers_lengths_terminators_and_foreign_watch_close_parser(self):
+        self.valid()
+        invalid = [b'', b'x' * 15, b'x' * (subject.EVENT_BATCH_BYTES + 1),
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 4) + b'abc',
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 3) + b'a\0\0',
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 260) + b'\0' * 260,
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 4) + b'abcd',
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 4) + b'\0' * 4,
+                   subject.EVENT_HEADER.pack(self.watch, 0x100, 0, 4) + b'a\0x\0',
+                   self.record(self.tracker, watch=8), self.record(self.tracker, cookie=1),
+                   self.record(self.tracker, mask=0x2), self.record(mask=0x100)]
+        for payload in invalid:
+            with self.subTest(size=len(payload)):
+                data = subject.PassiveTmpEvents()
+                data.feed(payload, self.watch)
+                self.assertTrue(data.parse_error)
+                data.feed(self.record(self.tracker), self.watch)
+                self.assertEqual(0, data.rows[0]['create'])
+
+    def test_batch_and_event_limits_are_lifetime_bounds(self):
+        self.valid()
+        data = subject.PassiveTmpEvents()
+        for _ in range(subject.EVENT_BATCH_LIMIT + 1):
+            data.feed(self.record(b'unknown'), self.watch)
+        self.assertEqual(8, data.batches)
+        self.assertTrue(data.limit_reached)
+        data = subject.PassiveTmpEvents()
+        batch = self.record(b'unknown') * 1024
+        data.feed(batch, self.watch)
+        self.assertFalse(data.limit_reached)
+        data.feed(batch, self.watch)
+        self.assertEqual(2048, data.events)
+        self.assertTrue(data.limit_reached)
+        data.feed(self.record(self.tracker), self.watch)
+        self.assertEqual(2048, data.events)
+        self.assertEqual(0, data.rows[0]['create'])
+
+    def test_expired_original_deadline_reads_nothing_and_packet_never_proves_absence(self):
+        observer = subject.PassiveTmpObserver()
+        observer.armed, observer.unavailable, observer.end = True, False, 42
+        output = io.StringIO()
+        with patch.object(subject.time, 'monotonic', return_value=42), patch.object(subject.os, 'read') as read:
+            with redirect_stdout(output):
+                observer.finish()
+        read.assert_not_called()
+        packet = json.loads(output.getvalue())
+        self.assertTrue(packet['deadline_reached'])
+        for field in ('absence_proof', 'exact_tracker_binding', 'native_acceptance'):
+            self.assertIs(packet[field], False)
+
+    def test_unavailable_observer_emits_one_closed_packet_without_exception_text(self):
+        observer = subject.PassiveTmpObserver()
+        descriptor = {'worker_pid': 123, 'worker_uid': 10, 'worker_gid': 11, 'cgroup': 'private-canary'}
+        attempts = []
+
+        def unavailable_sample(*args):
+            attempts.append(args)
+            raise ValueError('private-canary')
+
+        with patch.object(subject.platform, 'system', return_value='Linux'), patch.object(subject.os, 'open') as opened:
+            observer.arm_once(descriptor, 'fixture.service', unavailable_sample, time.monotonic() + 1)
+            observer.arm_once(descriptor, 'fixture.service', unavailable_sample, time.monotonic() + 1)
+        opened.assert_not_called()
+        self.assertEqual(1, len(attempts))
+        output = io.StringIO()
+        with redirect_stdout(output):
+            observer.finish()
+            observer.finish()
+        self.assertEqual(1, len(output.getvalue().splitlines()))
+        packet = json.loads(output.getvalue())
+        self.assertTrue(packet['unavailable'])
+        self.assertFalse(packet['armed'])
+        self.assertNotIn('private-canary', output.getvalue())
+        self.assertFalse(packet['absence_proof'])
+
+    def test_close_failure_attempts_both_real_pipe_fds_and_does_not_echo_error(self):
+        observer = subject.PassiveTmpObserver()
+        read_fd, write_fd = os.pipe()
+        observer.notification, observer.temporary = read_fd, write_fd
+        close = os.close
+        calls = []
+
+        def fail_first(fd):
+            calls.append(fd)
+            if fd == read_fd:
+                raise OSError('private-canary')
+            close(fd)
+
+        output = io.StringIO()
+        try:
+            with patch.object(subject.os, 'close', side_effect=fail_first), redirect_stdout(output):
+                observer.finish()
+            self.assertEqual([read_fd, write_fd], calls)
+            self.assertTrue(json.loads(output.getvalue())['close_error'])
+            self.assertNotIn('private-canary', output.getvalue())
+        finally:
+            close(read_fd)
 
 
 if __name__ == '__main__':
