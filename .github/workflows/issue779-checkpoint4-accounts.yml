@@ -1,0 +1,106 @@
+# Source-bound account mechanism measurements; no accepted consumer or production proof.
+name: Issue 779 private account mechanism controls
+on:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  accounts:
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [C4Accounts, C4AccountRollback]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    concurrency:
+      group: issue779-c4-accounts-${{ github.sha }}-${{ matrix.variant }}
+      cancel-in-progress: false
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+      C4_VARIANT: ${{ matrix.variant }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/checkpoint4-account-sdk
+        with:
+          dotnet-version: 10.0.401
+      - name: Capture complete clean source and define private destinations
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/checkpoint4-accounts-$C4_VARIANT"
+          mkdir -m 0700 "$evidence"
+          printf 'C4_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'C4_TOOL=%s/account-tool-%s\n' "$RUNNER_TEMP" "$C4_VARIANT" >> "$GITHUB_ENV"
+          runtime="$(dirname "$(readlink -f "$(command -v dotnet)")")"
+          printf 'C4_RUNTIME=%s\n' "$runtime" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_run_accounts.py > "$evidence/driver-controls.log" 2>&1
+      - name: Build only this same-source private account image
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification="$C4_VARIANT" > "$C4_EVIDENCE/restore.log" 2>&1
+          timeout --signal=KILL 300 dotnet publish Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification="$C4_VARIANT" -o "$C4_TOOL" > "$C4_EVIDENCE/publish.log" 2>&1
+          timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/c4-account-coverlet" > "$C4_EVIDENCE/coverlet-install.log" 2>&1
+          console="$RUNNER_TEMP/c4-account-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
+          test -s "$console"
+          printf 'C4_COVERLET=%s\n' "$console" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint4/run-accounts.py bind --variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA"
+      - name: Standard pinned collection around the genuine protected owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          common=(--variant "$C4_VARIANT" --tool "$C4_TOOL" --runtime "$C4_RUNTIME" --evidence "$C4_EVIDENCE" --source "$GITHUB_SHA")
+          target_args="$(python3 -B - "$C4_VARIANT" "$C4_TOOL" "$C4_RUNTIME" "$C4_EVIDENCE" "$GITHUB_SHA" <<'PY'
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from measurement_arguments import arguments
+          variant, tool, runtime, evidence, source = sys.argv[1:]
+          print(arguments(['-B', '.github/issue779-checkpoint4/run-accounts.py', 'run', '--variant', variant,
+                           '--tool', tool, '--runtime', runtime, '--evidence', evidence, '--source', source]))
+          PY
+          )"
+          set +e
+          timeout --signal=KILL 1260 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            "$C4_RUNTIME/dotnet" "$C4_COVERLET" "$C4_TOOL/ForgeTrust.AppSurface.Cli.dll" \
+            --target /usr/bin/python3 --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --format json --output "$C4_EVIDENCE/native-accounts" > "$C4_EVIDENCE/collector.log" 2>&1
+          collector_exit=$?
+          timeout --signal=KILL 30 sudo --non-interactive python3 -B .github/issue779-checkpoint4/run-accounts.py finalize --collector-exit "$collector_exit" "${common[@]}"
+          finalize_exit=$?
+          set -e
+          echo "account_collector_exit=$collector_exit account_finalize_exit=$finalize_exit"
+          if (( collector_exit != 0 )); then exit "$collector_exit"; fi
+          exit "$finalize_exit"
+      - name: Recheck all original source bytes and modes
+        if: always()
+        run: python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$C4_EVIDENCE/source.json" --verify
+      - name: Apply existing retention bounds
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$C4_EVIDENCE"
+          python3 -B .github/issue779-checkpoint3/check-retention.py "$C4_EVIDENCE"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.retention.outcome == 'success'
+        with:
+          name: issue779-c4-accounts-${{ matrix.variant }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.C4_EVIDENCE }}
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

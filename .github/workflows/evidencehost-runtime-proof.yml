@@ -21,6 +21,10 @@ jobs:
     name: CSharp CLI and SDK application consumers
     uses: ./.github/workflows/issue779-checkpoint3-application.yml
 
+  account-mechanisms:
+    name: Genuine account creation and reserved rollback mechanisms
+    uses: ./.github/workflows/issue779-checkpoint4-accounts.yml
+
   solution-coverage:
     name: Unchanged solution and codecov patch gates
     needs: application-consumers

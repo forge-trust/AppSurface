@@ -1,7 +1,9 @@
 # Private account lifecycle controls
 
-This is implementation preparation for two closed Linux account mechanism controls.
-It supplies no workflow, driver, test execution, coverage result or native qualification.
+These two closed Linux account mechanism controls run through the finite
+[driver](../run-accounts.py) and [independent matrix workflow](../../workflows/issue779-checkpoint4-accounts.yml).
+Local compile and image-metadata checks passed before driver integration; genuine Linux
+execution and its standard report remain required. No native qualification is inferred.
 The [linked implementation](LinuxAccountMeasurement.cs) runs only in the private
 `C4Accounts` and `C4AccountRollback` builds. The ordinary `None` image contains no
 fixture type, private observation methods, collision fields or fixture call sites.
@@ -147,5 +149,23 @@ a complete module or source binding.
 
 Before use, the parent must compile both variants, inspect ordinary `None` PE
 metadata for absence of fixture types/methods/references, check the existing pack
-rejection, and run the controls in fresh protected Linux owners. This preparation
-does not claim any of those validations or predict coverage gains.
+rejection, and run the controls in fresh protected Linux owners. The initial handoff was
+source-only; local compilation and image-metadata checks subsequently passed.
+Native control outcomes, supported report integration and measured coverage gains
+still require their own fresh evidence.
+
+## Driver ordering and report custody
+
+The driver performs `bind` before the pinned collector instruments the six selected modules,
+then `run` as its actual target, and `finalize` only after collection and restoration of all
+twelve original DLL/PDB files. Each compiled variant has a separate job, source capture,
+artifact and report. The root-owned staged inputs use the existing C3 owner recipe and
+its 1100-second service lifetime inside one 1200-second driver bound; the request retains
+more than 1110 seconds at publication to cover that service plus stop time. It supplies
+no solution, application, producer or consumer.
+
+Finalization checks exact source/variant/image bindings, the native result and strict
+receipt, original bytes restored, and real account/owner source hits in the standard
+Coverlet JSON. Portable tests validate detached data and small files only. These reports
+are not consumed by the final gate until a separately reviewed merge and binding check
+has been connected; no raw counter or report arithmetic takes place in this driver.
