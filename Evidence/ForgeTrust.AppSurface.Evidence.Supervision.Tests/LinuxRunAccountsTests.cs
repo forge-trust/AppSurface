@@ -368,6 +368,18 @@ public sealed class LinuxRunAccountsTests
         Assert.Throws<ArgumentNullException>(() => new LinuxRunAccountReservations(null!));
     }
 
+    /// <summary>An unknown prefix is rejected even when the generated hex suffix and full length remain unchanged.</summary>
+    [Fact]
+    public void GeneratedAccountNameRejectsUnknownPrefixWithTheSameHexSuffixAndLength()
+    {
+        var valid = LinuxRunAccountNames.Create(Run).Worker;
+        Assert.True(LinuxRunAccountNames.IsGenerated(valid));
+        var changed = "evq" + valid[3..];
+        Assert.Equal(valid.Length, changed.Length);
+        Assert.Equal(valid[3..], changed[3..]);
+        Assert.False(LinuxRunAccountNames.IsGenerated(changed));
+    }
+
     private static IdentityData Data(bool includeApplication = false)
     {
         var names = LinuxRunAccountNames.Create(Run);

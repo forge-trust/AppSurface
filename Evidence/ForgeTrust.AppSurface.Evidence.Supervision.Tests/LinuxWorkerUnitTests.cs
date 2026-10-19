@@ -526,6 +526,87 @@ public sealed class LinuxWorkerUnitTests
         AssertClosed(() => recipe.IsExitTransition(transition with { User = "0" }, transition.ExecMainPid));
     }
 
+    /// <summary>A supported stop transition stays pending, while a different substate does not.</summary>
+    [Fact]
+    public void ExitTransitionRejectsReloadBesideSupportedStopSigterm()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with { ActiveState = "deactivating", SubState = "stop-sigterm" };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(valid with { SubState = "reload" }, valid.ExecMainPid));
+    }
+
+    /// <summary>Only a zero main PID makes the mixed active/running sample an exit transition.</summary>
+    [Fact]
+    public void ExitTransitionDistinguishesZeroMainPidFromStillRunningExecution()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with { MainPid = 0 };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(valid with { MainPid = valid.ExecMainPid }, valid.ExecMainPid));
+    }
+
+    /// <summary>An inactive/dead sample stops being transitional when its exit code is available.</summary>
+    [Fact]
+    public void ExitTransitionDistinguishesInactiveDeadPendingAndCompletedExitCodes()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with { ActiveState = "inactive", SubState = "dead", MainPid = 0 };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(valid with { ExecMainCode = 1 }, valid.ExecMainPid));
+    }
+
+    /// <summary>A failed/failed sample stops being transitional when its exit code is available.</summary>
+    [Fact]
+    public void ExitTransitionDistinguishesFailedPendingAndCompletedExitCodes()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with { ActiveState = "failed", SubState = "failed", MainPid = 0 };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(valid with { ExecMainCode = 1 }, valid.ExecMainPid));
+    }
+
+    /// <summary>A supported stop sample cannot substitute a different positive main PID.</summary>
+    [Fact]
+    public void ExitTransitionRejectsForeignMainPidBesideMatchingExecution()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with { ActiveState = "deactivating", SubState = "stop" };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        Assert.False(recipe.IsExitTransition(valid with { MainPid = valid.ExecMainPid + 1 }, valid.ExecMainPid));
+    }
+
+    /// <summary>The signal-status upper bound accepts 64 and rejects the adjacent value with fixed diagnostics.</summary>
+    [Fact]
+    public void ExitTransitionRejectsSignalStatusAboveTheSupportedMaximum()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with
+        {
+            ActiveState = "deactivating", SubState = "stop", ExecMainCode = 3, ExecMainStatus = 64,
+        };
+        Assert.True(recipe.IsExitTransition(valid, valid.ExecMainPid));
+        var rejected = Assert.Throws<EvidenceAdmissionException>(() =>
+            recipe.IsExitTransition(valid with { ExecMainStatus = 65 }, valid.ExecMainPid));
+        Assert.Equal("ASEVD410", rejected.Code);
+        Assert.Equal("ASEVD410: The protected systemd operation or its response is invalid."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", rejected.Message);
+        Assert.Null(rejected.InnerException);
+        Assert.DoesNotContain("canary", rejected.ToString(), StringComparison.Ordinal);
+    }
+
     private static void AssertRejected(Func<bool> predicate)
     {
         try { Assert.False(predicate()); }

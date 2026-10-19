@@ -151,4 +151,106 @@ public sealed class LinuxProducerWorkspaceTests
         Assert.False(LinuxProducerWorkspaceLayout.IsResultsToken("coverage_token"));
         Assert.False(LinuxProducerWorkspaceLayout.IsResultsToken(new string('a', 97)));
     }
+
+    /// <summary>A rejected two-byte reservation preserves the final byte and all previous consumption.</summary>
+    [Fact]
+    public void MixedCopyReservationsPreserveOneByteAfterAdjacentTwoByteRejection()
+    {
+        static LinuxProducerCopyBudget WithOneByteRemaining()
+        {
+            var budget = new LinuxProducerCopyBudget();
+            for (var i = 0; i < 3; i++) budget.ReserveFile(LinuxProducerWorkspaceLayout.MaximumFileBytes);
+            budget.ReserveFile(LinuxProducerWorkspaceLayout.MaximumFileBytes - 1);
+            return budget;
+        }
+
+        var valid = WithOneByteRemaining();
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes - 1, valid.Bytes);
+        valid.ReserveFile(1);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes, valid.Bytes);
+        Assert.Equal(5, valid.Nodes);
+
+        var candidate = WithOneByteRemaining();
+        var error = Assert.Throws<EvidenceAdmissionException>(() => candidate.ReserveFile(2));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The protected producer workspace is unavailable or changed."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes - 1, candidate.Bytes);
+        Assert.Equal(4, candidate.Nodes);
+        candidate.ReserveFile(1);
+        Assert.Equal(valid.Bytes, candidate.Bytes);
+        Assert.Equal(valid.Nodes, candidate.Nodes);
+    }
+
+    /// <summary>The final node may contain bytes, and a rejected next file cannot consume either counter.</summary>
+    [Fact]
+    public void MixedCopyReservationsPreserveBytesWhenTheLastNodeIsAlreadyConsumed()
+    {
+        var budget = new LinuxProducerCopyBudget();
+        for (var i = 0; i < LinuxProducerWorkspaceLayout.MaximumNodes - 1; i++) budget.ReserveDirectory();
+        budget.ReserveFile(1);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumNodes, budget.Nodes);
+        Assert.Equal(1L, budget.Bytes);
+        var error = Assert.Throws<EvidenceAdmissionException>(() => budget.ReserveFile(1));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The protected producer workspace is unavailable or changed."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumNodes, budget.Nodes);
+        Assert.Equal(1L, budget.Bytes);
+    }
+
+    /// <summary>A directory still consumes a node at the byte limit, while the next file remains rejected.</summary>
+    [Fact]
+    public void FullByteBudgetAllowsDirectoryWithoutReleasingEarlierConsumption()
+    {
+        var budget = new LinuxProducerCopyBudget();
+        for (var i = 0; i < 4; i++) budget.ReserveFile(LinuxProducerWorkspaceLayout.MaximumFileBytes);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes, budget.Bytes);
+        Assert.Equal(4, budget.Nodes);
+        budget.ReserveDirectory();
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes, budget.Bytes);
+        Assert.Equal(5, budget.Nodes);
+        var error = Assert.Throws<EvidenceAdmissionException>(() => budget.ReserveFile(1));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The protected producer workspace is unavailable or changed."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes, budget.Bytes);
+        Assert.Equal(5, budget.Nodes);
+    }
+
+    /// <summary>Ancestor metadata requires root UID independently of its otherwise valid root group and mode.</summary>
+    [Fact]
+    public void AncestorComparisonRejectsOnlyTheChangedRootUid()
+    {
+        var valid = new LinuxProtectedMetadata(1, 2, 3, 0, 0, 0x41ed, 2, 0, 0, 0, 0, 0);
+        LinuxProducerWorkspaceLayout.RequireAncestor(valid);
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProducerWorkspaceLayout.RequireAncestor(valid with { Uid = 1 }));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The protected producer workspace is unavailable or changed."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Ancestor metadata requires root GID independently of its otherwise valid root owner and mode.</summary>
+    [Fact]
+    public void AncestorComparisonRejectsOnlyTheChangedRootGid()
+    {
+        var valid = new LinuxProtectedMetadata(1, 2, 3, 0, 0, 0x41ed, 2, 0, 0, 0, 0, 0);
+        LinuxProducerWorkspaceLayout.RequireAncestor(valid);
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProducerWorkspaceLayout.RequireAncestor(valid with { Gid = 1 }));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The protected producer workspace is unavailable or changed."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+    }
 }

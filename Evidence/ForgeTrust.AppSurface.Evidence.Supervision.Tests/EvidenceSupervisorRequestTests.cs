@@ -377,6 +377,65 @@ public sealed class EvidenceSupervisorRequestTests
         Reject(data);
     }
 
+    /// <summary>A paired application digest permits dot punctuation but cannot make a path-like ID valid.</summary>
+    [Fact]
+    public void ApplicationDotIdentifierAcceptsDigestPairBeforeAdjacentInvalidPunctuation()
+    {
+        var data = Valid();
+        data["application_id"] = "a.b";
+        data["application_entry_digest"] = new string('a', 64);
+        var parsed = Parse(data);
+        Assert.Equal("a.b", parsed.ApplicationId);
+        Assert.Equal(new string('a', 64), parsed.ApplicationEntryDigest);
+        data["application_id"] = "a/b";
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Parse(data));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The supervisor launch request is malformed or exceeds its fixed limits."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-canary", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>A paired application digest permits underscore punctuation but cannot make a path-like ID valid.</summary>
+    [Fact]
+    public void ApplicationUnderscoreIdentifierAcceptsDigestPairBeforeAdjacentInvalidPunctuation()
+    {
+        var data = Valid();
+        data["application_id"] = "a_b";
+        data["application_entry_digest"] = new string('a', 64);
+        var parsed = Parse(data);
+        Assert.Equal("a_b", parsed.ApplicationId);
+        Assert.Equal(new string('a', 64), parsed.ApplicationEntryDigest);
+        data["application_id"] = "a:b";
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Parse(data));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal("ASEVD402: The supervisor launch request is malformed or exceeds its fixed limits."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-canary", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Both observation ID lists preserve dot and underscore data and reject only a changed colon.</summary>
+    [Fact]
+    public void ObservationIdentifierListsDistinguishAllowedPunctuationFromColon()
+    {
+        foreach (var field in new[] { "observation_profile_ids", "observation_producer_ids" })
+        {
+            var data = Valid();
+            data[field] = new[] { "p.q_r" };
+            var parsed = Parse(data);
+            var actual = field == "observation_profile_ids" ? parsed.ObservationProfileIds : parsed.ObservationProducerIds;
+            Assert.Equal("p.q_r", Assert.Single(actual));
+            data[field] = new[] { "p:q_r" };
+            var error = Assert.Throws<EvidenceAdmissionException>(() => Parse(data));
+            Assert.Equal("ASEVD402", error.Code);
+            Assert.Equal("ASEVD402: The supervisor launch request is malformed or exceeds its fixed limits."
+                + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+            Assert.Null(error.InnerException);
+            Assert.DoesNotContain("private-canary", error.ToString(), StringComparison.Ordinal);
+        }
+    }
+
     private static Dictionary<string, object?> Valid() => new(StringComparer.Ordinal)
     {
         ["schema"] = "evidence-supervisor-linux-v1",

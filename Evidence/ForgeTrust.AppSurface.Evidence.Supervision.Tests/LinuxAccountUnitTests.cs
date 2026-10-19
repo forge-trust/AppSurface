@@ -252,6 +252,42 @@ public sealed class LinuxAccountUnitTests
         Assert.Same(execution, alreadyFailed.First);
     }
 
+    /// <summary>An absent cgroup cannot retain a numeric DeviceMajor sample from an existing leaf.</summary>
+    [Fact]
+    public void AbsentCgroupRejectsOnlyTheRetainedDeviceMajor()
+    {
+        var valid = new LinuxCgroupSample(false, null, null, null, null, null);
+        Assert.True(LinuxAccountUtility.GroupEmpty(valid));
+        var error = AssertClosed(() => LinuxAccountUtility.GroupEmpty(valid with { DeviceMajor = 0 }));
+        Assert.Equal("ASEVD410: The protected systemd operation or its response is invalid."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>An absent cgroup cannot retain a numeric DeviceMinor sample from an existing leaf.</summary>
+    [Fact]
+    public void AbsentCgroupRejectsOnlyTheRetainedDeviceMinor()
+    {
+        var valid = new LinuxCgroupSample(false, null, null, null, null, null);
+        Assert.True(LinuxAccountUtility.GroupEmpty(valid));
+        var error = AssertClosed(() => LinuxAccountUtility.GroupEmpty(valid with { DeviceMinor = 0 }));
+        Assert.Equal("ASEVD410: The protected systemd operation or its response is invalid."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>An absent cgroup cannot retain a numeric KernelInode sample from an existing leaf.</summary>
+    [Fact]
+    public void AbsentCgroupRejectsOnlyTheRetainedKernelInode()
+    {
+        var valid = new LinuxCgroupSample(false, null, null, null, null, null);
+        Assert.True(LinuxAccountUtility.GroupEmpty(valid));
+        var error = AssertClosed(() => LinuxAccountUtility.GroupEmpty(valid with { KernelInode = 1 }));
+        Assert.Equal("ASEVD410: The protected systemd operation or its response is invalid."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
+    }
+
     private static SafeFileHandle Output(int fd) => new((nint)fd, ownsHandle: false);
 
     private static LinuxAccountUnit Recipe(SafeFileHandle stdout, SafeFileHandle stderr,
