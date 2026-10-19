@@ -112,6 +112,32 @@ The selected root-filesystem class also includes five [producer copy component c
 
 ### Separate failed-SDK measurement
 
-[`SdkFailureMeasurement.Validate`](SdkFailureMeasurement.cs) requires the [separate genuine failed-test SDK consumer](../../.github/issue779-checkpoint3/README.md#separate-sdk-failed-producer-consumer), in addition to the original consumer matrix. It compares the completed report and finalized receipt hashes, common published originals with distinct failure instrumentation, required v2 worker byte handoffs, actual failed-test counts, the original ready-guard observation, no-claim manifest state and physical cleanup/account absence. It also requires hits in the current producer's nonzero-result arm. The main native test locates that arm only after checking the actual producer source against the full current source capture; report labels cannot select another line as a substitute.
+[`SdkFailureMeasurement.Validate`](SdkFailureMeasurement.cs) requires the [separate genuine failed-test SDK consumer](../../.github/issue779-checkpoint3/README.md#separate-sdk-failed-producer-consumer), in addition to the original consumer matrix. It compares the completed report and finalized receipt hashes, common published originals with distinct failure instrumentation, required v3 worker/cache/host byte handoffs with explicit pre-exit provenance, actual failed-test counts, the original ready-guard observation, no-claim manifest state and physical cleanup/account absence. It also requires hits in the current producer's nonzero-result arm. The main native test locates that arm only after checking the actual producer source against the full current source capture; report labels cannot select another line as a substitute.
 
 The separate negative report remains independently inspectable. The later `native-sdk.json` is aggregate SDK coverage once its supported merge includes that report; only the normal control's retained v1 witness independently attributes its original worker handoff. JSON consistency is not admission or OS authentication. The [constructed receipt controls](SdkFailureMeasurementTests.cs) deliberately run without workers, pidfds, accounts or an accepted proof, and therefore supply no native coverage or qualification claim themselves. Every new input is mandatory in the genuine native measurement test before the unchanged solution gate consumes the merged report.
+
+### Account mechanism data validation
+
+[`AccountMeasurement.Validate`](AccountMeasurement.cs) compares six detached inputs:
+the independently selected source commit and compiled variant, full source-capture
+bytes, final measurement binding, original native receipt, and unmodified standard
+report. Each byte input is bounded at 8 MiB. The caller must compare the full capture
+byte-for-byte to its independently verified parent capture; this helper performs no
+Git refresh, process launch or ownership construction. Its current v1 contract checks
+all twelve module hashes, source/report/native byte digests, exact five-ID domains,
+variant-specific utility/cleanup outcomes, and real account/owner document hits.
+Future merge lineage is a separate caller obligation; these raw reports are not yet
+connected to the final collector input.
+
+The [detached controls](AccountMeasurementTests.cs) cover valid boundary neighbors
+and malformed observations without creating accounts or physical-success evidence.
+The [actual account driver](../../.github/issue779-checkpoint4/run-accounts.py) owns
+only finite fixture preparation and observation; the [private C# account controls](../../.github/issue779-checkpoint4/measurement/accounts-README.md)
+perform authenticated account work and strict closure. Source
+`488143ea14b791fae6755bec50f33646e262c3fb`,
+[run 39194022902](https://github.com/forge-trust/AppSurface/actions/runs/39194022902),
+passed both native mechanisms: six settled utilities for normal closure and seven
+for the expected collision rollback, with strict name/numeric absence and complete
+source/artifact digest verification. That run's SDK worker startup failed and its
+full gate was skipped; account success establishes neither consumer acceptance nor
+a solution/patch coverage pass.
