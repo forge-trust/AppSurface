@@ -445,13 +445,13 @@
       "sha256": "576964f33da83949a05618024c24c5651471c05a45536db821b33238c9bb93e1"
     },
     {
-      "bytes": 36109,
+      "bytes": 36991,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/os_audit.py",
-      "ported_sha256": "a32b4edd8eab45211bc367c7de168a679c1cd3bc2c088b101b60acbe0d968380",
-      "sha256": "a32b4edd8eab45211bc367c7de168a679c1cd3bc2c088b101b60acbe0d968380"
+      "ported_sha256": "828ca53fdd151e91a599b7f20faa9ebf892d1a00ec2c247683230770847d4341",
+      "sha256": "828ca53fdd151e91a599b7f20faa9ebf892d1a00ec2c247683230770847d4341"
     },
     {
       "bytes": 4187,

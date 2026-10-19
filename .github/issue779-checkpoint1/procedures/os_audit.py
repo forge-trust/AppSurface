@@ -53,6 +53,20 @@ TOOLS["ldconfig"] = ("/usr/sbin/ldconfig.real", "/sbin/ldconfig.real")
 class AuditError(Exception):
     """Closed failure; exception text from external operations is never published."""
 
+    def __init__(self, category, *, failure_context=None, failure_deadline=None):
+        """Keep only the category in exception text/args; optional bytes stay private.
+
+        The existing dependency latch supplies bounded metadata bytes or None.
+        This attribute grants no trust or success and must never be echoed to
+        public stderr; a caller may retain it separately as private diagnostic
+        data. failure_deadline is the original audit expiry, never a renewed
+        allowance or authority. Other errors default both attributes to None.
+        A missing context never changes the original rejection.
+        """
+        super().__init__(category)
+        self.failure_context = failure_context
+        self.failure_deadline = failure_deadline
+
 
 def reject(category):
     raise AuditError(category)
@@ -533,7 +547,8 @@ class Audit:
             candidates = sorted(set(runpath_candidates + cache_rows))
             if len(candidates) != 1:
                 self.latch_dependency_failure(path, name, runpath_candidates, cache_rows, candidates)
-                reject("dependency-unresolved-or-ambiguous")
+                raise AuditError("dependency-unresolved-or-ambiguous", failure_context=self.failure_context,
+                                 failure_deadline=self.deadline)
             selected = candidates[0]
             dep_hash, _ = self.pin_os(selected)
             resolved.append({"soname": name, "path": selected, "sha256": dep_hash})

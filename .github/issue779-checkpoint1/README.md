@@ -15,6 +15,19 @@ messages use a fixed fallback. No traceback, filename, command, exception text o
 private process output is included. A diagnostic cannot replace a missing native
 record, authorize a retry, change a guard or make a failed control pass.
 
+For the audit's unresolved/ambiguous dependency rejection only, the driver also
+copies its existing private context to the fixed `native/os-audit-dependency.json`
+leaf. [`retain_dependency_failure`](run-native.py) requires the actual source-owned
+audit exception, its original absolute audit deadline and exact closed context;
+it preserves the bounded bytes (at most 32 KiB) without selecting a dependency.
+The requester, SONAME and up to eight candidates per group stay in this private
+`0600` file beneath the settled `0700` output. Exclusive no-follow creation,
+retained FDs and final identity/size checks prevent replacing an old result.
+Missing context, expiry, a pre-existing leaf or any retention error keeps the
+original failed exit; no raw path is added to the closed public failure record.
+The [real ordinary-file regression controls](test_dependency_retention.py) verify
+this diagnostic boundary, and supply no native or coverage credit.
+
 ## Entry points and publication data
 
 `publish.py` is the parent-owned publisher. Its receipt records the actual CLI

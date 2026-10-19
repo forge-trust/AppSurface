@@ -14,8 +14,10 @@ import re
 import uuid
 import types
 import json
+import math
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -118,6 +120,98 @@ def failure_diagnostic(error):
             "stage": stage, "error_kind": kind,
             "errno": number if type(number) is int and 1 <= number <= 4095 else None,
             "exit": 1, "native_acceptance": False, "coverage_credit": False}
+
+
+def retain_dependency_failure(error, output):
+    """Best-effort bounded private context, on the audit's original deadline.
+
+    Only the original dependency rejection with a fixed audit source frame can
+    supply these bytes. The exact closed context is copied without rewriting to
+    a fresh os-audit-dependency.json under the caller's canonical owned0700
+    output. Its original library paths stay private, never in failure stdout.
+    This ordinary-file copy grants no authority. Missing context, invalid data,
+    expiry, substitution, an occupied leaf or any I/O/close error returns false;
+    partial failed files remain private and are never adopted or overwritten.
+    """
+    parent_fd = leaf_fd = None
+    success = False
+    try:
+        if (type(error).__name__ != "AuditError" or error.args != ("dependency-unresolved-or-ambiguous",)
+                or failure_diagnostic(error)["category"] != "audit-dependency-unresolved-or-ambiguous"):
+            return False
+        raw = getattr(error, "failure_context", None)
+        deadline = getattr(error, "failure_deadline", None)
+        if (type(raw) is not bytes or not 0 < len(raw) <= 32768
+                or type(deadline) not in (int, float) or not math.isfinite(deadline)):
+            return False
+        binding._remaining(deadline)
+        value = binding.decode(raw)
+        binding.exact(value, ("schema", "category", "requester", "soname", "candidate_count",
+            "runpath_count", "cache_count", "truncated", "runpath_candidates",
+            "cache_candidates", "combined_candidates"), "dependency-context-fields")
+        binding.require(value["schema"] == "issue779-os-audit-dependency-failure-context-v1"
+            and value["category"] == "dependency-unresolved-or-ambiguous"
+            and type(value["soname"]) is str
+            and re.fullmatch(r"[A-Za-z0-9_.+-]{1,256}", value["soname"])
+            and type(value["truncated"]) is bool, "dependency-context-shape")
+        binding.absolute(value["requester"])
+        for count, candidates in (("candidate_count", "combined_candidates"),
+                                  ("runpath_count", "runpath_candidates"),
+                                  ("cache_count", "cache_candidates")):
+            binding.require(binding.integer(value[count], 0, 4096)
+                and type(value[candidates]) is list
+                and len(value[candidates]) == min(value[count], 8), "dependency-context-candidates")
+            for path in value[candidates]:
+                binding.absolute(path)
+        binding.require(value["candidate_count"] != 1 and value["truncated"] == any(
+            value[name] > 8 for name in ("candidate_count", "runpath_count", "cache_count")),
+            "dependency-context-counts")
+        output = binding.absolute(str(output))
+        binding.require(output.resolve(strict=True) == output, "dependency-output-path")
+        before = output.lstat()
+        binding.require(stat.S_ISDIR(before.st_mode) and stat.S_IMODE(before.st_mode) == 0o700
+            and before.st_uid == os.geteuid() and before.st_gid == os.getegid(), "dependency-output-owner")
+        binding._remaining(deadline)
+        parent_fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        binding.require(binding._identity(before) == binding._identity(os.fstat(parent_fd)),
+                        "dependency-output-substitution")
+        leaf = "os-audit-dependency.json"
+        leaf_fd = os.open(leaf, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                          0o600, dir_fd=parent_fd)
+        pending = memoryview(raw)
+        while pending:
+            binding._remaining(deadline)
+            count = os.write(leaf_fd, pending)
+            binding.require(count > 0, "dependency-output-write")
+            pending = pending[count:]
+        os.fsync(leaf_fd)
+        binding._remaining(deadline)
+        opened = os.fstat(leaf_fd)
+        binding.require(stat.S_ISREG(opened.st_mode) and stat.S_IMODE(opened.st_mode) == 0o600
+            and opened.st_uid == os.geteuid() and opened.st_gid == os.getegid()
+            and opened.st_nlink == 1 and opened.st_size == len(raw)
+            and binding._identity(opened) == binding._identity(os.stat(leaf, dir_fd=parent_fd, follow_symlinks=False)),
+            "dependency-output-leaf")
+        binding.require(binding._identity(before)[:5] == binding._identity(os.fstat(parent_fd))[:5]
+            and binding._identity(os.fstat(parent_fd)) == binding._identity(output.lstat()), "dependency-output-final")
+        binding._remaining(deadline)
+        success = True
+    except Exception:
+        # Diagnostic failure never changes the original unsuccessful native run.
+        success = False
+    finally:
+        for fd in (leaf_fd, parent_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    success = False
+    if success:
+        try:
+            binding._remaining(deadline)
+        except Exception:
+            success = False
+    return success
 
 
 def ready(selector, inventory):
@@ -407,6 +501,8 @@ def main(argv=None):
         return 0
     except Exception as error:
         # No raw path, source text, shell output or private process prefix.
+        if getattr(args, "command", None) == "run":
+            retain_dependency_failure(error, args.output)
         print(json.dumps(failure_diagnostic(error), sort_keys=True), file=sys.stderr)
         return 1
 
