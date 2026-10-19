@@ -920,15 +920,25 @@ signal_owned() {
 join_owned() {
  local name=$1 pid=${!1} status current
  [[ -n $pid ]] || return 0
+ [[ ${owned_start[$pid]+present} ]] || return 125
  while kill -0 "$pid" 2>/dev/null; do
   left >/dev/null || return 124
-  [[ ${owned_start[$pid]+present} ]] || return 125
-  current=$(owned_identity "$pid") || return 125
+  if ! current=$(owned_identity "$pid"); then
+   # Exit may race the identity read. Only disappearance of this original
+   # child AND its group permits the existing exact-child reap below.
+   left >/dev/null || return 124
+   if kill -0 "$pid" 2>/dev/null || [[ -e /proc/$pid || -L /proc/$pid ]] || pg_alive "$pid"; then
+    return 125
+   fi
+   break
+  fi
   [[ $current == "${owned_start[$pid]}" ]] || return 125
   try_bounded sleep .05 || return 124
  done
+ left >/dev/null || return 124
  status=0; wait "$pid" || status=$?
  pg_alive "$pid" && return 125
+ left >/dev/null || return 124
  # A fully settled registration is retired independently of its preserved exit status.
  unset 'owned_start[$pid]'; printf -v "$name" '%s' ''
  return "$status"

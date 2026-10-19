@@ -133,12 +133,19 @@ their success does not qualify a Linux native case or simulate a protected owner
 [port-manifest.json](port-manifest.json) records relative historical paths, hashes,
 source files and static invariance. [historical-to-current.patch](historical-to-current.patch)
 shows only the historical provenance boundary replacement and sixth env literal.
-The historical patch records the initial port only. The native shell, dispatcher
-and retainer remain unchanged by the settled-callback correction. The
+The historical patch records the initial port only. The settled-callback
+correction updates two entries in the native shell's fixed parser-hash array to
+match the reviewed modules and [parser-pins.tsv](parser-pins.tsv). The dispatcher
+and retainer remain unchanged. The
 `check_stall_record` historical data contract remains supported; the current
 parser and capture modules now add the separate strict settled-callback contract
 described above. `validate_n11_capture` recomputes that contract from the original
 bytes; the other identity, custody and quarantine predicates remain in force.
+The [parser-pin controls](../../test_n11_parser_pins.py) bind all four literal
+names and hashes to the TSV and current file bytes, then exercise the original
+row/count guards with modeled custody calls. Wrong hash/order, missing/extra
+rows and extra columns reject. This is a data consistency check; physical root
+custody still requires the genuine Linux procedure.
 Parent/Godel owns inventory registration. Independent review, portable validation,
 actual current helper publication and fresh Linux native execution remain required.
 No all16-ready or coverage-gain claim is made.

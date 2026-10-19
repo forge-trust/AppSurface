@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 6321,
-      "sha256": "ef888abbab88bfa047c83d64930ce31d7c70d5dbed6c00fc6292004d0e354f79"
+      "bytes": 8265,
+      "sha256": "14694f1627eca3fd2dd2d4ebc63677b06a1b682492ecc76033a31d8159c5a631"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -88,6 +88,21 @@
     ],
     "scope": "N03 publisher emits terminal LF through jq -cS; strict parser unchanged. N04 adds closed numeric failure diagnostic only."
   },
+  "source51_join_transition": {
+    "fresh_linux_required": true,
+    "native_causality_proven": false,
+    "native_execution": false,
+    "portable_test": "../../test_n04_join_race.py",
+    "scope": "On original-child identity-read failure require same-clock PID/proc/group absence before exact-child wait; preserve numeric status and fail closed on live mismatch, remaining group or expiry."
+  },
+  "source51_metadata_sampling": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "N06 pin_file and ancestor adopt complete typed sampling; None/N06/N12 ordinary alias components combine UID/mode query. All physical walks, symlink before/after checks, hashes and original clocks retained.",
+    "time_gain_measured": false
+  },
   "wrappers": [
     {
       "changes": [
@@ -100,7 +115,7 @@
       "historical_sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a",
       "native_execution": false,
       "ported_path": "checkpoint-none.sh",
-      "ported_sha256": "617d00e177f3531738610988d10440876992d78865d31df9f4e929ef7e8caec7",
+      "ported_sha256": "6799c704aad15c076be8fe02ceb15d64d032f6e35b3377614b328eb5ee5b3f6b",
       "selector": "None"
     },
     {
@@ -114,7 +129,7 @@
       "historical_sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d",
       "native_execution": false,
       "ported_path": "checkpoint-n04.sh",
-      "ported_sha256": "78b61a18afeb69e46dd512567bf3a212278e90ca0d12f992f06005408dc92f97",
+      "ported_sha256": "bd24236f17a06078606b5195809c155c32438d38c41155455c7e535cfab56df0",
       "selector": "N04"
     },
     {
@@ -142,7 +157,7 @@
       "historical_sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761",
       "native_execution": false,
       "ported_path": "checkpoint-n06.sh",
-      "ported_sha256": "6b1a6c6134ce2b1b2782da4161a63c9b9fc1a7ad63d9bb23a19f37d53d22f1e8",
+      "ported_sha256": "e6e77cbf96303e51dfa2b5e466b8290e54a0b49718f6759c246ba873154c57f6",
       "selector": "N06"
     },
     {

@@ -103,3 +103,34 @@ numeric results and three Boolean values; no path or raw output is included.
 The [diagnostic controls](../../test_n04_join_diagnostic.py) exercise the actual
 guard's accepted tuple and each rejected neighbor. The diagnostic neither proves
 the inner failure cause nor changes any native acceptance or cleanup condition.
+
+
+`join_owned` also handles the exit transition between its liveness sample and
+its retained start-identity read. An identity-read failure permits the original
+exact-child `wait` only after the same deadline is rechecked and both the PID
+name and its original process group are absent. A live identity mismatch,
+missing registration, surviving group or expired deadline still rejects. The
+actual child status is retained, including expected nonzero exits; registration
+retirement follows another group/deadline check. No signal, identity substitute
+or fresh allowance is added. The [join-order controls](../../test_n04_join_race.py)
+force this ordering with detached process metadata and make no native-cause or
+physical-settlement claim.
+
+## Setup metadata queries
+
+`pin_file(path, sha256, limit)` in None and N06 obtains size and link count from
+the existing complete before sample, validates its seven typed fields, and keeps
+the same file hash and complete after-sample comparison. `ancestor(path)` samples
+UID and octal permissions together at every original component through `/`.
+`alias_walk` in None and N06 likewise samples each ordinary component's UID and
+permissions together. It retains both complete walks, every deadline check,
+symlink metadata-before/readlink/metadata-after checks, and the resolved file's
+hash and identity checks. The [N12 procedure](../n12/README.md#metadata-sampling-without-repeated-subprocesses)
+uses the same consolidation.
+
+The [metadata controls](../../test_metadata_sample_batching.py) exercise the live
+functions with ordinary temporary paths and detached metadata. They check exact
+command counts, all traversed components, malformed or unsafe fields, changed
+link identity and expiry. The consolidation removes redundant subprocesses; it
+does not extend the original 600/30-second fixture budget or change its prelaunch
+reserve. Fresh Linux execution must establish whether setup finishes in time.

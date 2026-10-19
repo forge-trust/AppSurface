@@ -5,6 +5,7 @@ and hash outputs are detached data, not claims about root ownership or the OS.
 """
 
 from pathlib import Path
+import json
 import os
 import subprocess
 import tempfile
@@ -13,6 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = (ROOT / "procedures/slot/checkpoint-none.sh",
+           ROOT / "procedures/slot/checkpoint-n06.sh",
            ROOT / "procedures/n12/checkpoint-n12-data-integration.sh")
 HASH = "a" * 64
 BEFORE = "1:2:4:81a4:1:0:0"
@@ -154,6 +156,118 @@ else ancestor "$TARGET"; fi
                     result, calls = self.invoke(script, action, target=target)
                     self.assertEqual((1, b"deployment-symlink\n"), (result.returncode, result.stderr))
                     self.assertEqual([], calls)
+
+
+class AliasComponentSampleTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="c1-alias-samples-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        (self.root / "nested").mkdir()
+        self.leaf = self.root / "nested/payload"
+        self.leaf.write_bytes(b"data")
+        self.link = self.root / "alias"
+        self.link.symlink_to("nested/payload")
+        self.calls = self.root / "calls.tsv"
+
+    def invoke(self, script, *, sample="0:755", malformed_at="", changed_link=False,
+               wrong_target=False, expired=False):
+        source = script.read_text()
+        helpers = "\n".join(function(source, name)
+                            for name in ("lexical", "normalize_os_target", "alias_walk"))
+        # macOS ships Bash 3, where nounset rejects an initialized empty array.
+        # The native fixture uses Linux Bash 5; leave its strict mode intact there.
+        strict = "set -euo pipefail\nif ((BASH_VERSINFO[0]<4)); then set +u; fi\n"
+        program = strict + helpers + r'''
+fail() { printf '%s\n' "$1" >&2; exit 1; }
+remaining() { [[ $EXPIRED == no ]] || fail expired; }
+bounded() {
+ printf '%s\t%s\t%s\n' "$1" "${3:-}" "${5:-}" >>"$CALLS"
+ case "$1" in
+  stat)
+   [[ $2 == -c && $4 == -- ]] || exit 90
+   case "$3" in
+    '%u:%a')
+     if [[ $5 == "$MALFORMED_AT" ]]; then printf '%s\n' "$SAMPLE";
+     else printf '0:755\n'; fi ;;
+    '%u:%g:%a:%d:%i')
+     local count=0 line
+     while IFS= read -r line; do
+      [[ $line == *'%u:%g:%a:%d:%i'* ]] && count=$((count+1))
+     done <"$CALLS"
+     if [[ $CHANGED_LINK == yes && $count == 2 ]]; then printf '0:0:777:1:99\n';
+     else printf '0:0:777:1:2\n'; fi ;;
+    *) exit 91;;
+   esac;;
+  readlink)
+   if [[ $WRONG_TARGET == yes ]]; then printf 'nested/other\n';
+   else command readlink "$3"; fi;;
+  jq) command jq "${@:2}";;
+  *) exit 92;;
+ esac
+}
+if [[ $FAMILY == none ]]; then alias_walk "$RECORD";
+else
+ os_alias_declarations_ready=1
+ os_cache_alias_paths=("$LITERAL"); os_alias_counts=(1); os_alias_starts=(0)
+ os_alias_link_paths=("$LITERAL"); os_alias_link_metadata=('0:0:777:1:2')
+ os_alias_link_targets=('nested/payload'); os_alias_resolved=("$LEAF")
+ alias_walk 0
+fi
+'''
+        record = {"literal": str(self.link), "resolved_path": str(self.leaf),
+                  "links": [{"path": str(self.link), "target": "nested/payload",
+                             "uid": 0, "gid": 0, "mode": "777", "device": 1, "inode": 2}]}
+        self.calls.unlink(missing_ok=True)
+        env = {"PATH": os.environ["PATH"], "LC_ALL": "C", "CALLS": str(self.calls),
+               "SAMPLE": sample, "MALFORMED_AT": malformed_at,
+               "CHANGED_LINK": "yes" if changed_link else "no",
+               "WRONG_TARGET": "yes" if wrong_target else "no",
+               "EXPIRED": "yes" if expired else "no", "LITERAL": str(self.link),
+               "LEAF": str(self.leaf), "RECORD": json.dumps(record),
+               "FAMILY": "n06" if script.name == "checkpoint-n06.sh" else "none"}
+        result = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", program],
+                                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
+        calls = [line.split("\t") for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
+        return result, calls
+
+    def test_every_ordinary_component_is_sampled_once_and_link_is_sampled_twice(self):
+        def components(path):
+            return [str(Path(path.anchor).joinpath(*path.parts[1:index + 1]))
+                    for index in range(1, len(path.parts))]
+
+        for script in SCRIPTS:
+            with self.subTest(script=script.name):
+                result, calls = self.invoke(script)
+                self.assertEqual((0, str(self.leaf).encode(), b""),
+                                 (result.returncode, result.stdout, result.stderr))
+                ordinary = [row[2] for row in calls if row[0] == "stat" and row[1] == "%u:%a"]
+                self.assertEqual(components(self.root) + components(self.leaf), ordinary)
+                self.assertEqual(2, sum(row[0] == "stat" and row[1] == "%u:%g:%a:%d:%i" for row in calls))
+                self.assertEqual(1, sum(row[0] == "readlink" for row in calls))
+
+    def test_nonroot_writable_and_malformed_ordinary_metadata_reject(self):
+        samples = (("1:755", b"alias-node\n"), ("0:775", b"alias-writable-node\n"),
+                   ("0:757", b"alias-writable-node\n"), ("0:755:extra", b"alias-node\n"),
+                   ("root:755", b"alias-node\n"), ("0:789", b"alias-node\n"),
+                   ("0:", b"alias-node\n"))
+        for script in SCRIPTS:
+            for sample, reason in samples:
+                with self.subTest(script=script.name, sample=sample):
+                    result, calls = self.invoke(script, sample=sample, malformed_at=str(self.root))
+                    self.assertEqual((1, reason), (result.returncode, result.stderr))
+                    self.assertEqual([], [row for row in calls if row[0] == "readlink"])
+
+    def test_link_identity_change_wrong_target_and_expiry_still_reject(self):
+        for script in SCRIPTS:
+            for kwargs, reason in (({"changed_link": True}, b"alias-link-changed\n"),
+                                   ({"wrong_target": True}, b"alias-target-pin\n"),
+                                   ({"expired": True}, b"expired\n")):
+                with self.subTest(script=script.name, kwargs=kwargs):
+                    result, calls = self.invoke(script, **kwargs)
+                    self.assertEqual((1, reason), (result.returncode, result.stderr))
+                    if kwargs.get("expired") and script.name == "checkpoint-n06.sh":
+                        self.assertEqual([], calls)
 
 
 if __name__ == "__main__":

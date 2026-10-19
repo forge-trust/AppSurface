@@ -11,8 +11,8 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 10425,
-      "sha256": "d57aa3c2e7b6c691c6f1a8f568100ed88320d36bd2567c33a473edb18662b806"
+      "bytes": 10910,
+      "sha256": "05c990141d38310b3d6f2f0f62fe82d0d8216a565e5f39f16e9fb107c0886cd4"
     },
     "adapter.py": {
       "bytes": 4405,
@@ -32,7 +32,7 @@
     },
     "checkpoint-n11.sh": {
       "bytes": 99944,
-      "sha256": "9ef2dd4c135ab0e17cb12fdb71d486bf245f4b99fa67bcb138bb44f9f89ba880"
+      "sha256": "57fd062dd17f2988cf48d407600f3f73e44d6bea65b2ef0e840726391e642dee"
     },
     "dispatch.sh": {
       "bytes": 2458,
@@ -79,7 +79,7 @@
     },
     "checkpoint-n11.sh": {
       "byte_unchanged": false,
-      "current_sha256": "9ef2dd4c135ab0e17cb12fdb71d486bf245f4b99fa67bcb138bb44f9f89ba880",
+      "current_sha256": "57fd062dd17f2988cf48d407600f3f73e44d6bea65b2ef0e840726391e642dee",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
       "historical_sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
@@ -109,13 +109,13 @@
     }
   },
   "incremental_prepared_utc": "2026-10-19T08:45:22.590798+00:00",
-  "native_execution": false,
-  "native_suffix_invariance": [
+  "initial_port_native_suffix_invariance": [
     "diagnostic_stage=root-layout",
     "copy_tree() {",
     "# Pure data guards use bounded reads;",
     "diagnostic_stage=sealed-inputs"
   ],
+  "native_execution": false,
   "portable_retention_validation": {
     "bytes": 10424,
     "command": [
@@ -247,6 +247,12 @@
     "native_execution": false,
     "portable_test": "../../test_n11_settled_callback.py",
     "scope": "Separate strict callback-failed/root-settled data contract; historical failed/false-settlement codec retained. No production or native clock change."
+  },
+  "source51_parser_pins": {
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_control": "../../test_n11_parser_pins.py",
+    "scope": "Exactly two fixed native parser-hash literals updated to already reviewed current checker/capture bytes. Four names, row/count guards, custody checks and native clocks unchanged."
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

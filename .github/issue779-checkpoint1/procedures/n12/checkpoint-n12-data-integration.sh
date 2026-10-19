@@ -443,8 +443,13 @@ alias_walk() {
    resolved=$(normalize_os_target "$target"); lexical "$resolved"
    queue=("${components[@]}" "${queue[@]}"); current=; index=$((index+1))
   else
-   [[ -e $current && ! -L $current && $(bounded stat -c %u -- "$current") == 0 ]] || fail alias-node
-   local permissions; permissions=$(bounded stat -c %a -- "$current"); (((8#$permissions & 0022)==0)) || fail alias-writable-node
+   [[ -e $current && ! -L $current ]] || fail alias-node
+   local node_metadata node_uid permissions
+   node_metadata=$(bounded stat -c '%u:%a' -- "$current")
+   [[ $node_metadata =~ ^([0-9]+):([0-7]+)$ ]] || fail alias-node
+   node_uid=${BASH_REMATCH[1]}; permissions=${BASH_REMATCH[2]}
+   [[ $node_uid == 0 ]] || fail alias-node
+   (((8#$permissions & 0022)==0)) || fail alias-writable-node
    if ((${#queue[@]})); then [[ -d $current ]] || fail alias-parent; fi
   fi
  done

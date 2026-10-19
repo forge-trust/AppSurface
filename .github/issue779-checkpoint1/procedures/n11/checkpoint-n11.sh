@@ -998,7 +998,7 @@ absolute "$stall_parser_pins"; ancestor "${stall_parser_pins%/*}"
 [[ $(bounded stat -c %s "$stall_parser_pins") -le 2048 ]] || fail stall-parser-pin-bound
 bounded install -d -m 700 "$private/parsers"
 local_parser_count=0
-readonly STALL_MODULE_SHA256=('6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf' '237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487' '96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79' '3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0')
+readonly STALL_MODULE_SHA256=('6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf' 'ef270352ae7a030d83e27483250df4625ea4b02987be6313eb3bdc9b67db5229' '58d06809a59fa5393bf8cafaa0296e944e5fec9364e95ae74b1f1d17fc741c4d' '3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0')
 readonly STALL_MODULE_NAMES=('root_stall_frame.py' 'check_stall_record.py' 'stall_capture.py' 'capture_stall.py')
 while IFS=$'\t' read -r module digest extra; do
  ((local_parser_count<4)) || fail stall-parser-pin-count

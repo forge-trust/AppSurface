@@ -86,6 +86,12 @@ and the same complete after sample. `ancestor` reads UID and octal permissions
 together for each component, preserving the actual lexical/symlink checks,
 complete walk through `/`, root UID and nonwritable-mode predicate.
 
+`alias_walk(record)` also reads the UID and octal mode of each ordinary path
+component together. Its two complete walks still surround the resolved file
+hash and full identity samples. Every symlink keeps its separate metadata,
+target and second metadata checks; malformed fields, a nonroot UID, a writable
+mode, changed link identity or an expired deadline still rejects.
+
 These changes reduce subprocess calls, not verification checkpoints. There is no
 cached physical result, skipped tree/OS check, renewed deadline, enlarged allowance
 or changed prelaunch remainder guard. The

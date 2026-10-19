@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 6234,
-      "sha256": "4a6b1f56c331cbb2976d99d35a57130ef2e369c61f1d51f303cd76efdbb72058"
+      "bytes": 6608,
+      "sha256": "fc438413eabebd53e4e8379c1f97f83bab38af9c9ecca1cfc83f96368cff1fae"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 85996,
-      "sha256": "5ab6ff99a81e97fb8c17387cea50789431ca116a292a7f4670495e0141632a63"
+      "bytes": 86158,
+      "sha256": "b95a864c8a34deb76a7c1972371509cfd959c32cadec7c5ff0fbc32d8a97795a"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -43,7 +43,7 @@
   "historical_files": {
     "checkpoint-n12-data-integration.sh": {
       "byte_unchanged": false,
-      "current_sha256": "5ab6ff99a81e97fb8c17387cea50789431ca116a292a7f4670495e0141632a63",
+      "current_sha256": "b95a864c8a34deb76a7c1972371509cfd959c32cadec7c5ff0fbc32d8a97795a",
       "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
       "historical_sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
     },
@@ -175,6 +175,14 @@
     "native_execution": false,
     "portable_control": "../../test_metadata_sample_batching.py",
     "scope": "pin_file uses same physical full before tuple for size and nlink; ancestor combines UID/mode stat per component; physical hash/finaltuple/walks unchanged",
+    "time_gain_measured": false
+  },
+  "source51_metadata_sampling": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "N06 pin_file and ancestor adopt complete typed sampling; None/N06/N12 ordinary alias components combine UID/mode query. All physical walks, symlink before/after checks, hashes and original clocks retained.",
     "time_gain_measured": false
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
