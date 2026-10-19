@@ -55,8 +55,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
     /// <remarks>
     /// A factory that allocates resources but fails to return a builder remains responsible for those resources. Once a
     /// builder is returned, the fixture takes ownership before checking cancellation or deadline again and cleans it on
-    /// every unsuccessful startup path. Original factory/build/start exceptions remain primary if cleanup also fails;
-    /// in that case <see cref="Exception.Data"/> may contain only the fixed key
+    /// every unsuccessful startup path unless process-fatal cleanup interrupts it. Original factory/build/start exceptions
+    /// remain primary if nonfatal cleanup also fails; process-fatal cleanup exceptions propagate unchanged.
+    /// For nonfatal cleanup failures, <see cref="Exception.Data"/> may contain only the fixed key
     /// <c>AppSurface.Readiness.CleanupFailure</c> with value <see cref="ReadinessFailureCategory.CleanupFailure"/>.
     /// </remarks>
     public static Task<AppSurfaceAspireTestFixture> StartAsync(
@@ -167,7 +168,7 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
                 {
                     ownedProbeClient.Dispose();
                 }
-                catch (Exception)
+                catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
                 {
                     RecordSafeSecondaryCleanup(primaryException);
                 }
@@ -179,7 +180,7 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
                 {
                     await operations.CleanupAsync(builder).ConfigureAwait(false);
                 }
-                catch (Exception)
+                catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
                 {
                     RecordSafeSecondaryCleanup(primaryException);
                 }
@@ -275,7 +276,7 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
         {
             client.Dispose();
         }
-        catch (Exception exception)
+        catch (Exception exception) when (!AspireExceptionUtilities.IsProcessFatal(exception))
         {
             clientCleanupException = exception;
         }
@@ -338,9 +339,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
         {
             primaryException.Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure;
         }
-        catch (Exception)
+        catch (Exception exception) when (!AspireExceptionUtilities.IsProcessFatal(exception))
         {
-            // Diagnostic metadata is best-effort and cannot replace the primary error.
+            // Nonfatal diagnostic-storage failures cannot replace the primary error.
         }
     }
 

@@ -11,6 +11,54 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceAspireHttpReadinessTests
 {
+    // Value: process-fatal cleanup keeps its identity after success or an ordinary primary failure, while draining ownership.
+    // Seam: synthetic exceptions from handler disposal; no actual resource exhaustion or corrupted process state.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FatalClientCleanupFailures_PropagateWithoutWrappingOrSuppression(bool primaryFails)
+    {
+        foreach (var fatal in new Exception[] { new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException(), new AppDomainUnloadedException() })
+        {
+            var primary = new InvalidOperationException("ordinary operation failure");
+            var clientDisposals = 0;
+            var leaseDisposals = 0;
+            var adapter = Create(
+                client: _ => primaryFails
+                    ? Client((_, _) => Task.FromException<HttpResponseMessage>(primary), () => { clientDisposals++; throw fatal; })
+                    : Client(dispose: () => { clientDisposals++; throw fatal; }),
+                cleanup: () => { leaseDisposals++; return ValueTask.CompletedTask; });
+
+            var error = await Record.ExceptionAsync(() => adapter.WaitUntilReadyAsync(default));
+            await adapter.DisposeAsync();
+
+            Assert.Same(fatal, error);
+            Assert.Equal(1, clientDisposals);
+            Assert.Equal(1, leaseDisposals);
+        }
+    }
+
+    // Value: a fatal failure reading caller diagnostic storage must not be hidden as ordinary secondary metadata failure.
+    [Fact]
+    public async Task FatalCleanupMetadataFailure_PropagatesUnchanged()
+    {
+        var fatal = new OutOfMemoryException();
+        var primary = new FatalAdapterDataException(fatal);
+        var adapter = Create(client: _ => Client(
+            (_, _) => Task.FromException<HttpResponseMessage>(primary),
+            () => throw new InvalidOperationException("ordinary client cleanup failure")));
+
+        var error = await Record.ExceptionAsync(() => adapter.WaitUntilReadyAsync(default));
+        await adapter.DisposeAsync();
+
+        Assert.Same(fatal, error);
+    }
+
+    private sealed class FatalAdapterDataException(Exception fatal) : Exception
+    {
+        public override IDictionary Data => throw fatal;
+    }
+
     [Fact]
     public async Task SequentialAndConcurrentWaits_OwnIndependentClients_ThenDisposeLeaseOnce()
     {
@@ -33,11 +81,16 @@ public sealed class EvidenceAspireHttpReadinessTests
     public async Task DisposalClosesAdmissionAndDrainsIgnoringWait_ClientBeforeLease_SharedFailure()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var response = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var order = new List<string>();
         var failure = new InvalidOperationException("lease cleanup failed");
         Task? wait = null;
-        var adapter = Create(client: _ => Client((_, _) => { entered.SetResult(); return response.Task; }, () => order.Add("client")),
+        var adapter = Create(client: _ => Client(async (_, _) =>
+            {
+                entered.SetResult();
+                await response.Task;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            }, () => order.Add("client")),
             cleanup: () => { Assert.True(wait!.IsCompleted); order.Add("lease"); throw failure; });
         wait = adapter.WaitUntilReadyAsync(default);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -46,7 +99,7 @@ public sealed class EvidenceAspireHttpReadinessTests
         Assert.Throws<ObjectDisposedException>(() => { _ = adapter.WaitUntilReadyAsync(default); });
         Assert.False(first.IsCompleted);
         Assert.Empty(order);
-        response.SetResult(new HttpResponseMessage(HttpStatusCode.OK));
+        response.SetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait);
         Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => first));
         Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => second));
@@ -164,7 +217,7 @@ public sealed class EvidenceAspireHttpReadinessTests
             {
                 factoryInvocations++;
                 if (phase == "client") throw unrelatedCancellation;
-                return Client((_, _) => { requests++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); });
+                return Client((_, _) => { requests++; throw new InvalidOperationException("HTTP must not run after callback cancellation."); });
             });
         var wait = adapter.WaitUntilReadyAsync(default);
         var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(10)));
@@ -218,6 +271,54 @@ public sealed class EvidenceAspireHttpReadinessTests
         Assert.Equal(1, requests);
         Assert.Equal(1, clientDisposals);
         await adapter.DisposeAsync();
+    }
+
+    // Value: fatal cleanup failures must escape EvidenceHost unchanged after admitted work drains, even inside callback aggregates.
+    // Seam: synthetic fatal exceptions from cancellation callbacks and lease cleanup; no actual process exhaustion.
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("lease")]
+    [InlineData("nested-lease")]
+    public async Task DisposalPreservesFatalIdentityAfterDrainingAndAcrossJoiners(string phase)
+    {
+        foreach (var fatal in new Exception[] { new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException(), new AppDomainUnloadedException() })
+        {
+            var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseHealth = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var leaseDisposals = 0;
+            var adapter = Create(
+                health: async token =>
+                {
+                    using var registration = token.Register(() => throw (phase == "stop" ? fatal : new InvalidOperationException("ordinary stop failure")));
+                    healthEntered.SetResult();
+                    await releaseHealth.Task;
+                },
+                cleanup: () =>
+                {
+                    leaseDisposals++;
+                    throw phase switch
+                    {
+                        "stop" => new InvalidOperationException("ordinary lease failure"),
+                        "nested-lease" => new AggregateException(new InvalidOperationException("ordinary nested failure"), new AggregateException(fatal)),
+                        _ => fatal,
+                    };
+                });
+            var wait = adapter.WaitUntilReadyAsync(default);
+            await healthEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var first = adapter.DisposeAsync().AsTask();
+            var second = adapter.DisposeAsync().AsTask();
+            Assert.False(first.IsCompleted);
+            Assert.False(second.IsCompleted);
+            Assert.Equal(0, leaseDisposals);
+            releaseHealth.SetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => wait.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            Assert.Same(fatal, await Record.ExceptionAsync(() => first.WaitAsync(TimeSpan.FromSeconds(10))));
+            Assert.Same(fatal, await Record.ExceptionAsync(() => second.WaitAsync(TimeSpan.FromSeconds(10))));
+            Assert.Same(fatal, await Record.ExceptionAsync(() => adapter.DisposeAsync().AsTask()));
+            Assert.Equal(1, leaseDisposals);
+        }
     }
 
     // valuecard protects joined cleanup failure reporting and drain ordering; fails_when stop cancellation callbacks and lease cleanup both throw.

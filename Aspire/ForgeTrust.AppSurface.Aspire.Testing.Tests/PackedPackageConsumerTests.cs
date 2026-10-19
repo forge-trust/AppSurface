@@ -11,6 +11,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
     private const string AspireOverrideVersion = "13.4.6";
     private const string AspireBaselineVersion = "13.4.4";
     private const string HostingBaselineVersion = "10.0.8";
+    private const string MessagePackVersion = "2.5.303";
     private const string AppSurfaceTestingPackageId = "ForgeTrust.AppSurface.Aspire.Testing";
     private const string SkoolitSourceCommit = "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e";
     private static readonly string[] PackedPackageIds =
@@ -615,6 +616,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         AssertResolvedPackageVersion(libraries, "Aspire.Hosting.AppHost", expectedAspireVersion);
         AssertResolvedPackageVersion(libraries, "Aspire.Hosting.Testing", expectedAspireVersion);
         AssertResolvedPackageVersion(libraries, "Microsoft.Extensions.Hosting", HostingBaselineVersion);
+        AssertResolvedPackageVersion(libraries, "MessagePack", MessagePackVersion);
         AssertResolvedPackageVersion(
             libraries,
             "Microsoft.Extensions.DependencyInjection",

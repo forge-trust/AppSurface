@@ -48,7 +48,8 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
     /// <exception cref="ArgumentException">The id or probe path is invalid.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The timeout is unsupported.</exception>
     /// <exception cref="ArgumentNullException">A required callback, snapshot, or time provider is null.</exception>
-    /// <remarks>Callbacks execute outside the admission lock. A callback must not dispose this adapter from its own wait.</remarks>
+    /// <remarks>Callbacks execute outside the admission lock. A callback must not dispose this adapter from its own wait.
+    /// Fatal client cleanup and diagnostic-storage failures propagate unchanged, after per-wait bookkeeping is restored.</remarks>
     internal EvidenceAspireHttpReadiness(
         string id,
         string probePath,
@@ -266,6 +267,11 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
 
         if (clientCleanupFailure is not null)
         {
+            if (!EvidenceHostBootstrap.IsNonFatalException(clientCleanupFailure))
+            {
+                ExceptionDispatchInfo.Capture(clientCleanupFailure).Throw();
+            }
+
             if (operationFailure is null)
             {
                 throw new ReadinessException(ReadinessPhase.Cleanup, ReadinessFailureCategory.CleanupFailure,
@@ -309,7 +315,12 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
                 (failures ??= []).Add(exception);
             }
 
-            if (failures is null)
+            var fatalFailure = failures?.Select(FindFatalCleanupFailure).FirstOrDefault(static failure => failure is not null);
+            if (fatalFailure is not null)
+            {
+                completion.TrySetException(fatalFailure);
+            }
+            else if (failures is null)
             {
                 completion.TrySetResult();
             }
@@ -326,6 +337,21 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
         {
             CurrentFlow.Value = previousFlow;
         }
+    }
+
+    /// <summary>Preserves a fatal cleanup failure even when cancellation callbacks wrapped it in aggregates.</summary>
+    /// <param name="exception">One cleanup failure, including nested cancellation callback aggregates.</param>
+    /// <returns>The first original fatal failure, or null when all failures are nonfatal.</returns>
+    private static Exception? FindFatalCleanupFailure(Exception exception)
+    {
+        if (!EvidenceHostBootstrap.IsNonFatalException(exception))
+        {
+            return exception;
+        }
+
+        return exception is AggregateException aggregate
+            ? aggregate.InnerExceptions.Select(FindFatalCleanupFailure).FirstOrDefault(static failure => failure is not null)
+            : null;
     }
 
     private void FinishWait()
@@ -349,9 +375,9 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
         {
             primaryFailure.Data[CleanupFailureDataKey] = ReadinessFailureCategory.CleanupFailure;
         }
-        catch (Exception)
+        catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception))
         {
-            // Safe metadata must not replace the original primary error.
+            // Nonfatal diagnostic-storage failures cannot replace the primary error.
         }
     }
 

@@ -100,7 +100,7 @@ public sealed class EvidenceAspireApplicationLifetimeTests
     public async Task DisposingOneAdapter_DoesNotCancelAnotherAdaptersIgnoringHttpWaitOrDisposeItsClient()
     {
         var requestEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var finishRequest = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishRequest = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var clientDisposed = 0;
         var applicationCleanupCount = 0;
         var lifetime = new EvidenceAspireApplicationLifetime(() =>
@@ -111,13 +111,14 @@ public sealed class EvidenceAspireApplicationLifetimeTests
         var firstRegistration = lifetime.Acquire();
         var secondRegistration = lifetime.Acquire();
         var firstAdapter = CreateReadiness(firstRegistration.DisposeAsync, new DelegateHandler(
-            _ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)), () => { }));
+            _ => throw new InvalidOperationException("The first adapter must not send an HTTP request."), () => { }));
         var secondAdapter = CreateReadiness(secondRegistration.DisposeAsync, new DelegateHandler(
-            _ =>
+            async _ =>
             {
                 requestEntered.TrySetResult();
                 // Deliberately ignore cancellation until the test releases the response.
-                return finishRequest.Task;
+                await finishRequest.Task;
+                return new HttpResponseMessage(HttpStatusCode.OK);
             },
             () => Interlocked.Increment(ref clientDisposed)));
 
@@ -135,7 +136,7 @@ public sealed class EvidenceAspireApplicationLifetimeTests
         Assert.False(secondWait.IsCompleted);
         Assert.Equal(0, clientDisposed);
 
-        finishRequest.TrySetResult(new HttpResponseMessage(HttpStatusCode.OK));
+        finishRequest.TrySetResult();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => secondWait.WaitAsync(TimeSpan.FromSeconds(10)));
         await secondDispose.WaitAsync(TimeSpan.FromSeconds(10));
 

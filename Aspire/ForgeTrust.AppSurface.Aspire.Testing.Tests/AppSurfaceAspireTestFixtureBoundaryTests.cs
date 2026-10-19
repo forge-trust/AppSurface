@@ -7,6 +7,63 @@ using Microsoft.Extensions.Time.Testing;
 
 public sealed partial class AppSurfaceAspireTestFixtureTests
 {
+    // Value: fatal cleanup and diagnostic-storage failures must propagate unchanged, including after an earlier ordinary failure.
+    // Seam: synthetic exception instances from controlled client/builder disposal and Exception.Data; no actual resource exhaustion.
+    [Theory]
+    [InlineData("client-success")]
+    [InlineData("client-primary")]
+    [InlineData("client-before-probe")]
+    [InlineData("builder-primary")]
+    [InlineData("metadata")]
+    public async Task FatalCleanupFailures_PropagateWithoutWrappingOrSuppression(string phase)
+    {
+        foreach (var fatal in new Exception[] { new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException() })
+        {
+            await using var application = CreateApplication();
+            await using var builder = CreateBuilder();
+            using var caller = new CancellationTokenSource();
+            var primary = phase == "metadata" ? new FatalFixtureDataException(fatal) : new Exception("ordinary startup failure");
+            var clientDisposals = 0;
+            var builderCleanups = 0;
+            using var client = new HttpClient(new StubHandler(_ => new(HttpStatusCode.OK), () =>
+            {
+                clientDisposals++;
+                if (phase.StartsWith("client", StringComparison.Ordinal)) throw fatal;
+                if (phase == "metadata") throw new InvalidOperationException("ordinary cleanup failure");
+            }));
+            var operations = CreateOperations(application, [], []) with
+            {
+                WaitForHttpAsync = (_, _, _, _, _) => phase == "client-success" ? Task.CompletedTask : Task.FromException(primary),
+                CleanupAsync = _ =>
+                {
+                    builderCleanups++;
+                    if (phase == "builder-primary") throw fatal;
+                    return ValueTask.CompletedTask;
+                },
+            };
+
+            var error = await Record.ExceptionAsync(() => AppSurfaceAspireTestFixture.StartAsync(
+                _ => Task.FromResult(builder), Target,
+                new()
+                {
+                    CreateProbeClient = _ =>
+                    {
+                        if (phase == "client-before-probe") caller.Cancel();
+                        return client;
+                    },
+                }, caller.Token, TimeProvider.System, operations));
+
+            Assert.Same(fatal, error);
+            Assert.Equal(1, clientDisposals);
+            Assert.Equal(phase == "client-before-probe" ? 0 : 1, builderCleanups);
+        }
+    }
+
+    private sealed class FatalFixtureDataException(Exception fatal) : Exception
+    {
+        public override IDictionary Data => throw fatal;
+    }
+
     [Theory]
     [InlineData("null-factory")]
     [InlineData("null-target")]

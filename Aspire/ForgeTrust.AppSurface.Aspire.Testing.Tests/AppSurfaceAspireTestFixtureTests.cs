@@ -27,7 +27,7 @@ public sealed partial class AppSurfaceAspireTestFixtureTests : IDisposable
         var builder = CreateBuilder();
         var events = new List<string>();
         var handler = new StubHandler(_ => new(HttpStatusCode.OK), () => events.Add("client-dispose"));
-        var client = new HttpClient(handler);
+        using var client = new HttpClient(handler);
         var calls = new List<CancellationToken>();
         var operations = CreateOperations(application, events, calls);
         var factoryCalls = 0;
@@ -37,7 +37,7 @@ public sealed partial class AppSurfaceAspireTestFixtureTests : IDisposable
             CreateProbeClient = _ => client,
         };
 
-        var fixture = await AppSurfaceAspireTestFixture.StartAsync(
+        await using var fixture = await AppSurfaceAspireTestFixture.StartAsync(
             _ =>
             {
                 factoryCalls++;
