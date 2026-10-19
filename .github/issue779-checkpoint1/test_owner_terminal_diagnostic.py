@@ -7,7 +7,9 @@ import unittest
 PATH = Path(__file__).resolve().parent / "procedures/owner-death/checkpoint-owner-death-common.sh"
 SOURCE = PATH.read_text()
 HELPER = SOURCE.split("# BEGIN OWNER TERMINAL DIAGNOSTIC\n", 1)[1].split("# END OWNER TERMINAL DIAGNOSTIC", 1)[0]
-GUARD = next(line for line in SOURCE.splitlines() if line.startswith('[[ $(field "$owner_terminal" ExecMainCode) == 2'))
+GUARD = SOURCE.split("# BEGIN OWNER DEADLINE TERMINAL PREDICATE\n", 1)[1].split(
+    "# END OWNER DEADLINE TERMINAL PREDICATE", 1
+)[0]
 FIELD = next(line for line in SOURCE.splitlines() if line.startswith("field(){"))
 
 
@@ -16,7 +18,8 @@ class OwnerTerminalDiagnosticTests(unittest.TestCase):
         program = "set -euo pipefail\n" + HELPER
         if guard:
             program += '\nbounded_exec(){ "$@"; }\n' + FIELD
-            program += '\nfail(){ exit 1; }\nowner_terminal=$1\n' + GUARD
+            program += ('\nfail(){ exit 1; }\nowner_terminal=$1\nOWNER_DEATH_CASE=N13\n' +
+                        'active_enter_usec=1000000000; runtime_usec=120000000; timeout_usec=5000000\n' + GUARD)
         else:
             program += '\nowner_terminal_diagnostic "$1"\n'
         return subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", program, "_", facts],

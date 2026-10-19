@@ -62,7 +62,7 @@ require_original_owner_budget(){
  now=$(bounded_exec date -u +%s) || fail owner-original-deadline
  owner_deadline_fits "$end" "$now" || fail owner-original-budget
 }
-unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus; }
+unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p Result -p ExecMainCode -p ExecMainStatus -p ExecMainExitTimestampMonotonic; }
 field(){ bounded_exec awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1)}' <<<"$1"; }
 # BEGIN OWNER TERMINAL DIAGNOSTIC
 owner_terminal_diagnostic(){
@@ -524,7 +524,7 @@ read -r worker_start worker_uid worker_gid worker_cg < <(proc_facts "$worker_pid
 [[ $owner_uid == 0 && $owner_gid == 0 && $owner_cg == "$owner_cgroup" && $worker_uid =~ ^[1-9][0-9]*$ && $worker_gid =~ ^[1-9][0-9]*$ && $worker_cg == "$worker_cgroup" ]] || fail process-unit-bind
 [[ $(stat -Lc '%u:%g:%a:%h' "$guard/consumed") == 0:0:600:1 && $(cat "$guard/consumed") == "$G" ]] || fail activation-guard-not-consumed
 active_enter_usec=$(field "$owner_facts" ActiveEnterTimestampMonotonic)
-[[ $active_enter_usec =~ ^[1-9][0-9]*$ ]] || fail owner-activation-time
+[[ $active_enter_usec =~ ^[1-9][0-9]{0,15}$ ]] || fail owner-activation-time
 runtime_show=$(field "$owner_facts" RuntimeMaxUSec); timeout_show=$(field "$owner_facts" TimeoutStopUSec)
 runtime_usec=$(systemd_policy_usec RuntimeMaxUSec "$runtime_show") || fail owner-runtime-policy
 timeout_usec=$(systemd_policy_usec TimeoutStopUSec "$timeout_show") || fail owner-runtime-policy
@@ -556,7 +556,16 @@ owner_terminal=$(unit_sample "$owner") || fail owner-terminal-sample
 worker_terminal=$(unit_sample "$worker") || fail worker-terminal-sample
 owner_state=$(field "$owner_terminal" ActiveState); worker_state=$(field "$worker_terminal" ActiveState)
 [[ $owner_state =~ ^(inactive|failed)$ && $worker_state =~ ^(inactive|failed)$ && $(field "$owner_terminal" MainPID) == 0 && $(field "$worker_terminal" MainPID) == 0 ]] || fail units-not-terminal
+# BEGIN OWNER DEADLINE TERMINAL PREDICATE
+if [[ $OWNER_DEATH_CASE == N13 ]]; then
 [[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-not-sigkill; }
+else
+ owner_result=$(field "$owner_terminal" Result); owner_exit_usec=$(field "$owner_terminal" ExecMainExitTimestampMonotonic)
+ [[ $owner_result == timeout && $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) =~ ^(15|9)$ && $owner_exit_usec =~ ^[1-9][0-9]{0,15}$ ]] || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-not-deadline; }
+ owner_exit_min_usec=$((10#$active_enter_usec+runtime_usec)); owner_exit_max_usec=$((owner_exit_min_usec+timeout_usec))
+ ((10#$owner_exit_usec>=owner_exit_min_usec && 10#$owner_exit_usec<=owner_exit_max_usec)) || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-outside-deadline; }
+fi
+# END OWNER DEADLINE TERMINAL PREDICATE
 [[ $(field "$owner_terminal" SubState) =~ ^(dead|failed)$ && $(field "$worker_terminal" SubState) =~ ^(dead|failed)$ ]] || fail unit-terminal-substate
 [[ -d $stage && ! -L $stage && $(stat -Lc '%u:%g:%a' "$stage") == 0:0:555 && -d $private && ! -L $private && $(stat -Lc '%u:%g:%a' "$private") == 0:0:700 ]] || fail quarantine-workspace-custody
 for pid in "$owner_pid" "$worker_pid"; do pid_absent "$pid" || fail original-process-remains; done
@@ -615,10 +624,11 @@ bounded_exec jq -cnS \
  --argjson subject_uid "$subject_account_uid" --argjson subject_gid "$subject_account_gid" --argjson results_gid "$results_group_gid" \
  --arg final_policy "SendSIGKILL=$(field "$owner_facts" SendSIGKILL);FinalKillSignal=$(field "$owner_facts" FinalKillSignal);KillMode=$(field "$owner_facts" KillMode)" \
  --arg owner_exit_code "$(field "$owner_terminal" ExecMainCode)" --arg owner_exit_status "$(field "$owner_terminal" ExecMainStatus)" \
+ --arg owner_result "$(field "$owner_terminal" Result)" --arg owner_exit_usec "$(field "$owner_terminal" ExecMainExitTimestampMonotonic)" \
  --arg stdout_sha "$(sha256sum "$log/root.stdout" | cut -d' ' -f1)" --arg stderr_sha "$(sha256sum "$log/root.stderr" | cut -d' ' -f1)" \
  --argjson stdout_bytes "$(stat -Lc %s "$log/root.stdout")" --argjson stderr_bytes "$(stat -Lc %s "$log/root.stderr")" \
  --argjson output_before 0 --argjson output_after 0 \
- '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:{active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false},termination:{owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)},pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
+ '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:{active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false},termination:({owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)} + (if $case=="N14" then {owner_result:$owner_result,owner_exit_usec:($owner_exit_usec|tonumber)} else {} end)),pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
 printf '%s\n' 'OWNER_DEATH_OBSERVED_OUTPUT_QUARANTINED' >"$quarantine"; chmod 600 "$quarantine"
 chmod 600 "$result"; bounded_exec /usr/bin/python3.12 -I -S -B "$parser" "$result" >/dev/null || fail receipt-parser
 success=1

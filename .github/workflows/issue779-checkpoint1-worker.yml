@@ -14,7 +14,7 @@ jobs:
   worker-selector:
     name: Current CSharp worker ${{ matrix.selector }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -77,12 +77,38 @@ jobs:
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           raise SystemExit(0 if result.wasSuccessful() else 1)
           PY
+      - name: Install the distribution-matched execution runtime prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # The private 10.0.401 SDK remains the only compiler host. The
+          # distribution SDK supplies the complete OS-matched runtime image;
+          # none of its SDK/packs content is copied into the protected runtime.
+          timeout --signal=KILL 180 sudo --non-interactive apt-get update \
+            > "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          timeout --signal=KILL 10 apt-cache policy \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-package-policy.log"
+          timeout --signal=KILL 240 sudo --non-interactive apt-get install \
+            --yes --no-install-recommends dotnet-sdk-10.0 \
+            >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          dpkg-query --show --showformat='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-packages.tsv"
+          test "$(readlink -f /usr/lib/dotnet)" = /usr/lib/dotnet
+          test "$(readlink -f /usr/lib/dotnet/dotnet)" = /usr/lib/dotnet/dotnet
+          test -d /usr/lib/dotnet/sdk
+          printf 'C1_EXECUTION_SDK=/usr/lib/dotnet\n' >> "$GITHUB_ENV"
       - name: Copy the actual SDK-free framework-dependent runtime closure
         shell: bash
         run: |
           set -euo pipefail
           umask 077
-          # Observe only fixed SDK roles; these facts cannot qualify the image.
+          # Observe only fixed execution-installation roles; these facts cannot
+          # qualify the image or replace the complete copy and native OS audit.
           timeout --signal=KILL 6 python3 -B - <<'PY' > "$C1_EVIDENCE/runtime-input-metadata.json"
           import json
           import os
@@ -90,7 +116,7 @@ jobs:
           import re
           import stat
           import time
-          root = Path(os.environ['C1_BUILD_SDK'])
+          root = Path(os.environ['C1_EXECUTION_SDK'])
           deadline = time.monotonic() + 5
           roles = ('host', 'host/fxr', 'shared', 'shared/Microsoft.NETCore.App', 'shared/Microsoft.AspNetCore.App')
           version = re.compile(r'10\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
@@ -124,7 +150,7 @@ jobs:
                             'qualification': False}, sort_keys=True))
           PY
           timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/prepare-runtime.py \
-            --sdk-root "$C1_BUILD_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
+            --sdk-root "$C1_EXECUTION_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
             > "$C1_EVIDENCE/runtime-preparation.log" 2>&1
       - name: Publish the current selected CLI in Release and retain genuine build facts
         shell: bash

@@ -67,10 +67,21 @@ one closed `issue779-owner-terminal-diagnostic-v1` JSON line to the already-priv
 fixture stderr. It retains numeric `ExecMainCode`, `ExecMainStatus` and `MainPID`,
 plus closed active/substate enums. Missing, duplicate or malformed fields become
 null/unknown. No raw property, unit path, exception or command text is emitted.
-The original `ExecMainCode == 2` and `ExecMainStatus == 9` requirement, signals,
-clocks and failure result are unchanged. These facts diagnose a failed check;
-they cannot make a failed N14 pass. The [portable diagnostic/guard controls](../../test_owner_terminal_diagnostic.py)
-execute only this shell fragment and establish no native behavior.
+N13 retains its exact `ExecMainCode == 2` and `ExecMainStatus == 9` requirement and
+its original receipt shape. For N14, the fixed 120-second systemd runtime deadline
+is proven by `Result == timeout`, `ExecMainCode == 2`, SIGTERM or SIGKILL status
+(`15` or `9`), and the actual monotonic main-process exit timestamp in the inclusive
+window from `ActiveEnterTimestampMonotonic + 120s` through `+125s` (the unchanged
+five-second stop allowance). The closed N14-only receipt fields `owner_result` and
+`owner_exit_usec` preserve those facts; N13 records contain neither field. The
+exit also cannot follow the final observed terminal sample beyond its actual
+centisecond precision: `/proc/uptime` is padded by `mono_ms`, so the parser
+allows at most 9,999 microseconds of quantization without extending the exact
+activation-plus-125-second exit bound. The
+original activation clock, timeout policy, signal, identity, join, cgroup, account,
+budget and quarantine checks remain in force. The [portable deadline controls](../../test_owner_deadline_contract.py)
+exercise only data validation and the real shell predicate fragment; they establish
+no native behavior.
 
 The native common's PID/starttime/UID/GID/cgroup checks, accepted phase, presignal
 rereads, original systemd activation timer, exact signal, dependent worker checks,

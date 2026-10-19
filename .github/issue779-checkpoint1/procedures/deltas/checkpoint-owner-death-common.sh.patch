@@ -1,32 +1,117 @@
 --- historical/checkpoint-owner-death-common.sh
 +++ current/checkpoint-owner-death-common.sh
-@@ -8,4 +8,2 @@
+@@ -6,13 +6,11 @@
+ : "${OWNER_DEATH_CASE:?fixed wrapper must set OWNER_DEATH_CASE}"
+ [[ $OWNER_DEATH_CASE == N13 || $OWNER_DEATH_CASE == N14 ]] || exit 64
 -readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30 FIXTURE_REVIEW_CLEAR=1 SOURCE_REVIEW_CLEAR=1 ROOT_REVIEW_CLEAR=1
 -readonly EXPECTED_HEAD=5b4ed381badb91de47d793715d05b6ae7737e39e EXPECTED_PARENT=914046e1e998ca89a5f0f5be39a90bbfb88a431d
 -readonly EXPECTED_COUNT=2872 EXPECTED_CAPTURE_SHA=4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540
 -mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation=
 +readonly ORIGINAL_JOB_SECONDS=240 FIXTURE_SECONDS=600 CLEANUP_RESERVE=30
 +mode=prepare-only; selected=0; capture= capture_sha= request= request_sha= host= host_sha= entry= entry_sha= build= build_sha= output= parser= parser_sha= generation= source_revision= binding_validator= binding_validator_sha256= binding_deadline_monotonic=
-@@ -16,1 +14,1 @@
+ fail(){ printf 'OWNER_DEATH_FIXTURE_REJECTED:%s\n' "$1" >&2; exit 1; }
+ while (($#)); do
+  case "$1" in
+   --prepare-only|--execute) ((selected==0)) || fail duplicate-mode; mode=${1#--}; selected=1; shift ;;
 -  --source-capture|--source-capture-sha256|--request|--request-sha256|--runtime-host|--runtime-host-sha256|--entry|--entry-sha256|--build-receipt|--build-receipt-sha256|--output-root|--parser|--parser-sha256|--generation)
 +  --source-capture|--source-capture-sha256|--request|--request-sha256|--runtime-host|--runtime-host-sha256|--entry|--entry-sha256|--build-receipt|--build-receipt-sha256|--output-root|--parser|--parser-sha256|--generation|--source-revision|--binding-validator|--binding-validator-sha256|--binding-deadline-monotonic)
-@@ -25,0 +24,4 @@
+    (($#>=2)) || fail missing-value
+    case "$1" in
+@@ -24,4 +22,8 @@
+     --output-root) key=output ;; --parser) key=parser ;; --parser-sha256) key=parser_sha ;;
+     --generation) key=generation ;;
 +    --source-revision) key=source_revision ;;
 +    --binding-validator) key=binding_validator ;;
 +    --binding-validator-sha256) key=binding_validator_sha256 ;;
 +    --binding-deadline-monotonic) key=binding_deadline_monotonic ;;
-@@ -33,2 +35,1 @@
+    esac
+    [[ -z ${!key} ]] || fail duplicate-option; printf -v "$key" '%s' "$2"; shift 2 ;;
+@@ -31,14 +33,13 @@
+ sha(){ [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail sha256-syntax; }
+ pin(){ local p=$1 h=$2 limit=$3 before after got size; [[ $p == /* && $p != *'/../'* && $p != *'/./'* && -f $p && ! -L $p && $(realpath -e -- "$p") == "$p" ]] || fail pinned-file-path; sha "$h"; before=$(stat -Lc '%d:%i:%s:%f:%h:%u:%g' -- "$p") || fail file-stat; size=$(stat -Lc %s -- "$p") || fail file-stat; ((size<=limit)) || fail file-bound; [[ $(stat -Lc %h -- "$p") == 1 && $(stat -Lc '%u:%g' -- "$p") == 0:0 ]] || fail file-custody; got=$(sha256sum -- "$p"); after=$(stat -Lc '%d:%i:%s:%f:%h:%u:%g' -- "$p") || fail file-stat; [[ $before == "$after" && ${got:0:64} == "$h" ]] || fail file-pin; }
 -for v in capture capture_sha request request_sha host host_sha entry entry_sha build build_sha output parser parser_sha generation; do [[ -n ${!v} ]] || fail "missing-$v"; done
 -[[ $capture_sha == "$EXPECTED_CAPTURE_SHA" ]] || fail capture-pin
 +for v in capture capture_sha request request_sha host host_sha entry entry_sha build build_sha output parser parser_sha generation source_revision binding_validator binding_validator_sha256 binding_deadline_monotonic; do [[ -n ${!v} ]] || fail "missing-$v"; done
-@@ -37,2 +38,3 @@
+ pin "$capture" "$capture_sha" 8388608; pin "$request" "$request_sha" 65536; pin "$host" "$host_sha" 2147483648; pin "$entry" "$entry_sha" 2147483648; pin "$build" "$build_sha" 4194304; pin "$parser" "$parser_sha" 131072
+ [[ $generation =~ ^[0-9a-f]{32}$ ]] || fail generation
 -jq -e --arg h "$EXPECTED_HEAD" --arg p "$EXPECTED_PARENT" --arg t "3bafd0fcd5321f1b29323f46df94b77eb48fa859" --argjson n "$EXPECTED_COUNT" ' . as $r | $r.schema=="issue779-csharp-common-source-capture-v4" and $r.validation_commit==$h and $r.previous_validation_commit==$p and $r.source_count==$n and $r.source_tree==$t and $r.clean==true and $r.index_checksum_verified==true and $r.index_tree_blob_modes_equal==true and $r.no_alternates==true and $r.native_credit==false and $r.all16_final_integrated_native_verified==false and ($r.source|type=="object" and keys==["modes","sha256"]) and ($r.source.sha256|type=="object" and length==$n) and ($r.source.modes|type=="object" and length==$n) and ($r.source.sha256|keys)==($r.source.modes|keys)' "$capture" >/dev/null || fail source-capture-metadata
 -jq -e --arg c "$OWNER_DEATH_CASE" --arg h "$EXPECTED_HEAD" --argjson n "$EXPECTED_COUNT" '.source_revision==$h and .source_count==$n and .private_qualification==$c' "$build" >/dev/null || fail build-variant-binding
 +[[ $source_revision =~ ^[0-9a-f]{40}$ ]] || fail current-source-syntax
 +pin "$binding_validator" "$binding_validator_sha256" 131072
 +timeout --signal=KILL 120 /usr/bin/python3 -I -S -B "$binding_validator" root-verify --source-capture "$capture" --build-receipt "$build" --source "$source_revision" --selector "$OWNER_DEATH_CASE" --deadline-monotonic "$binding_deadline_monotonic" >/dev/null || fail current-source-build-binding
-@@ -42,1 +43,0 @@
+ [[ $host != *'$'* && $host != *'%'* && $host != *'='* && $entry != *'$'* && $entry != *'%'* ]] || fail bootstrap-path
+ if [[ $mode == prepare-only ]]; then printf 'PREPARATION_PINS_MATCHED:%s:NOT_RUN\n' "$OWNER_DEATH_CASE"; exit 0; fi
+ ((EUID==0)) || fail root-required
 -((SOURCE_REVIEW_CLEAR==1 && FIXTURE_REVIEW_CLEAR==1 && ROOT_REVIEW_CLEAR==1)) || fail independent-review-pending
-@@ -445,1 +446,1 @@
+ [[ $OSTYPE == linux* && $(uname -m) == x86_64 ]] || fail linux-x64-required
+ for t in systemd-run systemctl jq stat sha256sum awk grep sleep install getent realpath timeout setsid cmp cut cat bash date; do command -v "$t" >/dev/null || fail missing-tool; done
+@@ -62,6 +63,27 @@
+  owner_deadline_fits "$end" "$now" || fail owner-original-budget
+ }
+-unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p ExecMainCode -p ExecMainStatus; }
++unit_sample(){ systemctl_bounded show "$1" -p MainPID -p ControlGroup -p ActiveState -p SubState -p Type -p Restart -p RemainAfterExit -p RuntimeMaxUSec -p TimeoutStopUSec -p KillMode -p SendSIGKILL -p FinalKillSignal -p BindsTo -p After -p ActiveEnterTimestampMonotonic -p Result -p ExecMainCode -p ExecMainStatus -p ExecMainExitTimestampMonotonic; }
+ field(){ bounded_exec awk -F= -v k="$2" '$1==k{print substr($0,index($0,"=")+1)}' <<<"$1"; }
++# BEGIN OWNER TERMINAL DIAGNOSTIC
++owner_terminal_diagnostic(){
++ local facts=$1 line key value seen= code=null status=null main=null state=unknown sub=unknown
++ while IFS= read -r line; do
++  key=${line%%=*}; value=${line#*=}
++  case "$key" in ExecMainCode|ExecMainStatus|MainPID|ActiveState|SubState) ;; *) continue ;; esac
++  case " $seen " in
++   *" $key "*) case "$key" in ExecMainCode) code=null ;; ExecMainStatus) status=null ;; MainPID) main=null ;; ActiveState) state=unknown ;; SubState) sub=unknown ;; esac; continue ;;
++  esac
++  seen+=" $key"
++  case "$key" in
++   ExecMainCode) [[ $value =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((10#$value<=255)) && code=$value ;;
++   ExecMainStatus) [[ $value =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((10#$value<=255)) && status=$value ;;
++   MainPID) [[ $value =~ ^(0|[1-9][0-9]{0,9})$ ]] && ((10#$value<=2147483647)) && main=$value ;;
++   ActiveState) case "$value" in active|activating|deactivating|inactive|failed) state=$value ;; esac ;;
++   SubState) case "$value" in running|dead|failed|start|start-pre|start-post|stop|stop-sigterm|stop-sigkill|final-sigterm|final-sigkill|auto-restart) sub=$value ;; esac ;;
++  esac
++ done <<<"$facts"
++ printf '{"schema":"issue779-owner-terminal-diagnostic-v1","exec_main_code":%s,"exec_main_status":%s,"main_pid":%s,"active_state":"%s","sub_state":"%s"}\n' "$code" "$status" "$main" "$state" "$sub" >&2
++}
++# END OWNER TERMINAL DIAGNOSTIC
+ systemd_policy_usec(){ case "$1:$2" in RuntimeMaxUSec:2min|RuntimeMaxUSec:120000000) printf '%s' 120000000 ;; TimeoutStopUSec:5s|TimeoutStopUSec:5000000) printf '%s' 5000000 ;; *) return 1 ;; esac; }
+ unit_absent(){ [[ $(systemctl_bounded show "$1" -p LoadState --value 2>/dev/null || :) == not-found ]]; }
+@@ -443,5 +465,5 @@
+ trap cleanup EXIT; trap 'exit 1' INT TERM
+ # Inherited launch recipe is fixed to the existing root-owned owner service; C# creates the dependent worker.
 -fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
 +fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp)
+ unsafe='DOTNET_STARTUP_HOOKS DOTNET_ADDITIONAL_DEPS DOTNET_SHARED_STORE DOTNET_ROOT DOTNET_ROOT_X64 DOTNET_HOST_PATH DOTNET_ROLL_FORWARD DOTNET_ROLL_FORWARD_TO_PRERELEASE DOTNET_MULTILEVEL_LOOKUP CORECLR_ENABLE_PROFILING CORECLR_PROFILER CORECLR_PROFILER_PATH CORECLR_PROFILER_PATH_64 COR_ENABLE_PROFILING COR_PROFILER COR_PROFILER_PATH COMPlus_ReadyToRun COMPlus_ZapDisable'
+ props=(--property=Type=exec --property=User=0 --property=Group=0 --property=KillMode=control-group --property=Restart=no --property=RemainAfterExit=no --property=SendSIGKILL=yes --property=FinalKillSignal=9 --property=RuntimeMaxSec=120s --property=TimeoutStopSec=5s "--property=ConditionPathExists=$guard/armed" --property=PassEnvironment= "--property=UnsetEnvironment=$unsafe" "--property=Environment=${fixed_env[*]}")
+@@ -503,5 +525,5 @@
+ [[ $(stat -Lc '%u:%g:%a:%h' "$guard/consumed") == 0:0:600:1 && $(cat "$guard/consumed") == "$G" ]] || fail activation-guard-not-consumed
+ active_enter_usec=$(field "$owner_facts" ActiveEnterTimestampMonotonic)
+-[[ $active_enter_usec =~ ^[1-9][0-9]*$ ]] || fail owner-activation-time
++[[ $active_enter_usec =~ ^[1-9][0-9]{0,15}$ ]] || fail owner-activation-time
+ runtime_show=$(field "$owner_facts" RuntimeMaxUSec); timeout_show=$(field "$owner_facts" TimeoutStopUSec)
+ runtime_usec=$(systemd_policy_usec RuntimeMaxUSec "$runtime_show") || fail owner-runtime-policy
+@@ -535,5 +557,14 @@
+ owner_state=$(field "$owner_terminal" ActiveState); worker_state=$(field "$worker_terminal" ActiveState)
+ [[ $owner_state =~ ^(inactive|failed)$ && $worker_state =~ ^(inactive|failed)$ && $(field "$owner_terminal" MainPID) == 0 && $(field "$worker_terminal" MainPID) == 0 ]] || fail units-not-terminal
+-[[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || fail owner-terminal-not-sigkill
++# BEGIN OWNER DEADLINE TERMINAL PREDICATE
++if [[ $OWNER_DEATH_CASE == N13 ]]; then
++[[ $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) == 9 ]] || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-not-sigkill; }
++else
++ owner_result=$(field "$owner_terminal" Result); owner_exit_usec=$(field "$owner_terminal" ExecMainExitTimestampMonotonic)
++ [[ $owner_result == timeout && $(field "$owner_terminal" ExecMainCode) == 2 && $(field "$owner_terminal" ExecMainStatus) =~ ^(15|9)$ && $owner_exit_usec =~ ^[1-9][0-9]{0,15}$ ]] || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-not-deadline; }
++ owner_exit_min_usec=$((10#$active_enter_usec+runtime_usec)); owner_exit_max_usec=$((owner_exit_min_usec+timeout_usec))
++ ((10#$owner_exit_usec>=owner_exit_min_usec && 10#$owner_exit_usec<=owner_exit_max_usec)) || { owner_terminal_diagnostic "$owner_terminal"; fail owner-terminal-outside-deadline; }
++fi
++# END OWNER DEADLINE TERMINAL PREDICATE
+ [[ $(field "$owner_terminal" SubState) =~ ^(dead|failed)$ && $(field "$worker_terminal" SubState) =~ ^(dead|failed)$ ]] || fail unit-terminal-substate
+ [[ -d $stage && ! -L $stage && $(stat -Lc '%u:%g:%a' "$stage") == 0:0:555 && -d $private && ! -L $private && $(stat -Lc '%u:%g:%a' "$private") == 0:0:700 ]] || fail quarantine-workspace-custody
+@@ -594,8 +625,9 @@
+  --arg final_policy "SendSIGKILL=$(field "$owner_facts" SendSIGKILL);FinalKillSignal=$(field "$owner_facts" FinalKillSignal);KillMode=$(field "$owner_facts" KillMode)" \
+  --arg owner_exit_code "$(field "$owner_terminal" ExecMainCode)" --arg owner_exit_status "$(field "$owner_terminal" ExecMainStatus)" \
++ --arg owner_result "$(field "$owner_terminal" Result)" --arg owner_exit_usec "$(field "$owner_terminal" ExecMainExitTimestampMonotonic)" \
+  --arg stdout_sha "$(sha256sum "$log/root.stdout" | cut -d' ' -f1)" --arg stderr_sha "$(sha256sum "$log/root.stderr" | cut -d' ' -f1)" \
+  --argjson stdout_bytes "$(stat -Lc %s "$log/root.stdout")" --argjson stderr_bytes "$(stat -Lc %s "$log/root.stderr")" \
+  --argjson output_before 0 --argjson output_after 0 \
+- '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:{active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false},termination:{owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)},pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
++ '{schema:"issue779-owner-death-native-fixture-v1",case:$case,generation:$gen,phase_line:$phase,accepted_reply_committed:true,original_request_pending:true,owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},worker:{pid:$worker_pid,starttime:$worker_start,uid:$worker_uid,gid:$worker_gid,unit:$worker_unit,cgroup:$worker_cgroup},signal:{name:(if $case=="N13" then "SIGKILL" else "SIGSTOP" end),target_pid:$owner_pid,pre_signal_owner:{pid:$owner_pid,starttime:$owner_start,uid:$owner_uid,gid:$owner_gid,unit:$owner_unit,cgroup:$owner_cgroup},syscall_succeeded:true,elapsed_seconds:$signal_elapsed,from_activation_usec:$signal_activation_usec},systemd_bound:{active_enter_usec:$activation_usec,runtime_max_usec:$runtime_us,runtime_max_show:$runtime_show,timeout_stop_usec:$timeout_us,timeout_stop_show:$timeout_show,final_kill_policy:$final_policy,timer_rearmed:false,new_acceptance:false},termination:({owner_exited:true,worker_exited:true,owner_unit_terminal:true,worker_unit_terminal:true,owner_active_state:$owner_active,worker_active_state:$worker_active,owner_sub_state:$owner_sub,worker_sub_state:$worker_sub,owner_terminal_main_pid:($owner_main_live|tonumber),worker_terminal_main_pid:($worker_main_live|tonumber),owner_cgroup_empty:true,worker_cgroup_empty:true,elapsed_seconds:$elapsed,from_activation_usec:$activation_elapsed_usec,owner_exec_main_code:($owner_exit_code|tonumber),owner_exec_main_status:($owner_exit_status|tonumber)} + (if $case=="N14" then {owner_result:$owner_result,owner_exit_usec:($owner_exit_usec|tonumber)} else {} end)),pipes:{root_stdout_eof:true,root_stderr_eof:true,stdout_bytes:$stdout_bytes,stderr_bytes:$stderr_bytes,stdout_sha256:$stdout_sha,stderr_sha256:$stderr_sha,launch_exit:$launch_status},positive_files_before:$output_before,positive_files_after:$output_after,accounts:{generation_bound:true,retained:true,reusable:false,names:[$worker_name,$subject_name,$results_name],worker_uid:$worker_uid,worker_gid:$worker_gid,subject_uid:$subject_uid,subject_gid:$subject_gid,results_gid:$results_gid},workspace:{generation_bound:true,quarantined:true,retained:true},owner_death_outcome_preserved:true,native_credit:false}' >"$result" || fail result-encode
+ printf '%s\n' 'OWNER_DEATH_OBSERVED_OUTPUT_QUARANTINED' >"$quarantine"; chmod 600 "$quarantine"
+ chmod 600 "$result"; bounded_exec /usr/bin/python3.12 -I -S -B "$parser" "$result" >/dev/null || fail receipt-parser

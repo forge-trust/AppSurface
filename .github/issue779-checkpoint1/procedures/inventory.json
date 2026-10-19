@@ -1,7 +1,7 @@
 {
   "files": [
     {
-      "bytes": 89868,
+      "bytes": 82799,
       "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-none.sh",
@@ -9,7 +9,7 @@
       "sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a"
     },
     {
-      "bytes": 120734,
+      "bytes": 113281,
       "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n04.sh",
@@ -17,7 +17,7 @@
       "sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d"
     },
     {
-      "bytes": 117571,
+      "bytes": 110120,
       "historical_path": "packet/cases/N05/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n05.sh",
@@ -25,7 +25,7 @@
       "sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e"
     },
     {
-      "bytes": 117575,
+      "bytes": 110124,
       "historical_path": "packet/cases/N06/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n06.sh",
@@ -33,7 +33,7 @@
       "sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761"
     },
     {
-      "bytes": 111929,
+      "bytes": 104476,
       "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n07.sh",
@@ -41,7 +41,7 @@
       "sha256": "718d6c357bcbb73010039d172ab76c3dd789b0bbf1089d9243aed4ddaab55678"
     },
     {
-      "bytes": 105691,
+      "bytes": 98238,
       "historical_path": "packet/cases/N08/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n08.sh",
@@ -56,7 +56,7 @@
       "sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e"
     },
     {
-      "bytes": 87257,
+      "bytes": 79743,
       "historical_path": "packet/cases/N09/tooling/.github/issue779-csharp-native/checkpoint-n09-retained-slot.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n09/checkpoint-n09-retained-slot.sh",
@@ -71,7 +71,7 @@
       "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
     },
     {
-      "bytes": 97110,
+      "bytes": 88969,
       "historical_path": "packet/cases/N10/tooling/.github/issue779-csharp-native/checkpoint-n10-pending-start.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n10/checkpoint-n10-pending-start.sh",
@@ -79,7 +79,7 @@
       "sha256": "134ec927222349b1ea506153574b5950be2d0372c622b9f2ee905dd583386b48"
     },
     {
-      "bytes": 109371,
+      "bytes": 99944,
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n11/checkpoint-n11.sh",
@@ -87,7 +87,7 @@
       "sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
     {
-      "bytes": 92661,
+      "bytes": 85787,
       "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n12/checkpoint-n12-data-integration.sh",
@@ -158,7 +158,7 @@
       "sha256": "b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf"
     },
     {
-      "bytes": 11522,
+      "bytes": 11824,
       "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/checkpoint-n15-pending-start-death.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n15/checkpoint-n15-pending-start-death.sh",
@@ -194,12 +194,15 @@
       "sha256": "65442eec60de59941cf9b26f975ea4996b80c37017d167ff7289b90d221c5821"
     },
     {
-      "bytes": 9461,
-      "delta": [],
+      "bytes": 10189,
+      "delta": [
+        "Keep N13 strict signal9 and its original closed record shape.",
+        "For N14 require actual Result=timeout and monotonic ExecMainExitTimestamp in original runtime120s/stop5s window; retain typed N14-only owner_result/owner_exit_usec and final observed sample consistency."
+      ],
       "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/check_owner_death_record.py",
-      "port_status": "byte-identical-helper-or-parser-only",
+      "port_status": "current-source-N14-systemd-deadline-causality-correction",
       "ported_path": "procedures/parsers/check_owner_death_record.py",
-      "ported_sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd",
+      "ported_sha256": "41ff405f25a3c44de8b93af96424cfef1a70e5c2f76c068de61ff29391516b2f",
       "sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
     },
     {
@@ -221,7 +224,7 @@
       "sha256": "97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3"
     },
     {
-      "bytes": 18061,
+      "bytes": 18684,
       "delta": [
         "Require independent current source_commit/capture_sha256 keyword arguments, replacing two historical constants; preserve observed identity/event/deadline/cleanup predicate bodies."
       ],
@@ -350,17 +353,18 @@
       "sha256": "f85d30a95b2bbe66ae8b21ff66ea812aee1c0e801fa03f49b8246d91a202d91a"
     },
     {
-      "bytes": 45316,
+      "bytes": 47333,
       "delta": [
         "Replace historical source/review/build schema pins with pinned shared current binding validator; retain root file pin/ownership checks.",
         "Add literal sixth XDG_RUNTIME_DIR assignment.",
-        "Original 240s job, 600s fixture, 30s cleanup, identity/signal/systemd/EOF/quarantine/result predicates retained."
+        "Original 240s job, 600s fixture, 30s cleanup, signals, unit policy, identity, joins, EOF and quarantine retained.",
+        "N14 deadline-causality correction requires timeout result + actual exit timestamp120..125s, code2/status15or9; N13 original code2/status9 unchanged."
       ],
       "delta_file": "procedures/deltas/checkpoint-owner-death-common.sh.patch",
       "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/owner-death/checkpoint-owner-death-common.sh",
-      "ported_sha256": "77f37b81fe77767714407e4e0021b3c0767dcb98c69c4c8d947f15546aabe777",
+      "ported_sha256": "8f9408428cd962b95da71e70aa9291b086c19d6895028e8ae9262dc6ef222d6a",
       "sha256": "f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406"
     },
     {
@@ -427,7 +431,7 @@
       "sha256": "d91e283b6e121f01995b43341f0bec770a470440b50546629448b1ba744ac434"
     },
     {
-      "bytes": 90108,
+      "bytes": 79466,
       "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/checkpoint-n16-accepted-work.sh",
       "origin": "historical-native-procedure",
       "port_status": "current-source-port-source-only",
@@ -472,22 +476,22 @@
       "sha256": "8eca8a9e95e88f0c67ea60db968fff40c24bd7269b8fb6e1727293c06000002b"
     },
     {
-      "bytes": 8064,
+      "bytes": 8877,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/owner-death/README.md",
-      "ported_sha256": "0aa1ce2fdfea8224023318ae8a2fa07c45019c8fd5859fee942f5e1bac3407cb",
-      "sha256": "0aa1ce2fdfea8224023318ae8a2fa07c45019c8fd5859fee942f5e1bac3407cb"
+      "ported_sha256": "6d4be567936b12537679a0e381cef8a7b7966010f20b39b7eb2b1fb811159c24",
+      "sha256": "6d4be567936b12537679a0e381cef8a7b7966010f20b39b7eb2b1fb811159c24"
     },
     {
-      "bytes": 11728,
+      "bytes": 12910,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/owner-death/port-manifest.json",
-      "ported_sha256": "769c01eeb8439b40554fc63dbaa44c7bd2ec0222eeb6a9aaef7361c308695db5",
-      "sha256": "769c01eeb8439b40554fc63dbaa44c7bd2ec0222eeb6a9aaef7361c308695db5"
+      "ported_sha256": "5d232e075fa38274befa36442dff4260a43a402cee92808c1f5448ce9adde13b",
+      "sha256": "5d232e075fa38274befa36442dff4260a43a402cee92808c1f5448ce9adde13b"
     },
     {
       "bytes": 10388,
@@ -517,13 +521,13 @@
       "sha256": "1733d0855073232dd3e9012f2fcc4306c793d06df5137b877d7fb65f40226cc5"
     },
     {
-      "bytes": 4183,
+      "bytes": 17561,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/deltas/checkpoint-owner-death-common.sh.patch",
-      "ported_sha256": "78ad225bc5f232cd009a033a7ac1a98da97b9d87b391c888f68719b5a25ee792",
-      "sha256": "78ad225bc5f232cd009a033a7ac1a98da97b9d87b391c888f68719b5a25ee792"
+      "ported_sha256": "e2f15c4269fb70d3bd8ace3e7a0d41b1503b147686a5211e41dff1ae9975126a",
+      "sha256": "e2f15c4269fb70d3bd8ace3e7a0d41b1503b147686a5211e41dff1ae9975126a"
     },
     {
       "bytes": 2344,

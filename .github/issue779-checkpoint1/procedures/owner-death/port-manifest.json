@@ -17,8 +17,8 @@
   ],
   "current_parent_integration_files": {
     "README.md": {
-      "bytes": 8064,
-      "sha256": "0aa1ce2fdfea8224023318ae8a2fa07c45019c8fd5859fee942f5e1bac3407cb"
+      "bytes": 8877,
+      "sha256": "6d4be567936b12537679a0e381cef8a7b7966010f20b39b7eb2b1fb811159c24"
     },
     "adapter.py": {
       "bytes": 32881,
@@ -193,7 +193,7 @@
     "verify_retained_evidence": "(context,*,deadline)->case row; re-reads actual bounded leaves without native execution"
   },
   "schema": "issue779-owner-death-current-port-v1",
-  "shared_parser_unchanged": true,
+  "shared_parser_unchanged": false,
   "shells": [
     {
       "current_bytes": 125,
@@ -214,13 +214,13 @@
       "unchanged_since_handoff": true
     },
     {
-      "current_bytes": 44771,
-      "current_sha256": "a358a339fad519edd9289b62a655fc2f89f9546bfed03200a86a5daf26b234ac",
+      "current_bytes": 47333,
+      "current_sha256": "8f9408428cd962b95da71e70aa9291b086c19d6895028e8ae9262dc6ef222d6a",
       "handoff_sha256": "a358a339fad519edd9289b62a655fc2f89f9546bfed03200a86a5daf26b234ac",
       "historical_path": "/Users/andrew/Projects/forge-trust/runnable__saturn/artifacts/issue779-checkpoint4/evidence/c1-current-lane-preparation/history/recovered/.github/issue779-integrated16/runtime/packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh",
       "historical_sha256": "f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406",
       "path": "checkpoint-owner-death-common.sh",
-      "unchanged_since_handoff": true
+      "unchanged_since_handoff": false
     }
   ],
   "source44_followup": {
@@ -236,6 +236,28 @@
     "updated_paths": [
       ".github/issue779-checkpoint1/procedures/owner-death/README.md"
     ]
+  },
+  "source47_followup": {
+    "all_policy_values_unchanged": true,
+    "cause": "The documented N14 original systemd deadline can terminate a continued stopped process with SIGTERM; source45 measured code2/status15 but did not retain deadline-causality fields.",
+    "centisecond_quantization": {
+      "allowance_usec": 9999,
+      "exact_runtime_stop_window_unchanged": true,
+      "exit": 0,
+      "focused_tests": 5,
+      "receipt": "c1-runtime-and-owner-fixes-47/centisecond-correction/receipt.json",
+      "receipt_sha256": "1d4660e6d0c79018638459d9e2ffe167b5c6529f0f3e50061fbc31303166174d"
+    },
+    "correction": "N13 keeps code2/status9 and old receipt schema; N14 requires Result timeout, code2/status15or9, original120..125s monotonic main-process exit; final sample ordering checked.",
+    "coverage_credit": false,
+    "native_execution": false,
+    "parser_sha256": "41ff405f25a3c44de8b93af96424cfef1a70e5c2f76c068de61ff29391516b2f",
+    "portable_validation": {
+      "exit": 0,
+      "receipt": "c1-runtime-and-owner-fixes-47/receipt.json",
+      "receipt_sha256": "37e4f82fc117e06e753990d71957e0594bc7adbccaf9c16a3fbd43d1f60e849b",
+      "tests": 145
+    }
   },
   "static_checks": [
     "Python AST syntax parse only; no procedure imported/executed",

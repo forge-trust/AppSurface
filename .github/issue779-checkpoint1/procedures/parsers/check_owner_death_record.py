@@ -76,11 +76,14 @@ def validate(record):
          and policy["timer_rearmed"] is False and policy["new_acceptance"] is False,
          "original-policy")
     terminal = record["termination"]
-    shape(terminal, {"owner_exited", "worker_exited", "owner_unit_terminal", "worker_unit_terminal",
+    terminal_keys = {"owner_exited", "worker_exited", "owner_unit_terminal", "worker_unit_terminal",
                      "owner_active_state", "worker_active_state", "owner_sub_state", "worker_sub_state",
                      "owner_terminal_main_pid", "worker_terminal_main_pid", "owner_cgroup_empty",
                      "worker_cgroup_empty", "elapsed_seconds", "from_activation_usec",
-                     "owner_exec_main_code", "owner_exec_main_status"}, "termination-shape")
+                     "owner_exec_main_code", "owner_exec_main_status"}
+    if case == "N14":
+        terminal_keys |= {"owner_result", "owner_exit_usec"}
+    shape(terminal, terminal_keys, "termination-shape")
     need(all(terminal[key] is True for key in ("owner_exited", "worker_exited", "owner_unit_terminal",
          "worker_unit_terminal", "owner_cgroup_empty", "worker_cgroup_empty")), "physical-termination")
     need(type(terminal["owner_active_state"]) is str and terminal["owner_active_state"] in ("inactive", "failed")
@@ -100,8 +103,18 @@ def validate(record):
          and terminal["elapsed_seconds"] == terminal["from_activation_usec"] // 1000000
          and type(terminal["owner_exec_main_code"]) is int
          and terminal["owner_exec_main_code"] == 2
-         and type(terminal["owner_exec_main_status"]) is int
-         and terminal["owner_exec_main_status"] == 9, "termination-time-and-signal")
+         and type(terminal["owner_exec_main_status"]) is int, "termination-time-and-signal")
+    if case == "N13":
+        need(terminal["owner_exec_main_status"] == 9, "n13-sigkill-required")
+    else:
+        need(terminal["owner_result"] == "timeout"
+             and terminal["owner_exec_main_status"] in (15, 9)
+             and type(terminal["owner_exit_usec"]) is int
+             and policy["active_enter_usec"] + 120000000 <= terminal["owner_exit_usec"]
+             <= policy["active_enter_usec"] + 125000000
+             # /proc/uptime reports centiseconds; mono_ms only pads that value.
+             and terminal["owner_exit_usec"] <= policy["active_enter_usec"]
+             + terminal["from_activation_usec"] + 9999, "n14-deadline-causality")
     bound = policy["runtime_max_usec"] + (policy["timeout_stop_usec"] if case == "N14" else 0)
     need(terminal["from_activation_usec"] <= bound, "termination-outside-original-systemd-bound")
     pipes = record["pipes"]

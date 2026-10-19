@@ -76,7 +76,7 @@ exception text, path or stack is emitted. Retain `runtime-preparation.log` to
 diagnose a failed copy before attempting publication. A diagnostic is not a
 runtime receipt, an OS qualification, or permission to continue after failure.
 The workflow also retains `runtime-input-metadata.json`: a read-only snapshot of
-five fixed SDK directory roles and bounded numeric .NET 10 version directories.
+five fixed execution-installation directory roles and bounded numeric .NET 10 version directories.
 It records modes, numeric ownership, link counts and closed read errors using a
 five-second clock, six-second process bound and 128 entries per version container. It neither changes the SDK
 nor substitutes for the runtime copy's retained-FD, mode and byte checks.
@@ -86,6 +86,31 @@ reusing the image's shared SDK directory. The observed shared runner installatio
 had root-owned `0777` directory roles and was rejected by the unchanged `0755`
 contract. Fresh installation addresses that prerequisite without changing the
 shared SDK or normalizing unsafe source permissions in the copy helper.
+
+The build SDK and execution runtime have separate sources. The compiler and
+helper publisher still use that private, pinned `10.0.401` installation. For
+execution, the Ubuntu 24.04 workflow installs the distribution's `dotnet-sdk-10.0`
+package and copies only its host, hostfxr and matching .NET/ASP.NET frameworks
+from the fixed `/usr/lib/dotnet` installation. The distribution SDK is installed
+to satisfy the copy helper's existing SDK-root contract; its `sdk`, `packs` and
+`templates` trees remain outside the copied runtime. The actual copy receipt
+records that installation and every copied byte and mode. The package install
+log, APT candidate/origin log and `runtime-packages.tsv` retain the selected
+feed and actual package versions separately.
+The worker job has a 50-minute outer limit so its sequential bounded package,
+copy, publication and native phases leave time for setup and private retention;
+the native procedure's existing 900-second outer process limit and original
+per-control clocks are unchanged.
+
+This separation addresses the measured missing `liblttng-ust.so.0` dependency of
+the generic runtime's tracing provider. The [Ubuntu .NET 10 runtime package](https://packages.ubuntu.com/noble/dotnet-runtime-10.0)
+declares the distribution's `liblttng-ust1t64` dependency. Use the supported
+[Ubuntu .NET package feed](https://learn.microsoft.com/dotnet/core/install/linux-ubuntu-install),
+rather than replacing a library SONAME, dropping the tracing provider or making
+an unresolved dependency eligible. The unchanged native OS audit must still
+pin and resolve the complete copied runtime and actual OS libraries before any
+control executes. Package installation and a successful copy alone do not
+qualify the runtime or prove a native control passed.
 
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly
