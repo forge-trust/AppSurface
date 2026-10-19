@@ -4,7 +4,9 @@ from types import SimpleNamespace
 import concurrent.futures
 import hashlib
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -63,6 +65,39 @@ class PublisherControls(unittest.TestCase):
         self.assertEqual(row["log_bytes"], 0)
         self.assertFalse((self.root / "build.json").exists())
 
+    def test_build_child_modes_do_not_change_private_parent_or_log_modes(self):
+        previous = os.umask(0o077)
+        try:
+            row = self.invoke("from pathlib import Path; Path('image').mkdir(); "
+                              "Path('image/output.dll').write_bytes(b'actual child bytes')")
+            observed = os.umask(0o077)
+            self.assertEqual(observed, 0o077)
+        finally:
+            os.umask(previous)
+        self.assertEqual(row["exit"], 0)
+        self.assertEqual((self.root / "image").stat().st_mode & 0o777, 0o755)
+        self.assertEqual((self.root / "image/output.dll").stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((self.root / "build.log").stat().st_mode & 0o777, 0o600)
+
+    def test_publisher_failure_diagnostic_is_closed_and_never_echoes_raw_errors(self):
+        secret = "/private-canary/publish"
+        for error, category, kind, number in (
+                (publisher.binding.Rejected("image-file"), "image-file", "input", None),
+                (publisher.binding.Rejected(secret), "publication-input-invalid", "input", None),
+                (ValueError(secret), "publication-input-invalid", "input", None),
+                (PermissionError(13, secret, secret), "publication-os-error", "os", 13),
+                (subprocess.CalledProcessError(7, [secret]), "publication-process-error", "process", None)):
+            with self.subTest(error=type(error).__name__):
+                result = publisher.failure_diagnostic(error)
+                self.assertEqual(result, {
+                    "schema": "issue779-checkpoint1-publisher-failure-v1",
+                    "category": category, "error_kind": kind, "errno": number,
+                })
+                raw = json.dumps(result)
+                self.assertNotIn(secret, raw)
+                self.assertLess(len(raw.encode()), 512)
+
     def test_log_overflow_rejects_and_joins_original_process(self):
         with patch.object(publisher.binding, "MAX_LOG", 32):
             with self.assertRaisesRegex(publisher.binding.Rejected, "^build-log-limit$"):
@@ -104,6 +139,19 @@ class PublisherControls(unittest.TestCase):
                 publisher.publish(args)
         read.assert_not_called()
         self.assertEqual(self.processes, [])
+
+    def test_nonprivate_input_parent_rejects_before_capture_or_command(self):
+        args = self.arguments()
+        parent = self.root / "public-input-parent"
+        parent.mkdir(mode=0o755)
+        parent.chmod(0o755)
+        args.tool = parent / "tool"
+        with patch.object(publisher.binding, "read") as read:
+            with self.assertRaisesRegex(publisher.binding.Rejected, "^publisher-input-directory$"):
+                publisher.publish(args)
+        read.assert_not_called()
+        self.assertEqual(self.processes, [])
+        self.assertFalse(args.tool.exists())
 
     def test_source_output_overlap_rejects_before_capture_or_command(self):
         args = self.arguments()

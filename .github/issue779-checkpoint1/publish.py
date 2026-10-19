@@ -22,6 +22,22 @@ import time
 import binding
 
 
+FAILURE_CATEGORIES = frozenset((
+    "publish-fresh-output", "publisher-root-alias", "publisher-root-overlap",
+    "publisher-evidence-directory", "publisher-input-directory", "publisher-sdk-overlap", "publisher-runtime-only",
+    "publisher-host-alias", "publisher-sdk-version", "publisher-command-failed",
+    "publisher-compiler-diagnostic", "publisher-helper-source", "publisher-helper-loader",
+    "publisher-helper-log", "publisher-receipt-limit", "source-not-clean", "source-file",
+    "source-git", "source-git-identity", "source-git-entry", "source-git-mode",
+    "source-symlink", "source-complete-set", "image-file", "image-directory-mode",
+    "inventory-link", "inventory-file", "inventory-directory-substitution",
+    "helper-command-terminal", "helper-command-log", "helper-fdd-output",
+    "helper-private-parent", "helper-output-fresh", "helper-sdk-root", "helper-deadline",
+    "build-command-deadline", "build-command-group", "build-final-group",
+    "build-log-limit", "build-command-output",
+))
+
+
 def group_absent(pid):
     """Require actual process-group absence; inability to inspect is failure."""
     try:
@@ -37,6 +53,9 @@ def command(argv, phase, log, source_root, environment, deadline):
     Both EOF and parent settlement are required. A descendant retaining output
     cannot turn a successful parent exit into a successful build observation.
     Every exceptional path kills the selected group and reaps the original.
+    Only the child uses umask 022 so fresh publish files meet the audited image
+    contract. The caller's private umask, parent directories and 0600 log remain
+    unchanged; the completed image is still verified before a receipt is issued.
     """
     process = None
     eof = False
@@ -47,7 +66,7 @@ def command(argv, phase, log, source_root, environment, deadline):
         try:
             process = subprocess.Popen(argv, cwd=source_root, env=environment,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, start_new_session=True)
+                stderr=subprocess.STDOUT, start_new_session=True, umask=0o022)
             with process.stdout, selectors.DefaultSelector() as events:
                 os.set_blocking(process.stdout.fileno(), False)
                 events.register(process.stdout, selectors.EVENT_READ)
@@ -116,6 +135,10 @@ def publish(args):
     binding.require(stat.S_ISDIR(evidence.st_mode) and evidence.st_uid == os.geteuid()
                     and stat.S_IMODE(evidence.st_mode) == 0o700,
                     "publisher-evidence-directory")
+    input_parent = tool.parent.lstat()
+    binding.require(stat.S_ISDIR(input_parent.st_mode) and input_parent.st_uid == os.geteuid()
+                    and stat.S_IMODE(input_parent.st_mode) == 0o700,
+                    "publisher-input-directory")
     capture_raw = binding.read(args.source_capture, deadline=deadline)
     capture = binding.validate_capture(binding.decode(capture_raw), args.source)
     binding.verify_source(capture, source_root, deadline=deadline)
@@ -191,17 +214,32 @@ def publish(args):
     return value
 
 
-def main():
+def failure_diagnostic(error):
+    """Return closed failure data; never publish raw paths, argv or error text."""
+    kind = ("os" if isinstance(error, OSError) else
+            "process" if isinstance(error, subprocess.SubprocessError) else "input")
+    category = {"os": "publication-os-error", "process": "publication-process-error",
+                "input": "publication-input-invalid"}[kind]
+    if (type(error) is binding.Rejected and len(error.args) == 1
+            and type(error.args[0]) is str and error.args[0] in FAILURE_CATEGORIES):
+        category = error.args[0]
+    number = error.errno if isinstance(error, OSError) else None
+    return {"schema": "issue779-checkpoint1-publisher-failure-v1", "category": category,
+            "error_kind": kind,
+            "errno": number if type(number) is int and 1 <= number <= 4095 else None}
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("source-root", "source-capture", "runtime", "build-sdk", "tool", "output"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--source", required=True)
     parser.add_argument("--selector", required=True, choices=binding.SELECTORS)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         publish(args)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        print("C1 current publication failed; no native result was issued.")
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(json.dumps(failure_diagnostic(error), sort_keys=True))
         return 1
     print(json.dumps({"selector": args.selector, "published": True,
                       "native_execution": False}, sort_keys=True))
