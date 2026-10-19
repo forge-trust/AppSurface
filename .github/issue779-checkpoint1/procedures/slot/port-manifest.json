@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 4424,
-      "sha256": "5d1ddd52d42ae0b532e56bcb72498e48a97f5078139c42d02286635103be7389"
+      "bytes": 5068,
+      "sha256": "5e9e335d5662b65830729cedbe854b4457bb748452c155f52b78ff6bf6fb9581"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -47,83 +47,115 @@
     "scope": "failure-only unchanged actual archive retention before original exception rethrow",
     "success_path_unchanged": true
   },
+  "source49_initializer_correction": {
+    "baseline": "02ce79b4b15f4fa7de4574b8addfec6bcc5f9428",
+    "cases": [
+      "N04",
+      "N05",
+      "N06",
+      "N07",
+      "N08"
+    ],
+    "historical_patch_files_unchanged": true,
+    "incremental_five_shells_diff_sha256": "6746ffd160bdb02fe763f483ded4708b1a835a455f8e5a861d0d3cfcd1be4059",
+    "native_execution": false,
+    "portable_controls": "../../test_negative_source_binding.py",
+    "scope": "one readonly source snapshot after authenticated root-verify per file; original N03 guard unchanged"
+  },
+  "source49_metadata_sampling": {
+    "clocks_unchanged": true,
+    "files": [
+      "procedures/slot/checkpoint-none.sh",
+      "procedures/n12/checkpoint-n12-data-integration.sh"
+    ],
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "pin_file uses same physical full before tuple for size and nlink; ancestor combines UID/mode stat per component; physical hash/finaltuple/walks unchanged",
+    "time_gain_measured": false
+  },
   "wrappers": [
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "consolidated metadata fields from existing physical samples without removing checks"
       ],
       "historical_path": "N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a",
       "native_execution": false,
       "ported_path": "checkpoint-none.sh",
-      "ported_sha256": "1138bcbec2b1168bedc09b2debfd1252f57c948484764e1af27ae47b5b1c7e04",
+      "ported_sha256": "617d00e177f3531738610988d10440876992d78865d31df9f4e929ef7e8caec7",
       "selector": "None"
     },
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
       ],
       "historical_path": "N04/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d",
       "native_execution": false,
       "ported_path": "checkpoint-n04.sh",
-      "ported_sha256": "c06042cd57008f9e6c32dcec0d45ea98f3ae03ada5e94ca2b734db068da3e134",
+      "ported_sha256": "1afabcba842269b5e53b0aa760eb4a8f080210c7cec38fde5548fadea9ec112c",
       "selector": "N04"
     },
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
       ],
       "historical_path": "N05/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e",
       "native_execution": false,
       "ported_path": "checkpoint-n05.sh",
-      "ported_sha256": "dae6fc7cae9f1fcf46756db4c542848498455aa5b5355335af2e99c74839f566",
+      "ported_sha256": "8b97859a9c4ef34d0c0f3b36f4e32fef095b94824163e8e874ec4be5d7d798c8",
       "selector": "N05"
     },
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
       ],
       "historical_path": "N06/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761",
       "native_execution": false,
       "ported_path": "checkpoint-n06.sh",
-      "ported_sha256": "4cdfe36826da9af92c4016c0d75443d2e59980cc74c68a6e11703ef928ebd954",
+      "ported_sha256": "cdbdbf54152d9e2bd27005ace2e853acff4ee0972bde2671be58e4af9e30e533",
       "selector": "N06"
     },
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
       ],
       "historical_path": "N07/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "718d6c357bcbb73010039d172ab76c3dd789b0bbf1089d9243aed4ddaab55678",
       "native_execution": false,
       "ported_path": "checkpoint-n07.sh",
-      "ported_sha256": "829b1df3764f88d2ff49572857f10fa648befec75bf57bf6e96ee2142ffbd267",
+      "ported_sha256": "29e48717f01f790b165f1c23b64b3116e84e33a435b93ba7741aed788b81eb4f",
       "selector": "N07"
     },
     {
       "changes": [
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
-        "current six-entry bootstrap environment"
+        "current six-entry bootstrap environment",
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
       ],
       "historical_path": "N08/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "f6f17cf58811c3093f07b2a39817b45eeebfc5052431c85d4c9cfb29604cc384",
       "native_execution": false,
       "ported_path": "checkpoint-n08.sh",
-      "ported_sha256": "eef3c12e3a6be7b190b2af5c2c8a31d5148c73f2b5b05fac619330f82685d723",
+      "ported_sha256": "5476c64ade87366876ba8ae869fe2f95f4a15565b6ba1563ec653c9e42951f07",
       "selector": "N08"
     }
   ]

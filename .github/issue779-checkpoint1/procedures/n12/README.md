@@ -73,3 +73,24 @@ Original dispatcher/retainer bytes and N11 capture/parser modules are unchanged.
 Parent/Godel owns inventory registration. Independent review, portable validation,
 actual current helper publication and fresh Linux native execution remain required.
 No all16-ready or coverage-gain claim is made.
+
+## Metadata sampling without repeated subprocesses
+
+The actual [N12 shell](checkpoint-n12-data-integration.sh) and
+[None shell](../slot/checkpoint-none.sh) use the same `pin_file(path, hash,
+byte_limit)` and `ancestor(path)` functions. `pin_file` parses size and link count
+from its existing complete before sample (`device:inode:size:hex-mode:links:uid:gid`)
+instead of starting separate `stat` commands for those two fields. It requires
+exactly seven typed fields, the same byte cap and one link, the actual SHA256,
+and the same complete after sample. `ancestor` reads UID and octal permissions
+together for each component, preserving the actual lexical/symlink checks,
+complete walk through `/`, root UID and nonwritable-mode predicate.
+
+These changes reduce subprocess calls, not verification checkpoints. There is no
+cached physical result, skipped tree/OS check, renewed deadline, enlarged allowance
+or changed prelaunch remainder guard. The
+[metadata sample controls](../../test_metadata_sample_batching.py) execute the
+actual Bash functions on ordinary temporary paths with controlled command data
+and recorded calls. They establish parser/orchestration behavior only; no native
+acceptance or actual time saving is claimed. Fresh bounded Linux execution remains
+required to show that setup fits the original fixture budget.

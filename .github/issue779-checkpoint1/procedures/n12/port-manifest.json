@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 4901,
-      "sha256": "61a2fcc9f3194b7f6f8a291e5f8c183e4930a4d8cfbdfe13707a16a380fbd0b6"
+      "bytes": 6234,
+      "sha256": "4a6b1f56c331cbb2976d99d35a57130ef2e369c61f1d51f303cd76efdbb72058"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 85787,
-      "sha256": "8daad37c07beb08b3b6cdc7e1f1e2d25a3af6f74a6f73d7f16695d4a43918704"
+      "bytes": 85996,
+      "sha256": "5ab6ff99a81e97fb8c17387cea50789431ca116a292a7f4670495e0141632a63"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -166,6 +166,17 @@
     "procedures/os_audit.py",
     "procedures/n11/bridge.py"
   ],
+  "source49_metadata_sampling": {
+    "clocks_unchanged": true,
+    "files": [
+      "procedures/slot/checkpoint-none.sh",
+      "procedures/n12/checkpoint-n12-data-integration.sh"
+    ],
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "pin_file uses same physical full before tuple for size and nlink; ancestor combines UID/mode stat per component; physical hash/finaltuple/walks unchanged",
+    "time_gain_measured": false
+  },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true
 }

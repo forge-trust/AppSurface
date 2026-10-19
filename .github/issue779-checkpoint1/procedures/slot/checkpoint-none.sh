@@ -80,19 +80,23 @@ lexical() {
 absolute() { local path=$1 s current=; lexical "$path"; for s in "${components[@]}"; do current+=/$s; [[ ! -L $current ]] || fail deployment-symlink; done; }
 sha() { [[ $1 =~ ^[0-9a-f]{64}$ ]] || fail sha256-syntax; }
 pin_file() {
- local p=$1 h=$2 limit=$3 before after size measured
+ local p=$1 h=$2 limit=$3 before after size links measured
  absolute "$p"; sha "$h"; [[ -f $p && ! -L $p ]] || fail regular-file
- before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p"); size=$(bounded stat -c %s -- "$p")
+ before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p")
+ [[ $before =~ ^([0-9]+):([0-9]+):([0-9]+):([0-9a-f]+):([0-9]+):([0-9]+):([0-9]+)$ ]] || fail file-metadata
+ size=${BASH_REMATCH[3]}; links=${BASH_REMATCH[5]}
  [[ $size =~ ^[0-9]+$ ]] && ((size<=limit)) || fail file-byte-bound
- [[ $(bounded stat -c %h -- "$p") == 1 ]] || fail hardlink
+ [[ $links == 1 ]] || fail hardlink
  measured=$(bounded sha256sum -- "$p"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$p")
  [[ $before == "$after" && ${measured:0:64} == "$h" ]] || fail file-pin-changed
 }
 ancestor() {
- local p=$1 uid perms; absolute "$p"
+ local p=$1 uid perms metadata; absolute "$p"
  while :; do
   [[ -d $p && ! -L $p ]] || fail ancestor-type
-  uid=$(bounded stat -c %u -- "$p"); perms=$(bounded stat -c %a -- "$p")
+  metadata=$(bounded stat -c '%u:%a' -- "$p")
+  [[ $metadata =~ ^([0-9]+):([0-7]+)$ ]] || fail unsafe-root-ancestor
+  uid=${BASH_REMATCH[1]}; perms=${BASH_REMATCH[2]}
   [[ $uid == 0 ]] && (((8#$perms & 0022)==0)) || fail unsafe-root-ancestor
   [[ $p == / ]] && break; p=${p%/*}; [[ -n $p ]] || p=/
  done

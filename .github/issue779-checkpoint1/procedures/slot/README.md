@@ -71,3 +71,14 @@ exclusive writes, exact stream completeness and all four negative fixture
 shapes. Passing them supplies no Linux kernel, admission, Trusted or coverage
 claim. Fresh current-source execution of every selected native procedure is
 still required before whole-lane aggregation.
+
+## Negative fixture source binding
+
+N04–N08 snapshot `source_revision` into the readonly
+`NEGATIVE_SOURCE_REVISION` variable immediately after the fixed current-source
+root verification succeeds and before source-input diagnostics or the N03 guard.
+The guard compares its live source argument against that snapshot, so later
+source-variable changes or attempts to reassign the snapshot fail closed. The
+[portable controls](../../test_negative_source_binding.py) extract that exact
+comparison from each live script and exercise it with ordinary values under a
+nonroot shell; they do not run the native procedure or claim an EUID/native pass.

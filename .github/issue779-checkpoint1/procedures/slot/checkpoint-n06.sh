@@ -831,6 +831,7 @@ bounded /usr/bin/python3 -I -S -B "$binding_validator" root-verify \
  --source-capture "$source_capture" --build-receipt "$build_receipt" \
  --source "$source_revision" --selector N06 \
  --deadline-monotonic "$binding_deadline_monotonic" >/dev/null
+readonly NEGATIVE_SOURCE_REVISION=$source_revision
 diagnostic_stage=source-input
 verify_tree "$source_root" "$source_manifest" "$source_manifest_sha256" "$source_nodes" "$source_nodes_sha256" source
 diagnostic_stage=tool-input
