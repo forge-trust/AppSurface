@@ -15,6 +15,15 @@ complete helper images; it never adds synthetic rows to the two CLI commands.
 The protected runtime must be the actual SDK-free FDD runtime, while the publisher
 may use a separate SDK host. Images and source roots must be disjoint.
 
+[`prepare-runtime.py`](prepare-runtime.py) exits 1 when preparation is rejected.
+Its failure stdout is one `issue779-checkpoint1-runtime-failure-v1` JSON object:
+`category`, `error_kind` (`input` or `os`), and nullable `errno` in 1..4095, plus
+`schema`. Known custody categories identify the failed guard; unknown input
+errors use `runtime-input-invalid`, and OS errors use `runtime-os-error`. No raw
+exception text, path or stack is emitted. Retain `runtime-preparation.log` to
+diagnose a failed copy before attempting publication. A diagnostic is not a
+runtime receipt, an OS qualification, or permission to continue after failure.
+
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly
 entries are fixed in [`binding.py`](binding.py). Each helper phase is named

@@ -28,6 +28,17 @@ VERSION = re.compile(r"10\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z")
 FRAMEWORK_VERSION = re.compile(r"10\.0\.(?:0|[1-9][0-9]*)\Z")
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+FAILURE_CATEGORIES = frozenset((
+    "runtime-copy-inventory", "runtime-copy-write", "runtime-deadline",
+    "runtime-dotnet-host", "runtime-framework-version-mismatch",
+    "runtime-image-bound", "runtime-node-limit", "runtime-output-fresh",
+    "runtime-output-parent", "runtime-receipt-fresh", "runtime-receipt-limit",
+    "runtime-receipt-write", "runtime-root-alias", "runtime-sdk-content",
+    "runtime-sdk-root", "runtime-source-changed", "runtime-source-directory",
+    "runtime-source-file", "runtime-source-growth", "runtime-source-link-or-special",
+    "runtime-source-substitution", "runtime-total-limit", "runtime-version-directory",
+    "runtime-version-missing",
+))
 
 
 class Rejected(ValueError):
@@ -411,6 +422,27 @@ def prepare_runtime(sdk_root, output, receipt=None, *, deadline=None):
     return value
 
 
+def failure_diagnostic(error):
+    """Project a failed preparation to closed data without paths or raw errors.
+
+    Known custody categories remain distinguishable. Other input errors use
+    ``runtime-input-invalid``; OS errors use ``runtime-os-error`` and retain only
+    an integer errno in 1..4095. This data cannot qualify a runtime or turn a
+    rejected preparation into a published image.
+    """
+    category = "runtime-os-error" if isinstance(error, OSError) else "runtime-input-invalid"
+    if (type(error) is Rejected and len(error.args) == 1
+            and type(error.args[0]) is str and error.args[0] in FAILURE_CATEGORIES):
+        category = error.args[0]
+    number = error.errno if isinstance(error, OSError) else None
+    return {
+        "schema": "issue779-checkpoint1-runtime-failure-v1",
+        "category": category,
+        "error_kind": "os" if isinstance(error, OSError) else "input",
+        "errno": number if type(number) is int and 1 <= number <= 4095 else None,
+    }
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sdk-root", required=True, type=Path)
@@ -419,8 +451,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         value = prepare_runtime(args.sdk_root, args.output, args.receipt)
-    except (OSError, ValueError):
-        print("C1 compact runtime preparation failed; no qualification was issued.")
+    except (OSError, ValueError) as error:
+        print(json.dumps(failure_diagnostic(error), sort_keys=True))
         return 1
     print(json.dumps({"runtime": str(value["image"]["root"]),
                       "runtime_only_copy": True, "os_qualification": False}, sort_keys=True))

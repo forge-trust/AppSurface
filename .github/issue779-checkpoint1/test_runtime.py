@@ -2,7 +2,10 @@
 
 import hashlib
 import importlib.util
+import io
+import json
 import os
+from contextlib import redirect_stdout
 from pathlib import Path
 import stat
 import tempfile
@@ -140,6 +143,46 @@ class RuntimeCopyControls(unittest.TestCase):
         with self.assertRaisesRegex(runtime.Rejected, "^runtime-framework-version-mismatch$"):
             runtime.prepare_runtime(self.sdk, self.output)
         self.assertFalse(self.output.exists())
+
+    def test_main_reports_actual_directory_rejection_without_publishing_runtime(self):
+        (self.sdk / "host/fxr").chmod(0o700)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = runtime.main(["--sdk-root", str(self.sdk), "--output", str(self.output)])
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "schema": "issue779-checkpoint1-runtime-failure-v1",
+            "category": "runtime-source-directory", "error_kind": "input", "errno": None,
+        })
+        self.assertFalse(self.output.exists())
+
+    def test_main_normalizes_unknown_errors_without_echoing_messages_or_paths(self):
+        secret = "/private-canary/runtime-input"
+        for error, category, kind, number in (
+                (runtime.Rejected(secret), "runtime-input-invalid", "input", None),
+                (ValueError(secret), "runtime-input-invalid", "input", None),
+                (PermissionError(13, secret, secret), "runtime-os-error", "os", 13)):
+            with self.subTest(error=type(error).__name__):
+                output = io.StringIO()
+                with patch.object(runtime, "prepare_runtime", side_effect=error), redirect_stdout(output):
+                    exit_code = runtime.main(["--sdk-root", str(self.sdk), "--output", str(self.output)])
+                raw = output.getvalue()
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(json.loads(raw), {
+                    "schema": "issue779-checkpoint1-runtime-failure-v1",
+                    "category": category, "error_kind": kind, "errno": number,
+                })
+                self.assertNotIn(secret, raw)
+                self.assertLess(len(raw.encode()), 512)
+                self.assertFalse(self.output.exists())
+
+    def test_failure_errno_requires_a_positive_bounded_integer(self):
+        for number in (None, True, -1, 0, 4096, 2):
+            with self.subTest(number=number):
+                error = OSError(13, "/private-canary/runtime-input")
+                error.errno = number
+                self.assertEqual(runtime.failure_diagnostic(error)["errno"],
+                                 2 if type(number) is int and number == 2 else None)
 
 
 if __name__ == "__main__":
