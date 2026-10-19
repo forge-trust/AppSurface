@@ -4,6 +4,7 @@ Uses the shared original sealed-copy/custody functions. Unlike the N13/N14 entry
 this function never samples a fresh job deadline; execute sampled it before staging.
 No worker is launched here. Current parent/source replace historical fixed hashes.
 """
+import json
 import os,re,stat,subprocess,time
 from pathlib import Path
 

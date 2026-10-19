@@ -719,13 +719,13 @@
       "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
     },
     {
-      "bytes": 6788,
+      "bytes": 7579,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/README.md",
-      "ported_sha256": "4442b190203afd3025023877a7fbb368184ead03aee45360e8096662c375d9bf",
-      "sha256": "4442b190203afd3025023877a7fbb368184ead03aee45360e8096662c375d9bf"
+      "ported_sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35",
+      "sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35"
     },
     {
       "bytes": 4405,
@@ -737,13 +737,13 @@
       "sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d"
     },
     {
-      "bytes": 23933,
+      "bytes": 24073,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/bridge.py",
-      "ported_sha256": "a9e0d4550fb5090abe9fee528ee349929e77aaad6509f6247682ca5cda5598a4",
-      "sha256": "a9e0d4550fb5090abe9fee528ee349929e77aaad6509f6247682ca5cda5598a4"
+      "ported_sha256": "deca34f16ca3e8fa25a43ed8e3f9794076634048e7e574386bbdb4d503798409",
+      "sha256": "deca34f16ca3e8fa25a43ed8e3f9794076634048e7e574386bbdb4d503798409"
     },
     {
       "bytes": 1165,
@@ -791,13 +791,13 @@
       "sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
     },
     {
-      "bytes": 9127,
+      "bytes": 9448,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/port-manifest.json",
-      "ported_sha256": "ea93e58325b4906f434058d69a3249f2dc8c714deb5c0991557f895c5cd09829",
-      "sha256": "ea93e58325b4906f434058d69a3249f2dc8c714deb5c0991557f895c5cd09829"
+      "ported_sha256": "1397e14e696137fb02b54a2907ba4d27461acdf9188d99af1100efe1fe067e73",
+      "sha256": "1397e14e696137fb02b54a2907ba4d27461acdf9188d99af1100efe1fe067e73"
     },
     {
       "bytes": 24073,
@@ -899,13 +899,13 @@
       "sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f"
     },
     {
-      "bytes": 5152,
+      "bytes": 5559,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n15/README.md",
-      "ported_sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7",
-      "sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7"
+      "ported_sha256": "78fbaaca9d07ac9a06dd6a78f49aab8048a38e28b8f3579bac004f6cc5d658a9",
+      "sha256": "78fbaaca9d07ac9a06dd6a78f49aab8048a38e28b8f3579bac004f6cc5d658a9"
     },
     {
       "bytes": 14065,
@@ -944,13 +944,13 @@
       "sha256": "26c594305f08f9255746e00f15cec31388cc230281a892c5e78f16137daece4f"
     },
     {
-      "bytes": 5973,
+      "bytes": 5985,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n15/materialize.py",
-      "ported_sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15",
-      "sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15"
+      "ported_sha256": "c568c115238cfeb95e87c17f263465b2a410199a3092ca46b00e4dff0b2bbbf8",
+      "sha256": "c568c115238cfeb95e87c17f263465b2a410199a3092ca46b00e4dff0b2bbbf8"
     },
     {
       "bytes": 24702,
@@ -989,13 +989,13 @@
       "sha256": "7f1ee71893f72336b30129e3d0ceb896d5256af58f9958f441aeca9f09dc1881"
     },
     {
-      "bytes": 7605,
+      "bytes": 7898,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n15/port-manifest.json",
-      "ported_sha256": "a144e2286da467b8f2a3b9735e66a4b2cd6125d6ccca8d3526a4404c38e73cc8",
-      "sha256": "a144e2286da467b8f2a3b9735e66a4b2cd6125d6ccca8d3526a4404c38e73cc8"
+      "ported_sha256": "9fe979940a697afc241fc10add103f845db87e2d7cc0a2c4c1e3535fdbf3ee83",
+      "sha256": "9fe979940a697afc241fc10add103f845db87e2d7cc0a2c4c1e3535fdbf3ee83"
     },
     {
       "bytes": 18718,
@@ -1034,13 +1034,13 @@
       "sha256": "ccd6ec0fc42896fed57e077f53fd6569ff81464f19711b676ee11e106ec25417"
     },
     {
-      "bytes": 3754,
+      "bytes": 4424,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/README.md",
-      "ported_sha256": "825275ff5ae1d5bf7935192db056964c8be7e85104fb6476cfdaec266c3abd7b",
-      "sha256": "825275ff5ae1d5bf7935192db056964c8be7e85104fb6476cfdaec266c3abd7b"
+      "ported_sha256": "5d1ddd52d42ae0b532e56bcb72498e48a97f5078139c42d02286635103be7389",
+      "sha256": "5d1ddd52d42ae0b532e56bcb72498e48a97f5078139c42d02286635103be7389"
     },
     {
       "bytes": 2323,
@@ -1052,13 +1052,13 @@
       "sha256": "4210464e68a6660aa28bf74df6c2ead7bbcaeecb570ce3d2f447705c9f4801e4"
     },
     {
-      "bytes": 25743,
+      "bytes": 25883,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/bridge.py",
-      "ported_sha256": "a7c69ec0c4ca68bc5066f349904baff5b505d8e0d87b04cf33d55a263bf22595",
-      "sha256": "a7c69ec0c4ca68bc5066f349904baff5b505d8e0d87b04cf33d55a263bf22595"
+      "ported_sha256": "3780f6092395bba472b908b455dd1466b70aa1e7b8754b2cc80f7cff3c96dde7",
+      "sha256": "3780f6092395bba472b908b455dd1466b70aa1e7b8754b2cc80f7cff3c96dde7"
     },
     {
       "bytes": 12228,
@@ -1268,13 +1268,13 @@
       "sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab"
     },
     {
-      "bytes": 5330,
+      "bytes": 5651,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/port-manifest.json",
-      "ported_sha256": "aec1d3890548df18c69971cc5b6da1523704f060b7b2f5c25a88571d7e26eac7",
-      "sha256": "aec1d3890548df18c69971cc5b6da1523704f060b7b2f5c25a88571d7e26eac7"
+      "ported_sha256": "b8abbab698b038599245fa440ba45d05a542fe7658306f8bd510ec852f66b1fc",
+      "sha256": "b8abbab698b038599245fa440ba45d05a542fe7658306f8bd510ec852f66b1fc"
     },
     {
       "bytes": 7740,

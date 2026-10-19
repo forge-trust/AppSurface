@@ -39,6 +39,16 @@ no-follow 0600 write retains the opened FD through fsync and file identity/size
 checks. The archive's 33,619,968-byte bound is separate from the 8 MiB bound for
 an individual member or command log; an existing destination is never replaced.
 
+If the fixture fails and the existing bounded retainer returns its actual archive,
+`execute_case` saves those unchanged bytes as `native-private.tar` before
+rethrowing the original fixture exception. This failure-only save uses the same
+`retain_end` as the archive read; it creates no additional retention allowance.
+Expiry, an occupied destination or an I/O error cannot replace the original
+fixture failure. No successful evidence packet or case result is issued on this
+path. The [failure-retention controls](../../test_failed_fixture_retention.py)
+exercise the actual orchestration block and ordinary owned files, not native
+execution or protected-owner authority.
+
 `validate_commands(commands)` requires exactly two terminal command rows, each
 with one ordinal-specific stdout row and one stderr row. Both rows carry typed,
 bounded byte counts and SHA256 values. `verify_command_logs(output, commands,

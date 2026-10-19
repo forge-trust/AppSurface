@@ -80,3 +80,9 @@ and explicit review of the fixed predicate/pin delta.
 worker, native process or subprocess operations. These controls were not executed
 during this source preparation. `port-manifest.json` records historical/current
 hashes, exact-source deltas and the static preservation checks.
+
+`test_n15_materializer.py` directly exercises the staging function with tiny real
+temporary input files and mocked Git, root-path and custody boundaries. It reaches
+policy JSON serialization, request construction, and byte/hash readbacks through
+the ordinary materialization code path. It creates no account, unit, worker or
+native acceptance evidence; passing this control is not an N15 execution result.

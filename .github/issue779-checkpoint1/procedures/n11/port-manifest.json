@@ -11,16 +11,16 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 6788,
-      "sha256": "4442b190203afd3025023877a7fbb368184ead03aee45360e8096662c375d9bf"
+      "bytes": 7579,
+      "sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35"
     },
     "adapter.py": {
       "bytes": 4405,
       "sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d"
     },
     "bridge.py": {
-      "bytes": 23933,
-      "sha256": "a9e0d4550fb5090abe9fee528ee349929e77aaad6509f6247682ca5cda5598a4"
+      "bytes": 24073,
+      "sha256": "deca34f16ca3e8fa25a43ed8e3f9794076634048e7e574386bbdb4d503798409"
     },
     "capture_stall.py": {
       "bytes": 1165,
@@ -235,6 +235,13 @@
       ".github/issue779-checkpoint1/procedures/n11/README.md",
       ".github/issue779-checkpoint1/procedures/n11/bridge.py"
     ]
+  },
+  "source48_failure_retention": {
+    "native_execution": false,
+    "original_retention_deadline_preserved": true,
+    "portable_controls": "../../test_failed_fixture_retention.py",
+    "scope": "failure-only unchanged actual archive retention before original exception rethrow",
+    "success_path_unchanged": true
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

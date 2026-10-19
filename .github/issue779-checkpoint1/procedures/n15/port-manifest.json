@@ -12,9 +12,9 @@
   },
   "files": {
     "README.md": {
-      "bytes": 5152,
+      "bytes": 5559,
       "mode": "0644",
-      "sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7"
+      "sha256": "78fbaaca9d07ac9a06dd6a78f49aab8048a38e28b8f3579bac004f6cc5d658a9"
     },
     "adapter.py": {
       "bytes": 14065,
@@ -42,9 +42,9 @@
       "sha256": "26c594305f08f9255746e00f15cec31388cc230281a892c5e78f16137daece4f"
     },
     "materialize.py": {
-      "bytes": 5973,
+      "bytes": 5985,
       "mode": "0644",
-      "sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15"
+      "sha256": "c568c115238cfeb95e87c17f263465b2a410199a3092ca46b00e4dff0b2bbbf8"
     },
     "n15-guard-reactivation-retry.sh": {
       "bytes": 24702,
@@ -216,6 +216,13 @@
     "updated_paths": [
       ".github/issue779-checkpoint1/procedures/n15/adapter.py"
     ]
+  },
+  "source48_materializer_correction": {
+    "native_execution": false,
+    "policy_request_clocks_custody_unchanged": true,
+    "portable_control": "../../test_n15_materializer.py",
+    "runtime_delta": "import only",
+    "scope": "missing json import before actual policy serialization"
   },
   "source_only": true,
   "static_validation": {

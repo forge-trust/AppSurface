@@ -406,6 +406,8 @@ def execute_case(context, *, deadline):
                     "--reviewed-script-sha256", sha(read(reviewed / "retain-native.sh", 131072, deadline=retain_end))], retain_end)
                 need(retention_marker.startswith(b"NATIVE_RETENTION_COMPLETED:DATA_ONLY:FILES="), "retention-terminal-marker")
                 archive = read(control / "native.tar", MAX_ARCHIVE, deadline=retain_end)
+                if fixture_error is not None:
+                    save_archive(output / "native-private.tar", archive, deadline=retain_end)
             except BaseException:
                 if fixture_error is None:
                     raise

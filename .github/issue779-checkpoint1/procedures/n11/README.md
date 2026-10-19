@@ -105,3 +105,16 @@ Original dispatcher/retainer bytes and N11 capture/parser modules are unchanged.
 Parent/Godel owns inventory registration. Independent review, portable validation,
 actual current helper publication and fresh Linux native execution remain required.
 No all16-ready or coverage-gain claim is made.
+
+## Failed-fixture archive retention
+
+When a fixture fails but its existing bounded retainer supplies the actual
+archive, `execute_case` saves the unchanged bytes as `native-private.tar` before
+rethrowing the original fixture exception. The failure-only save shares the
+archive read's `retain_end`; it adds no clock or allowance. Expiry, an occupied
+destination or an I/O save failure cannot replace the original fixture failure.
+This path creates no successful evidence packet or case result, and the existing
+success-path save and validation remain unchanged. The
+[portable failure-retention controls](../../test_failed_fixture_retention.py)
+exercise the actual orchestration block with ordinary owned files and detached
+command outcomes; they establish no native or protected-owner fact.
