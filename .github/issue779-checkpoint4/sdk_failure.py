@@ -204,6 +204,25 @@ def require_failed_report(body, workspace, source_capture):
     require(any(type(value) is int and value > 0 for value in hits), 'producer-failure-arm-hit')
 
 
+def closed_case_result(result):
+    """Project the original failed controller outcome before any acceptance check; never echo arbitrary error text."""
+    known = {'KeyError', 'TypeError', 'ValueError', 'FileNotFoundError', 'PermissionError', 'TimeoutExpired',
+             'sdk-failure-actual-producer', 'sdk-failure-ready-guard-count', 'sdk-failure-ready-guard',
+             'sdk-failure-original-readiness', 'sdk-failure-failed-manifest', 'sdk-failure-failed-producer',
+             'sdk-failure-actual-test-summary', 'sdk-failure-actual-test-failure', 'sdk-failure-producer-state-shape',
+             'sdk-failure-producer-normal-exit', 'sdk-failure-producer-joined', 'sdk-failure-producer-cleanup',
+             'negative-no-root-success', 'original-all-groups-empty', 'actual-application-settlement',
+             'actual-apphost-before-control', 'original-numeric-account-custody', 'sealed-output-root'}
+    category = result.get('failure_category')
+    code = result.get('root_exit')
+    return {'schema': 'issue779-sdk-failure-controller-v1', 'passed': result.get('passed') is True,
+            'root_exit': code if type(code) is int and -128 <= code <= 255 else None,
+            'groups_empty': result.get('groups_empty') is True,
+            'final_groups_empty': result.get('final_groups_empty') is True,
+            'failure_category': category if type(category) is str and category in known else 'other',
+            'native_acceptance': False}
+
+
 def execute(args):
     r = driver()
     end = time.monotonic() + 840
@@ -218,6 +237,7 @@ def execute(args):
     case_args.digests = args.evidence / 'registration-digests.json'
     tools, runtime = r.stage(case_args, end, sdk_only=True)
     result = r.execute(case_args, 'sdk-test-failure', tools, runtime, end)
+    print(json.dumps(closed_case_result(result), sort_keys=True), flush=True)
     require(result.get('passed') is True and result.get('groups_empty') is True and result.get('final_groups_empty') is True, 'original-control')
     require(result.get('root_exit') == 1 and len(result.get('worker_measurements', [])) == 1, 'natural-failed-worker')
     require_worker(result['worker_measurements'][0], result['sdk_failure']['worker'], instrumented)

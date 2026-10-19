@@ -14,6 +14,20 @@ import sdk_failure as subject
 class FailureDiagnosticDataTests(unittest.TestCase):
     generation = 'a' * 32
 
+    def test_failed_controller_projection_preserves_failure_and_discards_arbitrary_text(self):
+        result = {'passed': False, 'root_exit': 1, 'groups_empty': True, 'final_groups_empty': True,
+                  'failure_category': 'KeyError', 'exception': 'private-canary', 'raw_stdout': 'private-canary'}
+        projected = subject.closed_case_result(result)
+        self.assertFalse(projected['passed'])
+        self.assertEqual('KeyError', projected['failure_category'])
+        self.assertTrue(projected['groups_empty'])
+        self.assertNotIn('private-canary', json.dumps(projected))
+        result['failure_category'] = 'private-canary'; result['root_exit'] = True
+        projected = subject.closed_case_result(result)
+        self.assertEqual('other', projected['failure_category'])
+        self.assertIsNone(projected['root_exit'])
+        self.assertFalse(projected['native_acceptance'])
+
     def fixture(self, parent):
         root = parent / ('appsurface-evidence-producer-diagnostics-' + self.generation)
         root.mkdir(mode=0o700)
