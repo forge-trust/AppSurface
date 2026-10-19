@@ -1342,13 +1342,16 @@ public sealed class DurableSchemaPreflightIntegrationTests
 
     private static async Task AssertConnectionRejectedAsync(Fixture fixture, string caller, string expectedSqlState)
     {
-        var exception = await Record.ExceptionAsync(async () => await fixture.RunAsync(caller));
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+        var exception = await Record.ExceptionAsync(async () => await fixture.RunAsync(caller, cancellationToken: completionDeadline.Token));
         Assert.NotNull(exception);
         Assert.IsAssignableFrom<NpgsqlException>(exception);
         var serverError = exception as PostgresException ??
             (exception as NpgsqlException)?.InnerException as PostgresException;
         Assert.NotNull(serverError);
         Assert.Equal(expectedSqlState, serverError.SqlState);
+        // Client close has no server acknowledgement; observe rejected-session exit within the same total budget.
+        await fixture.WaitForSessionExitAsync($"issue845-{caller}", completionDeadline.Token);
         Assert.Equal(0, await fixture.CountSessionsAsync($"issue845-{caller}"));
     }
 
