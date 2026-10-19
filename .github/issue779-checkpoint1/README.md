@@ -23,6 +23,11 @@ errors use `runtime-input-invalid`, and OS errors use `runtime-os-error`. No raw
 exception text, path or stack is emitted. Retain `runtime-preparation.log` to
 diagnose a failed copy before attempting publication. A diagnostic is not a
 runtime receipt, an OS qualification, or permission to continue after failure.
+The workflow also retains `runtime-input-metadata.json`: a read-only snapshot of
+five fixed SDK directory roles and bounded numeric .NET 10 version directories.
+It records modes, numeric ownership, link counts and closed read errors using a
+five-second clock, six-second process bound and 128 entries per version container. It neither changes the SDK
+nor substitutes for the runtime copy's retained-FD, mode and byte checks.
 
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly

@@ -72,6 +72,48 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          umask 077
+          # Observe only fixed SDK roles; these facts cannot qualify the image.
+          timeout --signal=KILL 6 python3 -B - <<'PY' > "$C1_EVIDENCE/runtime-input-metadata.json"
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import time
+          root = Path(os.environ['C1_BUILD_SDK'])
+          deadline = time.monotonic() + 5
+          roles = ('host', 'host/fxr', 'shared', 'shared/Microsoft.NETCore.App', 'shared/Microsoft.AspNetCore.App')
+          version = re.compile(r'10\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
+          rows = []
+          def facts(value):
+            return {'mode': format(stat.S_IMODE(value.st_mode), '04o'),
+                    'uid': value.st_uid, 'gid': value.st_gid,
+                    'links': value.st_nlink, 'directory': stat.S_ISDIR(value.st_mode)}
+          for role in roles:
+            row = {'role': role, 'facts': None, 'versions': [], 'errno': None, 'truncated': False}
+            try:
+              if time.monotonic() >= deadline:
+                row['truncated'] = True
+              else:
+                node = root / role
+                row['facts'] = facts(node.lstat())
+                if role in roles[1:2] + roles[3:]:
+                  with os.scandir(node) as entries:
+                    for index, entry in enumerate(entries):
+                      if index >= 128 or time.monotonic() >= deadline:
+                        row['truncated'] = True
+                        break
+                      if version.fullmatch(entry.name):
+                        row['versions'].append({'version': entry.name,
+                                                'facts': facts(entry.stat(follow_symlinks=False))})
+                  row['versions'].sort(key=lambda item: item['version'])
+            except OSError as error:
+              row['errno'] = error.errno if type(error.errno) is int and 1 <= error.errno <= 4095 else None
+            rows.append(row)
+          print(json.dumps({'schema': 'issue779-runtime-input-metadata-v1', 'roles': rows,
+                            'qualification': False}, sort_keys=True))
+          PY
           timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/prepare-runtime.py \
             --sdk-root "$C1_BUILD_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
             > "$C1_EVIDENCE/runtime-preparation.log" 2>&1
