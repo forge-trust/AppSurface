@@ -295,7 +295,7 @@ test('collection duplicate aborts when the source sparse index cannot be resolve
   assert.equal(
     context.window.RazorWire.formInteractionsManager
       .getDiagnostics()
-      .some(diagnostic => /duplicate command has no source row index/.test(diagnostic.message)),
+      .some(diagnostic => /missing row index/.test(diagnostic.message)),
     true);
 });
 
@@ -467,7 +467,7 @@ test('non-button collection commands are diagnosed without preventing fallback c
   assert.equal(
     context.window.RazorWire.formInteractionsManager
       .getDiagnostics()
-      .some(diagnostic => /a uses a collection command attribute but is not a button/.test(diagnostic.message)),
+      .some(diagnostic => /a command is not a button/.test(diagnostic.message)),
     true);
 });
 
@@ -546,9 +546,9 @@ test('manager diagnoses cross-form targets and invalid collection indices', () =
   assert.equal(messages.some(message => /outside its form/.test(message)), true);
   assert.equal(messages.some(message => /row is missing Actions\.index/.test(message)), true);
   assert.equal(messages.some(message => /duplicate index "0"/.test(message)), true);
-  assert.equal(messages.some(message => /row index "8" does not match Actions\.index "7"/.test(message)), true);
+  assert.equal(messages.some(message => /Collection "Actions" row index "8" does not match "7"/.test(message)), true);
   assert.equal(messages.some(message => /invalid Actions\.index marker/.test(message)), true);
-  assert.equal(messages.some(message => /file input that duplicate cannot clone/.test(message)), true);
+  assert.equal(messages.some(message => /cannot clone file input/.test(message)), true);
 });
 
 test('[G01] nested owners isolate child rows, templates, markers, delete controls, and status', () => {
@@ -670,7 +670,7 @@ test('[G03] local placeholder defaults, custom tokens, ancestor distinction, and
     fixture.add.dispatchEvent(createEvent('click'));
     assert.equal(ownedRows(fixture.root).length, 0);
     assert.equal(context.window.RazorWire.formInteractionsManager.getDiagnostics()
-      .some(diagnostic => /ancestor and child template tokens must differ/.test(diagnostic.message)), true);
+      .some(diagnostic => /ancestor and child tokens must differ/.test(diagnostic.message)), true);
   }
 
   {
@@ -1974,6 +1974,62 @@ function rebaseOwnedPath(root, oldPrefix, newPrefix) {
   };
   visit(root);
 }
+
+test('nested commands reject a binding prefix owned by a different parent, including late ancestor changes', () => {
+  for (const depth of [2, 3]) {
+    for (const late of [false, true]) {
+      for (const action of ['add', 'duplicate', 'remove']) {
+        const { context, document } = loadRuntime();
+        const fixture = buildNestedFixture(document, { parentIndices: ['0', '9'], includeGrandchildren: true, grandchildIndicesByDate: { 0: ['0'] } });
+        const name = depth === 2 ? 'Actions[0].Dates' : 'Actions[0].Dates[0].Reminders';
+        const dates = fixture.row.querySelector(`[data-rw-form-collection="${name}"]`);
+        const field = findInput(ownedRows(dates)[0], `${name}[0].${depth === 2 ? 'Kind' : 'Text'}`);
+        field.value = 'Retain this entered value';
+        const form = document.createElement('form');
+        form.appendChild(fixture.root);
+        document.body.appendChild(form);
+        const changeOwner = () => {
+          fixture.row.setAttribute('data-rw-form-index', '8');
+          findInput(fixture.row, 'Actions.index').value = '8';
+        };
+        if (!late) changeOwner();
+        context.window.RazorWire.formInteractionsManager.scan();
+        context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+        if (late) form.addEventListener(`razorwire:form-collection:before-${action}`, changeOwner);
+        const command = action === 'add' ? dates.querySelector('[data-rw-form-collection-add]') : ownedCommand(ownedRows(dates)[0], action);
+        command.focus();
+        command.dispatchEvent(createEvent('click'));
+        assert.equal(ownedRows(dates).length, 1, `${late}/${action}`);
+        assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics().some(item => item.message.includes('invalid child prefix')), `${late}/${action}`);
+        assert.equal(field.value, 'Retain this entered value');
+        assert.equal(document.activeElement, command);
+      }
+    }
+  }
+});
+
+test('parent Add rejects a detached template child whose internally consistent prefix belongs to another parent', () => {
+  const { context, document } = loadRuntime();
+  const fixture = buildNestedFixture(document);
+  const child = ownedTemplate(fixture.root).content.querySelector('[data-rw-form-collection]');
+  const rewrite = element => {
+    for (const attribute of [...element.attributes]) {
+      element.setAttribute(attribute.name, attribute.value.replaceAll('Actions[__index__]', 'Actions[foreign]'));
+    }
+    if (element.localName === 'template') for (const nested of element.content.children) rewrite(nested);
+    for (const nested of element.children) rewrite(nested);
+  };
+  rewrite(child);
+  const form = document.createElement('form');
+  form.appendChild(fixture.root);
+  document.body.appendChild(form);
+  context.window.RazorWire.formInteractionsManager.scan();
+  context.window.RazorWire.formInteractionsManager.clearDiagnostics();
+  fixture.add.dispatchEvent(createEvent('click'));
+  assert.equal(ownedRows(fixture.root).length, 1);
+  assert.ok(context.window.RazorWire.formInteractionsManager.getDiagnostics().some(item => item.message.includes('invalid child prefix')));
+  assert.equal(child.getAttribute('data-rw-form-collection'), 'Actions[foreign].Dates');
+});
 
 function buildCollection(document) {
   const root = document.createElement('div');

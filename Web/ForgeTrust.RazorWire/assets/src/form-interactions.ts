@@ -55,7 +55,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
 
         scan() {
             const forms = new Set<HTMLFormElement>();
-            for (const marker of Array.from(document.querySelectorAll(markerSelector))) {
+            for (const marker of document.querySelectorAll(markerSelector)) {
                 const form = marker.closest('form');
                 if (form instanceof HTMLFormElement) {
                     forms.add(form);
@@ -148,11 +148,11 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             this.form.removeEventListener('click', this.clickListener);
             this.form.removeEventListener('change', this.changeListener);
             this.form.removeAttribute('data-rw-form-interactions-enhanced');
-            for (const status of Array.from(this.form.querySelectorAll('[data-rw-form-collection-status-generated]'))) status.remove();
+            for (const status of this.form.querySelectorAll('[data-rw-form-collection-status-generated]')) status.remove();
         }
 
         refresh() {
-            for (const toggle of Array.from(this.form.querySelectorAll('[data-rw-form-toggle]'))) this.syncToggle(toggle as HTMLElement);
+            for (const toggle of this.form.querySelectorAll('[data-rw-form-toggle]')) this.syncToggle(toggle as HTMLElement);
             this.validateRoots();
         }
 
@@ -302,7 +302,14 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         }
 
         /** Canonical row tokens are opaque data. Metadata fallback remains for legacy one-level rows only. */
-        private validateRows(root: HTMLElement, collection: string, strict = false) {
+        private validateRows(root: HTMLElement, collection: string, strict = false, parentPrefix?: string) {
+            for (let owner = root.parentElement; owner; owner = owner.parentElement) {
+                if (!owner.matches(rowSelector)) continue;
+                const parent = owner.closest(rootSelector) as HTMLElement | null;
+                const prefix = parent ? `${this.name(parent)}[${this.rowIndex(owner, this.name(parent))}].` : parentPrefix;
+                if (prefix && !collection.startsWith(prefix))
+                    return this.fail(root, 'invalid child prefix.', templateFix);
+            }
             const seen = new Set<string>();
             let valid = true;
             for (const row of this.rows(root)) {
@@ -317,19 +324,19 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                     this.fail(root, `row has an invalid ${collection}.index marker.`, markerFix);
                     valid = false;
                 } else if (metadata && metadata !== marker.value) {
-                    this.fail(root, `row index "${metadata}" does not match ${collection}.index "${marker.value}".`, markerFix);
+                    this.fail(root, `row index "${metadata}" does not match "${marker.value}".`, markerFix);
                     valid = false;
                 }
                 const key = marker?.value || metadata;
                 if (key && seen.has(key)) { this.fail(root, `has duplicate index "${key}".`, markerFix); valid = false; }
                 if (key) seen.add(key);
-                if (row.querySelector('input[type="file"]')) this.fail(root, 'has a file input that duplicate cannot clone.', 'Reselect files.');
+                if (row.querySelector('input[type="file"]')) this.fail(root, 'cannot clone file input.', 'Reselect files.');
             }
             return valid;
         }
 
         private validateRoots() {
-            for (const root of Array.from(this.form.querySelectorAll(rootSelector)) as HTMLElement[]) {
+            for (const root of this.form.querySelectorAll<HTMLElement>(rootSelector)) {
                 if (!this.name(root)) this.fail(root, 'blank prefix.', 'Set the prefix.');
                 this.template(root);
                 this.validateRows(root, this.name(root));
@@ -342,11 +349,11 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
         private commandRoot(command: Element) {
             const root = command.closest(rootSelector) as HTMLElement | null;
             if (!root || !this.form.contains(root) || !this.name(root)) {
-                this.manager.recordDiagnostic('Collection command has no root.', 'Form required.', 'Use a form.');
+                this.manager.recordDiagnostic('Command has no root.', 'Form required.', 'Use a form.');
                 return null;
             }
             if (command.tagName !== 'BUTTON') {
-                this.fail(root, `${command.tagName.toLowerCase()} uses a collection command attribute but is not a button.`, 'Use a button.');
+                this.fail(root, `${command.tagName.toLowerCase()} command is not a button.`, 'Use a button.');
                 return null;
             }
             return root;
@@ -371,8 +378,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const markers = row ? this.marker(row, this.name(root)) : [];
             const bound = row && this.controls(row).some(element => element.closest(rowSelector) === row
                 && (element.name === prefix || element.name.startsWith(`${prefix}.`)));
-            if (!bound || (!markers.length && root.parentElement?.closest(rowSelector))
-                || (markers.length && (markers.length !== 1 || markers[0].type !== 'hidden' || markers[0].disabled || markers[0].value !== token))) {
+            if (!bound || (markers.length ? markers.length !== 1 || markers[0].type !== 'hidden' || markers[0].disabled || markers[0].value !== token : root.parentElement?.closest(rowSelector))) {
                 this.fail(root, `template binding: ${token} missing.`, templateFix);
                 return null;
             }
@@ -417,7 +423,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 const unresolved = tokens.get(scope) ?? [];
                 if (element.hasAttribute('data-rw-form-collection')) {
                     if (!this.template(element)) prototypesValid = false;
-                    if (unresolved.includes(this.token(element))) prototypesValid = this.fail(element, 'ancestor and child template tokens must differ.', templateFix);
+                    if (unresolved.includes(this.token(element))) prototypesValid = this.fail(element, 'ancestor and child tokens must differ.', templateFix);
                 }
                 if (element.localName === 'template') {
                     const owner = element.closest(rootSelector) as HTMLElement ?? root;
@@ -435,11 +441,10 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                 const old = `${this.name(owner)}[${key}]`;
                 const next = `${nextCollection}[${nextKey}]`;
                 mappings.push({ old, next, oldKey: key, key: nextKey, clone, collection: nextCollection });
-                for (const childOwner of Array.from(sourceRow.querySelectorAll(rootSelector)) as HTMLElement[]) {
+                for (const childOwner of sourceRow.querySelectorAll<HTMLElement>(rootSelector)) {
                     if (childOwner.closest(rowSelector) !== sourceRow) continue;
                     const childPrefix = this.rebase(this.name(childOwner), [{ old, next }]);
-                    if (!this.name(childOwner).startsWith(`${old}.`)) return this.fail(childOwner, 'invalid child prefix.', templateFix);
-                    if (!this.validateRows(childOwner, this.name(childOwner), true)) return false;
+                    if (!this.validateRows(childOwner, this.name(childOwner), true, old + '.')) return false;
                     const reserved = new Set<string>();
                     for (const child of this.rows(childOwner)) {
                         if (duplicate && child.getAttribute(rowStateAttribute) === 'removed') { pairs.get(child)!.remove(); continue; }
@@ -588,7 +593,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             const source = command.closest(rowSelector) as HTMLElement | null;
             if (!root || !source || source.closest(rootSelector) !== root) return;
             const oldIndex = this.rowIndex(source, this.name(root));
-            if (!oldIndex) { this.fail(root, 'duplicate command has no source row index.', markerFix); return; }
+            if (!oldIndex) return this.fail(root, 'missing row index.', markerFix);
             if (!this.validateRows(root, this.name(root), true)) return;
             const index = this.nextIndex(root, this.name(root));
             const plan = this.clonePlan(root, source, oldIndex, index, true);
@@ -621,7 +626,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             for (const [element, entry] of [...plan.bindings, ...plan.sourceBindings]) {
                 const collection = element.getAttribute('data-rw-form-collection');
                 if (collection !== null) {
-                    if (collection !== entry[2]) return this.fail(root, ownerChanged, ownerFix);
+                    if (collection !== entry[2] || element.parentNode !== entry[4]) return this.fail(root, ownerChanged, ownerFix);
                     if (!this.template(element) || !this.validateRows(element, collection.trim(), true)) return false;
                 }
             }
@@ -800,7 +805,7 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
             index: string,
             cancelable: boolean,
             previousIndex: string | null = null) {
-            const event = new CustomEvent(type, {
+            return (command.isConnected ? command : root).dispatchEvent(new CustomEvent(type, {
                 bubbles: true,
                 cancelable,
                 detail: {
@@ -811,11 +816,9 @@ type CollectionAction = 'add' | 'duplicate' | 'physical-remove' | 'mark-remove';
                     index,
                     previousIndex,
                     action,
-                    removeMode: action === 'mark-remove' ? 'mark' : action === 'physical-remove' ? 'physical' : null
+                    removeMode: action.endsWith('remove') ? action.split('-')[0] : null
                 }
-            });
-            (command.isConnected ? command : root).dispatchEvent(event);
-            return !event.defaultPrevented;
+            }));
         }
 
         private status(root: HTMLElement) {

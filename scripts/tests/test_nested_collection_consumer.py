@@ -1,8 +1,8 @@
 """Regression tests for the package-consumer checks in the proof harness.
 
-These tests execute the inline Python blocks from the shell script itself. The
-fixtures stay synthetic, so the tests need neither a .NET build nor network
-access.
+These tests execute the inline Python blocks from the shell script itself using
+synthetic assets and a temporary copy of the real MVC project. They need neither
+a .NET build nor network access.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -125,7 +126,10 @@ class NestedCollectionConsumerTests(unittest.TestCase):
             root = __import__("xml.etree.ElementTree", fromlist=["ElementTree"]).parse(
                 project_path
             ).getroot()
-            local_name = lambda element: element.tag.rsplit("}", 1)[-1]
+
+            def local_name(element):
+                return element.tag.rsplit("}", 1)[-1]
+
             project_references = [
                 element for element in root.iter() if local_name(element) == "ProjectReference"
             ]
@@ -156,6 +160,29 @@ class NestedCollectionConsumerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("ParseError", result.stderr)
             self.assertEqual(project_path.read_text(encoding="utf-8"), original)
+
+    def test_rewrite_accepts_the_real_example_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory_name:
+            project_path = pathlib.Path(directory_name) / "RazorWireWebExample.csproj"
+            shutil.copyfile(
+                REPO_ROOT / "examples/razorwire-mvc/RazorWireWebExample.csproj", project_path
+            )
+            result = self.run_rewrite(project_path)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rewritten = project_path.read_text(encoding="utf-8")
+            self.assertIn(f'Include="ForgeTrust.RazorWire" Version="[{PACKAGE_VERSION}]"', rewritten)
+            self.assertIn(f'Include="ForgeTrust.AppSurface.Web.Tailwind" Version="[{PACKAGE_VERSION}]"', rewritten)
+            self.assertNotIn("<ProjectReference", rewritten)
+            self.assertNotIn("<Import", rewritten)
+            for property_xml in (
+                "<TargetFramework>net10.0</TargetFramework>",
+                "<Nullable>enable</Nullable>",
+                "<AddRazorSupportForMvc>true</AddRazorSupportForMvc>",
+                "<ImplicitUsings>enable</ImplicitUsings>",
+                "<IsExampleProject>true</IsExampleProject>",
+            ):
+                self.assertIn(property_xml, rewritten)
 
     def test_rewrite_rejects_an_additional_source_project_reference(self) -> None:
         with tempfile.TemporaryDirectory() as directory_name:

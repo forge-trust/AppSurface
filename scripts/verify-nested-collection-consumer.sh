@@ -11,9 +11,17 @@ PINNED_SCRIPT="src/Skoolit.Web/wwwroot/js/alpha-evidence-wizard.js"
 COMMAND="${1:-prepare}"
 RUN_DIR=""
 STAGE="initializing"
+START_LOCK_DIR=""
+START_LOCK_ACQUIRED=false
+START_OWNED_PID=""
+START_OWNED_DLL=""
+START_OWNED_URL=""
 
 fail() {
     printf 'ERROR: %s\n' "$*" >&2
+    if [[ -n "$RUN_DIR" && -d "$RUN_DIR" ]]; then
+        printf 'Failed at stage: %s (exit 1): %s\n' "$STAGE" "$*" > "$RUN_DIR/FAILURE.txt"
+    fi
     exit 1
 }
 
@@ -26,6 +34,48 @@ on_error() {
     exit "$status"
 }
 trap on_error ERR
+
+cleanup_start() {
+    local status=$?
+    trap - ERR
+    if [[ -n "$START_OWNED_PID" && $status -ne 0 ]]; then
+        local args recorded_pid recorded_url stopped=false
+        args="$(ps -p "$START_OWNED_PID" -o args= 2>/dev/null || true)"
+        if [[ "$args" == *"$START_OWNED_DLL"* ]]; then
+            kill "$START_OWNED_PID" 2>/dev/null || true
+            for _ in $(seq 1 20); do
+                if ! kill -0 "$START_OWNED_PID" 2>/dev/null; then
+                    stopped=true
+                    break
+                fi
+                sleep 1
+            done
+            if ! kill -0 "$START_OWNED_PID" 2>/dev/null; then
+                stopped=true
+            fi
+            if [[ "$stopped" == true ]]; then
+                wait "$START_OWNED_PID" 2>/dev/null || true
+            else
+                printf 'Cleanup: owned host PID %s is still running after 20 seconds; retaining host.pid and host.url for a later stop.\n' \
+                    "$START_OWNED_PID" >&2
+            fi
+        fi
+        recorded_pid="$(cat "$RUN_DIR/host.pid" 2>/dev/null || true)"
+        recorded_url="$(cat "$RUN_DIR/host.url" 2>/dev/null || true)"
+        if [[ "$stopped" == true && "$recorded_pid" == "$START_OWNED_PID" ]]; then
+            rm -f "$RUN_DIR/host.pid"
+            if [[ -n "$recorded_url" && "$recorded_url" == "$START_OWNED_URL" ]]; then
+                rm -f "$RUN_DIR/host.url"
+            fi
+        fi
+    fi
+    if [[ "$START_LOCK_ACQUIRED" == true ]]; then
+        rmdir "$START_LOCK_DIR" 2>/dev/null || true
+        START_LOCK_ACQUIRED=false
+    fi
+    return "$status"
+}
+trap cleanup_start EXIT
 
 resolve_run_dir() {
     local run_id="${2:-}"
@@ -42,6 +92,11 @@ start_host() {
     local host_dir="$RUN_DIR/consumer-host"
     local dll="$host_dir/bin/Release/net10.0/RazorWireWebExample.dll"
     local port="" base_url="" pid=""
+    START_LOCK_DIR="$RUN_DIR/start.lock"
+    mkdir "$START_LOCK_DIR" 2>/dev/null || fail "Another start operation is already active for this run."
+    START_LOCK_ACQUIRED=true
+    [[ -f "$RUN_DIR/PREPARED" && -s "$RUN_DIR/receipt.md" ]] \
+        || fail "Run is not completely prepared; execute $0 prepare again."
     [[ -f "$dll" ]] || fail "Copied PackageReference host has not been built: $dll"
     export NUGET_PACKAGES="$RUN_DIR/nuget-packages"
 
@@ -70,6 +125,9 @@ start_host() {
         nohup bash -c 'cd "$1" && exec env ASPNETCORE_ENVIRONMENT=Development DOTNET_ENVIRONMENT=Development ASPNETCORE_URLS="$2" dotnet "$3" --urls "$2"' \
             _ "$host_dir" "$base_url" "$dll" > "$RUN_DIR/host.log" 2>&1 < /dev/null &
         pid=$!
+        START_OWNED_PID="$pid"
+        START_OWNED_DLL="$dll"
+        START_OWNED_URL="$base_url"
         printf '%s\n' "$pid" > "$RUN_DIR/host.pid"
         printf '%s\n' "$base_url" > "$RUN_DIR/host.url"
     fi
@@ -136,13 +194,41 @@ PY
     printf 'Host log: %s/host.log\n' "$RUN_DIR"
 }
 
+write_nuget_config() {
+    python3 - "$1" "$2" <<'PY_NUGET'
+import pathlib
+import sys
+import xml.etree.ElementTree as ET
+
+destination, local_feed = sys.argv[1:]
+configuration = ET.Element("configuration")
+sources = ET.SubElement(configuration, "packageSources")
+ET.SubElement(sources, "clear")
+ET.SubElement(sources, "add", {"key": "issue-868-local", "value": local_feed})
+ET.SubElement(sources, "add", {"key": "nuget.org", "value": "https://api.nuget.org/v3/index.json"})
+mapping = ET.SubElement(configuration, "packageSourceMapping")
+local = ET.SubElement(mapping, "packageSource", {"key": "issue-868-local"})
+ET.SubElement(local, "package", {"pattern": "ForgeTrust.*"})
+public = ET.SubElement(mapping, "packageSource", {"key": "nuget.org"})
+ET.SubElement(public, "package", {"pattern": "*"})
+ET.ElementTree(configuration).write(destination, encoding="utf-8", xml_declaration=True)
+PY_NUGET
+}
+
+publish_prepared_run() {
+    local run_id="$1"
+    [[ -s "$RUN_DIR/receipt.md" ]] || fail "Prepared run receipt is missing or empty."
+    touch "$RUN_DIR/PREPARED"
+    printf '%s\n' "$run_id" > "$PROOFS_ROOT/LATEST.$run_id"
+    mv "$PROOFS_ROOT/LATEST.$run_id" "$PROOFS_ROOT/LATEST"
+}
+
 prepare() {
     mkdir -p "$PROOFS_ROOT"
     local run_id
     run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
     RUN_DIR="$PROOFS_ROOT/$run_id"
     mkdir -p "$RUN_DIR/local-feed" "$RUN_DIR/nuget-packages"
-    printf '%s\n' "$run_id" > "$PROOFS_ROOT/LATEST"
     export NUGET_PACKAGES="$RUN_DIR/nuget-packages"
 
     STAGE="recording source identity"
@@ -374,24 +460,7 @@ EOF
   </PropertyGroup>
 </Project>
 EOF
-    cat > "$host_dir/NuGet.config" <<EOF
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <packageSources>
-    <clear />
-    <add key="issue-868-local" value="$RUN_DIR/local-feed" />
-    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-  </packageSources>
-  <packageSourceMapping>
-    <packageSource key="issue-868-local">
-      <package pattern="ForgeTrust.*" />
-    </packageSource>
-    <packageSource key="nuget.org">
-      <package pattern="*" />
-    </packageSource>
-  </packageSourceMapping>
-</configuration>
-EOF
+    write_nuget_config "$host_dir/NuGet.config" "$RUN_DIR/local-feed"
 
     STAGE="restoring and building isolated PackageReference host"
     dotnet restore "$host_dir/RazorWireWebExample.csproj" --configfile "$host_dir/NuGet.config" \
@@ -515,7 +584,8 @@ This receipt records exact package preparation, copied-host build, and runtime a
 '''
 pathlib.Path(destination).write_text(receipt)
 PY
-    printf '%s\n' "$run_id" > "$PROOFS_ROOT/LATEST"
+    STAGE="publishing completed preparation"
+    publish_prepared_run "$run_id"
     printf 'PackageReference host built. Run %s start %s to launch the isolated host.\n' "$0" "$run_id"
     printf 'Receipt: %s/receipt.md\n' "$RUN_DIR"
 }
