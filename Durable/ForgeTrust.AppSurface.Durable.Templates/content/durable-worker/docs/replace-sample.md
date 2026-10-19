@@ -1,12 +1,14 @@
 # Replace the sample Work
 
-The generated host and test project belong to your application after creation. Keep the authenticated activation and provider composition in place, then replace the sample Work in these three locations:
+The generated host and test project belong to your application after creation. Keep the authenticated activation and provider composition in place, then replace the sample Work in these three locations. The paths use `FirstDurableWorker` as the example project name; substitute the name you passed to `dotnet new` when it differs:
 
 | Location | Change |
 | --- | --- |
 | `src/FirstDurableWorker/Work/SampleWork.cs` and `SampleWorkExecutor.cs` | Define your input and result types, stable Work name/version, codecs, provider-safety and retry choices; implement the executor and any reconciliation contract. |
 | `src/FirstDurableWorker/Work/WorkRegistration.cs` | Bind the typed definition to your executor/reconciler once. Keep the registration facts aligned with the definition; do not duplicate them in request code. |
 | `src/FirstDurableWorker/Work/SampleWorkProducer.cs` | Construct and submit the typed acceptance request from your domain-owned producer path. Retain the returned acceptance receipt and authorized scope outside the wake request. |
+
+For a replacement confined to these locations, retain the public sample names and call signatures used by the generated host and tests: `SampleWork`, `SampleWorkResult`, their `Value` properties and one-string construction, `SampleWorkDefinition`, `SampleWorkExecutor`, `SampleWorkProducer.AcceptAsync`, and `WorkRegistration.AddSampleWork`. You can give the persisted Work and codec identities distinct names and extend the input/result with compatible optional fields. The retained proof expects the result's `Value` to be `processed:<input Value>`. Its assertions do not verify any new domain fields or effects; add application tests for those behaviors. Renaming public symbols, requiring additional constructor arguments, or changing that result convention also requires updating the generated host/test call sites and their assertions, beyond the three-location replacement.
 
 The codec identity/version is part of the Work contract. If input or result serialization changes, treat it as a persisted-data compatibility change. If the Work name/version changes, decide how old and new accepted records will be processed before deploying the new producer or executor. Existing accepted records are not rewritten by a template update. Review the [typed Work definition guide](https://github.com/forge-trust/AppSurface/blob/main/Durable/migrations/typed-work-definitions-v1.md) and [Work protocol](https://github.com/forge-trust/AppSurface/blob/main/Durable/work-protocol-v1.md).
 
