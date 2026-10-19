@@ -53,6 +53,13 @@ internal static class EvidenceProcessEntryPoint
             if (selected.Role == EvidenceProcessRole.Supervisor)
             {
                 supervisorSelected = true;
+#if EVIDENCE_PRIVATE_C4_ACCOUNTS
+                // The private mechanism receipt is available only after its actual native finalization returns.
+                var receipt = await LinuxAccountMeasurement.RunAsync(selected.Path!,
+                    console.RegisterCancellationHandler()).ConfigureAwait(false);
+                await console.Output.WriteLineAsync(Encoding.UTF8.GetString(receipt));
+                return 0;
+#else
                 var manifest = await LinuxEmptyObservationExecution.RunAsync(selected.Path!,
                     console.RegisterCancellationHandler()).ConfigureAwait(false);
                 var summary = EvidenceCanonicalJson.Serialize(new
@@ -65,6 +72,7 @@ internal static class EvidenceProcessEntryPoint
                 });
                 await console.Output.WriteLineAsync(Encoding.UTF8.GetString(summary));
                 return 0;
+#endif
             }
 
             await new EvidenceWorkerCommand { ControlChannel = selected.Path }.ExecuteAsync(console).ConfigureAwait(false);

@@ -7,6 +7,23 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Build-selection and original callback controls; no native owner, lease or accepted proof.</summary>
 public sealed class EvidenceNativeQualificationTests
 {
+    /// <summary>The ordinary CLI cannot reference the private account supervisor dispatcher.</summary>
+    [Fact]
+    public void AccountMechanismDispatcherReferenceExistsOnlyInItsPrivateImages()
+    {
+        using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Cli.dll"));
+        using var image = new System.Reflection.PortableExecutable.PEReader(file);
+        var reader = image.GetMetadataReader();
+        var references = reader.TypeReferences.Select(handle => reader.GetTypeReference(handle))
+            .Select(type => reader.GetString(type.Namespace) + "." + reader.GetString(type.Name)).ToArray();
+        const string fixture = "ForgeTrust.AppSurface.Evidence.Supervision.LinuxAccountMeasurement";
+#if EVIDENCE_PRIVATE_C4_ACCOUNTS
+        Assert.Contains(fixture, references);
+#else
+        Assert.DoesNotContain(fixture, references);
+#endif
+    }
+
     /// <summary>Reads finished metadata without invoking the deliberate private stall.</summary>
     [Fact]
     public void SynchronousNativeStallIsAbsentFromOrdinaryProductImages()

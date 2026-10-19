@@ -19,6 +19,10 @@
     <Compile Include="../../.github/issue779-checkpoint4/measurement/LinuxWorkerMeasurement.cs" Link="Measurement/LinuxWorkerMeasurement.cs" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(EvidencePrivateQualification)' == 'C4Accounts' or '$(EvidencePrivateQualification)' == 'C4AccountRollback'">
+    <Compile Include="../../.github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs" Link="Measurement/LinuxAccountMeasurement.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Supervision.Tests" />

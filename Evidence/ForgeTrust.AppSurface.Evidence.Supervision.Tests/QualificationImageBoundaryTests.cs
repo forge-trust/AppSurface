@@ -180,6 +180,32 @@ public sealed class QualificationImageBoundaryTests
 #endif
     }
 
+    /// <summary>The account fixtures and their collision hooks are absent from every ordinary product image.</summary>
+    [Fact]
+    public void PrivateAccountMechanismTypesAndHooksMatchOnlyTheirCompiledImage()
+    {
+        var types = ReadTypeNames();
+        var methods = ReadMethodDefinitions();
+#if EVIDENCE_PRIVATE_C4_ACCOUNTS
+        Assert.Contains("LinuxAccountMeasurement", types);
+        Assert.Contains("LinuxAccountMeasurementState", types);
+        Assert.Contains("LinuxRunAccounts.CaptureAccountMeasurementState", methods);
+        Assert.Contains("LinuxRunAccountNss.RequireAccountMeasurementNumbersAbsentAsync", methods);
+#else
+        Assert.DoesNotContain("LinuxAccountMeasurement", types);
+        Assert.DoesNotContain("LinuxAccountMeasurementState", types);
+        Assert.DoesNotContain("LinuxRunAccounts.CaptureAccountMeasurementState", methods);
+        Assert.DoesNotContain("LinuxRunAccountNss.RequireAccountMeasurementNumbersAbsentAsync", methods);
+#endif
+#if EVIDENCE_PRIVATE_C4_ACCOUNT_ROLLBACK
+        Assert.Contains("LinuxRunAccounts.PrepareAccountMeasurementCollisionAsync", methods);
+        Assert.Contains("LinuxRunAccounts.RecordAccountMeasurementRollback", methods);
+#else
+        Assert.DoesNotContain("LinuxRunAccounts.PrepareAccountMeasurementCollisionAsync", methods);
+        Assert.DoesNotContain("LinuxRunAccounts.RecordAccountMeasurementRollback", methods);
+#endif
+    }
+
     private static HashSet<string> ReadMethodReferences()
     {
         using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Supervision.dll"));

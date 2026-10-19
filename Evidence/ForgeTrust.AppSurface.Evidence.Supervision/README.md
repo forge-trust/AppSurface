@@ -1746,6 +1746,14 @@ describes the source/digest checks, isolated-process limits and unchanged comple
 
 ## Native qualification image boundary
 
+The separate [account mechanism controls](../../.github/issue779-checkpoint4/measurement/accounts-README.md)
+use the private `C4Accounts` and `C4AccountRollback` build values. They authenticate the original root
+supervisor and exercise actual account utilities/NSS without starting a worker or creating a manifest.
+Only the rollback image seeds its own already-reserved group before the unchanged duplicate dispatch;
+the original failure and cleanup must remain observable. Both values remain unpackageable and compile
+their fixture types and calls out of ordinary `None` images. Local compilation alone is not a native
+result; the complete protected Linux controls and source-bound measurement must still be verified.
+
 The N04 and N07 rendezvous implementations in
 [`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) and
 [`LinuxN07CheckpointOwner`](LinuxN07CheckpointOwner.cs) are compiled only into

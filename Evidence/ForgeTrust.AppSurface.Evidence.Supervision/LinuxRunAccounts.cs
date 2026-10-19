@@ -304,7 +304,7 @@ internal sealed record LinuxRunAccountSnapshot(uint WorkerUid, uint WorkerGid, u
 /// Every deletion joins its unit/pumps; final live NSS absence is mandatory. Original failure never becomes
 /// successful admission. Workspace/artifact custody must be secured before deleting IDs and permitting reuse.
 /// </remarks>
-internal sealed class LinuxRunAccounts
+internal sealed partial class LinuxRunAccounts
 {
     private readonly object _gate = new();
     private readonly LinuxOwnerActivation _owner;
@@ -501,6 +501,10 @@ internal sealed class LinuxRunAccounts
                 _owner.RequireActive(token);
                 var command = _reservations.ReserveNext(); // Including implicit group, before any start I/O.
                 stage = LinuxAccountPreparationStage.UtilityExecute;
+#if EVIDENCE_PRIVATE_C4_ACCOUNT_ROLLBACK
+                if (command.Operation == LinuxRunAccountOperation.CreateResultsGroup)
+                    await PrepareAccountMeasurementCollisionAsync(command, token).ConfigureAwait(false);
+#endif
                 await RunUtilityAsync(command, cleanup: false, token).ConfigureAwait(false);
             }
             stage = LinuxAccountPreparationStage.IdentityRead;
@@ -515,6 +519,9 @@ internal sealed class LinuxRunAccounts
             _reservations.MarkFailed();
             try { await CloseAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { lock (_gate) _quarantined = true; }
+#if EVIDENCE_PRIVATE_C4_ACCOUNT_ROLLBACK
+            RecordAccountMeasurementRollback(); // Detached observation cannot replace the original first failure.
+#endif
             if (IsQuarantined) throw new LinuxRunAccountException(LinuxRunAccountFailure.CleanupFailed, _failures.First);
             if (token.IsCancellationRequested) throw new LinuxRunAccountCancelledException(token, _failures.First);
             throw new LinuxRunAccountException(LinuxRunAccountFailure.OperationFailed, _failures.First);
