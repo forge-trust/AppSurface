@@ -342,12 +342,16 @@ public sealed class ReleaseWorkflowPolicyTests
         Assert.Contains("must not contain unsupported append-only entry markers", workflow, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Ensures release preparation denies cache access before executing tooling from the selected base ref.
+    /// </summary>
     [Fact]
     public async Task ReleasePreparationDisablesCacheAccessForBaseRefControlledCode()
     {
         var workflow = await ReadRepositoryFileAsync(".github/workflows/release-prep.yml");
         var yaml = new YamlStream();
-        yaml.Load(new StringReader(workflow));
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
         var root = Assert.IsType<YamlMappingNode>(Assert.Single(yaml.Documents).RootNode);
         var jobs = Assert.IsType<YamlMappingNode>(root.Children[new YamlScalarNode("jobs")]);
         var prepare = Assert.IsType<YamlMappingNode>(jobs.Children[new YamlScalarNode("prepare")]);
