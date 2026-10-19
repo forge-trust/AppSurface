@@ -6,7 +6,8 @@ import os
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import measurement_arguments as arguments
@@ -392,6 +393,141 @@ class PassiveTmpEventDataTests(unittest.TestCase):
             self.assertNotIn('private-canary', output.getvalue())
         finally:
             close(read_fd)
+
+
+class WorkerStartupDiagnosticDataTests(unittest.TestCase):
+    """Real temporary diagnostic bytes only; no worker, account, descriptor or owner is constructed."""
+    generation = 'a' * 32
+    payloads = {'stderr.prefix': b'worker-private-canary', 'stdout.prefix': b'worker stdout', 'state.json': b'{"closed":"data"}'}
+
+    @staticmethod
+    def save(path, body):
+        path.write_bytes(body); path.chmod(0o600)
+
+    def fixture(self, temporary):
+        directory = temporary / 'worker-diagnostics'; directory.mkdir(mode=0o700)
+        for name, body in self.payloads.items():
+            self.save(directory / ('sdk-test-failure-worker-' + name), body)
+        leaves = subject.read_worker_stage(directory, uid=os.getuid(), gid=os.getgid())
+        packet = {'schema': subject.WORKER_DIAGNOSTIC_SCHEMA, 'files': {
+            name: {'bytes': len(body), 'sha256': subject.hashlib.sha256(body).hexdigest()} for name, body in leaves.items()}}
+        self.save(directory / 'complete.json', json.dumps(packet).encode())
+        return directory
+
+    def append(self, temporary, log, maximum=8 * 1024 * 1024):
+        subject.append_worker_diagnostics(temporary, log, maximum, uid=os.getuid(), gid=os.getgid())
+
+    def test_exact_returned_generation_and_worker_role_preserve_the_original_result(self):
+        with tempfile.TemporaryDirectory() as value:
+            temporary = Path(value); calls = []
+            result = {'generation': self.generation, 'passed': False, 'failure_category': 'original-private-canary'}
+            original = json.dumps(result, sort_keys=True)
+            def retain(generation, output, case, role):
+                calls.append((generation, case, role))
+                for name, body in self.payloads.items(): self.save(output / (case + '-' + role + '-' + name), body)
+                return True
+            r = SimpleNamespace(c2=SimpleNamespace(retain_producer_prefixes=retain, write=self.save))
+            subject.retain_worker_diagnostics(r, result, temporary, time.monotonic() + 10, uid=os.getuid(), gid=os.getgid())
+            self.assertEqual([(self.generation, 'sdk-test-failure', 'worker')], calls)
+            self.assertEqual(original, json.dumps(result, sort_keys=True))
+            self.assertEqual(self.payloads, subject.read_worker_stage(temporary / 'worker-diagnostics', uid=os.getuid(), gid=os.getgid(), complete=True))
+
+    def test_invalid_missing_and_expired_generation_selection_never_calls_the_reader(self):
+        for result, end in (({}, time.monotonic() + 10), ({'generation': '../private-canary'}, time.monotonic() + 10),
+                            ({'generation': 'A' * 32}, time.monotonic() + 10), ({'generation': self.generation}, time.monotonic() - 1)):
+            with self.subTest(result=result), tempfile.TemporaryDirectory() as value:
+                with patch.object(subject, 'read_worker_stage') as copied:
+                    r = SimpleNamespace(c2=SimpleNamespace(retain_producer_prefixes=unittest.mock.Mock()))
+                    subject.retain_worker_diagnostics(r, result, Path(value), end)
+                r.c2.retain_producer_prefixes.assert_not_called(); copied.assert_not_called()
+
+    def test_partial_copy_or_reader_error_is_not_appended_or_echoed(self):
+        with tempfile.TemporaryDirectory() as value:
+            temporary = Path(value); log = temporary / 'combined.log'; self.save(log, b'original')
+            result = {'generation': self.generation, 'passed': False, 'root_exit': 1, 'failure_category': 'KeyError'}
+            before = subject.closed_case_result(result)
+            def partial(generation, output, case, role):
+                self.save(output / (case + '-' + role + '-stderr.prefix'), b'private-canary')
+                raise OSError('private-canary')
+            r = SimpleNamespace(c2=SimpleNamespace(retain_producer_prefixes=partial, write=self.save))
+            public = io.StringIO()
+            with redirect_stdout(public), redirect_stderr(public):
+                subject.retain_worker_diagnostics(r, result, temporary, time.monotonic() + 10, uid=os.getuid(), gid=os.getgid())
+                self.append(temporary, log)
+            self.assertEqual(b'original', log.read_bytes()); self.assertEqual('', public.getvalue())
+            self.assertEqual(before, subject.closed_case_result(result))
+
+    def test_three_fixed_private_sections_add_no_retained_files_or_public_canary(self):
+        with tempfile.TemporaryDirectory() as value:
+            temporary = Path(value); self.fixture(temporary)
+            evidence = temporary / 'evidence'; evidence.mkdir(mode=0o700)
+            log = evidence / 'sdk-test-failure-diagnostics.log'; self.save(log, b'collector plus owner')
+            public = io.StringIO()
+            with redirect_stdout(public), redirect_stderr(public): self.append(temporary, log)
+            body = log.read_bytes()
+            self.assertTrue(body.startswith(b'collector plus owner'))
+            for name, payload in self.payloads.items():
+                self.assertEqual(1, body.count(('Original CSharp worker ' + name + ' (private):').encode()))
+                self.assertIn(payload, body)
+            self.assertEqual('', public.getvalue()); self.assertEqual([log], list(evidence.iterdir()))
+
+    def test_one_bad_copied_node_or_completion_field_never_enters_log(self):
+        for mutation in ('mode', 'hardlink', 'symlink', 'fifo', 'extra', 'missing', 'digest', 'schema'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as value:
+                temporary = Path(value); directory = self.fixture(temporary)
+                subject.read_worker_stage(directory, uid=os.getuid(), gid=os.getgid(), complete=True)
+                log = temporary / 'combined.log'; self.save(log, b'original')
+                leaf = directory / 'sdk-test-failure-worker-stderr.prefix'
+                if mutation == 'mode': leaf.chmod(0o644)
+                elif mutation == 'hardlink': os.link(leaf, temporary / 'outside')
+                elif mutation == 'symlink': leaf.unlink(); leaf.symlink_to(log)
+                elif mutation == 'fifo': leaf.unlink(); os.mkfifo(leaf)
+                elif mutation == 'extra': self.save(directory / 'extra', b'private-canary')
+                elif mutation == 'missing': leaf.unlink()
+                else:
+                    path = directory / 'complete.json'; packet = json.loads(path.read_bytes())
+                    if mutation == 'digest': packet['files']['stderr.prefix']['sha256'] = '0' * 64
+                    else: packet['schema'] = 'private-canary'
+                    self.save(path, json.dumps(packet).encode())
+                self.append(temporary, log); self.assertEqual(b'original', log.read_bytes())
+
+    def test_combined_ceiling_truncates_explicitly_or_leaves_a_full_log_unchanged(self):
+        with tempfile.TemporaryDirectory() as value:
+            temporary = Path(value); self.fixture(temporary)
+            log = temporary / 'combined.log'; self.save(log, b'o' * 100)
+            self.append(temporary, log, 256)
+            body = log.read_bytes(); self.assertEqual(256, len(body))
+            self.assertTrue(body.endswith(b'Worker diagnostics truncated at existing combined-log bound.\n'))
+            self.append(temporary, log, 256); self.assertEqual(body, log.read_bytes())
+
+    def test_unsafe_destination_is_not_written_or_echoed(self):
+        for mutation in ('symlink', 'hardlink', 'fifo'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as value:
+                temporary = Path(value); self.fixture(temporary)
+                outside = temporary / 'outside'; self.save(outside, b'outside-canary')
+                log = temporary / 'combined.log'
+                if mutation == 'symlink': log.symlink_to(outside)
+                elif mutation == 'hardlink': os.link(outside, log)
+                else: os.mkfifo(log)
+                public = io.StringIO()
+                with redirect_stdout(public), redirect_stderr(public): self.append(temporary, log)
+                self.assertEqual(b'outside-canary', outside.read_bytes()); self.assertEqual('', public.getvalue())
+
+    def test_finalize_retains_worker_bytes_before_preserving_the_original_collector_failure(self):
+        with tempfile.TemporaryDirectory() as value:
+            parent = Path(value); temporary = parent / 'checkpoint3-sdk-failure-work'; temporary.mkdir(mode=0o700)
+            self.fixture(temporary)
+            self.save(temporary / 'sdk-test-failure-owner.stderr', b'owner diagnostics')
+            evidence = parent / 'evidence'; evidence.mkdir(mode=0o700)
+            log = evidence / 'sdk-test-failure-diagnostics.log'; self.save(log, b'collector diagnostics')
+            append = subject.append_worker_diagnostics
+            def portable_append(work, destination, maximum):
+                append(work, destination, maximum, uid=os.getuid(), gid=os.getgid())
+            with patch.object(subject, 'driver', return_value=SimpleNamespace(MAX_LOG=8 * 1024 * 1024)), patch.object(subject, 'append_worker_diagnostics', side_effect=portable_append):
+                with self.assertRaisesRegex(RuntimeError, '^sdk-failure-collector-exit$'):
+                    subject.finalize(SimpleNamespace(evidence=evidence, collector_exit=1))
+            self.assertIn(b'worker-private-canary', log.read_bytes())
+            self.assertFalse((evidence / 'native').exists())
 
 
 if __name__ == '__main__':

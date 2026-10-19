@@ -78,3 +78,40 @@ success claim; an optional nullable measurement call returning is not proof it c
 anything. Diagnostic I/O failure is discarded, and every original token, startup
 allowance, unit property and lifecycle guard remains authoritative. These milestones
 locate an early startup cancellation separately from the later exit-cache protocol.
+
+
+## SDK startup worker diagnostics
+
+The SDK-only controller also retains the original worker's joined diagnostic prefixes
+when startup ends before descriptor publication. The C3 controller already returns its
+fresh selected `generation`; after that original call returns, the SDK fixture passes
+that exact selection and role `worker` to the existing
+[C2 strict prefix reader](../../issue779-checkpoint2/run-native.py). It does not infer a
+PID, adopt another generation, retry a start, or change the original result. A missing
+selection or unavailable/invalid diagnostic source grants no observation.
+
+The three copied leaves (`stderr.prefix`, `stdout.prefix`, `state.json`) stay in the
+existing unretained controller working directory under a fresh private child. A small
+completion record is written only after all three copies validate; partial copies are
+not used. The finalizer reopens the copies with no-follow/nonblocking FDs, exact private
+ownership/modes, single-link/regular type and stable named metadata, and verifies the
+completion lengths/hashes. Each leaf retains the existing 1 MiB prefix bound. This is
+opaque diagnostic data, not a worker exit, signal, native outcome or acceptance proof.
+
+After the collector and original owner writers have joined, the finalizer appends fixed
+private worker sections to the existing `sdk-test-failure-diagnostics.log`, **before**
+its original collector-exit assertion. This also works for a failed collector with no
+provisional success receipt. Stderr is first. The combined log remains at its original
+8 MiB ceiling; insufficient room causes explicit diagnostic truncation, or no append
+if the marker itself cannot fit. No additional retained evidence files, generic quota,
+clock, unit policy, output allowance or product/runtime code changes. Missing or rejected
+copies do not prove absence and do not replace the original failure. Raw prefix/state
+bytes remain only in this private log, with no public echo of payload or exception text.
+
+The new `WorkerStartupDiagnosticDataTests` class in the
+[small-file controls](../test_sdk_failure.py) covers exact selection, invalid/expired
+selection, partial copies, one-field/node failures, private-only output, the shared log
+ceiling, unsafe destinations and finalization before the original collector failure.
+These controls create temporary data only; they establish neither a native worker
+failure cause nor a successful runtime measurement. Source29/30 startup cancellation
+remains undiagnosed until fresh retained worker bytes are actually inspected.

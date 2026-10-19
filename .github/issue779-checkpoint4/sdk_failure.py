@@ -31,6 +31,8 @@ EVENT_MASK = 0x100 | 0x8 | 0x200  # IN_CREATE, IN_CLOSE_WRITE, IN_DELETE only.
 TRACKER_NAMES = tuple(re.compile(re.escape(module.encode('ascii')) +
                       rb'_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
                       for module in MODULES)
+WORKER_DIAGNOSTIC_LEAVES = ('stderr.prefix', 'stdout.prefix', 'state.json')
+WORKER_DIAGNOSTIC_SCHEMA = 'issue779-sdk-worker-diagnostics-v1'
 
 
 class PassiveTmpEvents:
@@ -485,6 +487,115 @@ def closed_case_result(result):
             'native_acceptance': False}
 
 
+def read_worker_copy(root, name, limit, uid, gid):
+    """Read a bounded private temporary leaf within the existing external process bound."""
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=root)
+    try:
+        metadata = os.fstat(fd)
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == uid and metadata.st_gid == gid
+                and metadata.st_nlink == 1 and stat.S_IMODE(metadata.st_mode) == 0o600
+                and 0 <= metadata.st_size <= limit, 'worker-diagnostic-leaf')
+        body = bytearray()
+        while len(body) <= metadata.st_size:
+            part = os.read(fd, min(65536, metadata.st_size + 1 - len(body)))
+            if not part: break
+            body.extend(part)
+        require(len(body) == metadata.st_size and identity(metadata) == identity(os.fstat(fd))
+                == identity(os.stat(name, dir_fd=root, follow_symlinks=False)), 'worker-diagnostic-stability')
+        return bytes(body)
+    finally:
+        os.close(fd)
+
+
+def read_worker_stage(directory, *, uid=0, gid=0, complete=False):
+    """Read three opaque copied leaves, not worker outcome or process authority.
+
+    The original C2 reader owns source validation. This second read checks only
+    its private temporary copies, after the original controller returned. UID/GID
+    parameters permit ordinary small-file controls without constructing owners.
+    External controller/finalizer bounds remain unchanged; each leaf is <=1 MiB.
+    """
+    root = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        before = os.fstat(root)
+        require(before.st_uid == uid and before.st_gid == gid and stat.S_IMODE(before.st_mode) == 0o700,
+                'worker-diagnostic-stage')
+        names = {'sdk-test-failure-worker-' + name for name in WORKER_DIAGNOSTIC_LEAVES}
+        require(set(os.listdir(root)) == (names | {'complete.json'} if complete else names), 'worker-diagnostic-stage')
+        result = {}
+        for name in WORKER_DIAGNOSTIC_LEAVES:
+            selected = 'sdk-test-failure-worker-' + name
+            result[name] = read_worker_copy(root, selected, PREFIX_LIMIT, uid, gid)
+        if complete:
+            packet = strict_json(read_worker_copy(root, 'complete.json', 4096, uid, gid))
+            expected = {'schema': WORKER_DIAGNOSTIC_SCHEMA, 'files': {
+                name: {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()} for name, body in result.items()}}
+            require(packet == expected and all(type(row['bytes']) is int for row in packet['files'].values()),
+                    'worker-diagnostic-complete')
+        require(identity(before) == identity(os.fstat(root)) == identity(directory.lstat()), 'worker-diagnostic-stage')
+        return result
+    finally:
+        os.close(root)
+
+
+def retain_worker_diagnostics(r, result, temporary, end, *, uid=0, gid=0):
+    """Best-effort post-join copy using the exact generation returned by r.execute.
+
+    No descriptor, guessed generation, process authority or changed result is
+    supplied. Partial copies have no completion record and are never appended.
+    Nothing is printed and every observer error preserves the original outcome.
+    """
+    try:
+        generation = result.get('generation')
+        if type(generation) is not str or not re.fullmatch('[0-9a-f]{32}', generation): return
+        check_deadline(end)
+        directory = temporary / 'worker-diagnostics'
+        directory.mkdir(mode=0o700)
+        if r.c2.retain_producer_prefixes(generation, directory, 'sdk-test-failure', role='worker') is not True: return
+        check_deadline(end)
+        leaves = read_worker_stage(directory, uid=uid, gid=gid)
+        packet = {'schema': WORKER_DIAGNOSTIC_SCHEMA, 'files': {
+            name: {'bytes': len(body), 'sha256': hashlib.sha256(body).hexdigest()} for name, body in leaves.items()}}
+        r.c2.write(directory / 'complete.json', json.dumps(packet, sort_keys=True).encode())
+    except Exception:
+        pass
+
+
+def append_worker_diagnostics(temporary, log, maximum, *, uid=0, gid=0):
+    """Append private diagnostic bytes only; unavailable/bad data never changes finalization.
+
+    One fixed packet and fixed section labels enter the existing combined log.
+    Stderr comes first. If necessary the block is explicitly truncated at the
+    original shared ceiling, with no new retained evidence file or allowance.
+    """
+    try:
+        directory = temporary / 'worker-diagnostics'
+        leaves = read_worker_stage(directory, uid=uid, gid=gid, complete=True)
+        status = {'schema': WORKER_DIAGNOSTIC_SCHEMA, 'retained': True, 'absence_proof': False, 'native_acceptance': False}
+        block = b'\n' + json.dumps(status, sort_keys=True).encode() + b'\n'
+        for name in WORKER_DIAGNOSTIC_LEAVES:
+            block += ('\nOriginal CSharp worker ' + name + ' (private):\n').encode() + leaves[name]
+        fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_size <= maximum,
+                    'worker-diagnostic-log')
+            remaining = maximum - before.st_size
+            marker = b'\nWorker diagnostics truncated at existing combined-log bound.\n'
+            if len(block) > remaining:
+                if remaining < len(marker): return
+                block = block[:remaining - len(marker)] + marker
+            body = memoryview(block)
+            while body:
+                count = os.write(fd, body)
+                require(count > 0, 'worker-diagnostic-write')
+                body = body[count:]
+        finally:
+            os.close(fd)
+    except Exception:
+        pass
+
+
 def execute(args):
     r = driver()
     end = time.monotonic() + 840
@@ -510,6 +621,7 @@ def execute(args):
             observer.finish()
         except Exception:
             pass  # Even an unexpected observer error cannot replace original execution failure.
+    retain_worker_diagnostics(r, result, temporary, end)
     print(json.dumps(closed_case_result(result), sort_keys=True), flush=True)
     require(result.get('passed') is True and result.get('groups_empty') is True and result.get('final_groups_empty') is True, 'original-control')
     require(result.get('root_exit') == 1 and len(result.get('worker_measurements', [])) == 1, 'natural-failed-worker')
@@ -543,6 +655,7 @@ def finalize(args):
                 body = body[count:]
         finally:
             os.close(fd)
+    append_worker_diagnostics(temporary, log, r.MAX_LOG)
     require(args.collector_exit == 0, 'collector-exit')
     require(owner_log.is_file() and not owner_log.is_symlink(), 'original-owner-log')
     originals = strict_json((args.evidence / 'original-supervision.json').read_bytes())
