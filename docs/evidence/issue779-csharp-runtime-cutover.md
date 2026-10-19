@@ -40,7 +40,9 @@ Pure controls remain pure; only source-bound native runs establish actual system
 | Complete solution and patch coverage | Required at checkpoint four. | Exact [unchanged gate](issue779-coverage-gate.md); fixture coverage is not repository coverage. |
 | Production Trusted/platform acceptance | Closed. | Production catalogue and accepted-proof registry remain empty; no Windows/macOS native execution support is asserted. |
 
-The [runtime workflow](../../.github/workflows/evidencehost-runtime-proof.yml) calls the reusable [producer](../../.github/workflows/issue779-checkpoint2-producer.yml) and [application](../../.github/workflows/issue779-checkpoint3-application.yml) workflows on the same committed revision and runs the unchanged full coverage command after the application lane supplies its current, source-bound native measurement. The ordinary producer image comes from a freshly packed and installed NuGet tool; the artifact-mutation image remains explicitly private and nonpackable. Application registration images are also private and nonpackable. Source captures before/after each lane bind committed bytes and modes. Neither a workflow definition nor a passing metadata assertion establishes execution.
+The [runtime workflow](../../.github/workflows/evidencehost-runtime-proof.yml) calls the reusable [worker](../../.github/workflows/issue779-checkpoint1-worker.yml), [producer](../../.github/workflows/issue779-checkpoint2-producer.yml) and [application](../../.github/workflows/issue779-checkpoint3-application.yml) workflows on the same committed revision. The worker lane must reconcile all sixteen controls without skips before the unchanged full coverage command can run. Its fourteen isolated selectors use a fresh Release publication, real build logs and complete source/tool/runtime inventories; historical checkpoint-one receipts cannot satisfy this dependency. Original native deadlines, kernel observations, owner termination and custody predicates still apply. The new workflow requires a fresh Linux execution before it establishes a current sixteen-control result.
+
+The application lane supplies its current, source-bound native measurement to the account creation and rollback controls, then the packaged producer lane. The ordinary producer image comes from a freshly packed and installed NuGet tool; the artifact-mutation image remains explicitly private and nonpackable. Application registration images are also private and nonpackable. All measured images use the same pinned SDK and Release configuration as the solution lane, so branches from different compiler configurations are not mixed. Source captures before/after each lane bind committed bytes and modes. Neither a workflow definition nor a passing metadata assertion establishes execution.
 
 ## Checkpoint-four measured attempts
 
@@ -202,3 +204,33 @@ The runtime workflow retains the gate's actual `coverage-patch-targets.json` and
 [Run 39168743553](https://github.com/forge-trust/AppSurface/actions/runs/39168743553), source `10c0a6529b561634f453e95ab918b4f6f4778eb8`, passed both seven-control consumer lanes and all 29 required root tests without skips. The unchanged gate reached numerical evaluation and failed `ASCOV020`: aggregate 132,819/138,377 lines (95.9834%) and 59,815/68,428 conditions (87.4130%) passed; patch 12,832/14,812 fully covered lines (86.6325%) and 19,517/24,378 conditions (80.0599%) failed. At those fixed denominators, 1,166 more fully covered lines and 1,083 conditions are required. Coverage artifact `12153400464` has verified SHA-256 `fe7f5db23135448c3238835f7de947d99000b0aacb5f6c7c9a6a9ad5e76ab90b`. The exact source capture, immutable-base diff and streamed XML independently reconcile those counts.
 
 The subsequent [workspace rejection controls](../../.github/issue779-checkpoint3/README.md#native-workspace-rejection-controls) prepare real unsafe objects and require failure/quarantine before any fixture containment. Their local data and compilation checks are not native verification or a predicted numerical gain. The original coverage command, Codecov full-line rule, comparison base, thresholds, tolerance and exclusions remain unchanged.
+
+### Current worker lane and measurement configuration
+
+[Run 39212528881](https://github.com/forge-trust/AppSurface/actions/runs/39212528881),
+source `2befb98ad5e1a214a4d33abb357c1f8dfd11f0cf`, completed the application,
+account creation, rollback and packaged producer measurements. The standard
+report chain was C3 → C4Accounts → C4AccountRollback → C2 → None, with identical
+3,290-file source captures. Its unchanged numerical gate failed `ASCOV020`:
+aggregate 134,886/147,193 lines and 62,668/87,973 outcomes; patch 13,553/18,123
+fully covered lines and 36,067/68,746 outcomes. Coverage artifact `12171214181`
+has verified SHA-256 `077b33412e76e5bb67ca1c60b416f8eaba89526585ad4c8d23d01b0239b8390c`.
+These results do not establish checkpoint completion.
+
+The [account](../../.github/issue779-checkpoint4/measurement/accounts-README.md#build-and-entry-contract)
+and [producer](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md#workflow-command-construction)
+publications now use Release consistently with C3, the installed package and the
+solution build. Debug and Release branch maps can differ even for equal source
+hashes. The correction requires fresh collection and the standard report merge;
+it does not rewrite report rows or predict a passing percentage.
+
+The reusable [current worker lane](../../.github/issue779-checkpoint1/README.md)
+now supplies all sixteen controls through fourteen isolated selectors. The
+source-owned inventory records availability to run, with mandatory actual raw
+archive, command and stream readback. It does not turn the historical sixteen
+passes or portable test data into a current result. Local preparation passed
+87 portable controls and actual locked restore, formatting and Release
+publication of all three helper projects. The SDK-free runtime copy was also
+executed locally. These macOS preparation checks supply no Linux qualification,
+native acceptance or coverage credit; the final source still requires a new
+Linux matrix and passing unchanged solution and patch gates.

@@ -1,0 +1,180 @@
+name: Issue 779 current CSharp worker controls
+
+on:
+  workflow_call:
+    outputs:
+      artifact_name:
+        description: Current-source aggregate of the sixteen genuine worker controls
+        value: ${{ jobs.aggregate.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  worker-selector:
+    name: Current CSharp worker ${{ matrix.selector }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        selector: ["None", N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15, N16]
+    env:
+      C1_SELECTOR: ${{ matrix.selector }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind the complete current source and fixed selector
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-evidence"
+          inputs="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-inputs"
+          mkdir -m 0700 "$evidence"
+          mkdir -m 0700 "$inputs"
+          printf 'C1_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'C1_INPUTS=%s\n' "$inputs" >> "$GITHUB_ENV"
+          printf 'C1_BUILD_SDK=%s\n' "$(dirname "$(readlink -f "$(command -v dotnet)")")" >> "$GITHUB_ENV"
+          printf 'C1_RUNTIME=%s\n' "$inputs/runtime" >> "$GITHUB_ENV"
+          printf 'NUGET_PACKAGES=%s/checkpoint1-packages\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          timeout --signal=KILL 60 python3 -B - <<'PY' > "$evidence/portable-tests.log" 2>&1
+          import importlib.util
+          from pathlib import Path
+          import sys
+          import unittest
+          root = Path('.github/issue779-checkpoint1').resolve()
+          sys.path.insert(0, str(root))
+          loader = unittest.TestLoader()
+          suite = loader.discover(str(root), pattern='test_*.py')
+          # N15's owner-scoped tests live beside the port, outside discovery's
+          # package recursion. Include that fixed module in the same 60s bound.
+          path = root / 'procedures/n15/test_data.py'
+          spec = importlib.util.spec_from_file_location('c1_n15_portable_data', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          suite.addTests(loader.loadTestsFromModule(module))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+      - name: Copy the actual SDK-free framework-dependent runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/prepare-runtime.py \
+            --sdk-root "$C1_BUILD_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
+            > "$C1_EVIDENCE/runtime-preparation.log" 2>&1
+      - name: Publish the current selected CLI in Release and retain genuine build facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          timeout --signal=KILL 630 python3 -B .github/issue779-checkpoint1/publish.py \
+            --source-root "$GITHUB_WORKSPACE" --source-capture "$C1_EVIDENCE/source.json" \
+            --source "$GITHUB_SHA" --selector "$C1_SELECTOR" --runtime "$C1_RUNTIME" --build-sdk "$C1_BUILD_SDK" \
+            --tool "$C1_INPUTS/tool" --output "$C1_EVIDENCE/build.json" \
+            > "$C1_EVIDENCE/publisher.log" 2>&1
+      - name: Prepare a source-bound plan without granting native authority
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/run-native.py prepare \
+            --source-capture "$C1_EVIDENCE/source.json" --source "$GITHUB_SHA" \
+            --selector "$C1_SELECTOR" --tool "$C1_INPUTS/tool" \
+            --runtime "$C1_RUNTIME" --build-receipt "$C1_EVIDENCE/build.json" \
+            --output "$C1_EVIDENCE/plan" > "$C1_EVIDENCE/preparation.log" 2>&1
+      - name: Execute the fixed genuine Linux procedure with its original clocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          timeout --signal=KILL 900 sudo --non-interactive /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            /usr/bin/python3 -B .github/issue779-checkpoint1/run-native.py run \
+            --plan "$C1_EVIDENCE/plan/plan.json" --output "$C1_EVIDENCE/native" \
+            --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            > "$C1_EVIDENCE/native-driver.log" 2>&1
+      - name: Recheck current source after builds and native work
+        if: always()
+        shell: bash
+        run: |
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$C1_EVIDENCE/source.json" --verify
+      - name: Validate bounded private artifacts
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # All procedure writers must already be joined. No sealed input tree is retained.
+          sudo --non-interactive chown -R --no-dereference "$(id -u):$(id -g)" "$C1_EVIDENCE"
+          timeout --signal=KILL 35 python3 -B .github/issue779-checkpoint1/check-retention.py "$C1_EVIDENCE"
+      - name: Retain current selector receipts and private diagnostics
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-checkpoint1-selector-${{ matrix.selector }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.C1_EVIDENCE }}
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+  aggregate:
+    name: Reconcile all sixteen current worker controls
+    needs: worker-selector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      artifact_name: issue779-checkpoint1-current-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: issue779-checkpoint1-selector-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint1-results
+      - name: Bind and reconcile the exact current selector set
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 -B - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint1')
+          import binding
+          root = Path(os.environ['RUNNER_TEMP']) / 'checkpoint1-results'
+          suffix = '-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT']
+          selected = [root / ('issue779-checkpoint1-selector-' + selector + suffix) for selector in binding.SELECTORS]
+          assert {p.name for p in root.iterdir()} == {p.name for p in selected}
+          capture = selected[0] / 'source.json'
+          subprocess.run([sys.executable, '-B', '.github/issue779-checkpoint2/capture-source.py',
+              os.environ['GITHUB_SHA'], str(capture), '--verify'], check=True, timeout=60)
+          command = [sys.executable, '-B', '.github/issue779-checkpoint1/run-native.py', 'aggregate',
+              '--source-capture', str(capture), '--output', str(Path(os.environ['RUNNER_TEMP']) / 'checkpoint1-aggregate'),
+              '--receipts', *[str(p / 'native') for p in selected]]
+          subprocess.run(command, check=True, timeout=150)
+          PY
+      - name: Retain current sixteen-control aggregate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-checkpoint1-current-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint1-aggregate
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

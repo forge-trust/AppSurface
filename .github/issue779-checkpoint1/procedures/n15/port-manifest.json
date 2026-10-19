@@ -1,0 +1,225 @@
+{
+  "changes": [
+    "current full source/build/maps verifier replaces historical receipt/capture/review literals",
+    "current fixed parser SHA and explicit actual source/capture in finalizer ABI",
+    "sixth fixed environment entry in launch/retry/property readback",
+    "actual current-source materialization reuses original copy/custody helpers under the already-running original clock"
+  ],
+  "deadline_sample_before_verification_and_staging": true,
+  "entry_points": {
+    "execute": "execute(context, *, deadline) -> exact row5",
+    "verify_retained_evidence": "verify_retained_evidence(context, *, deadline) -> exact row5"
+  },
+  "files": {
+    "README.md": {
+      "bytes": 5152,
+      "mode": "0644",
+      "sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7"
+    },
+    "adapter.py": {
+      "bytes": 14028,
+      "mode": "0644",
+      "sha256": "f9bf28968c3633627a036a1d2e1df5189b6acb68a3f996eb8c0dc4eb778e0570"
+    },
+    "checkpoint-n15-pending-start-death.sh": {
+      "bytes": 11824,
+      "mode": "0644",
+      "sha256": "b2d51f79402d1869fd18d920b842c88791e520350b51ab7926763c62af26f466"
+    },
+    "checkpoint-n15-pending-start-death.sh.patch": {
+      "bytes": 2119,
+      "mode": "0644",
+      "sha256": "c5634c1a9679ceb5c5d13adc4ee8e8b50a7b2c8cad2cd13862db4bb46e3649f8"
+    },
+    "finalize_n15_observation.py": {
+      "bytes": 15872,
+      "mode": "0644",
+      "sha256": "6f69187b2b663ad9597d4bc57e12de69d62569517eeaf18f0cb241f2c172cfe6"
+    },
+    "finalize_n15_observation.py.patch": {
+      "bytes": 1568,
+      "mode": "0644",
+      "sha256": "26c594305f08f9255746e00f15cec31388cc230281a892c5e78f16137daece4f"
+    },
+    "materialize.py": {
+      "bytes": 5973,
+      "mode": "0644",
+      "sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15"
+    },
+    "n15-guard-reactivation-retry.sh": {
+      "bytes": 24702,
+      "mode": "0644",
+      "sha256": "8f1c45d185aaef69bfa3eb82906808f9049e5ef37bc248b1004d390f25b23cb7"
+    },
+    "n15-guard-reactivation-retry.sh.patch": {
+      "bytes": 922,
+      "mode": "0644",
+      "sha256": "965c7e926010019357846b996f21600fad222818253c6820cde2cd64beae0126"
+    },
+    "observe_n15_pending_start.py": {
+      "bytes": 35838,
+      "mode": "0644",
+      "sha256": "bf0b41a01c403cf4c8e22593ff761da8296254872e1dac4b30923193e611389c"
+    },
+    "observe_n15_pending_start.py.patch": {
+      "bytes": 323,
+      "mode": "0644",
+      "sha256": "7f1ee71893f72336b30129e3d0ceb896d5256af58f9958f441aeca9f09dc1881"
+    },
+    "process.py": {
+      "bytes": 18718,
+      "mode": "0644",
+      "sha256": "3437be3c1bce9d01d9a3cb8b8dd73072178b16042fe0e75e1a638a1b26d8e501"
+    },
+    "records.py": {
+      "bytes": 20865,
+      "mode": "0644",
+      "sha256": "4c246f0da9d47f4a7e83653f788474cb99c1ad93c275a4b20e058a2f4f2931da"
+    },
+    "retain-native.sh": {
+      "bytes": 12118,
+      "mode": "0644",
+      "sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c"
+    },
+    "test_data.py": {
+      "bytes": 6642,
+      "mode": "0644",
+      "sha256": "ccd6ec0fc42896fed57e077f53fd6569ff81464f19711b676ee11e106ec25417"
+    }
+  },
+  "historical_case_root": "packet/cases/N15/tooling/.github/issue779-csharp-native/",
+  "historical_files": {
+    "check_n15_records.py": {
+      "bytes": 18061,
+      "sha256": "b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf"
+    },
+    "checkpoint-n15-pending-start-death.sh": {
+      "bytes": 11522,
+      "sha256": "86df71b46ca0cd96f7c0f207fa9b6dd67a09e4ce3d7d6251a8e97e73e9ad50fd"
+    },
+    "finalize_n15_observation.py": {
+      "bytes": 15641,
+      "sha256": "77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6"
+    },
+    "n15-guard-reactivation-retry.sh": {
+      "bytes": 24635,
+      "sha256": "9b297512f3a91e4735b3663bdd5263f590e1766b78d6affdfa89694f70bc9f70"
+    },
+    "observe_n15_pending_start.py": {
+      "bytes": 35838,
+      "sha256": "43dd0f71d07dc028fba88b538a1c9fe45aa7afab8cc21ae91b36c51fe657580f"
+    },
+    "prepare-case-workspace.py": {
+      "bytes": 47244,
+      "sha256": "d970e2ab458a1cf6f8f3f5559ebaa15c81896aa513ce90975fb4b0d97dd99293"
+    },
+    "retain-native.sh": {
+      "bytes": 12118,
+      "sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c"
+    },
+    "run-native.py": {
+      "bytes": 83635,
+      "sha256": "b8d2a51179b9fee75e16db3bdfc74486d02ce244dba19fff12bfdbe2595fe676"
+    }
+  },
+  "native_executed": false,
+  "original_cleanup_seconds": 60,
+  "original_job_seconds": 240,
+  "original_request_admission_seconds": 10,
+  "original_start_seconds": 30,
+  "ownership_prefix": ".github/issue779-checkpoint1/procedures/n15/",
+  "parent_portable_correction": {
+    "failed": 0,
+    "native_executed": false,
+    "passed": 6,
+    "scope": "test clock namespace only, no runtime fallback",
+    "skipped": 0
+  },
+  "predicate_ast_equal": {
+    "archive_unmodified": {
+      "decode_data": true,
+      "fixture_arguments": true,
+      "inspect_archive": true
+    },
+    "finalizer_except_main": {
+      "Reject": true,
+      "account_rows": true,
+      "canonical": true,
+      "decode": true,
+      "digest_matches": true,
+      "lookup": true,
+      "need": true,
+      "now_ms": true,
+      "nss_identity_matches": true,
+      "read_fixed": true,
+      "save_fixed": true,
+      "utility_succeeded": true,
+      "validate_join_observation": true,
+      "validate_replay_observation": true,
+      "validate_utility_rows": true,
+      "verify_absent": true,
+      "verify_present": true,
+      "workspace": true
+    },
+    "observer": {
+      "InitialIdentityPending": true,
+      "Reject": true,
+      "TerminalIdentityPending": true,
+      "UnitReference": true,
+      "account_id": true,
+      "account_snapshot": true,
+      "boot_ms": true,
+      "cgroup_members": true,
+      "consumed_guard": true,
+      "failure_diagnostic": true,
+      "hold_reference_until_release": true,
+      "identity": true,
+      "load_pinned_parser": true,
+      "main": true,
+      "observe_and_kill": true,
+      "proc_file": true,
+      "proc_identity": true,
+      "publish_reference_released": true,
+      "read_fd": true,
+      "record_parser": true,
+      "reference_markers": true,
+      "remaining": true,
+      "require": true,
+      "systemd": true,
+      "terminal_failure_diagnostic": true,
+      "unit_identity": true,
+      "validate_phase": true,
+      "wait_phase": true,
+      "wait_worker_terminal": true
+    },
+    "process": {
+      "Rejected": true,
+      "Runner": true,
+      "absent": true,
+      "decode": true,
+      "ident": true,
+      "read": true,
+      "require": true,
+      "root_deadline": true,
+      "save": true,
+      "sha": true,
+      "unique": true
+    }
+  },
+  "required_helpers": [],
+  "retainer_byte_equal": true,
+  "schema": "issue779-n15-current-native-port-v1",
+  "source_only": true,
+  "static_validation": {
+    "all_live_chain_pins_match_current_files": true,
+    "defined_portable_test_methods": 6,
+    "native_executed": false,
+    "python_ast_sources": 7,
+    "shell_syntax_exit": 0,
+    "shell_syntax_sources": 3,
+    "six_environment_entries_all_three_replay_forms": true,
+    "unit_tests_executed": false
+  },
+  "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
+  "tests_executed": false
+}

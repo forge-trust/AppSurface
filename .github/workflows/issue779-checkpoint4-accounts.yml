@@ -94,7 +94,7 @@ jobs:
         run: |
           set -euo pipefail
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification="$C4_VARIANT" > "$C4_EVIDENCE/restore.log" 2>&1
-          timeout --signal=KILL 300 dotnet publish Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore -c Debug --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification="$C4_VARIANT" -o "$C4_TOOL" > "$C4_EVIDENCE/publish.log" 2>&1
+          timeout --signal=KILL 300 dotnet publish Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification="$C4_VARIANT" -o "$C4_TOOL" > "$C4_EVIDENCE/publish.log" 2>&1
           timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/c4-account-coverlet" > "$C4_EVIDENCE/coverlet-install.log" 2>&1
           console="$RUNNER_TEMP/c4-account-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
           test -s "$console"

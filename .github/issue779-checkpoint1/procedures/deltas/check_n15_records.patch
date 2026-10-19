@@ -1,0 +1,39 @@
+--- historical/check_n15_records.py
++++ current/check_n15_records.py
+@@ -8,2 +7,0 @@
+-SOURCE = '5b4ed381badb91de47d793715d05b6ae7737e39e'
+-CAPTURE_SHA256 = '4ad23a2fdeccf9abbcd06724b9c97e3a4c1751ecb45e8321cc35bd79c036d540'
+@@ -275,1 +273,1 @@
+-def validate_completion_evidence(value, expected_generation):
++def validate_completion_evidence(value, expected_generation, *, source_commit, capture_sha256):
+@@ -279,0 +278,3 @@
++    require(type(source_commit) is str and re.fullmatch(r"[0-9a-f]{40}", source_commit) is not None
++            and type(capture_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", capture_sha256) is not None,
++            "completion-source-syntax")
+@@ -283,2 +284,2 @@
+-            and value["source_commit"] == SOURCE
+-            and value["source_capture_sha256"] == CAPTURE_SHA256,
++            and value["source_commit"] == source_commit
++            and value["source_capture_sha256"] == capture_sha256,
+@@ -301,1 +302,1 @@
+-def validate_result(value, expected_generation):
++def validate_result(value, expected_generation, *, source_commit, capture_sha256):
+@@ -302,0 +304,3 @@
++    require(type(source_commit) is str and re.fullmatch(r"[0-9a-f]{40}", source_commit) is not None
++            and type(capture_sha256) is str and re.fullmatch(r"[0-9a-f]{64}", capture_sha256) is not None,
++            "result-source-syntax")
+@@ -306,2 +310,2 @@
+-            and value["source_commit"] == SOURCE
+-            and value["source_capture_sha256"] == CAPTURE_SHA256,
++            and value["source_commit"] == source_commit
++            and value["source_capture_sha256"] == capture_sha256,
+@@ -324,1 +328,1 @@
+-def assemble_final_record(partial, completion_evidence, expected_generation):
++def assemble_final_record(partial, completion_evidence, expected_generation, *, source_commit, capture_sha256):
+@@ -327,1 +331,2 @@
+-    validate_completion_evidence(completion_evidence, expected_generation)
++    validate_completion_evidence(completion_evidence, expected_generation,
++                                 source_commit=source_commit, capture_sha256=capture_sha256)
+@@ -333,1 +338,1 @@
+-    validate_result(record, expected_generation)
++    validate_result(record, expected_generation, source_commit=source_commit, capture_sha256=capture_sha256)

@@ -49,6 +49,8 @@ The internal API exposes `Current` (`None`, `PeerReplacement`, `ParentIdentitySu
 
 A private image must compile Contracts, Supervision, Evidence.Cli and the executable from the same selected source and symbols. Mixing assemblies compiled with different selections is unsupported. Data/token tests do not establish genuine Linux execution; each native checkpoint still requires its own immutable source/image binding and retained kernel observations. The historical private-image sections below describe their original source snapshots rather than a passing result for this integrated source.
 
+The reusable [current worker workflow](../../.github/workflows/issue779-checkpoint1-worker.yml) runs fourteen isolated selectors and reconciles the sixteen checkpoint-one controls on one committed revision. Each selector publishes its actual current CLI in Release, binds the complete source and image inventories, then executes its fixed Linux procedure. Detached build/receipt grammar tests and the historical all-sixteen result cannot replace that execution. The [runtime cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md#native-evidence-and-current-acceptance) distinguishes this required lane from producer, application and numerical coverage acceptance.
+
 
 Internal C# supervision for the [EvidenceHost trust boundary](../../start-here/evidencehost.md).
 The library is part of the protected CLI deployment and is not an independently supported NuGet API.

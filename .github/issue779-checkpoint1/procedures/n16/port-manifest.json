@@ -1,0 +1,88 @@
+{
+  "audit_build_extension": {
+    "changed_methods": [
+      "build"
+    ],
+    "current_source_sha256": "9fd106c6745546b72a152e3767025dd21c8014539637d391f7839eb519cf1446",
+    "default_body_mechanically_equal_to_frozen_source": true,
+    "frozen_source_sha256": "9623da2bbca9634af9b8078cc58d61d41a8a087cf14fa96b6c39d80f105cb4c8",
+    "keyword": "additional_helpers=()",
+    "maximum_additional_helpers": 1,
+    "reason": "N04/N07 require both actual peer and coordinator helper inventories/ELF closures; other callers retain original default"
+  },
+  "audit_definitions_ast_equal": {
+    "Audit": false,
+    "AuditError": true,
+    "canonical_path": true,
+    "identity": true,
+    "reject": true,
+    "root_node": true
+  },
+  "audit_methods_ast_equal_except_build": {
+    "__init__": true,
+    "check": true,
+    "hash_regular": true,
+    "initialize_tools": true,
+    "inspect_elf": true,
+    "inventory": true,
+    "latch_dependency_failure": true,
+    "no_link_chain": true,
+    "pin_os": true,
+    "pin_python_standard_library": true,
+    "publish": true,
+    "publish_failure_context": true,
+    "require_fixed_python_bootstrap": true,
+    "resolve_directory": true,
+    "resolve_os": true,
+    "run": true,
+    "sample": true
+  },
+  "case": "N16",
+  "custody_decoded_sha256": "312e64a93db5bc1b9729129f3b2cee966ad3ad1ee27bba4c12d47e9608c48bdb",
+  "files": {
+    "procedures/n16/README.md": {
+      "bytes": 2740,
+      "sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71"
+    },
+    "procedures/n16/adapter.py": {
+      "bytes": 18478,
+      "sha256": "5bdf29c02acffcd7518c6ad0ecd67d52c2fca024f14b2d2f3b4e12d3259b0636"
+    },
+    "procedures/n16/checkpoint-n16-accepted-work.sh": {
+      "bytes": 79466,
+      "sha256": "529ddf88cf7330f17fcc2a82b2b29ae6b27a0ea07bd9896326df94ae5af32ffd"
+    },
+    "procedures/n16/n16_retained_custody.py": {
+      "bytes": 5914,
+      "sha256": "312e64a93db5bc1b9729129f3b2cee966ad3ad1ee27bba4c12d47e9608c48bdb"
+    },
+    "procedures/n16/records.py": {
+      "bytes": 7351,
+      "sha256": "51eea513077a0a3bc8f3f054d26fa3ad8c41b43634fbbcede3588c0745247ccc"
+    }
+  },
+  "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/checkpoint-n16-accepted-work.sh",
+  "historical_sha256": "65442eec60de59941cf9b26f975ea4996b80c37017d167ff7289b90d221c5821",
+  "native_body_changes": [
+    "provenance prelude replaced with current source/build verification and node-map binding",
+    "sixth fixed environment member XDG_RUNTIME_DIR=/tmp",
+    "fixed custody reader extracted byte-identically and hash-pinned before use"
+  ],
+  "native_execution": false,
+  "ported_sha256": "529ddf88cf7330f17fcc2a82b2b29ae6b27a0ea07bd9896326df94ae5af32ffd",
+  "schema": "issue779-checkpoint1-procedure-port-v1",
+  "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
+  "utility_definitions_ast_equal": {
+    "Rejected": true,
+    "Runner": true,
+    "absent": true,
+    "decode": true,
+    "ident": true,
+    "read": true,
+    "require": true,
+    "root_deadline": true,
+    "save": true,
+    "sha": true,
+    "unique": true
+  }
+}

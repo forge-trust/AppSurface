@@ -1,0 +1,96 @@
+{
+  "changes": [
+    "current root source/build verifier replaces retired packed reader and historical revision/count pins",
+    "current Git parent supplies N09 base_revision",
+    "current sixth bootstrap environment entry XDG_RUNTIME_DIR=/tmp",
+    "original archive predicates extracted to readable records; N09 result explicit current base avoids historical default"
+  ],
+  "clocks": {
+    "cleanup_reserve": 30,
+    "fixture": 600,
+    "outer": 900,
+    "product_job": 240
+  },
+  "files": {
+    "README.md": {
+      "bytes": 2344,
+      "mode": "0644",
+      "sha256": "78db41734a76883f995536d08e5b5c63071904752e54063d4f75d4bc2e013b50"
+    },
+    "adapter.py": {
+      "bytes": 14476,
+      "mode": "0644",
+      "sha256": "e71c7e91a241d347b5be93d1ec2c0b7c11ce63a3f971e37bb97c70f8ef457ca4"
+    },
+    "cancellation_adapter.py": {
+      "bytes": 20289,
+      "mode": "0644",
+      "sha256": "8b02473ad90695df1840a14af0e02d5d17c3bee79177eb826a228f3345b6ee0f"
+    },
+    "check_cancellation_records.py": {
+      "bytes": 6469,
+      "mode": "0644",
+      "sha256": "c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6"
+    },
+    "check_kernel_record.py": {
+      "bytes": 7298,
+      "mode": "0644",
+      "sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab"
+    },
+    "check_n09_records.py": {
+      "bytes": 15362,
+      "mode": "0644",
+      "sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e"
+    },
+    "checkpoint-n09-retained-slot.sh": {
+      "bytes": 79743,
+      "mode": "0644",
+      "sha256": "d70b2686858f59eeace2f0e6b4000f2e15b3a20adeee0b8305f23c2d2bf1b002"
+    },
+    "dispatch.sh": {
+      "bytes": 2486,
+      "mode": "0644",
+      "sha256": "d1105a7fc48b21c984f5156a7a134f5c489d705d5da9e25a48400ce9273400fe"
+    },
+    "historical-to-current.patch": {
+      "bytes": 13133,
+      "mode": "0644",
+      "sha256": "91668ec62407f926959c9e368d3e05cc06430550e2ecaddc538768e4bf24a428"
+    },
+    "records.py": {
+      "bytes": 12713,
+      "mode": "0644",
+      "sha256": "b2cce931d45b1d5e48301633a318ef63379acec267f3989715ff63b6adb9e076"
+    },
+    "retain-native.sh": {
+      "bytes": 13442,
+      "mode": "0644",
+      "sha256": "427a3b1f9698b930a4cc556c58c766b9e98c919de95b34f00546ac4d67015b59"
+    }
+  },
+  "historical_runner_sha256": "46a20962090b9ebd8698e69645719024c98f45c50c41c45f457b07207955ea0b",
+  "historical_shell_sha256": "9924931dec483b41d48686cc542d44597f86a7c29144546520d124fb7b5551a2",
+  "native_execution": false,
+  "portable_controls": {
+    "argv": [
+      "python3",
+      "-B",
+      ".github/issue779-checkpoint1/test_n09.py",
+      "-v"
+    ],
+    "exit": 0,
+    "failed": 0,
+    "passed": 2,
+    "skipped": 0
+  },
+  "retained_byte_exact": [
+    "check_kernel_record.py",
+    "check_cancellation_records.py",
+    "cancellation_adapter.py",
+    "check_n09_records.py",
+    "retain-native.sh"
+  ],
+  "schema": "issue779-current-n09-port-v1",
+  "source_ready": true,
+  "status": "portable-data-controls-pass-fresh-linux-required"
+}

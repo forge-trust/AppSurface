@@ -1,0 +1,71 @@
+--- historical/N12/checkpoint-n12-data-integration.sh
++++ current/n12/checkpoint-n12-data-integration.sh
+@@ -9,0 +10,1 @@
++binding_validator= binding_validator_sha256= binding_deadline_monotonic=
+@@ -11,1 +12,1 @@
+-source_root= source_manifest= source_manifest_sha256= payload_root= payload_manifest= payload_manifest_sha256=
++source_capture= source_capture_sha256= source_root= source_manifest= source_manifest_sha256= payload_root= payload_manifest= payload_manifest_sha256=
+@@ -18,1 +18,0 @@
+-readonly N03_INDEPENDENT_REVIEW_CLEAR=1
+@@ -24,1 +24,1 @@
+- --source-root|--source-manifest|--source-manifest-sha256|--source-nodes|--source-nodes-sha256|--payload-root|--payload-manifest|--payload-manifest-sha256|--payload-nodes|--payload-nodes-sha256|--runtime-root|--runtime-manifest|--runtime-manifest-sha256|--runtime-nodes|--runtime-nodes-sha256|--source-review|--source-review-sha256|--build-receipt|--build-receipt-sha256|--os-audit|--os-audit-sha256|--reviewed-script-sha256|--source-revision|--base-revision|--workflow-identity|--entry|--runtime-host|--entry-sha256|--n02-uid|--n02-gid|--n03-helper-root|--n03-helper-map|--n03-helper-map-sha256|--n03-helper-nodes|--n03-helper-nodes-sha256|--n03-helper-entry-sha256|--n03-helper-generation)
++ --binding-validator|--binding-validator-sha256|--binding-deadline-monotonic|--source-capture|--source-capture-sha256|--source-root|--source-manifest|--source-manifest-sha256|--source-nodes|--source-nodes-sha256|--payload-root|--payload-manifest|--payload-manifest-sha256|--payload-nodes|--payload-nodes-sha256|--runtime-root|--runtime-manifest|--runtime-manifest-sha256|--runtime-nodes|--runtime-nodes-sha256|--source-review|--source-review-sha256|--build-receipt|--build-receipt-sha256|--os-audit|--os-audit-sha256|--reviewed-script-sha256|--source-revision|--base-revision|--workflow-identity|--entry|--runtime-host|--entry-sha256|--n02-uid|--n02-gid|--n03-helper-root|--n03-helper-map|--n03-helper-map-sha256|--n03-helper-nodes|--n03-helper-nodes-sha256|--n03-helper-entry-sha256|--n03-helper-generation)
+@@ -33,1 +32,0 @@
+-((N03_INDEPENDENT_REVIEW_CLEAR==1)) || fail N03-integration-review-pending
+@@ -465,1 +464,1 @@
+-for key in source_root source_manifest source_manifest_sha256 source_nodes source_nodes_sha256 payload_root payload_manifest payload_manifest_sha256 payload_nodes payload_nodes_sha256 runtime_root runtime_manifest runtime_manifest_sha256 runtime_nodes runtime_nodes_sha256 source_review source_review_sha256 build_receipt build_receipt_sha256 os_audit os_audit_sha256 source_revision base_revision workflow_identity entry runtime_host entry_sha256 n02_uid n02_gid; do [[ -n ${!key} ]] || fail missing-input; done
++for key in binding_validator binding_validator_sha256 binding_deadline_monotonic source_capture source_capture_sha256 source_root source_manifest source_manifest_sha256 source_nodes source_nodes_sha256 payload_root payload_manifest payload_manifest_sha256 payload_nodes payload_nodes_sha256 runtime_root runtime_manifest runtime_manifest_sha256 runtime_nodes runtime_nodes_sha256 build_receipt build_receipt_sha256 os_audit os_audit_sha256 source_revision base_revision workflow_identity entry runtime_host entry_sha256 n02_uid n02_gid; do [[ -n ${!key} ]] || fail missing-input; done
+@@ -469,0 +469,3 @@
++# Current full-source/actual locked-restore+publish boundary. This does not
++# replace any copied-tree/kernel/OS assertion below and cannot renew the clock.
++pin_file "$source_capture" "$source_capture_sha256" "$MAX_NODE_JSON_BYTES"
+@@ -471,26 +473,12 @@
+-bounded /usr/bin/python3 -B - "$build_receipt" <<'INTEGRATED_BUILD_RECEIPT'
+-import base64, hashlib, zlib
+-REVIEWED_READER_PACKED = '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'
+-REVIEWED_READER_LENGTH = 14103
+-REVIEWED_READER_SHA256 = 'c8c5a0cc24c0b06594af94ad5707726678e02f6b0da2aa9d7d98d0eb247ef07e'
+-if not 0 < REVIEWED_READER_LENGTH <= 32768 or len(REVIEWED_READER_PACKED) > 65536:
+-    raise ValueError('adapter-reader-size')
+-_packed = base64.b64decode(REVIEWED_READER_PACKED, validate=True)
+-_decoder = zlib.decompressobj()
+-_reader = _decoder.decompress(_packed, REVIEWED_READER_LENGTH + 1)
+-if (len(_reader) != REVIEWED_READER_LENGTH or not _decoder.eof or
+-        _decoder.unused_data or _decoder.unconsumed_tail):
+-    raise ValueError('adapter-reader-compression')
+-if hashlib.sha256(_reader).hexdigest() != REVIEWED_READER_SHA256:
+-    raise ValueError('adapter-reader-pin')
+-exec(compile(_reader, '<pinned-fixed-receipt-reader>', 'exec'), {})
+-INTEGRATED_BUILD_RECEIPT
+-bounded jq -e --arg source "$source_revision" --arg sn "$source_nodes_sha256" --arg pn "$payload_nodes_sha256" --arg rn "$runtime_nodes_sha256" \
+- --arg st "$source_manifest_sha256" --arg pt "$payload_manifest_sha256" --arg rt "$runtime_manifest_sha256" '
+- .schema=="issue779-integrated16-build-v1" and .exit==0 and
+- .source_commit==$source and $source=="5b4ed381badb91de47d793715d05b6ae7737e39e" and
+- .native_execution==false and .checkpoint_pass==false and .build_prerequisite_only==true and
+- (.artifacts|type=="object" and keys==["runtime","source","tool"]) and
+- .artifacts.source.nodes_sha256==$sn and .artifacts.tool.nodes_sha256==$pn and .artifacts.runtime.nodes_sha256==$rn and
+- .artifacts.source.tsv_sha256==$st and .artifacts.tool.tsv_sha256==$pt and .artifacts.runtime.tsv_sha256==$rt
+-' "$build_receipt" >/dev/null || fail build-node-receipt-binding
++pin_file "$binding_validator" "$binding_validator_sha256" 131072
++bounded /usr/bin/python3 -I -S -B "$binding_validator" root-verify \
++ --source-capture "$source_capture" --build-receipt "$build_receipt" \
++ --source "$source_revision" --selector N12 \
++ --deadline-monotonic "$binding_deadline_monotonic" >/dev/null || fail current-source-build-binding
++bounded jq -e --arg source "$source_revision" --slurpfile nodes "$source_nodes" '
++ .schema=="issue779-checkpoint2-source-v1" and .source==$source and
++ (.files|type)=="object" and (.files|keys)==($nodes[0].files|keys) and
++ all(.files|to_entries[]; . as $e | $nodes[0].files[$e.key].sha256==$e.value.sha256 and
++ $nodes[0].files[$e.key].mode==$e.value.mode)
++' "$source_capture" >/dev/null || fail current-copied-source-map
++readonly CURRENT_BOUND_SOURCE=$source_revision
+@@ -504,1 +491,0 @@
+-pin_file "$source_review" "$source_review_sha256" 65536
+@@ -736,1 +723,1 @@
+- [[ $# == 11 && $EUID == 0 && $source_revision == 5b4ed381badb91de47d793715d05b6ae7737e39e ]] || fail N03-input
++ [[ $# == 11 && $EUID == 0 && $source_revision == "$CURRENT_BOUND_SOURCE" ]] || fail N03-input
+@@ -815,1 +802,1 @@
+- fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
++ fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp)
+@@ -958,1 +945,1 @@
+-fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
++fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp)

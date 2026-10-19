@@ -1,0 +1,10 @@
+--- packet/cases/N15/tooling/.github/issue779-csharp-native/n15-guard-reactivation-retry.sh
++++ procedures/n15/n15-guard-reactivation-retry.sh
+@@ -253,1 +253,1 @@
+-                         "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp")
++                         "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_CLI_HOME=/tmp", "XDG_RUNTIME_DIR=/tmp")
+@@ -367,2 +367,2 @@
+- --property=Environment=PATH=/usr/bin:/bin\ HOME=/nonexistent\ LANG=C.UTF-8\ DOTNET_CLI_TELEMETRY_OPTOUT=1\ DOTNET_CLI_HOME=/tmp \
+- /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp \
++ --property=Environment=PATH=/usr/bin:/bin\ HOME=/nonexistent\ LANG=C.UTF-8\ DOTNET_CLI_TELEMETRY_OPTOUT=1\ DOTNET_CLI_HOME=/tmp\ XDG_RUNTIME_DIR=/tmp \
++ /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \

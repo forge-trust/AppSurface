@@ -1,0 +1,171 @@
+{
+  "api": [
+    "execute(context,*,deadline)->single case row",
+    "validate_evidence(context,evidence_raw,*,capture_raw)->envelope row only",
+    "verify_retained_evidence(context,*,deadline)->actual retained record verification row"
+  ],
+  "builds_executed": false,
+  "credited_cases": [
+    "N12"
+  ],
+  "entry": "procedures/n12/adapter.py",
+  "files": {
+    "README.md": {
+      "bytes": 4901,
+      "sha256": "61a2fcc9f3194b7f6f8a291e5f8c183e4930a4d8cfbdfe13707a16a380fbd0b6"
+    },
+    "adapter.py": {
+      "bytes": 4422,
+      "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
+    },
+    "checkpoint-n12-data-integration.sh": {
+      "bytes": 85787,
+      "sha256": "8daad37c07beb08b3b6cdc7e1f1e2d25a3af6f74a6f73d7f16695d4a43918704"
+    },
+    "dispatch.sh": {
+      "bytes": 2492,
+      "sha256": "9909a73fe7bc4ce37cb74273c6c1a23119c1753e52e23030576266c885c14294"
+    },
+    "historical-to-current.patch": {
+      "bytes": 13327,
+      "sha256": "0904cc4c33e69735d788e6312bcf1ce0f3d49c677cd45f86c3784fa4d9658d3a"
+    },
+    "records.py": {
+      "bytes": 16958,
+      "sha256": "bfa79c978b4131f313472090ea902535ea7f6149913b97175e068c61388f11cf"
+    },
+    "retain-native.sh": {
+      "bytes": 12384,
+      "sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f"
+    }
+  },
+  "git_mutations": false,
+  "historical_files": {
+    "checkpoint-n12-data-integration.sh": {
+      "byte_unchanged": false,
+      "current_sha256": "8daad37c07beb08b3b6cdc7e1f1e2d25a3af6f74a6f73d7f16695d4a43918704",
+      "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
+      "historical_sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
+    },
+    "retain-native.sh": {
+      "byte_unchanged": true,
+      "current_sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f",
+      "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/retain-native.sh",
+      "historical_sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f"
+    }
+  },
+  "incremental_prepared_utc": "2026-10-19T08:45:22.591601+00:00",
+  "native_execution": false,
+  "native_suffix_invariance": [
+    "diagnostic_stage=root-layout",
+    "copy_tree() {",
+    "# Pure data guards use bounded reads;",
+    "diagnostic_stage=sealed-inputs"
+  ],
+  "portable_retention_validation": {
+    "bytes": 10424,
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      ".github/issue779-checkpoint1",
+      "-p",
+      "test_n11.py",
+      "-v"
+    ],
+    "errors": 0,
+    "exit": 0,
+    "failures": 0,
+    "native_execution": false,
+    "path": "test_n11.py",
+    "scope": "detached metadata and real unprivileged file operations only",
+    "sha256": "0d99640c025d2f52ac6fcbbd55501f9ab97349f4b2b9f7f78131962e069d9987",
+    "skipped": 0,
+    "tests": 12,
+    "timeout_seconds": 30,
+    "unittest_elapsed_seconds": 0.04,
+    "wrapper_elapsed_seconds": 0.082333
+  },
+  "prepared_utc": "2026-10-19T08:29:27.347401+00:00",
+  "prerequisite_cases": [
+    "N02",
+    "N03"
+  ],
+  "raw_packet_wiring_validation": {
+    "argv": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "test_n11.N11RetentionDataTests.test_actual_packet_and_aggregate_forward_original_archive_before_sentinel_rejection",
+      "-v"
+    ],
+    "bridge_or_adapter_changed": false,
+    "cwd": ".github/issue779-checkpoint1",
+    "defined_tests_total": 13,
+    "errors": 0,
+    "exit": 0,
+    "failures": 0,
+    "native_execution": false,
+    "original_test_source_sha256": "0d99640c025d2f52ac6fcbbd55501f9ab97349f4b2b9f7f78131962e069d9987",
+    "prepared_utc": "2026-10-19T08:59:53.680815+00:00",
+    "prior_12_test_bodies_byte_unchanged": true,
+    "production_predicates_changed": false,
+    "scope": "real validate_packet/verify_packet data flow and retained files; hash-pinned fixed record sentinel always raises before any passing case row",
+    "skipped": 0,
+    "status": "passed",
+    "test_path": "test_n11.py",
+    "test_source_sha256": "b3eeaef5c8341595aede561c723810dacf67a706999e94f12aee92c46c1b8910",
+    "tests": 1,
+    "timeout_seconds": 30,
+    "unittest_elapsed_seconds": 0.008,
+    "wrapper_elapsed_seconds": 0.062838
+  },
+  "record_predicates_ast_equal_excluding_docstring_indentation": [
+    "inspect_archive",
+    "validate_native_result",
+    "require_n03_result",
+    "validate_n03_archive",
+    "decode_n12_record"
+  ],
+  "remaining": [
+    "Parent/Godel fixed inventory registration and archive retention-name exception",
+    "Independent source review and full parent portable validation",
+    "Actual current compactFDD+peer helper publication",
+    "Fresh Linux native execution under original bounds"
+  ],
+  "retention_correction": {
+    "before_sha256": {
+      "README.md": "8c34df5dbc0d6c052a6680e142c6647d79be6f6f832bed3b86e7cc945f7a964e",
+      "adapter.py": "58e29fd81f7b1b7a8903b21b10b0807e4f249ee325a3b6df15872911bc1bdd6d"
+    },
+    "commands": 2,
+    "member_max_bytes": 8388608,
+    "native_claim": false,
+    "original_shells_and_record_predicates_unchanged": true,
+    "private_api": "validate_packet(context,packet,capture_raw,build_raw,raw_members,*,archive_raw,deadline)",
+    "raw_archive_max_bytes": 33619968,
+    "raw_archive_name": "native-private.tar",
+    "raw_archive_reconstructed": false,
+    "required_streams_per_command": [
+      "stdout",
+      "stderr"
+    ],
+    "shared_bridge_sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab"
+  },
+  "schema": "issue779-checkpoint1-native-family-port-v1",
+  "selector": "N12",
+  "shared_source_dependencies": [
+    "binding.py",
+    "procedures/owner-death/adapter.py",
+    "procedures/slot/helpers.py",
+    "procedures/native_process.py",
+    "procedures/os_audit.py",
+    "procedures/n11/bridge.py"
+  ],
+  "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
+  "tests_executed": true
+}

@@ -1,0 +1,232 @@
+{
+  "api": [
+    "execute(context,*,deadline)->single case row",
+    "validate_evidence(context,evidence_raw,*,capture_raw)->envelope row only",
+    "verify_retained_evidence(context,*,deadline)->actual retained record verification row"
+  ],
+  "builds_executed": false,
+  "credited_cases": [
+    "N11"
+  ],
+  "entry": "procedures/n11/adapter.py",
+  "files": {
+    "README.md": {
+      "bytes": 6094,
+      "sha256": "85848b9b2f20b43c32af992a448fd389d2e372be828ee46d2175875f4b6c66f8"
+    },
+    "adapter.py": {
+      "bytes": 4405,
+      "sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d"
+    },
+    "bridge.py": {
+      "bytes": 23743,
+      "sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab"
+    },
+    "capture_stall.py": {
+      "bytes": 1165,
+      "sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
+    },
+    "check_stall_record.py": {
+      "bytes": 17146,
+      "sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
+    },
+    "checkpoint-n11.sh": {
+      "bytes": 99944,
+      "sha256": "9ef2dd4c135ab0e17cb12fdb71d486bf245f4b99fa67bcb138bb44f9f89ba880"
+    },
+    "dispatch.sh": {
+      "bytes": 2458,
+      "sha256": "61642b17a01cfe5f48714ba6476313aed8e51ae261a16635a5a777b02768ebe7"
+    },
+    "historical-to-current.patch": {
+      "bytes": 15360,
+      "sha256": "8e0762ac217e870e825053fc0429b1d33787a95450e80323307a785fb0723a16"
+    },
+    "parser-pins.tsv": {
+      "bytes": 336,
+      "sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
+    },
+    "records.py": {
+      "bytes": 24073,
+      "sha256": "6f73e1077af6fe6126271ef1a4dcd916c39702215f5b82e2b15e106e41729a7f"
+    },
+    "retain-native.sh": {
+      "bytes": 13572,
+      "sha256": "fd0f4bf9160f0d60a60f18b66470b1bb499024b296fbcfa08d50381bada5005c"
+    },
+    "root_stall_frame.py": {
+      "bytes": 8388,
+      "sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
+    },
+    "stall_capture.py": {
+      "bytes": 23052,
+      "sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
+    }
+  },
+  "git_mutations": false,
+  "historical_files": {
+    "capture_stall.py": {
+      "byte_unchanged": true,
+      "current_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/capture_stall.py",
+      "historical_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
+    },
+    "check_stall_record.py": {
+      "byte_unchanged": true,
+      "current_sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/check_stall_record.py",
+      "historical_sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
+    },
+    "checkpoint-n11.sh": {
+      "byte_unchanged": false,
+      "current_sha256": "9ef2dd4c135ab0e17cb12fdb71d486bf245f4b99fa67bcb138bb44f9f89ba880",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
+      "historical_sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
+    },
+    "parser-pins.tsv": {
+      "byte_unchanged": true,
+      "current_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/parser-pins.tsv",
+      "historical_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
+    },
+    "retain-native.sh": {
+      "byte_unchanged": true,
+      "current_sha256": "fd0f4bf9160f0d60a60f18b66470b1bb499024b296fbcfa08d50381bada5005c",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/retain-native.sh",
+      "historical_sha256": "fd0f4bf9160f0d60a60f18b66470b1bb499024b296fbcfa08d50381bada5005c"
+    },
+    "root_stall_frame.py": {
+      "byte_unchanged": true,
+      "current_sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/root_stall_frame.py",
+      "historical_sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
+    },
+    "stall_capture.py": {
+      "byte_unchanged": true,
+      "current_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79",
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/stall_capture.py",
+      "historical_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
+    }
+  },
+  "incremental_prepared_utc": "2026-10-19T08:45:22.590798+00:00",
+  "native_execution": false,
+  "native_suffix_invariance": [
+    "diagnostic_stage=root-layout",
+    "copy_tree() {",
+    "# Pure data guards use bounded reads;",
+    "diagnostic_stage=sealed-inputs"
+  ],
+  "portable_retention_validation": {
+    "bytes": 10424,
+    "command": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      ".github/issue779-checkpoint1",
+      "-p",
+      "test_n11.py",
+      "-v"
+    ],
+    "errors": 0,
+    "exit": 0,
+    "failures": 0,
+    "native_execution": false,
+    "path": "test_n11.py",
+    "scope": "detached metadata and real unprivileged file operations only",
+    "sha256": "0d99640c025d2f52ac6fcbbd55501f9ab97349f4b2b9f7f78131962e069d9987",
+    "skipped": 0,
+    "tests": 12,
+    "timeout_seconds": 30,
+    "unittest_elapsed_seconds": 0.04,
+    "wrapper_elapsed_seconds": 0.082333
+  },
+  "prepared_utc": "2026-10-19T08:29:27.326445+00:00",
+  "prerequisite_cases": [
+    "N02",
+    "N03"
+  ],
+  "raw_packet_wiring_validation": {
+    "argv": [
+      "python3",
+      "-B",
+      "-m",
+      "unittest",
+      "test_n11.N11RetentionDataTests.test_actual_packet_and_aggregate_forward_original_archive_before_sentinel_rejection",
+      "-v"
+    ],
+    "bridge_or_adapter_changed": false,
+    "cwd": ".github/issue779-checkpoint1",
+    "defined_tests_total": 13,
+    "errors": 0,
+    "exit": 0,
+    "failures": 0,
+    "native_execution": false,
+    "original_test_source_sha256": "0d99640c025d2f52ac6fcbbd55501f9ab97349f4b2b9f7f78131962e069d9987",
+    "prepared_utc": "2026-10-19T08:59:53.680815+00:00",
+    "prior_12_test_bodies_byte_unchanged": true,
+    "production_predicates_changed": false,
+    "scope": "real validate_packet/verify_packet data flow and retained files; hash-pinned fixed record sentinel always raises before any passing case row",
+    "skipped": 0,
+    "status": "passed",
+    "test_path": "test_n11.py",
+    "test_source_sha256": "b3eeaef5c8341595aede561c723810dacf67a706999e94f12aee92c46c1b8910",
+    "tests": 1,
+    "timeout_seconds": 30,
+    "unittest_elapsed_seconds": 0.008,
+    "wrapper_elapsed_seconds": 0.062838
+  },
+  "record_predicates_ast_equal_excluding_docstring_indentation": [
+    "inspect_archive",
+    "validate_native_result",
+    "require_n03_result",
+    "validate_n03_archive",
+    "require_data",
+    "unique_pairs",
+    "decode_data",
+    "exact_object",
+    "inspect_retention",
+    "validate_negative_archive",
+    "validate_n11_capture",
+    "validate_required_archive"
+  ],
+  "remaining": [
+    "Parent/Godel fixed inventory registration and archive retention-name exception",
+    "Independent source review and full parent portable validation",
+    "Actual current compactFDD+peer helper publication",
+    "Fresh Linux native execution under original bounds"
+  ],
+  "retention_correction": {
+    "before_sha256": {
+      "README.md": "19916835df62b7ca78c94f7bf98fb9b4b03f611960fcf0cd3f755406515b17bb",
+      "adapter.py": "6596e90eae954118d2ec5252afee6f8ec75a49eaaf9873925a81f7157eceb13f",
+      "bridge.py": "4cf462d532767778f5f40c27ab64665d04c6718e602b85a215e471718f347bd8"
+    },
+    "commands": 2,
+    "member_max_bytes": 8388608,
+    "native_claim": false,
+    "original_shells_and_record_predicates_unchanged": true,
+    "private_api": "validate_packet(context,packet,capture_raw,build_raw,raw_members,*,archive_raw,deadline)",
+    "raw_archive_max_bytes": 33619968,
+    "raw_archive_name": "native-private.tar",
+    "raw_archive_reconstructed": false,
+    "required_streams_per_command": [
+      "stdout",
+      "stderr"
+    ],
+    "shared_bridge_sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab"
+  },
+  "schema": "issue779-checkpoint1-native-family-port-v1",
+  "selector": "N11",
+  "shared_source_dependencies": [
+    "binding.py",
+    "procedures/owner-death/adapter.py",
+    "procedures/slot/helpers.py",
+    "procedures/native_process.py",
+    "procedures/os_audit.py"
+  ],
+  "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
+  "tests_executed": true
+}

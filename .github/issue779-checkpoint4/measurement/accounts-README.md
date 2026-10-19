@@ -20,6 +20,13 @@ packing either image. Select the variant consistently across the complete projec
 Use fresh build outputs when changing variants; ordinary and private outputs must
 not overwrite one another during validation.
 
+Publish both account variants in **Release**, matching the preceding C3/C3Sdk images,
+the later C2/None images and the solution run. Debug and Release can map the same
+unchanged source condition to different IL offsets. The standard collector retains
+both maps when merged; it cannot infer that those rows describe the same condition.
+Keep the original reports intact and collect fresh, consistently configured builds
+instead of rewriting or deduplicating counters.
+
 The private branch in
 [`EvidenceProcessEntryPoint`](../../../Cli/ForgeTrust.AppSurface.Cli/EvidenceProcessEntryPoint.cs)
 dispatches only the parsed supervisor role, after normal help handling. Its argv

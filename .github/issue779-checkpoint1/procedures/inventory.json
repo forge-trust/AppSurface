@@ -1,0 +1,1557 @@
+{
+  "files": [
+    {
+      "bytes": 89868,
+      "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-none.sh",
+      "ported_sha256": "1138bcbec2b1168bedc09b2debfd1252f57c948484764e1af27ae47b5b1c7e04",
+      "sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a"
+    },
+    {
+      "bytes": 120734,
+      "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-n04.sh",
+      "ported_sha256": "c06042cd57008f9e6c32dcec0d45ea98f3ae03ada5e94ca2b734db068da3e134",
+      "sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d"
+    },
+    {
+      "bytes": 117571,
+      "historical_path": "packet/cases/N05/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-n05.sh",
+      "ported_sha256": "dae6fc7cae9f1fcf46756db4c542848498455aa5b5355335af2e99c74839f566",
+      "sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e"
+    },
+    {
+      "bytes": 117575,
+      "historical_path": "packet/cases/N06/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-n06.sh",
+      "ported_sha256": "4cdfe36826da9af92c4016c0d75443d2e59980cc74c68a6e11703ef928ebd954",
+      "sha256": "377abed92192c4d948dc42ea0eedaec3ad8537e3d8f935deb90ae3057257c761"
+    },
+    {
+      "bytes": 111929,
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-n07.sh",
+      "ported_sha256": "829b1df3764f88d2ff49572857f10fa648befec75bf57bf6e96ee2142ffbd267",
+      "sha256": "718d6c357bcbb73010039d172ab76c3dd789b0bbf1089d9243aed4ddaab55678"
+    },
+    {
+      "bytes": 105691,
+      "historical_path": "packet/cases/N08/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/slot/checkpoint-n08.sh",
+      "ported_sha256": "eef3c12e3a6be7b190b2af5c2c8a31d5148c73f2b5b05fac619330f82685d723",
+      "sha256": "f6f17cf58811c3093f07b2a39817b45eeebfc5052431c85d4c9cfb29604cc384"
+    },
+    {
+      "bytes": 15362,
+      "historical_path": "packet/cases/N09/tooling/.github/issue779-csharp-native/check_n09_records.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e"
+    },
+    {
+      "bytes": 87257,
+      "historical_path": "packet/cases/N09/tooling/.github/issue779-csharp-native/checkpoint-n09-retained-slot.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/n09/checkpoint-n09-retained-slot.sh",
+      "ported_sha256": "d70b2686858f59eeace2f0e6b4000f2e15b3a20adeee0b8305f23c2d2bf1b002",
+      "sha256": "9924931dec483b41d48686cc542d44597f86a7c29144546520d124fb7b5551a2"
+    },
+    {
+      "bytes": 10460,
+      "historical_path": "packet/cases/N10/tooling/.github/issue779-csharp-native/check_n10_pending_start.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
+    },
+    {
+      "bytes": 97110,
+      "historical_path": "packet/cases/N10/tooling/.github/issue779-csharp-native/checkpoint-n10-pending-start.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/n10/checkpoint-n10-pending-start.sh",
+      "ported_sha256": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
+      "sha256": "134ec927222349b1ea506153574b5950be2d0372c622b9f2ee905dd583386b48"
+    },
+    {
+      "bytes": 109371,
+      "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/n11/checkpoint-n11.sh",
+      "ported_sha256": "9ef2dd4c135ab0e17cb12fdb71d486bf245f4b99fa67bcb138bb44f9f89ba880",
+      "sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
+    },
+    {
+      "bytes": 92661,
+      "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/n12/checkpoint-n12-data-integration.sh",
+      "ported_sha256": "8daad37c07beb08b3b6cdc7e1f1e2d25a3af6f74a6f73d7f16695d4a43918704",
+      "sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
+    },
+    {
+      "bytes": 9461,
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/check_owner_death_record.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
+    },
+    {
+      "bytes": 125,
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-n13-owner-killed.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc"
+    },
+    {
+      "bytes": 125,
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-n14-owner-stopped.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
+    },
+    {
+      "bytes": 45316,
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406"
+    },
+    {
+      "bytes": 9881,
+      "historical_path": "packet/cases/N14/tooling/.github/issue779-csharp-native/check_owner_death_record.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "7d8ac2bc4a45aa9a49eb98ee25e812b4667441f0c436e075af9cf0f51a05abea"
+    },
+    {
+      "bytes": 125,
+      "historical_path": "packet/cases/N14/tooling/.github/issue779-csharp-native/checkpoint-n13-owner-killed.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc"
+    },
+    {
+      "bytes": 125,
+      "historical_path": "packet/cases/N14/tooling/.github/issue779-csharp-native/checkpoint-n14-owner-stopped.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
+    },
+    {
+      "bytes": 47172,
+      "historical_path": "packet/cases/N14/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "16fa9b19f290ac06f3076665e7be4562e96eccd26644fc746038ebcc4455b8bb"
+    },
+    {
+      "bytes": 18061,
+      "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/check_n15_records.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf"
+    },
+    {
+      "bytes": 11522,
+      "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/checkpoint-n15-pending-start-death.sh",
+      "port_status": "current-source-provenance-ported-native-predicates-retained",
+      "ported_path": "procedures/n15/checkpoint-n15-pending-start-death.sh",
+      "ported_sha256": "b2d51f79402d1869fd18d920b842c88791e520350b51ab7926763c62af26f466",
+      "sha256": "86df71b46ca0cd96f7c0f207fa9b6dd67a09e4ce3d7d6251a8e97e73e9ad50fd"
+    },
+    {
+      "bytes": 15641,
+      "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/finalize_n15_observation.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6"
+    },
+    {
+      "bytes": 35838,
+      "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/observe_n15_pending_start.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "43dd0f71d07dc028fba88b538a1c9fe45aa7afab8cc21ae91b36c51fe657580f"
+    },
+    {
+      "bytes": 17835,
+      "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/check_n16_records.py",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3"
+    },
+    {
+      "bytes": 90108,
+      "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/checkpoint-n16-accepted-work.sh",
+      "port_status": "pending-provenance-boundary-port",
+      "ported_path": null,
+      "sha256": "65442eec60de59941cf9b26f975ea4996b80c37017d167ff7289b90d221c5821"
+    },
+    {
+      "bytes": 9461,
+      "delta": [],
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/check_owner_death_record.py",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/parsers/check_owner_death_record.py",
+      "ported_sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd",
+      "sha256": "352cc73606edc4c7a3af2eb96ca8238e40caa8d4f920c4500de627ee69121ffd"
+    },
+    {
+      "bytes": 10460,
+      "delta": [],
+      "historical_path": "packet/cases/N10/tooling/.github/issue779-csharp-native/check_n10_pending_start.py",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/parsers/check_n10_pending_start.py",
+      "ported_sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d",
+      "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
+    },
+    {
+      "bytes": 17835,
+      "delta": [],
+      "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/check_n16_records.py",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/parsers/check_n16_records.py",
+      "ported_sha256": "97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3",
+      "sha256": "97172e56ceb91ae82166919a88d7b8b678870adb65823b11dc9af5b4c5ddeda3"
+    },
+    {
+      "bytes": 18061,
+      "delta": [
+        "Require independent current source_commit/capture_sha256 keyword arguments, replacing two historical constants; preserve observed identity/event/deadline/cleanup predicate bodies."
+      ],
+      "delta_file": "procedures/deltas/check_n15_records.patch",
+      "historical_path": "packet/cases/N15/tooling/.github/issue779-csharp-native/check_n15_records.py",
+      "port_status": "pure-source-binding-ported-native-predicates-retained",
+      "ported_path": "procedures/parsers/check_n15_records.py",
+      "ported_sha256": "d06806ea5248709c96e8d1cce0f6b97b1ae4029296609669e1cb88f3c6ec9fb3",
+      "sha256": "b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf"
+    },
+    {
+      "bytes": 15362,
+      "delta": [],
+      "historical_path": "packet/cases/N09/tooling/.github/issue779-csharp-native/check_n09_records.py",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/parsers/check_n09_records.py",
+      "ported_sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e",
+      "sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e"
+    },
+    {
+      "bytes": 14048,
+      "delta": [],
+      "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/Program.cs",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/peer/Program.cs",
+      "ported_sha256": "02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a",
+      "sha256": "02a28424a2d57c56213fae8618d50df1019986cadf89246e2ce11411a23c967a"
+    },
+    {
+      "bytes": 364,
+      "delta": [],
+      "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/NativePeerBroker.csproj",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/peer/NativePeerBroker.csproj",
+      "ported_sha256": "92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e",
+      "sha256": "92da6c96d4c88fae754ece54af775a00c1d713c7e44b9a76bda7cc768773514e"
+    },
+    {
+      "bytes": 61,
+      "delta": [],
+      "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/packages.lock.json",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/peer/packages.lock.json",
+      "ported_sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb",
+      "sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"
+    },
+    {
+      "bytes": 51857,
+      "delta": [],
+      "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/n04-helper-source/Program.cs",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n04/Program.cs",
+      "ported_sha256": "90277c9188d1b0c2dfbda9b9075c6640e87b99ad4a8dc21c18efc69b8f5e04c9",
+      "sha256": "90277c9188d1b0c2dfbda9b9075c6640e87b99ad4a8dc21c18efc69b8f5e04c9"
+    },
+    {
+      "bytes": 554,
+      "delta": [],
+      "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/n04-helper-source/NativeRootCoordinator.csproj",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n04/NativeRootCoordinator.csproj",
+      "ported_sha256": "6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87",
+      "sha256": "6df583dc8191ea8aa588e62d50280ec8a7e788b63a3570ccec7a26d0fbd51a87"
+    },
+    {
+      "bytes": 61,
+      "delta": [],
+      "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/n04-helper-source/packages.lock.json",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n04/packages.lock.json",
+      "ported_sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb",
+      "sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"
+    },
+    {
+      "bytes": 60163,
+      "delta": [],
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/n07-helper-source/Program.cs",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n07/Program.cs",
+      "ported_sha256": "20ddf7f54bf335ec49ab0d221b3b49bb2695f1c61d959786a585806ace332d9d",
+      "sha256": "20ddf7f54bf335ec49ab0d221b3b49bb2695f1c61d959786a585806ace332d9d"
+    },
+    {
+      "bytes": 602,
+      "delta": [],
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/n07-helper-source/NativeRootCoordinator.csproj",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n07/NativeRootCoordinator.csproj",
+      "ported_sha256": "9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1",
+      "sha256": "9ea64016a8932db2b62910d08a579236a8e3a2b20e2cd438a0b27bc92f5269d1"
+    },
+    {
+      "bytes": 61,
+      "delta": [],
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/n07-helper-source/packages.lock.json",
+      "port_status": "byte-identical-helper-or-parser-only",
+      "ported_path": "procedures/helpers/n07/packages.lock.json",
+      "ported_sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb",
+      "sha256": "a29c6aa8cfb81874ff8bb78dc369d7416f28c9b8cc47e99592bfc019b20c41eb"
+    },
+    {
+      "bytes": 3039,
+      "delta": [],
+      "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/n04-helper-source/PossibleStopRegistration.cs",
+      "port_status": "byte-identical-helper-source-only",
+      "ported_path": "procedures/helpers/n04/PossibleStopRegistration.cs",
+      "ported_sha256": "0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6",
+      "sha256": "0ed05a67f555c2b75c436ecb77e2b8f26d7aa66ab8cb3bafb5e92bb85c4df9d6"
+    },
+    {
+      "bytes": 3039,
+      "delta": [],
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/n07-helper-source/PossibleStopRegistration.cs",
+      "port_status": "byte-identical-helper-source-only",
+      "ported_path": "procedures/helpers/n07/PossibleStopRegistration.cs",
+      "ported_sha256": "3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af",
+      "sha256": "3c1e57f7030c2e2a1a54bfa2853744248bf3bad4cc71af5b94ca912a87d0d3af"
+    },
+    {
+      "bytes": 3355,
+      "delta": [],
+      "historical_path": "packet/cases/N07/tooling/.github/issue779-csharp-native/n07-helper-source/N07CoordinatorData.cs",
+      "port_status": "byte-identical-helper-source-only",
+      "ported_path": "procedures/helpers/n07/N07CoordinatorData.cs",
+      "ported_sha256": "f85d30a95b2bbe66ae8b21ff66ea812aee1c0e801fa03f49b8246d91a202d91a",
+      "sha256": "f85d30a95b2bbe66ae8b21ff66ea812aee1c0e801fa03f49b8246d91a202d91a"
+    },
+    {
+      "bytes": 45316,
+      "delta": [
+        "Replace historical source/review/build schema pins with pinned shared current binding validator; retain root file pin/ownership checks.",
+        "Add literal sixth XDG_RUNTIME_DIR assignment.",
+        "Original 240s job, 600s fixture, 30s cleanup, identity/signal/systemd/EOF/quarantine/result predicates retained."
+      ],
+      "delta_file": "procedures/deltas/checkpoint-owner-death-common.sh.patch",
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-owner-death-common.sh",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/checkpoint-owner-death-common.sh",
+      "ported_sha256": "a358a339fad519edd9289b62a655fc2f89f9546bfed03200a86a5daf26b234ac",
+      "sha256": "f5d860405ecd8fe2e17285db2aac33200c861e74f97982beb3ec9cb356e7a406"
+    },
+    {
+      "bytes": 125,
+      "delta": [],
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-n13-owner-killed.sh",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/checkpoint-n13-owner-killed.sh",
+      "ported_sha256": "cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc",
+      "sha256": "cd9e37d4f64a23471ea6c64f6286bcc36657c9fcdf7731678bddc108a986aafc"
+    },
+    {
+      "bytes": 125,
+      "delta": [],
+      "historical_path": "packet/cases/N13/tooling/.github/issue779-csharp-native/checkpoint-n14-owner-stopped.sh",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/checkpoint-n14-owner-stopped.sh",
+      "ported_sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2",
+      "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
+    },
+    {
+      "bytes": 18478,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/adapter.py",
+      "ported_sha256": "5bdf29c02acffcd7518c6ad0ecd67d52c2fca024f14b2d2f3b4e12d3259b0636",
+      "sha256": "5bdf29c02acffcd7518c6ad0ecd67d52c2fca024f14b2d2f3b4e12d3259b0636"
+    },
+    {
+      "bytes": 5914,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/n16_retained_custody.py",
+      "ported_sha256": "312e64a93db5bc1b9729129f3b2cee966ad3ad1ee27bba4c12d47e9608c48bdb",
+      "sha256": "312e64a93db5bc1b9729129f3b2cee966ad3ad1ee27bba4c12d47e9608c48bdb"
+    },
+    {
+      "bytes": 7351,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/records.py",
+      "ported_sha256": "51eea513077a0a3bc8f3f054d26fa3ad8c41b43634fbbcede3588c0745247ccc",
+      "sha256": "51eea513077a0a3bc8f3f054d26fa3ad8c41b43634fbbcede3588c0745247ccc"
+    },
+    {
+      "bytes": 2740,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/README.md",
+      "ported_sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71",
+      "sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71"
+    },
+    {
+      "bytes": 2037,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/port-manifest.json",
+      "ported_sha256": "3fa73fac8ab1f5c11066603e4caf86aa859c7c0154aa674b7cd14ba77fd7b27c",
+      "sha256": "d46ad792db364bb8e0766e914fee31927c615fa60df77a005c1132f8e628706c"
+    },
+    {
+      "bytes": 90108,
+      "historical_path": "packet/cases/N16/tooling/.github/issue779-csharp-native/checkpoint-n16-accepted-work.sh",
+      "origin": "historical-native-procedure",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/n16/checkpoint-n16-accepted-work.sh",
+      "ported_sha256": "529ddf88cf7330f17fcc2a82b2b29ae6b27a0ea07bd9896326df94ae5af32ffd",
+      "sha256": "65442eec60de59941cf9b26f975ea4996b80c37017d167ff7289b90d221c5821"
+    },
+    {
+      "bytes": 20833,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/native_process.py",
+      "ported_sha256": "576964f33da83949a05618024c24c5651471c05a45536db821b33238c9bb93e1",
+      "sha256": "576964f33da83949a05618024c24c5651471c05a45536db821b33238c9bb93e1"
+    },
+    {
+      "bytes": 31257,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/os_audit.py",
+      "ported_sha256": "9fd106c6745546b72a152e3767025dd21c8014539637d391f7839eb519cf1446",
+      "sha256": "9623da2bbca9634af9b8078cc58d61d41a8a087cf14fa96b6c39d80f105cb4c8"
+    },
+    {
+      "bytes": 7739,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/historical-to-current.patch",
+      "ported_sha256": "d079dab960459b4f24527532da9ce074cd202cb32c2401ecb203db89c04f6ce7",
+      "sha256": "4a09e66f6e86df729cfde40514cf52b47340ef659c5888c3589e2dc4667dd1d6"
+    },
+    {
+      "bytes": 32881,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/adapter.py",
+      "ported_sha256": "8eca8a9e95e88f0c67ea60db968fff40c24bd7269b8fb6e1727293c06000002b",
+      "sha256": "8eca8a9e95e88f0c67ea60db968fff40c24bd7269b8fb6e1727293c06000002b"
+    },
+    {
+      "bytes": 7164,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/README.md",
+      "ported_sha256": "69215da79b492a4799be2d60b1460ed7e670f32e2a35608f88c2d96a94316b85",
+      "sha256": "73559ea68352a9d8ec61b6411d85936b1d5791801d783d51d82ad5669d42f92f"
+    },
+    {
+      "bytes": 10584,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/port-manifest.json",
+      "ported_sha256": "ca81b9da6a75fe2028d9d27b095e4a0cd33789912134ce7f7da7d4c66eac6cce",
+      "sha256": "b748308cd3640b87a4784426dc6ceac7ec640860cf192c9642f274f872228ef2"
+    },
+    {
+      "bytes": 10388,
+      "historical_path": null,
+      "origin": "current-source-bridge",
+      "port_status": "current-source-port-source-only",
+      "ported_path": "procedures/owner-death/workspace.py",
+      "ported_sha256": "198fa3aef93f1285242cc1f6ec21fa5412f93170f9954678687d94588d9bb163",
+      "sha256": "198fa3aef93f1285242cc1f6ec21fa5412f93170f9954678687d94588d9bb163"
+    },
+    {
+      "bytes": 4055,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/deltas/check_n15_records.patch",
+      "ported_sha256": "3b0ffc1dc75cc0112a8e01ef5d24b9f27f6f0037c3c52a44a8894a230f930e03",
+      "sha256": "f76a7fcaaef48efd5528ebbaee9f37140a0d989218cb128ad28dc5de52fa2190"
+    },
+    {
+      "bytes": 23917,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/deltas/checkpoint-n16-accepted-work.sh.patch",
+      "ported_sha256": "1733d0855073232dd3e9012f2fcc4306c793d06df5137b877d7fb65f40226cc5",
+      "sha256": "730f2919cfa1a21e566bf8fb214e8933801f48b7891917cf8ad84eb005ccacc2"
+    },
+    {
+      "bytes": 7735,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/deltas/checkpoint-owner-death-common.sh.patch",
+      "ported_sha256": "78ad225bc5f232cd009a033a7ac1a98da97b9d87b391c888f68719b5a25ee792",
+      "sha256": "0a047d222fb260fab34fd18259ea0b34665a73ebc030fdcc943233ef11f72727"
+    },
+    {
+      "bytes": 2344,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/README.md",
+      "ported_sha256": "78db41734a76883f995536d08e5b5c63071904752e54063d4f75d4bc2e013b50",
+      "sha256": "78db41734a76883f995536d08e5b5c63071904752e54063d4f75d4bc2e013b50"
+    },
+    {
+      "bytes": 14476,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/adapter.py",
+      "ported_sha256": "e71c7e91a241d347b5be93d1ec2c0b7c11ce63a3f971e37bb97c70f8ef457ca4",
+      "sha256": "e71c7e91a241d347b5be93d1ec2c0b7c11ce63a3f971e37bb97c70f8ef457ca4"
+    },
+    {
+      "bytes": 20289,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/cancellation_adapter.py",
+      "ported_sha256": "8b02473ad90695df1840a14af0e02d5d17c3bee79177eb826a228f3345b6ee0f",
+      "sha256": "8b02473ad90695df1840a14af0e02d5d17c3bee79177eb826a228f3345b6ee0f"
+    },
+    {
+      "bytes": 6469,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/check_cancellation_records.py",
+      "ported_sha256": "c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6",
+      "sha256": "c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6"
+    },
+    {
+      "bytes": 7298,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/check_kernel_record.py",
+      "ported_sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab",
+      "sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab"
+    },
+    {
+      "bytes": 15362,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/check_n09_records.py",
+      "ported_sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e",
+      "sha256": "c4039008467aae0e7abbd82a85b7cf551b38c307f19d546236202a5d74b3647e"
+    },
+    {
+      "bytes": 2486,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/dispatch.sh",
+      "ported_sha256": "d1105a7fc48b21c984f5156a7a134f5c489d705d5da9e25a48400ce9273400fe",
+      "sha256": "d1105a7fc48b21c984f5156a7a134f5c489d705d5da9e25a48400ce9273400fe"
+    },
+    {
+      "bytes": 17456,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/historical-to-current.patch",
+      "ported_sha256": "91668ec62407f926959c9e368d3e05cc06430550e2ecaddc538768e4bf24a428",
+      "sha256": "09d228cbe755efdc8551884022ae1fed9f3557176faa8f6cb18c190e55d32447"
+    },
+    {
+      "bytes": 3034,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/port-manifest.json",
+      "ported_sha256": "69a56f4c499ee8e71947d9dc024e3a65a47e4fca2d934c6dcc6af3e1c78060db",
+      "sha256": "4bfbace0b0be2c7ca59c0546084b79801078b85401c195ebd988414d3d85acde"
+    },
+    {
+      "bytes": 12713,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/records.py",
+      "ported_sha256": "b2cce931d45b1d5e48301633a318ef63379acec267f3989715ff63b6adb9e076",
+      "sha256": "b2cce931d45b1d5e48301633a318ef63379acec267f3989715ff63b6adb9e076"
+    },
+    {
+      "bytes": 13442,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n09/retain-native.sh",
+      "ported_sha256": "427a3b1f9698b930a4cc556c58c766b9e98c919de95b34f00546ac4d67015b59",
+      "sha256": "427a3b1f9698b930a4cc556c58c766b9e98c919de95b34f00546ac4d67015b59"
+    },
+    {
+      "bytes": 7290,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/README.md",
+      "ported_sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
+      "sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6"
+    },
+    {
+      "bytes": 17359,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/adapter.py",
+      "ported_sha256": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628",
+      "sha256": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628"
+    },
+    {
+      "bytes": 19580,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/checkpoint-n10-pending-start.sh.patch",
+      "ported_sha256": "45a09eab4321aa9943598476e685527111958889ca8986bdc18464b519959d29",
+      "sha256": "14b93b679cf813154e591c265874d05884d72d54e001a41ec96d929b0b1a2b32"
+    },
+    {
+      "bytes": 2579,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/dispatch.sh",
+      "ported_sha256": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f",
+      "sha256": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f"
+    },
+    {
+      "bytes": 5315,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/port-manifest.json",
+      "ported_sha256": "cc951e2503a1f5549a722b075d10b128f7bd6fe892e6368ab2c4f375c2913f84",
+      "sha256": "1e310efe7f604624a91bfee36083dee2f0d563451fd62f5fff09cf3d7b9d8ec9"
+    },
+    {
+      "bytes": 2528,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/portable-validation.json",
+      "ported_sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295",
+      "sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295"
+    },
+    {
+      "bytes": 18212,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/process.py",
+      "ported_sha256": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38",
+      "sha256": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38"
+    },
+    {
+      "bytes": 13816,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/records.py",
+      "ported_sha256": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591",
+      "sha256": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591"
+    },
+    {
+      "bytes": 3379,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/records.py.patch",
+      "ported_sha256": "0c21de839f4fe420f8a6e03b41bdcf5753d10927c180f4671417b8eb15bd7b5c",
+      "sha256": "78418f9672ba32a878409adb5e35884bdc91efa453461281e194057812ce5294"
+    },
+    {
+      "bytes": 11724,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n10/retain-native.sh",
+      "ported_sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024",
+      "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
+    },
+    {
+      "bytes": 6094,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/README.md",
+      "ported_sha256": "85848b9b2f20b43c32af992a448fd389d2e372be828ee46d2175875f4b6c66f8",
+      "sha256": "85848b9b2f20b43c32af992a448fd389d2e372be828ee46d2175875f4b6c66f8"
+    },
+    {
+      "bytes": 4405,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/adapter.py",
+      "ported_sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d",
+      "sha256": "0db67b16412020f2973e34732d2331083ea8ffa585cdb83e6916c97e0a3d2f0d"
+    },
+    {
+      "bytes": 23743,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/bridge.py",
+      "ported_sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab",
+      "sha256": "f1e7677fc0b469e745c5907ca657db23f768c52ab95f488bd99f54688a7d7eab"
+    },
+    {
+      "bytes": 1165,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/capture_stall.py",
+      "ported_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0",
+      "sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
+    },
+    {
+      "bytes": 17146,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/check_stall_record.py",
+      "ported_sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487",
+      "sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
+    },
+    {
+      "bytes": 2458,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/dispatch.sh",
+      "ported_sha256": "61642b17a01cfe5f48714ba6476313aed8e51ae261a16635a5a777b02768ebe7",
+      "sha256": "61642b17a01cfe5f48714ba6476313aed8e51ae261a16635a5a777b02768ebe7"
+    },
+    {
+      "bytes": 19926,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/historical-to-current.patch",
+      "ported_sha256": "8e0762ac217e870e825053fc0429b1d33787a95450e80323307a785fb0723a16",
+      "sha256": "c5dd75d15a320732849480508ee6d1cba148972db055135cf789320568df6f31"
+    },
+    {
+      "bytes": 336,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/parser-pins.tsv",
+      "ported_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684",
+      "sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
+    },
+    {
+      "bytes": 8755,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/port-manifest.json",
+      "ported_sha256": "9736ae43f7e765ef3f1bf8dc5bcac5bb08310d89475ae6710b24074afa7c6951",
+      "sha256": "a8bfc1e8dee6f40fcdee9f4705a1417cb97eb8de329a42757fbce1d2a1ec4f64"
+    },
+    {
+      "bytes": 24073,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/records.py",
+      "ported_sha256": "6f73e1077af6fe6126271ef1a4dcd916c39702215f5b82e2b15e106e41729a7f",
+      "sha256": "6f73e1077af6fe6126271ef1a4dcd916c39702215f5b82e2b15e106e41729a7f"
+    },
+    {
+      "bytes": 13572,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/retain-native.sh",
+      "ported_sha256": "fd0f4bf9160f0d60a60f18b66470b1bb499024b296fbcfa08d50381bada5005c",
+      "sha256": "fd0f4bf9160f0d60a60f18b66470b1bb499024b296fbcfa08d50381bada5005c"
+    },
+    {
+      "bytes": 8388,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/root_stall_frame.py",
+      "ported_sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf",
+      "sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
+    },
+    {
+      "bytes": 23052,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n11/stall_capture.py",
+      "ported_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79",
+      "sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
+    },
+    {
+      "bytes": 4901,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/README.md",
+      "ported_sha256": "61a2fcc9f3194b7f6f8a291e5f8c183e4930a4d8cfbdfe13707a16a380fbd0b6",
+      "sha256": "61a2fcc9f3194b7f6f8a291e5f8c183e4930a4d8cfbdfe13707a16a380fbd0b6"
+    },
+    {
+      "bytes": 4422,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/adapter.py",
+      "ported_sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7",
+      "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
+    },
+    {
+      "bytes": 2492,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/dispatch.sh",
+      "ported_sha256": "9909a73fe7bc4ce37cb74273c6c1a23119c1753e52e23030576266c885c14294",
+      "sha256": "9909a73fe7bc4ce37cb74273c6c1a23119c1753e52e23030576266c885c14294"
+    },
+    {
+      "bytes": 18602,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/historical-to-current.patch",
+      "ported_sha256": "0904cc4c33e69735d788e6312bcf1ce0f3d49c677cd45f86c3784fa4d9658d3a",
+      "sha256": "81b9f28ebbe6d570914399f499e9d7bb091e4fe9552ec1e51e2ad3c42e7ec15d"
+    },
+    {
+      "bytes": 5990,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/port-manifest.json",
+      "ported_sha256": "822184e33375f36bf9da6e520517bb3c02df33ce2f74d495eb8aa9611625784e",
+      "sha256": "d36884ae23649ac25589dab68069ac8a4144ed6fd8996d89bb8da3edd6dee68e"
+    },
+    {
+      "bytes": 16958,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/records.py",
+      "ported_sha256": "bfa79c978b4131f313472090ea902535ea7f6149913b97175e068c61388f11cf",
+      "sha256": "bfa79c978b4131f313472090ea902535ea7f6149913b97175e068c61388f11cf"
+    },
+    {
+      "bytes": 12384,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n12/retain-native.sh",
+      "ported_sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f",
+      "sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f"
+    },
+    {
+      "bytes": 5152,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/README.md",
+      "ported_sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7",
+      "sha256": "0a96c742149ef3fc7c6cedabfc81a7160e34f16649c6cbafc20e2c3ffc2567a7"
+    },
+    {
+      "bytes": 14028,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/adapter.py",
+      "ported_sha256": "f9bf28968c3633627a036a1d2e1df5189b6acb68a3f996eb8c0dc4eb778e0570",
+      "sha256": "f9bf28968c3633627a036a1d2e1df5189b6acb68a3f996eb8c0dc4eb778e0570"
+    },
+    {
+      "bytes": 4312,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/checkpoint-n15-pending-start-death.sh.patch",
+      "ported_sha256": "c5634c1a9679ceb5c5d13adc4ee8e8b50a7b2c8cad2cd13862db4bb46e3649f8",
+      "sha256": "eee948908cbf46bd8e18d4db34ed35a63f8a644765d8285ac299abf4dc7ef863"
+    },
+    {
+      "bytes": 15872,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/finalize_n15_observation.py",
+      "ported_sha256": "6f69187b2b663ad9597d4bc57e12de69d62569517eeaf18f0cb241f2c172cfe6",
+      "sha256": "6f69187b2b663ad9597d4bc57e12de69d62569517eeaf18f0cb241f2c172cfe6"
+    },
+    {
+      "bytes": 3637,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/finalize_n15_observation.py.patch",
+      "ported_sha256": "26c594305f08f9255746e00f15cec31388cc230281a892c5e78f16137daece4f",
+      "sha256": "790d49c408fd01bb4e791ecd9b3bf6e4cc02af342907b6d9373d99c2b925aa00"
+    },
+    {
+      "bytes": 5973,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/materialize.py",
+      "ported_sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15",
+      "sha256": "aa179a2c2630f49e075afc58a5ffaf58a279142d715be802f82c07aaaf978f15"
+    },
+    {
+      "bytes": 24702,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/n15-guard-reactivation-retry.sh",
+      "ported_sha256": "8f1c45d185aaef69bfa3eb82906808f9049e5ef37bc248b1004d390f25b23cb7",
+      "sha256": "8f1c45d185aaef69bfa3eb82906808f9049e5ef37bc248b1004d390f25b23cb7"
+    },
+    {
+      "bytes": 2099,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/n15-guard-reactivation-retry.sh.patch",
+      "ported_sha256": "965c7e926010019357846b996f21600fad222818253c6820cde2cd64beae0126",
+      "sha256": "5a9e9127c35bf1279274a643552f18e8284a62b3c392f2ec138799ffc65661f9"
+    },
+    {
+      "bytes": 35838,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/observe_n15_pending_start.py",
+      "ported_sha256": "bf0b41a01c403cf4c8e22593ff761da8296254872e1dac4b30923193e611389c",
+      "sha256": "bf0b41a01c403cf4c8e22593ff761da8296254872e1dac4b30923193e611389c"
+    },
+    {
+      "bytes": 415,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/observe_n15_pending_start.py.patch",
+      "ported_sha256": "7f1ee71893f72336b30129e3d0ceb896d5256af58f9958f441aeca9f09dc1881",
+      "sha256": "6f92fc2e6b3652767b64503c94ec162602e41073de0cfea6e5d93fb45297db07"
+    },
+    {
+      "bytes": 7296,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/port-manifest.json",
+      "ported_sha256": "b048e3199a3abbd28c128fa2b0b2b5495dc331ef83320e177cd333343282fb2a",
+      "sha256": "421994b539b4fbcd77b27d92aca72750c752b08ef3b8f83930abfbfed6fc3016"
+    },
+    {
+      "bytes": 18718,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/process.py",
+      "ported_sha256": "3437be3c1bce9d01d9a3cb8b8dd73072178b16042fe0e75e1a638a1b26d8e501",
+      "sha256": "3437be3c1bce9d01d9a3cb8b8dd73072178b16042fe0e75e1a638a1b26d8e501"
+    },
+    {
+      "bytes": 20865,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/records.py",
+      "ported_sha256": "4c246f0da9d47f4a7e83653f788474cb99c1ad93c275a4b20e058a2f4f2931da",
+      "sha256": "4c246f0da9d47f4a7e83653f788474cb99c1ad93c275a4b20e058a2f4f2931da"
+    },
+    {
+      "bytes": 12118,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/retain-native.sh",
+      "ported_sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c",
+      "sha256": "6ba3f76b69e95eb1084e22f4745da1f28dd93bcf7b7a59ac27fe47b8597d461c"
+    },
+    {
+      "bytes": 6642,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/n15/test_data.py",
+      "ported_sha256": "ccd6ec0fc42896fed57e077f53fd6569ff81464f19711b676ee11e106ec25417",
+      "sha256": "ccd6ec0fc42896fed57e077f53fd6569ff81464f19711b676ee11e106ec25417"
+    },
+    {
+      "bytes": 2769,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/README.md",
+      "ported_sha256": "1eb0b8159a8ffdceae67b3d29e0d85a7e3b393115b77a8b9299162080ae8fef5",
+      "sha256": "1eb0b8159a8ffdceae67b3d29e0d85a7e3b393115b77a8b9299162080ae8fef5"
+    },
+    {
+      "bytes": 2323,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/adapter.py",
+      "ported_sha256": "4210464e68a6660aa28bf74df6c2ead7bbcaeecb570ce3d2f447705c9f4801e4",
+      "sha256": "4210464e68a6660aa28bf74df6c2ead7bbcaeecb570ce3d2f447705c9f4801e4"
+    },
+    {
+      "bytes": 25553,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/bridge.py",
+      "ported_sha256": "fcbf5da8fb298039f3205fa4453b8b14a9e97e8d603afc2a984083fce5b39c5d",
+      "sha256": "fcbf5da8fb298039f3205fa4453b8b14a9e97e8d603afc2a984083fce5b39c5d"
+    },
+    {
+      "bytes": 17032,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-n04.sh.patch",
+      "ported_sha256": "295cb259f59e7ef3b34c87e127cf1e24d72d275e0a7494f0b4e4f8a00c26c591",
+      "sha256": "3119e9a83a864d47c6473ebb4fc36dd674a25885321286cd57c5bf8c1831333a"
+    },
+    {
+      "bytes": 16564,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-n05.sh.patch",
+      "ported_sha256": "0332c105f89a014f8e44491b53a9dabdb6be3d8a91f3c0eb577dc3e5192a9759",
+      "sha256": "7a6eeb8061b3bb2fc9aa6a8553cf57bbb523454f9ff2631894ab390cea488970"
+    },
+    {
+      "bytes": 16564,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-n06.sh.patch",
+      "ported_sha256": "aeb59e6afa2c101c413bc8634f1e292b34049790f86f12a59f11d8613b2257d3",
+      "sha256": "717d210e408b909f7fae9cab884b9965b1ddfa505876a64a4b9f0fbd21f95292"
+    },
+    {
+      "bytes": 17132,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-n07.sh.patch",
+      "ported_sha256": "4e1e22aa5f2cb47bbf94d5930265e5a3e3ac05271a25d76df723ff569c8f97ba",
+      "sha256": "ee7c08f09e93149a5d7ada449b702618f9311f33b2d9e169c483620272bd5e6a"
+    },
+    {
+      "bytes": 16886,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-n08.sh.patch",
+      "ported_sha256": "23b4e868e0f21592d3040b1b9b9d595b78aff0e1f60cf025d359d58cac28a0a0",
+      "sha256": "912db228fe44a91d5fff02529ae53fe89346a1e5d8164437d61ffab65a986018"
+    },
+    {
+      "bytes": 15489,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/checkpoint-none.sh.patch",
+      "ported_sha256": "04e095be4bbd46c834b0516c570b9b2d58166690096536d6a3b8c2dc16b0e232",
+      "sha256": "732be2b5b07901f78c4a3ff1a4c3fc44055d98defc3663f4a7a264d29296394e"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-n04.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-n05.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-n06.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-n07.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-n08.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 2472,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/dispatch-none.sh",
+      "ported_sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade",
+      "sha256": "b9c94b96ab6fe54ceeaa425e24e77ed2f270506eed2be222b7fd0dd527e6fade"
+    },
+    {
+      "bytes": 4579,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/helpers.py",
+      "ported_sha256": "626b7cd0b8542af5bc42ff11c2860668772e297bd39f47d4b60b8670cce254b8",
+      "sha256": "626b7cd0b8542af5bc42ff11c2860668772e297bd39f47d4b60b8670cce254b8"
+    },
+    {
+      "bytes": 8899,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n04/n04-archive-data.py",
+      "ported_sha256": "364ccc951b97c98b27197350e976b2a699a78a579526336144d8302f2304527d",
+      "sha256": "364ccc951b97c98b27197350e976b2a699a78a579526336144d8302f2304527d"
+    },
+    {
+      "bytes": 24174,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n04/n04-record-data.py",
+      "ported_sha256": "eba48c40d6f35001ba30fa7cf733d87dea0a12e23e9c55f11675a6e514f88784",
+      "sha256": "eba48c40d6f35001ba30fa7cf733d87dea0a12e23e9c55f11675a6e514f88784"
+    },
+    {
+      "bytes": 6712,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n07/n07-archive-data.py",
+      "ported_sha256": "1355837e41f3e3f17df50a4d7427c0561cb1958b15d1db944dd0a1c797708e75",
+      "sha256": "1355837e41f3e3f17df50a4d7427c0561cb1958b15d1db944dd0a1c797708e75"
+    },
+    {
+      "bytes": 5130,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n07/n07-helper-live.py",
+      "ported_sha256": "ff957a62af596c9ae2278685a756493c709f3906bf9194d13a2946109cb792b1",
+      "sha256": "ff957a62af596c9ae2278685a756493c709f3906bf9194d13a2946109cb792b1"
+    },
+    {
+      "bytes": 32705,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n07/n07-record-data.py",
+      "ported_sha256": "27c4a9f631dc297e9f00bc8892c4824b7b3de2dccca815f987757747d68ada82",
+      "sha256": "27c4a9f631dc297e9f00bc8892c4824b7b3de2dccca815f987757747d68ada82"
+    },
+    {
+      "bytes": 21679,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n08/cancellation_adapter.py",
+      "ported_sha256": "e9b8a2cfe0053f93df03006c727cc1c005be32b64897ea13340fb057e294ec70",
+      "sha256": "e9b8a2cfe0053f93df03006c727cc1c005be32b64897ea13340fb057e294ec70"
+    },
+    {
+      "bytes": 991,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n08/capture_cancellation.py",
+      "ported_sha256": "fc9e57334ff18d854d8819524d2ceef9e5d5e04e464234285c978a0329d9b9cf",
+      "sha256": "fc9e57334ff18d854d8819524d2ceef9e5d5e04e464234285c978a0329d9b9cf"
+    },
+    {
+      "bytes": 7393,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n08/check_cancellation_archive.py",
+      "ported_sha256": "53dd388058231fbc995328ac8ca47cf7b7e5e971f28ceba9f638ac5a429b6145",
+      "sha256": "53dd388058231fbc995328ac8ca47cf7b7e5e971f28ceba9f638ac5a429b6145"
+    },
+    {
+      "bytes": 6469,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n08/check_cancellation_records.py",
+      "ported_sha256": "c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6",
+      "sha256": "c45238cc3bd129a19af3d04dfa12bc83a82345b130e43f7296808ecee7e5cee6"
+    },
+    {
+      "bytes": 7298,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/n08/check_kernel_record.py",
+      "ported_sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab",
+      "sha256": "90da0002db90ddb8b769bd3530551f10363ce772bc99327bdd27976be71cf3ab"
+    },
+    {
+      "bytes": 4956,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/port-manifest.json",
+      "ported_sha256": "54ab366e63638c97545d6ae63f276b282c9007455e0d43b2d744f3be2bda8465",
+      "sha256": "54ab366e63638c97545d6ae63f276b282c9007455e0d43b2d744f3be2bda8465"
+    },
+    {
+      "bytes": 7740,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-manifest.json",
+      "ported_sha256": "2d8d86ce9df93f9b36b8e8068721be0ce3916ab6ae34da20cf9d6f8086e62dd8",
+      "sha256": "2d8d86ce9df93f9b36b8e8068721be0ce3916ab6ae34da20cf9d6f8086e62dd8"
+    },
+    {
+      "bytes": 36892,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-n04.py",
+      "ported_sha256": "08180917361a32fafc1eb81d9028aa963b093a16dc9daa5dc4b66cc0a279dcd2",
+      "sha256": "08180917361a32fafc1eb81d9028aa963b093a16dc9daa5dc4b66cc0a279dcd2"
+    },
+    {
+      "bytes": 46773,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-n05.py",
+      "ported_sha256": "1b05c3fbfb9c121f035320a1f418ea83cbe62f822b81ed26f52f2933693e1e3f",
+      "sha256": "1b05c3fbfb9c121f035320a1f418ea83cbe62f822b81ed26f52f2933693e1e3f"
+    },
+    {
+      "bytes": 46773,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-n06.py",
+      "ported_sha256": "9a02e1837071b311c31d4c6875169a43043059fbb56dcefd3a3df25577edd9e7",
+      "sha256": "9a02e1837071b311c31d4c6875169a43043059fbb56dcefd3a3df25577edd9e7"
+    },
+    {
+      "bytes": 42019,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-n07.py",
+      "ported_sha256": "770c0f1a3496a216e77332ba05a4f83b790206f45e88ff6445096c7aeff95812",
+      "sha256": "770c0f1a3496a216e77332ba05a4f83b790206f45e88ff6445096c7aeff95812"
+    },
+    {
+      "bytes": 12716,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-n08.py",
+      "ported_sha256": "5a6df85f088a509fcf2ea6de5780e2dcc2c9a3eef6016e2cf27e64834f58bf76",
+      "sha256": "5a6df85f088a509fcf2ea6de5780e2dcc2c9a3eef6016e2cf27e64834f58bf76"
+    },
+    {
+      "bytes": 10535,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/records-none.py",
+      "ported_sha256": "7225f76b94359c66553297f6897657f6e744b1a3ee9d239ca13794523818c850",
+      "sha256": "7225f76b94359c66553297f6897657f6e744b1a3ee9d239ca13794523818c850"
+    },
+    {
+      "bytes": 13903,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-n04.sh",
+      "ported_sha256": "096b1f8672839560ded52dd18b0faa19123164b854c55aacec43352618ba6346",
+      "sha256": "096b1f8672839560ded52dd18b0faa19123164b854c55aacec43352618ba6346"
+    },
+    {
+      "bytes": 13207,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-n05.sh",
+      "ported_sha256": "a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e",
+      "sha256": "a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e"
+    },
+    {
+      "bytes": 13207,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-n06.sh",
+      "ported_sha256": "a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e",
+      "sha256": "a6427331feee6fb9c065fa4f1e5461d7b5e2a3751bdbeb320840a63ac506fc3e"
+    },
+    {
+      "bytes": 13454,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-n07.sh",
+      "ported_sha256": "6d1abb54b5b6f518bda64de754a2b8ff5fdb7dd94124ddaadba75af27a904f01",
+      "sha256": "6d1abb54b5b6f518bda64de754a2b8ff5fdb7dd94124ddaadba75af27a904f01"
+    },
+    {
+      "bytes": 13507,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-n08.sh",
+      "ported_sha256": "f1e1851742b098c92c03adda7588593b9b9efb80198e928dbf68ffa918d3074a",
+      "sha256": "f1e1851742b098c92c03adda7588593b9b9efb80198e928dbf68ffa918d3074a"
+    },
+    {
+      "bytes": 12384,
+      "historical_path": null,
+      "native_execution": false,
+      "port_status": "current-source-adapter-parser-custody-or-provenance-data",
+      "ported_path": "procedures/slot/retain-none.sh",
+      "ported_sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f",
+      "sha256": "30e643a42b4d0d65fb77d07f34a0efdd811328240d25f4f30b8c0d11714b909f"
+    }
+  ],
+  "historical_harness": "0c34f22388d4d35db94765d211213054a42f91e0",
+  "historical_product_source": "5b4ed381badb91de47d793715d05b6ae7737e39e",
+  "native_execution_ready": true,
+  "ports": {
+    "N04": {
+      "cases": [
+        "N04"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-n04.sh"
+      ]
+    },
+    "N05": {
+      "cases": [
+        "N05"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-n05.sh"
+      ]
+    },
+    "N06": {
+      "cases": [
+        "N06"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-n06.sh"
+      ]
+    },
+    "N07": {
+      "cases": [
+        "N07"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-n07.sh"
+      ]
+    },
+    "N08": {
+      "cases": [
+        "N08"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-n08.sh"
+      ]
+    },
+    "N09": {
+      "cases": [
+        "N09"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n09/adapter.py",
+        "procedures/n09/checkpoint-n09-retained-slot.sh"
+      ]
+    },
+    "N10": {
+      "cases": [
+        "N10"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n10/adapter.py",
+        "procedures/n10/checkpoint-n10-pending-start.sh"
+      ]
+    },
+    "N11": {
+      "cases": [
+        "N11"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n11/adapter.py",
+        "procedures/n11/checkpoint-n11.sh"
+      ]
+    },
+    "N12": {
+      "cases": [
+        "N12"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n12/adapter.py",
+        "procedures/n12/checkpoint-n12-data-integration.sh"
+      ]
+    },
+    "N13": {
+      "cases": [
+        "N13"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/owner-death/adapter.py",
+        "procedures/owner-death/checkpoint-n13-owner-killed.sh"
+      ]
+    },
+    "N14": {
+      "cases": [
+        "N14"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/owner-death/adapter.py",
+        "procedures/owner-death/checkpoint-n14-owner-stopped.sh"
+      ]
+    },
+    "N15": {
+      "cases": [
+        "N15"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n15/adapter.py",
+        "procedures/n15/checkpoint-n15-pending-start-death.sh"
+      ]
+    },
+    "N16": {
+      "cases": [
+        "N16"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/n16/adapter.py",
+        "procedures/n16/checkpoint-n16-accepted-work.sh"
+      ]
+    },
+    "None": {
+      "cases": [
+        "N01",
+        "N02",
+        "N03"
+      ],
+      "native_ready": true,
+      "procedures": [
+        "procedures/slot/adapter.py",
+        "procedures/slot/checkpoint-none.sh"
+      ]
+    }
+  },
+  "schema": "issue779-checkpoint1-procedure-inventory-v1",
+  "selectors": [
+    "None",
+    "N04",
+    "N05",
+    "N06",
+    "N07",
+    "N08",
+    "N09",
+    "N10",
+    "N11",
+    "N12",
+    "N13",
+    "N14",
+    "N15",
+    "N16"
+  ]
+}

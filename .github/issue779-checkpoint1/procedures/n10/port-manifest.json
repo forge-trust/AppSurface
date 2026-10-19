@@ -1,0 +1,158 @@
+{
+  "additional_owned_test": ".github/issue779-checkpoint1/test_n10.py",
+  "additional_test": {
+    "bytes": 14450,
+    "mode": "0644",
+    "path": "test_n10.py",
+    "sha256": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5"
+  },
+  "changes": [
+    "current full source/build/maps root verifier replaces historical packed receipt/capture/review literals",
+    "current source,parent,capture,parser SHA supplied explicitly to original record predicates",
+    "sixth fixed XDG_RUNTIME_DIR=/tmp bootstrap entry",
+    "actual root receipt bytes/hash remain root projection",
+    "current copied source/tool/runtime nodes determine exact original stdout inventory expectations"
+  ],
+  "coverage_credit": false,
+  "dotnet_executed": false,
+  "entry_points": {
+    "execute": "execute(context, *, deadline) -> exact row5",
+    "verify_retained_evidence": "verify_retained_evidence(context, *, deadline) -> exact row5; mandatory actual retained archive and command streams"
+  },
+  "files": {
+    "README.md": {
+      "bytes": 7290,
+      "mode": "0644",
+      "sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6"
+    },
+    "adapter.py": {
+      "bytes": 17359,
+      "mode": "0644",
+      "sha256": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628"
+    },
+    "checkpoint-n10-pending-start.sh": {
+      "bytes": 88969,
+      "mode": "0644",
+      "sha256": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a"
+    },
+    "checkpoint-n10-pending-start.sh.patch": {
+      "bytes": 15383,
+      "mode": "0644",
+      "sha256": "45a09eab4321aa9943598476e685527111958889ca8986bdc18464b519959d29"
+    },
+    "dispatch.sh": {
+      "bytes": 2579,
+      "mode": "0644",
+      "sha256": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f"
+    },
+    "portable-validation.json": {
+      "bytes": 2528,
+      "mode": "0644",
+      "sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295"
+    },
+    "process.py": {
+      "bytes": 18212,
+      "mode": "0644",
+      "sha256": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38"
+    },
+    "records.py": {
+      "bytes": 13816,
+      "mode": "0644",
+      "sha256": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591"
+    },
+    "records.py.patch": {
+      "bytes": 1284,
+      "mode": "0644",
+      "sha256": "0c21de839f4fe420f8a6e03b41bdcf5753d10927c180f4671417b8eb15bd7b5c"
+    },
+    "retain-native.sh": {
+      "bytes": 11724,
+      "mode": "0644",
+      "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
+    }
+  },
+  "historical_case_root": "packet/cases/N10/tooling/.github/issue779-csharp-native/",
+  "historical_files": {
+    "check_n10_pending_start.py": {
+      "bytes": 10460,
+      "mode": "0600",
+      "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
+    },
+    "checkpoint-n10-pending-start.sh": {
+      "bytes": 97110,
+      "mode": "0600",
+      "sha256": "134ec927222349b1ea506153574b5950be2d0372c622b9f2ee905dd583386b48"
+    },
+    "retain-native.sh": {
+      "bytes": 11724,
+      "mode": "0600",
+      "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
+    },
+    "run-native.py": {
+      "bytes": 72026,
+      "mode": "0600",
+      "sha256": "46ac8c56bf7f8c509bb66a83b8c25954a2dfed6dcec2727d1936b13b5015ef42"
+    }
+  },
+  "native_executed": false,
+  "original_bounds": {
+    "archive_bytes": 33619968,
+    "expanded_archive_bytes": 33554432,
+    "fixture_cleanup_reserve_seconds": 30,
+    "fixture_seconds": 600,
+    "outer_seconds": 900,
+    "owner_runtime_seconds": 240,
+    "request_cleanup_seconds": 60,
+    "request_deadline": "original remaining fixture minus one second",
+    "retention_seconds": 30
+  },
+  "ownership_prefix": ".github/issue779-checkpoint1/procedures/n10/",
+  "portable_validation": {
+    "elapsed_seconds": 0.051142583000000005,
+    "exit": 0,
+    "receipt": "portable-validation.json",
+    "source_unchanged": true,
+    "stderr_sha256": "ae017c4200de2aec325bfd6f44d3521e2244d0fd18ba5d85e2ec6878f7e9f8f0",
+    "test_methods": 7
+  },
+  "preservation": {
+    "canonical_ustar_exact_repack_unchanged": true,
+    "dispatch_literal_byte_equal": true,
+    "native_shell_suffix_equal_except_retired_review_pin_and_sixth_env": true,
+    "parser_byte_equal": true,
+    "process_ast_equal": {
+      "Rejected": true,
+      "Runner": true,
+      "absent": true,
+      "decode": true,
+      "ident": true,
+      "read": true,
+      "require": true,
+      "root_deadline": true,
+      "save": true,
+      "sha": true,
+      "unique": true
+    },
+    "record_ast_equal": {
+      "decode_data": true,
+      "inspect_archive": true,
+      "validate_fixture_stdout": true,
+      "validate_unit_collision_diagnostic": true
+    },
+    "record_only_added_provenance_parameters": {
+      "validate_fixture_result": true,
+      "validate_n10_archive": true,
+      "validate_request_binding": true
+    },
+    "retainer_byte_equal": true
+  },
+  "required_helpers": [],
+  "schema": "issue779-n10-current-native-port-v1",
+  "static_validation": {
+    "defined_portable_test_methods": 7,
+    "python_ast_sources": 4,
+    "shell_syntax_exit": 0,
+    "shell_syntax_sources": 3
+  },
+  "status": "SOURCE_READY_PORTABLE_DATA_VALIDATED_NOT_NATIVE"
+}

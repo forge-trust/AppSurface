@@ -43,6 +43,13 @@ and never invokes Git or refreshes the capture.
 
 ## Workflow command construction
 
+Publish the private C2 image in **Release**, matching the installed None package,
+the preceding [C3/account measurements](accounts-README.md#build-and-entry-contract)
+and the solution build. The standard merge uses compiled branch maps, including IL
+offsets; equal source hashes do not make Debug and Release maps interchangeable.
+Correct the build configuration and recollect all inputs when they differ. Do not
+rewrite, drop or deduplicate report rows to make the totals agree.
+
 Keep the original package smoke first, existing driver `1800` timeout, internal case
 limits, and workflow job allowance. Install pinned `coverlet.console` **10.0.1** into
 `$RUNNER_TEMP/checkpoint2-coverlet`, retaining its install output in an existing bounded

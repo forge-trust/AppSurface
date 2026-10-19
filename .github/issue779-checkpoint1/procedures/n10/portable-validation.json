@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "-B",
+    "-m",
+    "unittest",
+    "-v",
+    "test_n10"
+  ],
+  "dotnet_executed": false,
+  "elapsed_seconds": 0.051142583000000005,
+  "exit": 0,
+  "native_executed": false,
+  "schema": "issue779-n10-portable-source-validation-v1",
+  "source_after": {
+    "procedures/n10/README.md": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
+    "procedures/n10/adapter.py": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628",
+    "procedures/n10/checkpoint-n10-pending-start.sh": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
+    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "14b93b679cf813154e591c265874d05884d72d54e001a41ec96d929b0b1a2b32",
+    "procedures/n10/dispatch.sh": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f",
+    "procedures/n10/process.py": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38",
+    "procedures/n10/records.py": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591",
+    "procedures/n10/retain-native.sh": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024",
+    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5"
+  },
+  "source_before": {
+    "procedures/n10/README.md": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
+    "procedures/n10/adapter.py": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628",
+    "procedures/n10/checkpoint-n10-pending-start.sh": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
+    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "14b93b679cf813154e591c265874d05884d72d54e001a41ec96d929b0b1a2b32",
+    "procedures/n10/dispatch.sh": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f",
+    "procedures/n10/process.py": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38",
+    "procedures/n10/records.py": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591",
+    "procedures/n10/retain-native.sh": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024",
+    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5"
+  },
+  "source_unchanged": true,
+  "stderr_bytes": 803,
+  "stderr_sha256": "ae017c4200de2aec325bfd6f44d3521e2244d0fd18ba5d85e2ec6878f7e9f8f0",
+  "stdout_bytes": 0,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timeout_seconds": 30
+}

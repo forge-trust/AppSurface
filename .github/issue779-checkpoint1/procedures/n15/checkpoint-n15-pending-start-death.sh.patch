@@ -1,0 +1,28 @@
+--- packet/cases/N15/tooling/.github/issue779-csharp-native/checkpoint-n15-pending-start-death.sh
++++ procedures/n15/checkpoint-n15-pending-start-death.sh
+@@ -6,4 +6,4 @@
+-readonly OBSERVER_SHA256=43dd0f71d07dc028fba88b538a1c9fe45aa7afab8cc21ae91b36c51fe657580f
+-readonly PARSER_SHA256=b5716563df8a7b5e26c25b3e23ef77732395d55dc9063a818a1b885740d481cf
+-readonly RETRY_SHA256=9b297512f3a91e4735b3663bdd5263f590e1766b78d6affdfa89694f70bc9f70
+-readonly FINALIZER_SHA256=77eead09df4cb29855efd263e7dfd7663c1e051d5089b0ee3725b91ba3f0b8c6
++readonly OBSERVER_SHA256=bf0b41a01c403cf4c8e22593ff761da8296254872e1dac4b30923193e611389c
++readonly PARSER_SHA256=d06806ea5248709c96e8d1cce0f6b97b1ae4029296609669e1cb88f3c6ec9fb3
++readonly RETRY_SHA256=8f1c45d185aaef69bfa3eb82906808f9049e5ef37bc248b1004d390f25b23cb7
++readonly FINALIZER_SHA256=6f69187b2b663ad9597d4bc57e12de69d62569517eeaf18f0cb241f2c172cfe6
+@@ -13,1 +13,1 @@
+-[[ $# == 24 && $1 == --case-generation && $3 == --request && $5 == --runtime-host \
++[[ $# == 28 && $1 == --case-generation && $3 == --request && $5 == --runtime-host \
+@@ -17,1 +17,2 @@
+-   && ${21} == --work-deadline-boot-ms && ${23} == --root-input-root ]] || fail argument-order
++   && ${21} == --work-deadline-boot-ms && ${23} == --root-input-root \
++   && ${25} == --source-commit && ${27} == --capture-sha256 ]] || fail argument-order
+@@ -20,1 +21,2 @@
+-work_deadline=${22} root_input=${24}
++work_deadline=${22} root_input=${24} source_commit=${26} capture_sha256=${28}
++[[ $source_commit =~ ^[0-9a-f]{40}$ && $capture_sha256 =~ ^[0-9a-f]{64}$ ]] || fail current-provenance-syntax
+@@ -69,1 +71,1 @@
+-fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp)
++fixed_env=(PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp)
+@@ -138,1 +140,1 @@
+-  --job-deadline-boot-ms "$job_deadline" || fail final-record-and-account-cleanup
++  --job-deadline-boot-ms "$job_deadline" --source-commit "$source_commit" --capture-sha256 "$capture_sha256" || fail final-record-and-account-cleanup
