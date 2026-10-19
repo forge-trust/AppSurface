@@ -656,6 +656,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                         ? _backend.StartWorkerForN10Async(_recipe, _n10PendingStart, ct)
                         : _backend.StartWorkerAsync(_recipe, ct);
 #else
+#if EVIDENCE_PRIVATE_C3_SDK
+                    LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.NativeDispatch);
+#endif
                     return _backend.StartWorkerAsync(_recipe, ct);
 #endif
                 }, startup.Token).ConfigureAwait(false);
@@ -663,6 +666,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             finally { _pipes.CloseWriteCopies(); } // The original FD-transfer/start task is joined.
             // Observation cancellation may abort its bus connection. Keep it separate from the
             // original starting connection, whose AddRef must survive through final settlement.
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.NativeStartJoined);
+#endif
             _observations = await LinuxSystemdBackend.ConnectAsync(startup.Token).ConfigureAwait(false);
             while (true)
             {
@@ -670,6 +676,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 var facts = await _observations.ReadUnitAsync(Unit, startup.Token).ConfigureAwait(false);
                 if (_recipe.HasRunningMain(facts))
                 {
+#if EVIDENCE_PRIVATE_C3_SDK
+                    LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.RunningIdentity);
+#endif
                     _worker = LinuxProcessIdentity.Capture(facts.MainPid, _accountData.WorkerUid,
                         _accountData.WorkerGid, Unit, startup.Token);
                     break;
@@ -680,12 +689,24 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             }
             RequireActive(startup.Token);
 #if EVIDENCE_PRIVATE_C3
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.TrackerCaptureStart);
+#endif
             _measurement = LinuxWorkerMeasurement.TryCapture(_worker, startup.Token);
 #if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.TrackerCaptureJoined);
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.ExitPlanStart);
             _measurement?.PrepareFailedExitBarrier(_input.Request.JobDeadlineUtc, startup.Token);
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.ExitPlanJoined);
 #endif
+#endif
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.DescriptorStart);
 #endif
             _workspace.WriteDescriptor(Descriptor(_worker, _owner.Remaining).DescriptorBytes, startup.Token);
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.DescriptorJoined);
+#endif
             _worker.Recheck(startup.Token);
             RequireActive(startup.Token);
             var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -697,6 +718,9 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 _exit = MonitorExitAsync(dispatch.Task, _jobDeadline.Token);
             }
             dispatch.TrySetResult(); // Native monitor work dispatches only outside the ownership lock.
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.MonitorRegistered);
+#endif
         }
         catch { Fail(); throw; }
     }

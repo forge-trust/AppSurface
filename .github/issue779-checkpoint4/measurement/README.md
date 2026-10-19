@@ -70,3 +70,11 @@ their original post-exit path. The bridge adds no accepted proof or success stat
 Its source preparation and local builds are separate from required fresh Linux
 execution; native event observation and cache provenance must be checked before
 claiming measurement success.
+
+Private SDK startup also emits a best-effort closed `evidence-worker-measurement-startup-v1`
+milestone before/after the original native start, kernel capture, measurement preparation
+and descriptor publication. The ten enum labels contain no exception, path or native
+success claim; an optional nullable measurement call returning is not proof it captured
+anything. Diagnostic I/O failure is discarded, and every original token, startup
+allowance, unit property and lifecycle guard remains authoritative. These milestones
+locate an early startup cancellation separately from the later exit-cache protocol.

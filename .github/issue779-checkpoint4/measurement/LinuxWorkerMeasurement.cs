@@ -136,6 +136,20 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
                 original_pidfd_exit = true, normal_exit_code = expectedStatus, modules = rows, native_acceptance = false }));
     }
 
+    /// <summary>Writes one closed private startup milestone; it is not startup or acceptance authority.</summary>
+    internal static void ObserveStartup(WorkerMeasurementStartup stage)
+    {
+        try
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(new
+            {
+                schema = "evidence-worker-measurement-startup-v1", stage = stage.ToString(), native_acceptance = false
+            }));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+        { } // An optional diagnostic write cannot replace the original startup outcome.
+    }
+
     /// <summary>Closes measurement-only handles after the original monitor joins, attempting every close.</summary>
     public void Dispose()
     {
@@ -244,4 +258,29 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
             return new(System.IO.Path.GetFileName(module), path, count, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         }
     }
+}
+
+/// <summary>Closed milestone labels for the private original worker-start procedure.</summary>
+internal enum WorkerMeasurementStartup
+{
+    /// <summary>The original native start callback is about to dispatch.</summary>
+    NativeDispatch,
+    /// <summary>The original start and transferred writer-copy close have returned.</summary>
+    NativeStartJoined,
+    /// <summary>The actual running main is about to be captured.</summary>
+    RunningIdentity,
+    /// <summary>The private tracker metadata and namespace capture is about to start.</summary>
+    TrackerCaptureStart,
+    /// <summary>The optional tracker capture call returned; this alone proves no measurement.</summary>
+    TrackerCaptureJoined,
+    /// <summary>The optional root exit plan preparation is about to run.</summary>
+    ExitPlanStart,
+    /// <summary>The optional root plan call returned.</summary>
+    ExitPlanJoined,
+    /// <summary>The original sealed worker descriptor write is about to run.</summary>
+    DescriptorStart,
+    /// <summary>The original descriptor write returned.</summary>
+    DescriptorJoined,
+    /// <summary>The original monitor task was retained and its dispatch released.</summary>
+    MonitorRegistered
 }
