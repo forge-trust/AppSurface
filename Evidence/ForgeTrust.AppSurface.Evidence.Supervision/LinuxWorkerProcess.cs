@@ -674,7 +674,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             {
                 RequireActive(startup.Token);
                 var facts = await _observations.ReadUnitAsync(Unit, startup.Token).ConfigureAwait(false);
-                if (_recipe.HasRunningMain(facts))
+                var state = _recipe.ClassifyStartup(facts);
+                if (state == LinuxWorkerStartupState.Running)
                 {
 #if EVIDENCE_PRIVATE_C3_SDK
                     LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.RunningIdentity);
@@ -683,7 +684,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                         _accountData.WorkerGid, Unit, startup.Token);
                     break;
                 }
-                if (_recipe.HasFinished(facts)) throw LinuxSystemdBackend.InvalidControl();
+                if (state == LinuxWorkerStartupState.Terminal) throw LinuxSystemdBackend.InvalidControl();
                 RequireOutputNotFailed();
                 await Task.Delay(TimeSpan.FromMilliseconds(25), startup.Token).ConfigureAwait(false);
             }

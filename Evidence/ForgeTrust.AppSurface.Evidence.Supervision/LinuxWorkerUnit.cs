@@ -6,6 +6,20 @@ using Tmds.DBus.Protocol;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
+/// <summary>Classifies sampled worker startup metadata without issuing process identity or settlement.</summary>
+/// <remarks>Only the actual worker holder may capture kernel identity or complete native cleanup.</remarks>
+internal enum LinuxWorkerStartupState
+{
+    /// <summary>The validated sample establishes neither a running main nor a recorded terminal state.</summary>
+    Pending,
+
+    /// <summary>The sample matches the recipe's running-main predicate; kernel capture remains required.</summary>
+    Running,
+
+    /// <summary>The sample records a normal or stopped terminal; startup must reject regardless of exit status.</summary>
+    Terminal,
+}
+
 /// <summary>Fixed worker unit data selected by the protected run owner.</summary>
 /// <remarks>
 /// This recipe issues no admission and performs no filesystem or kernel identity validation.
@@ -184,6 +198,24 @@ internal sealed class LinuxWorkerUnit
             throw LinuxSystemdBackend.InvalidControl();
         return new(worker, owner, runtimeHost, managedEntry, workerUid, workerGid, controlSocket,
             toolRoot, preparedSubjectRoot, outputParent, deniedSubjectResults, runtime, stop, stdout, stderr, producerRoot);
+    }
+
+    /// <summary>Classifies validated startup data so the holder can reject recorded terminal execution.</summary>
+    /// <param name="value">Actual typed systemd sample, or detached data when testing this classifier.</param>
+    /// <returns>Running first, otherwise Terminal for a finished or stopped record, otherwise Pending.</returns>
+    /// <remarks>
+    /// This composes <see cref="HasRunningMain"/>, <see cref="HasFinished"/> and <see cref="HasStopped"/>
+    /// without acquiring identity, accepting an exit outcome or establishing physical settlement.
+    /// Wrong unit/policy and malformed signal status retain fixed ASEVD410 rejection. Uninitialized
+    /// inactive/dead zero-code data and mixed active/running zero-main samples remain pending.
+    /// A terminal sample rejects startup even for normal status zero; the original holder must still
+    /// stop and join its retained operations, inspect the actual group and join both output pumps.
+    /// </remarks>
+    internal LinuxWorkerStartupState ClassifyStartup(LinuxUnitProperties value)
+    {
+        if (HasRunningMain(value)) return LinuxWorkerStartupState.Running;
+        return HasFinished(value) || HasStopped(value)
+            ? LinuxWorkerStartupState.Terminal : LinuxWorkerStartupState.Pending;
     }
 
     /// <summary>Matches running-main metadata against this exact recipe; it issues no process or admission authority.</summary>

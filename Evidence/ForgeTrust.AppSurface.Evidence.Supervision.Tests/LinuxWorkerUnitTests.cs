@@ -607,6 +607,133 @@ public sealed class LinuxWorkerUnitTests
         Assert.DoesNotContain("canary", rejected.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>Detached terminal records classify as terminal without capturing a kernel identity or accepting an exit.</summary>
+    [Theory]
+    [InlineData("failed", "failed", 3, 6)]
+    [InlineData("failed", "failed", 2, 9)]
+    [InlineData("failed", "failed", 1, 0)]
+    [InlineData("failed", "failed", 1, 1)]
+    [InlineData("active", "exited", 1, 0)]
+    [InlineData("inactive", "dead", 1, 1)]
+    public void StartupClassifierRecognizesRecordedTerminalWithoutAcceptingTheExit(string state, string substate,
+        int code, int status)
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var terminal = Running(recipe) with
+        {
+            ActiveState = state, SubState = substate, MainPid = 0,
+            ExecMainCode = code, ExecMainStatus = status,
+        };
+
+        Assert.Equal(LinuxWorkerStartupState.Terminal, recipe.ClassifyStartup(terminal));
+        Assert.Equal(LinuxWorkerStartupState.Terminal,
+            recipe.ClassifyStartup(terminal with { ControlGroup = string.Empty }));
+        Assert.Equal(code, terminal.ExecMainCode);
+        Assert.Equal(status, terminal.ExecMainStatus);
+        Assert.False(output.IsClosed);
+        Assert.False(error.IsClosed);
+    }
+
+    /// <summary>Uninitialized dead metadata cannot be mistaken for an execution that actually terminated.</summary>
+    [Fact]
+    public void StartupClassifierKeepsUninitializedDeadMetadataPending()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var pending = Running(recipe) with
+        {
+            ActiveState = "inactive", SubState = "dead", ControlGroup = string.Empty,
+            MainPid = 0, ExecMainPid = 0, ExecMainCode = 0, ExecMainStatus = 0,
+        };
+
+        Assert.Equal(LinuxWorkerStartupState.Pending, recipe.ClassifyStartup(pending));
+        Assert.Equal(LinuxWorkerStartupState.Pending,
+            recipe.ClassifyStartup(pending with { ExecMainPid = 4001 }));
+        Assert.Equal(LinuxWorkerStartupState.Terminal,
+            recipe.ClassifyStartup(pending with { ExecMainPid = 4001, ExecMainCode = 1 }));
+    }
+
+    /// <summary>The valid running neighbor reaches kernel capture; a mixed zero-main sample continues waiting.</summary>
+    [Fact]
+    public void StartupClassifierDistinguishesRunningMainFromMixedZeroMainMetadata()
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var running = Running(recipe);
+
+        Assert.Equal(LinuxWorkerStartupState.Running, recipe.ClassifyStartup(running));
+        Assert.Equal(LinuxWorkerStartupState.Pending, recipe.ClassifyStartup(running with { MainPid = 0 }));
+        Assert.Equal(LinuxWorkerStartupState.Pending,
+            recipe.ClassifyStartup(running with { ActiveState = "activating", SubState = "start" }));
+        Assert.Equal(LinuxWorkerStartupState.Running, recipe.ClassifyStartup(running));
+    }
+
+    /// <summary>Invalid signal endpoints retain the fixed rejection beside a valid terminal signal.</summary>
+    [Theory]
+    [InlineData(2, 0)]
+    [InlineData(2, 65)]
+    [InlineData(3, 0)]
+    [InlineData(3, 65)]
+    public void StartupClassifierRejectsInvalidSignalStatusWithTheOriginalDiagnostic(int code, int signal)
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe) with
+        {
+            ActiveState = "failed", SubState = "failed", MainPid = 0,
+            ExecMainCode = code, ExecMainStatus = 6,
+        };
+        Assert.Equal(LinuxWorkerStartupState.Terminal, recipe.ClassifyStartup(valid));
+
+        AssertStartupRejected(() => { recipe.ClassifyStartup(valid with { ExecMainStatus = signal }); });
+    }
+
+    /// <summary>Composing startup predicates preserves exact unit and recipe policy rejection.</summary>
+    [Theory]
+    [InlineData("id")]
+    [InlineData("uid")]
+    [InlineData("gid")]
+    [InlineData("type")]
+    [InlineData("runtime")]
+    [InlineData("cgroup")]
+    [InlineData("null")]
+    public void StartupClassifierRejectsForeignUnitOrPolicyWithoutAnInnerException(string field)
+    {
+        using var output = BorrowedOutput();
+        using var error = BorrowedError();
+        var recipe = Create(output, error);
+        var valid = Running(recipe);
+        Assert.Equal(LinuxWorkerStartupState.Running, recipe.ClassifyStartup(valid));
+        var bad = field switch
+        {
+            "id" => valid with { Id = recipe.Owner.Value },
+            "uid" => valid with { User = "0" },
+            "gid" => valid with { Group = "0" },
+            "type" => valid with { Type = "simple" },
+            "runtime" => valid with { RuntimeMaxMicroseconds = recipe.RuntimeMicroseconds + 1 },
+            "cgroup" => valid with { ControlGroup = "/system.slice/" + recipe.Owner.Value },
+            "null" => null!,
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+
+        AssertStartupRejected(() => { recipe.ClassifyStartup(bad); });
+        Assert.Equal(LinuxWorkerStartupState.Running, recipe.ClassifyStartup(valid));
+    }
+
+    private static void AssertStartupRejected(Action action)
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(action);
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Equal("ASEVD410: The protected systemd operation or its response is invalid."
+            + " Fix: use an explicit mode and supported protected worker. See start-here/evidencehost.md.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
     private static void AssertRejected(Func<bool> predicate)
     {
         try { Assert.False(predicate()); }

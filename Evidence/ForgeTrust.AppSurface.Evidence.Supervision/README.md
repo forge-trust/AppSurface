@@ -633,6 +633,22 @@ is failed execution. `HasStopped` separately requires inactive/dead or failed/fa
 normal or signal termination record; active/exited cannot match stopped settlement. Empty pruned terminal
 cgroup metadata is permitted only as data; actual group and output joins still follow. Uninitialized zero code/status cannot establish completion.
 
+Startup uses [`LinuxWorkerUnit.ClassifyStartup`](LinuxWorkerUnit.cs) and its internal
+`LinuxWorkerStartupState` data enum. It checks the exact running-main predicate first and returns
+`Running` only for that sample; the holder must then perform the original kernel identity capture.
+Otherwise a normal finished or stopped record returns `Terminal`: inactive/dead or failed/failed
+signal termination (including dumped code3/signal6 and killed code2/signal9) rejects startup with the
+existing fixed `ASEVD410` diagnostic immediately on observation, rather than waiting for the startup
+deadline to cancel. A recorded normal exit, including status zero, also rejects startup. This does
+not accept a failed exit, publish identity, or establish settlement. Uninitialized inactive/dead
+code0 data and mixed active/running zero-main data remain `Pending` under the original startup token.
+Malformed signal statuses and foreign unit/policy samples retain the same closed diagnostic without
+an inner exception. The original stop, operation/task, actual group, and pump joins still run even
+when no worker identity was captured. This classification changes no timeout, unit policy or cleanup
+authority. The separate private SDK helper dependency/build fix remains necessary for the observed
+loader failure; earlier rejection only makes a terminal startup failure observable without waiting
+for cancellation. Detached classifier tests establish this data behavior, not native execution.
+
 `WaitForExitAsync` joins the original monitor of the authenticated unit's captured main PID. The monitor
 cannot demand live proc files after a running sample: natural exit can occur between those observations.
 Live kernel continuity is checked separately on every admitted control I/O. `StopAndJoinAsync` closes
