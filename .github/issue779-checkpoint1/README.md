@@ -28,6 +28,12 @@ five fixed SDK directory roles and bounded numeric .NET 10 version directories.
 It records modes, numeric ownership, link counts and closed read errors using a
 five-second clock, six-second process bound and 128 entries per version container. It neither changes the SDK
 nor substitutes for the runtime copy's retained-FD, mode and byte checks.
+The C1 workflow sets `DOTNET_INSTALL_DIR` before the pinned setup action, under a
+fresh owner-private `0700` parent. It installs SDK `10.0.401` there rather than
+reusing the image's shared SDK directory. The observed shared runner installation
+had root-owned `0777` directory roles and was rejected by the unchanged `0755`
+contract. Fresh installation addresses that prerequisite without changing the
+shared SDK or normalizing unsafe source permissions in the copy helper.
 
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly

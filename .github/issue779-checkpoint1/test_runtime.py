@@ -145,16 +145,18 @@ class RuntimeCopyControls(unittest.TestCase):
         self.assertFalse(self.output.exists())
 
     def test_main_reports_actual_directory_rejection_without_publishing_runtime(self):
-        (self.sdk / "host/fxr").chmod(0o700)
-        output = io.StringIO()
-        with redirect_stdout(output):
-            exit_code = runtime.main(["--sdk-root", str(self.sdk), "--output", str(self.output)])
-        self.assertEqual(exit_code, 1)
-        self.assertEqual(json.loads(output.getvalue()), {
-            "schema": "issue779-checkpoint1-runtime-failure-v1",
-            "category": "runtime-source-directory", "error_kind": "input", "errno": None,
-        })
-        self.assertFalse(self.output.exists())
+        for mode in (0o700, 0o777):
+            with self.subTest(mode=mode):
+                (self.sdk / "host/fxr").chmod(mode)
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    exit_code = runtime.main(["--sdk-root", str(self.sdk), "--output", str(self.output)])
+                self.assertEqual(exit_code, 1)
+                self.assertEqual(json.loads(output.getvalue()), {
+                    "schema": "issue779-checkpoint1-runtime-failure-v1",
+                    "category": "runtime-source-directory", "error_kind": "input", "errno": None,
+                })
+                self.assertFalse(self.output.exists())
 
     def test_main_normalizes_unknown_errors_without_echoing_messages_or_paths(self):
         secret = "/private-canary/runtime-input"

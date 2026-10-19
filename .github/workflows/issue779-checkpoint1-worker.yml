@@ -31,6 +31,15 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Select a fresh private build SDK installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sdk_parent="$RUNNER_TEMP/checkpoint1-build-sdk"
+          mkdir -m 0700 "$sdk_parent"
+          # setup-dotnet reads this before selecting its installation/reuse root.
+          printf 'DOTNET_INSTALL_DIR=%s/installation\n' "$sdk_parent" >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 10.0.401
