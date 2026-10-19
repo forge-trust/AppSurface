@@ -33,6 +33,11 @@ class RuntimeCopyControls(unittest.TestCase):
         self._file(self.sdk / "sdk" / "do-not-copy", b"sdk", 0o644)
         self._file(self.sdk / "packs" / "do-not-copy", b"packs", 0o644)
         self._file(self.sdk / "templates" / "do-not-copy", b"templates", 0o644)
+        # Model the installed SDK's exact public directory modes even when the
+        # workflow creates this owned fixture under its private 077 umask.
+        for directory in self.sdk.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o755)
         self.output = self.root / "compact-runtime"
         self.receipt = self.root / "runtime-receipt.json"
 

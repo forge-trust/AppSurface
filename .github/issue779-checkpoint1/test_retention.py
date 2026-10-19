@@ -21,6 +21,9 @@ class RetentionControls(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.evidence = self.root / "evidence"
         self.evidence.mkdir(mode=0o755)
+        # The negative controls require this actual pre-retention mode,
+        # independently of the caller's private workflow umask.
+        self.evidence.chmod(0o755)
         self.log = self.evidence / "private.log"
         self.log.write_bytes(b"private canary\x00")
         self.log.chmod(0o644)
