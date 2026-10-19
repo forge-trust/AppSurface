@@ -8,24 +8,28 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 `NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all six instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts and Coverage worker hit-file handoffs. The SDK control additionally binds those handoffs and Aspire against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits.
 
-`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all six files below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
+`LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all application, account and producer inputs below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
 Run the test as part of the complete [solution coverage gate](../../scripts/coverage-solution.sh) in the prepared runtime workflow. The project targets `net10.0` and uses the centrally pinned `coverlet.collector` 10.0.1 as a private test dependency. Its Linux-only `RunSettingsFilePath` is enabled by the same `EVIDENCEHOST_NATIVE_MEASUREMENT=1` property. A local invocation without prepared inputs is expected to skip; setting the flag manually selects the test and therefore requires the complete prepared input set and runsettings.
 
 ## Prepared inputs and merge settings
 
-The runtime workflow downloads the current application-lane artifact and copies exactly these six files into `TestResults/issue779-native-measurement`:
+The runtime workflow downloads the current application-lane artifact and copies exactly these eight files into `TestResults/issue779-native-measurement`:
 
 | File | Meaning |
 | --- | --- |
 | `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all six selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
 | `native-sdk.json` | Separate standard SDK-image report, hash-bound before the outer collector's standard report merge. |
+| `native-sdk-failure.json` | Independently finalized standard report for the genuine failed-test SDK control. |
+| `sdk-test-failure.json` | Finalized failed-SDK receipt, restoration and pre-exit worker-cache provenance. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem/kernel controls for all four expected classes; zero skips or failures. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 
-After those copies succeed, the workflow writes `native.runsettings` with the standard `XPlat Code Coverage` collector, `Format` set to `cobertura`, and `MergeWith` set to the absolute path of `native-supervision.json`. Coverlet's collector reads `MergeWith` as a supported setting. That behavior is present in the pinned Coverlet source at commit [`d21b5b6a08d48f51405ba2c5c5660f91a565776d`](https://github.com/coverlet-coverage/coverlet/tree/d21b5b6a08d48f51405ba2c5c5660f91a565776d), in [`CoverletSettingsParser.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverletSettingsParser.cs) and [`CoverageWrapper.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverageWrapper.cs). The collector remains the driver for the test run and merge; the project does not use `coverlet.msbuild`.
+The two account stages each supply `source.json`, `measurement-binding.json`, `native-accounts.json` and `native-accounts-receipt.json` in the fixed `accounts-creation` and `accounts-rollback` child directories. The producer stage supplies `source.json`, `producer-roots-binding.json`, `native-producer-roots.json`, `native-producer-roots-c2.json` and `native-receipt.json` in `producer-roots`. Every source capture must equal the complete original application capture byte-for-byte. These are mandatory inputs, not optional reports discovered by searching the filesystem.
+
+After those copies succeed, the workflow writes `native.runsettings` with the standard `XPlat Code Coverage` collector, `Format` set to `cobertura`, and `MergeWith` set to the absolute path of `producer-roots/native-producer-roots.json`. This is the last standard report in the ordered application → account creation → account rollback → inner C2 → outer packaged None chain. Original reports remain separate for the consistency checks; the solution collector consumes the final report once, without separately merging its ancestors again. Coverlet's collector reads `MergeWith` as a supported setting. That behavior is present in the pinned Coverlet source at commit [`d21b5b6a08d48f51405ba2c5c5660f91a565776d`](https://github.com/coverlet-coverage/coverlet/tree/d21b5b6a08d48f51405ba2c5c5660f91a565776d), in [`CoverletSettingsParser.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverletSettingsParser.cs) and [`CoverageWrapper.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverageWrapper.cs). The collector remains the driver for the test run and merge; the project does not use `coverlet.msbuild` or edit report counters.
 
 The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain exactly the six selected modules, an executed root path in `LinuxEmptyObservationExecution.cs`, and an executed worker `ConnectAsync` path. First-worker raw-hit hashes must match the unchanged host handoff and the instrumented module hashes. A JSON file's presence or a plausible percentage alone cannot pass these checks.
 
@@ -49,7 +53,7 @@ Coverage describes only code actually reached by the measured process. It proves
 
 ## Relationship to the full gate and trust
 
-The full gate remains the existing [`scripts/coverage-solution.sh`](../../scripts/coverage-solution.sh) command. It merges this native report through the standard collector and evaluates the same aggregate thresholds of 95% lines and 85% branches, plus the configured patch thresholds of 95% lines and 85% branches in Codecov patch-line mode. The gate's default 0.5 percentage-point tolerance applies, and the default patch comparison base is `origin/main` when no explicit base is supplied. This sidecar does not report that the gate has passed; the aggregate and patch reports from an executed full gate determine that result.
+The full gate remains the existing [`scripts/coverage-solution.sh`](../../scripts/coverage-solution.sh) command. It merges this native report through the standard collector and evaluates the same aggregate thresholds of 95% lines and 85% branches, plus the configured patch thresholds of 95% lines and 85% branches in Codecov patch-line mode. The gate's default 0.5 percentage-point tolerance applies. The [cutover workflow](../../.github/workflows/evidencehost-runtime-proof.yml) explicitly pins `COVERAGE_GATE_DIFF_BASE=1991280e8af049db592ebcb705cbf66f4b4c6e8b`, verifies its ancestry and records the comparison commit. The unchanged script still defaults to `origin/main` for other callers; a moving remote branch must not silently replace this task's fixed comparison. This sidecar does not report that the gate has passed; the aggregate and patch reports from an executed full gate determine that result.
 
 The private fixture registrations are not production application-table entries. The production table remains empty, and the native receipt records `trusted_eligibility: false`. Passing measurement checks is neither production acceptance nor a Trusted proof. [Run 39146333953](https://github.com/forge-trust/AppSurface/actions/runs/39146333953) completed all seven instrumented Linux application controls on source `771d0538347998bdbcff0257fe5089c350ca68bc`. The [cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md) binds its artifact digest and complete source verification. Its separate numerical full-gate result was still pending when this observation was recorded; later changes require fresh measurements.
 
@@ -126,8 +130,14 @@ byte-for-byte to its independently verified parent capture; this helper performs
 Git refresh, process launch or ownership construction. Its current v1 contract checks
 all twelve module hashes, source/report/native byte digests, exact five-ID domains,
 variant-specific utility/cleanup outcomes, and real account/owner document hits.
-Future merge lineage is a separate caller obligation; these raw reports are not yet
-connected to the final collector input.
+`ValidateMerged` retains the same receipt and image checks for v2 packets, allowing
+32 MiB only for standard reports. Before using rollback data, the actual native test
+also invokes [`AccountMeasurementLineage.Validate`](AccountMeasurementLineage.cs)
+with the original C3 binding/report/native/root-TRX and both account packets. It checks
+the complete C3 → creation → rollback lineage, hashes, run/attempt identity and each
+stage's source-bound current-method witness. Its eleven byte inputs are bounded at
+160 MiB in total. The two account reports are connected through standard collector
+merges, but their successful local data tests do not establish a native merged run.
 
 The [detached controls](AccountMeasurementTests.cs) cover valid boundary neighbors
 and malformed observations without creating accounts or physical-success evidence.
@@ -141,3 +151,36 @@ for the expected collision rollback, with strict name/numeric absence and comple
 source/artifact digest verification. That run's SDK worker startup failed and its
 full gate was skipped; account success establishes neither consumer acceptance nor
 a solution/patch coverage pass.
+
+### Producer root measurement validation
+
+[`ProducerRootsMeasurement.Validate`](ProducerRootsMeasurement.cs) takes eight byte
+inputs: the independently verified current source capture, final producer binding,
+combined and inner standard reports, producer native receipt, and the exact rollback
+binding/report/native bytes already checked by the account lineage validator. Reports
+permit 32 MiB each, other inputs 8 MiB, and the combined input bound is 160 MiB. The
+helper performs no process launch, filesystem lookup, account creation or report merge.
+Its [detached model controls](ProducerRootsMeasurementTests.cs) test comparisons only.
+
+Only the completed v2 [producer-root packet](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md)
+is eligible for the final merge. Its external predecessor must bind those exact
+rollback bytes and the same workflow run/attempt. Both original/instrumented/restored
+six-module DLL/PDB maps, zero collector/driver exits, seven ordered native controls,
+physical settlement/account outcomes and exact current-source witnesses are required.
+The C2 mutation method and the packaged None quota arm have separate source mappings;
+an earlier positive method cannot stand in for either current witness. Metadata never
+creates an owner, imports worker hits or admits a proof.
+
+The standalone v1 packet from [run 39203788097](https://github.com/forge-trust/AppSurface/actions/runs/39203788097)
+passed all seven actual Linux producer controls on source
+`2dfb35e1155344b155fbe3154c7cb9773f54bf2b`; its artifact digest and full 3288-file capture,
+image maps, original restoration, case receipts, log/report hashes and current witnesses
+were verified. V1 has no external predecessor and remains ineligible as the final gate
+input. The connected v2 chain still requires its own current-source native result and
+the unchanged full gate; standalone success supplies neither.
+
+The integrated data checks passed 189 source-built cases: 132 producer-root cases
+and 57 existing account/lineage cases, with zero failures, skips or compiler diagnostic
+lines. Exact-file formatting completed without changing source bytes. The integrated
+Python predecessor suite passed all 30 data controls. These local checks verify the
+consistency APIs and ordering; they supply no native execution or coverage-gate pass.

@@ -2,11 +2,13 @@
 
 Closed API: bind -> outer collector target(inner) -> inner target(driver) -> finalize.
 Both images are instrumented before the unchanged driver stages either one. The outer
-collector merges only the completed inner report; there is no external predecessor.
+collector merges only the completed inner report. An optional closed v2 predecessor
+is validated at every boundary and consumed only by the inner standard collector.
 """
 from pathlib import Path, PurePosixPath
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -32,6 +34,9 @@ DRIVER = ROOT / '.github/issue779-checkpoint2/run-native.py'
 SUP = 'ForgeTrust.AppSurface.Evidence.Supervision'
 MUTATION_DOC = 'Evidence/' + SUP + '/LinuxRetainedReportSet.cs'
 QUOTA_DOC = 'Evidence/' + SUP + '/SupervisionRunOutputBudget.cs'
+PRIOR_OPTIONS = ('prior_report', 'prior_binding', 'prior_source', 'prior_native', 'prior_artifact_name')
+MERGE_ORDER = ('C3', 'C4Accounts', 'C4AccountRollback', 'C2', 'None')
+ACCOUNT_DRIVER = '.github/issue779-checkpoint4/run-accounts.py'
 
 
 def require(value, reason):
@@ -125,9 +130,126 @@ def context(args):
     require(packaged['schema'] == 'issue779-packaged-consumer-v1' and packaged['source'] == args.source
             and type(packaged['exit']) is int and packaged['exit'] == 0
             and Path(packaged['tool_image']) == args.tool, 'package-image')
-    return {'source': args.source, 'base': args.base, 'source_capture_sha256': digest(body),
+    value = {'source': args.source, 'base': args.base, 'source_capture_sha256': digest(body),
             'package_smoke_sha256': digest(smoke),
             'paths': {key: str(getattr(args, key)) for key in ('tool', 'mutation_tool', 'runtime', 'subject', 'evidence')}}
+    prior = predecessor(args, body, capture)
+    if prior is not None:
+        value['external_predecessor'] = prior
+    return value
+
+
+def prior_enabled(args):
+    """Require all five immutable predecessor inputs together; absence preserves v1."""
+    supplied = [getattr(args, key, None) is not None for key in PRIOR_OPTIONS]
+    require(all(supplied) or not any(supplied), 'prior-arguments')
+    if not any(supplied):
+        return False
+    for key in PRIOR_OPTIONS[:-1]:
+        path = getattr(args, key)
+        require(isinstance(path, Path) and path.is_absolute(), 'prior-path')
+        # Incoming leaves are not part of the outgoing bounded artifact inventory.
+        require(not path.resolve().is_relative_to(args.evidence.resolve()), 'prior-outside-evidence')
+    require(len({getattr(args, key).resolve() for key in PRIOR_OPTIONS[:-1]}) == 4, 'prior-distinct-leaves')
+    require(type(args.prior_artifact_name) is str and re.fullmatch(
+        'issue779-c4-accounts-C4AccountRollback-[1-9][0-9]*-[1-9][0-9]*', args.prior_artifact_name), 'prior-artifact')
+    return True
+
+
+def account_data():
+    """Load only the fixed captured account driver's pure data validators, never its CLI."""
+    spec = importlib.util.spec_from_file_location('producer_roots_account_data', ROOT / ACCOUNT_DRIVER)
+    require(spec is not None and spec.loader is not None, 'account-data-module')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def prior_contribution(modules, capture):
+    """Reject inherited C2 declarations or quota hits, without manufacturing missing zeros.
+
+    A missing quota method/point is accepted as absent, not recorded as a zero hit.
+    A declared point must be exactly zero. Finalization still requires actual current
+    positive witnesses. These comparisons do not subtract, edit or merge counters.
+    """
+    for mutation in (True, False):
+        doc = MUTATION_DOC if mutation else QUOTA_DOC
+        body = read(ROOT / doc)
+        require(digest(body) == capture['files'][doc]['sha256'], 'prior-witness-source')
+        typ = SUP + ('.LinuxRetainedReportSet' if mutation else '.SupervisionRunOutputBudget')
+        method = ('System.Byte[] ' + typ + '::MutateRetainedReportForC2(System.Threading.CancellationToken)' if mutation
+                  else 'System.Boolean ' + typ + '::Charge(System.Int32)')
+        candidates = []
+        for module, docs in modules.items():
+            if Path(module).name == SUP + '.dll':
+                for name, types in docs.items():
+                    if mutation or name.replace('\\', '/') == doc or name.replace('\\', '/').endswith('/' + doc):
+                        if typ in types and method in types[typ]:
+                            candidates.append(types[typ][method])
+        if mutation:
+            require(not candidates, 'prior-c2-method-present')
+        else:
+            anchors = [n for n, line in enumerate(body.decode().splitlines(), 1)
+                       if line.strip() == 'Fail(SupervisionRunOutputFailure.QuotaExceeded);']
+            require(len(anchors) == 1 and len(candidates) <= 1, 'prior-quota-mapping')
+            if candidates:
+                points = [hits for line, hits in candidates[0]['Lines'].items() if int(line) == anchors[0]]
+                require(len(points) <= 1 and all(type(hits) is int and hits == 0 for hits in points),
+                        'prior-quota-positive')
+
+
+def predecessor(args, current_source, capture):
+    """Validate a completed rollback v2 packet, returning only the approved hash lineage.
+
+    The immediate creation ancestry is structurally bound here. The caller's independent
+    C# AccountMeasurementLineage joins its actual bytes back to raw C3 before any gate
+    consumption. This reader cannot confer native acceptance or account authority.
+    """
+    if not prior_enabled(args):
+        return None
+    require(ACCOUNT_DRIVER in capture['files'], 'account-data-capture')
+    source_body = read(args.prior_source)
+    require(source_body == current_source, 'prior-source-bytes')
+    require(capture['schema'] == 'issue779-checkpoint2-source-v1' and capture['source'] == args.source
+            and type(capture['count']) is int and 0 < capture['count'] <= 10000
+            and capture['count'] == len(capture['files']), 'prior-source')
+    require(digest(read(ROOT / ACCOUNT_DRIVER)) == capture['files'][ACCOUNT_DRIVER]['sha256'], 'account-data-source')
+    report_body = read(args.prior_report, REPORT)
+    modules = report(report_body)
+    binding_body = read(args.prior_binding)
+    value = decode(binding_body)
+    native_body = read(args.prior_native)
+    observed = decode(native_body)
+    require(value['schema'] == 'issue779-c4-account-measurement-v2'
+            and value['source'] == args.source and value['variant'] == 'C4AccountRollback'
+            and value['collector'] == 'coverlet.console/10.0.1' and value['native_acceptance'] is False
+            and value['source_capture_sha256'] == digest(source_body)
+            and value['coverage_sha256'] == digest(report_body)
+            and value['native_receipt_sha256'] == digest(native_body), 'prior-binding')
+    require(value['prior_kind'] == 'accounts' and value['prior_variant'] == 'C4Accounts'
+            and value['prior_root_trx_sha256'] is None, 'prior-order')
+    suffix = args.prior_artifact_name.removeprefix('issue779-c4-accounts-C4AccountRollback-')
+    require(value['prior_artifact_name'] == 'issue779-c4-accounts-C4Accounts-' + suffix, 'prior-run-attempt')
+    for key in ('prior_coverage_sha256', 'prior_input_binding_sha256', 'prior_source_capture_sha256',
+                'prior_native_receipt_sha256'):
+        require(type(value[key]) is str and re.fullmatch('[0-9a-f]{64}', value[key]), 'prior-lineage-hash')
+    require(value['prior_source_capture_sha256'] == digest(source_body), 'prior-lineage-source')
+    helpers = account_data()
+    helpers.image_binding(value)
+    require(observed['schema'] == 'issue779-c4-account-driver-v1' and observed['source'] == args.source
+            and observed['variant'] == 'C4AccountRollback' and observed['passed'] is True
+            and observed['groups_empty'] is True and observed['final_groups_empty'] is True
+            and observed['native_acceptance'] is False
+            and type(observed['wrapper_exit']) is int and observed['wrapper_exit'] == 0, 'prior-native')
+    helpers.validate_receipt(observed['receipt'], 'C4AccountRollback', observed['generation'],
+                             value['instrumented'][MODULES[0] + '.dll'])
+    require(value['current_witness'] == helpers.require_current_witness(modules, capture, 'C4AccountRollback'),
+            'prior-current-witness')
+    prior_contribution(modules, capture)
+    return {'kind': 'accounts-rollback', 'variant': 'C4AccountRollback',
+            'artifact_name': args.prior_artifact_name, 'merge_order': list(MERGE_ORDER),
+            'source_capture_sha256': digest(source_body), 'input_binding_sha256': digest(binding_body),
+            'coverage_sha256': digest(report_body), 'native_receipt_sha256': digest(native_body)}
 
 
 def bound(args):
@@ -137,7 +259,10 @@ def bound(args):
 
 
 def common(args):
-    return [item for key in ('tool', 'mutation_tool', 'runtime', 'subject', 'evidence', 'source', 'base')
+    keys = ('tool', 'mutation_tool', 'runtime', 'subject', 'evidence', 'source', 'base')
+    if prior_enabled(args):
+        keys += PRIOR_OPTIONS
+    return [item for key in keys
             for item in ('--' + key.replace('_', '-'), str(getattr(args, key)))]
 
 
@@ -155,6 +280,8 @@ def collector(args, inner):
               '--output', str(args.evidence / (FILES[4] if inner else FILES[5]))]
     if not inner:
         values += ['--merge-with', str(args.evidence / FILES[4])]
+    elif prior_enabled(args):
+        values += ['--merge-with', str(args.prior_report)]
     return values
 
 
@@ -188,6 +315,8 @@ def target(args):
         # Outer process has already instrumented None. Inner instruments C2 before driver staging.
         require(image(args.mutation_tool) == original['original']['C2'], 'inner-original')
         code = subprocess.run(collector(args, True), stdin=subprocess.DEVNULL, check=False).returncode
+        if prior_enabled(args):
+            require(original['context'] == context(args), 'context-changed-after-inner')
         write(args.evidence / FILES[2], {'inner_collector_exit': code,
               'original_sha256': digest(read(args.evidence / FILES[0]))})
         return code
@@ -353,7 +482,11 @@ def finalize(args):
     combined_report = report(combined)
     witnesses = {'C2': witness(report(raw), capture, True), 'None': witness(combined_report, capture, False)}
     require(witness(combined_report, capture, True) == witnesses['C2'], 'merged-current-witness')
-    value = {'schema': 'issue779-producer-roots-measurement-v1', 'context': original['context'],
+    prior = original['context'].get('external_predecessor')
+    if prior is not None:
+        require(original['context'] == context(args), 'context-changed-before-publication')
+    value = {'schema': 'issue779-producer-roots-measurement-v2' if prior is not None else 'issue779-producer-roots-measurement-v1',
+             'context': original['context'],
              'original': original['original'], 'instrumented': armed['instrumented'], 'restored': restored,
              'original_binding_sha256': original_sha,
              'instrumented_binding_sha256': digest(read(args.evidence / FILES[1])),
@@ -365,8 +498,8 @@ def finalize(args):
              'input_inventory_sha256': digest(inventory_bytes),
              'reports': {FILES[4]: {'sha256': digest(raw), 'bytes': len(raw)},
                          FILES[5]: {'sha256': digest(combined), 'bytes': len(combined)}},
-             'current_witness': witnesses, 'external_predecessor': None,
-             'root_only': True, 'worker_imported': False, 'native_acceptance': False, 'ready_for_gate': False}
+             'current_witness': witnesses, 'external_predecessor': prior,
+             'root_only': True, 'worker_imported': False, 'native_acceptance': False, 'ready_for_gate': prior is not None}
     retention(args.evidence, len(canonical(value)))
     write(args.evidence / FILES[6], value)
 
@@ -380,11 +513,14 @@ def main():
     parser.add_argument('--base', required=True, choices=(BASE,))
     parser.add_argument('--stage', choices=('inner', 'driver'))
     parser.add_argument('--collector-exit', type=int)
+    for name in PRIOR_OPTIONS:
+        parser.add_argument('--' + name.replace('_', '-'), type=str if name == 'prior_artifact_name' else Path)
     args = parser.parse_args()
     require(re.fullmatch('[0-9a-f]{40}', args.source), 'head')
     require(all(getattr(args, n).is_absolute() for n in ('tool', 'mutation_tool', 'runtime', 'subject', 'evidence')), 'absolute-path')
     require((args.stage is not None) == (args.operation == 'target')
             and (args.collector_exit is not None) == (args.operation == 'finalize'), 'operation-arguments')
+    prior_enabled(args)
     os.umask(0o077)
     return {'bind': bind, 'target': target, 'finalize': finalize}[args.operation](args) or 0
 

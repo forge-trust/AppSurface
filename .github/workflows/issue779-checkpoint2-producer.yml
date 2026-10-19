@@ -8,6 +8,10 @@ on:
         required: false
         type: boolean
         default: false
+      prior_artifact_name:
+        required: false
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -75,6 +79,29 @@ jobs:
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_roots.py > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_retention.py >> "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint2-coverlet" > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-install.log" 2>&1
+      - name: Download only the current successful rollback predecessor
+        if: inputs.prior_artifact_name != ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.prior_artifact_name }}
+          path: ${{ runner.temp }}/checkpoint2-prior-download
+      - name: Stage the fixed immutable predecessor inputs
+        if: inputs.prior_artifact_name != ''
+        shell: bash
+        env:
+          PRIOR_ARTIFACT: ${{ inputs.prior_artifact_name }}
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ '${{ inputs.measure_roots }}' == true ]]
+          [[ "$PRIOR_ARTIFACT" == "issue779-c4-accounts-C4AccountRollback-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" ]]
+          prior="$RUNNER_TEMP/checkpoint2-prior"
+          mkdir -m 0700 "$prior"
+          for name in source.json measurement-binding.json native-accounts.json native-accounts-receipt.json; do
+            cp "$RUNNER_TEMP/checkpoint2-prior-download/$name" "$prior/$name"
+          done
+          chmod 0400 "$prior"/*
+          printf 'CHECKPOINT2_PRIOR=%s\nCHECKPOINT2_PRIOR_ARTIFACT=%s\n' "$prior" "$PRIOR_ARTIFACT" >> "$GITHUB_ENV"
       - name: Measure the unchanged seven controls through standard root collectors
         id: producer_measurement
         if: inputs.measure_roots
@@ -85,6 +112,7 @@ jobs:
           ulimit -c 0
           timeout --signal=KILL 1800 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             RUNNER_TEMP="$RUNNER_TEMP" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" GITHUB_SHA="$GITHUB_SHA" CHECKPOINT2_TOOL="$CHECKPOINT2_TOOL" CHECKPOINT2_SDK_ROOT="$CHECKPOINT2_SDK_ROOT" \
+            CHECKPOINT2_PRIOR="${CHECKPOINT2_PRIOR:-}" CHECKPOINT2_PRIOR_ARTIFACT="${CHECKPOINT2_PRIOR_ARTIFACT:-}" \
             /usr/bin/python3 -B - > "$RUNNER_TEMP/checkpoint2-evidence/native-driver.log" 2>&1 <<'PY_ROOTS'
           from pathlib import Path
           from types import SimpleNamespace
@@ -98,6 +126,13 @@ jobs:
           data = SimpleNamespace(tool=Path(os.environ['CHECKPOINT2_TOOL']), mutation_tool=temporary / 'checkpoint2-tool-c2',
               runtime=Path(os.environ['CHECKPOINT2_SDK_ROOT']), subject=workspace / '.github/issue779-checkpoint2/subject',
               evidence=temporary / 'checkpoint2-evidence', source=os.environ['GITHUB_SHA'], base=BASE)
+          if os.environ['CHECKPOINT2_PRIOR']:
+              prior = Path(os.environ['CHECKPOINT2_PRIOR'])
+              data.prior_report = prior / 'native-accounts.json'
+              data.prior_binding = prior / 'measurement-binding.json'
+              data.prior_source = prior / 'source.json'
+              data.prior_native = prior / 'native-accounts-receipt.json'
+              data.prior_artifact_name = os.environ['CHECKPOINT2_PRIOR_ARTIFACT']
           prefix = ['/usr/bin/python3', '-B', str(SELF)]
           subprocess.run([*prefix, 'bind', *common(data)], check=True)
           outer_exit = subprocess.run(collector(data, False), check=False).returncode

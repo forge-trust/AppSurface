@@ -15,9 +15,11 @@ concurrency:
 jobs:
   packaged-producer:
     name: Packaged CSharp CLI producer and artifact custody
+    needs: account-rollback
     uses: ./.github/workflows/issue779-checkpoint2-producer.yml
     with:
       measure_roots: true
+      prior_artifact_name: ${{ needs.account-rollback.outputs.artifact_name }}
 
   application-consumers:
     name: CSharp CLI and SDK application consumers
@@ -43,7 +45,7 @@ jobs:
 
   solution-coverage:
     name: Unchanged solution and codecov patch gates
-    needs: [application-consumers, account-creation, account-rollback]
+    needs: [application-consumers, account-creation, account-rollback, packaged-producer]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -93,6 +95,11 @@ jobs:
         with:
           name: ${{ needs.account-rollback.outputs.artifact_name }}
           path: ${{ runner.temp }}/checkpoint4-account-rollback-input
+      - name: Download the successful packaged producer root measurement
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: issue779-csharp-checkpoint2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint4-producer-input
       - name: Stage only fixed source-bound native measurement inputs
         run: |
           set -euo pipefail
@@ -115,6 +122,12 @@ jobs:
               cp "$RUNNER_TEMP/checkpoint4-account-$variant-input/$name" "$destination/$name"
             done
           done
+          destination=TestResults/issue779-native-measurement/producer-roots
+          mkdir -m 0700 "$destination"
+          for name in source.json producer-roots-binding.json native-producer-roots.json native-producer-roots-c2.json; do
+            cp "$RUNNER_TEMP/checkpoint4-producer-input/$name" "$destination/$name"
+          done
+          cp "$RUNNER_TEMP/checkpoint4-producer-input/native/native-receipt.json" "$destination/native-receipt.json"
           python3 -B - <<'PY'
           from pathlib import Path
           from xml.etree import ElementTree as ET
@@ -122,7 +135,7 @@ jobs:
           settings = ET.Element('RunSettings')
           collector = ET.SubElement(ET.SubElement(ET.SubElement(settings, 'DataCollectionRunSettings'), 'DataCollectors'), 'DataCollector', friendlyName='XPlat Code Coverage')
           configuration = ET.SubElement(collector, 'Configuration')
-          ET.SubElement(configuration, 'MergeWith').text = str(root / 'accounts-rollback/native-accounts.json')
+          ET.SubElement(configuration, 'MergeWith').text = str(root / 'producer-roots/native-producer-roots.json')
           ET.SubElement(configuration, 'Format').text = 'cobertura'
           ET.ElementTree(settings).write(root / 'native.runsettings', encoding='utf-8', xml_declaration=True)
           PY

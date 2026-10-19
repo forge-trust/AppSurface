@@ -35,7 +35,8 @@ Every operation takes the same required `--tool` (None), `--mutation-tool` (C2),
 `--runtime`, `--subject`, `--evidence`, `--source` (full lower-case SHA), and `--base`
 (`416b30919e6c4d03b634d9d3fe558884b02f0b91`). Paths must be absolute.
 `--stage` is legal only for `target`; `--collector-exit` only for `finalize`.
-There is no predecessor, arbitrary command, callback, image variant, or report input option.
+Without the optional predecessor group below, these operations retain the v1 standalone
+contract. There is no arbitrary command, callback, or image variant option.
 Source completeness/HEAD provenance is established by the existing clean-tree source
 capture step; this reader compares the supplied capture and all its physical source files,
 and never invokes Git or refreshes the capture.
@@ -49,7 +50,9 @@ private log. The console must then be at the exact `.store` path shown below.
 The [C2 workflow](../../workflows/issue779-checkpoint2-producer.yml) exposes
 `measure_roots` defaulting to false. The [cutover workflow](../../workflows/evidencehost-runtime-proof.yml)
 enables it. Ordinary direct checkpoint runs retain their original command. This
-standalone report is not yet a gate input; `ready_for_gate` remains false.
+standalone v1 report is not a gate input; `ready_for_gate` remains false. V2 preparation
+requires separate native proof, workflow wiring and independent lineage validation before
+the parent may use it as a gate input.
 
 The following Python is the complete argument construction. `collector` uses
 [`measurement_arguments.arguments`](../measurement_arguments.py) for .NET's
@@ -101,11 +104,85 @@ RUNTIME/dotnet CONSOLE NONE/ForgeTrust.AppSurface.Cli.dll
 
 The inner argv has the same six includes and format, uses
 `C2/ForgeTrust.AppSurface.Cli.dll`, `--stage driver`, and
-`--output EVIDENCE/native-producer-roots-c2.json`, with **no `--merge-with`**.
+`--output EVIDENCE/native-producer-roots-c2.json`, with **no `--merge-with` in v1**.
 `CONSOLE` is exactly
 `EVIDENCE/../checkpoint2-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll`.
 Thus inner C2 completes before outer None performs its one standard merge.
 Use the returned argument arrays directly; do not concatenate these displays into shell text.
+
+## Optional completed rollback predecessor (v2)
+
+Every operation accepts the following **all-or-none** group. The four input leaves
+must be distinct absolute paths outside the outgoing evidence tree:
+
+| Option | Required input |
+| --- | --- |
+| `--prior-report` | Completed standard `native-accounts.json`, at most 32 MiB |
+| `--prior-binding` | Completed rollback `measurement-binding.json`, at most 8 MiB |
+| `--prior-source` | Full `source.json`, byte-identical to the current capture, at most 8 MiB |
+| `--prior-native` | Actual `native-accounts-receipt.json`, at most 8 MiB |
+| `--prior-artifact-name` | `issue779-c4-accounts-C4AccountRollback-RUN-ATTEMPT`, positive decimal identifiers |
+
+Set `prior_report`, `prior_binding`, `prior_source`, `prior_native` (each a `Path`)
+and `prior_artifact_name` on `a` in the construction above. `common(a)` forwards the
+same five values to both target stages and finalization. `bind` records their hashes
+in its context. Both target entries and finalization re-read and compare that context;
+the outer target also rechecks after joining the inner collector, and finalization
+rechecks immediately before publication. A later self-consistent but different packet
+cannot replace the bound predecessor.
+
+Only `issue779-c4-account-measurement-v2` / `C4AccountRollback` is accepted. The
+reader requires the current full source/head, six standard modules, exact original
+and instrumented twelve-file maps, changed DLLs, pinned collector, actual native
+wrapper exit zero, settled groups and strict rollback receipt. The existing
+[`run-accounts.py`](../run-accounts.py) **data-only** image, receipt and source-witness
+validators enforce the original failure stage/code, utility settlement, original-handle
+closure and five NSS IDs (distinct within UID/GID domains; equality across domains is
+valid). They do not create holders or run the account driver. The rollback's unique
+current-source collision `MoveNext` witness must be positive and exactly bound to the
+private and production partial source hashes. Its immediate ancestor must be C4Accounts,
+from the same run/attempt and full source; required ancestor hashes must be well formed.
+
+The inner C2 argv adds exactly `--merge-with PRIOR_REPORT`. The outer None argv keeps
+exactly `--merge-with EVIDENCE/native-producer-roots-c2.json`. This yields the supported
+console chain **C3 → C4Accounts → C4AccountRollback → C2 → None**. The inner filename
+is unchanged, but in v2 its report includes the completed rollback ancestry; it must
+not be described as an isolated raw C2 report. No counters are edited, subtracted,
+averaged, translated or merged by Python. No worker tracker is imported.
+
+Completed v2 finalization uses schema `issue779-producer-roots-measurement-v2`, retains
+all v1 binding fields and sets `external_predecessor` to exactly:
+
+```json
+{
+  "kind": "accounts-rollback",
+  "variant": "C4AccountRollback",
+  "artifact_name": "issue779-c4-accounts-C4AccountRollback-RUN-ATTEMPT",
+  "merge_order": ["C3", "C4Accounts", "C4AccountRollback", "C2", "None"],
+  "source_capture_sha256": "SHA256_OF_EXACT_PRIOR_SOURCE_BYTES",
+  "input_binding_sha256": "SHA256_OF_EXACT_PRIOR_BINDING_BYTES",
+  "coverage_sha256": "SHA256_OF_EXACT_PRIOR_STANDARD_REPORT_BYTES",
+  "native_receipt_sha256": "SHA256_OF_EXACT_PRIOR_NATIVE_RECEIPT_BYTES"
+}
+```
+
+The same object is bound in `context.external_predecessor`; run and attempt are
+encoded in the artifact name, with no additional fields. `ready_for_gate=true` means
+only that this v2 measurement finalization completed. `native_acceptance=false`,
+`worker_imported=false` and `root_only=true` remain fixed. The future caller must
+independently validate the complete actual C3 → creation → rollback byte chain with
+[`AccountMeasurementLineage`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/AccountMeasurementLineage.cs)
+and the root packet before the existing collector consumes it. This local reader has
+only rollback inputs and cannot independently authenticate every earlier ancestor.
+V1 retains its original schema, null external predecessor and false readiness.
+
+The predecessor must contain **no C2 mutation method declaration**, even at zero hits.
+The exact current quota statement must have zero prior hits **if its sequence point
+exists**. A missing method or point stays absent; it is never converted into a synthetic
+zero. Both exact current positive witnesses remain mandatory after collection. These
+checks establish bounded contribution controls, not a numerical coverage gain or
+per-case attribution. All incoming leaves stay outside the outgoing artifact, whose
+seven filenames and total/count bounds remain unchanged.
 
 ## Retained file whitelist and interpretation
 
@@ -117,7 +194,7 @@ Exactly seven new retained leaves, in the existing evidence directory:
 | `producer-roots-instrumented.json` | Both instrumented 12-file maps, captured before staging |
 | `producer-roots-inner-exit.json` | Actual joined inner collector exit and original binding hash |
 | `producer-roots-target.json` | Actual driver exit and instrumented binding hash |
-| `native-producer-roots-c2.json` | Unmodified standard inner C2 report, without predecessor |
+| `native-producer-roots-c2.json` | Unmodified standard inner C2 report (v1 alone; v2 with rollback ancestry) |
 | `native-producer-roots.json` | Unmodified outer None report with completed C2 merged by Coverlet |
 | `producer-roots-binding.json` | Successful final measurement binding, restoration maps and witnesses |
 
@@ -163,19 +240,36 @@ Fresh Linux proof remains required: package PDB/all-six-module availability, opt
 None sequence points, standard trackers surviving genuine root exit (including all
 negative exits), actual restoration and report sizes must be observed. Missing symbols,
 missing/zero witnesses, nonzero collectors, or exhausted original allowance are blockers,
-not grounds for changing the source, timeout, report or policy. The final binding sets
-`ready_for_gate=false`; future C3/accounts/rollback/C2 lineage validation and gate caller
-integration require separate review. Adding a predecessor later changes the raw-report
-contract and must bind the actual ordered inputs, not infer current contribution from
-already positive ancestor counters.
+not grounds for changing the source, timeout, report or policy. The v1 final binding sets
+`ready_for_gate=false`. The v2 contract above binds actual ordered inputs and requires
+current contribution controls. Workflow/caller integration and fresh native proof remain
+separately reviewed; portable packets cannot supply them.
 
 ## Validation status
 
-Fifteen focused data controls pass locally after integration. Independent source
-review found no remaining P1/P2 in the three-file collector preparation. The original
-Linux artifact inventory includes all six DLL/PDB pairs in both images; a fresh run
-must still establish actual instrumentation, flushes, witnesses, report size and
-restoration. No new native result or coverage gain is inferred from these checks.
+The private v2 preparation's single bounded Python suite passed all **30** data and
+small-file tests (15 existing methods with unchanged ASTs plus 15 new predecessor
+controls). It exercises exact source bytes, stage/order/hash bindings, rollback error
+and NSS data, unique current witnesses, inherited positive rejection, changed-prior
+replay, incoming node safety and readiness publication. No driver, collector or native
+process ran in this suite. The v2 console chain still requires independent review and
+fresh actual Linux proof; this status does not claim integration or gate consumption.
+
+The initial v1 preparation passed fifteen focused data controls and independent
+source review. Subsequently, [run 39203788097](https://github.com/forge-trust/AppSurface/actions/runs/39203788097)
+on source `2dfb35e1155344b155fbe3154c7cb9773f54bf2b` passed all seven actual Linux producer
+controls. Artifact SHA-256 `fadd35b2698af9dd98423656f8ece5e347ffbe378f1fac91b9a38476b31d6d59`
+and the complete 3288-file capture, both original/instrumented/staged/restored image
+maps, case/log hashes and current witnesses were verified. Its standard inner report
+is 6,030,924 bytes; the combined report is 9,952,958 bytes. That completed v1 packet
+is root-only, has no external predecessor and remains ineligible as the final gate
+input. This observation does not establish a connected v2 run or a full gate pass.
+
+After integration, all thirty Python data controls passed again. The C# root and
+account consistency classes passed 189 source-built cases with zero failures/skips
+or compiler diagnostics. Those are local data checks. The [native validation and
+merge reference](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#producer-root-measurement-validation)
+defines the mandatory actual v2 inputs and the unchanged final gate.
 
 A first standalone collection failed, followed by the original generic leaf-bound
 retention check; that check did not identify the offending file or predicate, so no

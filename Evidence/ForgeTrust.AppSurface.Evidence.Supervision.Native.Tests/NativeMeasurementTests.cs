@@ -57,6 +57,12 @@ public sealed class NativeMeasurementTests
         var rollback = ReadAccount("accounts-rollback", "C4AccountRollback");
         AccountMeasurementLineage.Validate(source, bindingBytes, coverage, native, rootTrx,
             creation.Binding, creation.Coverage, creation.Native, rollback.Binding, rollback.Coverage, rollback.Native);
+        var producerDirectory = Path.Join(directory, "producer-roots");
+        Assert.Equal(source, Read(producerDirectory, "source.json"));
+        ProducerRootsMeasurement.Validate(source, Read(producerDirectory, "producer-roots-binding.json"),
+            Read(producerDirectory, "native-producer-roots.json", 32L * 1024 * 1024),
+            Read(producerDirectory, "native-producer-roots-c2.json", 32L * 1024 * 1024),
+            Read(producerDirectory, "native-receipt.json"), rollback.Binding, rollback.Coverage, rollback.Native);
 
         (byte[] Binding, byte[] Coverage, byte[] Native) ReadAccount(string folder, string variant)
         {
