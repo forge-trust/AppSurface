@@ -170,11 +170,12 @@ public sealed class LinuxKernelIdentityNativeTests
         private Task? _stop;
         private readonly Stopwatch _startClock = new();
         private readonly string _executable;
+        private readonly string[] _arguments;
 
         internal TestUnit() : this(LinuxUnitRole.Worker, "/usr/bin/sleep") { }
 
-        private TestUnit(LinuxUnitRole role, string executable)
-        { Unit = LinuxUnitName.Create(role, Guid.NewGuid()); _executable = executable; }
+        private TestUnit(LinuxUnitRole role, string executable, string[]? arguments = null)
+        { Unit = LinuxUnitName.Create(role, Guid.NewGuid()); _executable = executable; _arguments = arguments ?? ["30"]; }
 
         /// <summary>Runs a test-owned absolute executable in the same bounded helper policy with an application unit name.</summary>
         internal static TestUnit ForApplicationExecutable(string executable)
@@ -182,6 +183,19 @@ public sealed class LinuxKernelIdentityNativeTests
             if (!Path.IsPathFullyQualified(executable) || !File.Exists(executable))
                 throw new ArgumentException("An existing test-owned absolute executable is required.", nameof(executable));
             return new(LinuxUnitRole.Application, executable);
+        }
+
+        /// <summary>Starts one test-owned shell copy and one fixed sleep child for actual kernel ancestry comparisons.</summary>
+        /// <remarks>Only fresh fixed-name /run fixture files are accepted; this test helper issues no product owner or health receipt.</remarks>
+        internal static TestUnit ForApplicationProcessTree(string executable, string runtime)
+        {
+            var parent = Path.GetDirectoryName(executable);
+            if (parent is null || !System.Text.RegularExpressions.Regex.IsMatch(parent,
+                    "^/run/issue779-dcp-tree-native-[0-9a-f]{32}$")
+                || executable != parent + "/dcp" || runtime != parent + "/runtime"
+                || !File.Exists(executable) || !File.Exists(runtime))
+                throw new ArgumentException("Existing fixed-name test-owned executables are required.");
+            return new(LinuxUnitRole.Application, executable, ["-c", runtime + " 30 & wait"]);
         }
 
         internal LinuxUnitName Unit { get; }
@@ -205,7 +219,7 @@ public sealed class LinuxKernelIdentityNativeTests
                 "--property=KillMode=control-group",
                 "--property=RemainAfterExit=yes",
                 "--property=Restart=no",
-                _executable, "30",
+                _executable, .. _arguments,
             ], StartLimit).ConfigureAwait(false);
             RequireSuccess(result);
 
