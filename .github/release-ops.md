@@ -60,6 +60,16 @@ release tooling, it verifies that the checkout is the current tip of the
 selected base. That job never receives the organization-owned
 `appsurface-release-bot` GitHub App credentials.
 
+The `prepare` job explicitly sets
+[`cache-mode: none`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcache-mode),
+so GitHub's scoped cache token denies both restores and saves before any
+base-ref-controlled tooling runs. Keep this restriction on the job: a read-only
+`GITHUB_TOKEN`, omitted cache actions, or an `ACTIONS_CACHE_MODE` environment
+variable does not remove the default cache-write capability of a
+[`workflow_dispatch` run](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#cache-access-for-low-trust-workflow-triggers).
+Release preparation does not use a dependency cache; it passes the bundle and
+report to the publishing job through the artifact upload and download steps.
+
 After that job succeeds, a separate fresh runner downloads only the bundle and
 report. It does not check out or execute files from `base-ref`; before it reads
 the App credentials, it fetches the selected protected base itself using its
