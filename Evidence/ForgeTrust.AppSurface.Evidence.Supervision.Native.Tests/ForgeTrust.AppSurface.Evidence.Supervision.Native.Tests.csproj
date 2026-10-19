@@ -16,6 +16,7 @@
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

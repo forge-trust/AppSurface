@@ -33,6 +33,12 @@ After those copies succeed, the workflow writes `native.runsettings` with the st
 
 The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain exactly the six selected modules, an executed root path in `LinuxEmptyObservationExecution.cs`, and an executed worker `ConnectAsync` path. First-worker raw-hit hashes must match the unchanged host handoff and the instrumented module hashes. A JSON file's presence or a plausible percentage alone cannot pass these checks.
 
+All prepared-input paths use the shared [TestPathUtils.PathUnder](../../tests/ForgeTrust.AppSurface.Testing/README.md)
+helper, including dynamic folder and filename parameters. It validates lexical containment
+under the selected repository or staging directory. It is a test path helper, not a
+symlink-resolving filesystem sandbox or native ownership check; the independent source,
+artifact and measurement checks remain mandatory.
+
 ## Instrumentation and native controls
 
 In the application workflow, Coverlet Console 10.0.1 instruments exactly the private CLI, Contracts, Planner, Coverage, Aspire and Supervision modules before the wrapper starts the original native runner. Every original/instrumented DLL and PDB hash is bound. The [private C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) retains the actual worker's private temporary directory before descriptor publication, then copies its genuine first-normal-worker hit bytes unchanged after original normal exit. The root tracker and standard collector perform all counter accumulation and interpretation. This fixture is absent from ordinary images; no production environment, grant, deadline or supervision policy changes.

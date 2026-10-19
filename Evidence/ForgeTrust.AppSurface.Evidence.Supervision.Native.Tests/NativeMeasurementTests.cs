@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 
@@ -17,7 +18,7 @@ public sealed class NativeMeasurementTests
     public async Task LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls()
     {
         var repo = FindRepository();
-        var directory = Path.Join(repo, "TestResults", "issue779-native-measurement");
+        var directory = TestPathUtils.PathUnder(repo, "TestResults", "issue779-native-measurement");
         var info = new ProcessStartInfo("git") { WorkingDirectory = repo, RedirectStandardOutput = true, RedirectStandardError = true };
         info.ArgumentList.Add("rev-parse"); info.ArgumentList.Add("HEAD");
         using var process = Process.Start(info)!;
@@ -47,7 +48,7 @@ public sealed class NativeMeasurementTests
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"), rootTrx);
         Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
         const string producerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs";
-        var producerSource = File.ReadAllBytes(Path.Join(repo, producerPath));
+        var producerSource = File.ReadAllBytes(TestPathUtils.PathUnder(repo, producerPath));
         using var sourceBinding = JsonDocument.Parse(source);
         Assert.Equal(sourceBinding.RootElement.GetProperty("files").GetProperty(producerPath).GetProperty("sha256").GetString(),
             Convert.ToHexStringLower(SHA256.HashData(producerSource)));
@@ -57,7 +58,7 @@ public sealed class NativeMeasurementTests
         var rollback = ReadAccount("accounts-rollback", "C4AccountRollback");
         AccountMeasurementLineage.Validate(source, bindingBytes, coverage, native, rootTrx,
             creation.Binding, creation.Coverage, creation.Native, rollback.Binding, rollback.Coverage, rollback.Native);
-        var producerDirectory = Path.Join(directory, "producer-roots");
+        var producerDirectory = TestPathUtils.PathUnder(directory, "producer-roots");
         Assert.Equal(source, Read(producerDirectory, "source.json"));
         ProducerRootsMeasurement.Validate(source, Read(producerDirectory, "producer-roots-binding.json"),
             Read(producerDirectory, "native-producer-roots.json", 32L * 1024 * 1024),
@@ -66,7 +67,7 @@ public sealed class NativeMeasurementTests
 
         (byte[] Binding, byte[] Coverage, byte[] Native) ReadAccount(string folder, string variant)
         {
-            var accountDirectory = Path.Join(directory, folder);
+            var accountDirectory = TestPathUtils.PathUnder(directory, folder);
             var accountSource = Read(accountDirectory, "source.json");
             Assert.Equal(source, accountSource); // The complete original source capture, not only a claimed commit.
             var accountBinding = Read(accountDirectory, "measurement-binding.json");
@@ -79,7 +80,7 @@ public sealed class NativeMeasurementTests
 
     private static byte[] Read(string directory, string name, long maximum = 8L * 1024 * 1024)
     {
-        var path = Path.Join(directory, name);
+        var path = TestPathUtils.PathUnder(directory, name);
         Assert.True(File.Exists(path), "Prepare the current source-bound Linux native measurement before running the complete gate.");
         using var stream = File.OpenRead(path);
         Assert.InRange(stream.Length, 1L, maximum);
@@ -193,7 +194,7 @@ public sealed class NativeMeasurementTests
     private static string FindRepository()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Join(directory.FullName, "ForgeTrust.AppSurface.slnx"))) directory = directory.Parent;
+        while (directory is not null && !File.Exists(TestPathUtils.PathUnder(directory.FullName, "ForgeTrust.AppSurface.slnx"))) directory = directory.Parent;
         return directory?.FullName ?? throw new InvalidOperationException("The native measurement fixture requires its source checkout.");
     }
 }
