@@ -84,6 +84,8 @@ class PublisherControls(unittest.TestCase):
         secret = "/private-canary/publish"
         for error, category, kind, number in (
                 (publisher.binding.Rejected("image-file"), "image-file", "input", None),
+                (publisher.binding.Rejected("publication-mode-owner"), "publication-mode-owner", "input", None),
+                (publisher.binding.Rejected("publication-mode-private-canary"), "publication-input-invalid", "input", None),
                 (publisher.binding.Rejected(secret), "publication-input-invalid", "input", None),
                 (ValueError(secret), "publication-input-invalid", "input", None),
                 (PermissionError(13, secret, secret), "publication-os-error", "os", 13),

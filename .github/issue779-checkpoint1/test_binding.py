@@ -367,5 +367,142 @@ class HelperBuildTests(unittest.TestCase):
                     binding.validate_build(bad, raw, HEAD, selector)
 
 
+class PublishImagePreparationTests(unittest.TestCase):
+    """Owned ordinary-file packaging controls; no protected image is admitted."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="c1-image-modes-")
+        self.addCleanup(self.temporary.cleanup)
+        self.parent = Path(self.temporary.name).resolve()
+        self.root = self.parent / "bundle"
+        self.root.mkdir(mode=0o700)
+        self.data = self.root / "data.bin"
+        self.data.write_bytes(b"actual copied dependency bytes")
+        self.data.chmod(0o600)
+        self.executable = self.root / "native"
+        self.executable.write_bytes(b"actual executable fixture bytes")
+        self.executable.chmod(0o744)
+        self.nested = self.root / "nested"
+        self.nested.mkdir(mode=0o700)
+        self.metadata = self.nested / "metadata.json"
+        self.metadata.write_bytes(b"{}")
+        self.metadata.chmod(0o640)
+
+    def prepare(self):
+        return binding.prepare_publish_image(self.root, deadline=time.monotonic() + 5)
+
+    def test_canonical_modes_preserve_all_bytes_and_private_parent(self):
+        expected = {p: p.read_bytes() for p in (self.data, self.executable, self.metadata)}
+        self.prepare()
+        self.assertEqual({p: p.read_bytes() for p in expected}, expected)
+        self.assertEqual(self.data.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.metadata.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(self.executable.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.nested.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.parent.stat().st_mode & 0o777, 0o700)
+        measured = binding.inventory(self.root, "data.bin", deadline=time.monotonic() + 5)
+        self.assertEqual(set(measured["files"]), {"data.bin", "native", "nested/metadata.json"})
+
+    def test_symlink_hardlink_and_fifo_reject_before_chmod(self):
+        outside = self.parent / "outside"
+        outside.write_bytes(b"outside sentinel")
+        outside.chmod(0o640)
+        for kind in ("symlink", "hardlink", "fifo"):
+            with self.subTest(kind=kind):
+                bad = self.root / "z-bad"
+                if kind == "symlink": bad.symlink_to(outside)
+                elif kind == "hardlink": os.link(outside, bad)
+                else: os.mkfifo(bad)
+                try:
+                    with mock.patch.object(binding.os, "fchmod") as chmod:
+                        with self.assertRaises(binding.Rejected): self.prepare()
+                        chmod.assert_not_called()
+                    self.assertEqual(outside.read_bytes(), b"outside sentinel")
+                    self.assertEqual(outside.stat().st_mode & 0o777, 0o640)
+                    self.assertEqual(self.data.stat().st_mode & 0o777, 0o600)
+                finally:
+                    bad.unlink()
+
+    def test_writable_by_others_files_and_directories_reject_before_chmod(self):
+        for directory in (False, True):
+            with self.subTest(directory=directory):
+                bad = self.root / "z-writable"
+                if directory: bad.mkdir()
+                else: bad.write_bytes(b"owned but unsafe")
+                bad.chmod(0o777)
+                try:
+                    with mock.patch.object(binding.os, "fchmod") as chmod:
+                        with self.assertRaises(binding.Rejected): self.prepare()
+                        chmod.assert_not_called()
+                    self.assertEqual(bad.stat().st_mode & 0o777, 0o777)
+                finally:
+                    bad.rmdir() if directory else bad.unlink()
+
+    def test_expired_deadline_and_byte_bound_reject_before_chmod(self):
+        with mock.patch.object(binding.os, "fchmod") as chmod:
+            with self.assertRaises(binding.Rejected):
+                binding.prepare_publish_image(self.root, deadline=time.monotonic() - 1)
+            with mock.patch.object(binding, "MAX_FILE", 1):
+                with self.assertRaises(binding.Rejected): self.prepare()
+            chmod.assert_not_called()
+
+    def test_nonprivate_or_foreign_parent_rejects_before_chmod(self):
+        self.parent.chmod(0o755)
+        try:
+            with mock.patch.object(binding.os, "fchmod") as chmod:
+                with self.assertRaises(binding.Rejected): self.prepare()
+                chmod.assert_not_called()
+        finally:
+            self.parent.chmod(0o700)
+        with mock.patch.object(binding.os, "geteuid", return_value=os.geteuid() + 1), \
+                mock.patch.object(binding.os, "fchmod") as chmod:
+            with self.assertRaises(binding.Rejected): self.prepare()
+            chmod.assert_not_called()
+
+    def test_root_alias_rejects_without_changing_its_target(self):
+        alias = self.parent / "alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        with mock.patch.object(binding.os, "fchmod") as chmod:
+            with self.assertRaises(binding.Rejected):
+                binding.prepare_publish_image(alias, deadline=time.monotonic() + 5)
+            chmod.assert_not_called()
+        self.assertEqual(self.data.stat().st_mode & 0o777, 0o600)
+
+    def test_named_file_substitution_preserves_replacement_mode(self):
+        original_open = os.open
+        replaced = False
+
+        def open_replacement(path, *args, **kwargs):
+            nonlocal replaced
+            if isinstance(path, (str, Path)) and Path(path).name == "data.bin" and not replaced:
+                replaced = True
+                self.data.rename(self.root / "saved")
+                self.data.write_bytes(b"replacement sentinel")
+                self.data.chmod(0o640)
+            return original_open(path, *args, **kwargs)
+
+        with mock.patch.object(binding.os, "open", side_effect=open_replacement):
+            with self.assertRaises(binding.Rejected): self.prepare()
+        self.assertTrue(replaced)
+        self.assertEqual(self.data.read_bytes(), b"replacement sentinel")
+        self.assertEqual(self.data.stat().st_mode & 0o777, 0o640)
+
+    def test_same_inode_growth_is_rejected_without_changing_affected_mode(self):
+        original_open = os.open
+        changed = False
+
+        def open_growth(path, *args, **kwargs):
+            nonlocal changed
+            if isinstance(path, (str, Path)) and Path(path).name == "data.bin" and not changed:
+                changed = True
+                with self.data.open("ab") as stream: stream.write(b"unexpected growth")
+            return original_open(path, *args, **kwargs)
+
+        with mock.patch.object(binding.os, "open", side_effect=open_growth):
+            with self.assertRaises(binding.Rejected): self.prepare()
+        self.assertTrue(changed)
+        self.assertEqual(self.data.stat().st_mode & 0o777, 0o600)
+
+
 if __name__ == "__main__":
     unittest.main()

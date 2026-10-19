@@ -35,6 +35,14 @@ FAILURE_CATEGORIES = frozenset((
     "helper-private-parent", "helper-output-fresh", "helper-sdk-root", "helper-deadline",
     "build-command-deadline", "build-command-group", "build-final-group",
     "build-log-limit", "build-command-output",
+    *("publication-mode-" + suffix for suffix in (
+        "deadline", "parent-changed", "root-changed", "directory-changed",
+        "directory-open", "file-changed", "file-open", "before-chmod", "after-chmod",
+        "canonical-root", "parent", "parent-open", "root", "owner", "directory-mode",
+        "file-kind-or-links", "file-mode-or-size", "tree-bytes", "preflight-file", "nodes",
+        "preflight-directory", "file-after-chmod", "file-parent-changed",
+        "directory-after-chmod", "path", "io", "close",
+    )),
 ))
 
 
@@ -197,6 +205,7 @@ def publish(args):
                 stream.write(raw)
             row["log_path"] = str(retained_log)
     binding.verify_source(capture, source_root, deadline=deadline)
+    binding.prepare_publish_image(tool, deadline=deadline)
     value = {"schema": "issue779-checkpoint1-build-v1", "source": args.source,
         "selector": args.selector, "configuration": "Release", "sdk_version": "10.0.401",
         "source_root": str(source_root),

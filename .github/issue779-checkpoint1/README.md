@@ -15,10 +15,28 @@ complete helper images; it never adds synthetic rows to the two CLI commands.
 Build children use umask `022` within owner-private input parents so their fresh
 files have the `0644`/`0755` modes required by the image contract. The parent
 must own the exact `0700` tool parent before any build starts, and keeps its
-private umask, `0700` directories and `0600` logs. No completed image
-mode is rewritten or accepted without the ordinary inventory checks. A real
+private umask, `0700` directories and `0600` logs. A real
 isolated helper build under umask `077` produced `0600` DLL/PDB/JSON files and
 demonstrated why the build child's creation policy must be explicit.
+
+`binding.prepare_publish_image(root, *, deadline)` then prepares only the newly
+built CLI/helper outputs for inventory. Package copies may retain owner-only
+execute/read modes. The helper first audits the complete owned tree beneath an
+owned `0700` parent, rejecting links, hardlinks, special objects, foreign owners,
+writable-by-others modes and excessive bytes/nodes. It sets canonical file modes
+to `0644` or `0755` according to the existing execute bits and directory modes to
+`0755`, using checked file descriptors. File bytes are preserved. Substitution
+or growth is an error, never permission to modify a replacement. The ordinary
+complete hash/mode inventory follows this packaging step, and native staging
+still independently rechecks those measured bytes and modes. This helper grants
+no admission and must not be used to repair an SDK, captured source or an
+already admitted image.
+The return is only `{"files": count, "directories": count}`, excluding the root
+from the directory count. A late failure may leave earlier owned nodes with
+canonical modes; discard that failed publication and start with a fresh output.
+The operation does not promise atomic rollback and cannot make a failed build
+eligible for a receipt.
+
 Publication failures emit `issue779-checkpoint1-publisher-failure-v1` with exactly
 `schema`, a closed `category`, `error_kind` (`input`, `os`, or `process`), and
 nullable numeric `errno` in 1..4095. Unknown errors use a fixed family category;

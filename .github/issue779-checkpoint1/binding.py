@@ -459,6 +459,226 @@ def inventory(root, entry, *, deadline):
     return value
 
 
+def prepare_publish_image(root, *, deadline):
+    """Normalize a fresh, exclusively owned SDK publish tree before inventory.
+
+    The canonical root and its immediate 0700 parent must belong to the current
+    effective UID/GID. Every descendant must have that same ownership. Only
+    regular single-link files in 0600/0640/0644/0700/0744/0750/0755/0444/0555
+    and directories in 0700/0750/0755/0555 are accepted. No bytes are read or
+    hashed here; ``inventory`` must subsequently measure the complete image.
+
+    A bounded whole-tree preflight performs no chmod. A second pass reopens
+    captured nodes through no-follow directory FDs, rechecks their identities,
+    and changes only the opened FD: executable files become 0755, other files
+    0644, child directories 0755 and the root 0700. FD use is constant rather
+    than proportional to the image size. No path-based chmod is used.
+
+    Returns only ``{"files": count, "directories": count}``; directories
+    exclude the root, as in inventory. This is packaging, never custody or
+    native authority. A race, expired deadline or I/O failure rejects with a
+    fixed publication-mode category. A late failure may leave earlier owned
+    nodes normalized; callers must discard the failed publication, not retry
+    it as if an atomic conversion had completed. The caller must have already
+    joined the publisher and exclude concurrent writers throughout this call.
+    """
+    parent_fd = root_fd = None
+
+    def need(condition, suffix):
+        require(condition, "publication-mode-" + suffix)
+
+    def check():
+        need(type(deadline) in (int, float)
+             and time.monotonic() < deadline < float("inf"), "deadline")
+
+    def owned(fact):
+        return fact.st_uid == uid and fact.st_gid == gid
+
+    def named(fd, name):
+        return os.stat(name, dir_fd=fd, follow_symlinks=False)
+
+    def anchor():
+        check()
+        need(_identity(os.fstat(parent_fd)) == parent_identity
+             == _identity(parent.lstat()), "parent-changed")
+        need(_identity(os.fstat(root_fd)) == directories[()]
+             == _identity(named(parent_fd, root.name)), "root-changed")
+
+    def directory(parts):
+        # Each openat resolves exactly one component. Closing the previous FD
+        # keeps deep trees from consuming one descriptor per path component.
+        anchor()
+        fd = os.dup(root_fd)
+        try:
+            for length, name in enumerate(parts, 1):
+                check()
+                expected = directories[parts[:length]]
+                need(_identity(named(fd, name)) == expected, "directory-changed")
+                child = os.open(name, directory_flags, dir_fd=fd)
+                try:
+                    need(_identity(os.fstat(child)) == expected
+                         == _identity(named(fd, name)), "directory-open")
+                except BaseException:
+                    os.close(child)
+                    raise
+                previous, fd = fd, child
+                os.close(previous)
+            need(_identity(os.fstat(fd)) == directories[parts], "directory-changed")
+            return fd
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def leaf(fd, name, expected):
+        check()
+        need(_identity(named(fd, name)) == expected, "file-changed")
+        opened = os.open(name, file_flags, dir_fd=fd)
+        try:
+            need(_identity(os.fstat(opened)) == expected
+                 == _identity(named(fd, name)), "file-open")
+            return opened
+        except BaseException:
+            os.close(opened)
+            raise
+
+    def normalize(fd, expected, mode):
+        check()
+        need(_identity(os.fstat(fd)) == expected, "before-chmod")
+        changed = stat.S_IMODE(expected[2]) != mode
+        if changed:
+            os.fchmod(fd, mode)
+        after = os.fstat(fd)
+        # fchmod may change mode and ctime only. Retain its actual new ctime
+        # for every subsequent FD/named recheck, rather than ignoring it.
+        wanted = (expected[:2] + (stat.S_IFMT(expected[2]) | mode,) + expected[3:8] + (after.st_ctime_ns,)
+                  if changed else expected)
+        need(_identity(after) == wanted, "after-chmod")
+        check()
+        return _identity(after)
+
+    try:
+        check()
+        uid, gid = os.geteuid(), os.getegid()
+        root = absolute(str(root))
+        parent = root.parent
+        need(root.resolve(strict=True) == root, "canonical-root")
+        parent_before = parent.lstat()
+        need(stat.S_ISDIR(parent_before.st_mode) and owned(parent_before)
+             and stat.S_IMODE(parent_before.st_mode) == 0o700, "parent")
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+        parent_fd = os.open(parent, directory_flags)
+        parent_identity = _identity(parent_before)
+        need(_identity(os.fstat(parent_fd)) == parent_identity
+             == _identity(parent.lstat()), "parent-open")
+        before = named(parent_fd, root.name)
+        directory_modes = (0o700, 0o750, 0o755, 0o555)
+        file_modes = (0o600, 0o640, 0o644, 0o700, 0o744, 0o750, 0o755, 0o444, 0o555)
+        need(stat.S_ISDIR(before.st_mode) and owned(before)
+             and stat.S_IMODE(before.st_mode) in directory_modes, "root")
+        root_fd = os.open(root.name, directory_flags, dir_fd=parent_fd)
+        directories, files = {(): _identity(before)}, {}
+        anchor()
+        pending, total = [()], 0
+        while pending:
+            parts = pending.pop()
+            fd = directory(parts)
+            try:
+                with os.scandir(fd) as entries:
+                    for entry in entries:
+                        check()
+                        path = parts + (entry.name,)
+                        relative("/".join(path))
+                        fact = named(fd, entry.name)
+                        need(owned(fact), "owner")
+                        mode = stat.S_IMODE(fact.st_mode)
+                        if stat.S_ISDIR(fact.st_mode):
+                            need(mode in directory_modes, "directory-mode")
+                            directories[path] = _identity(fact)
+                            pending.append(path)
+                        else:
+                            need(stat.S_ISREG(fact.st_mode) and fact.st_nlink == 1,
+                                 "file-kind-or-links")
+                            need(mode in file_modes and 0 <= fact.st_size <= MAX_FILE, "file-mode-or-size")
+                            files[path] = _identity(fact)
+                            total += fact.st_size
+                            need(total <= MAX_TREE, "tree-bytes")
+                            opened = leaf(fd, entry.name, files[path])
+                            try:
+                                need(_identity(os.fstat(opened)) == files[path]
+                                     == _identity(named(fd, entry.name)), "preflight-file")
+                            finally:
+                                os.close(opened)
+                        need(len(files) + len(directories) - 1 <= MAX_NODES, "nodes")
+                need(_identity(os.fstat(fd)) == directories[parts], "preflight-directory")
+            finally:
+                os.close(fd)
+        # No fchmod has occurred above this boundary. Every mutation below is
+        # limited to the captured object reopened and checked through root_fd.
+        anchor()
+        for path, expected in files.items():
+            fd = directory(path[:-1])
+            try:
+                opened = leaf(fd, path[-1], expected)
+                try:
+                    mode = 0o755 if stat.S_IMODE(expected[2]) & 0o111 else 0o644
+                    files[path] = normalize(opened, expected, mode)
+                    need(_identity(named(fd, path[-1])) == files[path], "file-after-chmod")
+                finally:
+                    os.close(opened)
+                need(_identity(os.fstat(fd)) == directories[path[:-1]], "file-parent-changed")
+            finally:
+                os.close(fd)
+        # Descendants first: changing a directory's own mode/ctime must not
+        # invalidate the still-captured parent used to reopen it.
+        for parts in sorted(directories, key=len, reverse=True):
+            fd = directory(parts)
+            try:
+                directories[parts] = normalize(fd, directories[parts], 0o755 if parts else 0o700)
+                if parts:
+                    ancestor = directory(parts[:-1])
+                    try:
+                        need(_identity(named(ancestor, parts[-1])) == directories[parts]
+                             == _identity(os.fstat(fd)), "directory-after-chmod")
+                    finally:
+                        os.close(ancestor)
+                else:
+                    anchor()
+            finally:
+                os.close(fd)
+        anchor()
+        # Reopen the whole captured set after mutation. Any added/removed node
+        # changes its directory identity; no changed path is silently adopted.
+        for parts in directories:
+            fd = directory(parts)
+            os.close(fd)
+        for path, expected in files.items():
+            fd = directory(path[:-1])
+            try:
+                opened = leaf(fd, path[-1], expected)
+                os.close(opened)
+            finally:
+                os.close(fd)
+        anchor()
+        return {"files": len(files), "directories": len(directories) - 1}
+    except Rejected as error:
+        if str(error).startswith("publication-mode-"):
+            raise
+        raise Rejected("publication-mode-path") from None
+    except (OSError, ValueError, TypeError, OverflowError, RuntimeError):
+        raise Rejected("publication-mode-io") from None
+    finally:
+        close_failed = False
+        for fd in (root_fd, parent_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    close_failed = True
+        if close_failed:
+            raise Rejected("publication-mode-close") from None
+
+
 def verify_source(value, root, *, deadline):
     """Compare the entire current captured tree to immutable Git entries and real file bytes.
 

@@ -141,6 +141,7 @@ def publish_helpers(*, source_root, capture_raw, selector, sdk_root, output, dea
             _verify_command(row, expected_phase, argv, end)
             command_rows.append(row)
             binding.require(time.monotonic() < end, "helper-deadline")
+        binding.prepare_publish_image(bundle, deadline=end)
         image = binding.inventory(bundle, entry, deadline=end)
         prefix = entry[:-4]
         _require(prefix + ".deps.json" in image["files"]
