@@ -173,6 +173,69 @@ public sealed class RazorWireSkoolitV4CollectionsPlaywrightTests(RazorWireMvcPla
         Assert.Equal(["8", "9"], await GetKeysAsync(ChildCollection(ParentRow(page, "10"))));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SkoolitV4_RejectedDiscreteEndPartsStayEditableUntilExplicitlyCorrected(bool javaScript, bool changeToRange)
+    {
+        await using var context = await fixture.Browser.NewContextAsync(new BrowserNewContextOptions { JavaScriptEnabled = javaScript });
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{V4TestBaseUrl}/Reactivity/SkoolitV4Collections");
+        if (javaScript)
+            await page.WaitForSelectorAsync("form[data-v4-form][data-rw-form-interactions-enhanced='true']");
+
+        const string prefix = "Actions[4].Dates[7]";
+        var date = DateRow(page, "4", "7");
+        var end = date.Locator("fieldset[data-date-endpoint='end']");
+        await date.Locator($"input[name='{prefix}.EndYear']").FillAsync("2027");
+        await date.Locator($"select[name='{prefix}.Shape']").SelectOptionAsync("Discrete");
+        // Submit stale client state once. Subsequent submits use the rendered controls without intervention.
+        await end.EvaluateAsync("fieldset => fieldset.disabled = false");
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var rejected = await SubmitAndWaitForResponseAsync(page);
+            Assert.Equal(StatusCodes.Status422UnprocessableEntity, rejected.Status);
+            Assert.True(await end.IsVisibleAsync());
+            Assert.False(await end.EvaluateAsync<bool>("fieldset => fieldset.disabled"));
+            Assert.Equal("false", await end.GetAttributeAsync("aria-hidden"));
+            foreach (var (part, value) in new[] { ("EndMonth", "6"), ("EndDay", "14"), ("EndYear", "2027") })
+            {
+                Assert.Equal(value, await date.Locator($"[name='{prefix}.{part}']").InputValueAsync());
+                Assert.True(await date.Locator($"[name='{prefix}.{part}']").IsEnabledAsync());
+                var message = date.Locator($"[data-valmsg-for='{prefix}.{part}']");
+                Assert.True(await message.IsVisibleAsync());
+                Assert.Contains("End date parts apply only to a Range", await message.InnerTextAsync());
+            }
+        }
+
+        if (javaScript)
+        {
+            await date.GetByRole(AriaRole.Button, new() { Name = "Duplicate date", Exact = true }).ClickAsync();
+            var copiedEnd = DateRow(page, "4", "8").Locator("fieldset[data-date-endpoint='end']");
+            Assert.True(await copiedEnd.IsHiddenAsync());
+            Assert.True(await copiedEnd.EvaluateAsync<bool>("fieldset => fieldset.disabled"));
+            Assert.All(await copiedEnd.Locator("[data-valmsg-for]").AllTextContentsAsync(), text => Assert.Equal(string.Empty, text));
+            Assert.True(await end.IsVisibleAsync());
+        }
+
+        if (changeToRange)
+            await date.Locator($"select[name='{prefix}.Shape']").SelectOptionAsync("Range");
+        else
+        {
+            await date.Locator($"select[name='{prefix}.EndMonth']").SelectOptionAsync(string.Empty);
+            await date.Locator($"input[name='{prefix}.EndDay']").FillAsync(string.Empty);
+            await date.Locator($"input[name='{prefix}.EndYear']").FillAsync(string.Empty);
+        }
+        var accepted = await SubmitAndWaitForResponseAsync(page);
+        Assert.Equal(StatusCodes.Status200OK, accepted.Status);
+        Assert.True(await page.Locator("[data-v4-result]").IsVisibleAsync());
+        Assert.Equal(changeToRange, await end.IsVisibleAsync());
+        Assert.Equal(!changeToRange, await end.EvaluateAsync<bool>("fieldset => fieldset.disabled"));
+    }
+
     [Fact]
     public async Task SkoolitV4_NoJavaScriptAddDateCommandsAreOwnerLocalAndOrdinarySubmitWorks()
     {

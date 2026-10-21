@@ -13,9 +13,14 @@
         if (!shape || !(endControls instanceof HTMLFieldSetElement)) return;
 
         const isRange = shape.value === "Range";
-        endControls.hidden = !isRange;
-        endControls.disabled = !isRange;
-        endControls.setAttribute("aria-hidden", String(!isRange));
+        // Server-rejected values must remain editable and submitted until corrected.
+        // Read rendered messages so a duplicate's cleared validation cannot inherit this exception.
+        const hasEndErrors = [...endControls.querySelectorAll("[data-valmsg-for]")]
+            .some(message => message.textContent.trim().length > 0);
+        const hideEnd = !isRange && !hasEndErrors;
+        endControls.hidden = hideEnd;
+        endControls.disabled = hideEnd;
+        endControls.setAttribute("aria-hidden", String(hideEnd));
     }
 
     function syncDateRows(scope, duplicated = false) {

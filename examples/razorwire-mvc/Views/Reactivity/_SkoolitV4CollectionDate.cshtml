@@ -7,6 +7,9 @@
     var actionPosition = Convert.ToString(ViewData["ActionPosition"], System.Globalization.CultureInfo.InvariantCulture) ?? "0";
     var datePosition = Convert.ToString(ViewData["DatePosition"], System.Globalization.CultureInfo.InvariantCulture) ?? "0";
     var isDiscrete = string.Equals(Model.Shape, "Discrete", StringComparison.Ordinal);
+    var hasEndErrors = new[] { "EndMonth", "EndDay", "EndYear" }
+        .Any(part => ViewData.ModelState.TryGetValue($"{prefix}.{part}", out var entry) && entry.Errors.Count > 0);
+    var hideEnd = isDiscrete && !hasEndErrors;
     var kinds = new[]
     {
         new SelectListItem("Select", ""),
@@ -59,7 +62,7 @@
         @Html.ValidationMessage($"{prefix}.StartYear", null, new { @class = "field-validation-error" })
     </div>
 
-    <fieldset data-date-endpoint="end" hidden="@isDiscrete" disabled="@isDiscrete" aria-hidden="@isDiscrete">
+    <fieldset data-date-endpoint="end" hidden="@hideEnd" disabled="@hideEnd" aria-hidden="@hideEnd.ToString().ToLowerInvariant()">
         <legend>Range end</legend>
         <label for="@(id)-end-month">End month</label>
         @Html.DropDownList($"{prefix}.EndMonth", new SelectList(months, "Value", "Text", Model.EndMonth), new { id = $"{id}-end-month" })

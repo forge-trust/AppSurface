@@ -359,8 +359,10 @@ required_policy_contract = (
     "razorwire:form-collection:duplicate",
     'select[data-v4-date-shape]',
     '[data-date-endpoint="end"]',
-    "endControls.hidden = !isRange",
-    "endControls.disabled = !isRange",
+    "const hideEnd = !isRange && !hasEndErrors",
+    'endControls.querySelectorAll("[data-valmsg-for]")',
+    "endControls.hidden = hideEnd",
+    "endControls.disabled = hideEnd",
 )
 missing = [contract for contract in required_policy_contract if contract not in policy]
 if missing:
@@ -552,7 +554,7 @@ receipt = f'''# Skoolit V4 exact-package consumer proof
 - Source and embedded asset hashes match: yes
 - V4 policy source: `examples/razorwire-mvc/wwwroot/js/SkoolitV4CollectionPolicy.js`
 - V4 policy SHA-256: {policy_hash}
-- Policy contract checks: existing add/duplicate event details (`detail.root`/`detail.row`), V4 temporal feedback, and Range-only visible/enabled end controls passed.
+- Policy contract checks: existing add/duplicate event details (`detail.root`/`detail.row`), V4 temporal feedback, and end-control visibility/submission with validation-error recovery passed.
 - Structural-ownership checks: no application-owned collection add/duplicate/remove commands, row cloning/insertion/removal, binder-path replacement, or `name`/`id` rewriting found in the V4 policy.
 - Date-count policy check: no executable eight-date cap found in the faithful V4 model, controller, or view.
 
