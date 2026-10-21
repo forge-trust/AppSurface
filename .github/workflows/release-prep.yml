@@ -34,6 +34,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Deny cache access before executing tooling selected by base-ref.
+    cache-mode: none
     env:
       # Keep generated pull-request branches outside the protected release/* source namespace.
       RELEASE_BRANCH: release-bot/v${{ inputs.version }}
