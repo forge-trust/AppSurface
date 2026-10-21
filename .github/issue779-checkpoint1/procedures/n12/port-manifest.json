@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 8300,
-      "sha256": "80461cbf0bafd61d167d872d5753bc867e7b2f67cefbdfdbd866b3dc0ac0b896"
+      "bytes": 10177,
+      "sha256": "c3536cda2c5d6f083d7b69439c241869393f9ece8fd2fcf3aad518762230a75b"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 88055,
-      "sha256": "01fd185b319bfeebbe3d46125addfa1eed29670f26bded36172696df36a1ff50"
+      "bytes": 102083,
+      "sha256": "a5897ca505e49da572ed8004c956c73f07d47bd0c6f417d2d39458b17361de2c"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -197,6 +197,18 @@
     "portable_control": "../../test_alias_declaration_lookup.py",
     "scope": "None/N12 readonly bounded declaration-only alias row cache after original typed schema; all physical walks/hash/pins and clocks preserved",
     "time_gain_measured": false
+  },
+  "source55_batched_audit_fresh_clock": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "measured_gain_claimed": false,
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_fixture_clock_sampling.py",
+      "../../test_n12_ordinary_os_batch.py",
+      "../../test_alias_declaration_lookup.py"
+    ],
+    "scope": "N12 adopts exact None declaration-only cache and N06 complete physical batch audit. None/N12 left reads the same fresh uptime sample inline rather than through inner shell child; original comparisons/caps/native guard and suffix preserved."
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

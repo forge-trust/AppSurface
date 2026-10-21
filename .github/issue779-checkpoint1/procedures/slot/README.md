@@ -192,3 +192,18 @@ failure can identify which setup span consumed it. They cannot renew it.
 [Portable controls](../../test_none_ordinary_os_batch.py) exercise declarations,
 ordered stat data, drift rejection and observer data without granting root or
 native authority. Fresh Linux execution is required to establish N01 completion.
+
+### Fresh deadline sampling without a shell child
+
+`left()` in the initial fixture and [N12](../n12/README.md#complete-os-passes-and-fresh-clock-sampling)
+reads `/proc/uptime` with the Bash `read` builtin, validates the same decimal
+uptime grammar and truncates the fractional part exactly as `monotonic()` did.
+The sample remains fresh on every call; work, cleanup and the nested N03
+startup deadline still select the same minimum end time. A missing, malformed
+or expired sample fails closed. The function returns the same original
+remaining seconds and never resets a deadline. Keeping that read in the current
+shell removes the former inner `now=$(monotonic)` subprocess from each audit
+loop check; the actual kernel read and each check remain mandatory.
+[Clock data controls](../../test_fixture_clock_sampling.py) use retained ordinary
+FD samples for grammar and boundary checks. They make no kernel-clock or native
+acceptance claim.

@@ -62,13 +62,15 @@ and [portable data/file controls](../../test_n11.py). Raw records are not echoed
 counter arithmetic is performed. The N12 adapter imports the fixed N11 bridge
 read-only, bound by the complete current capture.
 
-## Source audit and remaining work
+## Initial source audit and later follow-ups
 
 [port-manifest.json](port-manifest.json) records relative historical paths, hashes,
 source files and static invariance. [historical-to-current.patch](historical-to-current.patch)
-shows only the historical provenance boundary replacement and sixth env literal.
-All native suffixes are literal-equal after those allowed substitutions. Readable
-record predicates are AST-equal excluding docstring indentation changed by nesting.
+records the initial historical provenance boundary replacement and sixth env literal.
+At that initial handoff, the recorded native suffixes were literal-equal after
+those substitutions. Later metadata/OS-audit follow-ups are documented below;
+the original record predicates remain unchanged. Readable record predicates
+were AST-equal excluding docstring indentation changed by nesting.
 Original dispatcher/retainer bytes and N11 capture/parser modules are unchanged.
 Parent/Godel owns inventory registration. Independent review, portable validation,
 actual current helper publication and fresh Linux native execution remain required.
@@ -127,3 +129,30 @@ request deadline and prelaunch guard remain decisive. The
 empty and maximum tables, malformed/duplicate rows, replay/mutation, expiry,
 digest mismatch and changed physical samples. Fresh Linux execution remains
 necessary; reduced declaration subprocess count is not a timing result.
+
+## Complete OS passes and fresh clock sampling
+
+N12 uses the [complete batch OS-audit contract](../slot/README.md#initial-positive-fixture-os-passes)
+for both initial and final passes. Its declarations are copied once from the
+fully validated, hash-pinned audit, sorted and made readonly. Each alias literal
+must occur in the file table with the same digest. No physical metadata or hash
+result is cached. The batch implementation is byte-identical to N06 and the
+initial positive fixture: every ordinary file and ancestor, including `/`, has
+complete physical metadata sampled before and after all actual hashes. Alias
+verification keeps N12's original two physical walks and resolved-file pin.
+Both full passes and the audit's own hash pin remain required.
+
+Five paired closed stage observations use the original elapsed/remaining clock
+so later failures retain setup costs. `left()` uses the same fresh
+[`/proc/uptime` sampling contract](../slot/README.md#fresh-deadline-sampling-without-a-shell-child)
+without an inner shell subprocess. This does not change the 600/30 fixture
+clock, N03's nested startup bound, the original request UTC expression, the
+prelaunch `>246`/`>245` guards or the owner 240/5 unit limits. All native
+execution, ownership, stop/join, EOF and account/RootCustody requirements after
+the prelaunch guard remain unchanged.
+
+The [N12 data controls](../../test_n12_ordinary_os_batch.py) run the same actual
+Bash declaration/snapshot/observer controls as the initial fixture. The
+[clock controls](../../test_fixture_clock_sampling.py) separately cover the
+original deadline selection and sample grammar. Neither establishes a physical
+Linux result; a fresh source-bound native N12 run is still required.

@@ -38,14 +38,18 @@ monotonic() { local up rest; IFS=' ' read -r up rest </proc/uptime || return 1; 
 fixture_start=$(monotonic) || fail monotonic-clock
 readonly fixture_start hard_end=$((fixture_start+FIXTURE_SECONDS)) work_end=$((fixture_start+FIXTURE_SECONDS-CLEANUP_RESERVE))
 left() {
- local now end=$work_end
+ local now up rest end=$work_end
  [[ $phase != cleanup ]] || end=$hard_end
  # Bash dynamic scope carries the private N03 startup bound through all nested helpers/substitutions.
  if [[ $phase != cleanup && ${n03_startup_active:-0} == 1 ]]; then
   [[ ${n03_startup_end:-} =~ ^[0-9]+$ ]] || return 1
   ((n03_startup_end>=end)) || end=$n03_startup_end
  fi
- now=$(monotonic) || return 1
+ # Same fresh kernel sample as monotonic(), kept in this shell to avoid a
+ # command-substitution process for every deadline check in the audit loops.
+ IFS=' ' read -r up rest </proc/uptime || return 1
+ [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1
+ now=${up%%.*}
  ((now<end)) || return 1
  printf '%s' "$((end-now))"
 }
