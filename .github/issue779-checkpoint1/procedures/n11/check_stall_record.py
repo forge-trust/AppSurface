@@ -154,7 +154,17 @@ def _check_stall_record(record, *, worker_stdout, worker_stderr, expected_genera
         _digest(expected_descriptor_sha256)
         value = json.loads(body.decode("utf-8", errors="strict"), object_pairs_hook=_pairs,
                            parse_constant=lambda _: _require(False))
-        _require(type(value) is dict and set(value) == TOP | {"stop_timing"})
+        _require(type(value) is dict and set(value) in
+                 (TOP | {"stop_timing"}, TOP | {"stop_timing", "account_ids"}))
+        if "account_ids" in value:
+            account_ids = value["account_ids"]
+            _object(account_ids, ("worker_uid", "worker_gid", "subject_uid", "subject_gid", "results_gid"))
+            for identity in account_ids.values():
+                _integer(identity, 1, (1 << 32) - 2)
+            _require(account_ids["worker_uid"] == expected_uid
+                     and account_ids["worker_gid"] == expected_gid
+                     and account_ids["worker_uid"] != account_ids["subject_uid"]
+                     and len({account_ids["worker_gid"], account_ids["subject_gid"], account_ids["results_gid"]}) == 3)
         stop_timing = check_stop_timing(value.get("stop_timing"), expected_stopping_ms=expected_stopping_ms)
         if settled_callback_failure:
             # This branch records lifecycle fail-stop followed by root physical

@@ -459,17 +459,52 @@ alias_walk() {
  [[ -f $current && ! -L $current ]] || fail alias-final-file
  printf '%s' "$current"
 }
+# Immutable declaration rows only. Physical walks, hashes, and metadata samples
+# below are performed afresh at every initial/final audit boundary.
+os_declaration_alias_ready=0
+os_declaration_alias_index=-1
+declare -a os_declaration_alias_paths=() os_declaration_alias_rows=()
+initialize_alias_declarations() {
+ local LC_ALL=C expected rows row literal previous=
+ [[ $os_declaration_alias_ready == 0 && ${#os_declaration_alias_paths[@]} == 0 && ${#os_declaration_alias_rows[@]} == 0 ]] || fail alias-declaration-replay
+ expected=$(bounded jq -er '.aliases|length' "$os_audit")
+ [[ $expected =~ ^(0|[1-9][0-9]?)$ ]] && ((expected<=64)) || fail alias-declaration-count
+ rows=$(bounded jq -c '.aliases|sort_by(.literal)|.[]' "$os_audit")
+ ((${#rows}<=1048576)) || fail alias-declaration-bytes
+ if [[ -n $rows ]]; then
+  while IFS= read -r row; do
+   remaining >/dev/null
+   literal=$(bounded jq -er '.literal' <<<"$row"); lexical "$literal"
+   [[ -z $previous || $previous < "$literal" ]] || fail alias-declaration-order
+   previous=$literal; os_declaration_alias_paths+=("$literal"); os_declaration_alias_rows+=("$row")
+   ((${#os_declaration_alias_paths[@]}<=64)) || fail alias-declaration-count
+  done <<<"$rows"
+ fi
+ ((${#os_declaration_alias_paths[@]}==expected && ${#os_declaration_alias_rows[@]}==expected)) || fail alias-declaration-membership
+ os_declaration_alias_ready=1
+ readonly os_declaration_alias_ready
+ readonly -a os_declaration_alias_paths os_declaration_alias_rows
+}
+lookup_alias_declaration() {
+ local p=$1 i
+ [[ $os_declaration_alias_ready == 1 ]] || fail alias-declaration-uninitialized
+ remaining >/dev/null
+ os_declaration_alias_index=-1
+ for ((i=0;i<${#os_declaration_alias_paths[@]};i++)); do
+  if [[ $p == "${os_declaration_alias_paths[$i]}" ]]; then os_declaration_alias_index=$i; break; fi
+ done
+}
 verify_os_path() {
- local p=$1 h=$2 count row resolved first before after
- count=$(bounded jq --arg p "$p" '[.aliases[]|select(.literal==$p)]|length' "$os_audit")
- if [[ $count == 1 ]]; then
-  row=$(bounded jq -c --arg p "$p" '.aliases[]|select(.literal==$p)' "$os_audit")
+ local p=$1 h=$2 row resolved first before after
+ lookup_alias_declaration "$p"
+ if ((os_declaration_alias_index>=0)); then
+  row=${os_declaration_alias_rows[$os_declaration_alias_index]}
   [[ $(bounded jq -r .resolved_sha256 <<<"$row") == "$h" ]] || fail alias-hash-binding
   first=$(alias_walk "$row"); before=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$first")
   pin_file "$first" "$h" "$MAX_INPUT_FILE_BYTES"
   resolved=$(alias_walk "$row"); after=$(bounded stat -c '%d:%i:%s:%f:%h:%u:%g' -- "$resolved")
   [[ $first == "$resolved" && $before == "$after" ]] || fail alias-before-after
- else [[ $count == 0 ]] || fail duplicate-alias; ancestor "${p%/*}"; pin_file "$p" "$h" "$MAX_INPUT_FILE_BYTES"; fi
+ else ancestor "${p%/*}"; pin_file "$p" "$h" "$MAX_INPUT_FILE_BYTES"; fi
 }
 
 for key in source_root source_manifest source_manifest_sha256 source_nodes source_nodes_sha256 payload_root payload_manifest payload_manifest_sha256 payload_nodes payload_nodes_sha256 runtime_root runtime_manifest runtime_manifest_sha256 runtime_nodes runtime_nodes_sha256 source_review source_review_sha256 build_receipt build_receipt_sha256 os_audit os_audit_sha256 source_revision base_revision workflow_identity entry runtime_host entry_sha256 n02_uid n02_gid; do [[ -n ${!key} ]] || fail missing-input; done
@@ -518,6 +553,7 @@ bounded jq -e '
  ([.aliases[].literal]|length== (unique|length)) and
  all(.elf[]; [.resolved[].soname]|length==(unique|length))
 ' "$os_audit" >/dev/null || fail OS-audit-schema
+initialize_alias_declarations
 os_files=$(bounded jq -r '.files[]|[.path,.sha256]|@tsv' "$os_audit")
 while IFS=$'\t' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"
 runtime_files=$(bounded find -P "$runtime_root" -type f -print)

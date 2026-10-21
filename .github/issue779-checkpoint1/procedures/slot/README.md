@@ -118,11 +118,11 @@ physical-settlement claim.
 
 ## Setup metadata queries
 
-`pin_file(path, sha256, limit)` in None and N06 obtains size and link count from
+`pin_file(path, sha256, limit)` in None, N05 and N06 obtains size and link count from
 the existing complete before sample, validates its seven typed fields, and keeps
 the same file hash and complete after-sample comparison. `ancestor(path)` samples
 UID and octal permissions together at every original component through `/`.
-`alias_walk` in None and N06 likewise samples each ordinary component's UID and
+`alias_walk` in None, N05 and N06 likewise samples each ordinary component's UID and
 permissions together. It retains both complete walks, every deadline check,
 symlink metadata-before/readlink/metadata-after checks, and the resolved file's
 hash and identity checks. The [N12 procedure](../n12/README.md#metadata-sampling-without-repeated-subprocesses)
@@ -134,3 +134,30 @@ command counts, all traversed components, malformed or unsafe fields, changed
 link identity and expiry. The consolidation removes redundant subprocesses; it
 does not extend the original 600/30-second fixture budget or change its prelaunch
 reserve. Fresh Linux execution must establish whether setup finishes in time.
+
+N05's existing six stage observations use only closed names and the original
+elapsed/remaining clock values. They do not renew a deadline or change a guard.
+The [stage controls](../../test_n05_stage_observation.py) cover the live helper's
+schema, expiry/write failures and its placement around the unchanged commands.
+
+### Bounded alias declaration lookup
+
+None's `initialize_alias_declarations()` runs once after the complete typed OS
+audit schema and unique-literal check. It projects at most 64 sorted alias rows
+within 1 MiB, checks lexical paths, strict order and exact count, then seals the
+indexed path/row arrays as readonly. Reinitialization rejects. The data remains
+the validated declaration, including the original link metadata and target; no
+filesystem result is cached. The [N12 shell](../n12/README.md#bounded-alias-declaration-lookup)
+uses the identical lookup contract.
+
+`lookup_alias_declaration(path)` requires initialization and the original
+remaining allowance, clears its scratch index, then compares at most 64 exact
+strings without `eval` or a subprocess. `verify_os_path` uses that row in place
+of repeatedly parsing the whole audit for alias count and selection. An ordinary
+path still takes its fresh ancestor walk and hash pin. An alias still requires
+the declared digest, two fresh alias walks, its physical hash and complete
+before/after identity samples. Both complete initial/final OS passes and the
+audit's own hash pins remain mandatory. The
+[declaration controls](../../test_alias_declaration_lookup.py) exercise real jq,
+cache bounds/immutability, exact lookup and detached physical call ordering;
+they grant no native authority or measured timing improvement.

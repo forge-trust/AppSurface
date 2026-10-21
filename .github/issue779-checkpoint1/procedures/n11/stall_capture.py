@@ -101,6 +101,7 @@ ORIGINAL_RECORD_NAMES = frozenset((
     "worker-control.json", "worker.stdout", "worker.stderr", "original-request.json",
 ))
 RETAINED_RECORD_NAMES = ORIGINAL_RECORD_NAMES | frozenset(("filesystem-nss-observation.json",))
+ACCOUNT_ID_KEYS = frozenset(("worker_uid", "worker_gid", "subject_uid", "subject_gid", "results_gid"))
 
 
 def utc_ticks(value):
@@ -123,7 +124,7 @@ def requested_deadline(request, descriptor_deadline):
 
 
 def callback_failed_settled_branch(record, failure):
-    """Select only the exact retained root frame for callback fail-stop settlement."""
+    """Select the exact callback-failure frame whose post-custody state is required."""
     lifetime = record.get("lifetime") if type(record) is dict else None
     if type(lifetime) is not dict or lifetime.get("physically_settled") is not True:
         return False
@@ -139,7 +140,28 @@ def callback_failed_settled_branch(record, failure):
             and control["operation"] is None
             and control["error_kind"] == "Unknown"
             and control["diagnostic_code"] is None)
+    require_original_account_ids(record, None, required=True)
     return True
+
+
+def require_original_account_ids(record, descriptor, *, required):
+    """Validate the C# pre-custody account snapshot and bind descriptor identities."""
+    values = record.get("account_ids") if type(record) is dict else None
+    if values is None:
+        require(not required)
+        return None
+    require(type(values) is dict and set(values) == ACCOUNT_ID_KEYS)
+    for name in ACCOUNT_ID_KEYS:
+        uint(values[name])
+    require(values["worker_uid"] != values["subject_uid"]
+            and len({values["worker_gid"], values["subject_gid"], values["results_gid"]}) == 3)
+    if descriptor is not None:
+        for name in ("worker_uid", "worker_gid", "subject_uid", "subject_gid"):
+            require(values[name] == descriptor[name])
+        output_identity = descriptor["output_parent_identity"]
+        require(output_identity["uid"] == values["worker_uid"]
+                and output_identity["gid"] == values["worker_gid"])
+    return values
 
 
 def _parse_original(frame, descriptor, *, request, generation, source, base, entry_sha, policy_sha,
@@ -207,6 +229,9 @@ def _parse_original(frame, descriptor, *, request, generation, source, base, ent
     uint(d["broker_pid"], 1, (1 << 31) - 1)
     require(d["worker_uid"] != d["subject_uid"] and d["worker_gid"] != d["subject_gid"]
             and d["worker_pid"] != d["broker_pid"])
+    account_ids = require_original_account_ids(record, d, required=settled_callback_failure)
+    if account_ids is not None:
+        require(len({account_ids["worker_gid"], account_ids["subject_gid"], account_ids["results_gid"]}) == 3)
     # Full exported bytes come from the original collector. They are checked
     # again by the existing detached consistency API; no prefix substitutes.
     raw = {}
@@ -248,6 +273,16 @@ def identity(s):
             s.st_size, s.st_mtime_ns, s.st_ctime_ns)
 
 
+def require_absent_by_name_and_id(by_name, by_id, name, identifier):
+    """Require both NSS lookup forms to report absence for one retained original ID."""
+    for lookup, key in ((by_name, name), (by_id, identifier)):
+        try:
+            lookup(key)
+        except KeyError:
+            continue
+        require(False)
+
+
 class NativeCapture:
     """Root-selected retained read descriptors under the fixed fixture observer cutoff."""
     def __init__(self, end_ms):
@@ -270,11 +305,21 @@ class NativeCapture:
         return fd, before
 
     def read(self, parent, name, uid, gid, mode, maximum):
+        raw, _, _ = self._read(parent, name, uid, gid, mode, maximum, retain=False)
+        return raw
+
+    def read_retained(self, parent, name, uid, gid, mode, maximum):
+        """Read one fixed regular file and retain its verified descriptor through final checks."""
+        return self._read(parent, name, uid, gid, mode, maximum, retain=True)
+
+    def _read(self, parent, name, uid, gid, mode, maximum, *, retain):
         self.check()
         before = os.stat(name, dir_fd=parent, follow_symlinks=False)
         require(stat.S_ISREG(before.st_mode) and before.st_uid == uid and before.st_gid == gid
                 and stat.S_IMODE(before.st_mode) == mode and before.st_nlink == 1 and before.st_size <= maximum)
         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        if retain:
+            self.fds.append(fd)
         try:
             require(identity(os.fstat(fd)) == identity(before))
             chunks = []
@@ -290,9 +335,53 @@ class NativeCapture:
             require(count == before.st_size and identity(os.fstat(fd)) == identity(before)
                     and identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == identity(before))
             self.check()
-            return b"".join(chunks)
+            return b"".join(chunks), fd, before
         finally:
-            os.close(fd)
+            if not retain:
+                os.close(fd)
+
+    def socket(self, parent, name):
+        """Retain a root-owned 0600 socket inode through O_PATH with no readable-open fallback."""
+        self.check()
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        require(stat.S_ISSOCK(before.st_mode) and before.st_uid == before.st_gid == 0
+                and stat.S_IMODE(before.st_mode) == 0o600 and before.st_nlink == 1 and before.st_size == 0)
+        path_only = getattr(os, "O_PATH", 0)
+        require(path_only != 0)
+        fd = os.open(name, path_only | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
+        self.fds.append(fd)
+        require(identity(os.fstat(fd)) == identity(before))
+        self.check()
+        return fd, before
+
+    def names(self, directory, expected):
+        """Require one exact fixed child-name inventory under the original BOOTTIME cutoff."""
+        self.check()
+        values = os.listdir(directory)
+        require(len(values) == len(set(values)) and set(values) == set(expected))
+        self.check()
+        return values
+
+    def stable_named(self, parent, name, fd, before):
+        """Recheck the retained descriptor and fixed name against the same full metadata sample."""
+        self.check()
+        require(identity(os.fstat(fd)) == identity(before)
+                and identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) == identity(before))
+        self.check()
+
+    def stable_file_bytes(self, fd, expected):
+        """Confirm the retained descriptor still exposes the exact bytes captured earlier."""
+        self.check()
+        chunks = []
+        offset = 0
+        while offset < len(expected):
+            self.check()
+            chunk = os.pread(fd, min(65536, len(expected) - offset), offset)
+            require(chunk)
+            chunks.append(chunk)
+            offset += len(chunk)
+        require(os.pread(fd, 1, offset) == b"" and b"".join(chunks) == expected)
+        self.check()
 
     def write(self, parent, name, raw):
         self.check()
@@ -403,35 +492,63 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
         checkpoint = "root-frame"
         frame = c.read(log, "n01.stderr", 0, 0, 0o600, MAX_FRAME)
         require(c.read(log, "n01.stdout", 0, 0, 0o600, 0) == b"")
+        frame_record, frame_failure = parse_root_stall_frame(frame)
+        settled_callback_failure = callback_failed_settled_branch(frame_record, frame_failure)
         checkpoint = "workspace"
         workspace_name = "appsurface-evidence-" + generation
-        s = os.stat(workspace_name, dir_fd=run, follow_symlinks=False)
-        require(stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and s.st_gid > 0
-                and stat.S_IMODE(s.st_mode) == 0o750)
-        work, before_work = c.directory(run, workspace_name, 0, s.st_gid, 0o750)
+        if settled_callback_failure:
+            work, before_work = c.directory(run, workspace_name, 0, 0, 0o700)
+        else:
+            s = os.stat(workspace_name, dir_fd=run, follow_symlinks=False)
+            require(stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and s.st_gid > 0
+                    and stat.S_IMODE(s.st_mode) == 0o750)
+            work, before_work = c.directory(run, workspace_name, 0, s.st_gid, 0o750)
         checkpoint = "descriptor"
-        control, _ = c.directory(work, "worker", 0, s.st_gid, 0o710)
-        descriptor = c.read(control, "worker-control.json", 0, s.st_gid, 0o440, 65536)
+        if settled_callback_failure:
+            control, before_control = c.directory(work, "worker", 0, 0, 0o700)
+            broker, before_broker = c.directory(control, "broker", 0, 0, 0o700)
+            descriptor, descriptor_fd, before_descriptor = c.read_retained(
+                control, "worker-control.json", 0, 0, 0o400, 65536)
+            socket_fd, before_socket = c.socket(broker, "control.sock")
+            c.names(work, ("worker", "output", "raw-results"))
+            c.names(control, ("broker", "worker-control.json"))
+            c.names(broker, ("control.sock",))
+        else:
+            control, _ = c.directory(work, "worker", 0, s.st_gid, 0o710)
+            descriptor = c.read(control, "worker-control.json", 0, s.st_gid, 0o440, 65536)
         checkpoint = "request"
         request = c.read(private_fd, "request.json", 0, 0, 0o600, 65536)
         checkpoint = "record-consistency"
         d, consistency, records = parse_original(frame, descriptor, request=request, generation=generation,
             source=source, base=base, entry_sha=entry_sha, policy_sha=policy_sha,
             runtime_relative_host=runtime_relative_host, workflow=workflow)
-        require(d["worker_gid"] == s.st_gid)
         checkpoint = "output-identity"
-        out, before_out = c.directory(work, "output", d["worker_uid"], d["worker_gid"], 0o700)
-        require(d["output_parent_identity"] == {
-            "device_major": os.major(before_out.st_dev), "device_minor": os.minor(before_out.st_dev),
-            "inode": before_out.st_ino, "uid": before_out.st_uid, "gid": before_out.st_gid})
-        require(os.listdir(out) == [])
+        if settled_callback_failure:
+            out, before_out = c.directory(work, "output", 0, 0, 0o700)
+            original_identity = d["output_parent_identity"]
+            require(original_identity["device_major"] == os.major(before_out.st_dev)
+                    and original_identity["device_minor"] == os.minor(before_out.st_dev)
+                    and original_identity["inode"] == before_out.st_ino
+                    and original_identity["uid"] == d["worker_uid"]
+                    and original_identity["gid"] == d["worker_gid"])
+            c.names(out, ())
+        else:
+            out, before_out = c.directory(work, "output", d["worker_uid"], d["worker_gid"], 0o700)
+            require(d["output_parent_identity"] == {
+                "device_major": os.major(before_out.st_dev), "device_minor": os.minor(before_out.st_dev),
+                "inode": before_out.st_ino, "uid": before_out.st_uid, "gid": before_out.st_gid})
+            require(os.listdir(out) == [])
         checkpoint = "raw-results"
-        raw_s = os.stat("raw-results", dir_fd=work, follow_symlinks=False)
-        require(stat.S_ISDIR(raw_s.st_mode) and raw_s.st_uid == d["subject_uid"] and raw_s.st_gid > 0
-                and raw_s.st_gid not in (d["worker_gid"], d["subject_gid"])
-                and stat.S_IMODE(raw_s.st_mode) == 0o710)
-        raw, _ = c.directory(work, "raw-results", d["subject_uid"], raw_s.st_gid, 0o710)
-        require(os.listdir(raw) == [])
+        if settled_callback_failure:
+            raw, before_raw = c.directory(work, "raw-results", 0, 0, 0o700)
+            c.names(raw, ())
+        else:
+            raw_s = os.stat("raw-results", dir_fd=work, follow_symlinks=False)
+            require(stat.S_ISDIR(raw_s.st_mode) and raw_s.st_uid == d["subject_uid"] and raw_s.st_gid > 0
+                    and raw_s.st_gid not in (d["worker_gid"], d["subject_gid"])
+                    and stat.S_IMODE(raw_s.st_mode) == 0o710)
+            raw, _ = c.directory(work, "raw-results", d["subject_uid"], raw_s.st_gid, 0o710)
+            require(os.listdir(raw) == [])
         checkpoint = "pid-absence"
         require(not os.path.lexists("/proc/" + str(d["worker_pid"]))
                 and not os.path.lexists("/proc/" + str(d["broker_pid"])))
@@ -442,36 +559,75 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
         c.check()
         checkpoint = "users"
         users = []
-        for name, uid, gid in (("evw" + generation[:28], d["worker_uid"], d["worker_gid"]),
-                               ("evs" + generation[:28], d["subject_uid"], d["subject_gid"])):
-            by_name = pwd.getpwnam(name)
-            by_id = pwd.getpwuid(uid)
-            c.check()
-            require(by_name == by_id and by_name.pw_name == name
-                    and by_name.pw_uid == uid and by_name.pw_gid == gid)
-            users.append({"name": name, "uid": uid, "gid": gid, "retained": True})
+        if settled_callback_failure:
+            account_ids = frame_record["account_ids"]
+            for name, uid, gid in (("evw" + generation[:28], account_ids["worker_uid"], account_ids["worker_gid"]),
+                                   ("evs" + generation[:28], account_ids["subject_uid"], account_ids["subject_gid"])):
+                require_absent_by_name_and_id(pwd.getpwnam, pwd.getpwuid, name, uid)
+                c.check()
+                users.append({"name": name, "uid": uid, "gid": gid, "retained": False})
+        else:
+            for name, uid, gid in (("evw" + generation[:28], d["worker_uid"], d["worker_gid"]),
+                                   ("evs" + generation[:28], d["subject_uid"], d["subject_gid"])):
+                by_name = pwd.getpwnam(name)
+                by_id = pwd.getpwuid(uid)
+                c.check()
+                require(by_name == by_id and by_name.pw_name == name
+                        and by_name.pw_uid == uid and by_name.pw_gid == gid)
+                users.append({"name": name, "uid": uid, "gid": gid, "retained": True})
         checkpoint = "groups"
         groups = []
-        for name, gid in (("evw" + generation[:28], d["worker_gid"]),
-                          ("evs" + generation[:28], d["subject_gid"]), ("evr" + generation[:28], raw_s.st_gid)):
-            by_name = grp.getgrnam(name)
-            by_id = grp.getgrgid(gid)
-            c.check()
-            require(by_name == by_id and by_name.gr_name == name
-                    and by_name.gr_gid == gid and by_name.gr_mem == [])
-            groups.append({"name": name, "gid": gid, "retained": True})
+        if settled_callback_failure:
+            for name, gid in (("evw" + generation[:28], account_ids["worker_gid"]),
+                              ("evs" + generation[:28], account_ids["subject_gid"]),
+                              ("evr" + generation[:28], account_ids["results_gid"])):
+                require_absent_by_name_and_id(grp.getgrnam, grp.getgrgid, name, gid)
+                c.check()
+                groups.append({"name": name, "gid": gid, "retained": False})
+        else:
+            for name, gid in (("evw" + generation[:28], d["worker_gid"]),
+                              ("evs" + generation[:28], d["subject_gid"]), ("evr" + generation[:28], raw_s.st_gid)):
+                by_name = grp.getgrnam(name)
+                by_id = grp.getgrgid(gid)
+                c.check()
+                require(by_name == by_id and by_name.gr_name == name
+                        and by_name.gr_gid == gid and by_name.gr_mem == [])
+                groups.append({"name": name, "gid": gid, "retained": True})
         checkpoint = "final-identities"
-        require(identity(os.fstat(out)) == identity(before_out)
-                and identity(os.stat("output", dir_fd=work, follow_symlinks=False)) == identity(before_out)
-                and identity(os.fstat(work)) == identity(before_work)
-                and identity(os.stat(workspace_name, dir_fd=run, follow_symlinks=False)) == identity(before_work))
-        observation = {"schema": "issue779-n11-filesystem-nss-v1", "generation": generation,
-            "output_parent_descriptor_identity_match": True, "output_slot_present": False,
-            "raw_results_empty": True, "account_disposition": "preserved-quarantined",
-            "users": users, "groups": groups, "original_worker_pid_absent": True,
-            "original_broker_pid_absent": True, "fresh_generated_worker_group": worker_group,
-            "fresh_generated_owner_group": owner_group,
-            "native_acceptance": False, "native_authority": False}
+        if settled_callback_failure:
+            c.names(work, ("worker", "output", "raw-results"))
+            c.names(control, ("broker", "worker-control.json"))
+            c.names(broker, ("control.sock",))
+            c.names(out, ())
+            c.names(raw, ())
+            c.stable_named(run, workspace_name, work, before_work)
+            c.stable_named(work, "worker", control, before_control)
+            c.stable_named(control, "broker", broker, before_broker)
+            c.stable_named(control, "worker-control.json", descriptor_fd, before_descriptor)
+            c.stable_file_bytes(descriptor_fd, descriptor)
+            c.stable_named(broker, "control.sock", socket_fd, before_socket)
+            c.stable_named(work, "output", out, before_out)
+            c.stable_named(work, "raw-results", raw, before_raw)
+            observation = {"schema": "issue779-n11-filesystem-nss-v2", "generation": generation,
+                "output_parent_descriptor_object_match": True, "root_owned_layout_observed": True,
+                "output_slot_present": False, "raw_results_empty": True,
+                "account_disposition": "removed-under-root-custody",
+                "users": users, "groups": groups, "original_worker_pid_absent": True,
+                "original_broker_pid_absent": True, "fresh_generated_worker_group": worker_group,
+                "fresh_generated_owner_group": owner_group,
+                "native_acceptance": False, "native_authority": False}
+        else:
+            require(identity(os.fstat(out)) == identity(before_out)
+                    and identity(os.stat("output", dir_fd=work, follow_symlinks=False)) == identity(before_out)
+                    and identity(os.fstat(work)) == identity(before_work)
+                    and identity(os.stat(workspace_name, dir_fd=run, follow_symlinks=False)) == identity(before_work))
+            observation = {"schema": "issue779-n11-filesystem-nss-v1", "generation": generation,
+                "output_parent_descriptor_identity_match": True, "output_slot_present": False,
+                "raw_results_empty": True, "account_disposition": "preserved-quarantined",
+                "users": users, "groups": groups, "original_worker_pid_absent": True,
+                "original_broker_pid_absent": True, "fresh_generated_worker_group": worker_group,
+                "fresh_generated_owner_group": owner_group,
+                "native_acceptance": False, "native_authority": False}
         records["filesystem-nss-observation.json"] = (json.dumps(observation,
             sort_keys=True, separators=(",", ":")) + "\n").encode()
         require(set(records) == RETAINED_RECORD_NAMES)

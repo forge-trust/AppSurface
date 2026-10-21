@@ -392,6 +392,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// Terminal and cgroup fields come only from the existing post-pump finalization reads retained by this
     /// holder. This method performs no process, cgroup, timer or stop operation. It reports PhysicallySettled
     /// exactly as recorded, including false, and cannot clear the lifetime failure or quarantine state.
+    /// Private N11 additionally copies the original control-owned account snapshot before custody/account
+    /// closure, so later observers can check the original results GID without inferring it from sealed nodes.
     /// </remarks>
     internal LinuxFailedSettlementObservation CaptureFailedSettlementObservation(EvidenceProtectedLaunchInput input,
         LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
@@ -416,7 +418,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             EvidenceNativeQualification.CancellationEnabled ? LinuxFailedSettlementScenario.OriginalCancellation
                 : LinuxFailedSettlementScenario.WorkerStall,
 #if EVIDENCE_PRIVATE_N11
-            _stopTiming?.Snapshot
+            _stopTiming?.Snapshot, accounts.RequireControlOwnedBy(owner, token)
 #else
             null
 #endif

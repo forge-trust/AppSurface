@@ -5,7 +5,7 @@
       "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-none.sh",
-      "ported_sha256": "6799c704aad15c076be8fe02ceb15d64d032f6e35b3377614b328eb5ee5b3f6b",
+      "ported_sha256": "227c5c3394d9b82ac584ad5d85bf79f4c89cba78d5bdd9355e19506cb1cf08f1",
       "sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a"
     },
     {
@@ -21,7 +21,7 @@
       "historical_path": "packet/cases/N05/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n05.sh",
-      "ported_sha256": "cf879f6ab50ec4c4e60a195de944fb218c1a4a338be652632fa2127a84e0d5dc",
+      "ported_sha256": "a8450c625bd8eeeae70b2bc9856227b0d4c2d33f7b854888b7308045c7058e7b",
       "sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e"
     },
     {
@@ -83,7 +83,7 @@
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n11/checkpoint-n11.sh",
-      "ported_sha256": "85e82ec1a2e1728b227b4f22d042c3417b8ef35c839fc651b962883ba76be041",
+      "ported_sha256": "c4d3c2135fcd102bc2407f9b9dec2cabf318fa9c9cdeab51906ae09e77ba2d9d",
       "sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
     {
@@ -91,7 +91,7 @@
       "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n12/checkpoint-n12-data-integration.sh",
-      "ported_sha256": "c4e1ecdeb4ab613f89efab8d064b1f427dfea3dc8515132f0beac2ff3e15a003",
+      "ported_sha256": "01fd185b319bfeebbe3d46125addfa1eed29670f26bded36172696df36a1ff50",
       "sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
     },
     {
@@ -724,7 +724,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/README.md",
-      "ported_sha256": "608aba09896df754b45e9a40602a8a1f032b4d2f0229bd9001d33f3da169ea30",
+      "ported_sha256": "68648bb6d8805e405f69da3e945f449e790ab212776e3f8760cb07b54c71df5c",
       "sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35"
     },
     {
@@ -760,7 +760,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/check_stall_record.py",
-      "ported_sha256": "ef270352ae7a030d83e27483250df4625ea4b02987be6313eb3bdc9b67db5229",
+      "ported_sha256": "acdb66d1491c01311c005a8a4e10f62e790d5cf18b5e9cc9a1adb918e5b43c79",
       "sha256": "237c60db21e811d40a27b5a76a160d8aadaf2addb0b0f25c6e52c9a8313ae487"
     },
     {
@@ -787,7 +787,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/parser-pins.tsv",
-      "ported_sha256": "f151e552dfc54eb001e25bd696193cd9f420917a521f5062b3d39818d2c8f736",
+      "ported_sha256": "94ba06a0aa15c65a0b93e071683b876e4d2ed10971e680600fd0d409b24c92fc",
       "sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
     },
     {
@@ -796,7 +796,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/port-manifest.json",
-      "ported_sha256": "c174775c1d3acc883931f50613e8c31fb240f1490ebfc7e8e1f419c3867fab7d",
+      "ported_sha256": "4cf581f5af8495dd91de8c621c70146a5fa126f854c6d0571c7a8367f594e6ba",
       "sha256": "1397e14e696137fb02b54a2907ba4d27461acdf9188d99af1100efe1fe067e73"
     },
     {
@@ -805,7 +805,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/records.py",
-      "ported_sha256": "299cfac1e5e5a3df1abe8375003298e4a2c94c533f090001ed4ef77f15fbdb49",
+      "ported_sha256": "df7b783d5778e496438170385ab56a77ab09f1e6626ed023c2c37936a1bea08e",
       "sha256": "6f73e1077af6fe6126271ef1a4dcd916c39702215f5b82e2b15e106e41729a7f"
     },
     {
@@ -823,7 +823,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/root_stall_frame.py",
-      "ported_sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf",
+      "ported_sha256": "e1c88d24ee1d6a28c9ca9d1904c7f9fc7d777caac6dcfd765ce905c9990d635d",
       "sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
     },
     {
@@ -832,7 +832,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/stall_capture.py",
-      "ported_sha256": "95f007be927af7ef7d0ed8f45b8f55022c7a57a7ff9d20266fa5f737a6b06275",
+      "ported_sha256": "8c77c22dec5cd2109c84d51d3780dea2ec379574f739e1ac810562772ff90478",
       "sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
     },
     {
@@ -841,7 +841,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n12/README.md",
-      "ported_sha256": "41acca4a397ebb9bc9330b092a476f921fdde68e11f89a43c70e8007760af454",
+      "ported_sha256": "80461cbf0bafd61d167d872d5753bc867e7b2f67cefbdfdbd866b3dc0ac0b896",
       "sha256": "4a6b1f56c331cbb2976d99d35a57130ef2e369c61f1d51f303cd76efdbb72058"
     },
     {
@@ -877,7 +877,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n12/port-manifest.json",
-      "ported_sha256": "9101c5af714e7b51a93e266885053d90727efcd37b7e6a7fa1cc7d4d0abd54a2",
+      "ported_sha256": "e593de35042b23075d717a3fc5ae75ea5305062b20d193efefa86479e4d35aaa",
       "sha256": "aeba871d2f46d9fc3306f21518cb899e80b3a5d53d5691108e5b665367c57bb4"
     },
     {
@@ -1039,7 +1039,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/README.md",
-      "ported_sha256": "14694f1627eca3fd2dd2d4ebc63677b06a1b682492ecc76033a31d8159c5a631",
+      "ported_sha256": "169bd295d8bfbfd916fca3bee22286aaf3545e3c6425d4ba2ff45a04a4b3f806",
       "sha256": "5e9e335d5662b65830729cedbe854b4457bb748452c155f52b78ff6bf6fb9581"
     },
     {
@@ -1273,7 +1273,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/port-manifest.json",
-      "ported_sha256": "04f5ff8b64625b2303c27f9c1a5de8497b224e7bc47b93fa7012b84b04525acd",
+      "ported_sha256": "de88c74c67f0b4404c4569c450fe50cacae8dd990b95856718dede395cd50d09",
       "sha256": "1db483cffe025511384848a5f2bd456fb8ff789f8eef0e6002b2149635f9800d"
     },
     {

@@ -44,7 +44,7 @@ is checked against real NSS; the root adapter cannot substitute a protected owne
 
 ## Native behavior and clocks
 
-N11 is the real synchronous factory stall and preserved quarantine. Its historical
+N11 is the real synchronous factory stall. Its historical quarantine and
 failed/false-settlement record remains one supported outcome. A separate strict
 data outcome now describes **worker lifecycle fail-stop, then root physical
 settlement** when the callback's original bounded stop path reaches the fixed
@@ -79,6 +79,37 @@ closed consistency schema and exact byte bindings. Neither schema waives the
 source, image, identity, pump, cgroup, NSS, quarantine, output, or deadline
 checks. Portable controls establish data consistency only; a fresh complete
 Linux capture remains required for native N11 credit.
+
+### Post-custody observation
+
+The failure frame is emitted before the root's existing custody/account-close
+procedures. The external observer runs after root exit. For the settled-callback
+branch, `stall_capture` therefore requires the complete terminal layout from
+[RootCustody](../../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-n11-failed-settlement-observation):
+root:root directories `0700`, descriptor `0400`, and socket `0600`. It retains
+nofollow directory/file identities, checks the exact fixed children, empty
+output/raw-results, unchanged descriptor bytes and its original digest, and
+matches the output directory's device/inode to the original descriptor. The
+current owner is root; original UID/GID values are checked separately and never
+misreported as the directory's current identity.
+
+Private N11 additionally exports `account_ids`, exactly the original worker and
+subject UID/GID plus results GID, through the actual account-holder guard before
+custody. The observer requires this object, cross-binds the descriptor's four
+identities, and requires both generated names and all five original numeric IDs
+to be absent through NSS. Missing IDs, partial deletion, mixed pre/post modes,
+changed objects, lookup errors or expired time reject. It never falls back to
+the historical layout after a settled-branch failure.
+
+The resulting `issue779-n11-filesystem-nss-v2` record uses
+`output_parent_descriptor_object_match` and `root_owned_layout_observed`, with
+`account_disposition=removed-under-root-custody` and `retained=false` account
+rows. The older uncertain-settlement branch remains `v1`, with full original
+ownership and retained accounts under `preserved-quarantined`. The fixed result
+publisher and `records.validate_filesystem_observation(...)` require the exact
+disposition for the recomputed consistency branch. The latter is an internal
+data validator, usable for [record-binding controls](../../test_n11_observation_binding.py),
+and establishes no runtime authority, syscall result, or accepted proof.
 
 Fixture600/cleanup30 remain unchanged. N11 creates the original240-second request once and selects its owner runtime from that original remaining budget.
 The earlier outer absolute deadline remains in force; no native retry or renewed
@@ -134,7 +165,7 @@ their success does not qualify a Linux native case or simulate a protected owner
 source files and static invariance. [historical-to-current.patch](historical-to-current.patch)
 shows only the historical provenance boundary replacement and sixth env literal.
 The historical patch records the initial port only. The settled-callback
-correction updates two entries in the native shell's fixed parser-hash array to
+corrections update each changed entry in the native shell's fixed parser-hash array to
 match the reviewed modules and [parser-pins.tsv](parser-pins.tsv). The dispatcher
 and retainer remain unchanged. The
 `check_stall_record` historical data contract remains supported; the current
@@ -163,8 +194,9 @@ credential or output bytes enter that marker.
 
 The [diagnostic controls](../../test_n11_capture_diagnostic.py) exercise this
 projection, a failed private-layout operation, and close-before-final-deadline
-ordering. Capture guards, file reads/writes, NSS checks, close order, original
-observer deadline and rejection semantics remain unchanged. A helper checkpoint
+ordering. The marker projection does not change capture guards or deadlines. The strict
+post-custody filesystem/NSS contract is described separately above; close order,
+original observer deadline and unsuccessful-result semantics remain mandatory. A helper checkpoint
 is diagnostic only; it cannot qualify an unsuccessful native case.
 
 ## Failed-fixture archive retention

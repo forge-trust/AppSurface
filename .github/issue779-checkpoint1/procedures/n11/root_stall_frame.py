@@ -120,8 +120,17 @@ def _require_shape(value: dict[str, Any], name: str) -> None:
         _reject()
 
 def _validate_record(record: dict[str, Any]) -> None:
-    if frozenset(record) not in (_RECORD_KEYS, _RECORD_KEYS | {"stop_timing"}) or record.get("schema") != RECORD_SCHEMA:
+    if frozenset(record) not in (_RECORD_KEYS, _RECORD_KEYS | {"stop_timing"},
+            _RECORD_KEYS | {"account_ids"}, _RECORD_KEYS | {"stop_timing", "account_ids"}) or record.get("schema") != RECORD_SCHEMA:
         _reject()
+    if "account_ids" in record:
+        accounts = record["account_ids"]
+        if (type(accounts) is not dict or set(accounts) !=
+                {"worker_uid", "worker_gid", "subject_uid", "subject_gid", "results_gid"}
+                or any(type(v) is not int or not 1 <= v < 2**32 - 1 for v in accounts.values())
+                or accounts["worker_uid"] == accounts["subject_uid"]
+                or len({accounts["worker_gid"], accounts["subject_gid"], accounts["results_gid"]}) != 3):
+            _reject()
     if "stop_timing" in record:
         timing = record["stop_timing"]
         if type(timing) is not dict or frozenset(timing) != _STOP_TIMING_KEYS or timing.get("schema") != "issue779-original-worker-stop-timing-v1":

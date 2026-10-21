@@ -108,3 +108,22 @@ actual Bash functions on ordinary temporary paths with controlled command data
 and recorded calls. They establish parser/orchestration behavior only; no native
 acceptance or actual time saving is claimed. Fresh bounded Linux execution remains
 required to show that setup fits the original fixture budget.
+
+### Bounded alias declaration lookup
+
+`initialize_alias_declarations()` and `lookup_alias_declaration(path)` follow the
+[None declaration contract](../slot/README.md#bounded-alias-declaration-lookup):
+one bounded, typed and uniquely ordered declaration table is sealed after the
+full OS schema succeeds. Lookups compare exact strings in memory and reset the
+scratch result on every call, including a miss. They replace only repeated jq
+count/selection of immutable declarations. A lookup cannot establish ownership,
+identity, a hash result, or successful traversal.
+
+All physical ancestor/hash checks for ordinary paths and both complete alias
+walks with link before/readlink/after checks still execute at the original
+initial and final boundaries. The unchanged 600/30 fixture budget, original
+request deadline and prelaunch guard remain decisive. The
+[focused data/call-order controls](../../test_alias_declaration_lookup.py) cover
+empty and maximum tables, malformed/duplicate rows, replay/mutation, expiry,
+digest mismatch and changed physical samples. Fresh Linux execution remains
+necessary; reduced declaration subprocess count is not a timing result.

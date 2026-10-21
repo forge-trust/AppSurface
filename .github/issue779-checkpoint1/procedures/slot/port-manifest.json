@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 8265,
-      "sha256": "14694f1627eca3fd2dd2d4ebc63677b06a1b682492ecc76033a31d8159c5a631"
+      "bytes": 9974,
+      "sha256": "169bd295d8bfbfd916fca3bee22286aaf3545e3c6425d4ba2ff45a04a4b3f806"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -103,6 +103,21 @@
     "scope": "N06 pin_file and ancestor adopt complete typed sampling; None/N06/N12 ordinary alias components combine UID/mode query. All physical walks, symlink before/after checks, hashes and original clocks retained.",
     "time_gain_measured": false
   },
+  "source53_declaration_lookup": {
+    "native_execution": false,
+    "portable_control": "../../test_alias_declaration_lookup.py",
+    "scope": "None/N12 readonly bounded declaration-only alias row cache after original typed schema; all physical walks/hash/pins and clocks preserved",
+    "time_gain_measured": false
+  },
+  "source53_n05_sampling": {
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_metadata_sample_batching.py",
+      "../../test_n05_stage_observation.py"
+    ],
+    "scope": "N05 adopts exact N06 pin_file/ancestor/alias_walk consolidated physical samples; existing six diagnostic stage observations unchanged",
+    "time_gain_measured": false
+  },
   "wrappers": [
     {
       "changes": [
@@ -115,7 +130,7 @@
       "historical_sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a",
       "native_execution": false,
       "ported_path": "checkpoint-none.sh",
-      "ported_sha256": "6799c704aad15c076be8fe02ceb15d64d032f6e35b3377614b328eb5ee5b3f6b",
+      "ported_sha256": "227c5c3394d9b82ac584ad5d85bf79f4c89cba78d5bdd9355e19506cb1cf08f1",
       "selector": "None"
     },
     {
@@ -143,7 +158,7 @@
       "historical_sha256": "782a69fc2bce61df806dbb43ec63760aab6b77e5c604a2fa8fc3d33583b9e96e",
       "native_execution": false,
       "ported_path": "checkpoint-n05.sh",
-      "ported_sha256": "cf879f6ab50ec4c4e60a195de944fb218c1a4a338be652632fa2127a84e0d5dc",
+      "ported_sha256": "a8450c625bd8eeeae70b2bc9856227b0d4c2d33f7b854888b7308045c7058e7b",
       "selector": "N05"
     },
     {

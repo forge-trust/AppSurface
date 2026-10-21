@@ -951,7 +951,7 @@ join_owned() {
  return "$status"
 }
 cleanup() {
- local original=$? bad=0 name status=0 cg unit
+ local original=$? bad=0 name status=0 cg unit account_disposition
  trap - EXIT INT TERM; phase=cleanup
  # Signals attempted even at the deadline; no new allowance is ever manufactured.
  for name in observer_pid launch_pid; do signal_owned "$name" || bad=1; done
@@ -972,10 +972,16 @@ cleanup() {
  # Positive fixture data is published only after root joins, fresh group checks,
  # original filesystem/NSS capture and the same final fixture deadline.
  [[ -f $private/stall-capture.json && ! -L $private/stall-capture.json ]] || exit 1
+ # The source-bound observer validates either complete original quarantine or
+ # complete sealed-root custody. Never infer cleanup from the pre-custody frame.
+ account_disposition=$(try_bounded jq -er '
+  if .consistency.schema=="issue779-n11-settled-callback-failure-data-v1" then "removed-under-root-custody"
+  elif .consistency.schema=="issue779-n11-detached-data-consistency-v1" then "preserved-quarantined"
+  else error("capture-consistency") end' "$private/stall-capture.json") || exit 1
  local h
  h=$(try_bounded sha256sum "$private/stall-capture.json") || exit 1
- try_bounded jq -jcS -n --arg g "$G" --arg case "$NEGATIVE_CASE" --arg source "$source_revision" --arg base "$base_revision" --arg capture "${h:0:64}" --arg n03 "$n03_result_sha256" \
-  '{schema:"issue779-n11-stall-fixture-v1",generation:$g,case:$case,source_revision:$source,base_revision:$base,capture_sha256:$capture,n03_result_sha256:$n03,root_launch_exit:1,fixture_processes_joined:true,fresh_generated_groups_empty:true,account_disposition:"preserved-quarantined",native_acceptance:false,trusted:false}' >"$private/fixture-result.pending" || exit 1
+ try_bounded jq -jcS -n --arg g "$G" --arg case "$NEGATIVE_CASE" --arg source "$source_revision" --arg base "$base_revision" --arg capture "${h:0:64}" --arg n03 "$n03_result_sha256" --arg disposition "$account_disposition" \
+  '{schema:"issue779-n11-stall-fixture-v1",generation:$g,case:$case,source_revision:$source,base_revision:$base,capture_sha256:$capture,n03_result_sha256:$n03,root_launch_exit:1,fixture_processes_joined:true,fresh_generated_groups_empty:true,account_disposition:$disposition,native_acceptance:false,trusted:false}' >"$private/fixture-result.pending" || exit 1
  try_bounded chmod 600 "$private/fixture-result.pending" || exit 1
  try_bounded mv -T "$private/fixture-result.pending" "$private/fixture-result.json" || exit 1
  left >/dev/null || exit 1
@@ -998,7 +1004,7 @@ absolute "$stall_parser_pins"; ancestor "${stall_parser_pins%/*}"
 [[ $(bounded stat -c %s "$stall_parser_pins") -le 2048 ]] || fail stall-parser-pin-bound
 bounded install -d -m 700 "$private/parsers"
 local_parser_count=0
-readonly STALL_MODULE_SHA256=('6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf' 'ef270352ae7a030d83e27483250df4625ea4b02987be6313eb3bdc9b67db5229' '95f007be927af7ef7d0ed8f45b8f55022c7a57a7ff9d20266fa5f737a6b06275' 'b43878c0e35e7c56abbc42f4cec7adcc6236ba016ad8795714e7ea4efb22b741')
+readonly STALL_MODULE_SHA256=('e1c88d24ee1d6a28c9ca9d1904c7f9fc7d777caac6dcfd765ce905c9990d635d' 'acdb66d1491c01311c005a8a4e10f62e790d5cf18b5e9cc9a1adb918e5b43c79' '8c77c22dec5cd2109c84d51d3780dea2ec379574f739e1ac810562772ff90478' 'b43878c0e35e7c56abbc42f4cec7adcc6236ba016ad8795714e7ea4efb22b741')
 readonly STALL_MODULE_NAMES=('root_stall_frame.py' 'check_stall_record.py' 'stall_capture.py' 'capture_stall.py')
 while IFS=$'\t' read -r module digest extra; do
  ((local_parser_count<4)) || fail stall-parser-pin-count

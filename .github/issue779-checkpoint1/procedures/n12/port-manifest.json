@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 7140,
-      "sha256": "41acca4a397ebb9bc9330b092a476f921fdde68e11f89a43c70e8007760af454"
+      "bytes": 8300,
+      "sha256": "80461cbf0bafd61d167d872d5753bc867e7b2f67cefbdfdbd866b3dc0ac0b896"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 86309,
-      "sha256": "c4e1ecdeb4ab613f89efab8d064b1f427dfea3dc8515132f0beac2ff3e15a003"
+      "bytes": 88055,
+      "sha256": "01fd185b319bfeebbe3d46125addfa1eed29670f26bded36172696df36a1ff50"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -190,6 +190,12 @@
     "native_execution": false,
     "portable_control": "../../test_metadata_sample_batching.py",
     "scope": "One typed three-field audit declaration projection per symlink; actual metadata/readlink/metadata and both walks unchanged.",
+    "time_gain_measured": false
+  },
+  "source53_declaration_lookup": {
+    "native_execution": false,
+    "portable_control": "../../test_alias_declaration_lookup.py",
+    "scope": "None/N12 readonly bounded declaration-only alias row cache after original typed schema; all physical walks/hash/pins and clocks preserved",
     "time_gain_measured": false
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",

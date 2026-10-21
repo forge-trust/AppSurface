@@ -138,6 +138,9 @@ class N11SettledCallbackTests(unittest.TestCase):
         request = request_bytes()
         descriptor = descriptor_bytes(request)
         value = record()
+        value["account_ids"] = {"worker_uid": UID, "worker_gid": GID,
+                                "subject_uid": UID + 1, "subject_gid": GID + 1,
+                                "results_gid": GID + 2}
         value["ready"]["descriptor_sha256"] = hashlib.sha256(descriptor).hexdigest()
         frame = framed(value)
         _, result, retained = stall_capture.parse_original(frame, descriptor, request=request,
@@ -215,6 +218,9 @@ class N11SettledCallbackTests(unittest.TestCase):
 
     def test_root_failure_selection_requires_exact_source_owned_context(self):
         value = record()
+        value["account_ids"] = {"worker_uid": UID, "worker_gid": GID,
+                                "subject_uid": UID + 1, "subject_gid": GID + 1,
+                                "results_gid": GID + 2}
         good = {"phase": "ServerRun", "error_kind": "Admission", "diagnostic_code": "ASEVD410",
                 "account_failure": None, "custody_failure": None,
                 "control_failure": {"stage": "WorkerTerminalTaskCompleted", "operation": None,

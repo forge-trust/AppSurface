@@ -46,7 +46,8 @@ internal sealed record LinuxFailedSettlementState(bool StartupJoined, bool StopJ
 /// digest values are null while the actual closed pump failure and count metadata remains. The producer emits
 /// this record only for compile-selected N11, the N08/N09 failure fallback or the private N07
 /// rejected-frame fallback, after original joins and before custody/account closure. Its scenario
-/// changes only the fixed schema label.
+/// changes only the fixed schema label. Only N11 may additionally retain copied original account IDs;
+/// these identify later numeric absence checks and do not assert custody or account cleanup.
 /// </remarks>
 internal sealed class LinuxFailedSettlementObservation
 {
@@ -82,6 +83,9 @@ internal sealed class LinuxFailedSettlementObservation
     /// <param name="token">Original cleanup token; cancellation prevents publication.</param>
     /// <param name="scenario">Closed private diagnostic family, never a runtime execution selector.</param>
     /// <param name="stopTiming">Optional original N11 numeric stop observations; never an exit or deadline receipt.</param>
+    /// <param name="accountIds">Optional N11 original account comparison data, including the results GID.
+    /// Worker IDs must match the original process sample. Absence preserves the existing JSON bytes;
+    /// supplied IDs grant no ownership and do not assert that cleanup has completed.</param>
     /// <returns>Bounded detached failure data that cannot upgrade settlement.</returns>
     /// <exception cref="InvalidOperationException">A supplied closed metadata value violates the fixed schema.</exception>
     /// <exception cref="OperationCanceledException">The original cleanup token is cancelled.</exception>
@@ -89,7 +93,7 @@ internal sealed class LinuxFailedSettlementObservation
         string descriptorSha256, LinuxFailedSettlementState state, SupervisionPendingStartSnapshot pending,
         LinuxUnitProperties? terminal, LinuxCgroupSample? group, SupervisionOutputReceipt output,
         CancellationToken token = default, LinuxFailedSettlementScenario scenario = LinuxFailedSettlementScenario.WorkerStall,
-        LinuxWorkerStopTimingSnapshot? stopTiming = null)
+        LinuxWorkerStopTimingSnapshot? stopTiming = null, LinuxRunAccountSnapshot? accountIds = null)
     {
         token.ThrowIfCancellationRequested();
         try
@@ -100,10 +104,18 @@ internal sealed class LinuxFailedSettlementObservation
                 || !state.StartupJoined || !state.StopJoined || !pending.StartReserved || !pending.StartJoined
                 || !pending.Closed || !pending.StopJoined || !Enum.IsDefined(state.Monitor)
                 || !Enum.IsDefined(pending.FirstFailure) || !Enum.IsDefined(scenario)
-                || stopTiming is not null && scenario != LinuxFailedSettlementScenario.WorkerStall) throw Rejected();
+                || stopTiming is not null && scenario != LinuxFailedSettlementScenario.WorkerStall
+                || accountIds is not null && scenario != LinuxFailedSettlementScenario.WorkerStall) throw Rejected();
             var unit = LinuxUnitName.Create(LinuxUnitRole.Worker, generation);
             LinuxProcessData.RequireExpected(identity, identity.Stat.Pid, identity.Uids.Real,
                 identity.Gids.Real, unit, LinuxProcessSamplingRole.Worker);
+            if (accountIds is not null && (accountIds.WorkerUid is 0 or uint.MaxValue
+                || accountIds.WorkerGid is 0 or uint.MaxValue || accountIds.SubjectUid is 0 or uint.MaxValue
+                || accountIds.SubjectGid is 0 or uint.MaxValue || accountIds.ResultsGid is 0 or uint.MaxValue
+                || accountIds.WorkerUid != identity.Uids.Real || accountIds.WorkerGid != identity.Gids.Real
+                || accountIds.WorkerUid == accountIds.SubjectUid || accountIds.WorkerGid == accountIds.SubjectGid
+                || accountIds.WorkerGid == accountIds.ResultsGid || accountIds.SubjectGid == accountIds.ResultsGid))
+                throw Rejected();
             if (terminal is not null && (terminal.Id != unit.Value || terminal.ExecMainPid != identity.Stat.Pid
                 || terminal.ExecMainCode is < 0 or > 6 || terminal.ExecMainStatus is < 0 or > 255)) throw Rejected();
             if (group is null && state.CgroupAfterPumps || group is not null && (group.Exists
@@ -125,8 +137,8 @@ internal sealed class LinuxFailedSettlementObservation
                 && output.Stderr.ReceivedBytes == output.Stderr.Prefix.Length
                 && output.ReceivedBytes <= MaximumRawBytes;
             token.ThrowIfCancellationRequested();
-            // Retain the old strict shape when timing was not supplied. The new N11 fixture parses
-            // the additive field explicitly; cancellation and production frames remain byte compatible.
+            // Retain the old strict shape when neither optional N11 projection is supplied.
+            // Cancellation and parent-replacement frames remain byte compatible.
             using var timingJson = stopTiming is null ? null : JsonDocument.Parse(stopTiming.Encode());
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new
             {
@@ -161,7 +173,7 @@ internal sealed class LinuxFailedSettlementObservation
                     stop_signal_failed = output.StopSignalFailed, export_complete = complete },
                 observation_only = true, native_authority = false, native_acceptance = false,
             });
-            if (timingJson is not null)
+            if (timingJson is not null || accountIds is not null)
             {
                 using var original = JsonDocument.Parse(bytes);
                 using var stream = new MemoryStream();
@@ -169,8 +181,21 @@ internal sealed class LinuxFailedSettlementObservation
                 {
                     writer.WriteStartObject();
                     foreach (var property in original.RootElement.EnumerateObject()) property.WriteTo(writer);
-                    writer.WritePropertyName("stop_timing");
-                    timingJson.RootElement.WriteTo(writer);
+                    if (timingJson is not null)
+                    {
+                        writer.WritePropertyName("stop_timing");
+                        timingJson.RootElement.WriteTo(writer);
+                    }
+                    if (accountIds is not null)
+                    {
+                        writer.WriteStartObject("account_ids");
+                        writer.WriteNumber("worker_uid", accountIds.WorkerUid);
+                        writer.WriteNumber("worker_gid", accountIds.WorkerGid);
+                        writer.WriteNumber("subject_uid", accountIds.SubjectUid);
+                        writer.WriteNumber("subject_gid", accountIds.SubjectGid);
+                        writer.WriteNumber("results_gid", accountIds.ResultsGid);
+                        writer.WriteEndObject();
+                    }
                     writer.WriteEndObject();
                 }
                 bytes = stream.ToArray();

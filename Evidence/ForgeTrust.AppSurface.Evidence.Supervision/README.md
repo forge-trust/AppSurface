@@ -1564,6 +1564,23 @@ capture. Neither this descriptor data nor the observation releases custody or ac
 rejects with the fixed ASEVD410 data error. Native callers select the family from compile-owned image
 metadata; neither the argument nor a detached call selects a runtime operation or grants ownership.
 
+`CreateDetached(..., stopTiming = null, accountIds = null)` can additionally copy
+the original `LinuxRunAccountSnapshot` into an exact five-number `account_ids`
+object for `WorkerStall` only: `worker_uid`, `worker_gid`, `subject_uid`,
+`subject_gid`, and `results_gid`. Every value must be a nonroot ID below
+`uint.MaxValue`; the worker values must match the sampled process, user IDs must
+be distinct, and the three groups must be distinct. UID and GID namespaces can
+legitimately use the same number. Other families reject a supplied snapshot;
+omission preserves their serialized bytes. Only the private N11 callsite passes
+the actual account holder's control-validated snapshot before custody begins.
+
+Those IDs describe original ownership, not successful account deletion. After
+root exit, the [N11 observer](../../.github/issue779-checkpoint1/procedures/n11/README.md#post-custody-observation)
+separately requires the complete sealed root layout, unchanged descriptor and
+output object identity, empty results, absent processes/groups, and absence of
+both generated names and original numeric IDs. A pre-custody frame cannot stand
+in for those later physical checks or authorize account release.
+
 Focused local checks passed 87 executions: 59 codec/lifetime/pending-start controls, one N11 build-selection
 control and 27 ordinary qualification/protected CLI controls. These checks establish local data and
 procedure behavior; the deliberate stall and actual Linux stop/group/pump/custody evidence remain unverified.

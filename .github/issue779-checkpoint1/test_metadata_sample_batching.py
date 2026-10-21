@@ -15,7 +15,8 @@ import unittest
 ROOT = Path(__file__).resolve().parent
 SCRIPTS = (ROOT / "procedures/slot/checkpoint-none.sh",
            ROOT / "procedures/slot/checkpoint-n06.sh",
-           ROOT / "procedures/n12/checkpoint-n12-data-integration.sh")
+           ROOT / "procedures/n12/checkpoint-n12-data-integration.sh",
+           ROOT / "procedures/slot/checkpoint-n05.sh")
 HASH = "a" * 64
 BEFORE = "1:2:4:81a4:1:0:0"
 
@@ -230,7 +231,7 @@ fi
                "LEAF": str(self.leaf), "RECORD": json.dumps(record),
                "OVERRIDE": "yes" if projection is not None else "no",
                "PROJECTION": projection or "",
-               "FAMILY": "n06" if script.name == "checkpoint-n06.sh" else "none"}
+               "FAMILY": "indexed" if script.name in ("checkpoint-n05.sh", "checkpoint-n06.sh") else "none"}
         result = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", program],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
         calls = [line.split("\t") for line in self.calls.read_text().splitlines()] if self.calls.exists() else []
@@ -271,7 +272,7 @@ fi
                 with self.subTest(script=script.name, kwargs=kwargs):
                     result, calls = self.invoke(script, **kwargs)
                     self.assertEqual((1, reason), (result.returncode, result.stderr))
-                    if kwargs.get("expired") and script.name == "checkpoint-n06.sh":
+                    if kwargs.get("expired") and script.name in ("checkpoint-n05.sh", "checkpoint-n06.sh"):
                         self.assertEqual([], calls)
 
     def test_n12_projects_three_declaration_fields_once_and_rejects_bad_projection(self):

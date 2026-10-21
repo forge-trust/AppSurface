@@ -200,6 +200,141 @@ public sealed class LinuxFailedSettlementObservationTests
         Assert.Null(error.InnerException);
     }
 
+    /// <summary>Original N11 account numbers add exactly five fields without changing any earlier observation.</summary>
+    [Theory]
+    [InlineData(false)][InlineData(true)]
+    public void N11AccountIdsAddOnlyTheExactOriginalFiveNumbers(bool includeTiming)
+    {
+        var data = Valid();
+        var accounts = new LinuxRunAccountSnapshot(999, 987, 1000, 988, 989);
+        var timing = includeTiming ? new LinuxWorkerStopTimingSnapshot(20_000, 5000, 15_000_000,
+            0, 1, 2, null, null, 3, 4, 5, 6, null, 7) : null;
+        var original = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output, stopTiming: timing);
+        var observation = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output,
+            stopTiming: timing, accountIds: accounts);
+        using var before = JsonDocument.Parse(original.Bytes);
+        using var after = JsonDocument.Parse(observation.Bytes);
+        foreach (var property in before.RootElement.EnumerateObject())
+            Assert.Equal(property.Value.GetRawText(), after.RootElement.GetProperty(property.Name).GetRawText());
+        Assert.Equal(before.RootElement.EnumerateObject().Count() + 1, after.RootElement.EnumerateObject().Count());
+        var ids = after.RootElement.GetProperty("account_ids");
+        Assert.Equal(new[] { "worker_uid", "worker_gid", "subject_uid", "subject_gid", "results_gid" },
+            ids.EnumerateObject().Select(static property => property.Name).ToArray());
+        Assert.Equal(new uint[] { 999, 987, 1000, 988, 989 },
+            ids.EnumerateObject().Select(static property => property.Value.GetUInt32()).ToArray());
+        Assert.False(after.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(after.RootElement.GetProperty("native_acceptance").GetBoolean());
+        Assert.DoesNotContain("private-stream-canary", Encoding.UTF8.GetString(observation.Bytes));
+        var saved = observation.Bytes;
+        Array.Fill(observation.Bytes, (byte)0);
+        Assert.Equal(saved, observation.Bytes);
+    }
+
+    /// <summary>Null account data preserves each old family byte-for-byte, including the existing timing append.</summary>
+    [Theory]
+    [InlineData(0)][InlineData(1)][InlineData(2)]
+    public void AbsentAccountIdsPreserveExistingFamilyBytes(int scenarioValue)
+    {
+        var scenario = (LinuxFailedSettlementScenario)scenarioValue;
+        var data = Valid();
+        var original = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output, scenario: scenario).Bytes;
+        var explicitNull = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output,
+            scenario: scenario, accountIds: null).Bytes;
+        Assert.Equal(original, explicitNull);
+        using var json = JsonDocument.Parse(explicitNull);
+        Assert.False(json.RootElement.TryGetProperty("account_ids", out _));
+        if (scenario == LinuxFailedSettlementScenario.WorkerStall)
+        {
+            var timing = new LinuxWorkerStopTimingSnapshot(20_000, 5000, 15_000_000,
+                0, 1, 2, null, null, 3, 4, 5, 6, null, 7);
+            var timed = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+                data.State, data.Pending, data.Terminal, data.Group, data.Output, stopTiming: timing).Bytes;
+            var timedNull = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+                data.State, data.Pending, data.Terminal, data.Group, data.Output,
+                stopTiming: timing, accountIds: null).Bytes;
+            Assert.Equal(timed, timedNull);
+        }
+    }
+
+    /// <summary>The N11-only account projection is rejected for both other diagnostic families.</summary>
+    [Theory]
+    [InlineData(1)][InlineData(2)]
+    public void ForeignFamilyAccountIdsRejectWithoutSuppliedData(int scenarioValue)
+    {
+        var scenario = (LinuxFailedSettlementScenario)scenarioValue;
+        var data = Valid();
+        var accounts = new LinuxRunAccountSnapshot(999, 987, 1000, 988, 989);
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+                data.State, data.Pending, data.Terminal, data.Group, data.Output,
+                scenario: scenario, accountIds: accounts));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-stream-canary", error.Message);
+    }
+
+    /// <summary>One changed account field rejects invalid numbers, worker mismatches, and within-namespace collisions.</summary>
+    [Theory]
+    [InlineData("worker-uid-zero")][InlineData("worker-uid-max")]
+    [InlineData("worker-gid-zero")][InlineData("worker-gid-max")]
+    [InlineData("subject-uid-zero")][InlineData("subject-uid-max")]
+    [InlineData("subject-gid-zero")][InlineData("subject-gid-max")]
+    [InlineData("results-gid-zero")][InlineData("results-gid-max")]
+    [InlineData("worker-uid-mismatch")][InlineData("worker-gid-mismatch")]
+    [InlineData("same-uids")][InlineData("worker-subject-gids")]
+    [InlineData("worker-results-gids")][InlineData("subject-results-gids")]
+    public void MalformedN11AccountIdsRejectFromValidAdjacentData(string condition)
+    {
+        var data = Valid();
+        var accounts = new LinuxRunAccountSnapshot(999, 987, 1000, 988, 989);
+        _ = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output, accountIds: accounts);
+        accounts = condition switch
+        {
+            "worker-uid-zero" => accounts with { WorkerUid = 0 },
+            "worker-uid-max" => accounts with { WorkerUid = uint.MaxValue },
+            "worker-gid-zero" => accounts with { WorkerGid = 0 },
+            "worker-gid-max" => accounts with { WorkerGid = uint.MaxValue },
+            "subject-uid-zero" => accounts with { SubjectUid = 0 },
+            "subject-uid-max" => accounts with { SubjectUid = uint.MaxValue },
+            "subject-gid-zero" => accounts with { SubjectGid = 0 },
+            "subject-gid-max" => accounts with { SubjectGid = uint.MaxValue },
+            "results-gid-zero" => accounts with { ResultsGid = 0 },
+            "results-gid-max" => accounts with { ResultsGid = uint.MaxValue },
+            "worker-uid-mismatch" => accounts with { WorkerUid = 998 },
+            "worker-gid-mismatch" => accounts with { WorkerGid = 986 },
+            "same-uids" => accounts with { SubjectUid = accounts.WorkerUid },
+            "worker-subject-gids" => accounts with { SubjectGid = accounts.WorkerGid },
+            "worker-results-gids" => accounts with { ResultsGid = accounts.WorkerGid },
+            "subject-results-gids" => accounts with { ResultsGid = accounts.SubjectGid },
+            _ => throw new InvalidOperationException(),
+        };
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+                data.State, data.Pending, data.Terminal, data.Group, data.Output, accountIds: accounts));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-stream-canary", error.Message);
+    }
+
+    /// <summary>UID and GID namespaces may share numbers while each namespace retains its required distinctions.</summary>
+    [Fact]
+    public void CrossNamespaceNumericEqualityIsNotAnAccountCollision()
+    {
+        var data = Valid();
+        var accounts = new LinuxRunAccountSnapshot(999, 987, 987, 999, 1001);
+        var observation = LinuxFailedSettlementObservation.CreateDetached(data.Generation, data.Identity, Digest,
+            data.State, data.Pending, data.Terminal, data.Group, data.Output, accountIds: accounts);
+        using var json = JsonDocument.Parse(observation.Bytes);
+        var ids = json.RootElement.GetProperty("account_ids");
+        Assert.Equal(ids.GetProperty("worker_uid").GetUInt32(), ids.GetProperty("subject_gid").GetUInt32());
+        Assert.Equal(ids.GetProperty("worker_gid").GetUInt32(), ids.GetProperty("subject_uid").GetUInt32());
+    }
+
     private static void Reject(Data data)
     {
         var error = Assert.Throws<InvalidOperationException>(() => Encode(data));

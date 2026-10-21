@@ -1,7 +1,9 @@
 """Readable original native-record predicates; detached data issues no authority.
 
 Only expected current source/base/entry values are supplied by the outer binding.
-The original record/identity/EOF/stop/NSS predicates below are retained verbatim.
+Original record/identity/EOF/stop checks remain mandatory. Current N11 additionally
+distinguishes strict post-root-custody removal from the historical quarantine
+observation; neither detached branch grants native authority.
 """
 import hashlib, io, json, re, tarfile
 
@@ -40,6 +42,88 @@ NEGATIVE_CAPS = {
 
 KEYS = {"asevd402_observed", "broker_exit", "broker_pid", "control", "descriptor_supplied", "kernel_peer_bound_to_owned_worker", "native_acceptance", "owned_process_groups_joined", "ready_request_observed", "request_bytes", "schema", "sent_bytes", "source_commit", "status", "stream_custody", "systemd_worker_authority", "worker_exit", "worker_pid", "worker_stdout_bytes"}
 NEGATIVE_CAPS.update({'logs/n11-launch-timing.json': 1024, 'signal.json': 1024, 'kernel.json': 4097, 'joined-streams.json': 98304, 'root-failure.json': 1024, 'worker.stdout': 0, 'worker.stderr': 65536, 'worker-control.json': 65536, 'filesystem-nss-observation.json': 8192, 'cancellation-capture.json': 8192, 'stall-capture.json': 8192, 'stall-capture.stderr': 1024, 'original-failed-settlement.json': 65536, 'original-request.json': 8192, 'root.stderr': 71680, 'logs/n01.stdout': 0, 'logs/n01.stderr': 114688})
+
+def validate_filesystem_observation(observation, *, generation, descriptor, consistency_schema,
+                                    account_disposition, original_record):
+    """Reconcile detached post-state data, never native ownership or cleanup authority.
+
+    The archive validator supplies the already-recomputed original consistency.
+    Settled callback failure requires the complete v2 sealed-root observation and
+    original five IDs; historical uncertain settlement retains the exact v1
+    quarantine schema. A caller cannot mix these contracts or use partial NSS.
+    """
+    require(consistency_schema in ('issue779-n11-settled-callback-failure-data-v1',
+                                   'issue779-n11-detached-data-consistency-v1'),
+            'n11-observation-consistency-schema')
+    require(type(generation) is str and re.fullmatch('[0-9a-f]{32}', generation)
+            and generation != '0' * 32 and type(descriptor) is dict
+            and all(type(descriptor.get(k)) is int and 0 < descriptor[k] < 2**32-1
+                    for k in ('worker_uid','worker_gid','subject_uid','subject_gid'))
+            and descriptor['worker_uid'] != descriptor['subject_uid']
+            and descriptor['worker_gid'] != descriptor['subject_gid']
+            and type(original_record) is dict, 'n11-observation-original-identities')
+    settled = consistency_schema == 'issue779-n11-settled-callback-failure-data-v1'
+    disposition = 'removed-under-root-custody' if settled else 'preserved-quarantined'
+    require(account_disposition == disposition, 'n11-account-disposition-binding')
+    observation_keys = {'schema','generation','output_parent_descriptor_identity_match','output_slot_present',
+        'raw_results_empty','account_disposition','users','groups','original_worker_pid_absent',
+        'original_broker_pid_absent','fresh_generated_worker_group','fresh_generated_owner_group',
+        'native_acceptance','native_authority'}
+    if settled:
+        observation_keys.remove('output_parent_descriptor_identity_match')
+        observation_keys.update(('output_parent_descriptor_object_match','root_owned_layout_observed'))
+    identity_key = ('output_parent_descriptor_object_match' if settled
+                    else 'output_parent_descriptor_identity_match')
+    require(type(observation) is dict and set(observation) == observation_keys
+            and observation['schema'] == ('issue779-n11-filesystem-nss-v2' if settled else 'issue779-n11-filesystem-nss-v1')
+            and observation['generation'] == generation
+            and observation[identity_key] is True
+            and (not settled or observation['root_owned_layout_observed'] is True)
+            and observation['output_slot_present'] is False and observation['raw_results_empty'] is True
+            and observation['account_disposition'] == disposition
+            and observation['original_worker_pid_absent'] is True and observation['original_broker_pid_absent'] is True
+            and observation['native_acceptance'] is False and observation['native_authority'] is False,
+            'n11-filesystem-nss-observation')
+    for key in ('fresh_generated_worker_group','fresh_generated_owner_group'):
+        group = observation[key]
+        require(type(group) is dict and set(group) == {'exists','populated','frozen','inode'}
+                and type(group['exists']) is bool, 'n11-observed-group-shape')
+        if group['exists']:
+            require(group['populated'] is False and group['frozen'] is False
+                    and type(group['inode']) is int and 0 < group['inode'] < 2**64,
+                    'n11-observed-group-not-empty')
+        else:
+            require(all(group[k] is None for k in ('populated','frozen','inode')), 'n11-observed-group-absence')
+    users, groups = observation['users'], observation['groups']
+    account_ids = (original_record.get('account_ids')
+                   if settled else None)
+    if settled:
+        require(type(account_ids) is dict and set(account_ids) ==
+                {'worker_uid','worker_gid','subject_uid','subject_gid','results_gid'}
+                and all(type(v) is int and 0 < v < 2**32-1 for v in account_ids.values())
+                and all(account_ids[k] == descriptor[k] for k in ('worker_uid','worker_gid','subject_uid','subject_gid'))
+                and account_ids['worker_uid'] != account_ids['subject_uid']
+                and len({account_ids[k] for k in ('worker_gid','subject_gid','results_gid')}) == 3,
+                'n11-original-account-binding')
+    require(type(users) is list and len(users) == 2 and type(groups) is list and len(groups) == 3,
+            'n11-observed-accounts-count')
+    prefix = generation[:28]
+    for row, name, role in zip(users, ('evw','evs'), ('worker','subject')):
+        require(type(row) is dict and set(row) == {'name','uid','gid','retained'}
+                and row['name'] == name + prefix and row['retained'] is (not settled)
+                and type(row['uid']) is int and row['uid'] == descriptor[role+'_uid']
+                and type(row['gid']) is int and row['gid'] == descriptor[role+'_gid'], 'n11-observed-user-binding')
+    group_ids = []
+    for row, name in zip(groups, ('evw','evs','evr')):
+        require(type(row) is dict and set(row) == {'name','gid','retained'}
+                and row['name'] == name + prefix and row['retained'] is (not settled)
+                and type(row['gid']) is int and 0 < row['gid'] < 2**32-1, 'n11-observed-group-binding')
+        group_ids.append(row['gid'])
+    require(group_ids[:2] == [descriptor['worker_gid'],descriptor['subject_gid']]
+            and len(set(group_ids)) == 3
+            and (not settled or group_ids == [account_ids[k] for k in ('worker_gid','subject_gid','results_gid')]),
+            'n11-observed-group-identities')
+    return True
 
 def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
     SOURCE=source
@@ -119,7 +203,7 @@ def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
                 and value['case'] == 'N11' and re.fullmatch('[0-9a-f]{32}', value['generation'])
                 and type(value['root_launch_exit']) is int and value['root_launch_exit'] == 1
                 and value['fixture_processes_joined'] is True and value['fresh_generated_groups_empty'] is True
-                and value['account_disposition'] == 'preserved-quarantined'
+                and value['account_disposition'] in ('preserved-quarantined','removed-under-root-custody')
                 and value['native_acceptance'] is False and value['trusted'] is False
                 and re.fullmatch('[0-9a-f]{64}', value['capture_sha256'])
                 and type(value['n03_result_sha256']) is str
@@ -128,8 +212,8 @@ def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
     def validate_negative_archive(values):
         """Bind the N11 retained archive as detached data; preserve the failed execution.
 
-        N11 deliberately preserves quarantined accounts. It must never be routed through
-        the N08/N09 cancellation validator, which requires removed accounts/root custody.
+        N11 separately checks the actual original quarantine or sealed-root state.
+        It must never be routed through another family's cancellation validator.
         Canonical USTAR and member byte caps were checked by inspect_archive before this call.
         """
         require(NEGATIVE_CASE == 'N11', 'negative-archive-case')
@@ -142,7 +226,7 @@ def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
                 and result['capture_sha256'] == sha(raw['stall-capture.json'])
                 and decode_data(raw['fixture-result.json']) == result, 'n11-result-capture-digest')
         return {'case': 'N11', 'generation': result['generation'], 'source': SOURCE,
-                'capture_digest_matched': True, 'account_disposition': 'preserved-quarantined',
+                'capture_digest_matched': True, 'account_disposition': result['account_disposition'],
                 'native_authority': False, 'native_acceptance': False}
 
     def validate_n11_capture(values):
@@ -246,48 +330,10 @@ def validate(raw, *, source, base, entry_sha, record_checker, stall_capture):
         require(all(name in raw and raw[name] == content for name, content in original_records.items()),
                 'n11-original-framed-record-binding')
         require(capture['job_deadline_utc'] == request.get('job_deadline_utc'), 'n11-original-deadline-binding')
-        observation = decode_data(raw['filesystem-nss-observation.json'])
-        observation_keys = {'schema','generation','output_parent_descriptor_identity_match','output_slot_present',
-            'raw_results_empty','account_disposition','users','groups','original_worker_pid_absent',
-            'original_broker_pid_absent','fresh_generated_worker_group','fresh_generated_owner_group',
-            'native_acceptance','native_authority'}
-        require(type(observation) is dict and set(observation) == observation_keys
-                and observation['schema'] == 'issue779-n11-filesystem-nss-v1'
-                and observation['generation'] == result['generation']
-                and observation['output_parent_descriptor_identity_match'] is True
-                and observation['output_slot_present'] is False and observation['raw_results_empty'] is True
-                and observation['account_disposition'] == 'preserved-quarantined'
-                and observation['original_worker_pid_absent'] is True and observation['original_broker_pid_absent'] is True
-                and observation['native_acceptance'] is False and observation['native_authority'] is False,
-                'n11-filesystem-nss-observation')
-        for key in ('fresh_generated_worker_group','fresh_generated_owner_group'):
-            group = observation[key]
-            require(type(group) is dict and set(group) == {'exists','populated','frozen','inode'}
-                    and type(group['exists']) is bool, 'n11-observed-group-shape')
-            if group['exists']:
-                require(group['populated'] is False and group['frozen'] is False
-                        and type(group['inode']) is int and 0 < group['inode'] < 2**64,
-                        'n11-observed-group-not-empty')
-            else:
-                require(all(group[k] is None for k in ('populated','frozen','inode')), 'n11-observed-group-absence')
-        users, groups = observation['users'], observation['groups']
-        require(type(users) is list and len(users) == 2 and type(groups) is list and len(groups) == 3,
-                'n11-observed-accounts-count')
-        prefix = result['generation'][:28]
-        for row, name, role in zip(users, ('evw','evs'), ('worker','subject')):
-            require(type(row) is dict and set(row) == {'name','uid','gid','retained'}
-                    and row['name'] == name + prefix and row['retained'] is True
-                    and type(row['uid']) is int and row['uid'] == descriptor[role+'_uid']
-                    and type(row['gid']) is int and row['gid'] == descriptor[role+'_gid'], 'n11-observed-user-binding')
-        group_ids = []
-        for row, name in zip(groups, ('evw','evs','evr')):
-            require(type(row) is dict and set(row) == {'name','gid','retained'}
-                    and row['name'] == name + prefix and row['retained'] is True
-                    and type(row['gid']) is int and 0 < row['gid'] < 2**32-1, 'n11-observed-group-binding')
-            group_ids.append(row['gid'])
-        require(group_ids[:2] == [descriptor['worker_gid'],descriptor['subject_gid']]
-                and len(set(group_ids)) == 3, 'n11-observed-group-identities')
-        return True
+        return validate_filesystem_observation(decode_data(raw['filesystem-nss-observation.json']),
+            generation=result['generation'], descriptor=descriptor, consistency_schema=checked['schema'],
+            account_disposition=result['account_disposition'],
+            original_record=decode_data(original_records['original-failed-settlement.json']))
 
     def require_n03_result(raw, source):
         def reject():
