@@ -150,6 +150,23 @@ Parent/Godel owns inventory registration. Independent review, portable validatio
 actual current helper publication and fresh Linux native execution remain required.
 No all16-ready or coverage-gain claim is made.
 
+## Closed capture failure checkpoints
+
+The private [capture entry](capture_stall.py) preserves unsuccessful exit 65 and
+projects a fixed `STALL_CAPTURE_REJECTED:<stage>` marker for a recognized
+`CaptureRejected` checkpoint. The closed stages distinguish ancestor/private
+layout, root frame, workspace/descriptor/request, record consistency, output and
+raw-result identity, PID absence, generated groups, NSS, final identities, record
+writes and the final deadline. Unknown exceptions and malformed checkpoint data
+retain the generic `STALL_CAPTURE_REJECTED` marker. No raw path, OS exception,
+credential or output bytes enter that marker.
+
+The [diagnostic controls](../../test_n11_capture_diagnostic.py) exercise this
+projection, a failed private-layout operation, and close-before-final-deadline
+ordering. Capture guards, file reads/writes, NSS checks, close order, original
+observer deadline and rejection semantics remain unchanged. A helper checkpoint
+is diagnostic only; it cannot qualify an unsuccessful native case.
+
 ## Failed-fixture archive retention
 
 When a fixture fails but its existing bounded retainer supplies the actual

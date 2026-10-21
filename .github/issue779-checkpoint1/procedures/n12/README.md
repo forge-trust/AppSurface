@@ -92,6 +92,14 @@ hash and full identity samples. Every symlink keeps its separate metadata,
 target and second metadata checks; malformed fields, a nonroot UID, a writable
 mode, changed link identity or an expired deadline still rejects.
 
+For each encountered symlink, one bounded `jq` projection now reads its three
+reviewed declaration values together: path, metadata tuple and target. A control
+separator forbidden by the original audit grammar separates exactly three
+nonempty fields; reconstruction and separator checks reject missing/extra
+fields. Actual metadata-before, `readlink`, metadata-after, target equality,
+both full walks and file hashing remain separate. This removes two declaration
+subprocesses per link per walk without caching any physical result.
+
 These changes reduce subprocess calls, not verification checkpoints. There is no
 cached physical result, skipped tree/OS check, renewed deadline, enlarged allowance
 or changed prelaunch remainder guard. The

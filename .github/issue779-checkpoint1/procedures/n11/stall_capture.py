@@ -38,6 +38,25 @@ FAILURE_KEYS = frozenset(("schema", "phase", "error_kind", "diagnostic_code",
                          "account_failure", "control_failure", "custody_failure"))
 
 
+
+CAPTURE_STAGES = frozenset(("initial", "root-ancestors", "private-layout", "root-frame",
+    "workspace", "descriptor", "request", "record-consistency", "output-identity",
+    "raw-results", "pid-absence", "worker-group", "owner-group", "users", "groups",
+    "final-identities", "record-writes", "final-deadline"))
+
+
+class CaptureRejected(ValueError):
+    """A fixed private checkpoint; never retains an OS error or supplied path."""
+
+
+def failure_marker(error):
+    """Project a closed helper stage; unrecognized errors keep the fixed fallback."""
+    if (type(error) is CaptureRejected and len(error.args) == 1
+            and type(error.args[0]) is str and error.args[0] in CAPTURE_STAGES):
+        return "STALL_CAPTURE_REJECTED:" + error.args[0] + "\n"
+    return "STALL_CAPTURE_REJECTED\n"
+
+
 def require(value):
     if not value:
         raise ValueError("stall-capture-rejected")
@@ -364,8 +383,10 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
             and private == "/run/appsurface-evidence-fixture/" + generation)
     capture_owner = NativeCapture(end_ms)
     result = None
+    checkpoint = "initial"
     try:
         c = capture_owner
+        checkpoint = "root-ancestors"
         c.check()
         root = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         c.fds.append(root)
@@ -375,39 +396,51 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
         c.fds.append(run)
         s = os.fstat(run)
         require(s.st_uid == s.st_gid == 0 and not stat.S_IMODE(s.st_mode) & 0o022)
+        checkpoint = "private-layout"
         fixtures, _ = c.directory(run, "appsurface-evidence-fixture", 0, 0, 0o700)
         private_fd, _ = c.directory(fixtures, generation, 0, 0, 0o700)
         log, _ = c.directory(private_fd, "logs", 0, 0, 0o700)
+        checkpoint = "root-frame"
         frame = c.read(log, "n01.stderr", 0, 0, 0o600, MAX_FRAME)
         require(c.read(log, "n01.stdout", 0, 0, 0o600, 0) == b"")
+        checkpoint = "workspace"
         workspace_name = "appsurface-evidence-" + generation
         s = os.stat(workspace_name, dir_fd=run, follow_symlinks=False)
         require(stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and s.st_gid > 0
                 and stat.S_IMODE(s.st_mode) == 0o750)
         work, before_work = c.directory(run, workspace_name, 0, s.st_gid, 0o750)
+        checkpoint = "descriptor"
         control, _ = c.directory(work, "worker", 0, s.st_gid, 0o710)
         descriptor = c.read(control, "worker-control.json", 0, s.st_gid, 0o440, 65536)
+        checkpoint = "request"
         request = c.read(private_fd, "request.json", 0, 0, 0o600, 65536)
+        checkpoint = "record-consistency"
         d, consistency, records = parse_original(frame, descriptor, request=request, generation=generation,
             source=source, base=base, entry_sha=entry_sha, policy_sha=policy_sha,
             runtime_relative_host=runtime_relative_host, workflow=workflow)
         require(d["worker_gid"] == s.st_gid)
+        checkpoint = "output-identity"
         out, before_out = c.directory(work, "output", d["worker_uid"], d["worker_gid"], 0o700)
         require(d["output_parent_identity"] == {
             "device_major": os.major(before_out.st_dev), "device_minor": os.minor(before_out.st_dev),
             "inode": before_out.st_ino, "uid": before_out.st_uid, "gid": before_out.st_gid})
         require(os.listdir(out) == [])
+        checkpoint = "raw-results"
         raw_s = os.stat("raw-results", dir_fd=work, follow_symlinks=False)
         require(stat.S_ISDIR(raw_s.st_mode) and raw_s.st_uid == d["subject_uid"] and raw_s.st_gid > 0
                 and raw_s.st_gid not in (d["worker_gid"], d["subject_gid"])
                 and stat.S_IMODE(raw_s.st_mode) == 0o710)
         raw, _ = c.directory(work, "raw-results", d["subject_uid"], raw_s.st_gid, 0o710)
         require(os.listdir(raw) == [])
+        checkpoint = "pid-absence"
         require(not os.path.lexists("/proc/" + str(d["worker_pid"]))
                 and not os.path.lexists("/proc/" + str(d["broker_pid"])))
+        checkpoint = "worker-group"
         worker_group = c.group_empty(root, d["unit"])
+        checkpoint = "owner-group"
         owner_group = c.group_empty(root, "appsurface-evidence-owner-" + generation + ".service")
         c.check()
+        checkpoint = "users"
         users = []
         for name, uid, gid in (("evw" + generation[:28], d["worker_uid"], d["worker_gid"]),
                                ("evs" + generation[:28], d["subject_uid"], d["subject_gid"])):
@@ -417,6 +450,7 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
             require(by_name == by_id and by_name.pw_name == name
                     and by_name.pw_uid == uid and by_name.pw_gid == gid)
             users.append({"name": name, "uid": uid, "gid": gid, "retained": True})
+        checkpoint = "groups"
         groups = []
         for name, gid in (("evw" + generation[:28], d["worker_gid"]),
                           ("evs" + generation[:28], d["subject_gid"]), ("evr" + generation[:28], raw_s.st_gid)):
@@ -426,6 +460,7 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
             require(by_name == by_id and by_name.gr_name == name
                     and by_name.gr_gid == gid and by_name.gr_mem == [])
             groups.append({"name": name, "gid": gid, "retained": True})
+        checkpoint = "final-identities"
         require(identity(os.fstat(out)) == identity(before_out)
                 and identity(os.stat("output", dir_fd=work, follow_symlinks=False)) == identity(before_out)
                 and identity(os.fstat(work)) == identity(before_work)
@@ -440,8 +475,10 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
         records["filesystem-nss-observation.json"] = (json.dumps(observation,
             sort_keys=True, separators=(",", ":")) + "\n").encode()
         require(set(records) == RETAINED_RECORD_NAMES)
+        checkpoint = "record-writes"
         for name, raw in records.items():
             c.write(private_fd, name, raw)
+        checkpoint = "final-deadline"
         c.check()
         result = {"schema": "issue779-n11-private-capture-v1", "generation": generation,
             "source": source, "entry_sha256": entry_sha, "policy_sha256": policy_sha,
@@ -452,8 +489,11 @@ def capture(private, generation, source, base, entry_sha, policy_sha,
             "consistency": consistency, "observation_only": True,
             "native_acceptance": False, "native_authority": False}
     except (ValueError, TypeError, OSError, KeyError, UnicodeError, OverflowError, RecursionError):
-        raise ValueError("stall-capture-rejected") from None
+        raise CaptureRejected(checkpoint) from None
     finally:
         capture_owner.close()
-    capture_owner.check()
+    try:
+        capture_owner.check()
+    except ValueError:
+        raise CaptureRejected("final-deadline") from None
     return result

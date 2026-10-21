@@ -13,7 +13,7 @@ if (os.geteuid() != 0 or not stat.S_ISDIR(metadata.st_mode) or metadata.st_uid !
         or metadata.st_gid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700):
     raise SystemExit(65)
 sys.path.insert(0, str(directory))
-from stall_capture import capture
+from stall_capture import capture, failure_marker
 
 try:
     if len(sys.argv) != 10:
@@ -24,6 +24,6 @@ try:
         raise ValueError("stall-capture-rejected")
     sys.stdout.buffer.write(raw)
     sys.stdout.buffer.flush()
-except (ValueError, TypeError, OSError, KeyError, UnicodeError, OverflowError, RecursionError):
-    sys.stderr.write("STALL_CAPTURE_REJECTED\n")
+except (ValueError, TypeError, OSError, KeyError, UnicodeError, OverflowError, RecursionError) as error:
+    sys.stderr.write(failure_marker(error))
     raise SystemExit(65) from None

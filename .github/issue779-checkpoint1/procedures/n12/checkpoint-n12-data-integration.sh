@@ -426,18 +426,19 @@ normalize_os_target() {
  local joined; joined=$(IFS=/; printf '%s' "${out[*]}"); printf '/%s' "$joined"
 }
 alias_walk() {
- local record=$1 literal current= seg target metadata expected lp index=0 steps=0 rest resolved
+ local record=$1 literal current= seg target metadata expected lp declaration declared_target index=0 steps=0 rest resolved
  literal=$(bounded jq -r .literal <<<"$record"); lexical "$literal"
  local -a queue=("${components[@]}")
  while ((${#queue[@]})); do
   remaining >/dev/null; steps=$((steps+1)); ((steps<=256)) || fail alias-step-bound
   seg=${queue[0]}; queue=("${queue[@]:1}"); current+=/$seg
   if [[ -L $current ]]; then
-   lp=$(bounded jq -r --argjson i "$index" '.links[$i].path//""' <<<"$record"); [[ $lp == "$current" ]] || fail alias-unreviewed-link
+   declaration=$(bounded jq -er --argjson i "$index" '.links[$i]|[.path,"\(.uid):\(.gid):\(.mode):\(.device):\(.inode)",.target]|join("\u001f")' <<<"$record")
+   IFS=$'\x1f' read -r lp expected declared_target <<<"$declaration"
+   [[ -n $lp && -n $expected && -n $declared_target && $declared_target != *$'\x1f'* && $declaration == "$lp"$'\x1f'"$expected"$'\x1f'"$declared_target" && $lp == "$current" ]] || fail alias-unreviewed-link
    metadata=$(bounded stat -c '%u:%g:%a:%d:%i' -- "$current")
-   expected=$(bounded jq -r --argjson i "$index" '.links[$i]|"\(.uid):\(.gid):\(.mode):\(.device):\(.inode)"' <<<"$record")
    [[ $metadata == "$expected" ]] || fail alias-lstat-pin
-   target=$(bounded readlink -- "$current"); [[ $target == "$(bounded jq -r --argjson i "$index" '.links[$i].target' <<<"$record")" ]] || fail alias-target-pin
+   target=$(bounded readlink -- "$current"); [[ $target == "$declared_target" ]] || fail alias-target-pin
    [[ $(bounded stat -c '%u:%g:%a:%d:%i' -- "$current") == "$metadata" ]] || fail alias-link-changed
    [[ $target == /* ]] || target=${current%/*}/$target
    resolved=$(normalize_os_target "$target"); lexical "$resolved"

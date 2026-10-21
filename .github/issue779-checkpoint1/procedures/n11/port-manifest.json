@@ -11,8 +11,8 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 10910,
-      "sha256": "05c990141d38310b3d6f2f0f62fe82d0d8216a565e5f39f16e9fb107c0886cd4"
+      "bytes": 11934,
+      "sha256": "608aba09896df754b45e9a40602a8a1f032b4d2f0229bd9001d33f3da169ea30"
     },
     "adapter.py": {
       "bytes": 4405,
@@ -23,8 +23,8 @@
       "sha256": "deca34f16ca3e8fa25a43ed8e3f9794076634048e7e574386bbdb4d503798409"
     },
     "capture_stall.py": {
-      "bytes": 1165,
-      "sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
+      "bytes": 1185,
+      "sha256": "b43878c0e35e7c56abbc42f4cec7adcc6236ba016ad8795714e7ea4efb22b741"
     },
     "check_stall_record.py": {
       "bytes": 23145,
@@ -32,7 +32,7 @@
     },
     "checkpoint-n11.sh": {
       "bytes": 99944,
-      "sha256": "57fd062dd17f2988cf48d407600f3f73e44d6bea65b2ef0e840726391e642dee"
+      "sha256": "85e82ec1a2e1728b227b4f22d042c3417b8ef35c839fc651b962883ba76be041"
     },
     "dispatch.sh": {
       "bytes": 2458,
@@ -44,7 +44,7 @@
     },
     "parser-pins.tsv": {
       "bytes": 336,
-      "sha256": "23c998c8c9e38a35d75fbeef4e937123a7b32afa2f94e52a076279f1d067700b"
+      "sha256": "f151e552dfc54eb001e25bd696193cd9f420917a521f5062b3d39818d2c8f736"
     },
     "records.py": {
       "bytes": 26939,
@@ -59,15 +59,15 @@
       "sha256": "6314ef824d7a63c0e6aab18d717838980ab7888b04cf88ea235b53d3758731cf"
     },
     "stall_capture.py": {
-      "bytes": 24310,
-      "sha256": "58d06809a59fa5393bf8cafaa0296e944e5fec9364e95ae74b1f1d17fc741c4d"
+      "bytes": 25826,
+      "sha256": "95f007be927af7ef7d0ed8f45b8f55022c7a57a7ff9d20266fa5f737a6b06275"
     }
   },
   "git_mutations": false,
   "historical_files": {
     "capture_stall.py": {
-      "byte_unchanged": true,
-      "current_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0",
+      "byte_unchanged": false,
+      "current_sha256": "b43878c0e35e7c56abbc42f4cec7adcc6236ba016ad8795714e7ea4efb22b741",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/capture_stall.py",
       "historical_sha256": "3e2d2d9015d44ce671682aacc57d7286fd78c1a0103cb74eca40fb165a8037d0"
     },
@@ -79,13 +79,13 @@
     },
     "checkpoint-n11.sh": {
       "byte_unchanged": false,
-      "current_sha256": "57fd062dd17f2988cf48d407600f3f73e44d6bea65b2ef0e840726391e642dee",
+      "current_sha256": "85e82ec1a2e1728b227b4f22d042c3417b8ef35c839fc651b962883ba76be041",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
       "historical_sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
     "parser-pins.tsv": {
       "byte_unchanged": false,
-      "current_sha256": "23c998c8c9e38a35d75fbeef4e937123a7b32afa2f94e52a076279f1d067700b",
+      "current_sha256": "f151e552dfc54eb001e25bd696193cd9f420917a521f5062b3d39818d2c8f736",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/parser-pins.tsv",
       "historical_sha256": "a80d6ea6a0802cf625c5c623c9ccc04c143e230a9d95eef136dc80d9d5ba7684"
     },
@@ -103,7 +103,7 @@
     },
     "stall_capture.py": {
       "byte_unchanged": false,
-      "current_sha256": "58d06809a59fa5393bf8cafaa0296e944e5fec9364e95ae74b1f1d17fc741c4d",
+      "current_sha256": "95f007be927af7ef7d0ed8f45b8f55022c7a57a7ff9d20266fa5f737a6b06275",
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/stall_capture.py",
       "historical_sha256": "96387049383159bca19cae4b6852f0962ab82cbf3e1271c593a1626afef03e79"
     }
@@ -253,6 +253,12 @@
     "native_execution": false,
     "portable_control": "../../test_n11_parser_pins.py",
     "scope": "Exactly two fixed native parser-hash literals updated to already reviewed current checker/capture bytes. Four names, row/count guards, custody checks and native clocks unchanged."
+  },
+  "source52_closed_capture_diagnostics": {
+    "native_execution": false,
+    "native_failure_cause_pending": true,
+    "portable_control": "../../test_n11_capture_diagnostic.py",
+    "scope": "Fixed private stage on capture failure; original physical guard and IO AST unchanged after removal of checkpoint/error projection nodes. Post-close deadline check still rejects after close."
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

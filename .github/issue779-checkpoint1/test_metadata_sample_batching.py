@@ -171,7 +171,7 @@ class AliasComponentSampleTests(unittest.TestCase):
         self.calls = self.root / "calls.tsv"
 
     def invoke(self, script, *, sample="0:755", malformed_at="", changed_link=False,
-               wrong_target=False, expired=False):
+               wrong_target=False, expired=False, projection=None):
         source = script.read_text()
         helpers = "\n".join(function(source, name)
                             for name in ("lexical", "normalize_os_target", "alias_walk"))
@@ -202,7 +202,10 @@ bounded() {
   readlink)
    if [[ $WRONG_TARGET == yes ]]; then printf 'nested/other\n';
    else command readlink "$3"; fi;;
-  jq) command jq "${@:2}";;
+  jq)
+   if [[ $2 == -er && $3 == --argjson && $4 == i && $OVERRIDE == yes ]]; then
+    printf '%s\n' "$PROJECTION"
+   else command jq "${@:2}"; fi;;
   *) exit 92;;
  esac
 }
@@ -225,6 +228,8 @@ fi
                "WRONG_TARGET": "yes" if wrong_target else "no",
                "EXPIRED": "yes" if expired else "no", "LITERAL": str(self.link),
                "LEAF": str(self.leaf), "RECORD": json.dumps(record),
+               "OVERRIDE": "yes" if projection is not None else "no",
+               "PROJECTION": projection or "",
                "FAMILY": "n06" if script.name == "checkpoint-n06.sh" else "none"}
         result = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", program],
                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
@@ -268,6 +273,24 @@ fi
                     self.assertEqual((1, reason), (result.returncode, result.stderr))
                     if kwargs.get("expired") and script.name == "checkpoint-n06.sh":
                         self.assertEqual([], calls)
+
+    def test_n12_projects_three_declaration_fields_once_and_rejects_bad_projection(self):
+        script = SCRIPTS[2]
+        result, calls = self.invoke(script)
+        self.assertEqual(0, result.returncode)
+        declarations = [row for row in calls if row[0] == "jq" and row[1] == "--argjson"]
+        self.assertEqual(1, len(declarations))
+        good = str(self.link) + "\x1f0:0:777:1:2\x1fnested/payload"
+        cases = ((good + "\x1f", b"alias-unreviewed-link\n"),
+                 (good + "\x1fextra", b"alias-unreviewed-link\n"),
+                 (str(self.link) + "\x1f0:0:777:1:2", b"alias-unreviewed-link\n"),
+                 (good.replace(str(self.link), "/different"), b"alias-unreviewed-link\n"),
+                 (good.replace("777:1:2", "777:1:3"), b"alias-lstat-pin\n"),
+                 (good.replace("nested/payload", "nested/other"), b"alias-target-pin\n"))
+        for projection, reason in cases:
+            with self.subTest(reason=reason, projection_fields=projection.count("\x1f")):
+                result, _ = self.invoke(script, projection=projection)
+                self.assertEqual((1, reason), (result.returncode, result.stderr))
 
 
 if __name__ == "__main__":

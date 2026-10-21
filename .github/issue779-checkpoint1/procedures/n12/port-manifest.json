@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 6608,
-      "sha256": "fc438413eabebd53e4e8379c1f97f83bab38af9c9ecca1cfc83f96368cff1fae"
+      "bytes": 7140,
+      "sha256": "41acca4a397ebb9bc9330b092a476f921fdde68e11f89a43c70e8007760af454"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 86158,
-      "sha256": "b95a864c8a34deb76a7c1972371509cfd959c32cadec7c5ff0fbc32d8a97795a"
+      "bytes": 86309,
+      "sha256": "c4e1ecdeb4ab613f89efab8d064b1f427dfea3dc8515132f0beac2ff3e15a003"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -43,7 +43,7 @@
   "historical_files": {
     "checkpoint-n12-data-integration.sh": {
       "byte_unchanged": false,
-      "current_sha256": "b95a864c8a34deb76a7c1972371509cfd959c32cadec7c5ff0fbc32d8a97795a",
+      "current_sha256": "c4e1ecdeb4ab613f89efab8d064b1f427dfea3dc8515132f0beac2ff3e15a003",
       "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
       "historical_sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
     },
@@ -183,6 +183,13 @@
     "native_execution": false,
     "portable_control": "../../test_metadata_sample_batching.py",
     "scope": "N06 pin_file and ancestor adopt complete typed sampling; None/N06/N12 ordinary alias components combine UID/mode query. All physical walks, symlink before/after checks, hashes and original clocks retained.",
+    "time_gain_measured": false
+  },
+  "source52_link_declarations": {
+    "clocks_unchanged": true,
+    "native_execution": false,
+    "portable_control": "../../test_metadata_sample_batching.py",
+    "scope": "One typed three-field audit declaration projection per symlink; actual metadata/readlink/metadata and both walks unchanged.",
     "time_gain_measured": false
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
