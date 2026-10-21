@@ -29,6 +29,16 @@ Expected checkpoint lines are shown below. They are assertions required by the p
 
 The proof distinguishes request acceptance, persisted terminal success, readiness, and actual SDK export. `Completed` means the pump call returned; it does not establish that every Work item succeeded. The test reads the persisted Work/result and flushes the SDK before it reports success.
 
+After replacing the sample, validate the replacement in this order. These commands use `FirstDurableWorker` as the example generated project name; replace it with the name passed to `dotnet new` when it differs. In the unsubstituted template source tree, the corresponding project-name placeholder is `AppSurfaceDurableWorker`.
+
+```console
+dotnet build FirstDurableWorker --warnaserror
+dotnet test FirstDurableWorker --filter "Category!=PostgreSql&Category!=NativePostgreSql"
+dotnet test FirstDurableWorker --filter FullyQualifiedName~FirstDurableWork --logger "console;verbosity=detailed"
+```
+
+The filtered contract run excludes both Docker PostgreSQL contracts and the harness-owned native PostgreSQL smoke. It does not replace the dedicated real Docker-backed `FirstDurableWork` proof in the third command above. The native smoke is a separate, intentionally fail-closed environment gate; when its required environment is absent, it fails rather than being skipped or relaxed.
+
 For the canonical settings and API reference, recovery instructions, independent verification gates, and public-preview limits, see the [Durable worker start guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md). To replace the sample safely, follow [docs/replace-sample.md](docs/replace-sample.md).
 
 The proof test namespace is fixed as `DurableWorkerTemplate.Tests`, independently of the generated application name. This keeps the documented `FullyQualifiedName~FirstDurableWork` filter limited to its Docker proof even when the project is named `FirstDurableWorker`; the separately configured native smoke is excluded. The friend-test assembly name still follows your application name.
@@ -44,6 +54,8 @@ Every built host gets a new privacy-safe `template:<random GUID>` worker identit
 3. For local development, run in `Development` and supply a fresh `APPSURFACE_TEMPLATE_ACTIVATION_TOKEN` through the process environment or a secret provider. This token has no default and is rejected outside Development. Production must configure a real ASP.NET authentication scheme and the named `ActivationAuthorization` policy; it must leave the sample token unset.
 4. Configure `OpenTelemetry:OtlpEndpoint` when an external OTLP collector is available. Its default is empty. The automated first proof uses an in-process SDK exporter and does not require a collector. The default listen URL is `http://127.0.0.1:5080`; configure an appropriate address for the environment.
 5. Start the app with `dotnet run --project src/FirstDurableWorker/FirstDurableWorker.csproj`. Check `/live`, `/compatibility`, and `/ready` independently. Stop the host before changing schema, grants, roles, or epoch.
+
+`WorkerHostSettings.ToString()` prints only `StoreId` and `RuntimeEpoch`. It omits connection strings, tokens, role names, OTLP settings, and application values. Logging individual settings properties is still unsafe because they can expose sensitive configuration. The executable's catch boundary prints generic guidance for failures during host build, listener start, shutdown and disposal: provider and application code can throw the same exception types as host validation, so exception type alone cannot show that a message is safe to log. Builder creation and production authentication registration run before that catch boundary.
 
 The proof's 5-second default body-read deadline is independent of the 2-second pump discovery and 10-second cooperative service request budgets. See the start guide for all accepted bounds, body semantics, health status rules, production ownership, and the difference between this Docker proof and the all-OS native PostgreSQL smoke. A successful template test is not a production deployment certificate.
 

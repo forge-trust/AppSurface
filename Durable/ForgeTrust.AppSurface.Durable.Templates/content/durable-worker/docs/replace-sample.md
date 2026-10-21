@@ -18,6 +18,14 @@ The template's `ActivationAuthorization` policy and Development-only token are e
 
 ## Verify your replacement
 
-Use a separate generated copy so the untouched template-shape proof stays reproducible. Replace only the Work definition/executor, registration, and producer locations above. Give the new Work distinct input, result, and persisted identity. Then build the solution, run its non-Docker contract tests, and run the Docker-backed `FirstDurableWork` lifecycle test. The real proof must still show an authorized wake, persisted terminal Work, `NotStarted` to `Healthy` readiness, and an exported activation activity.
+Use a separate generated copy so the untouched template-shape proof stays reproducible. Replace only the Work definition/executor, registration, and producer locations above. Give the new Work distinct input, result, and persisted identity. The commands below use `FirstDurableWorker` as the example generated project name; replace it with the name passed to `dotnet new` when it differs. In the unsubstituted template source tree, the corresponding project-name placeholder is `AppSurfaceDurableWorker`.
+
+```console
+dotnet build FirstDurableWorker --warnaserror
+dotnet test FirstDurableWorker --filter "Category!=PostgreSql&Category!=NativePostgreSql"
+dotnet test FirstDurableWorker --filter FullyQualifiedName~FirstDurableWork --logger "console;verbosity=detailed"
+```
+
+Run these commands in order. The filtered contract run excludes both Docker PostgreSQL contracts and the harness-owned native PostgreSQL smoke. It does not replace the dedicated real Docker-backed `FirstDurableWork` proof in the third command. The native smoke remains a separate, intentionally fail-closed environment gate; when its required environment is absent, it fails rather than being skipped or relaxed. The real Docker-backed proof must still show an authorized wake, persisted terminal Work, `NotStarted` to `Healthy` readiness, and an exported activation activity.
 
 Installing an updated template affects future projects only. For a later template shape, compare files against the [versioned shape guide](https://github.com/forge-trust/AppSurface/blob/main/releases/durable-worker-template-shape-v1.md), review package compatibility, and merge source changes manually. Do not overwrite your generated application wholesale or assume a template install performs a migration.

@@ -794,9 +794,33 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             ["PGDATABASE"] = connection.Database,
             ["PGUSER"] = connection.Username,
             ["PGPASSWORD"] = password,
-            ["PGSSLMODE"] = insideContainer ? "disable" : connection.SslMode.ToString().ToLowerInvariant(),
+            ["PGSSLMODE"] = PsqlSslMode(connection.SslMode, insideContainer),
             ["PGCONNECT_TIMEOUT"] = "5",
         };
+
+    /// <summary>Maps an Npgsql SSL mode to the spelling accepted by libpq's <c>PGSSLMODE</c> environment variable.</summary>
+    /// <param name="sslMode">The Npgsql SSL mode to translate.</param>
+    /// <param name="insideContainer">Whether <c>psql</c> runs inside the fixture container, where SSL is disabled.</param>
+    /// <returns>The libpq SSL mode, or <c>disable</c> for container execution.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The SSL mode is not a supported Npgsql value.</exception>
+    internal static string PsqlSslMode(SslMode sslMode, bool insideContainer)
+    {
+        if (insideContainer)
+        {
+            return "disable";
+        }
+
+        return sslMode switch
+        {
+            SslMode.Disable => "disable",
+            SslMode.Allow => "allow",
+            SslMode.Prefer => "prefer",
+            SslMode.Require => "require",
+            SslMode.VerifyCA => "verify-ca",
+            SslMode.VerifyFull => "verify-full",
+            _ => throw new ArgumentOutOfRangeException(nameof(sslMode), sslMode, "Unsupported Npgsql SSL mode."),
+        };
+    }
 
     private static void AddDockerEnvironment(ICollection<string> arguments, IEnumerable<string> names)
     {

@@ -101,6 +101,35 @@ public sealed class DurableTemplateTimingWorkflowTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpCachePopulationBeforeSampleClockInvalidatesPrimedAndColdSamples(bool cold)
+    {
+        var populated = false;
+        var runner = new TimingRunner(this, afterRequest: request =>
+        {
+            if (populated || request.FileName != "docker" || request.Arguments.Count < 2
+                || request.Arguments[0] != "image" || request.Arguments[1] != "inspect"
+                || Path.GetFileName(request.WorkingDirectory) != "sample-1") return;
+            var httpCache = Assert.IsType<string>(request.Environment!["NUGET_HTTP_CACHE_PATH"]);
+            File.WriteAllText(Path.Join(httpCache, "synthetic-reused-entry"), "cached before the clock");
+            populated = true;
+        });
+
+        var receipt = await new DurableTemplateTimingWorkflow(runner, () => true).RunAsync(_input,
+            cold ? DurableTemplateTimingMode.Cold : DurableTemplateTimingMode.Primed,
+            cold ? ColdDockerHosts : [], CancellationToken.None);
+
+        Assert.True(populated);
+        Assert.False(receipt.Succeeded);
+        var result = receipt.Samples[0];
+        var sample = Assert.IsType<DurableTemplateTimingSample>(result.Sample);
+        Assert.False(sample.HttpCacheEmptyAtStart);
+        Assert.Equal(cold ? "cold-cache-state" : "primed-cache-closure", Assert.Single(result.ValidationFailures));
+        Assert.Contains(cold ? "cold-cache-state" : "primed-cache-closure", receipt.FailureCode.Split(','));
+    }
+
+    [Theory]
     [InlineData(false, " ", false)]
     [InlineData(true, " ", false)]
     [InlineData(false, "", true)]

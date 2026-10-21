@@ -210,9 +210,12 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
             }
             // The replacement is a separate source tree and database. Reuse only this proof's owned candidate cache.
             var replacementRoot = Path.Join(root, "replacement", ProjectName);
+            currentPhase = "replacement-stage";
             DurableTemplateStaging.Stage(generatedRoot, replacementRoot, request.PackageVersion);
+            currentPhase = "replacement-apply";
             DurableTemplateSampleReplacement.Apply(replacementRoot, ProjectName);
             await Run("replacement-build", ["build", replacementRoot, "-warnaserror"], replacementRoot, feedEnvironment, 300_000);
+            currentPhase = "replacement-graph";
             VerifyRestoredGraph(replacementRoot, feedEnvironment["NUGET_PACKAGES"]!, feed, request.PackageVersion);
             await Run("replacement-tests", ["test", replacementRoot, "--no-build", "--no-restore", "--filter", "Category!=PostgreSql&Category!=NativePostgreSql"], replacementRoot, feedEnvironment, 180_000);
             if (request.RunFirstWork)
@@ -222,7 +225,9 @@ internal sealed class DurableTemplateConsumerProof(IExternalCommandRunner comman
                     throw new PackageIndexException("A required replacement first-Work assertion checkpoint is missing.");
             }
             replacementVerified = true;
+            currentPhase = "feed-graph";
             VerifyRestoredGraph(generatedRoot, feedEnvironment["NUGET_PACKAGES"]!, feed, request.PackageVersion);
+            currentPhase = "sql-identity";
             RequireSqlIdentity(provider.ArtifactPath, generatedRoot);
             await Uninstall(feedRoot, feedEnvironment);
             installed.RemoveAll(x => x.Directory == feedRoot);

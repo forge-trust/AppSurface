@@ -68,6 +68,13 @@ The canonical [external activation reference](../Durable/external-activation-v1.
 
 ## Settings and defaults
 
+The immutable `WorkerHostSettings` diagnostic string includes only StoreId and runtime epoch. It omits connection
+strings, role names, tokens, exporter endpoints and other application configuration. This protects incidental object
+formatting; explicitly logging individual settings can still expose secrets. The executable's catch boundary prints
+generic guidance for failures during host build, listener start, shutdown and disposal: framework, provider and
+application code can throw the same exception types as host validation, so a type allowlist does not establish that a
+message is safe. Builder creation and the production authentication registration run before that catch boundary.
+
 The activation settings belong to the generated host and become one application-owned seam; they do not add a configuration API to AppSurface. Invalid values fail before listening. The following keys use invariant integer seconds or counts:
 
 | Setting | Default | Valid value | Meaning |
@@ -99,6 +106,11 @@ The reference defaults of 32 items, a two-second discovery budget, and a ten-sec
 ## Choose an alternative when it fits better
 
 For the sample replacement, follow the generated `docs/replace-sample.md`. A change confined to its three Work locations keeps the public sample names, callable signatures, and `processed:<input Value>` result convention used by the retained host/tests. Distinct persisted Work/codec identities and compatible optional fields can change there. Broader type renames or domain result semantics also require adapting the generated host/test call sites and assertions; add application tests for new fields and effects.
+
+For the non-Docker contract pass, use `dotnet test FirstDurableWorker --filter "Category!=PostgreSql&Category!=NativePostgreSql"`,
+substituting your generated project name. Both exclusions are required: `NativePostgreSqlSmoke` belongs to the separately
+configured native harness and intentionally fails when its environment is missing. This contract pass does not replace
+the Docker-backed `FirstDurableWork` proof in the [install instructions](#install-create-and-prove).
 
 - Prefer the [typed Work definition path](../Durable/migrations/typed-work-definitions-v1.md) for reusable Work whose name/version, codecs, provider safety, and retry policy should be shared by registration and acceptance. A low-level `DurableWorkRequest` is appropriate when an application deliberately owns and validates those contract facts at each call site.
 - Call `IDurableRuntimePump` directly for a scheduled or application-controlled pass when the caller already owns health observation, admission policy, cancellation, and result handling. Use `IDurableExternalActivationService` when the shared health/admission checks, cooperative request budget, closed result family, and standard activity are the needed boundary.

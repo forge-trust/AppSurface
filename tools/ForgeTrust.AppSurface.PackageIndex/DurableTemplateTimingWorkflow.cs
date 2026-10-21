@@ -137,8 +137,9 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
         var before = string.Empty;
         var after = string.Empty;
         var cache = environment["NUGET_PACKAGES"]!;
-        var cacheHash = HashCache(cache);
-        var cacheEmpty = !Directory.EnumerateFileSystemEntries(cache).Any();
+        var cacheHash = string.Empty;
+        var cacheEmpty = false;
+        var httpCacheEmpty = false;
         var commands = new List<DurableTemplateTimingCommand>();
         var flags = new bool[4];
         var database = string.Empty;
@@ -163,6 +164,10 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
             daemonHash = Hash(daemon.StandardOutput.Trim());
             before = await InspectImage(root, environment, cancellationToken);
             // The observation commands are outside the three-command workload clock.
+            cacheHash = HashCache(cache);
+            cacheEmpty = !Directory.EnumerateFileSystemEntries(cache).Any();
+            var httpCache = environment["NUGET_HTTP_CACHE_PATH"]!;
+            httpCacheEmpty = !Directory.EnumerateFileSystemEntries(httpCache).Any();
             started = Stopwatch.GetTimestamp();
             deadline.CancelAfter(maximumMs);
             if (mode == DurableTemplateTimingMode.Primed) group.CancelAfter(TimeSpan.FromSeconds(55));
@@ -234,7 +239,7 @@ internal sealed class DurableTemplateTimingWorkflow(IExternalCommandRunner runne
         return new(ordinal, Guid.NewGuid().ToString("N"), series, mode, DurableTemplateTimingFeedKind.CandidateLocal,
             "candidate-local-feed", input.SourceCommit, input.PackageVersion, DurableTemplateTimingProof.ComputeArtifactSetSha256(artifacts),
             RuntimeInformation.RuntimeIdentifier, Environment.GetEnvironmentVariable("ImageVersion") ?? "linux-owned-runner", sdk,
-            daemonHash, before.Length > 0, before, after, Hash(cache), cacheHash, cacheEmpty, true, false,
+            daemonHash, before.Length > 0, before, after, Hash(cache), cacheHash, cacheEmpty, httpCacheEmpty, false,
             Hash(Path.Join(root, "FirstDurableWorker")), database, started, ended, setupSeconds, commands,
             new(flags[0], flags[1], flags[2], flags[3]), cleanup, failure.Length == 0 && flags.All(flag => flag), failure);
 

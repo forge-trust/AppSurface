@@ -18,6 +18,8 @@ try
 catch (Exception exception) when (exception is not StackOverflowException
     and not OutOfMemoryException and not AccessViolationException)
 {
+    // Provider and application failures can use the same exception types as host validation;
+    // a type allowlist cannot prove that their messages are safe to print.
     Console.Error.WriteLine(
         "The Durable worker could not start or stop safely. Check the configured authentication, restricted PostgreSQL "
         + "roles, StoreId, and runtime epoch; see the AppSurface Durable worker start guide.");

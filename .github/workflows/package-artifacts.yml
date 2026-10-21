@@ -296,8 +296,10 @@ jobs:
           dotnet test tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj -c Release --no-restore -p:SourceRevisionId="$SOURCE_REVISION_ID" --filter 'FullyQualifiedName~TailwindPublishingTests|FullyQualifiedName~OriginalCandidatePublicationReplayTests'
 
   durable-template-evidence:
+    # Every successful producer gets candidate evidence; see release-ops.md#durable-template-candidate-evidence.
     needs: package-artifacts
     permissions:
+      # Download this run's exact producer bundle and read its immutable artifact identity.
       actions: read
       contents: read
     uses: ./.github/workflows/durable-template-evidence.yml

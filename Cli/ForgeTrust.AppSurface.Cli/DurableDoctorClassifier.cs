@@ -13,11 +13,12 @@ namespace ForgeTrust.AppSurface.Cli;
 internal static partial class DurableDoctorClassifier
 {
     private const int MaximumSchemaVersions = 64;
-    private const string ApplicationVerifierUrl =
+    /// <summary>Canonical documentation URL for the application-verifier guidance.</summary>
+    internal const string ApplicationVerifierDocumentationUrl =
         "https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md";
     private static readonly string[] CheckNames = ["credential", "schema", "epoch", "retention", "worker"];
     private static readonly string[] TerminalUnavailableCategories = ["session-affinity", "dependency", "deadline", "cleanup"];
-    private static readonly Uri ApplicationVerifierDocumentation = new(ApplicationVerifierUrl, UriKind.Absolute);
+    private static readonly Uri ApplicationVerifierDocumentation = new(ApplicationVerifierDocumentationUrl, UriKind.Absolute);
 
     /// <summary>Classifies a complete service observation; malformed or incomplete evidence becomes ASDUR415.</summary>
     internal static DurableDoctorResult Classify(DurableDoctorRequest request, DurableDoctorObservation observation)

@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <OutputType>Library</OutputType>
+    <PackageId>ForgeTrust.AppSurface.Durable.Templates.VerificationHost</PackageId>
     <AssemblyName>AppSurfaceDurableWorker</AssemblyName>
     <RootNamespace>AppSurfaceDurableWorker</RootNamespace>
     <Nullable>enable</Nullable>

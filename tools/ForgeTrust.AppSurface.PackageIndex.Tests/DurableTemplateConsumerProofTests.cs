@@ -632,6 +632,83 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
     }
 
     [Theory]
+    [InlineData("replacement-stage")]
+    [InlineData("replacement-apply")]
+    [InlineData("replacement-graph")]
+    [InlineData("feed-graph")]
+    [InlineData("sql-identity")]
+    public async Task UncommandedPostBuildChecksReportTheirOwnFailurePhase(string expectedPhase)
+    {
+        var runNativeSmoke = expectedPhase is "replacement-stage" or "replacement-apply";
+        Func<string, IReadOnlyDictionary<string, string?>, CancellationToken, Task>? nativeSmoke = null;
+        if (expectedPhase == "replacement-stage")
+        {
+            nativeSmoke = (generatedRoot, _, _) =>
+            {
+                var proofRoot = Directory.GetParent(Directory.GetParent(generatedRoot)!.FullName)!.FullName;
+                var replacementRoot = Path.Join(proofRoot, "replacement", "FirstDurableWorker");
+                Directory.CreateDirectory(Path.GetDirectoryName(replacementRoot)!);
+                File.WriteAllText(replacementRoot, "occupied replacement destination");
+                return Task.CompletedTask;
+            };
+        }
+        else if (expectedPhase == "replacement-apply")
+        {
+            nativeSmoke = (generatedRoot, _, _) =>
+            {
+                var workFile = Path.Join(generatedRoot, "src", "FirstDurableWorker", "Work", "SampleWork.cs");
+                const string anchor = "public const string WorkVersion = \"v1\";";
+                var content = File.ReadAllText(workFile);
+                Assert.Contains(anchor, content, StringComparison.Ordinal);
+                File.WriteAllText(workFile, content.Replace(anchor,
+                    "public const string WorkVersion = \"damaged\";", StringComparison.Ordinal), new UTF8Encoding(false));
+                return Task.CompletedTask;
+            };
+        }
+
+        Action<ExternalCommandRequest>? afterCommand = expectedPhase switch
+        {
+            "feed-graph" => request =>
+            {
+                if (request.OperationName != "replacement-first-work") return;
+                var proofRoot = Directory.GetParent(Assert.IsType<string>(request.Environment!["DOTNET_CLI_HOME"]))!.FullName;
+                var generatedRoot = Path.Join(proofRoot, "feed-install", "FirstDurableWorker");
+                foreach (var path in Directory.EnumerateFiles(generatedRoot, "project.assets.json", SearchOption.AllDirectories))
+                    File.WriteAllText(path, "{\"libraries\":{}}", new UTF8Encoding(false));
+            }
+            ,
+            "sql-identity" => request =>
+            {
+                if (request.OperationName != "replacement-first-work") return;
+                var proofRoot = Directory.GetParent(Assert.IsType<string>(request.Environment!["DOTNET_CLI_HOME"]))!.FullName;
+                var sqlPath = Path.Join(proofRoot, "feed-install", "FirstDurableWorker", "tests",
+                    "FirstDurableWorker.Tests", "bin", "Debug", "net10.0", "configure-postgresql-roles.sql");
+                File.AppendAllText(sqlPath, "-- altered after the proof build\n", new UTF8Encoding(false));
+            }
+            ,
+            _ => null
+        };
+        var runner = new DeterministicRunner(
+            _stagedTemplate,
+            _providerArchive,
+            graphFault: expectedPhase == "replacement-graph" ? GraphFault.MissingProvider : GraphFault.None,
+            graphFaultOperation: "replacement-build",
+            afterCommand: afterCommand);
+        var receiptPath = Path.Join(_root, $"{expectedPhase}-failure-phase.json");
+
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(
+            CreateRequest(receiptPath, runNativeSmoke: runNativeSmoke), CandidateArtifacts(), nativeSmoke: nativeSmoke);
+
+        Assert.False(receipt.Succeeded);
+        Assert.True(receipt.CleanupComplete);
+        Assert.Equal("TemplateProofFailed", receipt.FailureCode);
+        Assert.Equal(expectedPhase, receipt.FailurePhase);
+        Assert.Equal(runNativeSmoke, receipt.NativeSmoke);
+        Assert.DoesNotContain(SecretSentinel, File.ReadAllText(receiptPath), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(runner.ProofRoot));
+    }
+
+    [Theory]
     [InlineData(nameof(GraphFault.SourceProjectSubstitution))]
     [InlineData(nameof(GraphFault.MissingProvider))]
     [InlineData(nameof(GraphFault.MissingCandidateArchive))]

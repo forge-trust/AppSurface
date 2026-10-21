@@ -44,6 +44,36 @@ public sealed class HostContractTests
     private const string SensitiveMarker = "must-never-appear-in-a-host-response";
     private const string ActivationPath = "/private/durable/activate";
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Settings_diagnostic_text_omits_credentials_and_application_values(bool includeOptionalSettings)
+    {
+        var settings = new WorkerHostSettings(
+            "Host=dispatcher-private;Password=dispatcher-secret",
+            "Host=runtime-private;Password=runtime-secret",
+            Guid.Parse("a8bfbc5e-5660-4bd0-9bd6-83e31d2ec329"),
+            Guid.Parse("47f80193-0e02-4ea2-9857-4b6a70a62257"),
+            "private-runtime-role", 10, 5, 5,
+            new ActivationSettings(32, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(5)),
+            includeOptionalSettings ? "private-development-token" : null,
+            includeOptionalSettings ? new Uri("https://private-exporter.example/secret-path") : null);
+
+        var diagnostic = settings.ToString();
+
+        Assert.StartsWith("WorkerHostSettings {", diagnostic, StringComparison.Ordinal);
+        Assert.Contains(settings.StoreId.ToString(), diagnostic, StringComparison.Ordinal);
+        Assert.Contains(settings.RuntimeEpoch.ToString(), diagnostic, StringComparison.Ordinal);
+        foreach (var sensitive in new[]
+        {
+            "dispatcher-private", "dispatcher-secret", "runtime-private", "runtime-secret",
+            "private-runtime-role", "private-development-token", "private-exporter.example", "secret-path",
+        })
+        {
+            Assert.DoesNotContain(sensitive, diagnostic, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void Settings_use_documented_defaults_and_inclusive_limits()
     {

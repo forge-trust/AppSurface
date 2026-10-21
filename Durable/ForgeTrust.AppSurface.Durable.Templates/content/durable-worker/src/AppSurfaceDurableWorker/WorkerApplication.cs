@@ -328,6 +328,8 @@ public static class WorkerApplication
 /// <param name="Activation">Validated Work-only pump, request, and body-read budgets.</param>
 /// <param name="DevelopmentToken">Development-only bearer token; null outside Development.</param>
 /// <param name="OtlpEndpoint">Validated optional OTLP endpoint.</param>
+/// <remarks>Diagnostic formatting includes only StoreId and runtime epoch. Individual properties still contain
+/// credentials or application configuration and must not be logged directly.</remarks>
 internal sealed record WorkerHostSettings(
     string DispatcherConnectionString,
     string RuntimeConnectionString,
@@ -341,6 +343,16 @@ internal sealed record WorkerHostSettings(
     string? DevelopmentToken,
     Uri? OtlpEndpoint)
 {
+    /// <summary>Restricts record diagnostic formatting to the two non-secret provisioned identities.</summary>
+    /// <param name="builder">Destination used by the compiler-generated record formatter.</param>
+    /// <returns>True because both identity members were appended.</returns>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("StoreId = ").Append(StoreId)
+            .Append(", RuntimeEpoch = ").Append(RuntimeEpoch);
+        return true;
+    }
+
     /// <summary>Gets whether the settings were read for the Development environment.</summary>
     internal bool IsDevelopment { get; init; }
 

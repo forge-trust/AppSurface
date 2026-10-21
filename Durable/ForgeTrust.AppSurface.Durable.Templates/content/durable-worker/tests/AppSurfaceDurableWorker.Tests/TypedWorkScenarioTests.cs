@@ -3,11 +3,39 @@ using System.Text.Json.Serialization;
 using ForgeTrust.AppSurface.Durable;
 using ForgeTrust.AppSurface.Durable.Provider;
 using ForgeTrust.AppSurface.Durable.Testing;
+using Npgsql;
 
 namespace DurableWorkerTemplate.Tests;
 
 public sealed partial class TypedWorkScenarioTests
 {
+    [Theory]
+    [InlineData(SslMode.Disable, "disable")]
+    [InlineData(SslMode.Allow, "allow")]
+    [InlineData(SslMode.Prefer, "prefer")]
+    [InlineData(SslMode.Require, "require")]
+    [InlineData(SslMode.VerifyCA, "verify-ca")]
+    [InlineData(SslMode.VerifyFull, "verify-full")]
+    public void Fixture_psql_environment_uses_libpq_SSL_mode_spellings(SslMode sslMode, string expected)
+    {
+        Assert.Equal(expected, PostgreSqlFixture.PsqlSslMode(sslMode, insideContainer: false));
+    }
+
+    [Fact]
+    public void Fixture_psql_environment_disables_SSL_inside_the_container()
+    {
+        Assert.Equal("disable", PostgreSqlFixture.PsqlSslMode(SslMode.VerifyFull, insideContainer: true));
+    }
+
+    [Fact]
+    public void Fixture_psql_environment_rejects_unknown_SSL_modes()
+    {
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(
+            () => PostgreSqlFixture.PsqlSslMode((SslMode)int.MaxValue, insideContainer: false));
+
+        Assert.Equal("sslMode", exception.ParamName);
+    }
+
     [Fact]
     public async Task Published_testing_contract_builds_typed_work_and_keeps_admission_authoritative()
     {
