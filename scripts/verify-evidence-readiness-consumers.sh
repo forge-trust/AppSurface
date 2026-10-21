@@ -70,6 +70,15 @@ stage() {
   fi
 }
 
+# NuGet source attributes must round-trip valid work-directory paths as XML.
+feed_xml=${feed//&/'&amp;'}
+feed_xml=${feed_xml//</'&lt;'}
+feed_xml=${feed_xml//>/'&gt;'}
+feed_xml=${feed_xml//\"/'&quot;'}
+feed_xml=${feed_xml//$'\t'/'&#x9;'}
+feed_xml=${feed_xml//$'\r'/'&#xD;'}
+feed_xml=${feed_xml//$'\n'/'&#xA;'}
+
 producer_config="$run_root/nuget-producer.config"
 cat >"$producer_config" <<'EOF'
 <?xml version="1.0" encoding="utf-8"?>
@@ -79,13 +88,13 @@ EOF
 neutral_config="$run_root/nuget-neutral.config"
 cat >"$neutral_config" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
-<configuration><packageSources><clear /><add key="issue867-local-feed" value="$feed" /></packageSources></configuration>
+<configuration><packageSources><clear /><add key="issue867-local-feed" value="$feed_xml" /></packageSources></configuration>
 EOF
 
 typed_config="$run_root/nuget-typed.config"
 cat >"$typed_config" <<EOF
 <?xml version="1.0" encoding="utf-8"?>
-<configuration><packageSources><clear /><add key="issue867-local-feed" value="$feed" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
+<configuration><packageSources><clear /><add key="issue867-local-feed" value="$feed_xml" /><add key="nuget.org" value="https://api.nuget.org/v3/index.json" /></packageSources></configuration>
 EOF
 
 export NUGET_PACKAGES="$run_root/producer-cache"
