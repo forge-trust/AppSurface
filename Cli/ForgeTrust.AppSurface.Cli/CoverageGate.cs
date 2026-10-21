@@ -163,8 +163,10 @@ internal sealed partial class CoverageGateCommand : ICommand
         CoverageGateResult result;
         try
         {
+            using var coordination = await CoverageArtifactGateContext.AcquireAsync(request, console.Error, cancellationToken);
             result = await CoverageGateEvaluator.EvaluateAsync(request, cancellationToken);
             await CoverageGateReportWriter.WriteAsync(result, request, cancellationToken);
+            await coordination.RecordReportsAsync(request, result, cancellationToken);
         }
         catch (CoverageExecutionException exception)
         {
@@ -474,6 +476,8 @@ internal sealed record CoverageGateRequest(
     CoveragePatchRequest? PatchCoverage = null,
     decimal TolerancePercent = 0.5m)
 {
+    /// <summary>Gets a compatible caller-owned output context for nested first-party Evidence evaluation.</summary>
+    internal CoverageArtifactSession? ArtifactSession { get; init; }
     /// <summary>
     /// Supports existing first-party request construction while intentionally discarding CLI-only summary options.
     /// </summary>

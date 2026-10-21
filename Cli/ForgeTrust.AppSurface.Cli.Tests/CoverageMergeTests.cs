@@ -494,6 +494,42 @@ public sealed class CoverageMergeTests
         Assert.Throws<ArgumentNullException>(() => new CoverageMergeWorkflow(new RecordingReportGenerator(), null!));
     }
 
+    [Fact]
+    public async Task MergeAsync_RegisteredInputWriterBlocksMergeBeforeOutputCleanup()
+    {
+        using var repo = TempDirectory.Create("appsurface-merge-lease-");
+        repo.WriteFile("shards/project/coverage.cobertura.xml", "<coverage />");
+        repo.WriteFile("shards/project/.appsurface-coverage-run.json", "{}");
+        repo.WriteFile("merged/.appsurface-coverage-output", "AppSurface coverage output directory");
+        repo.WriteFile("merged/coverage.cobertura.xml", "previous output");
+        using var current = PushCurrentDirectory(repo.Path);
+        using var inputWriter = CoverageArtifactOperationLease.Acquire(Path.Join(repo.Path, "shards", "project"), true);
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CommandException>(() => workflow.MergeAsync(
+            new CoverageMergeRequest("shards", "merged", Clean: true), console, CancellationToken.None));
+
+        Assert.Contains("ASCOV202", error.Message, StringComparison.Ordinal);
+        Assert.Equal("previous output", File.ReadAllText(Path.Join(repo.Path, "merged", "coverage.cobertura.xml")));
+    }
+
+    [Fact]
+    public async Task MergeAsync_InvalidInternalRetentionDoesNotMutateOutput()
+    {
+        using var repo = TempDirectory.Create("appsurface-merge-retention-");
+        repo.WriteFile("shards/coverage.cobertura.xml", "<coverage />");
+        using var current = PushCurrentDirectory(repo.Path);
+        var workflow = CreateWorkflow(new RecordingReportGenerator());
+        using var console = new FakeInMemoryConsole();
+        var request = new CoverageMergeRequest("shards", "merged", Clean: true) { ArtifactRetention = "invalid" };
+
+        var error = await Assert.ThrowsAsync<CommandException>(() => workflow.MergeAsync(request, console, CancellationToken.None));
+
+        Assert.Contains("ASCOV208", error.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(repo.Path, "merged")));
+    }
+
     private static async Task AssertUnsafeOutputAsync(
         CoverageMergeWorkflow workflow,
         IConsole console,

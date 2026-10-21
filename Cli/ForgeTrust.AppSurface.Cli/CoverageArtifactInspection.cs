@@ -1,0 +1,325 @@
+using System.Xml;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace ForgeTrust.AppSurface.Evidence.Coverage;
+
+/// <summary>A bounded, read-only lower-bound observation of known coverage output.</summary>
+internal sealed record CoverageArtifactObservation(
+    long Bytes,
+    int FileCount,
+    int Entries,
+    bool Complete,
+    bool Cancelled,
+    DateTimeOffset ObservedAt,
+    IReadOnlyList<CoverageArtifactContributor> Largest,
+    IReadOnlyList<CoverageArtifactInspectionError> Errors)
+{
+    /// <summary>Gets bounded relative directories to inspect first on the next observation; these grant no ownership.</summary>
+    internal IReadOnlyList<string> ContinuationDirectories { get; init; } = [];
+}
+
+/// <summary>A relative path and size observed during coverage inspection.</summary>
+internal sealed record CoverageArtifactContributor(string Path, long Bytes);
+
+/// <summary>A sanitized inspection failure, scoped to a repository-relative path.</summary>
+internal sealed record CoverageArtifactInspectionError(string Type, string Scope);
+
+/// <summary>Collector settings state and a precise reason for the result.</summary>
+internal sealed record CoverageCollectorRisk(string State, string Cause);
+
+/// <summary>Inspects known test output without reading report payloads or modifying files.</summary>
+internal static class CoverageArtifactInspector
+{
+    private const int MaximumErrors = 32;
+    private const int MaximumLargest = 5;
+    private const int MaximumSettingsBytes = 64 * 1024;
+    private static readonly HashSet<string> SkippedNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".git", "bin", "obj", "node_modules", ".gstack", ".codex",
+    };
+
+    /// <summary>Counts regular files below repository TestResults and coverage-output roots.</summary>
+    /// <remarks>Budgets include directory enumerations and entry metadata checks. Incomplete results are lower bounds.</remarks>
+    public static CoverageArtifactObservation Inspect(
+        string repositoryRoot,
+        TimeProvider clock,
+        TimeSpan budget,
+        int maximumEntries,
+        CancellationToken token,
+        IReadOnlyList<string>? continuationDirectories = null)
+    {
+        ArgumentNullException.ThrowIfNull(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(clock);
+        if (budget < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(budget));
+        if (maximumEntries < 0) throw new ArgumentOutOfRangeException(nameof(maximumEntries));
+
+        var observedAt = clock.GetUtcNow();
+        var started = clock.GetTimestamp();
+        var bytes = 0L;
+        var files = 0;
+        var entries = 0;
+        var complete = true;
+        var cancelled = false;
+        var errors = new List<CoverageArtifactInspectionError>();
+        var largest = new List<CoverageArtifactContributor>();
+        var continuation = new List<string>();
+
+        bool WithinBudget() => clock.GetElapsedTime(started) <= budget && !token.IsCancellationRequested;
+        void Error(string type, string scope)
+        {
+            if (errors.Count < MaximumErrors) errors.Add(new(type, SanitizeRelative(scope)));
+        }
+
+        string root;
+        try
+        {
+            root = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(repositoryRoot));
+            var info = new DirectoryInfo(root);
+            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                Error(info.Exists ? "LinkSkipped" : "MissingRoot", ".");
+                complete = false;
+                return Result();
+            }
+            for (var ancestor = info.Parent; ancestor is not null; ancestor = ancestor.Parent)
+            {
+                if ((ancestor.Attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    Error("LinkAncestor", ".");
+                    complete = false;
+                    return Result();
+                }
+            }
+        }
+        catch (Exception ex) when (IsFileSystemException(ex) || ex is ArgumentException)
+        {
+            Error(ex.GetType().Name, ".");
+            complete = false;
+            return Result();
+        }
+
+        var candidates = new LinkedList<(string Path, bool InScope)>();
+        var queued = new HashSet<string>(StringComparer.Ordinal);
+        var resumed = continuationDirectories is { Count: > 0 };
+        if (continuationDirectories is { Count: > 128 }) throw new InvalidDataException("Inspection continuation exceeds its directory bound.");
+        foreach (var relative in continuationDirectories ?? [])
+        {
+            if (!IsSafeContinuation(relative)) throw new InvalidDataException("Inspection continuation must contain bounded relative directories.");
+            if (queued.Add(relative)) candidates.AddLast((relative == "." ? root : Path.Join(root, relative), IsOutputPath(relative)));
+        }
+        if (candidates.Count == 0) { candidates.AddLast((root, false)); queued.Add("."); }
+        while (candidates.Count > 0)
+        {
+            if (!WithinBudget()) { complete = false; break; }
+            var (directory, inScope) = candidates.First!.Value;
+            candidates.RemoveFirst();
+            var relDir = Relative(root, directory);
+            // A persisted observation is untrusted and can become stale. Recheck every ancestor
+            // before touching the resumed path; never follow links or enter a nested repository.
+            if (!string.Equals(directory, root, PathComparison) && HasRepositoryMarker(directory)) continue;
+            if (!IsSafeObservedDirectory(root, directory)) { Error("ContinuationUnavailable", relDir); complete = false; continue; }
+            IEnumerable<string> children;
+            try { children = Directory.EnumerateFileSystemEntries(directory); }
+            catch (Exception ex) when (IsFileSystemException(ex)) { Error(ex.GetType().Name, relDir); complete = false; continue; }
+            using var iterator = children.GetEnumerator();
+            while (true)
+            {
+                if (!WithinBudget())
+                {
+                    complete = false;
+                    candidates.AddLast((directory, inScope));
+                    break;
+                }
+                string child;
+                try { if (!iterator.MoveNext()) break; child = iterator.Current; }
+                catch (Exception ex) when (IsFileSystemException(ex)) { Error(ex.GetType().Name, relDir); complete = false; break; }
+                if (entries >= maximumEntries)
+                {
+                    complete = false;
+                    candidates.AddLast((directory, inScope));
+                    break;
+                }
+                entries++;
+                var name = Path.GetFileName(child);
+                var relative = Relative(root, child);
+                try
+                {
+                    var attributes = File.GetAttributes(child);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((attributes & FileAttributes.Directory) != 0)
+                    {
+                        if (SkippedNames.Contains(name)) continue;
+                        var childInScope = inScope || name.Equals("TestResults", StringComparison.OrdinalIgnoreCase)
+                            || name.Equals("coverage-output", StringComparison.OrdinalIgnoreCase);
+                        if (queued.Contains(relative)) continue;
+                        if (candidates.Count >= 128)
+                        {
+                            Error("ContinuationCapacity", relative);
+                            complete = false;
+                            // Keep the interrupted path and repository root in the bounded
+                            // cursor. If trimming is needed, the root scan can rediscover
+                            // trimmed paths on a later call.
+                            var currentIsPending = candidates.Any(item => item.Path.Equals(directory, PathComparison));
+                            var rootIsPending = candidates.Any(item => item.Path.Equals(root, PathComparison));
+                            var requiredSlots = (currentIsPending ? 0 : 1) + (rootIsPending ? 0 : 1);
+                            while (candidates.Count + requiredSlots > 128)
+                            {
+                                var removable = candidates.Last;
+                                while (removable is not null && (removable.Value.Path.Equals(root, PathComparison)
+                                    || removable.Value.Path.Equals(directory, PathComparison))) removable = removable.Previous;
+                                if (removable is null) break;
+                                queued.Remove(Relative(root, removable.Value.Path));
+                                candidates.Remove(removable);
+                            }
+                            if (!rootIsPending) { queued.Add("."); candidates.AddLast((root, false)); }
+                            if (!currentIsPending) { queued.Add(relDir); candidates.AddLast((directory, inScope)); }
+                            break;
+                        }
+                        queued.Add(relative);
+                        candidates.AddLast((child, childInScope));
+                        continue;
+                    }
+                    if (!inScope || !TryGetRegularFileLength(child, out var length)) continue;
+                    bytes = SaturatingAdd(bytes, length);
+                    files++;
+                    largest.Add(new(SanitizeRelative(relative), length));
+                    largest.Sort(static (a, b) => b.Bytes.CompareTo(a.Bytes));
+                    if (largest.Count > MaximumLargest) largest.RemoveAt(largest.Count - 1);
+                }
+                catch (Exception ex) when (IsFileSystemException(ex)) { Error(ex.GetType().Name, relative); complete = false; }
+            }
+            // Partial means the observation is a lower bound; it does not mean remaining
+            // queued directories should be abandoned while this invocation still has budget.
+            if (entries >= maximumEntries && candidates.Count > 0) break;
+        }
+        if (token.IsCancellationRequested) { cancelled = true; complete = false; }
+        else if (candidates.Count > 0 || clock.GetElapsedTime(started) > budget) complete = false;
+        continuation.AddRange(candidates.Take(128).Select(candidate => Relative(root, candidate.Path)));
+        // A continued observation covers only a portion of the repository. Never promote its
+        // per-invocation byte count to a complete repository total or sum overlapping scans.
+        if (resumed) complete = false;
+        return Result();
+
+        CoverageArtifactObservation Result() => new(bytes, files, entries, complete, cancelled, observedAt, largest.ToArray(), errors.ToArray())
+        { ContinuationDirectories = continuationDirectories is null && complete ? [] : continuation.Distinct(StringComparer.Ordinal).Take(128).ToArray() };
+    }
+
+    private static bool IsSafeContinuation(string path) => path == "." || path is { Length: > 0 and <= 4096 }
+        && !Path.IsPathRooted(path) && !path.Contains('\\')
+        && path.Split('/').All(component => component is not ("" or "." or "..") && !SkippedNames.Contains(component));
+
+    private static bool IsOutputPath(string relative) => relative.Split('/').Any(component =>
+        component.Equals("TestResults", StringComparison.OrdinalIgnoreCase) || component.Equals("coverage-output", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsSafeObservedDirectory(string root, string directory)
+    {
+        for (var current = new DirectoryInfo(directory); current is not null; current = current.Parent)
+        {
+            if (!current.Exists || (current.Attributes & FileAttributes.ReparsePoint) != 0) return false;
+            if (current.FullName.Equals(root, PathComparison)) return true;
+            if (SkippedNames.Contains(current.Name) || HasRepositoryMarker(current.FullName)) return false;
+        }
+        return false;
+    }
+
+    /// <summary>Reads a supplied effective settings file safely; this reports configured risk, not execution.</summary>
+    public static CoverageCollectorRisk ReadCollectorRisk(string settingsPath)
+    {
+        ArgumentNullException.ThrowIfNull(settingsPath);
+        try
+        {
+            var info = new FileInfo(settingsPath);
+            if (!info.Exists) return new("absent", "settings-file-missing");
+            if ((info.Attributes & FileAttributes.ReparsePoint) != 0) return new("unknown", "settings-file-link");
+            if (!TryOpenRegularFile(settingsPath, out var stream, out var length)) return new("unknown", "settings-file-not-regular-or-unavailable");
+            using (var validatedStream = stream!)
+            {
+                if (length > MaximumSettingsBytes) return new("unknown", "settings-file-over-64KiB");
+                var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = MaximumSettingsBytes };
+                using var reader = XmlReader.Create(validatedStream, settings);
+                var enabled = false;
+                while (reader.Read())
+                {
+                    if (reader.NodeType != XmlNodeType.Element || !reader.LocalName.Equals("DataCollector", StringComparison.OrdinalIgnoreCase)) continue;
+                    var friendlyName = reader.GetAttribute("friendlyName");
+                    if (!string.Equals(friendlyName, "XPlat Code Coverage", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (reader.GetAttribute("isEnabled") is not null)
+                        return new("unknown", "settings-collector-enablement-invalid");
+                    var enablement = reader.GetAttribute("enabled");
+                    if (enablement is not null && !bool.TryParse(enablement, out _))
+                        return new("unknown", "settings-collector-enablement-invalid");
+                    enabled |= enablement is null || bool.Parse(enablement);
+                }
+                return enabled ? new("enabled", "xplat-collector-enabled") : new("disabled", "xplat-collector-not-configured-or-disabled");
+            }
+        }
+        catch (FileNotFoundException) { return new("absent", "settings-file-missing"); }
+        catch (DirectoryNotFoundException) { return new("absent", "settings-file-missing"); }
+        catch (XmlException) { return new("unknown", "settings-xml-invalid-or-dtd-prohibited"); }
+        catch (Exception ex) when (IsFileSystemException(ex)) { return new("unknown", "settings-file-" + ex.GetType().Name); }
+    }
+
+    private static bool HasRepositoryMarker(string path) => Directory.Exists(Path.Combine(path, ".git")) || File.Exists(Path.Combine(path, ".git"));
+    private static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/');
+    private static string SanitizeRelative(string relative)
+    {
+        var segments = relative.Split('/');
+        for (var index = 0; index < segments.Length; index++)
+        {
+            var segment = segments[index];
+            if (new[] { "secret", "token", "password", "credential", "privatekey", "api_key", "apikey" }
+                .Any(marker => segment.Contains(marker, StringComparison.OrdinalIgnoreCase))) segments[index] = "<redacted>";
+        }
+        return CoverageArtifactDisplay.Bound(string.Join('/', segments));
+    }
+
+    private static bool TryGetRegularFileLength(string path, out long length)
+    {
+        using var stream = TryOpenRegularFile(path, out var opened, out length) ? opened : null;
+        return stream is not null;
+    }
+
+    private static bool TryOpenRegularFile(string path, out FileStream? stream, out long length)
+    {
+        stream = null;
+        length = 0;
+        if (OperatingSystem.IsWindows())
+        {
+            var handle = CoverageFileSystemInterop.WindowsCreateFile(path, 0x80000000, 0x7, 0, 3, 0x00200000, 0);
+            if (handle.IsInvalid) throw new IOException("Unable to inspect candidate handle.");
+            if (CoverageFileSystemInterop.WindowsGetFileType(handle) != 1
+                || !CoverageFileSystemInterop.WindowsGetFileInformationByHandle(handle, out var info)
+                || (info.FileAttributes & (0x10u | 0x400u)) != 0) { handle.Dispose(); return false; }
+            length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
+            stream = new FileStream(handle, FileAccess.Read);
+            return true;
+        }
+
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return false;
+        var flags = OperatingSystem.IsMacOS() ? 0x00000004 | 0x00000100 : 0x00000800 | 0x00020000;
+        var descriptor = CoverageFileSystemInterop.UnixOpen(path, flags);
+        if (descriptor < 0) throw new IOException("Unable to inspect candidate handle.");
+        var safeHandle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
+        var buffer = Marshal.AllocHGlobal(512);
+        try
+        {
+            if (CoverageFileSystemInterop.UnixFStat(descriptor, buffer) != 0) { safeHandle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
+            uint mode;
+            if (OperatingSystem.IsMacOS()) mode = unchecked((ushort)Marshal.ReadInt16(buffer, 4));
+            else if (RuntimeInformation.ProcessArchitecture == Architecture.X64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 24));
+            else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 16));
+            else { safeHandle.Dispose(); return false; }
+            if ((mode & 0xF000) != 0x8000) { safeHandle.Dispose(); return false; }
+            length = Marshal.ReadInt64(buffer, OperatingSystem.IsMacOS() ? 96 : 48);
+            if (length < 0) { safeHandle.Dispose(); return false; }
+            stream = new FileStream(safeHandle, FileAccess.Read);
+            return true;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
+    private static bool IsFileSystemException(Exception ex) => ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException;
+}

@@ -8,6 +8,8 @@ This is the living release note for the next coordinated AppSurface version afte
 
 <!-- appsurface:unreleased-entries section="taking-shape" -->
 
+- Document the in-progress coverage artifact retention defaults and compatibility boundaries in the [coverage storage guide](../guides/coverage-storage.md); package installation proof and storage measurements remain pending.
+
 ## Included in the next coordinated version
 
 ### Release and docs surface

@@ -106,6 +106,23 @@ internal static partial class CoverageFileSystemInterop
         uint bufferSize);
 
     /// <summary>
+    /// Reads basic timestamps and attributes for an open Windows file handle.
+    /// </summary>
+    /// <param name="handle">The open file-system handle.</param>
+    /// <param name="fileInformationClass">The native information-class identifier.</param>
+    /// <param name="fileInformation">Receives the basic timestamps and attributes.</param>
+    /// <param name="bufferSize">The size of <paramref name="fileInformation"/> in bytes.</param>
+    /// <returns><see langword="true"/> on success; otherwise <see langword="false"/>.</returns>
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool WindowsGetFileBasicInformationByHandleEx(
+        SafeFileHandle handle,
+        int fileInformationClass,
+        out WindowsFileBasicInformation fileInformation,
+        uint bufferSize);
+
+    /// <summary>
     /// Reads stable file-system identity metadata for an open Windows handle.
     /// </summary>
     /// <param name="handle">The open handle to inspect.</param>
@@ -172,6 +189,26 @@ internal static partial class CoverageFileSystemInterop
         /// Gets or sets the native reparse tag.
         /// </summary>
         internal uint ReparseTag;
+    }
+
+    /// <summary>Contains native Windows basic timestamps and attributes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WindowsFileBasicInformation
+    {
+        /// <summary>Gets or sets the creation time in 100-nanosecond intervals.</summary>
+        internal long CreationTime;
+
+        /// <summary>Gets or sets the last-access time in 100-nanosecond intervals.</summary>
+        internal long LastAccessTime;
+
+        /// <summary>Gets or sets the last-write time in 100-nanosecond intervals.</summary>
+        internal long LastWriteTime;
+
+        /// <summary>Gets or sets the change time in 100-nanosecond intervals.</summary>
+        internal long ChangeTime;
+
+        /// <summary>Gets or sets the native file-attribute bit field.</summary>
+        internal uint FileAttributes;
     }
 
     /// <summary>
