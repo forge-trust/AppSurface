@@ -161,3 +161,34 @@ audit's own hash pins remain mandatory. The
 [declaration controls](../../test_alias_declaration_lookup.py) exercise real jq,
 cache bounds/immutability, exact lookup and detached physical call ordering;
 they grant no native authority or measured timing improvement.
+
+### Initial positive fixture OS passes
+
+The `None` selector runs the original N02/N03 prerequisites followed by N01.
+Its `initialize_ordinary_os_declarations()` snapshots sorted file paths/digests
+from the already validated OS audit, binds every alias literal to the same file
+digest, then makes the indexed declaration arrays readonly. It rejects replay,
+empty/oversized tables, duplicate paths and missing or inconsistent alias files.
+It caches no filesystem observation.
+
+`ordinary_os_batch_full_pass(initial|final)` uses the same implementation as the
+[N06 fixture](checkpoint-n06.sh). Every ordinary file and all its ancestors,
+including `/`, appear in an exact ordered physical `stat` snapshot before and
+after checking all file hashes. The snapshots require root ownership, no group
+or other write bits, correct directory/file types, single-link regular files,
+size bounds and unchanged device/inode/size/mode/link/owner/timestamps.
+Generated root-only scratch files stay pinned by retained descriptors. Batches
+contain at most 32 paths and 16 KiB of argument bytes; inventory, snapshot and
+checksum files keep their existing finite bounds. Each alias still uses the
+original two fresh physical walks, link metadata/target pins and resolved-file
+hash check on both full passes. The ELF closure checks remain separate and
+unchanged.
+
+The shell requires both passes and the audit file hash before native dispatch.
+It preserves the 600-second fixture clock, 30-second cleanup reserve and
+prelaunch remaining-time guard. Five paired stage observations emit only closed
+stage names and elapsed/remaining samples from that original clock, so a later
+failure can identify which setup span consumed it. They cannot renew it.
+[Portable controls](../../test_none_ordinary_os_batch.py) exercise declarations,
+ordered stat data, drift rejection and observer data without granting root or
+native authority. Fresh Linux execution is required to establish N01 completion.

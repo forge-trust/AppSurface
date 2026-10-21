@@ -172,10 +172,21 @@ esac
             source = script.read_text()
             schema = source.index("' \"$os_audit\" >/dev/null || fail OS-audit-schema")
             initialize = source.index("\ninitialize_alias_declarations\n")
-            first_pass = source.index('while IFS=$\'\\t\' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"')
             self.assertLess(schema, initialize)
-            self.assertLess(initialize, first_pass)
-            self.assertEqual(2, source.count('while IFS=$\'\\t\' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"'))
+            if script.name == "checkpoint-none.sh":
+                ordinary = source.index("\ninitialize_ordinary_os_declarations\n")
+                initial = source.index("\nordinary_os_batch_full_pass initial\n")
+                final = source.index("\nordinary_os_batch_full_pass final\n")
+                guard = source.index('|| fail native-life-outside-fixture')
+                self.assertLess(initialize, ordinary)
+                self.assertLess(ordinary, initial)
+                self.assertLess(initial, final)
+                self.assertLess(final, guard)
+            else:
+                call = 'while IFS=$\'\\t\' read -r p h; do verify_os_path "$p" "$h"; done <<<"$os_files"'
+                self.assertLess(initialize, source.index(call))
+                self.assertEqual(2, source.count(call))
+
 
 
 if __name__ == "__main__":

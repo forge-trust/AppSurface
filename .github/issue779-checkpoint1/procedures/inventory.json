@@ -5,7 +5,7 @@
       "historical_path": "packet/cases/N03/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-none.sh",
-      "ported_sha256": "227c5c3394d9b82ac584ad5d85bf79f4c89cba78d5bdd9355e19506cb1cf08f1",
+      "ported_sha256": "570603fe49cbf0899964ffb7934873472861702042b37c1f7d425b39b07b50e4",
       "sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a"
     },
     {
@@ -1039,7 +1039,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/README.md",
-      "ported_sha256": "169bd295d8bfbfd916fca3bee22286aaf3545e3c6425d4ba2ff45a04a4b3f806",
+      "ported_sha256": "3355ec22d22f9eef92743c757b0aa47cada9687d5634a27722572940f0b375d0",
       "sha256": "5e9e335d5662b65830729cedbe854b4457bb748452c155f52b78ff6bf6fb9581"
     },
     {
@@ -1273,7 +1273,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/slot/port-manifest.json",
-      "ported_sha256": "de88c74c67f0b4404c4569c450fe50cacae8dd990b95856718dede395cd50d09",
+      "ported_sha256": "42830fe3d5597aa269051402afb456b6fce10489900ad8919db89569a2285eaa",
       "sha256": "1db483cffe025511384848a5f2bd456fb8ff789f8eef0e6002b2149635f9800d"
     },
     {

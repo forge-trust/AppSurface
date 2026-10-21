@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 9974,
-      "sha256": "169bd295d8bfbfd916fca3bee22286aaf3545e3c6425d4ba2ff45a04a4b3f806"
+      "bytes": 11939,
+      "sha256": "3355ec22d22f9eef92743c757b0aa47cada9687d5634a27722572940f0b375d0"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -118,6 +118,17 @@
     "scope": "N05 adopts exact N06 pin_file/ancestor/alias_walk consolidated physical samples; existing six diagnostic stage observations unchanged",
     "time_gain_measured": false
   },
+  "source54_none_ordinary_os": {
+    "clocks_unchanged": true,
+    "fresh_linux_required": true,
+    "native_execution": false,
+    "portable_controls": [
+      "../../test_none_ordinary_os_batch.py",
+      "../../test_alias_declaration_lookup.py"
+    ],
+    "scope": "None initial/final ordinary OS audits use exact N06 full batch implementation with immutable declaration-only input cache; all physical file/ancestor/alias/hash comparisons remain mandatory; five closed timing observations use original fixture clock",
+    "time_gain_measured": false
+  },
   "wrappers": [
     {
       "changes": [
@@ -130,7 +141,7 @@
       "historical_sha256": "7f1c4c71c30b9d9585daf1591dd71c4032d21c4c964656359faae9f2bc2a0a6a",
       "native_execution": false,
       "ported_path": "checkpoint-none.sh",
-      "ported_sha256": "227c5c3394d9b82ac584ad5d85bf79f4c89cba78d5bdd9355e19506cb1cf08f1",
+      "ported_sha256": "570603fe49cbf0899964ffb7934873472861702042b37c1f7d425b39b07b50e4",
       "selector": "None"
     },
     {
