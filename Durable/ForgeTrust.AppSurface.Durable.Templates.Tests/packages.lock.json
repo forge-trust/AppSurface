@@ -163,20 +163,6 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
-      "AppSurfaceDurableWorker": {
-        "type": "Project",
-        "dependencies": {
-          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Observability": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Workers": "[0.1.0, )",
-          "Npgsql": "[10.0.3, )",
-          "OpenTelemetry": "[1.15.3, )",
-          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
-          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )"
-        }
-      },
       "forgetrust.appsurface.core": {
         "type": "Project",
         "dependencies": {
@@ -203,6 +189,20 @@
         "type": "Project",
         "dependencies": {
           "ForgeTrust.AppSurface.Durable": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.durable.templates.verificationhost": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Durable": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable.PostgreSql": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Durable.Provider": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Observability": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Workers": "[0.1.0, )",
+          "Npgsql": "[10.0.3, )",
+          "OpenTelemetry": "[1.15.3, )",
+          "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.15.3, )",
+          "OpenTelemetry.Extensions.Hosting": "[1.15.3, )"
         }
       },
       "forgetrust.appsurface.flow": {
