@@ -17,5 +17,8 @@ for path in root.rglob('*'):
     total += metadata.st_size
     count += 1
     path.chmod(0o600)
-assert count <= 128 and total <= 96 * 1024 * 1024
+# Three separately bounded files retain the supplementary root TRX, collector log,
+# and its portable retention-control log.
+# Product limits, per-file limits and the total retained byte budget stay unchanged.
+assert count <= 131 and total <= 96 * 1024 * 1024
 root.chmod(0o700)

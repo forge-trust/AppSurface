@@ -46,6 +46,8 @@ public sealed class NativeMeasurementTests
         var sdkCoverage = Read(directory, "native-sdk.json", 32L * 1024 * 1024);
         var rootTrx = Read(directory, "root-files.trx");
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"), rootTrx);
+        RootSupplementMeasurement.Validate(binding.RootElement.GetProperty("root_supplement_tests"),
+            Read(directory, "root-supplement.trx", 1024 * 1024));
         Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
         const string producerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs";
         var producerSource = File.ReadAllBytes(TestPathUtils.PathUnder(repo, producerPath));

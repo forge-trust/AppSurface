@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Supervision;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -296,5 +297,148 @@ public sealed class SupervisionWorkerLifetimeTests
         await Assert.ThrowsAnyAsync<Exception>(() => owner.StopAsync(() => Task.CompletedTask, () => Task.CompletedTask));
         Assert.True(owner.StartJoined);
         Assert.True(owner.StopJoined);
+    }
+
+    [Fact]
+    public async Task SynchronouslyBlockedStartupRemainsOwnedUntilItsInvocationReturns()
+    {
+        var owner = new SupervisionWorkerLifetime();
+        using var release = new ManualResetEventSlim();
+        var entered = Signal();
+        var contained = Signal();
+        var finalizations = 0;
+        var invocation = Task.Factory.StartNew(() => owner.StartAsync(_ =>
+        {
+            entered.TrySetResult();
+            if (!release.Wait(TimeSpan.FromSeconds(10)))
+                throw new InvalidOperationException("startup-barrier-expired");
+            return Task.CompletedTask;
+        }, default), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        var start = invocation.Unwrap();
+        Task? stop = null;
+        Exception? startError = null;
+        Exception? stopError = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            stop = owner.StopAsync(() =>
+            {
+                contained.TrySetResult();
+                return Task.CompletedTask;
+            }, () =>
+            {
+                Interlocked.Increment(ref finalizations);
+                return Task.CompletedTask;
+            });
+            await contained.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(invocation.IsCompleted);
+            Assert.False(start.IsCompleted);
+            Assert.False(stop.IsCompleted);
+            Assert.False(owner.StartJoined);
+            Assert.Equal(0, Volatile.Read(ref finalizations));
+        }
+        finally
+        {
+            stop ??= owner.StopAsync(() => Task.CompletedTask, () => Task.CompletedTask);
+            release.Set();
+            startError = await Record.ExceptionAsync(() => start.WaitAsync(TimeSpan.FromSeconds(10)));
+            stopError = await Record.ExceptionAsync(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        Assert.IsAssignableFrom<OperationCanceledException>(startError);
+        Assert.Equal("ASEVD410", Assert.IsType<EvidenceAdmissionException>(stopError).Code);
+        Assert.Equal(1, finalizations);
+        Assert.True(owner.StartJoined);
+        Assert.True(owner.StopJoined);
+        Assert.True(owner.Failed);
+    }
+
+    [Fact]
+    public async Task MissingContainmentTaskStillOwnsFinalizationAndCannotBeReplayedAsSuccess()
+    {
+        var owner = new SupervisionWorkerLifetime();
+        var entered = Signal();
+        var release = Signal();
+        await owner.StartAsync(_ => Task.CompletedTask, default);
+        var stop = owner.StopAsync(() => null!, async () =>
+        {
+            entered.TrySetResult();
+            await release.Task;
+        });
+        var cleanup = owner.JoinCleanupAsync();
+        Exception? stopError = null;
+        Exception? cleanupError = null;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(stop.IsCompleted);
+            Assert.False(cleanup.IsCompleted);
+            Assert.False(owner.StopJoined);
+            Assert.Same(stop, owner.StopAsync(() => Task.CompletedTask, () => Task.CompletedTask));
+        }
+        finally
+        {
+            release.TrySetResult();
+            stopError = await Record.ExceptionAsync(() => stop.WaitAsync(TimeSpan.FromSeconds(10)));
+            cleanupError = await Record.ExceptionAsync(() => cleanup.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        Assert.Equal("ASEVD410", Assert.IsType<EvidenceAdmissionException>(stopError).Code);
+        Assert.Null(stopError!.InnerException);
+        Assert.Equal("ASEVD410", Assert.IsType<EvidenceAdmissionException>(cleanupError).Code);
+        Assert.True(owner.Failed);
+        Assert.True(owner.StopJoined);
+    }
+
+    [Fact]
+    public async Task NullProcedureArgumentsDoNotConsumeTheValidStartupOrStopAttempt()
+    {
+        var owner = new SupervisionWorkerLifetime();
+        Assert.Throws<ArgumentNullException>(() => { _ = owner.StartAsync(null!, default); });
+        Assert.Throws<ArgumentNullException>(() => { _ = owner.StopAsync(null!, () => Task.CompletedTask); });
+        Assert.Throws<ArgumentNullException>(() => { _ = owner.StopAsync(() => Task.CompletedTask, null!); });
+        var calls = 0;
+        await owner.StartAsync(_ => { calls++; return Task.CompletedTask; }, default);
+        await owner.StopAsync(() => { calls++; return Task.CompletedTask; },
+            () => { calls++; return Task.CompletedTask; });
+        await owner.JoinCleanupAsync();
+        Assert.Equal(3, calls);
+        Assert.False(owner.Failed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CleanupJoinRejectsReentrantContainmentAndFinalizationWithoutAwaitingItself(bool finalization)
+    {
+        var owner = new SupervisionWorkerLifetime();
+        await owner.StartAsync(_ => Task.CompletedTask, default);
+        Exception? rejection = null;
+        Task? reentrantJoin = null;
+        var calls = 0;
+        async Task CheckReentry()
+        {
+            await Task.Yield();
+            reentrantJoin = owner.JoinCleanupAsync();
+            rejection = await Record.ExceptionAsync(() => reentrantJoin.WaitAsync(TimeSpan.FromSeconds(10)));
+            calls++;
+        }
+        var stop = owner.StopAsync(finalization ? () => Task.CompletedTask : CheckReentry,
+            finalization ? CheckReentry : () => Task.CompletedTask);
+        try
+        {
+            await stop.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            // A broken reentry guard must still release the callback's bounded wait and join the originals.
+            await stop.WaitAsync(TimeSpan.FromSeconds(10));
+            if (reentrantJoin is not null)
+                await Record.ExceptionAsync(() => reentrantJoin.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        Assert.Equal("ASEVD410", Assert.IsType<EvidenceAdmissionException>(rejection).Code);
+        Assert.Equal(1, calls);
+        Assert.Null(rejection!.InnerException);
+        Assert.True(owner.StopJoined);
+        Assert.False(owner.Failed);
+        await owner.JoinCleanupAsync().WaitAsync(TimeSpan.FromSeconds(10));
     }
 }

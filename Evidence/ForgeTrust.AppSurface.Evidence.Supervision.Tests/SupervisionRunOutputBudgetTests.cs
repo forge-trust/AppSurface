@@ -273,6 +273,108 @@ public sealed class SupervisionRunOutputBudgetTests
     public void Constructor_RejectsLimitsOutsideExistingContract(long limit)
         => Assert.Throws<ArgumentOutOfRangeException>(() => new SupervisionRunOutputBudget(limit));
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task RegisteredStreamCannotBeReusedInEitherPositionOfAnotherPair(bool reuseStderr, bool asStderr)
+    {
+        using var budget = new SupervisionRunOutputBudget();
+        using var first = new ControlledStream([], ignoreCancellation: true);
+        using var second = new ControlledStream([], ignoreCancellation: true);
+        using var untouched = new MemoryStream([1, 2, 3]);
+        var accepted = budget.CollectAsync(new(), first, second);
+        try
+        {
+            await Task.WhenAll(first.Entered.Task, second.Entered.Task).WaitAsync(Guard);
+            Stream reused = reuseStderr ? second : first;
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                _ = budget.CollectAsync(new(), asStderr ? untouched : reused, asStderr ? reused : untouched);
+            });
+            Assert.Equal(0, untouched.Position);
+            Assert.True(budget.StopToken.IsCancellationRequested);
+            var complete = budget.CompleteAsync();
+            Assert.False(complete.IsCompleted);
+            first.Release();
+            second.Release();
+            await accepted.WaitAsync(Guard);
+            var receipt = await complete.WaitAsync(Guard);
+            Assert.Equal(1, receipt.RegisteredPairs);
+            Assert.Equal(SupervisionRunOutputFailure.InvalidSequence, receipt.Failure);
+            Assert.False(receipt.Successful);
+            Assert.False(receipt.Drained);
+        }
+        finally
+        {
+            first.Release();
+            second.Release();
+            await budget.CompleteAsync().WaitAsync(Guard);
+        }
+    }
+
+    [Fact]
+    public async Task NullRegistrationArgumentsDoNotConsumeOrCancelTheFirstValidPair()
+    {
+        using var budget = new SupervisionRunOutputBudget(3);
+        using var stdout = new MemoryStream([1, 2]);
+        using var stderr = new MemoryStream([3]);
+        Assert.Throws<ArgumentNullException>(() => { _ = budget.CollectAsync(null!, stdout, stderr); });
+        Assert.Throws<ArgumentNullException>(() => { _ = budget.CollectAsync(new(), null!, stderr); });
+        Assert.Throws<ArgumentNullException>(() => { _ = budget.CollectAsync(new(), stdout, null!); });
+        Assert.False(budget.StopToken.IsCancellationRequested);
+        Assert.Equal(0, stdout.Position);
+        Assert.Equal(0, stderr.Position);
+        await budget.CollectAsync(new(3, 3), stdout, stderr).WaitAsync(Guard);
+        var receipt = await budget.CompleteAsync().WaitAsync(Guard);
+        Assert.True(receipt.Successful);
+        Assert.True(receipt.Drained);
+        Assert.Equal(1, receipt.RegisteredPairs);
+        Assert.Equal(3, receipt.ReceivedBytes);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnreadableStreamRejectsBeforeEitherStreamIsDispatched(bool unreadableStderr)
+    {
+        using var budget = new SupervisionRunOutputBudget();
+        using var closed = new MemoryStream([9]);
+        closed.Dispose();
+        using var untouched = new MemoryStream([1, 2, 3]);
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            _ = budget.CollectAsync(new(), unreadableStderr ? untouched : closed,
+                unreadableStderr ? closed : untouched);
+        });
+        Assert.Equal(0, untouched.Position);
+        var receipt = await budget.CompleteAsync().WaitAsync(Guard);
+        Assert.Equal(0, receipt.RegisteredPairs);
+        Assert.Empty(receipt.Pairs);
+        Assert.Equal(SupervisionRunOutputFailure.InvalidSequence, receipt.Failure);
+        Assert.False(receipt.Drained);
+    }
+
+    [Fact]
+    public async Task DisposedLedgerReplaysItsOriginalCompletionButNeverDispatchesAnotherPair()
+    {
+        using var budget = new SupervisionRunOutputBudget();
+        using var stdout = new MemoryStream([1]);
+        using var stderr = new MemoryStream();
+        await budget.CollectAsync(new(), stdout, stderr).WaitAsync(Guard);
+        var completion = budget.CompleteAsync();
+        var receipt = await completion.WaitAsync(Guard);
+        budget.Dispose();
+        budget.Dispose();
+        using var rejected = new MemoryStream([2]);
+        using var empty = new MemoryStream();
+        Assert.Throws<InvalidOperationException>(() => { _ = budget.CollectAsync(new(), rejected, empty); });
+        Assert.Equal(0, rejected.Position);
+        Assert.Same(completion, budget.CompleteAsync());
+        Assert.Same(receipt, await budget.CompleteAsync());
+        Assert.True(receipt.Successful); // The earlier immutable stream receipt does not authorize another collection.
+    }
+
     private sealed class ControlledStream(byte[] bytes, bool ignoreCancellation = false,
         bool throwOnRead = false, bool throwOnCancellation = false) : Stream
     {

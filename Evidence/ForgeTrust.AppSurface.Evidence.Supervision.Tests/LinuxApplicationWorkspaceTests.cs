@@ -331,6 +331,36 @@ public sealed class LinuxApplicationWorkspaceTests
         Assert.Contains(string.Join('/', Enumerable.Repeat("nested", 32)), LinuxApplicationWorkspaceLayout.FindDirectories(boundary));
     }
 
+    /// <summary>Implicit directories share the tree-entry bound with files and the bundle root.</summary>
+    [Fact]
+    public void BundleTreeEntryBudgetIncludesEveryImplicitDirectoryAndTheRoot()
+    {
+        var files = Files(includeExtension: false).ToList();
+        for (var index = 0; index < 250; index++)
+        {
+            var depth = index < 247 ? 32 : 10;
+            var directories = Enumerable.Range(0, depth)
+                .Select(level => level == 0 ? $"tree-{index}" : $"level-{level}");
+            files.Add(Row(string.Join('/', directories) + "/leaf.dat", LinuxApplicationBundleRole.Dependency,
+                0x124, 'a'));
+        }
+
+        Assert.Equal(256, files.Count);
+        LinuxApplicationWorkspaceLayout.ValidateFiles(files);
+        var directoriesAtLimit = LinuxApplicationWorkspaceLayout.FindDirectories(files);
+        Assert.Equal(LinuxApplicationWorkspaceLayout.MaximumTreeEntries,
+            directoriesAtLimit.Count + files.Count + 1);
+        LinuxApplicationWorkspaceLayout.RequireExactInventory(files, Observed(files));
+
+        // The file count, per-file depth, modes, roles and bytes still satisfy their own bounds.
+        files[^1] = files[^1] with
+        {
+            RelativePath = files[^1].RelativePath.Replace("/leaf.dat", "/extra/leaf.dat", StringComparison.Ordinal),
+        };
+        Reject(() => LinuxApplicationWorkspaceLayout.FindDirectories(files));
+        Reject(() => LinuxApplicationWorkspaceLayout.ValidateFiles(files));
+    }
+
     [Theory]
     [InlineData("inventory-null")]
     [InlineData("inventory-over")]

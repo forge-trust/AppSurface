@@ -117,6 +117,7 @@ jobs:
           cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/root-file-tests/root-files.trx" TestResults/issue779-native-measurement/
+          cp "$RUNNER_TEMP/checkpoint4-native-input/root-supplement-tests/root-supplement.trx" TestResults/issue779-native-measurement/
           # Preserve the original C3 report/binding for NativeMeasurementTests.
           # The parent-owned account validator must validate both staged lineage directories.
           for variant in creation rollback; do

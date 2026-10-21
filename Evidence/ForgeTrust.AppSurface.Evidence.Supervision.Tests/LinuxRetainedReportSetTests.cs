@@ -52,6 +52,33 @@ public sealed class LinuxRetainedReportSetTests
     }
 
     [Fact]
+    public void InventoryRejectsNullAndACollectionChangedDuringItsCopy()
+    {
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths(null!));
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths([null!]));
+        var changing = new ChangingInventory();
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths(changing));
+        Assert.Equal(1, changing.Reads);
+    }
+
+    [Fact]
+    public void InventoryAcceptsExactUtf8AndDepthLimitsAndRejectsTheNextByte()
+    {
+        var component = new string('x', 255);
+        var maximumPath = string.Join('/', Enumerable.Repeat(component, 16));
+        Assert.Equal(4095, System.Text.Encoding.UTF8.GetByteCount(maximumPath));
+        Assert.Equal(maximumPath, Assert.Single(LinuxRetainedReportSet.ValidatePaths([maximumPath])));
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths([maximumPath + "x"]));
+        var unicodeComponent = new string('\u00e9', 127) + "x";
+        Assert.Equal(255, System.Text.Encoding.UTF8.GetByteCount(unicodeComponent));
+        Assert.Equal(unicodeComponent, Assert.Single(LinuxRetainedReportSet.ValidatePaths([unicodeComponent])));
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths([unicodeComponent + "x"]));
+        var deepest = string.Join('/', Enumerable.Repeat("a", 32));
+        Assert.Equal(deepest, Assert.Single(LinuxRetainedReportSet.ValidatePaths([deepest])));
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.ValidatePaths([deepest + "/a"]));
+    }
+
+    [Fact]
     public void SizeGuardsCheckIndependentFileAndAggregateBoundsWithoutOverflow()
     {
         Assert.Equal(0, LinuxRetainedReportSet.AddLength(0, 0));
@@ -225,6 +252,66 @@ public sealed class LinuxRetainedReportSetTests
     }
 
     [Fact]
+    public void CaptureRejectsAnOversizedActualFileAndClosesItsTransferredHandle()
+    {
+        using var fixture = new PortableFile([1]);
+        using (var writer = new FileStream(fixture.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+            writer.SetLength(LinuxRetainedReportSet.MaximumFileBytes + 1);
+        var stream = fixture.Open();
+        var handle = stream.SafeFileHandle;
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.FileReader.CapturePortableFileForTesting(stream, Deadline));
+        Assert.True(handle.IsClosed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CaptureRejectsActualEofMutationAndClosesItsTransferredHandle(bool grow)
+    {
+        using var fixture = new PortableFile([1]);
+        var stream = fixture.Open();
+        var handle = stream.SafeFileHandle;
+        var samples = 0;
+        var mutated = false;
+        Assert.Throws<IOException>(() => LinuxRetainedReportSet.FileReader.CapturePortableFileForTesting(stream, Deadline, () =>
+        {
+            // The existing sampling seam brackets real reads. Change the actual file after the
+            // length sample immediately before reading, or immediately before the final EOF read.
+            if (++samples != (grow ? 3 : 2)) return;
+            using var writer = new FileStream(fixture.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            writer.SetLength(grow ? 2 : 0);
+            mutated = true;
+        }));
+        Assert.True(mutated);
+        Assert.Equal(grow ? 3 : 2, samples);
+        Assert.True(handle.IsClosed);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FinalChunkRejectsActualEofMutationAndPoisonsFurtherReads(bool grow)
+    {
+        using var fixture = new PortableFile([1]);
+        var armed = false;
+        var samples = 0;
+        var mutated = false;
+        using var reader = fixture.Capture(() =>
+        {
+            if (!armed || ++samples != (grow ? 3 : 2)) return;
+            using var writer = new FileStream(fixture.Path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            writer.SetLength(grow ? 2 : 0);
+            mutated = true;
+        });
+        armed = true;
+        Assert.Throws<IOException>(() => reader.ReadChunk(0, 1));
+        Assert.True(mutated);
+        Assert.Equal(grow ? 3 : 2, samples);
+        File.WriteAllBytes(fixture.Path, fixture.Bytes);
+        Assert.Throws<IOException>(() => reader.ReadChunk(0, 1));
+    }
+
+    [Fact]
     public async Task ConcurrentCloseWaitsForActualReadSamplingBeforeClosingTheHandle()
     {
         using var fixture = new PortableFile([1, 2, 3]);
@@ -260,6 +347,15 @@ public sealed class LinuxRetainedReportSetTests
     }
 
     private static LinuxProtectedMetadata Metadata() => new(1, 2, 3, 123, 456, 0x8180, 1, 3, 10, 2, 10, 3);
+
+    private sealed class ChangingInventory : IReadOnlyList<string>
+    {
+        public int Reads { get; private set; }
+        public int Count => Reads == 0 ? 1 : 2;
+        public string this[int index] { get { Reads++; return "report.xml"; } }
+        public IEnumerator<string> GetEnumerator() => throw new NotSupportedException();
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
 
     private sealed class PortableFile : IDisposable
     {

@@ -705,6 +705,118 @@ public sealed class SupervisionApplicationLifetimeTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MissingStopCallbackOrTaskStillRunsDisposersButCannotCompleteCleanupSuccessfully(bool missingCallback)
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        var disposed = false;
+        lifetime.RegisterDisposer(_ => { disposed = true; return Task.CompletedTask; });
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        var stop = lifetime.StopAndJoinAsync(missingCallback ? null! : _ => null!, default);
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => stop.WaitAsync(Guard));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.True(disposed);
+        Assert.Equal(!missingCallback, lifetime.Joined);
+        Assert.True(lifetime.Failed);
+        Assert.Same(stop, lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default));
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
+    [Fact]
+    public async Task MissingDisposerTaskCannotSkipTheNextDisposerOrReleaseItsJoin()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        var entered = Signal();
+        var release = Signal();
+        var order = new List<int>();
+        lifetime.RegisterDisposer(_ => { order.Add(1); return null!; });
+        lifetime.RegisterDisposer(async _ =>
+        {
+            order.Add(2);
+            entered.TrySetResult();
+            await release.Task;
+            order.Add(3);
+        });
+        await lifetime.StartAsync(_ => Task.FromResult(true), default).WaitAsync(Guard);
+        var stop = lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default);
+        try
+        {
+            await entered.Task.WaitAsync(Guard);
+            Assert.Equal(new[] { 1, 2 }, order);
+            Assert.False(stop.IsCompleted);
+            Assert.False(lifetime.Joined);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Assert.ThrowsAsync<EvidenceAdmissionException>(() => stop.WaitAsync(Guard));
+        }
+        Assert.Equal(new[] { 1, 2, 3 }, order);
+        Assert.True(lifetime.Joined);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AlreadyCancelledOperationTokenNeverDispatchesAndDoesNotPoisonCleanup(bool readiness)
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        var calls = 0;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        if (readiness)
+            await lifetime.StartAsync(_ => Task.FromResult(true), default).WaitAsync(Guard);
+        var operation = readiness
+            ? lifetime.WaitResourceAsync("resource", _ => { calls++; return Task.FromResult(true); }, cancellation.Token)
+            : lifetime.StartAsync(_ => { calls++; return Task.FromResult(true); }, cancellation.Token);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(Guard));
+        Assert.Equal(0, calls);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Failed);
+        Assert.True(lifetime.Joined);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MissingOperationTaskReleasesItsRegistrationButKeepsTheLifetimeFailed(bool readiness)
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        if (readiness)
+            await lifetime.StartAsync(_ => Task.FromResult(true), default).WaitAsync(Guard);
+        var calls = 0;
+        Task<bool> MissingTask(CancellationToken _)
+        {
+            calls++;
+            return null!;
+        }
+        var operation = readiness
+            ? lifetime.WaitResourceAsync("resource", MissingTask, default)
+            : lifetime.StartAsync(MissingTask, default);
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => operation.WaitAsync(Guard));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.Equal(1, calls);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Joined);
+        Assert.True(lifetime.Failed);
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static async Task IgnoreCleanupFailure(Task task)

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Supervision;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -146,6 +147,25 @@ public sealed class LinuxControlConnectionTests
     }
 
     [Theory]
+    [InlineData(1L)]
+    [InlineData(3600000L)]
+    public async Task PreparationPreservesTheOriginalAllowanceAtBothInclusiveBounds(long remainingMilliseconds)
+    {
+        using var stream = new ScriptedStream(Ready);
+        using var framing = new SupervisionControlLineFraming(stream);
+        await framing.ReadRequestAsync(default);
+        await framing.WritePreparationAsync(remainingMilliseconds, default);
+        var written = stream.Written.ToArray();
+        Assert.Equal((byte)'\n', written[^1]);
+        using var preparation = JsonDocument.Parse(written.AsMemory(0, written.Length - 1));
+        Assert.True(preparation.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Equal("pre-admission", preparation.RootElement.GetProperty("phase").GetString());
+        Assert.Equal(remainingMilliseconds, preparation.RootElement.GetProperty("remaining_job_ms").GetInt64());
+        Assert.Equal(1, stream.WriteCalls);
+        Assert.Equal(0, stream.DisposeCount);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("[]")]
     [InlineData("private-canary")]
@@ -228,6 +248,21 @@ public sealed class LinuxControlConnectionTests
         Assert.Equal(ControlLineFailure.IoFailed, writeError.Failure);
         Assert.Null(writeError.InnerException);
         Assert.Equal(1, writeStream.DisposeCount);
+    }
+
+    [Fact]
+    public async Task PreparationWriteFailureIsSanitizedAndClosesTheFramingOwner()
+    {
+        using var stream = new ScriptedStream(Ready, failWrite: true);
+        using var framing = new SupervisionControlLineFraming(stream);
+        await framing.ReadRequestAsync(default);
+        var error = await Assert.ThrowsAsync<ControlLineException>(() =>
+            framing.WritePreparationAsync(120000, default));
+        Assert.Equal(ControlLineFailure.IoFailed, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-io-canary", error.ToString());
+        Assert.Equal(1, stream.WriteCalls);
+        Assert.Equal(1, stream.DisposeCount);
     }
 
     [Fact]

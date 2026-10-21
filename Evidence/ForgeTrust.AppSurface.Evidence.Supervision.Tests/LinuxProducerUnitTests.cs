@@ -111,6 +111,99 @@ public sealed class LinuxProducerUnitTests
         Assert.Throws<EvidenceAdmissionException>(() => recipe.IsNormalExitTransition(sample with { User = "0" }, 1234));
     }
 
+    /// <summary>Every supported stop substate remains pending only for the original normal-exit execution.</summary>
+    [Theory]
+    [InlineData("stop-sigterm")]
+    [InlineData("final-sigterm")]
+    public void AdditionalNormalStopSubstatesRejectAnAdjacentForeignState(string substate)
+    {
+        using var stdout = new SafeFileHandle((nint)111, false);
+        using var stderr = new SafeFileHandle((nint)112, false);
+        var recipe = Recipe(stdout, stderr);
+        var sample = Running(recipe) with { ActiveState = "deactivating", SubState = substate, MainPid = 0, ExecMainCode = 1 };
+        Assert.True(recipe.IsNormalExitTransition(sample, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample with { SubState = "stop-sigkill" }, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample with { ActiveState = "activating" }, 1234));
+    }
+
+    /// <summary>Only the documented zero-code inactive or failed substates remain transitional.</summary>
+    [Theory]
+    [InlineData("inactive", "failed")]
+    [InlineData("failed", "dead")]
+    [InlineData("failed", "failed")]
+    public void ZeroCodeTerminalShapedSamplesRemainPendingWithoutInventingAnExit(string active, string sub)
+    {
+        using var stdout = new SafeFileHandle((nint)111, false);
+        using var stderr = new SafeFileHandle((nint)112, false);
+        var recipe = Recipe(stdout, stderr);
+        var sample = Running(recipe) with { ActiveState = active, SubState = sub, MainPid = 0 };
+        Assert.True(recipe.IsNormalExitTransition(sample, 1234));
+        Assert.False(recipe.HasFinished(sample));
+        Assert.False(recipe.HasStopped(sample));
+        Assert.False(recipe.IsNormalExitTransition(sample with { ExecMainCode = 1 }, 1234));
+        Assert.False(recipe.IsNormalExitTransition(sample with { SubState = "running" }, 1234));
+    }
+
+    /// <summary>Stopped signal metadata preserves both kernel code kinds and the inclusive signal limits.</summary>
+    [Theory]
+    [InlineData(2, 1, 0)]
+    [InlineData(2, 64, 65)]
+    [InlineData(3, 1, 0)]
+    [InlineData(3, 64, 65)]
+    public void SignalStopDataHasClosedBoundsButNeverBecomesANormalCompletion(int code, int signal, int invalidSignal)
+    {
+        using var stdout = new SafeFileHandle((nint)111, false);
+        using var stderr = new SafeFileHandle((nint)112, false);
+        var recipe = Recipe(stdout, stderr);
+        var sample = Running(recipe) with { ActiveState = "failed", SubState = "failed", MainPid = 0,
+            ExecMainCode = code, ExecMainStatus = signal, ControlGroup = "" };
+        Assert.True(recipe.HasStopped(sample));
+        Assert.False(recipe.HasFinished(sample));
+        Assert.False(recipe.HasStopped(sample with { MainPid = sample.ExecMainPid }));
+        Assert.False(recipe.HasStopped(sample with { ExecMainPid = 0 }));
+        Assert.False(recipe.HasStopped(sample with { ActiveState = "active", SubState = "exited" }));
+        var failure = Assert.Throws<EvidenceAdmissionException>(() => recipe.HasStopped(sample with { ExecMainStatus = invalidSignal }));
+        Assert.Equal("ASEVD410", failure.Code);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain("canary", failure.ToString(), StringComparison.Ordinal);
+    }
+
+    /// <summary>Malformed sampled numeric or load policy rejects before every lifecycle predicate.</summary>
+    [Theory]
+    [InlineData("load")]
+    [InlineData("kill")]
+    [InlineData("main-pid")]
+    [InlineData("exec-pid")]
+    [InlineData("negative-status")]
+    [InlineData("exit-byte")]
+    public void RemainingObservedPolicyFieldsCannotBecomeLifecycleDefaults(string field)
+    {
+        using var stdout = new SafeFileHandle((nint)111, false);
+        using var stderr = new SafeFileHandle((nint)112, false);
+        var recipe = Recipe(stdout, stderr);
+        var valid = Running(recipe);
+        Assert.True(recipe.HasRunningMain(valid));
+        var invalid = field switch
+        {
+            "load" => valid with { LoadState = "not-found" },
+            "kill" => valid with { KillMode = "process" },
+            "main-pid" => valid with { MainPid = (uint)int.MaxValue + 1u },
+            "exec-pid" => valid with { ExecMainPid = (uint)int.MaxValue + 1u },
+            "negative-status" => valid with { ExecMainStatus = -1 },
+            "exit-byte" => valid with { MainPid = 0, ExecMainCode = 1, ExecMainStatus = 256 },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        foreach (var predicate in new Func<bool>[] { () => recipe.HasRunningMain(invalid), () => recipe.HasFinished(invalid),
+            () => recipe.HasStopped(invalid), () => recipe.IsNormalExitTransition(invalid, valid.ExecMainPid) })
+        {
+            var failure = Assert.Throws<EvidenceAdmissionException>(() => { predicate(); });
+            Assert.Equal("ASEVD410", failure.Code);
+            Assert.Null(failure.InnerException);
+            Assert.DoesNotContain("canary", failure.Message, StringComparison.Ordinal);
+        }
+        Assert.True(recipe.HasRunningMain(valid));
+    }
+
     private static LinuxProducerUnit Recipe(SafeFileHandle stdout, SafeFileHandle stderr)
     {
         var id = Guid.Parse("ba080484-cf24-4794-9180-b02447f9841e");

@@ -153,6 +153,75 @@ public sealed class LinuxSystemdBackendTests
         Assert.DoesNotContain("canary", error.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>The wire-name byte grammar keeps its inclusive bound and never normalizes empty numeric components.</summary>
+    [Fact]
+    public void ManagerNameLengthBoundaryAndNumericComponentsAreIndependent()
+    {
+        var maximum = ":1." + new string('7', 252);
+        Assert.Equal(255, maximum.Length);
+        LinuxSystemdBackend.ValidateManagerName(maximum);
+        AssertClosed(() => LinuxSystemdBackend.ValidateManagerName(maximum + "7"));
+        LinuxSystemdBackend.ValidateManagerName(":1.2.3");
+        AssertClosed(() => LinuxSystemdBackend.ValidateManagerName(":1..3"));
+        AssertClosed(() => LinuxSystemdBackend.ValidateManagerName(":1./3"));
+        AssertClosed(() => LinuxSystemdBackend.ValidateManagerName("x1.2.3"));
+    }
+
+    /// <summary>Every remaining required wire property fails closed instead of supplying an implicit typed default.</summary>
+    [Theory]
+    [InlineData("Id", false)]
+    [InlineData("LoadState", false)]
+    [InlineData("ActiveState", false)]
+    [InlineData("SubState", false)]
+    [InlineData("ExecMainPID", true)]
+    [InlineData("ExecMainStatus", true)]
+    [InlineData("User", true)]
+    [InlineData("Group", true)]
+    [InlineData("Type", true)]
+    [InlineData("KillMode", true)]
+    [InlineData("TimeoutStopUSec", true)]
+    public void RemainingRequiredPropertiesRejectOmissionAndWrongWireType(string name, bool isService)
+    {
+        var (unit, service) = Properties();
+        var valid = LinuxUnitProperties.Parse(unit, service);
+        var values = isService ? service : unit;
+        var original = values[name];
+        values.Remove(name);
+        AssertClosed(() => LinuxUnitProperties.Parse(unit, service));
+        values[name] = original;
+        Assert.Equal(valid, LinuxUnitProperties.Parse(unit, service));
+        values[name] = name is "ExecMainPID" or "ExecMainStatus" or "TimeoutStopUSec"
+            ? (VariantValue)"canary-wire-value" : (VariantValue)0u;
+        AssertClosed(() => LinuxUnitProperties.Parse(unit, service));
+        values[name] = original;
+        Assert.Equal(valid, LinuxUnitProperties.Parse(unit, service));
+    }
+
+    /// <summary>An operation's own cancellation is observed unchanged when the caller did not cancel.</summary>
+    [Fact]
+    public async Task OperationCancellationWithoutCallerCancellationDoesNotAbortTheTransport()
+    {
+        var failure = new OperationCanceledException("canary-operation-cancellation");
+        var abortCalls = 0;
+        var observed = await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            SupervisionOperationJoin.RunAsync(Task.FromException<int>(failure), () => abortCalls++, CancellationToken.None));
+        Assert.Same(failure, observed);
+        Assert.Equal(0, abortCalls);
+    }
+
+    /// <summary>A completed reply cannot bypass caller cancellation or detach the original transport operation.</summary>
+    [Fact]
+    public async Task AlreadyCompletedReplyStillHonorsTheOriginalCancelledCaller()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var abortCalls = 0;
+        var observed = await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            SupervisionOperationJoin.RunAsync(Task.FromResult(7), () => abortCalls++, cancellation.Token));
+        Assert.Equal(cancellation.Token, observed.CancellationToken);
+        Assert.Equal(1, abortCalls);
+    }
+
     private static void AssertClosed(Action operation)
     {
         var error = Assert.Throws<EvidenceAdmissionException>(operation);

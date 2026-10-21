@@ -14,7 +14,29 @@ Run the test as part of the complete [solution coverage gate](../../scripts/cove
 
 ## Prepared inputs and merge settings
 
-The runtime workflow downloads the current application-lane artifact and copies exactly these eight files into `TestResults/issue779-native-measurement`:
+### Supplementary root marker and subtree controls
+
+The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) runs a
+separate standard collector pass for `LinuxOwnerGuardNativeTests` (19 cases) and
+`LinuxCustodySupplementNativeTests` (9 cases). These actual Linux x64 root tests
+exercise atomic marker consumption, replay, cancellation and object mutation, and
+retained nested report names, selected root pins, unknown reads and cancellation.
+They establish file/marker behavior only; they create no application admission,
+accepted consumer proof or production registration.
+
+The supplemental `root-supplement.trx` and `root_supplement_tests` binding are
+separate from the original 39-case `root-files.trx` consumed by the account lineage.
+The binding requires exact SHA-256, 28 executed/passed rows with no skips or failures,
+and exactly the two fixed classes. The same already verified C3 dependency image
+is measured, its DLL/PDB bytes are rechecked after collector restoration, and its
+genuine report is merged through Coverlet's standard `--merge-with` before the
+coverage hash is updated. No counts are rewritten. The
+[runtime workflow](../../.github/workflows/evidencehost-runtime-proof.yml) stages
+both TRXs; the current-run measurement test requires both before the unchanged gate.
+Ordinary local builds can compile these cases, but their explicit platform/root
+selection prevents a macOS or nonroot run from claiming native execution.
+
+The runtime workflow downloads the current application-lane artifact and copies exactly these nine files into `TestResults/issue779-native-measurement`:
 
 | File | Meaning |
 | --- | --- |
@@ -24,6 +46,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 | `native-sdk-failure.json` | Independently finalized standard report for the genuine failed-test SDK control. |
 | `sdk-test-failure.json` | Finalized failed-SDK receipt, restoration and pre-exit worker-cache provenance. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem/kernel controls for all four expected classes; zero skips or failures. |
+| `root-supplement.trx` | Separate hash-bound 28-case marker/subtree supplement; no replacement of the original root TRX or account lineage. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 

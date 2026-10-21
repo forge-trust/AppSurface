@@ -254,6 +254,27 @@ public sealed class LinuxRunWorkspaceTests
         Reject(() => LinuxWorkspaceLayout.RequireDescriptor(value with { Length = 0 }, 65011, 0));
     }
 
+    /// <summary>Matching metadata is insufficient without the caller's selected directory policy.</summary>
+    [Fact]
+    public void DirectoryComparisonRejectsMissingPolicyAfterAnOtherwiseValidSample()
+    {
+        var policy = LinuxWorkspaceLayout.Create(Id, Accounts).ControlDirectory;
+        var value = Directory(policy);
+        LinuxWorkspaceLayout.RequireDirectory(value, policy);
+        Reject(() => LinuxWorkspaceLayout.RequireDirectory(value, null!));
+    }
+
+    /// <summary>A parent cannot stand in for an absent child policy, including the ancestor case.</summary>
+    [Fact]
+    public void ParentComparisonRejectsMissingChildPolicyWithAndWithoutAParent()
+    {
+        var layout = LinuxWorkspaceLayout.Create(Id, Accounts);
+        LinuxWorkspaceLayout.RequireParent(layout.GenerationDirectory, null);
+        Reject(() => LinuxWorkspaceLayout.RequireParent(null!, null));
+        LinuxWorkspaceLayout.RequireParent(layout.ControlDirectory, layout.GenerationDirectory);
+        Reject(() => LinuxWorkspaceLayout.RequireParent(null!, layout.GenerationDirectory));
+    }
+
     private static LinuxProtectedMetadata Directory(LinuxWorkspaceDirectoryPolicy policy) =>
         Metadata((ushort)(0x4000 | policy.Permissions), policy.Uid, policy.Gid);
 

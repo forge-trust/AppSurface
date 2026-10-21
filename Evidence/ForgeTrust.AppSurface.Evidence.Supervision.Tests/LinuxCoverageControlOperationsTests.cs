@@ -74,6 +74,20 @@ public sealed class LinuxCoverageControlOperationsTests
         Reject(() => LinuxCoverageControlOperations.ValidateCommand(Selected(solution: false), "/run/raw", Request(selected)));
     }
 
+    [Fact]
+    public void NullCommandOrSelectionAndAnUnselectedResultsParentRejectBeforeDispatch()
+    {
+        var selected = Selected();
+        var request = Request(selected);
+        Assert.Equal("coverage-a1", LinuxCoverageControlOperations.ValidateCommand(selected, "/run/raw", request));
+        Reject(() => LinuxCoverageControlOperations.ValidateCommand(null!, "/run/raw", request));
+        Reject(() => LinuxCoverageControlOperations.ValidateCommand(selected, "/run/raw", null!));
+        var args = request.Arguments.ToArray();
+        args[6] = "/run/raw-other/coverage-a1";
+        Reject(() => LinuxCoverageControlOperations.ValidateCommand(selected, "/run/raw",
+            new EvidenceRunControlRequest(request.Executable, args, request.WorkingDirectory)));
+    }
+
     private static EvidenceSupervisorRequest Selected(bool solution = true) => EvidenceSupervisorRequest.Parse(
         System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object?>
         {

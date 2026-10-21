@@ -32,6 +32,35 @@ public sealed class LinuxProcessIdentityTests
     }
 
     [Fact]
+    public void ExpectedSampleReportsTheFirstChangedIdentityField()
+    {
+        var sample = Sample();
+        var stage = LinuxControlFailureStage.Unknown;
+        LinuxProcessData.RequireExpected(sample, 123, 65010, 65011, Worker,
+            LinuxProcessSamplingRole.Worker, ref stage);
+        Assert.Equal(LinuxControlFailureStage.ProcessExpectedCgroup, stage);
+
+        RejectAt(sample with { Stat = sample.Stat with { Pid = 124 } }, LinuxControlFailureStage.ProcessExpectedPid);
+        RejectAt(sample with { Stat = sample.Stat with { StartTimeTicks = 0 } }, LinuxControlFailureStage.ProcessExpectedStartTime);
+        RejectAt(sample with { Stat = sample.Stat with { State = 'Z' } }, LinuxControlFailureStage.ProcessExpectedLiveState);
+        RejectAt(sample with { Uids = new(65010, 1, 65010, 65010) }, LinuxControlFailureStage.ProcessExpectedUid);
+        RejectAt(sample with { Gids = new(65011, 1, 65011, 65011) }, LinuxControlFailureStage.ProcessExpectedGid);
+        RejectAt(sample with { ControlGroup = sample.ControlGroup + "/child" }, LinuxControlFailureStage.ProcessExpectedCgroup);
+
+        Reject(() => LinuxProcessData.ParseCgroup(Bytes("0::/system.slice/worker\u0001.service\n")));
+
+        void RejectAt(LinuxProcessSample altered, LinuxControlFailureStage expected)
+        {
+            stage = LinuxControlFailureStage.Unknown;
+            var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxProcessData.RequireExpected(
+                altered, 123, 65010, 65011, Worker, LinuxProcessSamplingRole.Worker, ref stage));
+            Assert.Equal("ASEVD402", error.Code);
+            Assert.Null(error.InnerException);
+            Assert.Equal(expected, stage);
+        }
+    }
+
+    [Fact]
     public void CompleteStatusRetainsAllFourIdsAndDetachesInput()
     {
         var bytes = Status();

@@ -574,6 +574,72 @@ public sealed class LinuxOutputPipesTests
         Assert.True(stderrHandle.IsClosed);
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void EitherReadStreamCannotAlsoBeEitherWriteCloser(int alias)
+    {
+        using var stdout = new MemoryStream();
+        using var stderr = new MemoryStream();
+        var writes = Writes();
+        IDisposable first = alias == 1 ? stderr : writes.First;
+        IDisposable second = alias switch { 2 => stdout, 3 => stderr, _ => writes.Second };
+        var error = Assert.Throws<SupervisionOutputPipeException>(() =>
+            new SupervisionOutputPipeOwnership(stdout, stderr, first, second));
+        Assert.Equal(SupervisionOutputPipeFailure.InvalidPipe, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.True(stdout.CanRead);
+        Assert.True(stderr.CanRead);
+        Assert.Equal(0, writes.First.CloseCount);
+        Assert.Equal(0, writes.Second.CloseCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WriteOnlyOwnedFileCannotBeAdoptedAsAnOutputReader(bool asStderr)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"output-reader-{Guid.NewGuid():N}");
+        try
+        {
+            using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            using var readable = new MemoryStream([1]);
+            var writes = Writes();
+            var error = Assert.Throws<SupervisionOutputPipeException>(() => new SupervisionOutputPipeOwnership(
+                asStderr ? readable : file, asStderr ? file : readable, writes.First, writes.Second));
+            Assert.Equal(SupervisionOutputPipeFailure.InvalidPipe, error.Failure);
+            Assert.Null(error.InnerException);
+            Assert.False(file.SafeFileHandle.IsClosed);
+            Assert.Equal(0, readable.Position);
+            Assert.Equal(0, writes.First.CloseCount);
+            Assert.Equal(0, writes.Second.CloseCount);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task NullOwnershipArgumentsDoNotCloseTheResourcesNeededByAValidPair()
+    {
+        using var stdout = new MemoryStream([1]);
+        using var stderr = new MemoryStream([2]);
+        var writes = Writes();
+        Assert.Throws<ArgumentNullException>(() => new SupervisionOutputPipeOwnership(null!, stderr, writes.First, writes.Second));
+        Assert.Throws<ArgumentNullException>(() => new SupervisionOutputPipeOwnership(stdout, null!, writes.First, writes.Second));
+        Assert.Throws<ArgumentNullException>(() => new SupervisionOutputPipeOwnership(stdout, stderr, null!, writes.Second));
+        Assert.Throws<ArgumentNullException>(() => new SupervisionOutputPipeOwnership(stdout, stderr, writes.First, null!));
+        await using var owner = new SupervisionOutputPipeOwnership(stdout, stderr, writes.First, writes.Second);
+        var receipt = await owner.BeginCollectAsync(default).WaitAsync(Guard);
+        Assert.True(receipt.Successful);
+        Assert.Equal(2, receipt.ReceivedBytes);
+        await owner.DisposeAsync();
+        Assert.Equal(1, writes.First.CloseCount);
+        Assert.Equal(1, writes.Second.CloseCount);
+    }
+
     /// <summary>Moves one actual fixture read endpoint from its pipe handle to one owned file handle.</summary>
     /// <remarks>The server remains retained; its shared writer closes only through the original pipe owner.</remarks>
     private static SafeFileHandle TakeOwnedReadHandle(AnonymousPipeServerStream server)

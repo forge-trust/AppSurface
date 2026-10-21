@@ -50,6 +50,7 @@ jobs:
           set -euo pipefail
           mkdir -m 0700 "$CHECKPOINT3_EVIDENCE/tests"
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_run_native.py > "$CHECKPOINT3_EVIDENCE/runner-controls.log" 2>&1
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_retention_supplement.py > "$CHECKPOINT3_EVIDENCE/retention-supplement-controls.log" 2>&1
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_measurement.py > "$CHECKPOINT3_EVIDENCE/measurement-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet restore Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=None > "$CHECKPOINT3_EVIDENCE/core-restore.log" 2>&1
           timeout --signal=KILL 180 dotnet test Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj --no-restore -warnaserror -p:EvidencePrivateQualification=None -p:UseSharedCompilation=false --logger 'trx;LogFileName=core-supervision.trx' --results-directory "$CHECKPOINT3_EVIDENCE/tests" > "$CHECKPOINT3_EVIDENCE/core-test.log" 2>&1
@@ -335,6 +336,59 @@ jobs:
           binding['root_file_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': int(counters['executed']), 'passed': int(counters['passed']), 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-combined.' + suffix)
+              assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
+              combined.replace(root / ('native-supervision.' + suffix))
+          binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
+          binding_path.write_text(json.dumps(binding, sort_keys=True))
+          PY_BIND
+
+      - name: Measure supplementary actual root marker and retained-subtree rejection controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep the original 39-case TRX and account-lineage ABI intact. This separate pass
+          # uses the same hash-verified C3 image restored by the preceding standard collector.
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-supplement-tests" <<'PY_ARGS'
+          import subprocess, sys
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxOwnerGuardNativeTests|FullyQualifiedName~LinuxCustodySupplementNativeTests', '--logger:trx;LogFileName=root-supplement.trx', '--ResultsDirectory:' + sys.argv[2]]
+          assert all(not any(c in value for c in '\n\r"\\') for value in values)
+          print(subprocess.list2cmdline(values))
+          PY_ARGS
+          )"
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$test_image" \
+            --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --merge-with "$CHECKPOINT3_EVIDENCE/native-supervision.json" \
+            --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision-supplement" > "$CHECKPOINT3_EVIDENCE/root-supplement-driver.log" 2>&1
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" "$GITHUB_WORKSPACE" <<'PY_BIND'
+          import hashlib, json, pathlib, sys, xml.etree.ElementTree as ET
+          root = pathlib.Path(sys.argv[1])
+          original = json.loads((root / 'original-supervision.json').read_bytes())
+          image = pathlib.Path(sys.argv[2]) / 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0'
+          for module in ('ForgeTrust.AppSurface.Evidence.Supervision', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner'):
+              for suffix in ('.dll', '.pdb'):
+                  name = module + suffix
+                  assert hashlib.sha256((image / name).read_bytes()).hexdigest() == original['files'][name]
+          trx = root / 'root-supplement-tests/root-supplement.trx'
+          assert 0 < trx.stat().st_size <= 1024 * 1024
+          document = ET.parse(trx)
+          ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
+          counters = document.find('.//' + ns + 'Counters').attrib
+          assert all(int(counters[key]) == 28 for key in ('total', 'executed', 'passed'))
+          assert all(int(counters.get(key, '0')) == 0 for key in ('failed', 'error', 'notExecuted', 'warning'))
+          rows = document.findall('.//' + ns + 'UnitTestResult')
+          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 9}
+          assert len(rows) == 28 and len({row.attrib['testName'] for row in rows}) == 28
+          assert all(row.attrib['outcome'] == 'Passed' for row in rows)
+          for name, count in expected.items():
+              assert sum(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in rows) == count
+          binding_path = root / 'measurement-binding.json'
+          binding = json.loads(binding_path.read_bytes())
+          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 28, 'passed': 28, 'native_acceptance': False}
+          for suffix in ('json', 'cobertura.xml'):
+              combined = root / ('native-supervision-supplement.' + suffix)
               assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
               combined.replace(root / ('native-supervision.' + suffix))
           binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()

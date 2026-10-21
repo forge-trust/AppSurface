@@ -35,6 +35,26 @@ public sealed class EvidenceHostBootstrapTests
     }
 
     [Fact]
+    public void Registration_RejectsDuplicateResourceIdWithoutReplacingTheReadOnlyEntry()
+    {
+        var registration = new EvidenceHostRegistration();
+        var original = new ReadyResource("postgres");
+        var duplicate = new ReadyResource("postgres");
+
+        registration.AddResource(original);
+
+        Assert.Throws<InvalidOperationException>(() => registration.AddResource(duplicate));
+        Assert.Single(registration.Resources);
+        Assert.Same(original, registration.Resources["postgres"]);
+        Assert.Equal(0, original.WaitCount);
+        Assert.Equal(0, duplicate.WaitCount);
+        Assert.Throws<NotSupportedException>(() =>
+            ((IDictionary<string, IEvidenceResourceReadiness>)registration.Resources)
+                .Add("cache", new ReadyResource("cache")));
+        Assert.Single(registration.Resources);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldCloseObligationAfterExplicitResourceAndProducerRegistrations()
     {
         var resource = new ReadyResource("postgres");

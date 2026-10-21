@@ -213,6 +213,12 @@ public sealed class EvidenceProtectedCliExecutionTests(ITestOutputHelper output)
         Assert.Equal(1, calls);
         Assert.Same(original, execution.TerminalException);
         Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+
+        EvidenceProtectedCliExecution.ReportAllocationFailure(execution, stage.Outcome,
+            EvidenceAllocationPhase.Allocation, EvidenceLinuxArtifactAllocationOperation.CreateSlot, null);
+        Assert.Same(original, execution.TerminalException);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, execution.TerminalCode);
+        Assert.True(supervisor.Joined);
     }
 
     private sealed class DiagnosticSupervisor : IEvidenceExecutionSupervisor

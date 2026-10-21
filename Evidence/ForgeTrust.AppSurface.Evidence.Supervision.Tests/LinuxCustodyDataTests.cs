@@ -48,6 +48,106 @@ public sealed class LinuxCustodyDataTests
         Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.CoverageReport, [], "coverage"));
     }
 
+    /// <summary>A producer name cannot alias a fixed receipt or contain private non-ASCII/control data.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("evidence-plan.json")]
+    [InlineData("evidence-manifest.json")]
+    [InlineData("evidence-summary.json")]
+    [InlineData("CANARY-\u00e9")]
+    [InlineData("CANARY-\n")]
+    public void CoverageProducerIdentifierRejectsOneInvalidSelectionWithAnAdjacentValidInventory(string? producer)
+    {
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, ["producer-A0_.z"], "producer-A0_.z");
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [], producer!));
+    }
+
+    /// <summary>The exact 128-character producer limit is inclusive; failure cannot relax the closed name set.</summary>
+    [Fact]
+    public void CoverageProducerIdentifierRejectsOnlyAfterItsExactLengthLimit()
+    {
+        var producer = new string('a', 128);
+        LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [producer], producer);
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(LinuxCustodyNodeKind.Slot, [], producer + "a"));
+    }
+
+    /// <summary>Coverage directory inventories require the explicit producer-aware API, even when empty.</summary>
+    [Theory]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged)]
+    public void CoverageDirectoriesCannotUseTheOrdinaryDirectoryInventoryContract(int kindValue)
+    {
+        var kind = (LinuxCustodyNodeKind)kindValue;
+        var names = CoverageNames(kind);
+        LinuxCustodyData.RequireCoverageInventory(kind, names, "coverage");
+        Reject(() => LinuxCustodyData.RequireInventory(kind, []));
+        Reject(() => LinuxCustodyData.RequireInventory(kind, names));
+    }
+
+    /// <summary>Each coverage role rejects absent name data instead of accepting it as an empty failed-run tree.</summary>
+    [Theory]
+    [InlineData((int)LinuxCustodyNodeKind.Slot)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged)]
+    public void CoverageInventoriesRejectMissingNameData(int kindValue)
+    {
+        var kind = (LinuxCustodyNodeKind)kindValue;
+        LinuxCustodyData.RequireCoverageInventory(kind, CoverageNames(kind), "coverage");
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(kind, null!, "coverage"));
+    }
+
+    /// <summary>An invalid declared count rejects before accessing or enumerating any inventory names.</summary>
+    [Theory]
+    [InlineData((int)LinuxCustodyNodeKind.Slot, -1)]
+    [InlineData((int)LinuxCustodyNodeKind.Slot, 5)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer, -1)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer, 2)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged, -1)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged, 2)]
+    public void CoverageInventoryCountRejectsBeforeReadingNames(int kindValue, int count)
+    {
+        var kind = (LinuxCustodyNodeKind)kindValue;
+        var names = CoverageNames(kind);
+        var valid = new CountedCoverageNames(names, names.Length);
+        LinuxCustodyData.RequireCoverageInventory(kind, valid, "coverage");
+        Assert.Equal(names.Length, valid.Observed);
+        var invalid = new CountedCoverageNames(names, count);
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(kind, invalid, "coverage"));
+        Assert.Equal(0, invalid.Observed);
+    }
+
+    /// <summary>The ordinary inventory API also rejects a negative Count before enumerating decoded data.</summary>
+    [Fact]
+    public void OrdinaryInventoryRejectsNegativeDeclaredCountBeforeReadingNames()
+    {
+        string[] names = ["evidence-plan.json", "evidence-manifest.json", "evidence-summary.json"];
+        var valid = new CountedCoverageNames(names, names.Length);
+        LinuxCustodyData.RequireInventory(LinuxCustodyNodeKind.Slot, valid);
+        Assert.Equal(names.Length, valid.Observed);
+        var invalid = new CountedCoverageNames(names, -1);
+        Reject(() => LinuxCustodyData.RequireInventory(LinuxCustodyNodeKind.Slot, invalid));
+        Assert.Equal(0, invalid.Observed);
+    }
+
+    /// <summary>Enumeration has its own role capacity; a misleading Count cannot admit an extra name.</summary>
+    [Theory]
+    [InlineData((int)LinuxCustodyNodeKind.Slot)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageProducer)]
+    [InlineData((int)LinuxCustodyNodeKind.CoverageMerged)]
+    public void CoverageInventoryStopsEnumerationAtItsRoleCapacity(int kindValue)
+    {
+        var kind = (LinuxCustodyNodeKind)kindValue;
+        var names = CoverageNames(kind);
+        LinuxCustodyData.RequireCoverageInventory(kind, names, "coverage");
+        // An eager copy would also observe the tail; rejection must stop at the first excess name.
+        var invalid = new CountedCoverageNames(names.Append("CANARY").Append("UNREAD-TAIL").ToArray(), names.Length);
+        Reject(() => LinuxCustodyData.RequireCoverageInventory(kind, invalid, "coverage"));
+        Assert.Equal(names.Length + 1, invalid.Observed);
+    }
+
     [Theory]
     [InlineData((int)LinuxCustodyNodeKind.Generation)]
     [InlineData((int)LinuxCustodyNodeKind.Control)]
@@ -285,6 +385,40 @@ public sealed class LinuxCustodyDataTests
         Assert.StartsWith("ASEVD402: The protected custody metadata or inventory was rejected.", error.Message);
         Assert.DoesNotContain("CANARY", error.Message);
         Assert.Null(error.InnerException);
+    }
+
+    private static string[] CoverageNames(LinuxCustodyNodeKind kind) => kind switch
+    {
+        LinuxCustodyNodeKind.Slot => ["evidence-plan.json", "evidence-manifest.json", "evidence-summary.json", "coverage"],
+        LinuxCustodyNodeKind.CoverageProducer => ["merged"],
+        LinuxCustodyNodeKind.CoverageMerged => ["coverage.cobertura.xml"],
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    private sealed class CountedCoverageNames : IReadOnlyList<string>
+    {
+        private readonly string[] _names;
+
+        internal CountedCoverageNames(string[] names, int count)
+        {
+            _names = names;
+            Count = count;
+        }
+
+        public int Count { get; }
+        internal int Observed { get; private set; }
+        public string this[int index] => throw new InvalidOperationException("Unexpected indexed access.");
+
+        public IEnumerator<string> GetEnumerator()
+        {
+            foreach (var name in _names)
+            {
+                Observed++;
+                yield return name;
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class OverLimitNames : IReadOnlyList<string>

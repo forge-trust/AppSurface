@@ -151,6 +151,21 @@ public sealed class LinuxApplicationDcpIdentityTests
             [near, far], 65010, 65011, Unit));
     }
 
+    [Fact]
+    public void CandidateSetAcceptsItsBoundAndRejectsEmptyOrOversizedInputs()
+    {
+        var resource = Sample(123, 444);
+        LinuxApplicationDcpIdentity.LinuxApplicationParentFact[] chain = [new(123, 121, resource)];
+        var candidates = Enumerable.Range(0, LinuxApplicationDcpIdentity.MaximumProcesses)
+            .Select(index => Sample((uint)(121 + index + (index >= 2 ? 1 : 0)), (ulong)(500 + index))).ToArray();
+        Assert.Equal(121u, LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource,
+            candidates, 65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource,
+            [], 65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource,
+            [.. candidates, Sample(999, 999)], 65010, 65011, Unit));
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
@@ -211,6 +226,26 @@ public sealed class LinuxApplicationDcpIdentityTests
         }).ToArray();
         Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
             depth17, Sample(300, 600), Sample(500, 800), 65010, 65011, Unit));
+    }
+
+    [Fact]
+    public void ParentLinkParsesPpidAfterFinalCommandDelimiterAndSameProcessRequiresNoLinks()
+    {
+        var link = LinuxApplicationDcpIdentity.ParseParentLink(Stat(comm: "private ) nested ) command", parent: "2147483647"));
+        Assert.Equal(new LinuxApplicationDcpIdentity.LinuxApplicationParentLink(123, int.MaxValue, 987654), link);
+
+        var sample = Sample();
+        LinuxApplicationDcpIdentity.RequireParentChain([], sample, sample, 65010, 65011, Unit);
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain([], sample,
+            sample with { Stat = sample.Stat with { StartTimeTicks = sample.Stat.StartTimeTicks + 1 } },
+            65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
+            [new(123, 124, sample)], sample, sample, 65010, 65011, Unit));
+        Reject(() => LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "2147483648")));
+        Assert.Equal(0u, LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "0")).ParentPid);
+        Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
+            [new(123, 0, sample)], sample, Sample(121, 442), 65010, 65011, Unit));
+        RejectStat(() => LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "+124")));
     }
 
     [Fact]
@@ -278,6 +313,15 @@ public sealed class LinuxApplicationDcpIdentityTests
         [.. new[] { runtimeHost, resourceDll, "--socket", socketPath, "--case", "normal" }
             .SelectMany(static value => Encoding.UTF8.GetBytes(value + "\0"))];
 
+    private static byte[] Stat(string comm = "dotnet", string parent = "1")
+    {
+        var fields = Enumerable.Repeat("0", 50).ToArray();
+        fields[0] = "S";
+        fields[1] = parent;
+        fields[19] = "987654";
+        return Encoding.UTF8.GetBytes("123 (" + comm + ") " + string.Join(' ', fields) + "\n");
+    }
+
     private static Process StartAsApplication(string setpriv, string executable)
     {
         var start = new ProcessStartInfo(setpriv) { UseShellExecute = false };
@@ -337,6 +381,13 @@ public sealed class LinuxApplicationDcpIdentityTests
     {
         var error = Assert.Throws<EvidenceAdmissionException>(action);
         Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    private static void RejectStat(Action action)
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(action);
+        Assert.Equal("ASEVD402", error.Code);
         Assert.Null(error.InnerException);
     }
 }

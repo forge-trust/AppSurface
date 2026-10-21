@@ -542,6 +542,13 @@ public sealed class EvidenceWorkerExecutionTests
         Assert.False(invoked);
         Assert.Equal(0, supervisor.StopRequests);
         Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+
+        var adjacent = await execution.ExecuteAsync(EvidenceRunStage.Producer, TimeSpan.FromSeconds(1),
+            _ => ValueTask.FromResult(true));
+        Assert.Equal(EvidenceWorkerStageOutcome.Passed, adjacent.Outcome);
+        Assert.True(adjacent.Value);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+        Assert.Equal(0, supervisor.StopRequests);
     }
 
     [Fact]

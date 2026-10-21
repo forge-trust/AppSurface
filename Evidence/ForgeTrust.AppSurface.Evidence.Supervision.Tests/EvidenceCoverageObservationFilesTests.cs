@@ -333,6 +333,101 @@ public sealed class EvidenceCoverageObservationFilesTests
         Reject(() => VerifyApplication(plan, Rehash(manifest with { Metrics = metrics })));
     }
 
+    [Theory]
+    [InlineData("version")]
+    [InlineData("resource")]
+    [InlineData("timeout-zero")]
+    [InlineData("timeout-over")]
+    [InlineData("gate")]
+    [InlineData("assertion-count")]
+    [InlineData("assertion-id")]
+    [InlineData("slot-count")]
+    [InlineData("slot-name")]
+    [InlineData("slot-root")]
+    [InlineData("slot-media")]
+    [InlineData("slot-optional")]
+    [InlineData("slot-bound")]
+    public void EachClosedProducerDeclarationFieldIsCheckedBeforeTerminalDataCanBeAdopted(string field)
+    {
+        var valid = Plan();
+        var manifest = Manifest(valid);
+        Assert.Equal(manifest.ManifestDigest, Verify(valid, manifest).ManifestDigest);
+        var producer = valid.Profile.Producers[0];
+        var slot = producer.ArtifactSlots[0];
+        var changed = field switch
+        {
+            "version" => producer with { Version = "2.0.0" },
+            "resource" => producer with { RequiredResources = ["CANARY"] },
+            "timeout-zero" => producer with { TimeoutSeconds = 0 },
+            "timeout-over" => producer with { TimeoutSeconds = 1801 },
+            "gate" => producer with { CoverageGate = null },
+            "assertion-count" => producer with { AssertionIds = [] },
+            "assertion-id" => producer with { AssertionIds = ["CANARY"] },
+            "slot-count" => producer with { ArtifactSlots = [] },
+            "slot-name" => producer with { ArtifactSlots = [slot with { LogicalName = "CANARY" }] },
+            "slot-root" => producer with { ArtifactSlots = [slot with { RelativeRoot = "CANARY" }] },
+            "slot-media" => producer with { ArtifactSlots = [slot with { MediaType = "text/plain" }] },
+            "slot-optional" => producer with { ArtifactSlots = [slot with { Required = false }] },
+            "slot-bound" => producer with { ArtifactSlots = [slot with { MaximumBytes = slot.MaximumBytes - 1 }] },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        var expected = valid with { Profile = valid.Profile with { Producers = [changed] } };
+        Reject(() => Verify(expected, manifest));
+    }
+
+    [Theory]
+    [InlineData("producer-id")]
+    [InlineData("outcome")]
+    [InlineData("assertion-count")]
+    [InlineData("assertion-id")]
+    [InlineData("elapsed")]
+    [InlineData("artifact-null")]
+    [InlineData("artifact-count")]
+    public void EachTerminalProducerResultFieldMustMatchTheDeclaredPassingResult(string field)
+    {
+        var plan = Plan();
+        var manifest = Manifest(plan);
+        Assert.Equal(manifest.ManifestDigest, Verify(plan, manifest).ManifestDigest);
+        var producer = manifest.ProducerResults[0];
+        var changed = field switch
+        {
+            "producer-id" => producer with { ProducerId = "CANARY" },
+            "outcome" => producer with { Outcome = EvidenceProducerOutcome.Failed },
+            "assertion-count" => producer with { SatisfiedAssertionIds = [] },
+            "assertion-id" => producer with { SatisfiedAssertionIds = ["CANARY"] },
+            "elapsed" => producer with { ElapsedMilliseconds = -1 },
+            "artifact-null" => producer with { Artifacts = null },
+            "artifact-count" => producer with { Artifacts = [] },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        Reject(() => Verify(plan, Rehash(manifest with { ProducerResults = [changed] })));
+    }
+
+    [Theory]
+    [InlineData("planning")]
+    [InlineData("readiness")]
+    public void CumulativeMetricsRejectAnEarlyStageThatAlreadyExceedsTheReportedTotal(string stage)
+    {
+        var plan = ApplicationPlan();
+        var manifest = ApplicationManifest(plan);
+        var metrics = stage == "planning"
+            ? new EvidenceExecutionMetrics(PlanningMilliseconds: 10, TotalMilliseconds: 9)
+            : new EvidenceExecutionMetrics(PlanningMilliseconds: 2, ResourceReadinessMilliseconds: 8, TotalMilliseconds: 9);
+        Reject(() => VerifyApplication(plan, Rehash(manifest with { Metrics = metrics })));
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("42")]
+    public void CanonicalNonobjectSummaryDoesNotBecomeTerminalAuthority(string json)
+    {
+        var plan = Plan();
+        var manifest = Manifest(plan);
+        Reject(() => EvidenceCoverageObservationFiles.Verify(plan, EvidenceCanonicalJson.Serialize(plan),
+            EvidenceCanonicalJson.Serialize(manifest), Encoding.UTF8.GetBytes(json), Artifacts(plan)));
+    }
+
     private static EvidencePlan ApplicationPlan()
     {
         var resource = new EvidenceResourceDeclaration("native-http", "aspire_health", 1, []);

@@ -380,6 +380,95 @@ public sealed class LinuxRunAccountsTests
         Assert.False(LinuxRunAccountNames.IsGenerated(changed));
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4097)]
+    public void UserHomeRejectsBothLengthBoundariesWithAnAdjacentMaximumLengthNeighbor(int length)
+    {
+        var name = LinuxRunAccountNames.Create(Run).Worker;
+        var home = length == 0 ? string.Empty : "/" + new string('a', length - 1);
+        var error = Assert.Throws<LinuxRunAccountException>(() =>
+            LinuxRunAccountUser.Parse(name, 600, 601, home, "/usr/sbin/nologin"));
+        Assert.Equal(LinuxRunAccountFailure.InvalidData, error.Failure);
+        Assert.Null(error.InnerException);
+        var maximum = "/" + new string('a', 4095);
+        Assert.Equal(maximum, LinuxRunAccountUser.Parse(name, 600, 601, maximum, "/usr/sbin/nologin").Home);
+        Assert.Equal("/", LinuxRunAccountUser.Parse(name, 600, 601, "/", "/usr/sbin/nologin").Home);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    public void MissingOptionalGroupOrUserCannotFallBackToTheDefaultProfile(int present)
+    {
+        var data = Data(includeApplication: true);
+        var incomplete = data with
+        {
+            Application = (present & 1) == 0 ? null : data.Application,
+            ApplicationGroup = (present & 2) == 0 ? null : data.ApplicationGroup,
+            ResourceAccessGroup = (present & 4) == 0 ? null : data.ResourceAccessGroup,
+        };
+        var error = Assert.Throws<LinuxRunAccountException>(() => Parse(incomplete));
+        Assert.Equal(LinuxRunAccountFailure.IdentityMismatch, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.Equal(620u, Parse(data).ApplicationUid);
+        Assert.Equal(0u, Parse(Data()).ApplicationUid);
+    }
+
+    [Fact]
+    public void SnapshotRejectsAValidForeignSubjectGroupRatherThanOnlyMalformedGroupData()
+    {
+        var data = Data();
+        var other = LinuxRunAccountNames.Create(Guid.Parse("b1234567-89ab-cdef-0123-456789abcdef"));
+        var foreign = LinuxRunAccountGroup.Parse(other.Subject, data.Subject.Gid, []);
+        var error = Assert.Throws<LinuxRunAccountException>(() => Parse(data with { SubjectGroup = foreign }));
+        Assert.Equal(LinuxRunAccountFailure.IdentityMismatch, error.Failure);
+        Assert.Equal(data.Subject.Gid, Parse(data).SubjectGid);
+    }
+
+    [Fact]
+    public void NumericUserAndGroupDomainsMayOverlapWhileEachDomainStillRequiresUniqueMembers()
+    {
+        var data = Data(includeApplication: true);
+        var crossDomain = data with
+        {
+            Worker = data.Worker with { Uid = data.SubjectGroup.Gid },
+            Subject = data.Subject with { Uid = data.Results.Gid },
+            Application = data.Application! with { Uid = data.ResourceAccessGroup!.Gid },
+        };
+        var snapshot = Parse(crossDomain);
+        Assert.Equal(snapshot.SubjectGid, snapshot.WorkerUid);
+        Assert.Equal(snapshot.ResultsGid, snapshot.SubjectUid);
+        Assert.Equal(snapshot.ResourceAccessGid, snapshot.ApplicationUid);
+        var error = Assert.Throws<LinuxRunAccountException>(() => Parse(crossDomain with
+        {
+            Application = crossDomain.Application! with { Uid = crossDomain.Subject.Uid },
+        }));
+        Assert.Equal(LinuxRunAccountFailure.IdentityMismatch, error.Failure);
+    }
+
+    [Fact]
+    public void RevalidatedOptionalRecordsRejectAnInvalidUserAndEachInvalidGroupIndependently()
+    {
+        var data = Data(includeApplication: true);
+        var invalid = new[]
+        {
+            data with { Application = data.Application! with { Shell = "/bin/sh" } },
+            data with { ApplicationGroup = data.ApplicationGroup! with { Members = default } },
+            data with { ResourceAccessGroup = data.ResourceAccessGroup! with { Gid = uint.MaxValue } },
+        };
+        foreach (var changed in invalid)
+        {
+            var error = Assert.Throws<LinuxRunAccountException>(() => Parse(changed));
+            Assert.Equal(LinuxRunAccountFailure.InvalidData, error.Failure);
+            Assert.Null(error.InnerException);
+        }
+        Assert.Equal(613u, Parse(data).ResourceAccessGid);
+    }
+
     private static IdentityData Data(bool includeApplication = false)
     {
         var names = LinuxRunAccountNames.Create(Run);
