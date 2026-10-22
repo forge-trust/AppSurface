@@ -183,7 +183,7 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         }
         else if (operation == "maintain")
         {
-            var candidates = data.TryGetProperty("candidateCount", out var count) && count.TryGetInt32(out var value)
+            var candidates = data.TryGetProperty("candidateCount", out var count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt32(out var value)
                 ? value.ToString(CultureInfo.InvariantCulture)
                 : "unknown";
             await console.Output.WriteLineAsync($"  candidates: {candidates}; apply: {ReadBool(data, "apply")}").ConfigureAwait(false);
@@ -194,8 +194,8 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         }
     }
 
-    private static int ReadInt(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.TryGetInt32(out var result) ? result : 0;
-    private static long ReadLong(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.TryGetInt64(out var result) ? result : 0;
+    private static int ReadInt(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result) ? result : 0;
+    private static long ReadLong(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out var result) ? result : 0;
     private static bool ReadBool(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
     private static string ReadString(JsonElement data, string name) => data.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "unknown" : "unknown";
 

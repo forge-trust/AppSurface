@@ -30,3 +30,12 @@ unknown files and changed identities are preserved for inspection. Registry inpu
 validation rejects malformed observation and expiry-receipt entries before they
 reach status or maintenance, keeping optional metadata failures separate from the
 primary coverage outcome. See the [storage recovery guide](../../guides/coverage-storage.md#recovery-recipes).
+
+The CLI's internal storage-command base renders schema-v1 operation data into human
+and JSON results using the [storage result contract](../../guides/coverage-storage.md#status-json-and-exit-behavior).
+Human numeric fields accept JSON numbers only; absent, differently typed, or
+unrepresentable values use the field's documented zero or unknown fallback. This
+keeps presentation of partial results from throwing after the operation has
+already recorded its outcome and side effects. Operation implementations still
+validate their own metadata before producing this result; presentation fallbacks
+do not certify an unknown inventory or make an incomplete result successful.
