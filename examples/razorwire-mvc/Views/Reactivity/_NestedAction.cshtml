@@ -1,0 +1,33 @@
+@model RazorWireWebExample.Models.NestedActionModel
+@using RazorWireWebExample.Models
+@{
+    var prefix = $"Actions[{Model.ClientIndex}]";
+    var id = $"Actions_{Model.ClientIndex}__Title";
+}
+<fieldset rw-form-collection-row rw-form-index="@Model.ClientIndex" data-rw-form-collection-row-state="@(Model.Delete ? "removed" : "active")" hidden="@Model.Delete" class="space-y-3">
+    <legend>Action</legend>
+    <input type="hidden" name="Actions.index" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).ClientIndex" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).Id" value="@Model.Id" data-rw-form-collection-preserve />
+    <input type="hidden" name="@(prefix).RowVersion" value="@Model.RowVersion" />
+    <input type="hidden" name="@(prefix).Delete" value="@Model.Delete.ToString().ToLowerInvariant()" data-rw-form-collection-delete-field />
+    <label for="@id">Action title</label>
+    @Html.TextBox($"{prefix}.Title", Model.Title, Model.Delete ? new Dictionary<string, object> { ["id"] = id, ["class"] = "nested-field", ["disabled"] = "disabled" } : new Dictionary<string, object> { ["id"] = id, ["class"] = "nested-field" })
+    @Html.ValidationMessage($"{prefix}.Title")
+    <section rw-form-collection="@(prefix).Dates" rw-form-collection-index-token="__date_index__" rw-form-collection-label="date" rw-form-collection-remove-mode="@ViewData["RemoveMode"]" class="space-y-3">
+        @foreach (var date in Model.Dates)
+        {
+            ViewData["ActionPrefix"] = prefix;
+            @await Html.PartialAsync("~/Views/Reactivity/_NestedDate.cshtml", date, ViewData)
+        }
+        <template rw-form-collection-template>
+            @{ ViewData["ActionPrefix"] = prefix; }
+            @await Html.PartialAsync("~/Views/Reactivity/_NestedDate.cshtml", new NestedDateModel { ClientIndex = "__date_index__" }, ViewData)
+        </template>
+        <button rw-form-collection-add class="nested-command">Add date</button>
+        <span data-rw-form-collection-status role="status" aria-live="polite"></span>
+        <noscript><button type="submit" name="addDateFor" value="@Model.ClientIndex" formnovalidate class="nested-command">Add date on server</button></noscript>
+    </section>
+    <button rw-form-collection-duplicate class="nested-command">Duplicate action</button>
+    <button data-rw-form-collection-remove="true" type="button" class="nested-command">Remove action</button>
+</fieldset>
