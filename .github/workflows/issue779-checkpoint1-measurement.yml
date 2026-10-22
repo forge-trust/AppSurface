@@ -113,8 +113,12 @@ jobs:
             dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
             dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
             > "$C1_EVIDENCE/runtime-package-policy.log"
+          # Network acquisition is CI setup, separate from the unchanged package-install and native limits.
+          timeout --signal=KILL 600 sudo --non-interactive apt-get "${apt_acquire[@]}" install \
+            --download-only --yes --no-install-recommends dotnet-sdk-10.0 \
+            >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
           timeout --signal=KILL 240 sudo --non-interactive apt-get "${apt_acquire[@]}" install \
-            --yes --no-install-recommends dotnet-sdk-10.0 \
+            --no-download --yes --no-install-recommends dotnet-sdk-10.0 \
             >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
           dpkg-query --show --showformat='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' \
             dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \

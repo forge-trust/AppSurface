@@ -99,13 +99,18 @@ log, APT candidate/origin log and `runtime-packages.tsv` retain the selected
 feed and actual package versions separately.
 
 Both worker and measurement jobs bound APT's connection/data inactivity to 20
-seconds and allow two failed-download retries inside the existing 180-second
-update and 240-second install limits. HTTP pipelining is disabled for these
+seconds and allow two failed-download retries. Setup has separate finite phases:
+180 seconds to update indexes, 600 seconds to download the distribution SDK
+packages with `--download-only`, then the existing 240 seconds to install them
+with `--no-download`. The last phase fails if the required verified packages are
+not already available in APT’s cache. HTTP pipelining is disabled for these
 setup commands so stalled mirror responses cannot hold an entire request queue.
 These are [APT acquisition options](https://manpages.debian.org/trixie/apt/apt-transport-http.1.en.html#Connection_Configuration)
 and [download retries](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html#Retries),
-not a native-control retry or a new process deadline. Exhausting the same total
-setup limit still fails the job before copying a runtime or launching controls.
+not a native-control retry or a change to a product process deadline. The
+[APT download and install switches](https://manpages.debian.org/trixie/apt/apt-get.8.en.html#OPTIONS)
+separate variable network transfer time from package installation. Exhausting
+either setup phase still fails before copying a runtime or launching controls.
 The workflow replaces the runner's Azure Ubuntu mirror entry with Ubuntu's
 [canonical HTTPS archive](https://archive.ubuntu.com/ubuntu/). It retains the
 public mirror list before and after that replacement as
