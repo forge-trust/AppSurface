@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using System.ComponentModel;
 using Microsoft.Win32.SafeHandles;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -202,7 +203,7 @@ public sealed class CoverageArtifactOperationDecisionTests
             OpenWindowsLock = directory =>
             {
                 var handle = File.OpenHandle(
-                    Path.Join(directory.ArtifactDirectoryPath, LockFileName),
+                    TestPathUtils.PathUnder(directory.ArtifactDirectoryPath, LockFileName),
                     FileMode.OpenOrCreate,
                     FileAccess.ReadWrite,
                     FileShare.ReadWrite | FileShare.Delete);

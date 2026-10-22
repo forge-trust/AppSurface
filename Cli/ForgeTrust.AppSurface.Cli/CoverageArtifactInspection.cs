@@ -280,38 +280,48 @@ internal static class CoverageArtifactInspector
         return stream is not null;
     }
 
-    private static bool TryOpenRegularFile(string path, out FileStream? stream, out long length)
+    /// <summary>Opens a candidate without following links and validates native regular-file facts.</summary>
+    /// <param name="path">Observed local path inside the caller's bounded scan.</param>
+    /// <param name="stream">A caller-owned stream on success; null when native facts reject the candidate.</param>
+    /// <param name="length">Observed nonnegative byte length on success.</param>
+    /// <param name="nativeCalls">Optional per-call native observations for decoding and cleanup tests.</param>
+    /// <remarks>Injected observations verify managed decisions; native platform acceptance is separate.</remarks>
+    internal static bool TryOpenRegularFile(string path, out FileStream? stream, out long length,
+        CoverageArtifactCandidateCalls? nativeCalls = null)
     {
+        var calls = nativeCalls ?? CoverageArtifactCandidateCalls.Default;
         stream = null;
         length = 0;
-        if (OperatingSystem.IsWindows())
+        if (calls.IsWindows)
         {
-            var handle = CoverageFileSystemInterop.WindowsCreateFile(path, 0x80000000, 0x7, 0, 3, 0x00200000, 0);
-            if (handle.IsInvalid) throw new IOException("Unable to inspect candidate handle.");
-            if (CoverageFileSystemInterop.WindowsGetFileType(handle) != 1
-                || !CoverageFileSystemInterop.WindowsGetFileInformationByHandle(handle, out var info)
+            var handle = calls.WindowsOpen(path);
+            if (handle.IsInvalid) { handle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
+            if (calls.WindowsType(handle) != 1
+                || !calls.WindowsInformation(handle, out var info)
                 || (info.FileAttributes & (0x10u | 0x400u)) != 0) { handle.Dispose(); return false; }
-            length = ((long)info.FileSizeHigh << 32) | info.FileSizeLow;
+            var nativeLength = ((ulong)info.FileSizeHigh << 32) | info.FileSizeLow;
+            if (nativeLength > long.MaxValue) { handle.Dispose(); return false; }
+            length = (long)nativeLength;
             stream = new FileStream(handle, FileAccess.Read);
             return true;
         }
 
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return false;
-        var flags = OperatingSystem.IsMacOS() ? 0x00000004 | 0x00000100 : 0x00000800 | 0x00020000;
-        var descriptor = CoverageFileSystemInterop.UnixOpen(path, flags);
+        if (!calls.IsLinux && !calls.IsMacOS) return false;
+        var flags = calls.IsMacOS ? 0x00000004 | 0x00000100 : 0x00000800 | 0x00020000;
+        var descriptor = calls.UnixOpen(path, flags);
         if (descriptor < 0) throw new IOException("Unable to inspect candidate handle.");
         var safeHandle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
         var buffer = Marshal.AllocHGlobal(512);
         try
         {
-            if (CoverageFileSystemInterop.UnixFStat(descriptor, buffer) != 0) { safeHandle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
+            if (calls.UnixStat(descriptor, buffer) != 0) { safeHandle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
             uint mode;
-            if (OperatingSystem.IsMacOS()) mode = unchecked((ushort)Marshal.ReadInt16(buffer, 4));
-            else if (RuntimeInformation.ProcessArchitecture == Architecture.X64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 24));
-            else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 16));
+            if (calls.IsMacOS) mode = unchecked((ushort)Marshal.ReadInt16(buffer, 4));
+            else if (calls.Architecture == Architecture.X64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 24));
+            else if (calls.Architecture == Architecture.Arm64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 16));
             else { safeHandle.Dispose(); return false; }
             if ((mode & 0xF000) != 0x8000) { safeHandle.Dispose(); return false; }
-            length = Marshal.ReadInt64(buffer, OperatingSystem.IsMacOS() ? 96 : 48);
+            length = Marshal.ReadInt64(buffer, calls.IsMacOS ? 96 : 48);
             if (length < 0) { safeHandle.Dispose(); return false; }
             stream = new FileStream(safeHandle, FileAccess.Read);
             return true;
@@ -322,4 +332,30 @@ internal static class CoverageArtifactInspector
     private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
     private static long SaturatingAdd(long a, long b) => a > long.MaxValue - b ? long.MaxValue : a + b;
     private static bool IsFileSystemException(Exception ex) => ex is IOException or UnauthorizedAccessException or System.Security.SecurityException or NotSupportedException;
+}
+
+/// <summary>Per-call native candidate-file observations; defaults always inspect the real host.</summary>
+/// <remarks>Fake opens must return caller-owned native handles. Tests do not establish another OS's ABI or containment.</remarks>
+internal sealed class CoverageArtifactCandidateCalls
+{
+    /// <summary>Gets the real host's immutable observation set.</summary>
+    internal static CoverageArtifactCandidateCalls Default { get; } = new();
+    /// <summary>Gets whether Windows handle metadata is selected.</summary>
+    internal bool IsWindows { get; init; } = OperatingSystem.IsWindows();
+    /// <summary>Gets whether Darwin stat decoding is selected.</summary>
+    internal bool IsMacOS { get; init; } = OperatingSystem.IsMacOS();
+    /// <summary>Gets whether Linux stat decoding is supported.</summary>
+    internal bool IsLinux { get; init; } = OperatingSystem.IsLinux();
+    /// <summary>Gets the process architecture used to decode Linux stat mode.</summary>
+    internal Architecture Architecture { get; init; } = RuntimeInformation.ProcessArchitecture;
+    /// <summary>Gets the Windows no-follow regular-candidate open operation.</summary>
+    internal Func<string, SafeFileHandle> WindowsOpen { get; init; } = path => CoverageFileSystemInterop.WindowsCreateFile(path, 0x80000000, 0x7, 0, 3, 0x00200000, 0);
+    /// <summary>Gets the Windows object-type observation.</summary>
+    internal Func<SafeFileHandle, uint> WindowsType { get; init; } = CoverageFileSystemInterop.WindowsGetFileType;
+    /// <summary>Gets the Windows native size and attribute observation.</summary>
+    internal CoverageArtifactStateCalls.ReadWindowsInformation WindowsInformation { get; init; } = CoverageFileSystemInterop.WindowsGetFileInformationByHandle;
+    /// <summary>Gets the Unix no-follow candidate open operation.</summary>
+    internal Func<string, int, int> UnixOpen { get; init; } = CoverageFileSystemInterop.UnixOpen;
+    /// <summary>Gets the Unix native stat operation.</summary>
+    internal Func<int, nint, int> UnixStat { get; init; } = CoverageFileSystemInterop.UnixFStat;
 }

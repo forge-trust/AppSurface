@@ -310,6 +310,8 @@ The store must be private to the user: on Unix, directories are mode 0700 and re
 
 Automatic management is intended only for validated user-local regular-file storage on Windows/NTFS, macOS/APFS, or Linux/ext4 after native lock, identity, no-follow, and same-volume atomic-publication checks pass. Linked roots, network shares, unrecognized filesystems, and failed capability checks disable automatic archive/deletion. Required coverage filesystem rules remain authoritative.
 
+Warning and inspection state each use one fixed private publication slot under an exclusive observation-directory lease. Interrupted publication can retain that bounded slot for identity-checked recovery; it cannot admit a growing series of uniquely named temporary files. Unknown files and unsafe slots remain preserved for inspection. Invalid registry observation or expiry-receipt entries disable optional management before status or maintenance consumes them; required coverage retains its primary result.
+
 Diagnostics and traces are bounded and private. Sanitize paths, controls, nested causes, and traces; use repository-relative paths where possible and a <home> marker for user prefixes. Never print raw source exception text, credentials, secret-like values, test contents, process arguments, or environment values. Environment names and set/unset status may be shown. A private trace reference is safe only when the private write succeeded; report trace-write failure without exposing the underlying text. No outbound telemetry is added.
 
 ## Recovery recipes

@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -49,7 +50,7 @@ public sealed class CoverageArtifactInventoryBoundaryTests
         var inventory = new CoverageArtifactInventory(temp.Path, TimeProvider.System);
         var path = defect == "depth" ? string.Join(Path.DirectorySeparatorChar, Enumerable.Repeat("x", 33))
             : string.Join(Path.DirectorySeparatorChar, Enumerable.Repeat(new string('x', 239), 20));
-        inventory.RecordFile(Path.Join(temp.Path, path));
+        inventory.RecordFile(TestPathUtils.PathUnder(temp.Path, path));
         Assert.Throws<InvalidDataException>(() => inventory.Capture(CancellationToken.None));
     }
 

@@ -13,7 +13,9 @@ The [coverage storage guide](../../guides/coverage-storage.md) documents the in-
 Artifact safety keeps managed decisions and native acceptance separate. Internal,
 per-call observations cover file-state decoding, private Unix ownership/mode
 checks, Windows rename-buffer encoding, lock-result classification, and
-filesystem/mount classification. Production defaults call the host APIs and retain
+filesystem/mount classification. Windows access policy uses normalized SID and
+access-mask facts; candidate-file decisions retain explicit handle ownership and
+reject nonregular or unrepresentable sizes before returning a stream. Production defaults call the host APIs and retain
 normal no-follow path, identity, and publication checks. The observations are test
 seams, not consumer configuration; they never establish another operating system's
 ABI or filesystem guarantees. Native acceptance still runs on the supported

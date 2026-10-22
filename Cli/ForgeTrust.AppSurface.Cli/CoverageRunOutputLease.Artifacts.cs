@@ -442,12 +442,25 @@ internal sealed partial class CoverageRunOutputLease
             ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)
             : new FileInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
         var user = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
-        if (!user.Equals(security.GetOwner(typeof(SecurityIdentifier)))) throw new IOException("Artifact store owner differs from the current user.");
-        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-        foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
-            if (rule.AccessControlType == AccessControlType.Allow && rule.FileSystemRights != 0
-                && !rule.IdentityReference.Equals(user) && !rule.IdentityReference.Equals(system) && !rule.IdentityReference.Equals(admins))
+        ValidateArtifactWindowsAccess(security.GetOwner(typeof(SecurityIdentifier))?.Value, user.Value,
+            security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+                .Select(rule => new CoverageArtifactAccessRule(rule.IdentityReference.Value, (uint)rule.FileSystemRights, rule.AccessControlType == AccessControlType.Allow)));
+    }
+
+    /// <summary>Rejects Windows ownership or allow rules granting access beyond the current user and system administrators.</summary>
+    /// <param name="owner">Owner SID observed from the retained object's access control descriptor.</param>
+    /// <param name="user">The effective current-user SID from the native identity observation.</param>
+    /// <param name="rules">SID-normalized access rules, including inherited and explicit allow/deny entries.</param>
+    /// <remarks>These are policy decisions over observed facts; caller tests do not establish native ACL retrieval or Windows handle binding.</remarks>
+    internal static void ValidateArtifactWindowsAccess(string? owner, string user, IEnumerable<CoverageArtifactAccessRule> rules)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(user);
+        ArgumentNullException.ThrowIfNull(rules);
+        if (!string.Equals(owner, user, StringComparison.Ordinal)) throw new IOException("Artifact store owner differs from the current user.");
+        foreach (var rule in rules)
+            if (rule.Allows && rule.Rights != 0
+                && !string.Equals(rule.Principal, user, StringComparison.Ordinal)
+                && rule.Principal is not ("S-1-5-18" or "S-1-5-32-544"))
                 throw new IOException("Artifact store has permissions for another principal.");
     }
 
@@ -662,3 +675,9 @@ internal sealed class CoverageArtifactStateCalls
     /// <summary>Gets the identity observer for the same retained handle.</summary>
     internal Func<SafeFileHandle, string> Identity { get; init; } = CoverageRunOutputLease.GetArtifactObjectIdentity;
 }
+
+/// <summary>One SID-normalized Windows access rule observed through the native ACL API.</summary>
+/// <param name="Principal">Security-identifier text returned for the rule's principal.</param>
+/// <param name="Rights">The observed unsigned access mask; zero grants no access.</param>
+/// <param name="Allows">Whether the native rule allows the observed access mask.</param>
+internal sealed record CoverageArtifactAccessRule(string Principal, uint Rights, bool Allows);
