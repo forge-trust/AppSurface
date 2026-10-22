@@ -173,6 +173,27 @@ public sealed class CoverageArtifactStoreFinalPathsTests
     }
 
     [Fact]
+    public async Task MaintainAsync_SameLengthCorruptPayloadPreservesArchiveAndRegistration()
+    {
+        using var fixture = new Fixture();
+        using var store = fixture.OpenStore(historyMaxBytes: 0);
+        var run = await fixture.CreateEligibleArchiveAsync(store, "retention-corrupt-payload");
+        fixture.CorruptPayload(run.ManifestBase.RunId);
+        var registryBefore = File.ReadAllBytes(fixture.RegistryPath);
+        var archiveBefore = fixture.CaptureArchiveFiles(run.ManifestBase.RunId);
+        var deleted = new List<string>();
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            store.MaintainAsync(apply: true, CancellationToken.None, onArchiveDeleted: deleted.Add));
+
+        Assert.Equal("Stored archive hash mismatch.", error.Message);
+        Assert.Empty(deleted);
+        Assert.Equal(registryBefore, File.ReadAllBytes(fixture.RegistryPath));
+        fixture.AssertArchiveFilesEqual(run.ManifestBase.RunId, archiveBefore);
+        Assert.True(File.Exists(fixture.SourceFilePath(run)));
+    }
+
+    [Fact]
     public async Task MaintainAsync_ExpiredCandidateWithUnknownDirectoryPreservesEvidence()
     {
         using var fixture = new Fixture();

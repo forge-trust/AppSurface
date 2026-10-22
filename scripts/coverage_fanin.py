@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hashlib
 import json
 import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -312,25 +314,63 @@ def prepare_default_output(root: Path, output: Path) -> None:
 
     Custom output paths remain caller-managed and fresh. Unknown files, modified
     reports and links prevent cleanup; validate the entire inventory before any
-    unlink so a rejected preparation preserves all previous material.
+    unlink so a rejected preparation preserves all previous material. Cleanup
+    uses retained no-follow directory handles; a parent rename cannot redirect
+    its unlinks. Hosts without those capabilities must preserve existing output.
     """
     expected = root / "TestResults" / "coverage-fanin"
-    if output.absolute() != expected.absolute() or output.is_symlink():
+    if (output.absolute() != expected.absolute() or output.is_symlink()
+            or expected.parent.is_symlink()):
         raise ValueError("Only the wrapper's non-linked default composition can be prepared")
     if not output.exists():
         return
-    names = {"coverage.cobertura.xml", "primary-paths.cobertura.xml", "verification.json"}
-    entries = list(output.iterdir())
-    if {entry.name for entry in entries} != names or any(not entry.is_file() or entry.is_symlink() for entry in entries):
-        raise ValueError("Unknown composition contents must be preserved")
-    receipt = read_json(output / "verification.json")
-    if (receipt.get("policy") != POLICY
-            or digest(output / "coverage.cobertura.xml") != receipt.get("outputSha256")
-            or digest(output / "primary-paths.cobertura.xml") != receipt.get("primaryPathsSha256")):
-        raise ValueError("Modified composition contents must be preserved")
-    for entry in entries:
-        entry.unlink()
-    output.rmdir()
+    required = {os.open, os.stat, os.unlink, os.rmdir}
+    if not required <= os.supports_dir_fd or os.listdir not in os.supports_fd or not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("Existing default composition requires no-follow directory handles")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    with ExitStack() as handles:
+        def directory(name: str | Path, parent: int | None = None) -> int:
+            descriptor = os.open(name, flags, dir_fd=parent)
+            handles.callback(os.close, descriptor)
+            return descriptor
+
+        root_fd = directory(root)
+        try:
+            parent_fd = directory("TestResults", root_fd)
+            output_fd = directory("coverage-fanin", parent_fd)
+        except OSError as error:
+            raise ValueError("Only a non-linked default composition can be prepared") from error
+        names = {"coverage.cobertura.xml", "primary-paths.cobertura.xml", "verification.json"}
+        if set(os.listdir(output_fd)) != names:
+            raise ValueError("Unknown composition contents must be preserved")
+
+        def regular_file(name: str):
+            stream = handles.enter_context(os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW,
+                                                             dir_fd=output_fd), "rb"))
+            info = os.fstat(stream.fileno())
+            limit = 1024 * 1024 if name == "verification.json" else MAX_REPORT_BYTES
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
+                raise ValueError("Unknown composition contents must be preserved")
+            return stream
+
+        receipt = json.loads(regular_file("verification.json").read(1024 * 1024 + 1))
+        if (receipt.get("policy") != POLICY
+                or hashlib.file_digest(regular_file("coverage.cobertura.xml"), "sha256").hexdigest() != receipt.get("outputSha256")
+                or hashlib.file_digest(regular_file("primary-paths.cobertura.xml"), "sha256").hexdigest() != receipt.get("primaryPathsSha256")):
+            raise ValueError("Modified composition contents must be preserved")
+
+        def bound(name: str, parent: int, descriptor: int) -> bool:
+            current = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            retained = os.fstat(descriptor)
+            return (current.st_dev, current.st_ino) == (retained.st_dev, retained.st_ino)
+
+        if not bound("TestResults", root_fd, parent_fd) or not bound("coverage-fanin", parent_fd, output_fd):
+            raise ValueError("Default composition directory changed; preserve its contents")
+        for name in names:
+            os.unlink(name, dir_fd=output_fd)
+        if not bound("coverage-fanin", parent_fd, output_fd):
+            raise ValueError("Default composition directory changed before removal")
+        os.rmdir("coverage-fanin", dir_fd=parent_fd)
 
 
 def main() -> None:

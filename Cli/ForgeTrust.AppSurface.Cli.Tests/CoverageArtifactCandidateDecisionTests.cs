@@ -176,23 +176,37 @@ public sealed class CoverageArtifactCandidateDecisionTests
         var descriptor = CoverageFileSystemInterop.UnixOpen(path, 0);
         Assert.True(descriptor >= 0);
         using var cleanup = new SafeFileHandle(descriptor, true);
+        var openedIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(cleanup);
         Assert.Throws<IOException>(() => CoverageArtifactInspector.TryOpenRegularFile(path, out _, out _,
             new CoverageArtifactCandidateCalls
             {
                 IsWindows = false,
                 IsMacOS = true,
                 IsLinux = false,
-                UnixOpen = (_, _) => descriptor,
+                UnixOpen = (_, _) =>
+                {
+                    // Transfer ownership once; a second owner could close a descriptor
+                    // that another test thread reused after the inspector released it.
+                    cleanup.SetHandleAsInvalid();
+                    return descriptor;
+                },
                 UnixStat = (_, _) => throw new IOException("metadata observation failed")
             }));
-        var buffer = Marshal.AllocHGlobal(512);
-        try
-        {
-            var result = CoverageFileSystemInterop.UnixFStat(descriptor, buffer);
-            if (result == -1) cleanup.SetHandleAsInvalid();
-            Assert.Equal(-1, result);
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
+        AssertDescriptorReleased(descriptor, openedIdentity);
+    }
+
+    [Fact]
+    public void DescriptorReleaseAssertionAcceptsADifferentPhysicalObject()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var temp = TestDirectory.Create();
+        using var original = File.OpenHandle(temp.WriteFile("original", "first"), FileMode.Open, FileAccess.Read);
+        var originalIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(original);
+        using var other = File.OpenHandle(temp.WriteFile("other", "second"), FileMode.Open, FileAccess.Read);
+
+        // A valid descriptor alone cannot identify a leak. The existing negative
+        // probe still rejects the original physical object while it remains open.
+        AssertDescriptorReleased(other.DangerousGetHandle().ToInt32(), originalIdentity);
     }
 
     [Fact]

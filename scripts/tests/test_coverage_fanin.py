@@ -430,6 +430,18 @@ class CoverageFaninTests(unittest.TestCase):
             fanin.prepare_default_output(self.root, output)
         self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
 
+    def test_preparation_rejects_linked_parent_and_preserves_outside_composition(self) -> None:
+        primary, native = self.make_bundle(prefix="parent-link-")
+        outside = self.evidence / "outside"
+        outside.mkdir()
+        composition = outside / "coverage-fanin"
+        fanin.merge(self.root, primary, native, composition, CONFIGURATION)
+        before = {item.name: item.read_bytes() for item in composition.iterdir()}
+        (self.root / "TestResults").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "non-linked"):
+            fanin.prepare_default_output(self.root, self.root / "TestResults/coverage-fanin")
+        self.assertEqual(before, {item.name: item.read_bytes() for item in composition.iterdir()})
+
     def test_preparation_rejects_custom_output_without_mutation(self) -> None:
         custom = self.evidence / "custom"
         custom.mkdir()
@@ -438,6 +450,35 @@ class CoverageFaninTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "default composition"):
             fanin.prepare_default_output(self.root, custom)
         self.assertEqual(sentinel.read_text(), "keep")
+
+    def test_parent_replacement_cannot_redirect_cleanup_unlinks(self) -> None:
+        primary, native = self.make_bundle(prefix="parent-replacement-")
+        output = self.root / "TestResults/coverage-fanin"
+        fanin.merge(self.root, primary, native, output, CONFIGURATION)
+        outside = self.evidence / "unrelated"
+        redirected = outside / "coverage-fanin"
+        redirected.mkdir(parents=True)
+        for name in ("coverage.cobertura.xml", "primary-paths.cobertura.xml", "verification.json"):
+            (redirected / name).write_text("unrelated caller evidence")
+        before = {item.name: item.read_bytes() for item in redirected.iterdir()}
+        real_unlink = os.unlink
+        changed = False
+
+        def replace_parent_then_unlink(name, *args, **kwargs):
+            nonlocal changed
+            if not changed:
+                changed = True
+                (self.root / "TestResults").rename(self.root / "previous-results")
+                (self.root / "TestResults").symlink_to(outside, target_is_directory=True)
+            return real_unlink(name, *args, **kwargs)
+
+        with mock.patch.object(os, "unlink", side_effect=replace_parent_then_unlink) as intercepted, \
+                mock.patch.object(os, "supports_dir_fd", os.supports_dir_fd | {intercepted}):
+            fanin.prepare_default_output(self.root, output)
+
+        self.assertTrue(changed)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in redirected.iterdir()})
+        self.assertFalse((self.root / "previous-results/coverage-fanin").exists())
 
 
 class CoverageFaninHelperTests(unittest.TestCase):

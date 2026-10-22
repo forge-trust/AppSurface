@@ -478,7 +478,9 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <summary>Applies or previews eligible archive expiry under the shared retention policy.</summary>
     /// <remarks>Apply reconciles absent, unpinned historical archive registrations before selecting candidates.
     /// Reconciliation changes metadata only, preserves current/pinned entries and active snapshot reservations,
-    /// and records an explicit missing-archive receipt without reporting a new physical deletion.</remarks>
+    /// and records an explicit missing-archive receipt without reporting a new physical deletion.
+    /// Before deleting a candidate, apply verifies every stored and expanded payload length and hash under
+    /// its exclusive candidate lease and the same cumulative work budget. Corruption preserves the archive.</remarks>
     /// <param name="routineBudget">Optional invocation-wide maintenance budget; explicit maintenance has no deadline.</param>
     /// <param name="apply">False returns candidates without deleting them.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
@@ -563,6 +565,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 if (archive.EnumerateArtifactEntries(CoverageArtifactLimits.MaximumFiles + 3)
                     .Any(entry => entry.IsDirectory || !expectedNames.Contains(entry.Name)))
                     throw new InvalidDataException("An archive contains unknown entries; preserve it for inspection.");
+                await CoverageArtifactArchive.VerifyPayloadsAsync(archivePath, manifest, cancellationToken, routineBudget).ConfigureAwait(false);
                 // Keep an expiry receipt in bounded registration metadata. The directory helper owns deletion authority.
                 using var archives = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(RootPath, ArchivesName), false, true)!;
                 var archiveIdentity = archive.ArtifactDirectoryIdentity;
