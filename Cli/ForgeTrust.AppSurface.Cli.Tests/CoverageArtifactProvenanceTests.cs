@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -15,18 +17,110 @@ public sealed class CoverageArtifactProvenanceTests
         await Git(temp.Path, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-m", "fixture");
         var reader = new CoverageArtifactProvenanceReader();
 
-        var clean = await reader.ReadAsync(temp.Path, Policy);
+        var cleanObservation = await reader.ReadWithOutcomeAsync(temp.Path, Policy);
+        var clean = cleanObservation.Provenance;
+        var expectedRevision = ExpectedFingerprint((await GitOutput(temp.Path, "rev-parse", "--verify", "HEAD")).Trim());
+        Assert.Equal(expectedRevision, clean.GitRevisionFingerprint);
         Assert.NotNull(clean.GitRevisionFingerprint);
         Assert.Equal(64, clean.GitRevisionFingerprint.Length);
-        Assert.Equal(64, clean.GitStateFingerprint!.Length);
+        var cleanStatus = await GitOutput(temp.Path, "status", "--porcelain=v1", "--untracked-files=normal");
+        Assert.Equal(string.Empty, cleanStatus);
+        AssertRealStateProbe(cleanObservation, cleanStatus);
         Assert.Equal(Policy.ConfigurationFingerprint, clean.ConfigurationFingerprint);
 
         File.WriteAllText(Path.Join(temp.Path, "untracked-secret-name.txt"), "private contents");
-        var dirty = await reader.ReadAsync(temp.Path, Policy);
+        var dirtyObservation = await reader.ReadWithOutcomeAsync(temp.Path, Policy);
+        var dirty = dirtyObservation.Provenance;
+        Assert.Equal(expectedRevision, dirty.GitRevisionFingerprint);
         Assert.Equal(clean.GitRevisionFingerprint, dirty.GitRevisionFingerprint);
-        Assert.NotEqual(clean.GitStateFingerprint, dirty.GitStateFingerprint);
+        var dirtyStatus = await GitOutput(temp.Path, "status", "--porcelain=v1", "--untracked-files=normal");
+        Assert.Contains("untracked-secret-name.txt", dirtyStatus);
+        AssertRealStateProbe(dirtyObservation, dirtyStatus);
+        if (cleanObservation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted
+            && dirtyObservation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted)
+            Assert.NotEqual(clean.GitStateFingerprint, dirty.GitStateFingerprint);
         Assert.DoesNotContain("untracked-secret-name", dirty.GitStateFingerprint);
         Assert.DoesNotContain("private contents", dirty.GitStateFingerprint);
+    }
+
+    [Fact]
+    public async Task ReadWithOutcomeAsync_FingerprintsControlledCleanAndDirtyStatesAndRedactsStatus()
+    {
+        const string revision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var status = string.Empty;
+        var reader = new CoverageArtifactProvenanceReader((_, arguments, timeout, _) =>
+        {
+            Assert.Equal(TimeSpan.FromMilliseconds(500), timeout);
+            return Task.FromResult<string?>(arguments[0] == "rev-parse" ? revision : status);
+        });
+
+        var clean = await reader.ReadWithOutcomeAsync("unused", Policy);
+        Assert.Equal(ExpectedFingerprint(revision), clean.Provenance.GitRevisionFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.Fingerprinted, clean.GitStateProbeOutcome);
+        Assert.Equal(ExpectedStateFingerprint("clean", string.Empty), clean.Provenance.GitStateFingerprint);
+
+        status = "?? untracked-secret-name.txt\n";
+        var dirty = await reader.ReadWithOutcomeAsync("unused", Policy);
+        Assert.Equal(ExpectedFingerprint(revision), dirty.Provenance.GitRevisionFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.Fingerprinted, dirty.GitStateProbeOutcome);
+        Assert.Equal(ExpectedStateFingerprint("dirty", status), dirty.Provenance.GitStateFingerprint);
+        Assert.NotEqual(clean.Provenance.GitStateFingerprint, dirty.Provenance.GitStateFingerprint);
+        Assert.DoesNotContain("untracked-secret-name", dirty.Provenance.GitStateFingerprint);
+        Assert.DoesNotContain("private contents", dirty.Provenance.GitStateFingerprint);
+    }
+
+    [Theory]
+    [InlineData("io", "IoFailure")]
+    [InlineData("invalid-data", "OutputRejected")]
+    [InlineData("invalid-operation", "InvalidProcessState")]
+    [InlineData("native", "NativeProcessFailure")]
+    [InlineData("permission", "PermissionDenied")]
+    [InlineData("null", "NoUsableOutput")]
+    [InlineData("oversized", "OutputRejected")]
+    public async Task ReadWithOutcomeAsync_ClassifiesStatusFailureWithoutPublishingItsMessage(
+        string failure, string expectedOutcome)
+    {
+        var calls = 0;
+        var reader = new CoverageArtifactProvenanceReader((_, _, _, _) =>
+        {
+            if (++calls == 1) return Task.FromResult<string?>(new string('a', 40));
+            return failure switch
+            {
+                "io" => Task.FromException<string?>(new IOException("path=private repository detail")),
+                "invalid-data" => Task.FromException<string?>(new InvalidDataException("path=private repository detail")),
+                "invalid-operation" => Task.FromException<string?>(new InvalidOperationException("path=private repository detail")),
+                "native" => Task.FromException<string?>(new System.ComponentModel.Win32Exception(5, "private repository detail")),
+                "permission" => Task.FromException<string?>(new UnauthorizedAccessException("path=private repository detail")),
+                "null" => Task.FromResult<string?>(null),
+                "oversized" => Task.FromResult<string?>(new string('x', 16 * 1024 + 1)),
+                _ => throw new ArgumentOutOfRangeException(nameof(failure))
+            };
+        });
+
+        var observed = await reader.ReadWithOutcomeAsync("unused", Policy);
+
+        Assert.Equal(2, calls);
+        Assert.NotNull(observed.Provenance.GitRevisionFingerprint);
+        Assert.Equal("unknown", observed.Provenance.GitStateFingerprint);
+        Assert.Equal(expectedOutcome, observed.GitStateProbeOutcome.ToString());
+        Assert.DoesNotContain("private repository detail", observed.Provenance.GitStateFingerprint);
+    }
+
+    [Fact]
+    public async Task ReadWithOutcomeAsync_DoesNotTreatUnrequestedRunnerCancellationAsDeadlineExpiry()
+    {
+        var calls = 0;
+        var reader = new CoverageArtifactProvenanceReader((_, _, _, _) =>
+        {
+            if (++calls == 1) return Task.FromResult<string?>(new string('a', 40));
+            return Task.FromException<string?>(new OperationCanceledException("runner canceled without the deadline token"));
+        });
+
+        var observed = await reader.ReadWithOutcomeAsync("unused", Policy);
+
+        Assert.NotNull(observed.Provenance.GitRevisionFingerprint);
+        Assert.Equal("unknown", observed.Provenance.GitStateFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.RunnerCancelled, observed.GitStateProbeOutcome);
     }
 
     [Fact]
@@ -46,21 +140,50 @@ public sealed class CoverageArtifactProvenanceTests
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
             return null;
         });
-        var bounded = await slow.ReadAsync(temp.Path, Policy);
+        var bounded = await slow.ReadWithOutcomeAsync(temp.Path, Policy);
         Assert.Equal(2, calls);
-        Assert.NotNull(bounded.GitRevisionFingerprint);
-        Assert.Equal("unknown", bounded.GitStateFingerprint);
-        Assert.Equal(Policy.ConfigurationFingerprint, bounded.ConfigurationFingerprint);
+        Assert.NotNull(bounded.Provenance.GitRevisionFingerprint);
+        Assert.Equal("unknown", bounded.Provenance.GitStateFingerprint);
+        Assert.Equal(Policy.ConfigurationFingerprint, bounded.Provenance.ConfigurationFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.DeadlineExceeded, bounded.GitStateProbeOutcome);
     }
 
     private static async Task Git(string root, params string[] arguments)
     {
+        _ = await GitOutput(root, arguments);
+    }
+
+    private static async Task<string> GitOutput(string root, params string[] arguments)
+    {
         using var process = new Process { StartInfo = new ProcessStartInfo("git") { WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true } };
         foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         Assert.True(process.Start());
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();
-        Assert.True(process.ExitCode == 0, await process.StandardError.ReadToEndAsync());
+        var outputText = await output;
+        Assert.True(process.ExitCode == 0, await error);
+        return outputText;
     }
+
+    private static void AssertRealStateProbe(CoverageArtifactProvenanceReadResult observation, string expectedStatus)
+    {
+        var expectedClassification = expectedStatus.Length == 0 ? "clean" : "dirty";
+        if (observation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted)
+        {
+            Assert.Equal(ExpectedStateFingerprint(expectedClassification, expectedStatus), observation.Provenance.GitStateFingerprint);
+            return;
+        }
+
+        Assert.Equal("unknown", observation.Provenance.GitStateFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.DeadlineExceeded, observation.GitStateProbeOutcome);
+    }
+
+    private static string ExpectedStateFingerprint(string classification, string status)
+        => ExpectedFingerprint((classification + "\n" + status).Trim());
+
+    private static string ExpectedFingerprint(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }
 
 public sealed class CoverageArtifactProvenanceBoundaryTests
@@ -111,6 +234,6 @@ public sealed class CoverageArtifactProvenanceBoundaryTests
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         var reader = new CoverageArtifactProvenanceReader((_, _, _, token) => Task.FromCanceled<string?>(token));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ReadAsync("unused", Policy, cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ReadWithOutcomeAsync("unused", Policy, cancelled.Token));
     }
 }

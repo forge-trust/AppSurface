@@ -222,19 +222,39 @@ internal sealed class CoverageArtifactSession : IDisposable
     /// <param name="outputDirectory">The gate output directory already held under an exclusive lease.</param>
     /// <param name="publishedFiles">Report paths successfully written by the current gate call.</param>
     /// <param name="errors">Best-effort diagnostic output; failures never replace the gate result.</param>
-    /// <remarks>Existing non-report files must still match their recorded lengths and hashes. A nonparticipating writer's changes are never adopted under earlier provenance.</remarks>
+    /// <param name="outputLease">The gate's retained exclusive operation lease, captured before evaluation and report publication.</param>
+    /// <remarks>The sidecar and existing non-report files must still match their registered lengths and hashes.
+    /// Publication remains bound to the caller's leased physical output, including after a directory rename.
+    /// A nonparticipating writer's changes are never adopted under earlier provenance.</remarks>
     internal static async Task UpdateRegisteredInventoryAsync(string outputDirectory,
-        IEnumerable<string> publishedFiles, TextWriter errors)
+        IEnumerable<string> publishedFiles, TextWriter errors, CoverageArtifactOperationLease outputLease)
     {
         try
         {
+            outputLease.VerifyBinding();
+            if (!outputLease.IsExclusive) throw new InvalidOperationException("Gate publication requires an exclusive output lease.");
+            using var root = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, false, false)
+                ?? throw new IOException("Gate output root is missing.");
+            if (root.ArtifactDirectoryIdentity != outputLease.PhysicalIdentity)
+                throw new InvalidDataException("Gate output differs from its retained operation lease.");
+            using var sidecarStream = OpenCurrentSidecar(root);
+            if (sidecarStream is null) return;
             using var store = CoverageArtifactStore.Open();
             var registered = store.GetCurrentRun(outputDirectory);
             if (registered is null) return;
-            using var root = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, false, false)
-                ?? throw new IOException("Gate output root is missing.");
-            using var sidecarStream = root.OpenArtifactFile(SidecarName, false, requirePrivate: false);
-            var sidecar = ReadCurrent(sidecarStream);
+            var expectedSidecar = registered.Inventory.SingleOrDefault(entry => entry.Path == SidecarName)
+                ?? throw new InvalidDataException("Registered current sidecar inventory is missing.");
+            if (sidecarStream.Length > CoverageArtifactLimits.RunInventoryMaxBytes
+                || sidecarStream.Length != expectedSidecar.Length)
+                throw new InvalidDataException("Current sidecar bytes do not match their registered inventory.");
+            var sidecarBytes = new byte[checked((int)expectedSidecar.Length)];
+            sidecarStream.ReadExactly(sidecarBytes);
+            if (sidecarStream.ReadByte() != -1
+                || !string.Equals(Convert.ToHexString(SHA256.HashData(sidecarBytes)), expectedSidecar.Sha256,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Current sidecar bytes do not match their registered inventory.");
+            using var verifiedSidecar = new MemoryStream(sidecarBytes, writable: false);
+            var sidecar = ReadCurrent(verifiedSidecar);
             if (sidecar.ManifestBase.RunId != registered.ManifestBase.RunId
                 || sidecar.ManifestBase.OutputIdentity != root.ArtifactDirectoryIdentity
                 || !sidecar.Inventory.SequenceEqual(registered.Inventory.Where(entry => entry.Path != SidecarName)))
@@ -255,12 +275,18 @@ internal sealed class CoverageArtifactSession : IDisposable
                     throw new InvalidDataException("Producer-owned coverage bytes changed before gate inventory publication.");
             }
             sidecarStream.Dispose();
-            await PublishSidecarAndRegistrationAsync(sidecar, entries, store).ConfigureAwait(false);
+            await PublishSidecarAndRegistrationAsync(sidecar with { OutputPath = outputDirectory }, entries, store).ConfigureAwait(false);
         }
         catch (Exception exception) when (IsOptionalFailure(exception))
         {
             await WriteDiagnosticSafelyAsync(CoverageArtifactDiagnostic.Failure("ASCOV201", "gate-inventory", exception), errors);
         }
+    }
+
+    private static FileStream? OpenCurrentSidecar(CoverageRunOutputLease root)
+    {
+        try { return root.OpenArtifactFile(SidecarName, false, requirePrivate: false); }
+        catch (FileNotFoundException) { return null; }
     }
 
     /// <summary>Releases compatible output authority after every participating caller has finished.</summary>
@@ -295,6 +321,8 @@ internal sealed class CoverageArtifactSession : IDisposable
             throw new InvalidDataException("Current sidecar metadata exceeds its limit.");
         using var output = CoverageRunOutputLease.AcquireArtifactDirectory(run.OutputPath, false, false)
             ?? throw new IOException("Gate output root is missing.");
+        if (output.ArtifactDirectoryIdentity != run.ManifestBase.OutputIdentity)
+            throw new InvalidDataException("Gate output root changed before sidecar publication.");
         var staged = ".artifact-sidecar-" + Guid.NewGuid().ToString("N");
         using (var stream = output.OpenArtifactFile(staged, true, requirePrivate: false))
         {

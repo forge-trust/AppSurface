@@ -219,7 +219,7 @@ public sealed class CoverageArtifactArchiveSessionFinalPathsTests
         var compactRun = CoverageArtifactSession.ReadCurrent(compactInput);
         var reportEntry = new CoverageArtifactInventoryEntry("gate-report.json", reportBytes.Length, Hash(reportBytes));
         var projected = JsonSerializer.SerializeToUtf8Bytes(
-            compactRun with { Inventory = compactRun.Inventory.Append(reportEntry).ToArray() },
+            compactRun with { OutputPath = output, Inventory = compactRun.Inventory.Append(reportEntry).ToArray() },
             new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         var paddingLength = checked((int)(CoverageArtifactLimits.RunInventoryMaxBytes - projected.LongLength + 1));
         Assert.True(paddingLength > 0);
@@ -228,12 +228,22 @@ public sealed class CoverageArtifactArchiveSessionFinalPathsTests
         Assert.True(oversizedPublishedSidecar.LongLength <= CoverageArtifactLimits.RunInventoryMaxBytes);
         Assert.True(projected.LongLength + paddingLength > CoverageArtifactLimits.RunInventoryMaxBytes);
         await File.WriteAllBytesAsync(sidecarPath, oversizedPublishedSidecar);
+        using (var registeredInput = new MemoryStream(oversizedPublishedSidecar))
+        {
+            var registeredSidecar = CoverageArtifactSession.ReadCurrent(registeredInput);
+            var sidecarEntry = new CoverageArtifactInventoryEntry(CoverageArtifactSession.SidecarName,
+                oversizedPublishedSidecar.Length, Hash(oversizedPublishedSidecar));
+            prior = registeredSidecar with { Inventory = registeredSidecar.Inventory.Append(sidecarEntry).ToArray() };
+            using var registrationStore = CoverageArtifactStore.Open();
+            await registrationStore.RegisterAsync(prior, CancellationToken.None);
+        }
         using var errors = new StringWriter();
 
-        using (CoverageArtifactOperationLease.Acquire(output, exclusive: true))
-            await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [report], errors);
+        using (var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true))
+            await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [report], errors, outputLease);
 
-        Assert.Contains("ASCOV201 gate-inventory", errors.ToString(), StringComparison.Ordinal);
+        Assert.True(errors.ToString().Contains("ASCOV201 gate-inventory", StringComparison.Ordinal),
+            $"Expected envelope rejection: before={oversizedPublishedSidecar.Length}; after={new FileInfo(sidecarPath).Length}; projected={projected.LongLength + paddingLength}; limit={CoverageArtifactLimits.RunInventoryMaxBytes}.");
         Assert.Equal(oversizedPublishedSidecar, await File.ReadAllBytesAsync(sidecarPath));
         Assert.Equal("producer", await File.ReadAllTextAsync(producer));
         Assert.Equal("gate report", await File.ReadAllTextAsync(report));

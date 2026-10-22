@@ -241,6 +241,177 @@ public sealed class CoverageArtifactGateContextTests
         using var outerWriter = CoverageArtifactOperationLease.Acquire(ownedRoot, exclusive: true);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordReportsAsync_ChangedSidecarCannotRedirectPublicationOutsideTheLeasedOutput(bool changeLength)
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var output = fixture.CreateDirectory("repo/coverage");
+        var coverage = Path.Join(output, "coverage.xml");
+        await RegisterRunAsync(output, repository, coverage, "coverage"u8.ToArray());
+        var foreign = fixture.CreateDirectory("evil/coverage");
+        var sentinel = Path.Join(foreign, CoverageArtifactSession.SidecarName);
+        await File.WriteAllTextAsync(sentinel, "preserve unrelated metadata");
+        var sidecarPath = Path.Join(output, CoverageArtifactSession.SidecarName);
+        var originalSidecar = await File.ReadAllTextAsync(sidecarPath);
+        var changed = originalSidecar.Replace(output, foreign, StringComparison.Ordinal);
+        Assert.NotEqual(originalSidecar, changed);
+        Assert.Equal(originalSidecar.Length, changed.Length);
+        await File.WriteAllTextAsync(sidecarPath, changeLength ? changed + " " : changed);
+        var sidecarBefore = await File.ReadAllBytesAsync(sidecarPath);
+        var registryPath = Path.Join(storeHome.Path, "private-store", "registry.json");
+        var registryBefore = await File.ReadAllBytesAsync(registryPath);
+        var request = new CoverageGateRequest(coverage, output, 0, 0);
+        var result = await WriteGateReportsAsync(coverage, output);
+        using var errors = new StringWriter();
+
+        using (var context = await CoverageArtifactGateContext.AcquireAsync(request, errors, CancellationToken.None))
+            await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.Equal("preserve unrelated metadata", await File.ReadAllTextAsync(sentinel));
+        Assert.Equal(sidecarBefore, await File.ReadAllBytesAsync(sidecarPath));
+        Assert.Equal(registryBefore, await File.ReadAllBytesAsync(registryPath));
+        Assert.Contains("ASCOV201", errors.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RecordReportsAsync_RenamedOutputUpdatesOnlyTheLeasedPhysicalDirectory()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var original = fixture.CreateDirectory("repo/original");
+        await RegisterRunAsync(original, repository, Path.Join(original, "coverage.xml"), "coverage"u8.ToArray());
+        var moved = Path.Join(repository, "moved");
+        Directory.Move(original, moved);
+        Directory.CreateDirectory(original);
+        var sentinel = Path.Join(original, CoverageArtifactSession.SidecarName);
+        await File.WriteAllTextAsync(sentinel, "preserve replacement directory");
+        var coverage = Path.Join(moved, "coverage.xml");
+        var request = new CoverageGateRequest(coverage, moved, 0, 0);
+        var result = await WriteGateReportsAsync(coverage, moved);
+        using var errors = new StringWriter();
+
+        using (var context = await CoverageArtifactGateContext.AcquireAsync(request, errors, CancellationToken.None))
+            await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.Equal("preserve replacement directory", await File.ReadAllTextAsync(sentinel));
+        Assert.Empty(errors.ToString());
+        using var store = CoverageArtifactStore.Open();
+        var registered = store.GetCurrentRun(moved)!;
+        Assert.Equal(moved, registered.OutputPath);
+        Assert.Contains(registered.Inventory, item => item.Path == CoverageGateArtifactNames.Json);
+    }
+
+    [Fact]
+    public async Task RecordReportsAsync_UnregisteredOutputDoesNotCreateAnOptionalStore()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var output = fixture.CreateDirectory("reports");
+        var coverage = fixture.WriteFile("coverage.xml", "coverage");
+        var request = new CoverageGateRequest(coverage, output, 0, 0);
+        var result = await WriteGateReportsAsync(coverage, output);
+
+        using (var context = await CoverageArtifactGateContext.AcquireAsync(request, TextWriter.Null, CancellationToken.None))
+            await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.False(Directory.Exists(Path.Join(storeHome.Path, "private-store")));
+    }
+
+    private static async Task<CoverageGateResult> WriteGateReportsAsync(string coverage, string output)
+    {
+        var json = Path.Join(output, CoverageGateArtifactNames.Json);
+        var markdown = Path.Join(output, CoverageGateArtifactNames.Markdown);
+        await File.WriteAllTextAsync(json, "gate json");
+        await File.WriteAllTextAsync(markdown, "gate markdown");
+        return new CoverageGateResult(coverage, new CoverageMetric(1, 1, 100),
+            new CoverageMetric(1, 1, 100), 0, 0, true, json, markdown);
+    }
+
+    [CoverageUnixFact]
+    public async Task RecordReportsAsync_PathReplacementCannotAdoptAnotherRegisteredOutput()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var output = fixture.CreateDirectory("repo/output");
+        var replacement = fixture.CreateDirectory("repo/replacement");
+        await RegisterRunAsync(output, repository, Path.Join(output, "coverage.xml"), "original coverage"u8.ToArray());
+        await RegisterRunAsync(replacement, repository, Path.Join(replacement, "coverage.xml"), "replacement coverage"u8.ToArray());
+        var sidecarBefore = await File.ReadAllBytesAsync(Path.Join(replacement, CoverageArtifactSession.SidecarName));
+        var registryPath = Path.Join(storeHome.Path, "private-store", "registry.json");
+        var registryBefore = await File.ReadAllBytesAsync(registryPath);
+        var request = new CoverageGateRequest(Path.Join(output, "coverage.xml"), output, 0, 0);
+        using var errors = new StringWriter();
+        using var context = await CoverageArtifactGateContext.AcquireAsync(request, errors, CancellationToken.None);
+        Directory.Move(output, Path.Join(repository, "moved"));
+        Directory.Move(replacement, output);
+        var result = await WriteGateReportsAsync(request.CoveragePath, output);
+
+        await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.Equal(sidecarBefore, await File.ReadAllBytesAsync(Path.Join(output, CoverageArtifactSession.SidecarName)));
+        Assert.Equal(registryBefore, await File.ReadAllBytesAsync(registryPath));
+        Assert.Contains("ASCOV201", errors.ToString(), StringComparison.Ordinal);
+    }
+
+    [CoverageUnixFact]
+    public async Task RecordReportsAsync_LinkedSidecarDoesNotCreateAnOptionalStore()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var output = fixture.CreateDirectory("reports");
+        var coverage = fixture.WriteFile("coverage.xml", "coverage");
+        var outside = fixture.WriteFile("outside.json", "preserve outside metadata");
+        File.CreateSymbolicLink(Path.Join(output, CoverageArtifactSession.SidecarName), outside);
+        var request = new CoverageGateRequest(coverage, output, 0, 0);
+        var result = await WriteGateReportsAsync(coverage, output);
+        using var errors = new StringWriter();
+
+        using (var context = await CoverageArtifactGateContext.AcquireAsync(request, errors, CancellationToken.None))
+            await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.False(Directory.Exists(Path.Join(storeHome.Path, "private-store")));
+        Assert.Equal("preserve outside metadata", await File.ReadAllTextAsync(outside));
+        Assert.NotNull(new FileInfo(Path.Join(output, CoverageArtifactSession.SidecarName)).LinkTarget);
+        Assert.Contains("ASCOV201", errors.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UpdateRegisteredInventoryAsync_SharedLeaseCannotAuthorizePublication()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var output = fixture.CreateDirectory("repo/coverage");
+        var coverage = Path.Join(output, "coverage.xml");
+        await RegisterRunAsync(output, repository, coverage, "coverage"u8.ToArray());
+        var sidecarPath = Path.Join(output, CoverageArtifactSession.SidecarName);
+        var sidecarBefore = await File.ReadAllBytesAsync(sidecarPath);
+        var registryPath = Path.Join(storeHome.Path, "private-store", "registry.json");
+        var registryBefore = await File.ReadAllBytesAsync(registryPath);
+        var result = await WriteGateReportsAsync(coverage, output);
+        using var errors = new StringWriter();
+        using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: false);
+
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output,
+            [result.JsonReportPath, result.MarkdownReportPath], errors, outputLease);
+
+        Assert.Equal(sidecarBefore, await File.ReadAllBytesAsync(sidecarPath));
+        Assert.Equal(registryBefore, await File.ReadAllBytesAsync(registryPath));
+        Assert.Contains("ASCOV201", errors.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AcquireAsync_WhenSecondLeaseIsBusy_ReleasesEarlierLease()
     {

@@ -5,6 +5,7 @@ internal sealed class CoverageArtifactGateContext : IDisposable
 {
     private readonly List<CoverageArtifactOperationLease> _leases = [];
     private readonly TextWriter _errors;
+    private CoverageArtifactOperationLease? _outputLease;
 
     private CoverageArtifactGateContext(TextWriter errors) => _errors = errors;
 
@@ -37,7 +38,13 @@ internal sealed class CoverageArtifactGateContext : IDisposable
                 if (!desired.ContainsKey(input.ArtifactDirectoryIdentity)) desired[input.ArtifactDirectoryIdentity] = (inputPath, false);
             }
             foreach (var item in desired.OrderBy(pair => pair.Key, StringComparer.Ordinal))
-                context._leases.Add(CoverageArtifactOperationLease.Acquire(item.Value.Path, item.Value.Exclusive));
+            {
+                var lease = CoverageArtifactOperationLease.Acquire(item.Value.Path, item.Value.Exclusive);
+                context._leases.Add(lease);
+                if (lease.PhysicalIdentity != item.Key)
+                    throw new IOException("Gate root changed while acquiring its operation lease.");
+                if (item.Key == output.ArtifactDirectoryIdentity) context._outputLease = lease;
+            }
             return Task.FromResult(context);
         }
         catch { context.Dispose(); throw; }
@@ -58,7 +65,8 @@ internal sealed class CoverageArtifactGateContext : IDisposable
             await session.RecordPublishedArtifactsAsync(paths).ConfigureAwait(false);
             return;
         }
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(request.OutputDirectory, paths, _errors).ConfigureAwait(false);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(request.OutputDirectory, paths, _errors,
+            _outputLease ?? throw new InvalidOperationException("Gate output lease is unavailable.")).ConfigureAwait(false);
     }
 
     /// <summary>Releases all acquired leases in reverse deterministic order.</summary>

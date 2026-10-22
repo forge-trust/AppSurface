@@ -70,7 +70,8 @@ public sealed class CoverageArtifactSessionRecoveryEdgesTests
         var corrupt = sidecar.ToJsonString();
         File.WriteAllText(sidecarPath, corrupt);
         using var errors = new StringWriter();
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [], errors);
+        using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [], errors, outputLease);
         Assert.Contains("ASCOV201 gate-inventory", errors.ToString(), StringComparison.Ordinal);
         Assert.Equal(corrupt, File.ReadAllText(sidecarPath));
         using var final = CoverageArtifactStore.Open();

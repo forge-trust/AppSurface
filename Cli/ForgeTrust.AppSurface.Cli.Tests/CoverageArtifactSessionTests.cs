@@ -124,7 +124,7 @@ public sealed class CoverageArtifactSessionTests
         await File.WriteAllTextAsync(gateReport, "gate report");
         using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
 
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], TextWriter.Null);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], TextWriter.Null, outputLease);
 
         using var store = CoverageArtifactStore.Open();
         var registered = store.GetCurrentRun(output)!;

@@ -69,7 +69,8 @@ public sealed class CoverageArtifactSessionRemainingTests
         var report = Path.Join(output, "coverage-gate.json");
         await File.WriteAllTextAsync(report, "unmanaged");
         using var errors = new StringWriter();
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [report], errors);
+        using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [report], errors, outputLease);
         Assert.Empty(errors.ToString());
         Assert.False(File.Exists(Path.Join(output, CoverageArtifactSession.SidecarName)));
         Assert.Equal("unmanaged", await File.ReadAllTextAsync(report));

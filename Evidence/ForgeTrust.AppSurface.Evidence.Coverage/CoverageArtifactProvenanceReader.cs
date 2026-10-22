@@ -25,31 +25,62 @@ internal sealed class CoverageArtifactProvenanceReader
     /// <param name="policy">Caller-provided provenance whose configuration fingerprint is preserved.</param>
     /// <param name="token">Cancellation token for the bounded probes.</param>
     internal async Task<CoverageArtifactProvenance> ReadAsync(string repository, CoverageArtifactProvenance policy, CancellationToken token = default)
+        => (await ReadWithOutcomeAsync(repository, policy, token).ConfigureAwait(false)).Provenance;
+
+    /// <summary>Reads provenance and returns a safe outcome for the Git-state probe.</summary>
+    /// <param name="repository">Repository root supplied by the coverage invocation.</param>
+    /// <param name="policy">Caller-provided provenance whose configuration fingerprint is preserved.</param>
+    /// <param name="token">Cancellation token for the bounded probes.</param>
+    /// <returns>Fingerprints and a non-sensitive state describing whether the status probe completed.</returns>
+    internal async Task<CoverageArtifactProvenanceReadResult> ReadWithOutcomeAsync(
+        string repository, CoverageArtifactProvenance policy, CancellationToken token = default)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TotalLimit);
         try
         {
             var head = (await _run(repository, ["rev-parse", "--verify", "HEAD"], TotalLimit, deadline.Token).ConfigureAwait(false))?.Trim();
-            if (!IsRevision(head)) return new(null, "unknown", policy.ConfigurationFingerprint);
+            if (!IsRevision(head))
+                return new(new(null, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.NotAttempted);
             var revision = Fingerprint(head!);
             string? status;
             try { status = await _run(repository, ["status", "--porcelain=v1", "--untracked-files=normal"], TotalLimit, deadline.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (!token.IsCancellationRequested) { return new(revision, "unknown", policy.ConfigurationFingerprint); }
+            catch (OperationCanceledException) when (deadline.IsCancellationRequested && !token.IsCancellationRequested)
+            {
+                return new(new(revision, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.DeadlineExceeded);
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                return new(new(revision, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.RunnerCancelled);
+            }
             catch (Exception exception) when (IsUnavailable(exception))
-            { return new(revision, "unknown", policy.ConfigurationFingerprint); }
-            if (status is null || Encoding.UTF8.GetByteCount(status) > OutputLimit)
-                return new(revision, "unknown", policy.ConfigurationFingerprint);
+            { return new(new(revision, "unknown", policy.ConfigurationFingerprint), GetFailureOutcome(exception)); }
+            if (status is null)
+                return new(new(revision, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.NoUsableOutput);
+            if (Encoding.UTF8.GetByteCount(status) > OutputLimit)
+                return new(new(revision, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.OutputRejected);
             var state = status.Length == 0 ? "clean" : "dirty";
-            return new(revision, Fingerprint(state + "\n" + status), policy.ConfigurationFingerprint);
+            return new(new(revision, Fingerprint(state + "\n" + status), policy.ConfigurationFingerprint),
+                CoverageArtifactGitStateProbeOutcome.Fingerprinted);
         }
-        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return new(null, "unknown", policy.ConfigurationFingerprint); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
+        { return new(new(null, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.NotAttempted); }
         catch (Exception exception) when (IsUnavailable(exception))
-        { return new(null, "unknown", policy.ConfigurationFingerprint); }
+        { return new(new(null, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.NotAttempted); }
     }
 
     private static bool IsUnavailable(Exception exception) => exception is IOException or InvalidDataException
         or InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException;
+
+    private static CoverageArtifactGitStateProbeOutcome GetFailureOutcome(Exception exception) => exception switch
+    {
+        InvalidDataException => CoverageArtifactGitStateProbeOutcome.OutputRejected,
+        IOException => CoverageArtifactGitStateProbeOutcome.IoFailure,
+        InvalidOperationException => CoverageArtifactGitStateProbeOutcome.InvalidProcessState,
+        System.ComponentModel.Win32Exception => CoverageArtifactGitStateProbeOutcome.NativeProcessFailure,
+        UnauthorizedAccessException => CoverageArtifactGitStateProbeOutcome.PermissionDenied,
+        _ => throw new ArgumentOutOfRangeException(nameof(exception))
+    };
 
     private static bool IsRevision(string? value) => value is { Length: 40 or 64 } && value.All(Uri.IsHexDigit);
     private static string Fingerprint(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value.Trim()))).ToLowerInvariant();
@@ -110,3 +141,35 @@ internal sealed class CoverageArtifactProvenanceReader
         }
     }
 }
+
+/// <summary>Describes whether the bounded Git-state probe produced a fingerprint or a safe unknown.</summary>
+internal enum CoverageArtifactGitStateProbeOutcome
+{
+    /// <summary>The revision was unavailable or invalid, so no state probe was attempted.</summary>
+    NotAttempted,
+    /// <summary>The bounded status probe completed and its result was fingerprinted.</summary>
+    Fingerprinted,
+    /// <summary>The shared 500 ms deadline expired during the status probe.</summary>
+    DeadlineExceeded,
+    /// <summary>The command runner canceled without the shared deadline or caller token being canceled.</summary>
+    RunnerCancelled,
+    /// <summary>The command runner returned null, such as when Git could not start or returned a failing exit code.</summary>
+    NoUsableOutput,
+    /// <summary>The status output exceeded its configured byte bound.</summary>
+    OutputRejected,
+    /// <summary>The status process encountered an input/output failure.</summary>
+    IoFailure,
+    /// <summary>The status process reported an invalid operation state.</summary>
+    InvalidProcessState,
+    /// <summary>The operating system rejected or failed the status process operation.</summary>
+    NativeProcessFailure,
+    /// <summary>The status process could not access the repository.</summary>
+    PermissionDenied
+}
+
+/// <summary>Pairs provenance fingerprints with the safe outcome of its Git-state probe.</summary>
+/// <param name="Provenance">The fingerprints to retain with the coverage artifact.</param>
+/// <param name="GitStateProbeOutcome">A non-sensitive status-probe outcome for diagnostics and verification.</param>
+internal sealed record CoverageArtifactProvenanceReadResult(
+    CoverageArtifactProvenance Provenance,
+    CoverageArtifactGitStateProbeOutcome GitStateProbeOutcome);

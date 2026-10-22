@@ -169,7 +169,7 @@ public sealed class CoverageArtifactSessionBoundaryTests
         using var errors = new StringWriter();
         using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
 
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], errors);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], errors, outputLease);
 
         Assert.Contains("ASCOV201", errors.ToString(), StringComparison.Ordinal);
         Assert.Contains("gate-inventory", errors.ToString(), StringComparison.Ordinal);
@@ -218,7 +218,7 @@ public sealed class CoverageArtifactSessionBoundaryTests
         using var errors = new StringWriter();
         using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
 
-        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], errors);
+        await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [gateReport], errors, outputLease);
 
         Assert.Empty(errors.ToString());
         using var updatedStore = CoverageArtifactStore.Open();
