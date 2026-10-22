@@ -90,13 +90,17 @@ jobs:
           # The private 10.0.401 SDK remains the only compiler host. The
           # distribution SDK supplies the complete OS-matched runtime image;
           # none of its SDK/packs content is copied into the protected runtime.
-          timeout --signal=KILL 180 sudo --non-interactive apt-get update \
+          # Bound stalled mirror connections inside the unchanged update/install deadlines.
+          # APT retries only dependency downloads; native procedures and tests are never retried here.
+          apt_acquire=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
+                       -o Acquire::Retries=2 -o Acquire::http::Pipeline-Depth=0)
+          timeout --signal=KILL 180 sudo --non-interactive apt-get "${apt_acquire[@]}" update \
             > "$C1_EVIDENCE/runtime-package-install.log" 2>&1
           timeout --signal=KILL 10 apt-cache policy \
             dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
             dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
             > "$C1_EVIDENCE/runtime-package-policy.log"
-          timeout --signal=KILL 240 sudo --non-interactive apt-get install \
+          timeout --signal=KILL 240 sudo --non-interactive apt-get "${apt_acquire[@]}" install \
             --yes --no-install-recommends dotnet-sdk-10.0 \
             >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
           dpkg-query --show --showformat='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' \

@@ -97,6 +97,17 @@ to satisfy the copy helper's existing SDK-root contract; its `sdk`, `packs` and
 records that installation and every copied byte and mode. The package install
 log, APT candidate/origin log and `runtime-packages.tsv` retain the selected
 feed and actual package versions separately.
+
+Both worker and measurement jobs bound APT's connection/data inactivity to 20
+seconds and allow two failed-download retries inside the existing 180-second
+update and 240-second install limits. HTTP pipelining is disabled for these
+setup commands so stalled mirror responses cannot hold an entire request queue.
+These are [APT acquisition options](https://manpages.debian.org/trixie/apt/apt-transport-http.1.en.html#Connection_Configuration)
+and [download retries](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html#Retries),
+not a native-control retry or a new process deadline. Exhausting the same total
+setup limit still fails the job before copying a runtime or launching controls.
+The package, feed selection, APT authentication and complete OS audit stay in
+force; a transport retry does not qualify a runtime image.
 The worker job has a 50-minute outer limit so its sequential bounded package,
 copy, publication and native phases leave time for setup and private retention;
 the native procedure's existing 900-second outer process limit and original
