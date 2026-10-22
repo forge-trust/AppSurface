@@ -33,6 +33,8 @@ public sealed class CoverageArtifactCandidateLocksTests
         if (OperatingSystem.IsWindows()) Assert.Equal(0, new FileInfo(lockPath).Length);
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(temp.Path, false, false)!;
         parent.DeleteArtifactEntry("first", 1, firstLease.PhysicalIdentity);
+        // Windows completes pending directory deletion when its retained candidate handle closes.
+        firstLease.Dispose();
         Assert.False(Directory.Exists(first));
         secondLease.VerifyBinding();
         Assert.True(Directory.Exists(second));

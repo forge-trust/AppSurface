@@ -113,6 +113,18 @@ public sealed class CoverageSolutionScriptTests
                       --blame-hang-timeout 2m
                       --blame-hang-dump-type mini
 
+                  - name: Collect native Debug coverage evidence
+                    run: >-
+                      dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+                      --configuration Debug
+                      --no-restore
+                      /p:TailwindEnabled=false
+                      --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
+                      --logger "console;verbosity=minimal"
+                      --collect:"XPlat Code Coverage"
+                      -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+                      DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
+
                   - name: Upload coverage security diagnostics
                     if: ${{ always() }}
                     uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

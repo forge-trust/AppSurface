@@ -377,7 +377,11 @@ internal sealed partial class CoverageRunOutputLease
     /// <param name="name">Manager-authorized entry name; authority must be established by its caller.</param>
     /// <param name="maximumEntries">Bound for the complete child snapshot, including directories.</param>
     /// <param name="expectedIdentity">Optional identity previously verified by a reader.</param>
-    /// <remarks>Unknown trees, links, changed identities and excessive depth fail closed; they are not repaired.</remarks>
+    /// <remarks>
+    /// Unknown trees, links, changed identities and excessive depth fail closed; they are not repaired.
+    /// Windows deletion completes after retained handles to the entry close. Callers keep their candidate lease
+    /// through deletion and metadata publication, then dispose it before asserting namespace disappearance.
+    /// </remarks>
     internal void DeleteArtifactEntry(string name, int maximumEntries, string? expectedIdentity = null)
     {
         ValidateArtifactComponent(name);
