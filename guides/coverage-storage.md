@@ -252,7 +252,7 @@ A bounded registry or metadata category reached its count or byte limit. The man
 
 ### ASCOV208: Invalid storage input
 
-A storage command argument or policy value failed validation. The result identifies the field and allowed form without echoing secret-like input. Correct that value before retrying. Unknown policy schema or invalid policy values must disable optional management without preventing required coverage. Invalid policy schema or values are reported as ASCOV201 when opening the optional store. ASCOV208 identifies invalid explicit command arguments before the store is opened.
+A storage command argument or policy value failed validation. The result identifies the field and allowed form without echoing secret-like input. Run identifiers accept exactly 32 hexadecimal characters without hyphens; restore also requires a nonempty `--output` naming a fresh destination directory. Correct the named option before retrying. Unknown policy schema or invalid policy values must disable optional management without preventing required coverage. Invalid policy schema or values are reported as ASCOV201 when opening the optional store. ASCOV208 identifies invalid explicit command arguments before the store is opened.
 
 ### ASCOV209: Implicit collector risk
 

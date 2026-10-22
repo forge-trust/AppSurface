@@ -38,10 +38,12 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         string? recovery = null;
         string? reconcile = null;
         var exitCode = 0;
+        var inputValidated = false;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
             ValidateInput();
+            inputValidated = true;
             var readOnly = (operation is "status" or "inspect" or "maintain") && !RequestsMutation;
             using var store = readOnly
                 ? CoverageArtifactStore.OpenReadOnly() : CoverageArtifactStore.Open();
@@ -61,8 +63,10 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
             status = "failed";
             exitCode = 2;
             effects = FailureEffects(effects);
-            diagnostics.Add(CoverageArtifactDiagnostic.Failure("ASCOV208", operation, new ArgumentException(), effects));
-            recovery = "Supply valid command options and retry once.";
+            var diagnostic = CoverageArtifactDiagnostic.Failure("ASCOV208", operation, new ArgumentException(), effects);
+            if (!inputValidated) diagnostic = diagnostic with { Cause = InvalidInputGuidance, Recovery = InvalidInputGuidance };
+            diagnostics.Add(diagnostic);
+            recovery = diagnostic.Recovery;
             if (effects != "none") reconcile = "Inspect status and the affected run or destination before retrying.";
         }
         catch (CoverageExecutionException exception)
@@ -232,6 +236,12 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
 
     /// <summary>Validates explicit command inputs before opening or initializing the store.</summary>
     protected virtual void ValidateInput() { }
+
+    /// <summary>Gets a trusted field and accepted-form hint for a failed preflight, without echoing supplied values.</summary>
+    protected virtual string InvalidInputGuidance => "Supply valid command options and retry once.";
+
+    /// <summary>Gets the accepted opaque run identifier form used by pin, unpin and restore.</summary>
+    protected const string RunInputGuidance = "Supply --run as 32 hexadecimal characters without hyphens, then retry once.";
 
     /// <summary>Publishes safe progress details so failures retain completed work in the result envelope.</summary>
     protected void PublishPartialDetails(object details) => _partialDetails = details ?? throw new ArgumentNullException(nameof(details));
@@ -458,6 +468,10 @@ internal sealed partial class CoverageStorageRestoreCommand : CoverageStorageCom
             throw new ArgumentException("restore requires --run and a fresh --output.");
     }
     /// <inheritdoc />
+    protected override string InvalidInputGuidance => !Guid.TryParseExact(Run, "N", out _)
+        ? RunInputGuidance
+        : "Supply --output as a nonempty fresh destination directory, then retry once.";
+    /// <inheritdoc />
     protected override async ValueTask<object?> ExecuteOperationAsync(CoverageArtifactStore store, CancellationToken token, Action<string> setEffects, Action<string> setStatus)
     {
         setEffects("unknown");
@@ -482,6 +496,8 @@ internal sealed partial class CoverageStoragePinCommand : CoverageStorageCommand
         if (!Guid.TryParseExact(Run, "N", out _)) throw new ArgumentException("pin requires --run.");
     }
     /// <inheritdoc />
+    protected override string InvalidInputGuidance => RunInputGuidance;
+    /// <inheritdoc />
     protected override async ValueTask<object?> ExecuteOperationAsync(CoverageArtifactStore store, CancellationToken token, Action<string> setEffects, Action<string> setStatus)
     {
         setEffects("unknown"); await store.PinAsync(Run, true, token).ConfigureAwait(false); setEffects("complete");
@@ -503,6 +519,8 @@ internal sealed partial class CoverageStorageUnpinCommand : CoverageStorageComma
     {
         if (!Guid.TryParseExact(Run, "N", out _)) throw new ArgumentException("unpin requires --run.");
     }
+    /// <inheritdoc />
+    protected override string InvalidInputGuidance => RunInputGuidance;
     /// <inheritdoc />
     protected override async ValueTask<object?> ExecuteOperationAsync(CoverageArtifactStore store, CancellationToken token, Action<string> setEffects, Action<string> setStatus)
     {

@@ -194,6 +194,61 @@ public sealed class CoverageStorageCommandTests
         Assert.DoesNotContain("not-a-run", output, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("pin", true)]
+    [InlineData("pin", false)]
+    [InlineData("unpin", true)]
+    [InlineData("unpin", false)]
+    [InlineData("restore", true)]
+    [InlineData("restore", false)]
+    public async Task Invalid_run_names_the_option_and_accepted_format_without_echoing_input(string operation, bool json)
+    {
+        using var domain = TestDirectory.Create();
+        using var configured = ConfigureDomain(domain.Path);
+        using var console = new FakeInMemoryConsole();
+        CoverageStorageCommandBase command = operation switch
+        {
+            "pin" => new CoverageStoragePinCommand { Run = "secret-input-value", Json = json },
+            "unpin" => new CoverageStorageUnpinCommand { Run = "secret-input-value", Json = json },
+            _ => new CoverageStorageRestoreCommand { Run = "secret-input-value", Output = "unused", Json = json },
+        };
+
+        var error = await Assert.ThrowsAsync<CliFx.CommandException>(async () =>
+            await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(2, error.ExitCode);
+        var output = console.ReadOutputString() + console.ReadErrorString();
+        Assert.Contains("--run", output, StringComparison.Ordinal);
+        Assert.Contains("32 hexadecimal characters", output, StringComparison.Ordinal);
+        Assert.Contains("without hyphens", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret-input-value", output, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(domain.Path, "private-store")));
+        if (json)
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(console.ReadOutputString());
+            Assert.Equal("none", document.RootElement.GetProperty("sideEffects").GetString());
+            Assert.Contains("--run", document.RootElement.GetProperty("recoveryAction").GetString(), StringComparison.Ordinal);
+            Assert.Contains("--run", document.RootElement.GetProperty("diagnostics")[0].GetProperty("recovery").GetString(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Restore_missing_output_names_its_fresh_destination_requirement()
+    {
+        using var domain = TestDirectory.Create();
+        using var configured = ConfigureDomain(domain.Path);
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CliFx.CommandException>(async () =>
+            await new CoverageStorageRestoreCommand { Run = Guid.NewGuid().ToString("N"), Json = true }
+                .ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(2, error.ExitCode);
+        Assert.Contains("--output", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("fresh destination directory", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(domain.Path, "private-store")));
+    }
+
     [Fact]
     public async Task Inspect_missing_root_reports_partial_and_typed_diagnostic()
     {

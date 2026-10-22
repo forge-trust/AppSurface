@@ -122,7 +122,7 @@ public sealed class CoverageStorageCommandTestsBoundary
         Assert.Equal("failed", result.GetProperty("status").GetString());
         Assert.Equal("ASCOV208", result.GetProperty("diagnostics")[0].GetProperty("code").GetString());
         Assert.Equal("none", result.GetProperty("sideEffects").GetString());
-        Assert.Equal("Supply valid command options and retry once.", result.GetProperty("recoveryAction").GetString());
+        Assert.Equal("Supply --run as 32 hexadecimal characters without hyphens, then retry once.", result.GetProperty("recoveryAction").GetString());
         Assert.DoesNotContain("secret-invalid-run", output, StringComparison.Ordinal);
         Assert.DoesNotContain(domain.Path, output, StringComparison.Ordinal);
         Assert.False(Directory.Exists(StorePath(domain.Path)));
