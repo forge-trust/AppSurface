@@ -220,7 +220,7 @@ jobs:
             PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$C1_RUNTIME/dotnet" "$C1_COVERLET" "$C1_INPUTS/tool/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Linux*' '[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Supervision*' --include-test-assembly \
             --merge-with "$C1_PRIOR/prior-report.json" --format json --format cobertura --output "$C1_EVIDENCE/coverage" \
             > "$C1_EVIDENCE/collector.log" 2>&1
           collector_exit=$?

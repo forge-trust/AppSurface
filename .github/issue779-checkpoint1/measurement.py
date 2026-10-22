@@ -260,7 +260,7 @@ def measured_build(original, original_raw_sha, actual_tool, collector, collector
         "original_build_path": str(Path(original["commands"][0]["log_path"]).parent / "build.json"),
         "original_build_sha256": original_raw_sha, "original_tool": original["tool"],
         "instrumented_modules": {name: actual_tool["files"][name]["sha256"]
-                                  for name in sorted(binding.MEASUREMENT_NAMES)},
+                                  for name in sorted(binding.MEASUREMENT_INSTRUMENTED_NAMES)},
         "collector_path": str(collector), "collector_sha256": collector_sha}
     return value
 

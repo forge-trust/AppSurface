@@ -42,6 +42,14 @@ MEASUREMENT_MODULES = ("ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evide
     "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
     "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision")
 MEASUREMENT_NAMES = frozenset(name + suffix for name in MEASUREMENT_MODULES for suffix in (".dll", ".pdb"))
+# This supplemental collector observes root supervision only. Full six-module
+# reports remain required because the completed consumer predecessor is merged.
+MEASUREMENT_INSTRUMENTED_NAMES = frozenset(
+    "ForgeTrust.AppSurface.Evidence.Supervision" + suffix for suffix in (".dll", ".pdb"))
+MEASUREMENT_FILTERS = (
+    "[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Linux*",
+    "[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Supervision*",
+)
 MEASUREMENT_COLLECTOR_SUFFIX = "/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
 
 
@@ -338,8 +346,8 @@ def validate_build(value, capture_raw, expected_source, selector):
 def validate_measured_build(value, capture_raw, expected_source, selector):
     """Validate a private instrumented image while retaining the original build inventory.
 
-    The v1 publication commands remain literal and unchanged. Only the six selected
-    DLLs and their PDBs may differ in the actual staged image; all other files,
+    The v1 publication commands remain literal and unchanged. Only the selected root-supervision
+    DLL and its PDB may differ in the actual staged image; all other files,
     directory modes, runtime and helper inputs retain their original bindings.
     This detached check grants no execution or native authority. ``verify_build``
     additionally reads the original v1 receipt and pinned collector before staging.
@@ -369,11 +377,11 @@ def validate_measured_build(value, capture_raw, expected_source, selector):
         and original["directories"] == tool["directories"]
         and set(original["files"]) == set(tool["files"]), "measurement-image-shape")
     maps = measurement["instrumented_modules"]
-    require(type(maps) is dict and set(maps) == MEASUREMENT_NAMES
+    require(type(maps) is dict and set(maps) == MEASUREMENT_INSTRUMENTED_NAMES
         and MEASUREMENT_NAMES <= set(tool["files"]), "measurement-module-set")
     for name, row in tool["files"].items():
         previous = original["files"][name]
-        if name in MEASUREMENT_NAMES:
+        if name in MEASUREMENT_INSTRUMENTED_NAMES:
             require(type(maps[name]) is str and HEX64.fullmatch(maps[name])
                 and maps[name] == row["sha256"] and row["mode"] == previous["mode"],
                 "measurement-module-binding")

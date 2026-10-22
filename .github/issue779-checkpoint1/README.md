@@ -229,7 +229,7 @@ audit. The [ordinary-file controls](test_empty_helper.py) claim no native result
 
 ## Private root execution measurement
 
-The [private C1 measurement wrapper](measurement-README.md) instruments the six current managed modules before the fixed native procedures stage their selected tool image. A `issue779-checkpoint1-build-v2` receipt retains the exact original v1 publication, command terminals and image inventory; its additional measurement object binds the original receipt bytes, pinned collector, and all twelve instrumented DLL/PDB hashes. Only those selected file bytes may differ, every DLL must change, and all unselected files, directory modes, runtime and helper publications remain exact.
+The [private C1 measurement wrapper](measurement-README.md#root-only-collection-scope) measures root `Linux*` and `Supervision*` types in the current Supervision module before the fixed native procedures stage their selected tool image. A `issue779-checkpoint1-build-v2` receipt retains the exact original v1 publication, command terminals and complete image inventory; its additional measurement object binds the original receipt bytes, pinned collector, and the observed Supervision DLL/PDB pair. Only that pair may differ, its DLL must change, and all other managed pairs, files, directory modes, runtime and helper publications remain exact. The consumer predecessor and unchanged solution gate still measure all six modules.
 
 `binding.validate_measured_build` is a detached data check. `binding.verify_build` additionally reads the original v1 receipt and collector through the existing bounded stable-file reader, compares all original publication fields, and verifies the actual staged image before native execution. These checks cannot create an owner, bypass the OS audit, or establish a native result. The wrapper leaves the original run, product, stop and cleanup clocks in charge. Isolated worker tracker bytes are not imported by this root-only lane.
 
@@ -238,8 +238,8 @@ adds a fixed `None → N04 → N07 → N16` sequence after packaged C2 acceptanc
 Each selector gets a fresh VM, the ordinary current publisher and the original
 native procedure. The [chain data reference](measurement-chain-README.md)
 describes source/run/attempt, predecessor, image, report and retained-result
-bindings. This measures six original cases through the root owner's natural
-process exits. It neither promises coverage from deliberately killed owners nor
+bindings. This runs six original cases while collecting the root component's
+normal-exit counters; case execution alone does not imply worker coverage. It neither promises coverage from deliberately killed owners nor
 imports isolated worker tracker files. The separate fourteen-selector matrix and
 its sixteen-case aggregate remain mandatory. These are private CI fixture
 orchestrators; the [C# runtime cutover](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-4-cutover-and-full-verification)

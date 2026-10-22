@@ -36,7 +36,7 @@ def measured_model():
         original["tool"]["files"][name] = {"sha256": SHA, "bytes": 19, "mode": "0644"}
     original["tool"]["files"]["unchanged.json"] = {"sha256": SHA, "bytes": 2, "mode": "0644"}
     actual = copy.deepcopy(original["tool"])
-    for name in binding.MEASUREMENT_NAMES:
+    for name in binding.MEASUREMENT_INSTRUMENTED_NAMES:
         if name.endswith(".dll"):
             actual["files"][name]["sha256"] = OTHER
     value = subject.measured_build(original, binding.digest(binding.canonical(original)), actual,
@@ -138,19 +138,19 @@ class MeasurementDataTests(unittest.TestCase):
             with self.subTest(bytes_count=len(raw)), self.assertRaises(binding.Rejected):
                 subject.report_xml(raw)
 
-    def test_v2_projection_preserves_original_and_all_twelve_actual_hashes(self):
+    def test_v2_projection_preserves_twelve_inputs_and_only_root_supervision_instrumentation(self):
         original, measured, capture = measured_model()
         binding.validate_build(measured, capture, HEAD, "N10")
         self.assertEqual(original["commands"], measured["commands"])
         self.assertEqual(original["tool"], measured["measurement"]["original_tool"])
-        self.assertEqual(12, len(measured["measurement"]["instrumented_modules"]))
+        self.assertEqual(2, len(measured["measurement"]["instrumented_modules"]))
         self.assertFalse(measured["native_execution"])
         self.assertEqual(SHA, original["tool"]["files"][binding.MEASUREMENT_MODULES[0] + ".dll"]["sha256"])
 
     def test_v2_unselected_mutation_mode_change_and_uninstrumented_dll_reject(self):
         for mutation in ("unselected", "mode", "unchanged-dll"):
             original, measured, capture = measured_model()
-            name = binding.MEASUREMENT_MODULES[0] + ".dll"
+            name = "ForgeTrust.AppSurface.Evidence.Supervision.dll"
             if mutation == "unselected":
                 measured["tool"]["files"]["unchanged.json"]["sha256"] = OTHER
             elif mutation == "mode":

@@ -18,13 +18,13 @@ def model():
     original["tool"]["files"]["configuration.json"] = {"sha256": SHA, "bytes": 2, "mode": "0644"}
     value = copy.deepcopy(original)
     value["schema"] = "issue779-checkpoint1-build-v2"
-    for name in binding.MEASUREMENT_NAMES:
+    for name in binding.MEASUREMENT_INSTRUMENTED_NAMES:
         value["tool"]["files"][name]["sha256"] = OTHER
     value["measurement"] = {
         "schema": "issue779-c1-measurement-build-v1", "original_build_path": "/data/logs/build.json",
         "original_build_sha256": binding.digest(binding.canonical(original)),
         "original_tool": copy.deepcopy(original["tool"]),
-        "instrumented_modules": {name: OTHER for name in binding.MEASUREMENT_NAMES},
+        "instrumented_modules": {name: OTHER for name in binding.MEASUREMENT_INSTRUMENTED_NAMES},
         "collector_path": "/data/collector" + binding.MEASUREMENT_COLLECTOR_SUFFIX,
         "collector_sha256": SHA,
     }
@@ -32,20 +32,53 @@ def model():
 
 
 class MeasuredBuildDataTests(unittest.TestCase):
-    def test_exact_six_instrumented_modules_keep_original_commands_and_no_native_authority(self):
+    def test_only_root_supervision_changes_while_six_report_modules_remain_bound(self):
         original, value, capture = model()
         actual = binding.validate_build(value, capture, HEAD, "N10")
         self.assertEqual(HEAD, actual["source"])
         self.assertEqual(original["commands"], value["commands"])
         self.assertFalse(value["native_execution"])
-        self.assertEqual(12, len(value["measurement"]["instrumented_modules"]))
-        # Coverlet may leave portable PDB bytes unchanged; every managed DLL
-        # still must differ from its original publication before staging.
-        for name in binding.MEASUREMENT_NAMES:
+        self.assertEqual(2, len(value["measurement"]["instrumented_modules"]))
+        # Coverlet may leave the selected PDB unchanged; the root DLL must
+        # differ while all five other managed images remain original.
+        for name in binding.MEASUREMENT_INSTRUMENTED_NAMES:
             if name.endswith(".pdb"):
                 value["tool"]["files"][name]["sha256"] = SHA
                 value["measurement"]["instrumented_modules"][name] = SHA
         binding.validate_build(value, capture, HEAD, "N10")
+
+    def test_every_non_root_module_remains_the_exact_original_published_file(self):
+        original, value, capture = model()
+        binding.validate_build(value, capture, HEAD, "N10")
+        unselected = binding.MEASUREMENT_NAMES - binding.MEASUREMENT_INSTRUMENTED_NAMES
+        self.assertEqual(10, len(unselected))
+        for name in sorted(unselected):
+            self.assertEqual(original["tool"]["files"][name], value["tool"]["files"][name])
+            bad = copy.deepcopy(value)
+            bad["tool"]["files"][name]["sha256"] = OTHER
+            with self.subTest(file=name), self.assertRaises(binding.Rejected):
+                binding.validate_build(bad, capture, HEAD, "N10")
+
+    def test_root_collector_filters_leave_the_direct_non_root_worker_bootstrap_uninstrumented(self):
+        self.assertEqual((
+            "[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Linux*",
+            "[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Supervision*",
+        ), binding.MEASUREMENT_FILTERS)
+        import fnmatch
+        selected = lambda module, kind: any(
+            fnmatch.fnmatchcase(module, f[1:f.index("]")])
+            and fnmatch.fnmatchcase(kind, f[f.index("]") + 1:]) for f in binding.MEASUREMENT_FILTERS)
+        namespace = "ForgeTrust.AppSurface.Evidence.Supervision."
+        self.assertTrue(selected("ForgeTrust.AppSurface.Evidence.Supervision", namespace + "LinuxRunWorkspace"))
+        self.assertTrue(selected("ForgeTrust.AppSurface.Evidence.Supervision", namespace + "SupervisionPendingStart"))
+        self.assertFalse(selected("ForgeTrust.AppSurface.Evidence.Supervision", namespace + "EvidenceProcessRoleParser"))
+        self.assertFalse(selected("ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.EvidenceWorkerCommand"))
+        self.assertFalse(selected("ForgeTrust.AppSurface.Evidence.Contracts",
+                                  "ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxWorkerSupervisor"))
+        workflow = (Path(__file__).resolve().parents[1] / "workflows/issue779-checkpoint1-measurement.yml").read_text()
+        import re
+        filters = re.findall(r"'([^']+)'", next(row for row in workflow.splitlines() if "--include " in row))
+        self.assertEqual(list(binding.MEASUREMENT_FILTERS), filters)
 
     def test_unknown_fields_and_nested_measurement_schema_cannot_select_an_alternate_loader(self):
         for where in ("build", "measurement"):
@@ -65,7 +98,7 @@ class MeasuredBuildDataTests(unittest.TestCase):
         for mutation in ("unselected", "module-mode", "root", "directory", "missing-module",
                          "extra-map", "missing-map", "wrong-map", "unchanged-dll"):
             _, value, capture = model()
-            name = "ForgeTrust.AppSurface.Cli.dll"
+            name = "ForgeTrust.AppSurface.Evidence.Supervision.dll"
             if mutation == "unselected": value["tool"]["files"]["configuration.json"]["sha256"] = OTHER
             elif mutation == "module-mode": value["tool"]["files"][name]["mode"] = "0755"
             elif mutation == "root": value["measurement"]["original_tool"]["root"] = "/data/other-tool"
