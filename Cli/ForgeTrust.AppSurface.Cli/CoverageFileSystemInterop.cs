@@ -18,6 +18,23 @@ namespace ForgeTrust.AppSurface.CoverageArtifacts;
 /// </remarks>
 internal static partial class CoverageFileSystemInterop
 {
+    /// <summary>Selects no-follow directory and file flags for Darwin or a supported Linux architecture.</summary>
+    /// <param name="macos">Whether Darwin constants apply.</param>
+    /// <param name="architecture">Native process architecture; Linux x64 and ARM64 use distinct directory and no-follow flags.</param>
+    /// <returns>The native directory-only and no-follow flags, respectively.</returns>
+    /// <exception cref="PlatformNotSupportedException">The Linux architecture has no verified flag mapping.</exception>
+    /// <remarks>This selects native constants only. Callers still retain and verify the opened object and its ancestors.</remarks>
+    internal static (int Directory, int NoFollow) UnixTraversalFlags(bool macos, Architecture architecture)
+    {
+        if (macos) return (0x00100000, 0x00000100);
+        return architecture switch
+        {
+            Architecture.X64 => (0x00010000, 0x00020000),
+            Architecture.Arm64 => (0x00004000, 0x00008000),
+            _ => throw new PlatformNotSupportedException("Secure Unix traversal supports Darwin and Linux x64 or ARM64.")
+        };
+    }
+
     /// <summary>
     /// Opens a Unix path with the supplied native flags.
     /// </summary>

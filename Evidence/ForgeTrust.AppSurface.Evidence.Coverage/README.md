@@ -15,7 +15,9 @@ per-call observations cover file-state decoding, private Unix ownership/mode
 checks, Windows rename-buffer encoding, lock-result classification, and
 filesystem/mount classification. Windows access policy uses normalized SID and
 access-mask facts; candidate-file decisions retain explicit handle ownership and
-reject nonregular or unrepresentable sizes before returning a stream. Production defaults call the host APIs and retain
+reject nonregular or unrepresentable sizes before returning a stream. Candidate
+handles remain owned by the inspector until a stream is successfully returned;
+metadata failures release them on every unwind path. Production defaults call the host APIs and retain
 normal no-follow path, identity, and publication checks. The observations are test
 seams, not consumer configuration; they never establish another operating system's
 ABI or filesystem guarantees. Native acceptance still runs on the supported
@@ -39,3 +41,10 @@ keeps presentation of partial results from throwing after the operation has
 already recorded its outcome and side effects. Operation implementations still
 validate their own metadata before producing this result; presentation fallbacks
 do not certify an unknown inventory or make an incomplete result successful.
+
+Secure Unix opens share an internal native-flag selector for Darwin, Linux x64,
+and Linux ARM64. [Linux ARM64 native open flags](https://github.com/torvalds/linux/blob/master/arch/arm64/include/uapi/asm/fcntl.h) use different directory-only and no-follow bits
+from x64; output traversal, collector artifact reads, and storage inspection must
+use the matching pair. Unverified Linux architectures fail before opening a
+candidate. The selector has decision tests, while the native no-follow tests in
+the [platform matrix](../../.github/workflows/build.yml) verify actual host behavior.

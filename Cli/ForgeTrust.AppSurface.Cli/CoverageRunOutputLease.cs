@@ -1395,10 +1395,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private static int UnixCloseOnExec => OperatingSystem.IsMacOS() ? 0x01000000 : 0x00080000;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixDirectory => OperatingSystem.IsMacOS() ? 0x00100000 : 0x00010000;
+    private static int UnixDirectory => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).Directory;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixNoFollow => OperatingSystem.IsMacOS() ? 0x00000100 : 0x00020000;
+    private static int UnixNoFollow => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).NoFollow;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;

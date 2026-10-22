@@ -291,6 +291,47 @@ public sealed class CoverageStorageRenderingDecisionTests
             data.GetProperty("protectedBytes").GetInt64());
     }
 
+    [Fact]
+    public async Task HumanResultWithoutDataStillRendersFailureAndItsDiagnostic()
+    {
+        using var temp = TestDirectory.Create();
+        using var configured = ConfigureDomain(temp.Path);
+        using var console = new FakeInMemoryConsole();
+        await Assert.ThrowsAsync<CliFx.CommandException>(async () => await new ProbeCommand("inspect",
+            failure: new IOException("private"), json: false).ExecuteAsync(console, default));
+        Assert.Contains("coverage storage inspect: failed", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("ASCOV203", console.ReadErrorString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnrepresentableHumanNumbersUseFallbackAndDoNotThrow()
+    {
+        using var temp = TestDirectory.Create();
+        using var configured = ConfigureDomain(temp.Path);
+        using var console = new FakeInMemoryConsole();
+        await new ProbeCommand("status", new
+        {
+            registeredRuns = (long)int.MaxValue + 1,
+            currentBytes = 1e30,
+            complete = false,
+            policy = new { path = 0 }
+        }, json: false).ExecuteAsync(console, default);
+        Assert.Contains("0 registered", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("0 B current", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("policy: unknown", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.Contains("lower bounds", console.ReadOutputString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InvalidDomainPathReturnsUnknownIdentityWithSanitizedFailureEnvelope()
+    {
+        using var configured = ConfigureStore("\0");
+        using var result = await ExecuteFailureAsync(new ProbeCommand("status"));
+        Assert.Equal("domain-unknown", result.Document.RootElement.GetProperty("domainId").GetString());
+        Assert.Equal("failed", result.Document.RootElement.GetProperty("status").GetString());
+        Assert.Equal("none", result.Document.RootElement.GetProperty("sideEffects").GetString());
+    }
+
     private static object? StatusDetails(string detailsCase) => detailsCase switch
     {
         "positive-count" => new { overflowObservationCount = 1 },

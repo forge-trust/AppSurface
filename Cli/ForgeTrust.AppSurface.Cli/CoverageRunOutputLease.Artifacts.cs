@@ -442,9 +442,10 @@ internal sealed partial class CoverageRunOutputLease
             ? new DirectoryInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)
             : new FileInfo(path).GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access);
         var user = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
-        ValidateArtifactWindowsAccess(security.GetOwner(typeof(SecurityIdentifier))?.Value, user.Value,
-            security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
-                .Select(rule => new CoverageArtifactAccessRule(rule.IdentityReference.Value, (uint)rule.FileSystemRights, rule.AccessControlType == AccessControlType.Allow)));
+        var observedRules = new List<CoverageArtifactAccessRule>();
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
+            observedRules.Add(new(rule.IdentityReference.Value, (uint)rule.FileSystemRights, rule.AccessControlType == AccessControlType.Allow));
+        ValidateArtifactWindowsAccess(security.GetOwner(typeof(SecurityIdentifier))?.Value, user.Value, observedRules);
     }
 
     /// <summary>Rejects Windows ownership or allow rules granting access beyond the current user and system administrators.</summary>

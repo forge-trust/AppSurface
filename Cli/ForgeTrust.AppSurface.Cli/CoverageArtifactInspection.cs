@@ -295,38 +295,47 @@ internal static class CoverageArtifactInspector
         if (calls.IsWindows)
         {
             var handle = calls.WindowsOpen(path);
-            if (handle.IsInvalid) { handle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
-            if (calls.WindowsType(handle) != 1
-                || !calls.WindowsInformation(handle, out var info)
-                || (info.FileAttributes & (0x10u | 0x400u)) != 0) { handle.Dispose(); return false; }
-            var nativeLength = ((ulong)info.FileSizeHigh << 32) | info.FileSizeLow;
-            if (nativeLength > long.MaxValue) { handle.Dispose(); return false; }
-            length = (long)nativeLength;
-            stream = new FileStream(handle, FileAccess.Read);
-            return true;
+            try
+            {
+                if (handle.IsInvalid) throw new IOException("Unable to inspect candidate handle.");
+                if (calls.WindowsType(handle) != 1
+                    || !calls.WindowsInformation(handle, out var info)
+                    || (info.FileAttributes & (0x10u | 0x400u)) != 0) return false;
+                var nativeLength = ((ulong)info.FileSizeHigh << 32) | info.FileSizeLow;
+                if (nativeLength > long.MaxValue) return false;
+                length = (long)nativeLength;
+                stream = new FileStream(handle, FileAccess.Read);
+                return true;
+            }
+            finally { if (stream is null) handle.Dispose(); }
         }
 
         if (!calls.IsLinux && !calls.IsMacOS) return false;
-        var flags = calls.IsMacOS ? 0x00000004 | 0x00000100 : 0x00000800 | 0x00020000;
+        if (!calls.IsMacOS && calls.Architecture is not (Architecture.X64 or Architecture.Arm64)) return false;
+        var flags = (calls.IsMacOS ? 0x00000004 : 0x00000800)
+            | CoverageFileSystemInterop.UnixTraversalFlags(calls.IsMacOS, calls.Architecture).NoFollow;
         var descriptor = calls.UnixOpen(path, flags);
         if (descriptor < 0) throw new IOException("Unable to inspect candidate handle.");
         var safeHandle = new SafeFileHandle((nint)descriptor, ownsHandle: true);
-        var buffer = Marshal.AllocHGlobal(512);
+        nint buffer = 0;
         try
         {
-            if (calls.UnixStat(descriptor, buffer) != 0) { safeHandle.Dispose(); throw new IOException("Unable to inspect candidate handle."); }
-            uint mode;
-            if (calls.IsMacOS) mode = unchecked((ushort)Marshal.ReadInt16(buffer, 4));
-            else if (calls.Architecture == Architecture.X64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 24));
-            else if (calls.Architecture == Architecture.Arm64) mode = unchecked((uint)Marshal.ReadInt32(buffer, 16));
-            else { safeHandle.Dispose(); return false; }
-            if ((mode & 0xF000) != 0x8000) { safeHandle.Dispose(); return false; }
+            buffer = Marshal.AllocHGlobal(512);
+            if (calls.UnixStat(descriptor, buffer) != 0) throw new IOException("Unable to inspect candidate handle.");
+            var mode = calls.IsMacOS
+                ? unchecked((ushort)Marshal.ReadInt16(buffer, 4))
+                : unchecked((uint)Marshal.ReadInt32(buffer, calls.Architecture == Architecture.X64 ? 24 : 16));
+            if ((mode & 0xF000) != 0x8000) return false;
             length = Marshal.ReadInt64(buffer, calls.IsMacOS ? 96 : 48);
-            if (length < 0) { safeHandle.Dispose(); return false; }
+            if (length < 0) return false;
             stream = new FileStream(safeHandle, FileAccess.Read);
             return true;
         }
-        finally { Marshal.FreeHGlobal(buffer); }
+        finally
+        {
+            if (buffer != 0) Marshal.FreeHGlobal(buffer);
+            if (stream is null) safeHandle.Dispose();
+        }
     }
 
     private static StringComparison PathComparison => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

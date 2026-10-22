@@ -109,11 +109,63 @@ public sealed class CoverageArtifactCandidateDecisionTests
             }
             else Assert.Null(stream);
         }
+        if (condition == "unsupported")
+        {
+            Assert.Equal(-1, descriptor);
+            Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(path));
+            return;
+        }
         Assert.True(descriptor >= 0);
         var nativeState = Marshal.AllocHGlobal(512);
         try { Assert.Equal(-1, ForgeTrust.AppSurface.Evidence.Coverage.CoverageFileSystemInterop.UnixFStat(descriptor, nativeState)); }
         finally { Marshal.FreeHGlobal(nativeState); }
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void WindowsMetadataObserverFailureReleasesTheOpenedCandidate()
+    {
+        using var temp = TestDirectory.Create();
+        var path = Path.Join(temp.Path, "candidate");
+        File.WriteAllBytes(path, [1]);
+        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read);
+        Assert.Throws<IOException>(() => CoverageArtifactInspector.TryOpenRegularFile(path, out _, out _,
+            new CoverageArtifactCandidateCalls
+            {
+                IsWindows = true,
+                WindowsOpen = _ => handle,
+                WindowsType = _ => throw new IOException("metadata observation failed")
+            }));
+        Assert.True(handle.IsClosed);
+    }
+
+    [Fact]
+    public void UnixMetadataObserverFailureClosesTheDescriptor()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var temp = TestDirectory.Create();
+        var path = Path.Join(temp.Path, "candidate");
+        File.WriteAllBytes(path, [1]);
+        var descriptor = CoverageFileSystemInterop.UnixOpen(path, 0);
+        Assert.True(descriptor >= 0);
+        using var cleanup = new SafeFileHandle(descriptor, true);
+        Assert.Throws<IOException>(() => CoverageArtifactInspector.TryOpenRegularFile(path, out _, out _,
+            new CoverageArtifactCandidateCalls
+            {
+                IsWindows = false,
+                IsMacOS = true,
+                IsLinux = false,
+                UnixOpen = (_, _) => descriptor,
+                UnixStat = (_, _) => throw new IOException("metadata observation failed")
+            }));
+        var buffer = Marshal.AllocHGlobal(512);
+        try
+        {
+            var result = CoverageFileSystemInterop.UnixFStat(descriptor, buffer);
+            if (result == -1) cleanup.SetHandleAsInvalid();
+            Assert.Equal(-1, result);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
     }
 
     [Fact]
