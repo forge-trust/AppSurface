@@ -45,7 +45,7 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
             "#files-behind-the-hero-flow",
             await page.GetAttributeAsync("#docs-page-outline a[href='#files-behind-the-hero-flow']", "href"));
 
-        const string nextDocHeading = "Failed Form UX";
+        const string nextDocHeading = "Nested Collections Quickstart";
         var previousDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='previous']", "href"));
         Assert.Contains(previousDocPath, new[]
         {
@@ -56,8 +56,8 @@ public sealed class AppSurfaceDocsWayfindingPlaywrightTests
         var nextDocPath = Assert.IsType<string>(await page.GetAttributeAsync("[data-doc-wayfinding='next']", "href"));
         Assert.Contains(nextDocPath, new[]
         {
-            "/docs/web/forgetrust.razorwire/docs/form-failures",
-            "/docs/Web/ForgeTrust.RazorWire/Docs/form-failures.md.html"
+            "/docs/examples/razorwire-mvc/nested-collections",
+            "/docs/examples/razorwire-mvc/NESTED-COLLECTIONS.md.html"
         });
 
         var initialContent = await page.Locator("#doc-content").InnerHTMLAsync();

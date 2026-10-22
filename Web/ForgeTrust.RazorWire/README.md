@@ -168,7 +168,7 @@ Behavior kit is eager-only in v1. Plain `<rw:scripts />` lazy-loads built-in pag
 
 ## Form Interactions in 3 Minutes
 
-Use RazorWire form interactions when a server-rendered form needs conditional fields or one-dimensional model-bound collection rows without page-local JavaScript.
+Use RazorWire form interactions when a server-rendered form needs conditional fields or nested model-bound collection rows without page-local structural JavaScript.
 
 ```cshtml
 <input type="checkbox" name="ExpectedNoAction" rw-form-toggle="draft-action" rw-form-toggle-invert="true" />
@@ -198,7 +198,7 @@ Use RazorWire form interactions when a server-rendered form needs conditional fi
 </div>
 ```
 
-RazorWire owns local behavior, state attributes, sparse `.index` allocation, and accessibility status hooks. Your app owns fields, labels, layout, styling, persistence, and server validation. See the full contract in [Form Interactions](Docs/form-interactions.md).
+RazorWire owns local behavior, state attributes, owner-scoped sparse `.index` allocation, and accessibility status hooks. Your app owns fields, labels, layout, styling, persistence, and server validation. See the [Form Interactions contract](Docs/form-interactions.md), including the additive `IndexToken` placeholder API, nested binding rules, event stages, identity/removal behavior, and migration guidance. Start with the repository's [DateOnly MVC quickstart](../../examples/razorwire-mvc/NESTED-COLLECTIONS.md) at `/Reactivity/NestedCollections` for both removal modes and sparse invalid redisplay. The separate [faithful V4 fixture](../../examples/razorwire-mvc/NESTED-COLLECTIONS.md#faithful-v4-consumer-fixture) at `/Reactivity/SkoolitV4Collections` keeps the source's temporal policy and documents the exact-package consumer proof. Fixture evidence does not claim live Skoolit adoption.
 
 ## Behavior Kit Reference
 
@@ -581,6 +581,8 @@ RazorWire is designed for a fast feedback loop during development:
 - Local scripts and styles automatically receive version hashes for cache busting, even without `asp-append-version="true"`.
 
 ## API Reference
+
+The [form-interaction TagHelper reference](Docs/form-interactions.md#razor-taghelpers) covers `FormCollectionTagHelper.IndexToken`, its default `__index__`, authored attributes, and command normalization, with links to the canonical C# XML definitions and browser contract manifest. The [internal ownership and clone invariants](Docs/form-interactions.md#internal-ownership-and-clone-invariants) document operation-local mapping and before-event revalidation.
 
 ### `RazorWireBridge`
 
