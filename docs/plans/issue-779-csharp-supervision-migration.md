@@ -780,3 +780,80 @@ bytes and all existing quarantine/output/NSS observations. It does not claim tha
 the root stop request caused the worker exit. This is a verifier correction,
 not a C# runtime, timeout, capability, admission or coverage-policy change. A
 fresh complete N11 Linux capture is still required before crediting the control.
+
+
+### Revision 56 retained verification and the next measurement candidate — 2026-10-21
+
+[Revision 56](https://github.com/forge-trust/AppSurface/actions/runs/39549126214)
+uses source `d3a9356658e41603f1070da66e68dbd08ed6e9cd` with a complete 3,482-file
+capture. Its fourteen C1 selector jobs and native aggregate succeeded. Independent
+retained-byte reconciliation matched all sixteen case rows to the exact current
+aggregate. The C3 artifact passed 106 retained-data checks, including the original
+thirteen application/workspace cases, original 39 root controls and separate
+28-case supplement. Account creation and rollback passed their original final
+receipts with six and seven settled utilities, absent names/numeric identities
+and closed original handles. Packaged C2 passed all seven cases; independent
+checks bound the package command results, original producer identities, exact
+output accounting, paired EOFs, group settlement, intentional cleanup quarantine,
+source and standard-report lineage. These are retained artifact checks, not a
+fresh live-kernel query. The unchanged complete solution/patch job then failed with `ASCOV120` in the CLI
+test project before numerical gates were reached. The failed-test artifact is
+retained for diagnosis; no current numerical coverage or overall gate pass is claimed.
+
+The next candidate adds thirteen genuine Linux root deployment-copy controls to
+the [separate root supplement](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#supplementary-root-marker-and-subtree-controls).
+Local scoped format/build/parser tests passed with zero compiler diagnostics.
+Those root cases have not yet run on Linux. It also prepares a
+[standard C1 root measurement chain](../../.github/issue779-checkpoint1/measurement-chain-README.md)
+for `None`, `N04`, `N07` and `N16`, on four separate Linux runners after packaged
+C2. Those selectors exercise six original case rows; the original all-sixteen
+matrix and aggregate remain required. Each stage binds the actual original,
+instrumented and restored image, current source/run/attempt, native results,
+command logs and exact predecessor bytes. Standard Coverlet consumes each
+completed predecessor once. No report counters or condition identities are
+rewritten, no intermediate reporter XML replaces collector output, and no worker
+private tracker data is imported by this root-only lane.
+
+The earlier complete C1 portable discovery plus N15 data suite passed 266 tests in
+14.783 seconds under its 60-second bound; after the custody corrections, current
+discovery passed 268 tests in 6.284 seconds. The final 271-test suite, including
+the dedicated cumulative retention controls and command-reserve boundaries,
+passed in 5.510 seconds (5.780 seconds overall). The post-run verification reserve
+control separately passed its exact-boundary and late-admission rows. These are metadata/ordinary-file controls,
+not Linux owner or coverage evidence. Fresh execution and the original solution
+and Codecov patch gates remain mandatory. The fixed comparison commit
+`1991280e8af049db592ebcb705cbf66f4b4c6e8b`, gate thresholds and
+[`coverage-solution.sh`](../../scripts/coverage-solution.sh) remain unchanged.
+
+
+### Revision 57 CLI fixture clock correction
+
+The revision 56 full CLI log retained a lifecycle fatal-stop diagnostic:
+admission closure exceeded its two-second stopping grace. Of the four tests
+listed as active, only the
+[`EvidenceRestrictedCoverageFactoryTests` metadata fixture](../../Cli/ForgeTrust.AppSurface.Cli.Tests/EvidenceRestrictedCoverageFactoryTests.cs)
+uses that lifecycle. Its supervisor closure is a no-op, but its real wall clock
+and default fatal handler allowed a scheduling delay to terminate the whole test
+host. The artifact does not establish the underlying scheduler or machine cause.
+
+The fixture now uses an explicitly advanced monotonic clock and the existing
+fatal test-interruption seam. Its job, cleanup and stop allowances remain
+120/5/2 seconds. A blocked admission-close control tests both release before
+expiry and actual expiry at the original two-second bound, with owned closure
+released and joined in teardown. Metadata success controls verify ordering;
+they are not wall-time or native-supervision evidence. Production lifecycle,
+process limits, acceptance guards, comparison base and coverage thresholds are
+unchanged. Exact-file formatting and the full factory test class passed 46/46
+with zero compiler diagnostics in 32.764 seconds under a 180-second bound. The
+full Linux gate remains required.
+
+
+The cumulative measurement artifact has a dedicated 192 MiB/1,024-file retention
+contract; the ordinary all-sixteen C1 artifact remains 96 MiB/512 files.
+Observed revision 56 raw-lineage and standard-report sizes project about 106 MiB
+for the final upload before additional metadata, because it retains four report
+pairs and the current stage as well as raw native evidence. This is a bounded
+private artifact contract, not an increase to production output or execution
+budgets. Both modes retain unchanged leaf/archive bounds and reject unsafe nodes
+before applying private upload permissions. Actual revision 57 sizes and all
+standard Linux measurement results remain pending.

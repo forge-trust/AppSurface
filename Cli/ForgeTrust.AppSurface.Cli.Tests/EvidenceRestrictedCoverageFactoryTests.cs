@@ -391,6 +391,65 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         Assert.Equal(1, supervisor.WaitCount);
     }
 
+    /// <summary>The metadata clock isolates scheduling while preserving the actual two-second stop guard.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MetadataCleanupRequiresClosureBeforeItsUnchangedStoppingDeadline(bool expire)
+    {
+        var clock = new MetadataTimeProvider();
+        using var release = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var supervisor = new MetadataSupervisor
+        {
+            OnClose = () =>
+            {
+                entered.TrySetResult();
+                try { release.Wait(); }
+                finally { settled.TrySetResult(); }
+            }
+        };
+        var execution = Execution(supervisor, clock);
+        var disposed = false;
+        Assert.True(execution.RegisterDisposer(_ => { disposed = true; return ValueTask.CompletedTask; }));
+        var cleanup = execution.StopAndDisposeAsync().AsTask();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(cleanup.IsCompleted);
+            Assert.False(disposed);
+            Assert.Equal(0, supervisor.WaitCount);
+            if (expire)
+            {
+                clock.Advance(TimeSpan.FromSeconds(2));
+                var error = await Assert.ThrowsAsync<EvidenceWorkerTestInterruptionException>(
+                    () => cleanup.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.Contains("admission did not close", error.Message, StringComparison.Ordinal);
+                Assert.False(execution.OwnWorkStopped);
+                Assert.False(execution.CleanupCompleted);
+                Assert.False(disposed);
+                Assert.Equal(0, supervisor.WaitCount);
+            }
+            else
+            {
+                release.Set();
+                Assert.True(await cleanup.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.True(execution.OwnWorkStopped);
+                Assert.True(execution.CleanupCompleted);
+                Assert.True(disposed);
+                Assert.Equal(1, supervisor.WaitCount);
+            }
+        }
+        finally
+        {
+            release.Set();
+            await settled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try { await cleanup.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (EvidenceWorkerTestInterruptionException) when (expire) { }
+        }
+    }
+
     private static EvidenceProducerDeclaration Declaration() => new("coverage", "coverage", "1.0.0", [],
         ["appsurface/coverage/behavioral-patch@1"], [], 20, new EvidenceCoverageGateRequirements(95, 85));
     private static EvidencePlan Plan(EvidenceProducerDeclaration declaration)
@@ -400,8 +459,12 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
             [new EvidencePolicyRule("factory-source", "src/**", "coverage")]);
         return new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/FactoryFixture.cs")]);
     }
-    private static EvidenceWorkerExecution Execution(MetadataSupervisor supervisor) => new(supervisor, TimeProvider.System,
-        TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2));
+    // These controls exercise metadata and ownership ordering, not elapsed wall time. Advance the
+    // clock explicitly when testing expiry; the fatal seam keeps a regression from killing the host.
+    private static EvidenceWorkerExecution Execution(MetadataSupervisor supervisor, MetadataTimeProvider? clock = null) =>
+        new(supervisor, clock ?? new MetadataTimeProvider(),
+            TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2),
+            message => new EvidenceWorkerTestInterruptionException(message));
     private static void AssertSafe(EvidenceAdmissionException error, string code)
     {
         Assert.Equal(code, error.Code); Assert.DoesNotContain(Canary, error.Message); Assert.Null(error.InnerException);
@@ -419,8 +482,66 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         public bool IsArmed => true;
         public string RunId => "metadata-only/1";
         public int WaitCount { get; private set; }
-        public void CloseAdmission() { }
+        internal Action? OnClose { get; init; }
+        public void CloseAdmission() => OnClose?.Invoke();
         public ValueTask RequestStopAsync(CancellationToken stoppingToken) => ValueTask.CompletedTask;
         public ValueTask WaitForOwnedExitAsync(CancellationToken stoppingToken) { WaitCount++; return ValueTask.CompletedTask; }
+    }
+
+    /// <summary>Monotonic test clock whose timers fire only when a control explicitly advances it.</summary>
+    private sealed class MetadataTimeProvider : TimeProvider
+    {
+        private readonly object _gate = new();
+        private readonly List<MetadataTimer> _timers = [];
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() { lock (_gate) return _timestamp; }
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch + TimeSpan.FromTicks(GetTimestamp());
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            lock (_gate)
+            {
+                var timer = new MetadataTimer(this, callback, state);
+                timer.Change(dueTime, period);
+                _timers.Add(timer);
+                return timer;
+            }
+        }
+
+        internal void Advance(TimeSpan amount)
+        {
+            ArgumentOutOfRangeException.ThrowIfLessThan(amount, TimeSpan.Zero);
+            MetadataTimer[] due;
+            lock (_gate)
+            {
+                _timestamp += amount.Ticks;
+                due = _timers.Where(timer => timer.IsDue(_timestamp)).ToArray();
+                foreach (var timer in due) timer.Reschedule(_timestamp);
+            }
+            foreach (var timer in due) timer.Fire();
+        }
+
+        private sealed class MetadataTimer(MetadataTimeProvider owner, TimerCallback callback, object? state) : ITimer
+        {
+            private long? _dueAt;
+            private TimeSpan _period;
+            private bool _disposed;
+            internal bool IsDue(long now) => !_disposed && _dueAt is long due && due <= now;
+            internal void Reschedule(long now) => _dueAt = _period > TimeSpan.Zero ? now + _period.Ticks : null;
+            internal void Fire() => callback(state);
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                lock (owner._gate)
+                {
+                    if (_disposed) return false;
+                    _period = period;
+                    _dueAt = dueTime == Timeout.InfiniteTimeSpan ? null : owner._timestamp + dueTime.Ticks;
+                    return true;
+                }
+            }
+            public void Dispose() { lock (owner._gate) { _disposed = true; _dueAt = null; } }
+            public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        }
     }
 }

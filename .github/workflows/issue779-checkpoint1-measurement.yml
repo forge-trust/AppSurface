@@ -1,0 +1,261 @@
+name: Issue 779 measured current CSharp worker selector
+
+on:
+  workflow_call:
+    inputs:
+      selector:
+        required: true
+        type: string
+      prior_artifact_name:
+        required: true
+        type: string
+    outputs:
+      artifact_name:
+        description: Source-bound standard measurement for the selected genuine procedure
+        value: ${{ jobs.measurement.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  measurement:
+    name: Measure current CSharp worker ${{ inputs.selector }}
+    runs-on: ubuntu-24.04
+    # Preserve every explicit phase limit plus setup, downloads and retention.
+    timeout-minutes: 75
+    outputs:
+      artifact_name: ${{ steps.retention.outputs.artifact_name }}
+    env:
+      C1_SELECTOR: ${{ inputs.selector }}
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "1"
+      MSBUILDDISABLENODEREUSE: "1"
+      DOTNET_CLI_USE_MSBUILD_SERVER: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select a fresh private build SDK installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sdk_parent="$RUNNER_TEMP/checkpoint1-build-sdk"
+          mkdir -m 0700 "$sdk_parent"
+          # setup-dotnet reads this before selecting its installation/reuse root.
+          printf 'DOTNET_INSTALL_DIR=%s/installation\n' "$sdk_parent" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind the complete current source and fixed selector
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-evidence"
+          inputs="$RUNNER_TEMP/checkpoint1-$C1_SELECTOR-inputs"
+          mkdir -m 0700 "$evidence"
+          mkdir -m 0700 "$inputs"
+          printf 'C1_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          printf 'C1_INPUTS=%s\n' "$inputs" >> "$GITHUB_ENV"
+          printf 'C1_BUILD_SDK=%s\n' "$(dirname "$(readlink -f "$(command -v dotnet)")")" >> "$GITHUB_ENV"
+          printf 'C1_RUNTIME=%s\n' "$inputs/runtime" >> "$GITHUB_ENV"
+          printf 'NUGET_PACKAGES=%s/checkpoint1-packages\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          timeout --signal=KILL 60 python3 -B - <<'PY' > "$evidence/portable-tests.log" 2>&1
+          import importlib.util
+          from pathlib import Path
+          import sys
+          import unittest
+          root = Path('.github/issue779-checkpoint1').resolve()
+          sys.path.insert(0, str(root))
+          loader = unittest.TestLoader()
+          suite = loader.discover(str(root), pattern='test_*.py')
+          # N15's owner-scoped tests live beside the port, outside discovery's
+          # package recursion. Include that fixed module in the same 60s bound.
+          path = root / 'procedures/n15/test_data.py'
+          spec = importlib.util.spec_from_file_location('c1_n15_portable_data', path)
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          suite.addTests(loader.loadTestsFromModule(module))
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          PY
+      - name: Install the distribution-matched execution runtime prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # The private 10.0.401 SDK remains the only compiler host. The
+          # distribution SDK supplies the complete OS-matched runtime image;
+          # none of its SDK/packs content is copied into the protected runtime.
+          timeout --signal=KILL 180 sudo --non-interactive apt-get update \
+            > "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          timeout --signal=KILL 10 apt-cache policy \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-package-policy.log"
+          timeout --signal=KILL 240 sudo --non-interactive apt-get install \
+            --yes --no-install-recommends dotnet-sdk-10.0 \
+            >> "$C1_EVIDENCE/runtime-package-install.log" 2>&1
+          dpkg-query --show --showformat='${Package}\t${Version}\t${Architecture}\t${db:Status-Status}\n' \
+            dotnet-sdk-10.0 dotnet-host-10.0 dotnet-hostfxr-10.0 \
+            dotnet-runtime-10.0 aspnetcore-runtime-10.0 liblttng-ust1t64 \
+            > "$C1_EVIDENCE/runtime-packages.tsv"
+          test "$(readlink -f /usr/lib/dotnet)" = /usr/lib/dotnet
+          test "$(readlink -f /usr/lib/dotnet/dotnet)" = /usr/lib/dotnet/dotnet
+          test -d /usr/lib/dotnet/sdk
+          printf 'C1_EXECUTION_SDK=/usr/lib/dotnet\n' >> "$GITHUB_ENV"
+      - name: Copy the actual SDK-free framework-dependent runtime closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # Observe only fixed execution-installation roles; these facts cannot
+          # qualify the image or replace the complete copy and native OS audit.
+          timeout --signal=KILL 6 python3 -B - <<'PY' > "$C1_EVIDENCE/runtime-input-metadata.json"
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import stat
+          import time
+          root = Path(os.environ['C1_EXECUTION_SDK'])
+          deadline = time.monotonic() + 5
+          roles = ('host', 'host/fxr', 'shared', 'shared/Microsoft.NETCore.App', 'shared/Microsoft.AspNetCore.App')
+          version = re.compile(r'10\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\Z')
+          rows = []
+          def facts(value):
+            return {'mode': format(stat.S_IMODE(value.st_mode), '04o'),
+                    'uid': value.st_uid, 'gid': value.st_gid,
+                    'links': value.st_nlink, 'directory': stat.S_ISDIR(value.st_mode)}
+          for role in roles:
+            row = {'role': role, 'facts': None, 'versions': [], 'errno': None, 'truncated': False}
+            try:
+              if time.monotonic() >= deadline:
+                row['truncated'] = True
+              else:
+                node = root / role
+                row['facts'] = facts(node.lstat())
+                if role in roles[1:2] + roles[3:]:
+                  with os.scandir(node) as entries:
+                    for index, entry in enumerate(entries):
+                      if index >= 128 or time.monotonic() >= deadline:
+                        row['truncated'] = True
+                        break
+                      if version.fullmatch(entry.name):
+                        row['versions'].append({'version': entry.name,
+                                                'facts': facts(entry.stat(follow_symlinks=False))})
+                  row['versions'].sort(key=lambda item: item['version'])
+            except OSError as error:
+              row['errno'] = error.errno if type(error.errno) is int and 1 <= error.errno <= 4095 else None
+            rows.append(row)
+          print(json.dumps({'schema': 'issue779-runtime-input-metadata-v1', 'roles': rows,
+                            'qualification': False}, sort_keys=True))
+          PY
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/prepare-runtime.py \
+            --sdk-root "$C1_EXECUTION_SDK" --output "$C1_RUNTIME" --receipt "$C1_EVIDENCE/runtime-preparation.json" \
+            > "$C1_EVIDENCE/runtime-preparation.log" 2>&1
+      - name: Publish the current selected CLI in Release and retain genuine build facts
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          timeout --signal=KILL 630 python3 -B .github/issue779-checkpoint1/publish.py \
+            --source-root "$GITHUB_WORKSPACE" --source-capture "$C1_EVIDENCE/source.json" \
+            --source "$GITHUB_SHA" --selector "$C1_SELECTOR" --runtime "$C1_RUNTIME" --build-sdk "$C1_BUILD_SDK" \
+            --tool "$C1_INPUTS/tool" --output "$C1_EVIDENCE/build.json" \
+            > "$C1_EVIDENCE/publisher.log" 2>&1
+      - name: Install the pinned standard root collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint1-coverlet" > "$C1_EVIDENCE/collector-install.log" 2>&1
+          console="$RUNNER_TEMP/checkpoint1-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
+          test -s "$console"
+          printf 'C1_COVERLET=%s\n' "$console" >> "$GITHUB_ENV"
+      - name: Download the successful current measurement predecessor
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ inputs.prior_artifact_name }}
+          path: ${{ runner.temp }}/c1-chain-input
+      - name: Bind the exact predecessor without merging or rewriting counters
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          prior="$RUNNER_TEMP/c1-chain-prior"
+          timeout --signal=KILL 150 python3 -B .github/issue779-checkpoint1/measurement_chain.py prepare \
+            --input "$RUNNER_TEMP/c1-chain-input" --input-artifact "${{ inputs.prior_artifact_name }}" \
+            --source-capture "$C1_EVIDENCE/source.json" --source "$GITHUB_SHA" --selector "$C1_SELECTOR" \
+            --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" --output "$prior" \
+            > "$C1_EVIDENCE/prior-validation.log" 2>&1
+          printf 'C1_PRIOR=%s\n' "$prior" >> "$GITHUB_ENV"
+          common=(--source-capture "$C1_EVIDENCE/source.json" --source "$GITHUB_SHA" --selector "$C1_SELECTOR"
+                  --build-receipt "$C1_EVIDENCE/build.json" --collector "$C1_COVERLET" --evidence "$C1_EVIDENCE"
+                  --prior-report "$prior/prior-report.json" --prior-binding "$prior/prior-binding.json"
+                  --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          timeout --signal=KILL 250 python3 -B .github/issue779-checkpoint1/measurement.py bind "${common[@]}" \
+            > "$C1_EVIDENCE/measurement-bind.log" 2>&1
+      - name: Measure the original genuine Linux procedure and restore its selected image
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          common=(--source-capture "$C1_EVIDENCE/source.json" --source "$GITHUB_SHA" --selector "$C1_SELECTOR"
+                  --build-receipt "$C1_EVIDENCE/build.json" --collector "$C1_COVERLET" --evidence "$C1_EVIDENCE"
+                  --prior-report "$C1_PRIOR/prior-report.json" --prior-binding "$C1_PRIOR/prior-binding.json"
+                  --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT")
+          target_args="$(python3 -B - "${common[@]}" <<'PY_ARGS'
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from measurement_arguments import arguments
+          print(arguments(['-B', '.github/issue779-checkpoint1/measurement.py', 'target', *sys.argv[1:]]))
+          PY_ARGS
+          )"
+          set +e
+          timeout --signal=KILL 1200 sudo --non-interactive /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$C1_RUNTIME/dotnet" "$C1_COVERLET" "$C1_INPUTS/tool/ForgeTrust.AppSurface.Cli.dll" \
+            --target /usr/bin/python3 --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --merge-with "$C1_PRIOR/prior-report.json" --format json --format cobertura --output "$C1_EVIDENCE/coverage" \
+            > "$C1_EVIDENCE/collector.log" 2>&1
+          collector_exit=$?
+          timeout --signal=KILL 250 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint1/measurement.py finalize \
+            --collector-exit "$collector_exit" "${common[@]}" > "$C1_EVIDENCE/measurement-finalize.log" 2>&1
+          finalizer_exit=$?
+          set -e
+          printf 'c1_collector_exit=%s c1_finalizer_exit=%s\n' "$collector_exit" "$finalizer_exit"
+          if (( collector_exit != 0 )); then exit "$collector_exit"; fi
+          exit "$finalizer_exit"
+      - name: Retain the closed current chain after actual execution and restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 150 sudo --non-interactive /usr/bin/python3 -B .github/issue779-checkpoint1/measurement_chain.py finalize \
+            --input "$C1_PRIOR" --evidence "$C1_EVIDENCE" --source-capture "$C1_EVIDENCE/source.json" \
+            --source "$GITHUB_SHA" --selector "$C1_SELECTOR" --workflow-identity "github-actions-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --output "$C1_EVIDENCE/chain" > "$C1_EVIDENCE/chain-finalize.log" 2>&1
+      - name: Recheck the complete current source after native work
+        if: always()
+        run: python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$C1_EVIDENCE/source.json" --verify
+      - name: Validate bounded private artifacts
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --non-interactive chown -R --no-dereference "$(id -u):$(id -g)" "$C1_EVIDENCE"
+          timeout --signal=KILL 35 python3 -B .github/issue779-checkpoint1/check-retention.py --measurement "$C1_EVIDENCE"
+          printf 'artifact_name=issue779-c1-measured-%s-%s-%s\n' "$C1_SELECTOR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.retention.outcome == 'success'
+        with:
+          name: issue779-c1-measured-${{ inputs.selector }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.C1_EVIDENCE }}
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

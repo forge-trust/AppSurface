@@ -47,9 +47,41 @@ jobs:
       prior_kind: accounts
       prior_artifact_name: ${{ needs.account-creation.outputs.artifact_name }}
 
+  worker-measurement-none:
+    name: Standard root measurement for current C1 None
+    needs: packaged-producer
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "None"
+      prior_artifact_name: issue779-csharp-checkpoint2-${{ github.run_id }}-${{ github.run_attempt }}
+
+  worker-measurement-n04:
+    name: Standard root measurement for current C1 N04
+    needs: worker-measurement-none
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N04"
+      prior_artifact_name: ${{ needs.worker-measurement-none.outputs.artifact_name }}
+
+  worker-measurement-n07:
+    name: Standard root measurement for current C1 N07
+    needs: worker-measurement-n04
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N07"
+      prior_artifact_name: ${{ needs.worker-measurement-n04.outputs.artifact_name }}
+
+  worker-measurement-n16:
+    name: Standard root measurement for current C1 N16
+    needs: worker-measurement-n07
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N16"
+      prior_artifact_name: ${{ needs.worker-measurement-n07.outputs.artifact_name }}
+
   solution-coverage:
     name: Unchanged solution and codecov patch gates
-    needs: [worker-controls, application-consumers, account-creation, account-rollback, packaged-producer]
+    needs: [worker-controls, application-consumers, account-creation, account-rollback, packaged-producer, worker-measurement-n16]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -104,6 +136,11 @@ jobs:
         with:
           name: issue779-csharp-checkpoint2-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/checkpoint4-producer-input
+      - name: Download the completed current worker measurement chain
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n16.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input
       - name: Stage only fixed source-bound native measurement inputs
         run: |
           set -euo pipefail
@@ -140,7 +177,24 @@ jobs:
           settings = ET.Element('RunSettings')
           collector = ET.SubElement(ET.SubElement(ET.SubElement(settings, 'DataCollectionRunSettings'), 'DataCollectors'), 'DataCollector', friendlyName='XPlat Code Coverage')
           configuration = ET.SubElement(collector, 'Configuration')
-          ET.SubElement(configuration, 'MergeWith').text = str(root / 'producer-roots/native-producer-roots.json')
+          # Only this fixed source-owned data verifier can select the completed current
+          # standard report. Original C3/accounts/C2 inputs remain separate for their tests.
+          import os, sys, time
+          sys.path.insert(0, str(Path('.github/issue779-checkpoint1').resolve()))
+          import binding
+          from measurement_chain import validate_final
+          source_raw = (root / 'source.json').read_bytes()
+          capture = binding.validate_capture(binding.decode(source_raw), os.environ['GITHUB_SHA'])
+          binding.verify_source(capture, Path.cwd(), deadline=time.monotonic() + 120)
+          chain = Path(os.environ['RUNNER_TEMP']) / 'checkpoint4-worker-measurement-input/chain'
+          final_report = validate_final(source_raw, chain,
+              'github-actions-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'],
+              deadline=time.monotonic() + 120)
+          # The first chain report must be the exact producer report already staged above.
+          prior_sha = binding.digest((root / 'producer-roots/native-producer-roots.json').read_bytes())
+          chain_data = binding.decode((chain / 'chain-binding.json').read_bytes())
+          assert chain_data['predecessor']['report_sha256'] == prior_sha
+          ET.SubElement(configuration, 'MergeWith').text = str(final_report)
           ET.SubElement(configuration, 'Format').text = 'cobertura'
           ET.ElementTree(settings).write(root / 'native.runsettings', encoding='utf-8', xml_declaration=True)
           PY

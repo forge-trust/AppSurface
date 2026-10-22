@@ -351,7 +351,7 @@ jobs:
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-supplement-tests" <<'PY_ARGS'
           import subprocess, sys
-          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxOwnerGuardNativeTests|FullyQualifiedName~LinuxCustodySupplementNativeTests', '--logger:trx;LogFileName=root-supplement.trx', '--ResultsDirectory:' + sys.argv[2]]
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxOwnerGuardNativeTests|FullyQualifiedName~LinuxCustodySupplementNativeTests|FullyQualifiedName~LinuxProducerFileTreeNativeTests', '--logger:trx;LogFileName=root-supplement.trx', '--ResultsDirectory:' + sys.argv[2]]
           assert all(not any(c in value for c in '\n\r"\\') for value in values)
           print(subprocess.list2cmdline(values))
           PY_ARGS
@@ -376,17 +376,17 @@ jobs:
           document = ET.parse(trx)
           ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
           counters = document.find('.//' + ns + 'Counters').attrib
-          assert all(int(counters[key]) == 28 for key in ('total', 'executed', 'passed'))
+          assert all(int(counters[key]) == 41 for key in ('total', 'executed', 'passed'))
           assert all(int(counters.get(key, '0')) == 0 for key in ('failed', 'error', 'notExecuted', 'warning'))
           rows = document.findall('.//' + ns + 'UnitTestResult')
-          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 9}
-          assert len(rows) == 28 and len({row.attrib['testName'] for row in rows}) == 28
+          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 9, 'LinuxProducerFileTreeNativeTests': 13}
+          assert len(rows) == 41 and len({row.attrib['testName'] for row in rows}) == 41
           assert all(row.attrib['outcome'] == 'Passed' for row in rows)
           for name, count in expected.items():
               assert sum(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in rows) == count
           binding_path = root / 'measurement-binding.json'
           binding = json.loads(binding_path.read_bytes())
-          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 28, 'passed': 28, 'native_acceptance': False}
+          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 41, 'passed': 41, 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-supplement.' + suffix)
               assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024

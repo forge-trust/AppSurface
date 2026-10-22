@@ -38,6 +38,11 @@ HELPER_PROJECTS = {
     "n04": (".github/issue779-checkpoint1/procedures/helpers/n04/NativeRootCoordinator.csproj", "NativeRootCoordinator.dll"),
     "n07": (".github/issue779-checkpoint1/procedures/helpers/n07/NativeRootCoordinator.csproj", "NativeRootCoordinator.dll"),
 }
+MEASUREMENT_MODULES = ("ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
+    "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
+    "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision")
+MEASUREMENT_NAMES = frozenset(name + suffix for name in MEASUREMENT_MODULES for suffix in (".dll", ".pdb"))
+MEASUREMENT_COLLECTOR_SUFFIX = "/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
 
 
 def required_helpers(selector):
@@ -245,6 +250,8 @@ def validate_build(value, capture_raw, expected_source, selector):
     A passing detached model proves grammar only. verify_build additionally
     checks raw logs, full source/Git and every actual image file.
     """
+    if type(value) is dict and value.get("schema") == "issue779-checkpoint1-build-v2":
+        return validate_measured_build(value, capture_raw, expected_source, selector)
     capture = validate_capture(decode(capture_raw), expected_source)
     exact(value, ("schema", "source", "selector", "configuration", "sdk_version", "source_root",
                   "source_capture_sha256", "source_after_capture_sha256", "commands", "tool", "runtime", "helpers",
@@ -325,6 +332,55 @@ def validate_build(value, capture_raw, expected_source, selector):
         require(all(not overlaps(root, other) for other in roots), "helper-root-overlap")
         roots.append(root)
         validate_helper_commands(helper_id, helper["commands"], source, root, logs)
+    return capture
+
+
+def validate_measured_build(value, capture_raw, expected_source, selector):
+    """Validate a private instrumented image while retaining the original build inventory.
+
+    The v1 publication commands remain literal and unchanged. Only the six selected
+    DLLs and their PDBs may differ in the actual staged image; all other files,
+    directory modes, runtime and helper inputs retain their original bindings.
+    This detached check grants no execution or native authority. ``verify_build``
+    additionally reads the original v1 receipt and pinned collector before staging.
+    """
+    exact(value, ("schema", "source", "selector", "configuration", "sdk_version", "source_root",
+        "source_capture_sha256", "source_after_capture_sha256", "commands", "tool", "runtime", "helpers",
+        "native_execution", "measurement"), "measurement-build-fields")
+    measurement = value["measurement"]
+    exact(measurement, ("schema", "original_build_path", "original_build_sha256", "original_tool",
+        "instrumented_modules", "collector_path", "collector_sha256"), "measurement-fields")
+    require(measurement["schema"] == "issue779-c1-measurement-build-v1", "measurement-schema")
+    original_path = absolute(measurement["original_build_path"])
+    collector = absolute(measurement["collector_path"])
+    require(str(collector).endswith(MEASUREMENT_COLLECTOR_SUFFIX), "measurement-collector-path")
+    for key in ("original_build_sha256", "collector_sha256"):
+        require(type(measurement[key]) is str and HEX64.fullmatch(measurement[key]), "measurement-hash")
+    original = validate_image(measurement["original_tool"], "ForgeTrust.AppSurface.Cli.dll")
+    # Reuse the complete v1 command/source/image grammar, without adopting a
+    # caller-supplied alternate command or qualification selection.
+    projected = {key: child for key, child in value.items() if key != "measurement"}
+    projected["schema"] = "issue779-checkpoint1-build-v1"
+    capture = validate_build(projected, capture_raw, expected_source, selector)
+    tool = value["tool"]
+    require(original_path == absolute(value["commands"][0]["log_path"]).parent / "build.json",
+        "measurement-original-path")
+    require(original["root"] == tool["root"] and original["entry"] == tool["entry"]
+        and original["directories"] == tool["directories"]
+        and set(original["files"]) == set(tool["files"]), "measurement-image-shape")
+    maps = measurement["instrumented_modules"]
+    require(type(maps) is dict and set(maps) == MEASUREMENT_NAMES
+        and MEASUREMENT_NAMES <= set(tool["files"]), "measurement-module-set")
+    for name, row in tool["files"].items():
+        previous = original["files"][name]
+        if name in MEASUREMENT_NAMES:
+            require(type(maps[name]) is str and HEX64.fullmatch(maps[name])
+                and maps[name] == row["sha256"] and row["mode"] == previous["mode"],
+                "measurement-module-binding")
+            if name.endswith(".dll"):
+                require(row["sha256"] != previous["sha256"], "measurement-module-unchanged")
+        else:
+            require(row == previous, "measurement-unselected-file")
     return capture
 
 
@@ -727,6 +783,19 @@ def verify_source(value, root, *, deadline):
 
 def verify_build(value, capture_raw, expected_source, selector, *, deadline):
     capture = validate_build(value, capture_raw, expected_source, selector)
+    if value["schema"] == "issue779-checkpoint1-build-v2":
+        measurement = value["measurement"]
+        original_raw = read(measurement["original_build_path"], deadline=deadline)
+        require(digest(original_raw) == measurement["original_build_sha256"], "measurement-original-hash")
+        original = decode(original_raw)
+        require(type(original) is dict and original.get("schema") == "issue779-checkpoint1-build-v1",
+            "measurement-original-schema")
+        validate_build(original, capture_raw, expected_source, selector)
+        require(original["tool"] == measurement["original_tool"], "measurement-original-tool")
+        require(all(value[key] == child for key, child in original.items() if key not in ("schema", "tool")),
+            "measurement-original-fields")
+        collector_raw = read(measurement["collector_path"], 32 * 1024 * 1024, deadline=deadline)
+        require(digest(collector_raw) == measurement["collector_sha256"], "measurement-collector-hash")
     all_commands = list(value["commands"])
     for helper in value["helpers"].values(): all_commands.extend(helper["commands"])
     for row in all_commands:

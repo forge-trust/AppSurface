@@ -15,6 +15,34 @@ spec.loader.exec_module(retention)
 
 
 class RetentionControls(unittest.TestCase):
+    def test_measurement_contract_retains_actual_cumulative_files_above_the_ordinary_total(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sizes = [24 * 1024 * 1024] * 4 + [1]
+            for index, size in enumerate(sizes):
+                with (root / str(index)).open('xb') as stream:
+                    stream.truncate(size)
+            with patch.object(retention.os, 'fchmod') as chmod:
+                with self.assertRaisesRegex(ValueError, '^retention-tree-bound$'):
+                    retention.check(root)
+                chmod.assert_not_called()
+            self.assertEqual({'files': 5, 'bytes': sum(sizes)}, retention.check_measurement(root))
+            self.assertEqual(sizes, [(root / str(i)).stat().st_size for i in range(5)])
+            self.assertTrue(all((root / str(i)).stat().st_mode & 0o777 == 0o600 for i in range(5)))
+        self.assertEqual(96 * 1024 * 1024, retention.TOTAL_LIMIT)
+        self.assertEqual(512, retention.FILE_COUNT_LIMIT)
+
+    def test_measurement_limits_still_reject_before_any_permission_change(self):
+        for limit, value in (('MEASUREMENT_TOTAL_LIMIT', 0),
+                             ('MEASUREMENT_FILE_COUNT_LIMIT', 0), ('MEASUREMENT_NODE_LIMIT', 1)):
+            with self.subTest(limit=limit), patch.object(retention, limit, value), \
+                    patch.object(retention.os, 'fchmod') as chmod:
+                with self.assertRaisesRegex(ValueError, '^retention-tree-bound$'):
+                    retention.check_measurement(self.evidence)
+                chmod.assert_not_called()
+            self.assertEqual(b'private canary\x00', self.log.read_bytes())
+            self.assertEqual(0o644, self.log.stat().st_mode & 0o777)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="c1-retention-")
         self.addCleanup(self.temporary.cleanup)

@@ -5,7 +5,8 @@ The sealed source, SDK and publication trees remain outside the artifact root.
 All nodes are checked before any permission change. The fixed 96 MiB total,
 32 MiB file and 512-file limits are retention limits, not product quotas. The
 fixed native-private.tar and N15 native.tar leaves retain their original
-33,619,968-byte USTAR bound.
+33,619,968-byte USTAR bound. Only the dedicated four-link measurement workflow
+selects --measurement with 192 MiB/1,024 files; ordinary invocation is unchanged.
 """
 
 from pathlib import Path
@@ -21,6 +22,9 @@ FILE_COUNT_LIMIT = 512
 NODE_LIMIT = 1024
 ARCHIVE_LIMIT = 33619968
 ARCHIVE_NAMES = frozenset(("native-private.tar", "native.tar"))
+MEASUREMENT_TOTAL_LIMIT = 192 * 1024 * 1024
+MEASUREMENT_FILE_COUNT_LIMIT = 1024
+MEASUREMENT_NODE_LIMIT = 2048
 
 
 def check(root, *, deadline=None):
@@ -30,6 +34,24 @@ def check(root, *, deadline=None):
     are rejected without chmod; opened nodes are checked again before fchmod.
     No input is deleted or truncated to satisfy these bounds.
     """
+    return _check(root, deadline=deadline, total_limit=TOTAL_LIMIT,
+                  file_count_limit=FILE_COUNT_LIMIT, node_limit=NODE_LIMIT)
+
+
+def check_measurement(root, *, deadline=None):
+    """Retain four cumulative measurement links within 192 MiB and 1,024 files.
+
+    Only the dedicated measurement workflow selects this fixed contract. The
+    ordinary native lane retains its original 96 MiB/512-file contract, and all
+    per-file, archive, link, node-stability and no-truncation checks are shared.
+    These are private artifact limits, not production or coverage limits.
+    """
+    return _check(root, deadline=deadline, total_limit=MEASUREMENT_TOTAL_LIMIT,
+                  file_count_limit=MEASUREMENT_FILE_COUNT_LIMIT, node_limit=MEASUREMENT_NODE_LIMIT)
+
+
+def _check(root, *, deadline, total_limit, file_count_limit, node_limit):
+    """Apply identical stable-node checks for one source-selected retention contract."""
     root = Path(root)
     deadline = time.monotonic() + 30 if deadline is None else deadline
     if not stat.S_ISDIR(root.lstat().st_mode):
@@ -52,13 +74,13 @@ def check(root, *, deadline=None):
             total += metadata.st_size
             files += 1
         rows.append((path, metadata, directory))
-        if len(rows) > NODE_LIMIT or files > FILE_COUNT_LIMIT or total > TOTAL_LIMIT:
+        if len(rows) > node_limit or files > file_count_limit or total > total_limit:
             raise ValueError("retention-tree-bound")
         if directory:
             with os.scandir(path) as entries:
                 for entry in entries:
                     pending.append(Path(entry.path))
-                    if len(rows) + len(pending) > NODE_LIMIT:
+                    if len(rows) + len(pending) > node_limit:
                         raise ValueError("retention-tree-bound")
     for path, before, directory in rows:
         if time.monotonic() >= deadline:
@@ -81,6 +103,9 @@ def check(root, *, deadline=None):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    if len(sys.argv) == 3 and sys.argv[1] == "--measurement":
+        check_measurement(Path(sys.argv[2]))
+    elif len(sys.argv) == 2:
+        check(Path(sys.argv[1]))
+    else:
         raise SystemExit(2)
-    check(Path(sys.argv[1]))
