@@ -308,6 +308,43 @@ internal sealed class CoverageArtifactSession : IDisposable
         await store.RegisterAsync(registeredRun, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>Finds a physically bound managed input root without adopting copied metadata.</summary>
+    /// <param name="coveragePath">An input report whose containing directories are inspected, up to 32 levels.</param>
+    /// <param name="observedRoots">Optional acquisition-local observations shared by one merge's shard discovery; never retain or reuse across commands.</param>
+    /// <returns>The nearest root whose bounded sidecar names its actual physical output, or null.</returns>
+    /// <remarks>Missing, malformed, inaccessible and foreign sidecars do not grant ownership or require an input lock.
+    /// A copied report remains eligible for the existing arbitrary-XML numeric gate. First-party Evidence retains
+    /// its explicit execution session; this observation is neither source attestation nor registration.</remarks>
+    internal static string? FindOwnedInputRoot(string coveragePath, IDictionary<string, bool>? observedRoots = null)
+    {
+        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(coveragePath))!);
+        for (var depth = 0; directory is not null && depth < 32; depth++, directory = directory.Parent)
+        {
+            if (observedRoots is not null && observedRoots.TryGetValue(directory.FullName, out var observed))
+            {
+                if (observed) return directory.FullName;
+                continue;
+            }
+            var owned = false;
+            if (File.Exists(Path.Join(directory.FullName, SidecarName)))
+            {
+                try
+                {
+                    using var root = CoverageRunOutputLease.AcquireArtifactDirectory(directory.FullName, false, false);
+                    if (root is not null)
+                    {
+                        using var sidecar = root.OpenArtifactFile(SidecarName, createNew: false, requirePrivate: false);
+                        owned = ReadCurrent(sidecar).ManifestBase.OutputIdentity == root.ArtifactDirectoryIdentity;
+                    }
+                }
+                catch (Exception exception) when (IsOptionalFailure(exception)) { }
+            }
+            if (observedRoots is not null) observedRoots[directory.FullName] = owned;
+            if (owned) return directory.FullName;
+        }
+        return null;
+    }
+
     /// <summary>Reads one bounded current sidecar, requiring compatible explicit producer inventory.</summary>
     /// <param name="input">A caller-owned no-follow regular-file stream.</param>
     internal static CoverageArtifactCurrentRun ReadCurrent(Stream input)

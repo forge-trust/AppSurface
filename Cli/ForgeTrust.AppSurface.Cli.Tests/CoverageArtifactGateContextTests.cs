@@ -32,6 +32,93 @@ public sealed class CoverageArtifactGateContextTests
     }
 
     [Fact]
+    public async Task AcquireAsync_CopiedSidecarDoesNotAdoptOrLeaseAnUnregisteredInput()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var original = fixture.CreateDirectory("repo/original");
+        var coverage = Path.Join(original, "coverage.xml");
+        await RegisterRunAsync(original, repository, coverage, "coverage"u8.ToArray());
+        var copied = fixture.CreateDirectory("repo/copied");
+        var copiedCoverage = Path.Join(copied, "coverage.xml");
+        File.Copy(coverage, copiedCoverage);
+        File.Copy(Path.Join(original, CoverageArtifactSession.SidecarName),
+            Path.Join(copied, CoverageArtifactSession.SidecarName));
+        var output = fixture.CreateDirectory("repo/reports");
+
+        using var context = await CoverageArtifactGateContext.AcquireAsync(
+            new CoverageGateRequest(copiedCoverage, output, 0, 0), TextWriter.Null, CancellationToken.None);
+
+        using var unmanagedWriter = CoverageArtifactOperationLease.Acquire(copied, exclusive: true);
+        Assert.Throws<CoverageExecutionException>(() => CoverageArtifactOperationLease.Acquire(output, exclusive: false));
+    }
+
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("{}")]
+    [InlineData("null")]
+    public async Task AcquireAsync_InvalidSidecarDoesNotGrantInputOwnership(string sidecar)
+    {
+        using var fixture = TestDirectory.Create();
+        var input = fixture.CreateDirectory("input");
+        var coverage = Path.Join(input, "coverage.xml");
+        await File.WriteAllTextAsync(coverage, "coverage");
+        await File.WriteAllTextAsync(Path.Join(input, CoverageArtifactSession.SidecarName), sidecar);
+        var output = fixture.CreateDirectory("reports");
+
+        using var context = await CoverageArtifactGateContext.AcquireAsync(
+            new CoverageGateRequest(coverage, output, 0, 0), TextWriter.Null, CancellationToken.None);
+
+        using var unmanagedWriter = CoverageArtifactOperationLease.Acquire(input, exclusive: true);
+    }
+
+    [Fact]
+    public async Task AcquireAsync_InvalidNestedSidecarStillProtectsTheBoundAncestor()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var input = fixture.CreateDirectory("repo/coverage");
+        await RegisterRunAsync(input, repository, Path.Join(input, "coverage.xml"), "coverage"u8.ToArray());
+        var nested = fixture.CreateDirectory("repo/coverage/nested");
+        await File.WriteAllTextAsync(Path.Join(nested, CoverageArtifactSession.SidecarName), "not-json");
+        var coverage = Path.Join(nested, "coverage.xml");
+        await File.WriteAllTextAsync(coverage, "coverage");
+
+        using var context = await CoverageArtifactGateContext.AcquireAsync(
+            new CoverageGateRequest(coverage, fixture.CreateDirectory("reports"), 0, 0),
+            TextWriter.Null, CancellationToken.None);
+
+        Assert.Throws<CoverageExecutionException>(() => CoverageArtifactOperationLease.Acquire(input, exclusive: true));
+    }
+
+    [Fact]
+    public async Task FindOwnedInputRoot_MemoPreservesEachReportsAncestorBound()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var input = fixture.CreateDirectory("repo/coverage");
+        await RegisterRunAsync(input, repository, Path.Join(input, "coverage.xml"), "coverage"u8.ToArray());
+        var paths = new List<string> { input };
+        for (var index = 0; index < 35; index++)
+            paths.Add(Directory.CreateDirectory(Path.Join(paths[^1], "d")).FullName);
+        var observed = new Dictionary<string, bool>(
+            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+
+        Assert.Equal(input, CoverageArtifactSession.FindOwnedInputRoot(Path.Join(input, "coverage.xml"), observed));
+        Assert.Null(CoverageArtifactSession.FindOwnedInputRoot(Path.Join(paths[35], "coverage.xml"), observed));
+        Assert.Equal(input, CoverageArtifactSession.FindOwnedInputRoot(Path.Join(paths[20], "coverage.xml"), observed));
+        Assert.Equal(
+            CoverageArtifactSession.FindOwnedInputRoot(Path.Join(paths[20], "coverage.xml")),
+            CoverageArtifactSession.FindOwnedInputRoot(Path.Join(paths[20], "coverage.xml"), observed));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_WhenOutputLeaseIsBusy_FailsBeforeEvaluatingCoverage()
     {
         using var fixture = TestDirectory.Create();

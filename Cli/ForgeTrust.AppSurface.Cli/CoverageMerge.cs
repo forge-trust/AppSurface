@@ -309,16 +309,14 @@ internal sealed class CoverageMergeWorkflow
                 using var outputDirectory = CoverageRunOutputLease.AcquireArtifactDirectory(output, false, false)!;
                 var desired = new Dictionary<string, (string Path, bool Writer)>(StringComparer.Ordinal)
                 { [outputDirectory.ArtifactDirectoryIdentity] = (output, true) };
+                var observedRoots = new Dictionary<string, bool>(
+                    OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
                 foreach (var report in reports)
                 {
-                    var parent = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(report))!);
-                    for (var depth = 0; parent is not null && depth < 32; parent = parent.Parent, depth++)
-                    {
-                        if (!File.Exists(Path.Join(parent.FullName, CoverageArtifactSession.SidecarName))) continue;
-                        using var root = CoverageRunOutputLease.AcquireArtifactDirectory(parent.FullName, false, false)!;
-                        desired.TryAdd(root.ArtifactDirectoryIdentity, (parent.FullName, false));
-                        break;
-                    }
+                    var inputRoot = CoverageArtifactSession.FindOwnedInputRoot(report, observedRoots);
+                    if (inputRoot is null) continue;
+                    using var root = CoverageRunOutputLease.AcquireArtifactDirectory(inputRoot, false, false)!;
+                    desired.TryAdd(root.ArtifactDirectoryIdentity, (inputRoot, false));
                 }
                 foreach (var item in desired.OrderBy(pair => pair.Key, StringComparer.Ordinal))
                 {

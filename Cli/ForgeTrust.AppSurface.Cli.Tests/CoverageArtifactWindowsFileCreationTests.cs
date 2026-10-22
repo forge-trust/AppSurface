@@ -9,6 +9,28 @@ public sealed class CoverageArtifactWindowsFileCreationTests
 {
     [CoverageWindowsFact]
     [SupportedOSPlatform("windows")]
+    public void SharedOperationLeaseReadsAnExistingReadOnlyLockWithoutChangingIt()
+    {
+        using var temp = TestDirectory.Create();
+        using (CoverageArtifactOperationLease.Acquire(temp.Path, exclusive: true)) { }
+        var path = Path.Join(temp.Path, ".appsurface-coverage-operation.lock");
+        var attributes = File.GetAttributes(path);
+        var bytes = File.ReadAllBytes(path);
+        File.SetAttributes(path, attributes | FileAttributes.ReadOnly);
+        try
+        {
+            using var first = CoverageArtifactOperationLease.Acquire(temp.Path, exclusive: false);
+            using var second = CoverageArtifactOperationLease.Acquire(temp.Path, exclusive: false);
+            first.VerifyBinding();
+            second.VerifyBinding();
+            Assert.Equal(attributes | FileAttributes.ReadOnly, File.GetAttributes(path));
+            Assert.Equal(bytes, File.ReadAllBytes(path));
+        }
+        finally { File.SetAttributes(path, attributes); }
+    }
+
+    [CoverageWindowsFact]
+    [SupportedOSPlatform("windows")]
     public void NewPrivateFileSetsCurrentUserOwnerAndRestrictedAclBeforeWriting()
     {
         using var temp = TestDirectory.Create();

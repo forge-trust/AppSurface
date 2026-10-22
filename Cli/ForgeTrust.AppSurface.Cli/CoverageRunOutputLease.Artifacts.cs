@@ -147,16 +147,19 @@ internal sealed partial class CoverageRunOutputLease
     /// <summary>Opens the Windows cooperative-lock file without following links or allowing replacement.</summary>
     /// <param name="name">One fixed protocol filename owned by the caller's output or private domain.</param>
     /// <param name="requirePrivate">Whether to require private ownership and a zero-length candidate coordination file.</param>
-    internal SafeFileHandle OpenArtifactOperationLock(string name = ".appsurface-coverage-operation.lock", bool requirePrivate = false)
+    /// <param name="readExistingOnly">Whether an existing lock requires only read access. A missing protocol lock may still be created in a writable root.</param>
+    internal SafeFileHandle OpenArtifactOperationLock(string name = ".appsurface-coverage-operation.lock", bool requirePrivate = false,
+        bool readExistingOnly = false)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         ValidateArtifactComponent(name);
         VerifyBinding();
         SafeFileHandle handle;
         var path = Path.Join(_outputPath, name);
+        var access = readExistingOnly ? WindowsGenericRead : WindowsGenericRead | WindowsGenericWrite;
         try
         {
-            handle = OpenWindowsFile(path, WindowsGenericRead | WindowsGenericWrite,
+            handle = OpenWindowsFile(path, access,
             WindowsOpenExisting, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
         }
         catch (IOException exception) when (exception.InnerException is Win32Exception { NativeErrorCode: 2 })
@@ -164,7 +167,7 @@ internal sealed partial class CoverageRunOutputLease
             try { handle = CreateArtifactWindowsFile(path, WindowsShareRead | WindowsShareWrite | WindowsShareDelete); }
             catch (IOException conflict) when (conflict.InnerException is Win32Exception { NativeErrorCode: 80 or 183 })
             {
-                handle = OpenWindowsFile(path, WindowsGenericRead | WindowsGenericWrite,
+                handle = OpenWindowsFile(path, access,
                     WindowsOpenExisting, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
             }
         }

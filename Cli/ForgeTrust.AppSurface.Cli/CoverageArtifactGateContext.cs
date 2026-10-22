@@ -27,7 +27,7 @@ internal sealed class CoverageArtifactGateContext : IDisposable
             var outputPath = Path.GetFullPath(request.OutputDirectory);
             using var output = CoverageRunOutputLease.AcquireArtifactDirectory(outputPath, true, false)
                 ?? throw new IOException("Report output is missing.");
-            var inputPath = FindOwnedInputRoot(request.CoveragePath);
+            var inputPath = CoverageArtifactSession.FindOwnedInputRoot(request.CoveragePath);
             var desired = new Dictionary<string, (string Path, bool Exclusive)>(StringComparer.Ordinal)
             { [output.ArtifactDirectoryIdentity] = (outputPath, true) };
             if (inputPath is not null)
@@ -68,13 +68,4 @@ internal sealed class CoverageArtifactGateContext : IDisposable
         _leases.Clear();
     }
 
-    private static string? FindOwnedInputRoot(string path)
-    {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(path))!);
-        for (var depth = 0; directory is not null && depth < 32; depth++, directory = directory.Parent)
-        {
-            if (File.Exists(Path.Join(directory.FullName, CoverageArtifactSession.SidecarName))) return directory.FullName;
-        }
-        return null;
-    }
 }

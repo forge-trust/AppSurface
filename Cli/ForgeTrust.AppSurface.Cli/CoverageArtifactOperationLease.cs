@@ -154,7 +154,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
                 var lockOwner = lockDirectory ?? directory;
                 lockHandle = options.OpenWindowsLock?.Invoke(lockOwner) ?? lockOwner.OpenArtifactOperationLock(
                     lockDirectory is null ? ".appsurface-coverage-operation.lock" : CandidateLockFileName,
-                    requirePrivate: lockDirectory is not null);
+                    requirePrivate: lockDirectory is not null, readExistingOnly: !exclusive);
                 var lease = new CoverageArtifactOperationLease(directory, options, isWindows, lockHandle, exclusive, lockDirectory);
                 if (lockDirectory is not null)
                 {

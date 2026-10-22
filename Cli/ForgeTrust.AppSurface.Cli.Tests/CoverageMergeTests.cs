@@ -499,7 +499,23 @@ public sealed class CoverageMergeTests
     {
         using var repo = TempDirectory.Create("appsurface-merge-lease-");
         repo.WriteFile("shards/project/coverage.cobertura.xml", "<coverage />");
-        repo.WriteFile("shards/project/.appsurface-coverage-run.json", "{}");
+        repo.WriteFile("shards/project/nested/coverage.cobertura.xml", "<coverage />");
+        var input = Path.Join(repo.Path, "shards", "project");
+        using (var directory = CoverageRunOutputLease.AcquireArtifactDirectory(input, false, false)!)
+        {
+            var managed = new CoverageArtifactCurrentRun(new CoverageArtifactRunManifest
+            {
+                RunId = Guid.NewGuid().ToString("N"),
+                OutputIdentity = directory.ArtifactDirectoryIdentity,
+                RepositoryIdentity = "fixture-repository",
+                Outcome = "success",
+                Version = "merge-lease-fixture",
+                Provenance = new CoverageArtifactProvenance("revision", "clean", "configuration")
+            }, [], input, repo.Path);
+            repo.WriteFile("shards/project/.appsurface-coverage-run.json",
+                System.Text.Json.JsonSerializer.Serialize(managed, new System.Text.Json.JsonSerializerOptions
+                { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+        }
         repo.WriteFile("merged/.appsurface-coverage-output", "AppSurface coverage output directory");
         repo.WriteFile("merged/coverage.cobertura.xml", "previous output");
         using var current = PushCurrentDirectory(repo.Path);
