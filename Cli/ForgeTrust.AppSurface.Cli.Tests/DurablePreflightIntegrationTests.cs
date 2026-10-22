@@ -767,6 +767,47 @@ public sealed class DurableSchemaPreflightIntegrationTests
             $"Successful preflight including nonpooled connection disposal took {elapsed.Elapsed}.");
     }
 
+    /// <summary>Proves the rejection helper waits while a matching backend remains visible.</summary>
+    [Fact]
+    public async Task Rejected_connection_waits_for_visible_backend_exit_before_asserting_zero_sessions()
+    {
+        await using var fixture = await Fixture.CreateAsync(pairCount: 1);
+        await fixture.MutateAsync("REVOKE USAGE ON SCHEMA appsurface_durable FROM preflight_runtime_a");
+        var applicationName = $"issue845-{RuntimeA}";
+        using var deadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+        var observed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Hold a separate backend under the caller name to force the server-observation window; this tests the exit barrier without relying on natural teardown timing.
+        await using var held = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.OwnerConnection)
+        {
+            ApplicationName = applicationName,
+            Pooling = false,
+        }.ConnectionString);
+        await held.OpenAsync(deadline.Token);
+
+        var rejected = AssertConnectionRejectedAsync(fixture, RuntimeA, "42501", () =>
+        {
+            observed.TrySetResult();
+            return Task.CompletedTask;
+        }, deadline.Token);
+        try
+        {
+            await Task.WhenAny(observed.Task, rejected).WaitAsync(deadline.Token);
+            if (rejected.IsCompleted)
+            {
+                await rejected;
+            }
+            Assert.True(observed.Task.IsCompletedSuccessfully);
+            Assert.False(rejected.IsCompleted);
+        }
+        finally
+        {
+            await held.CloseAsync();
+        }
+
+        await rejected;
+        Assert.Equal(0, await fixture.CountSessionsAsync(applicationName));
+    }
+
     private static string SocketProbeConnectionString(int port, int timeoutSeconds) =>
         new NpgsqlConnectionStringBuilder
         {
@@ -1386,14 +1427,20 @@ public sealed class DurableSchemaPreflightIntegrationTests
     }
 
     /// <summary>Checks the expected rejection and observes backend exit within one original total deadline.</summary>
-    /// <remarks>The optional barrier holds a real backend in regression tests; it cannot certify exit or suppress failure.</remarks>
+    /// <param name="fixture">Owns the database, caller and server-side session observations.</param>
+    /// <param name="caller">Exact fixture role whose connection must be rejected.</param>
+    /// <param name="expectedSqlState">Required server rejection code.</param>
+    /// <param name="sessionObserved">Optional regression barrier after a visible backend; cannot certify exit or suppress failure.</param>
+    /// <param name="cancellationToken">Optional caller deadline combined with the existing total timeout; never renewed by observation.</param>
     private static async Task AssertConnectionRejectedAsync(
         Fixture fixture,
         string caller,
         string expectedSqlState,
-        Func<Task>? sessionObserved = null)
+        Func<Task>? sessionObserved = null,
+        CancellationToken cancellationToken = default)
     {
-        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+        using var completionDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        completionDeadline.CancelAfter(DurableSchemaPreflightVerifier.TotalTimeout);
         var exception = await Record.ExceptionAsync(async () =>
             await fixture.RunAsync(caller, cancellationToken: completionDeadline.Token));
         Assert.NotNull(exception);

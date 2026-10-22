@@ -26,6 +26,20 @@ It also includes an AppSurface Docs browser regression test that runs against `W
   - sidebar search works from `/docs`,
   - navigating to `/docs/search` via Turbo keeps both advanced search and sidebar search functional.
 
+## Form-interactions readiness
+
+The functional form-interactions tests in
+[`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) use a browser context that serves the
+sample's Google Fonts stylesheet with a local empty CSS response. The sample uses its system-font fallback;
+these tests verify conditional fields, collection form data, and validation redisplay. Use the [visual-baseline
+suites](#release-page-visual-baselines) when verifying appearance.
+
+The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
+before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
+even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
+application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
+Keep this interception scoped to functional form tests so browser tests that exercise rendering retain their own font policy.
+
 ## AppSurface Docs standalone fixture
 
 The AppSurface Docs Playwright fixture hosts `ForgeTrust.AppSurface.Docs.Standalone` in-process through `AppSurfaceDocsStandaloneHost.CreateBuilder`.
@@ -46,6 +60,29 @@ When adding AppSurface Docs browser coverage, use the shared fixture or `AppSurf
 The contributor-strip rendering regression uses [`AppSurfaceDocsContributorTimestampFixture`](AppSurfaceDocsContributorTimestampFixture.cs), a private source corpus served by the real Docs host. It supplies the documented [`contributor.last_updated_override`](../ForgeTrust.AppSurface.Docs/README.md#page-level-overrides) so the test always exercises a real server-rendered timestamp and the packaged browser formatter. The shared source-backed fixture continues to use Git freshness for its other tests. [Git freshness is optional and bounded](../ForgeTrust.AppSurface.Docs/README.md#contributor-provenance); do not require any particular page's timestamp from a large repository harvest or increase its production budget to satisfy a rendering test.
 
 [`AppSurfaceDocsTimestampReadiness.WaitAsync`](AppSurfaceDocsTimestampReadiness.cs) retains the rendering regression's nonempty, non-UTC text predicate and 60-second default. When that wait fails, it preserves the original timeout as the inner exception and adds only bounded timestamp/attribute/runtime booleans and a capped element count. A missing timestamp, invalid datetime or absent formatter remains a failure. Snapshot collection has a separate five-second cap; if it cannot complete, the original failure still surfaces with `State: unavailable`. The allowance must be a positive integer; zero is rejected because Playwright would otherwise disable its timeout. Synthetic negative probes use a short readiness allowance only to verify the diagnostic branches. The helper does not retry or initialize the formatter.
+
+### Release-page visual baselines
+
+The macOS Chromium screenshot tests compare the light and Graphite presets with PNGs in
+[`VisualBaselines`](./VisualBaselines). Their release route is the live
+[`unreleased` page](../../releases/unreleased.md), including its aggregated
+[release entries](../../releases/unreleased.entries). Preparing a release or adding an entry can change the visible
+version, sidebar, and outline even when no styles changed. Inspect the mismatch's `.actual.png` and the corresponding
+release-content diff before deciding whether the image needs updating.
+
+After reviewing intentional changes, refresh both families on macOS:
+
+```bash
+APPSURFACE_UPDATE_VISUAL_BASELINES=1 dotnet test \
+  Web/ForgeTrust.RazorWire.IntegrationTests/ForgeTrust.RazorWire.IntegrationTests.csproj \
+  --configuration Release \
+  --filter "FullyQualifiedName~FixedAppSurfaceLightPreset_ShouldMatchCommittedMacVisualBaselines|FullyQualifiedName~GraphiteDocs_ShouldMatchCommittedDesktopVisualBaselines"
+```
+
+The updater captures every route in those two tests. Keep only reviewed image changes and discard captures that differ
+solely by incidental rasterization noise. Run the same command again **without** `APPSURFACE_UPDATE_VISUAL_BASELINES`
+to verify the committed comparisons. Setting the variable during verification would accept new images instead of
+checking them. Do not widen the pixel tolerance or skip a screenshot to accommodate release-content drift.
 
 ### Docs outline layout evidence triage
 
