@@ -476,6 +476,9 @@ internal sealed class CoverageArtifactStore : IDisposable
         => CoverageArtifactOperationLease.Acquire(candidatePath, exclusive, windowsLockRoot: RootPath);
 
     /// <summary>Applies or previews eligible archive expiry under the shared retention policy.</summary>
+    /// <remarks>Apply reconciles absent, unpinned historical archive registrations before selecting candidates.
+    /// Reconciliation changes metadata only, preserves current/pinned entries and active snapshot reservations,
+    /// and records an explicit missing-archive receipt without reporting a new physical deletion.</remarks>
     /// <param name="routineBudget">Optional invocation-wide maintenance budget; explicit maintenance has no deadline.</param>
     /// <param name="apply">False returns candidates without deleting them.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
@@ -501,17 +504,21 @@ internal sealed class CoverageArtifactStore : IDisposable
                 routineBudget?.Check(cancellationToken);
                 using var root = CoverageRunOutputLease.AcquireArtifactDirectory(RootPath, false, true)!;
                 RemoveAbandonedRegistryStage(root);
+                ReconcileMissingArchives(root, cancellationToken, routineBudget);
             }
             await RecoverAbandonedSnapshotsAsync(cancellationToken, routineBudget, heldSourceLease).ConfigureAwait(false);
         }
         StoreRegistration[] registrations;
+        HashSet<string> reservedRuns;
         using (var readLease = _readOnly ? null : CoverageArtifactOperationLease.Acquire(RootPath, exclusive: false))
         {
             readLease?.VerifyBinding();
             using var readRoot = CoverageRunOutputLease.AcquireArtifactDirectory(RootPath, false, true)!;
-            registrations = ReadRegistry(readRoot).Registrations;
+            var registry = ReadRegistry(readRoot);
+            registrations = registry.Registrations;
+            reservedRuns = registry.Reservations.Select(item => item.RunId).ToHashSet(StringComparer.Ordinal);
         }
-        var eligible = registrations.Where(item => item.Archived && !item.Current && !item.Pinned)
+        var eligible = registrations.Where(item => item.Archived && !item.Current && !item.Pinned && !reservedRuns.Contains(item.RunId))
             .OrderBy(item => string.Equals(item.Outcome, "success", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
             .ThenBy(item => item.ArchivedAtUtc ?? item.ObservedAtUtc).ToList();
         // Current snapshots and explicit pins are protected categories, not pressure on the
@@ -582,6 +589,42 @@ internal sealed class CoverageArtifactStore : IDisposable
             }
         }
         return apply ? removed : remove.Select(item => item.RunId).ToArray();
+    }
+
+    // Missing entries grant metadata reconciliation only. Enumerate through the retained archives
+    // parent so access errors, links and unexpected entries cannot be mistaken for absence.
+    private void ReconcileMissingArchives(CoverageRunOutputLease root, CancellationToken token,
+        CoverageArtifactWorkBudget? budget)
+    {
+        var registry = ReadRegistry(root);
+        var candidates = registry.Registrations.Where(item => item.Archived && !item.Current && !item.Pinned
+            && !registry.Reservations.Any(reservation => reservation.RunId == item.RunId)).ToArray();
+        if (candidates.Length == 0) return;
+        budget?.Check(token);
+        token.ThrowIfCancellationRequested();
+        using var archives = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(RootPath, ArchivesName), false, true)
+            ?? throw new DirectoryNotFoundException("The owned archive directory is missing.");
+        var present = archives.EnumerateArtifactEntries(CoverageArtifactLimits.MaximumRegistrations + 1)
+            .Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
+        var reconciled = candidates.Where(item => !present.Contains(item.RunId)).ToArray();
+        if (reconciled.Length == 0) return;
+        budget?.Check(token);
+        token.ThrowIfCancellationRequested();
+        archives.VerifyArtifactBinding();
+        var ids = reconciled.Select(item => item.RunId).ToHashSet(StringComparer.Ordinal);
+        var now = _clock.GetUtcNow();
+        var receipts = registry.ExpiryReceipts.Concat(reconciled.Select(item =>
+                new ExpiryReceipt(item.RunId, item.Outcome, item.ArchiveBytes, now, "archive-missing-reconciled")))
+            .Where(item => now - item.ExpiredAtUtc <= TimeSpan.FromDays(CoverageArtifactLimits.ExpiryReceiptMaxAgeDays))
+            .OrderBy(item => item.ExpiredAtUtc).TakeLast(CoverageArtifactLimits.ExpiryReceiptsMaxEntries).ToArray();
+        while (JsonSerializer.SerializeToUtf8Bytes(receipts, JsonOptions).LongLength > CoverageArtifactLimits.ExpiryReceiptsMaxBytes)
+            receipts = receipts.Skip(1).ToArray();
+        PersistRegistry(root, registry with
+        {
+            Registrations = registry.Registrations.Select(item => ids.Contains(item.RunId)
+                ? item with { Archived = false, ArchiveBytes = 0, ObservedAtUtc = now } : item).ToArray(),
+            ExpiryReceipts = receipts
+        });
     }
 
     private async Task RecoverAbandonedSnapshotsAsync(CancellationToken token, CoverageArtifactWorkBudget? budget,

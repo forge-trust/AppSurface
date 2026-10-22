@@ -47,8 +47,10 @@ and Linux ARM64. [Linux ARM64 native open flags](https://github.com/torvalds/lin
 from x64; output traversal, collector artifact reads, and storage inspection must
 use the matching pair. Unverified Linux architectures fail before opening a
 candidate. The selector has decision tests, while the native no-follow tests in
-the [platform matrix](../../.github/workflows/build.yml) verify actual host behavior.
+the [platform matrix](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) verify actual host behavior.
 
 Recovery invoked by an existing coverage session reuses that session's live exclusive output lease only when its physical identity matches the stored registration. Shared, disposed or unrelated leases grant no recovery authority. The manager keeps ownership of any separately acquired leases and never releases a borrowed session lease. See the [storage lifecycle and recovery guide](../../guides/coverage-storage.md#recovery-recipes).
 
 On Windows, deletable archive and staging candidates coordinate through one empty private `.appsurface-coverage-candidates.lock` file in the domain root. A deterministic byte-range offset derived from the candidate's physical identity keeps independent candidates concurrent. The file stays zero-length because locking beyond its end does not allocate payload storage. Source-output leases keep their existing protocol. Every candidate operation verifies both retained directory and lock-file identities; a hash collision causes safe contention. The fixed file is never removed to force admission. See [Windows byte-range locking](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex).
+
+Applied maintenance also reconciles missing, unpinned historical archive registrations after an interrupted expiry. It verifies absence through a retained private archive parent under the store metadata lease, records a bounded missing-archive receipt, and clears only stale archive accounting. It never deletes an existing entry or reports reconciliation as a new physical deletion. Current, pinned and pending-reservation registrations are excluded. See the [recovery guide](../../guides/coverage-storage.md#recovery-recipes).
