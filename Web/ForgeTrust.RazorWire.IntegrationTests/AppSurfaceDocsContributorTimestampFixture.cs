@@ -27,14 +27,14 @@ internal sealed class AppSurfaceDocsContributorTimestampFixture : IAsyncDisposab
     /// <returns>The fixture that owns the server and corpus until asynchronous disposal.</returns>
     internal static async Task<AppSurfaceDocsContributorTimestampFixture> StartAsync(bool includeTimestampOverride = true)
     {
-        var root = Path.Combine(Path.GetTempPath(), $"appsurface-contributor-time-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(root, "releases"));
+        var root = TestPathUtils.PathUnder(Path.GetTempPath(), $"appsurface-contributor-time-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(TestPathUtils.PathUnder(root, "releases"));
         try
         {
             var timestamp = includeTimestampOverride
                 ? "contributor:\n  last_updated_override: 2026-04-22T23:19:00Z\n"
                 : string.Empty;
-            await File.WriteAllTextAsync(Path.Combine(root, "releases", "unreleased.md"),
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(root, "releases", "unreleased.md"),
                 $"---\n{timestamp}trust:\n  status: provisional\n---\n# Unreleased\n\nContributor timestamp rendering fixture.\n\n<!-- appsurface:unreleased-entries section=\"included\" -->\n");
             var host = await AppSurfaceDocsInProcessHost.StartAsync(
                 "http://127.0.0.1:0",

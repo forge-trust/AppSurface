@@ -180,7 +180,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
             throw new InvalidOperationException("The resolved native PostgreSQL bin directory is missing.");
         }
 
-        var resolvedPsql = Path.Combine(resolvedBinDirectory, OperatingSystem.IsWindows() ? "psql.exe" : "psql");
+        var resolvedPsql = Path.Join(resolvedBinDirectory, OperatingSystem.IsWindows() ? "psql.exe" : "psql");
         if (!File.Exists(resolvedPsql))
         {
             throw new InvalidOperationException("The resolved native PostgreSQL psql executable is missing.");
@@ -402,7 +402,7 @@ internal sealed class PostgreSqlFixture : IAsyncDisposable
     private async Task ApplyPackagedRoleRecipeAsync(CancellationToken cancellationToken)
     {
         // This immutable package content file is resolved by name; keep it in its package-provided directory.
-        var sqlPath = Path.Combine(AppContext.BaseDirectory, "configure-postgresql-roles.sql");
+        var sqlPath = Path.Join(AppContext.BaseDirectory, "configure-postgresql-roles.sql");
         var sql = new FileInfo(sqlPath);
         if (!sql.Exists || sql.Length is <= 0 or > MaximumRoleRecipeBytes)
         {

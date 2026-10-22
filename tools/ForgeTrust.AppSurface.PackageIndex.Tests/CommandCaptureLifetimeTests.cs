@@ -105,7 +105,7 @@ public sealed class CommandCaptureLifetimeTests
 
         private InheritedPipes(string? ownedRoot, CancellationToken cancellationToken)
         {
-            _root = ownedRoot ?? Path.Combine(Path.GetTempPath(), "appsurface-inherited-pipes-" + Guid.NewGuid().ToString("N"));
+            _root = ownedRoot ?? TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-inherited-pipes-" + Guid.NewGuid().ToString("N"));
             _ownedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         }
         internal Task<ExternalCommandResult> Operation { get; private set; } = null!;
@@ -130,8 +130,8 @@ public sealed class CommandCaptureLifetimeTests
             {
                 childScript = childScript.Replace("printf ready > \"$1/child.ready\"", string.Empty, StringComparison.Ordinal);
             }
-            await File.WriteAllTextAsync(Path.Combine(fixture._root, "child.sh"), childScript);
-            var parentPath = Path.Combine(fixture._root, "parent.sh");
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture._root, "child.sh"), childScript);
+            var parentPath = TestPathUtils.PathUnder(fixture._root, "parent.sh");
             await File.WriteAllTextAsync(parentPath, """
                 /bin/sh "$1/child.sh" "$1" &
                 printf '%s' "$$" > "$1/parent.pid"
@@ -148,9 +148,9 @@ public sealed class CommandCaptureLifetimeTests
             {
                 using var startup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 await fixture.WaitForFileAsync("parent.ready", startup.Token);
-                fixture.Parent = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(Path.Combine(fixture._root, "parent.pid")), CultureInfo.InvariantCulture));
+                fixture.Parent = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(fixture._root, "parent.pid")), CultureInfo.InvariantCulture));
                 await fixture.WaitForFileAsync("child.ready", startup.Token);
-                fixture.Descendant = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(Path.Combine(fixture._root, "child.pid")), CultureInfo.InvariantCulture));
+                fixture.Descendant = Process.GetProcessById(int.Parse(await File.ReadAllTextAsync(TestPathUtils.PathUnder(fixture._root, "child.pid")), CultureInfo.InvariantCulture));
                 return fixture;
             }
             catch
@@ -160,8 +160,8 @@ public sealed class CommandCaptureLifetimeTests
             }
         }
 
-        internal void ReleaseParent() => File.WriteAllText(Path.Combine(_root, "parent.release"), "release");
-        internal void ReleaseDescendant() => File.WriteAllText(Path.Combine(_root, "child.release"), "release");
+        internal void ReleaseParent() => File.WriteAllText(TestPathUtils.PathUnder(_root, "parent.release"), "release");
+        internal void ReleaseDescendant() => File.WriteAllText(TestPathUtils.PathUnder(_root, "child.release"), "release");
 
         private async Task WaitForFileAsync(string fileName, CancellationToken cancellationToken)
         {
