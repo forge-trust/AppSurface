@@ -187,7 +187,7 @@ public sealed class CoverageStorageCommandTestsBoundary
     {
         using var domain = TestDirectory.Create();
         var seeded = await SeedArchivedRunAsync(domain.Path, ArchivedRunId);
-        using var heldLease = CoverageArtifactOperationLease.Acquire(seeded.ArchivePath, exclusive: true);
+        using var heldLease = CoverageArtifactOperationLease.Acquire(seeded.ArchivePath, exclusive: true, windowsLockRoot: seeded.StorePath);
         using var configured = ConfigureDomain(domain.Path);
         using var console = new FakeInMemoryConsole();
 
@@ -213,7 +213,7 @@ public sealed class CoverageStorageCommandTestsBoundary
         var parent = Path.Join(domain.Path, "restore-parent");
         Directory.CreateDirectory(parent);
         var destination = Path.Join(parent, "restored");
-        using var heldLease = CoverageArtifactOperationLease.Acquire(seeded.ArchivePath, exclusive: true);
+        using var heldLease = CoverageArtifactOperationLease.Acquire(seeded.ArchivePath, exclusive: true, windowsLockRoot: seeded.StorePath);
         using var configured = ConfigureDomain(domain.Path);
         using var console = new FakeInMemoryConsole();
 

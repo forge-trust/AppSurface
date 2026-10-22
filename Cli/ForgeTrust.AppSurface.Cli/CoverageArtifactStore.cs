@@ -97,7 +97,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         using var initialization = CoverageArtifactOperationLease.Acquire(root, exclusive: !alreadyInitialized);
         initialization.VerifyBinding();
         var entries = directory.EnumerateArtifactEntries(16);
-        var allowed = new HashSet<string>([MarkerName, RegistryName, PolicyName, ArchivesName, StagingName, ".appsurface-coverage-operation.lock"], StringComparer.Ordinal);
+        var allowed = new HashSet<string>([MarkerName, RegistryName, PolicyName, ArchivesName, StagingName, ".appsurface-coverage-operation.lock", CoverageArtifactOperationLease.CandidateLockFileName], StringComparer.Ordinal);
         if (entries.Any(entry => !allowed.Contains(entry.Name)))
             throw new IOException("The artifact domain contains unknown entries; preserve it for inspection.");
 
@@ -147,7 +147,7 @@ internal sealed class CoverageArtifactStore : IDisposable
             return new CoverageArtifactStore(root, clock ?? TimeProvider.System, DefaultPolicy(), readOnly: true, initialized: false);
         using (directory)
         {
-            var allowed = new HashSet<string>([MarkerName, RegistryName, PolicyName, ArchivesName, StagingName, ".appsurface-coverage-operation.lock"], StringComparer.Ordinal);
+            var allowed = new HashSet<string>([MarkerName, RegistryName, PolicyName, ArchivesName, StagingName, ".appsurface-coverage-operation.lock", CoverageArtifactOperationLease.CandidateLockFileName], StringComparer.Ordinal);
             if (directory.EnumerateArtifactEntries(16).Any(entry => !allowed.Contains(entry.Name)))
                 throw new IOException("The artifact domain contains unknown entries; preserve it for inspection.");
             var identity = directory.ArtifactDirectoryIdentity;
@@ -288,7 +288,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 root.Dispose();
                 operation.Dispose();
                 var existingPath = Path.Join(RootPath, ArchivesName, run.ManifestBase.RunId);
-                using var candidate = CoverageArtifactOperationLease.Acquire(existingPath, exclusive: pin);
+                using var candidate = AcquireCandidateLease(existingPath, pin);
                 candidate.VerifyBinding();
                 using var existing = CoverageRunOutputLease.AcquireArtifactDirectory(existingPath, false, true)
                     ?? throw new IOException("The archive registration has no verified archive directory.");
@@ -331,7 +331,7 @@ internal sealed class CoverageArtifactStore : IDisposable
             using var staging = CoverageRunOutputLease.AcquireArtifactDirectory(stagingPath, false, true)!;
             staging.CreateArtifactDirectory(stageName).Dispose();
             using var stage = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(staging.ArtifactDirectoryPath, stageName), false, true, allowWindowsRenameSharing: true)!;
-            using var stageOperation = CoverageArtifactOperationLease.Acquire(stage.ArtifactDirectoryPath, exclusive: true);
+            using var stageOperation = AcquireCandidateLease(stage.ArtifactDirectoryPath, true);
             var budget = work.Remaining;
             var manifestBase = run.ManifestBase with
             {
@@ -390,7 +390,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 .SingleOrDefault(entry => entry.Name == stageName);
             if (candidate is not null)
             {
-                using var stageLease = CoverageArtifactOperationLease.Acquire(Path.Join(staging.ArtifactDirectoryPath, stageName), true);
+                using var stageLease = AcquireCandidateLease(Path.Join(staging.ArtifactDirectoryPath, stageName), true);
                 stageLease.VerifyBinding();
                 staging.DeleteArtifactEntry(stageName, CoverageArtifactLimits.MaximumFiles + 3, candidate.Identity);
             }
@@ -433,7 +433,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         if (current is null) return false;
         var path = Path.Join(RootPath, ArchivesName, current.ManifestBase.RunId);
         if (!Directory.Exists(path)) return false;
-        using var candidate = CoverageArtifactOperationLease.Acquire(path, false);
+        using var candidate = AcquireCandidateLease(path, false);
         candidate.VerifyBinding();
         using var archive = CoverageRunOutputLease.AcquireArtifactDirectory(path, false, true)!;
         var manifest = ReadManifest(archive);
@@ -467,6 +467,13 @@ internal sealed class CoverageArtifactStore : IDisposable
                 item.RunId, item.CurrentBytes, item.ObservedAtUtc)).ToArray()
         };
     }
+
+    /// <summary>Acquires candidate authority outside a deletable Windows directory, using the private domain's fixed lock file.</summary>
+    /// <param name="candidatePath">An existing archive or stage already selected by the caller's ownership checks.</param>
+    /// <param name="exclusive">Whether the operation mutates the candidate.</param>
+    /// <returns>A retained candidate lease; disposal never removes the domain lock file.</returns>
+    internal CoverageArtifactOperationLease AcquireCandidateLease(string candidatePath, bool exclusive)
+        => CoverageArtifactOperationLease.Acquire(candidatePath, exclusive, windowsLockRoot: RootPath);
 
     /// <summary>Applies or previews eligible archive expiry under the shared retention policy.</summary>
     /// <param name="routineBudget">Optional invocation-wide maintenance budget; explicit maintenance has no deadline.</param>
@@ -531,7 +538,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 routineBudget?.Check(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 var archivePath = Path.Join(RootPath, ArchivesName, candidate.RunId);
-                using var archiveLease = CoverageArtifactOperationLease.Acquire(archivePath, exclusive: true);
+                using var archiveLease = AcquireCandidateLease(archivePath, true);
                 archiveLease.VerifyBinding();
                 using var archive = CoverageRunOutputLease.AcquireArtifactDirectory(archivePath, false, true, allowWindowsRenameSharing: true)
                     ?? throw new IOException("The archive candidate disappeared before revalidation.");
@@ -634,7 +641,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 continue;
             }
             CoverageArtifactOperationLease candidate;
-            try { candidate = CoverageArtifactOperationLease.Acquire(stagePath, true); }
+            try { candidate = AcquireCandidateLease(stagePath, true); }
             catch (CoverageExecutionException) { continue; }
             using (candidate)
             using (var stage = CoverageRunOutputLease.AcquireArtifactDirectory(stagePath, false, true)!)
@@ -689,7 +696,7 @@ internal sealed class CoverageArtifactStore : IDisposable
             catch (Exception exception) when (IsOptionalFailure(exception)) { return; }
 
             CoverageArtifactOperationLease archiveLease;
-            try { archiveLease = CoverageArtifactOperationLease.Acquire(archivePath, exclusive: true); }
+            try { archiveLease = AcquireCandidateLease(archivePath, true); }
             catch (Exception exception) when (IsOptionalFailure(exception)) { return; }
             using (archiveLease)
             using (var archive = CoverageRunOutputLease.AcquireArtifactDirectory(archivePath, false, true))
@@ -825,7 +832,7 @@ internal sealed class CoverageArtifactStore : IDisposable
             }
         }
         var archivePath = Path.Join(RootPath, ArchivesName, runId);
-        using var archiveLease = CoverageArtifactOperationLease.Acquire(archivePath, exclusive: true);
+        using var archiveLease = AcquireCandidateLease(archivePath, true);
         archiveLease.VerifyBinding();
         using var archive = CoverageRunOutputLease.AcquireArtifactDirectory(archivePath, false, true)
             ?? throw new FileNotFoundException("The verified archive does not exist.");
@@ -864,7 +871,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(parentPath, false, false)
             ?? throw new IOException("Restore requires an existing safe parent directory.");
         var archivePath = Path.Join(RootPath, ArchivesName, runId);
-        using var archiveLease = CoverageArtifactOperationLease.Acquire(archivePath, exclusive: false);
+        using var archiveLease = AcquireCandidateLease(archivePath, false);
         archiveLease.VerifyBinding();
         using var archive = CoverageRunOutputLease.AcquireArtifactDirectory(archivePath, false, true)
             ?? throw new FileNotFoundException("The verified archive does not exist.");
@@ -1180,7 +1187,13 @@ internal sealed class CoverageArtifactStore : IDisposable
     {
         var total = root.EnumerateArtifactEntries(16)
             .Where(entry => !entry.IsDirectory && entry.Name != ".appsurface-coverage-operation.lock")
-            .Sum(entry => { using var stream = root.OpenArtifactFile(entry.Name, false); return stream.Length; });
+            .Sum(entry =>
+            {
+                if (entry.Name == CoverageArtifactOperationLease.CandidateLockFileName)
+                    return root.ReadArtifactCoordinationFileLength(entry.Name);
+                using var stream = root.OpenArtifactFile(entry.Name, false);
+                return stream.Length;
+            });
         using (var staging = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(root.ArtifactDirectoryPath, StagingName), false, true)!)
         using (var registryStage = TryOpen(staging, RegistryStageName))
         {

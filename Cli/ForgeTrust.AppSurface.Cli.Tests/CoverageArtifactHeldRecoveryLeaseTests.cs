@@ -88,7 +88,7 @@ public sealed class CoverageArtifactHeldRecoveryLeaseTests
         using var shared = CoverageArtifactOperationLease.Acquire(output, false);
         await Assert.ThrowsAsync<ArgumentException>(() => CoverageArtifactSession.BeginAsync(output, repository, false,
             CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), TimeProvider.System, default, shared));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(output).Where(path => !path.EndsWith(".appsurface-coverage-operation.lock", StringComparison.Ordinal)));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(output), path => !path.EndsWith(".appsurface-coverage-operation.lock", StringComparison.Ordinal));
         using var replacement = CoverageArtifactOperationLease.Acquire(output, true);
         replacement.VerifyBinding();
     }

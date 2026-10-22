@@ -173,7 +173,7 @@ public sealed class CoverageArtifactWarningsTests
         {
             var path = Path.Join(StorePath, "policy.json");
             var json = $"{{\"schemaVersion\":1,\"repositoryWarningBytes\":{_repositoryWarningBytes},\"domainWarningBytes\":{_domainWarningBytes},\"warningCooldownHours\":24}}";
-            File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            TestFileSystem.WritePrivateFile(path, json);
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }

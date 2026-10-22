@@ -134,7 +134,7 @@ public sealed class CoverageStorageCommandTests
             var current = CreateCurrentRun(domain.Path, "33333333333333333333333333333333", "success");
             await store.RegisterAsync(current, CancellationToken.None);
         }
-        using var heldLease = CoverageArtifactOperationLease.Acquire(Path.Join(storePath, "archives", secondRunId), exclusive: true);
+        using var heldLease = CoverageArtifactOperationLease.Acquire(Path.Join(storePath, "archives", secondRunId), exclusive: true, windowsLockRoot: storePath);
         using var configured = ConfigureDomain(domain.Path);
         using var console = new FakeInMemoryConsole();
 

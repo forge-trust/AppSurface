@@ -225,7 +225,7 @@ public sealed class CoverageArtifactObservationFaultTests
                 domainWarningBytes = _domainWarningBytes,
                 warningCooldownHours = 24
             });
-            File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            TestFileSystem.WritePrivateFile(path, json);
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);

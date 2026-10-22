@@ -1,4 +1,7 @@
 using System.ComponentModel;
+using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
@@ -18,7 +21,7 @@ internal readonly record struct CoverageArtifactNativeLockResult(bool Acquired, 
 /// <see cref="VerifyWindowsLockBinding"/> delegates. Disposing that handle is the Windows lock-release operation.
 /// These delegates verify orchestration only; they do not emulate or validate <c>LockFileEx</c> or Windows path
 /// binding. Native acceptance must be verified separately on the target OS. Instances are passed to one
-/// <see cref="CoverageArtifactOperationLease.Acquire(string, bool, CoverageArtifactOperationLeaseOptions?)"/>
+/// <see cref="CoverageArtifactOperationLease.Acquire(string, bool, CoverageArtifactOperationLeaseOptions?, string?)"/>
 /// call and are never stored globally.
 /// </remarks>
 internal sealed class CoverageArtifactOperationLeaseOptions
@@ -62,7 +65,10 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
     private readonly CoverageArtifactOperationLeaseOptions _options;
     private readonly bool _isWindows;
     private readonly SafeFileHandle? _windowsLock;
+    private readonly CoverageRunOutputLease? _windowsLockDirectory;
     private readonly string? _windowsLockIdentity;
+    /// <summary>Gets the single zero-length Windows candidate coordination filename in a private domain.</summary>
+    internal const string CandidateLockFileName = ".appsurface-coverage-candidates.lock";
     private NativeOverlappedLayout _overlapped;
     private bool _disposed;
 
@@ -84,9 +90,11 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
         CoverageArtifactOperationLeaseOptions options,
         bool isWindows,
         SafeFileHandle windowsLock,
-        bool exclusive)
+        bool exclusive,
+        CoverageRunOutputLease? lockDirectory = null)
         : this(directory, options, isWindows, exclusive)
     {
+        _windowsLockDirectory = lockDirectory;
         _windowsLock = windowsLock;
         _windowsLockIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(windowsLock);
     }
@@ -101,6 +109,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
     /// <param name="existingDirectory">An existing directory validated without following ancestor links.</param>
     /// <param name="exclusive">Whether the operation mutates this physical output.</param>
     /// <param name="options">Optional per-call lock and binding observations; omitted in production.</param>
+    /// <param name="windowsLockRoot">Optional private domain holding the fixed Windows lock file for a deletable archive or stage. Locks use a deterministic physical-identity byte range; Unix still locks the candidate directory.</param>
     /// <returns>A disposable lease; contention fails with ASCOV202 before caller mutation.</returns>
     /// <remarks>
     /// The directory is always opened and validated with the actual host's filesystem APIs. Supplying
@@ -111,7 +120,8 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
     internal static CoverageArtifactOperationLease Acquire(
         string existingDirectory,
         bool exclusive,
-        CoverageArtifactOperationLeaseOptions? options = null)
+        CoverageArtifactOperationLeaseOptions? options = null,
+        string? windowsLockRoot = null)
     {
         options ??= new CoverageArtifactOperationLeaseOptions();
         var isWindows = options.IsWindows ?? OperatingSystem.IsWindows();
@@ -132,13 +142,26 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
                 allowWindowsRenameSharing: true)
             ?? throw new DirectoryNotFoundException("The operation directory must exist before lease acquisition.");
         SafeFileHandle? lockHandle = null;
+        CoverageRunOutputLease? lockDirectory = null;
         var unixLocked = false;
         try
         {
             if (isWindows)
             {
-                lockHandle = options.OpenWindowsLock?.Invoke(directory) ?? directory.OpenArtifactOperationLock();
-                var lease = new CoverageArtifactOperationLease(directory, options, isWindows, lockHandle, exclusive);
+                if (windowsLockRoot is not null)
+                    lockDirectory = CoverageRunOutputLease.AcquireArtifactDirectory(windowsLockRoot, false, true,
+                        allowWindowsRenameSharing: true) ?? throw new DirectoryNotFoundException("The candidate lock domain is missing.");
+                var lockOwner = lockDirectory ?? directory;
+                lockHandle = options.OpenWindowsLock?.Invoke(lockOwner) ?? lockOwner.OpenArtifactOperationLock(
+                    lockDirectory is null ? ".appsurface-coverage-operation.lock" : CandidateLockFileName,
+                    requirePrivate: lockDirectory is not null);
+                var lease = new CoverageArtifactOperationLease(directory, options, isWindows, lockHandle, exclusive, lockDirectory);
+                if (lockDirectory is not null)
+                {
+                    var offset = CandidateLockOffset(directory.ArtifactDirectoryIdentity);
+                    lease._overlapped.Offset = (uint)offset;
+                    lease._overlapped.OffsetHigh = (uint)(offset >> 32);
+                }
                 var flags = (exclusive ? 2u : 0u) | 1u;
                 var attempt = TryWindowsLock(lockHandle, flags, lease, options);
                 if (!attempt.Acquired)
@@ -179,6 +202,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
             finally
             {
                 lockHandle?.Dispose();
+                lockDirectory?.Dispose();
                 directory.Dispose();
             }
 
@@ -200,7 +224,9 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
             }
             else
             {
-                _directory.VerifyArtifactOperationLockBinding(_windowsLock, _windowsLockIdentity!);
+                _directory.VerifyArtifactBinding();
+                (_windowsLockDirectory ?? _directory).VerifyArtifactOperationLockBinding(_windowsLock, _windowsLockIdentity!,
+                    _windowsLockDirectory is null ? ".appsurface-coverage-operation.lock" : CandidateLockFileName);
             }
         }
         else
@@ -230,8 +256,18 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
         finally
         {
             _windowsLock?.Dispose();
+            _windowsLockDirectory?.Dispose();
             _directory.Dispose();
         }
+    }
+
+    /// <summary>Maps a physical candidate identity to one nonzero Windows byte-range offset without growing the lock file.</summary>
+    /// <remarks>A hash collision only rejects concurrent work; it cannot admit conflicting work. The fixed file is distinct from the root metadata lock.</remarks>
+    internal static ulong CandidateLockOffset(string physicalIdentity)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(physicalIdentity);
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(physicalIdentity));
+        return (BinaryPrimitives.ReadUInt64LittleEndian(hash) & 0x7fff_ffff_ffff_ffffUL) | 1UL;
     }
 
     private static CoverageArtifactNativeLockResult TryUnixFlock(

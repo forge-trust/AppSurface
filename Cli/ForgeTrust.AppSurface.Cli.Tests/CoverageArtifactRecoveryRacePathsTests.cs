@@ -96,7 +96,7 @@ public sealed class CoverageArtifactRecoveryRacePathsTests
         var payload = Path.Join(stage, "00000000.gz");
         File.WriteAllText(payload, "stage");
         var before = File.ReadAllBytes(fixture.RegistryPath);
-        using (CoverageArtifactOperationLease.Acquire(stage, true))
+        using (store.AcquireCandidateLease(stage, true))
         {
             Assert.Empty(await store.MaintainAsync(true, default));
             Assert.Equal(before, File.ReadAllBytes(fixture.RegistryPath));

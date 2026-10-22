@@ -915,7 +915,9 @@ internal static class CoverageMergeOutputGuard
         if (Directory.Exists(output))
         {
             var entries = Directory.EnumerateFileSystemEntries(output)
-                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
+                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal)
+                    && !(string.Equals(Path.GetFileName(path), ".appsurface-coverage-operation.lock", StringComparison.Ordinal)
+                        && File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0))
                 .ToArray();
             if (entries.Length > 0 && !File.Exists(marker))
             {

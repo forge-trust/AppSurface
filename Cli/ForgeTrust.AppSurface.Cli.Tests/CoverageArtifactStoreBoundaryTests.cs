@@ -382,7 +382,7 @@ public sealed class CoverageArtifactStoreBoundaryTests
         {
             var path = StoreFilePath("policy.json");
             var json = JsonSerializer.Serialize(new { schemaVersion = 1, historyMaxBytes, historyMaxAgeDays });
-            File.WriteAllText(path, json, new UTF8Encoding(false));
+            TestFileSystem.WritePrivateFile(path, json);
             SetPrivateFileMode(path);
         }
 

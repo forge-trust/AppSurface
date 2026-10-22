@@ -232,7 +232,7 @@ public sealed class CoverageArtifactStoreRecoveryEdgesTests
 
         private static void WritePrivateFile(string path, string contents)
         {
-            File.WriteAllText(path, contents, new UTF8Encoding(false));
+            TestFileSystem.WritePrivateFile(path, contents);
             if (!OperatingSystem.IsWindows())
                 File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }

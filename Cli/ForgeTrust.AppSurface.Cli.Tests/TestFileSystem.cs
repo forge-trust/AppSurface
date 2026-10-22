@@ -54,6 +54,21 @@ internal sealed class TestDirectory(string path) : IDisposable
 /// <summary>Creates symbolic-link fixtures or reports when the current test environment lacks link support.</summary>
 internal static class TestFileSystem
 {
+    /// <summary>Writes fixture metadata with private ownership at creation while preserving an existing file's descriptor.</summary>
+    internal static void WritePrivateFile(string path, string contents)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(contents);
+        if (File.Exists(path)) File.WriteAllBytes(path, bytes);
+        else
+        {
+            using var parent = ForgeTrust.AppSurface.Evidence.Coverage.CoverageRunOutputLease.AcquireArtifactDirectory(
+                System.IO.Path.GetDirectoryName(path)!, false, true)!;
+            using var output = parent.OpenArtifactFile(System.IO.Path.GetFileName(path), true);
+            output.Write(bytes);
+            output.Flush(true);
+        }
+    }
+
     /// <summary>Creates a directory link or explicitly skips the test when the filesystem does not support it.</summary>
     public static void CreateDirectoryLinkOrSkip(string link, string target)
     {

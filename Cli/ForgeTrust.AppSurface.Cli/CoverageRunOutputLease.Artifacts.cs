@@ -145,30 +145,75 @@ internal sealed partial class CoverageRunOutputLease
     internal SafeFileHandle ArtifactDirectoryHandle => _outputHandle!;
 
     /// <summary>Opens the Windows cooperative-lock file without following links or allowing replacement.</summary>
-    internal SafeFileHandle OpenArtifactOperationLock()
+    /// <param name="name">One fixed protocol filename owned by the caller's output or private domain.</param>
+    /// <param name="requirePrivate">Whether to require private ownership and a zero-length candidate coordination file.</param>
+    internal SafeFileHandle OpenArtifactOperationLock(string name = ".appsurface-coverage-operation.lock", bool requirePrivate = false)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        const string name = ".appsurface-coverage-operation.lock";
+        ValidateArtifactComponent(name);
         VerifyBinding();
-        var handle = OpenWindowsFile(Path.Join(_outputPath, name), WindowsGenericRead | WindowsGenericWrite,
-            disposition: 4, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
+        SafeFileHandle handle;
+        var path = Path.Join(_outputPath, name);
+        try
+        {
+            handle = OpenWindowsFile(path, WindowsGenericRead | WindowsGenericWrite,
+            WindowsOpenExisting, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
+        }
+        catch (IOException exception) when (exception.InnerException is Win32Exception { NativeErrorCode: 2 })
+        {
+            try { handle = CreateArtifactWindowsFile(path, WindowsShareRead | WindowsShareWrite | WindowsShareDelete); }
+            catch (IOException conflict) when (conflict.InnerException is Win32Exception { NativeErrorCode: 80 or 183 })
+            {
+                handle = OpenWindowsFile(path, WindowsGenericRead | WindowsGenericWrite,
+                    WindowsOpenExisting, shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
+            }
+        }
         try
         {
             VerifyWindowsPathIdentity(handle, Path.Join(_outputPath, name));
             RejectWindowsWrongKind(handle, false);
             RejectWindowsHardLinkedArtifact(handle, name);
+            if (requirePrivate)
+            {
+                ValidateArtifactPrivateAccess(handle, directory: false);
+                if (RandomAccess.GetLength(handle) != 0) throw new InvalidDataException("The candidate coordination file must remain empty.");
+            }
             return handle;
         }
         catch { handle.Dispose(); throw; }
     }
 
+    /// <summary>Validates an existing zero-length private coordination file without creating or changing it.</summary>
+    /// <param name="name">One fixed domain protocol filename.</param>
+    /// <returns>The validated length, always zero.</returns>
+    internal long ReadArtifactCoordinationFileLength(string name)
+    {
+        if (!OperatingSystem.IsWindows()) throw new InvalidDataException("A Windows coordination file is unexpected on this host.");
+        ValidateArtifactComponent(name);
+        VerifyBinding();
+        var path = Path.Join(_outputPath, name);
+        using var handle = OpenWindowsFile(path, WindowsGenericRead, WindowsOpenExisting,
+            shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
+        VerifyWindowsPathIdentity(handle, path);
+        RejectWindowsWrongKind(handle, false);
+        RejectWindowsHardLinkedArtifact(handle, name);
+        ValidateArtifactPrivateAccess(handle, false);
+        var length = RandomAccess.GetLength(handle);
+        if (length != 0) throw new InvalidDataException("The candidate coordination file must remain empty.");
+        VerifyBinding();
+        return length;
+    }
+
     /// <summary>Verifies the named Windows operation lock still identifies the retained lock object.</summary>
     /// <param name="lockHandle">The retained lock-file handle used by the operation lease.</param>
     /// <param name="expectedIdentity">The lock-file identity captured when the lease was acquired.</param>
-    internal void VerifyArtifactOperationLockBinding(SafeFileHandle lockHandle, string expectedIdentity)
+    /// <param name="name">The fixed filename selected by the same lease protocol.</param>
+    internal void VerifyArtifactOperationLockBinding(SafeFileHandle lockHandle, string expectedIdentity,
+        string name = ".appsurface-coverage-operation.lock")
     {
+        ValidateArtifactComponent(name);
         VerifyBinding();
-        var lockPath = Path.Join(_outputPath, ".appsurface-coverage-operation.lock");
+        var lockPath = Path.Join(_outputPath, name);
         using var current = OpenWindowsFile(lockPath, 0, WindowsOpenExisting,
             shareMode: WindowsShareRead | WindowsShareWrite | WindowsShareDelete);
         VerifyWindowsPathIdentity(current, lockPath);
@@ -433,7 +478,7 @@ internal sealed partial class CoverageRunOutputLease
     // Windows takes a new file's owner from the token's default owner, which can be
     // Administrators for an elevated process. Set the current user atomically at creation;
     // accepting another owner or repairing an existing file would weaken store admission.
-    private static unsafe SafeFileHandle CreateArtifactWindowsFile(string path)
+    private static unsafe SafeFileHandle CreateArtifactWindowsFile(string path, uint sharing = WindowsShareRead)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var user = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
@@ -452,7 +497,7 @@ internal sealed partial class CoverageRunOutputLease
                 SecurityDescriptor = (nint)descriptorPointer,
                 InheritHandle = 0
             };
-            var handle = WindowsCreateFile(path, WindowsGenericRead | WindowsGenericWrite, WindowsShareRead,
+            var handle = WindowsCreateFile(path, WindowsGenericRead | WindowsGenericWrite, sharing,
                 (nint)(&attributes), WindowsCreateNew, WindowsOpenReparsePoint, 0);
             if (!handle.IsInvalid) return handle;
             var error = Marshal.GetLastPInvokeError();

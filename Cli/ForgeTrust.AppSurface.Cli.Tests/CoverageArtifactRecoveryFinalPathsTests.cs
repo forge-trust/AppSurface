@@ -61,7 +61,7 @@ public sealed class CoverageArtifactRecoveryFinalPathsTests
         var registryBefore = File.ReadAllBytes(registryPath);
         var manifestBefore = File.ReadAllBytes(manifestPath);
         using var blocker = fault == "source-busy" ? CoverageArtifactOperationLease.Acquire(output, true)
-            : fault == "archive-busy" ? CoverageArtifactOperationLease.Acquire(archive, true) : null;
+            : fault == "archive-busy" ? store.AcquireCandidateLease(archive, true) : null;
         Assert.Empty(await store.MaintainAsync(true, default));
         Assert.Equal(registryBefore, File.ReadAllBytes(registryPath));
         Assert.Equal(manifestBefore, File.ReadAllBytes(manifestPath));

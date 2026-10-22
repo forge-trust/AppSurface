@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -24,6 +26,28 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
 
         await exclusive.TerminateAsync();
         Assert.Equal("acquired", await LeaseProcess.TryAcquireAsync(tree.Output, "shared"));
+    }
+
+    [Fact]
+    public async Task NativeCandidateLeasesUseOneBoundedDomainFileAndCoordinateProcesses()
+    {
+        using var tree = LeaseTree.Create();
+        using var store = CoverageArtifactStore.Open(Path.Join(tree.Root, "domain"));
+        var other = Directory.CreateDirectory(Path.Join(tree.Root, "other")).FullName;
+        await using var first = await LeaseProcess.StartHolderAsync(tree.Output, "shared", store.RootPath);
+        await using var second = await LeaseProcess.StartHolderAsync(tree.Output, "shared", store.RootPath);
+        Assert.Equal("busy", await LeaseProcess.TryAcquireAsync(tree.Output, "exclusive", store.RootPath));
+        Assert.Equal("acquired", await LeaseProcess.TryAcquireAsync(other, "exclusive", store.RootPath));
+        await first.ReleaseAsync();
+        await second.TerminateAsync();
+        Assert.Equal("acquired", await LeaseProcess.TryAcquireAsync(tree.Output, "exclusive", store.RootPath));
+        if (OperatingSystem.IsWindows())
+        {
+            var file = TestPathUtils.PathUnder(store.RootPath, CoverageArtifactOperationLease.CandidateLockFileName);
+            Assert.Equal(0, new FileInfo(file).Length);
+            Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(tree.Output),
+                path => Path.GetFileName(path) == ".appsurface-coverage-operation.lock");
+        }
     }
 
     private sealed class LeaseTree : IDisposable
@@ -54,9 +78,9 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
             _standardError = process.StandardError.ReadToEndAsync();
         }
 
-        internal static async Task<LeaseProcess> StartHolderAsync(string directory, string mode)
+        internal static async Task<LeaseProcess> StartHolderAsync(string directory, string mode, string? candidateDomain = null)
         {
-            var holder = new LeaseProcess(Start("hold", directory, mode));
+            var holder = new LeaseProcess(Start("hold", directory, mode, candidateDomain));
             try
             {
                 await holder.WaitUntilAcquiredAsync();
@@ -96,9 +120,9 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
             await WaitForExitAsync(expectSuccess: false);
         }
 
-        internal static async Task<string> TryAcquireAsync(string directory, string mode)
+        internal static async Task<string> TryAcquireAsync(string directory, string mode, string? candidateDomain = null)
         {
-            using var process = Start("try", directory, mode);
+            using var process = Start("try", directory, mode, candidateDomain);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
             var output = await process.StandardOutput.ReadToEndAsync(timeout.Token);
             await process.WaitForExitAsync(timeout.Token);
@@ -119,7 +143,7 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
             }
         }
 
-        private static Process Start(string command, string directory, string mode)
+        private static Process Start(string command, string directory, string mode, string? candidateDomain = null)
         {
             var configuration = new DirectoryInfo(AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
                 .Parent?.Name ?? "Debug";
@@ -144,6 +168,7 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
             startInfo.ArgumentList.Add(command);
             startInfo.ArgumentList.Add(directory);
             startInfo.ArgumentList.Add(mode);
+            if (candidateDomain is not null) startInfo.ArgumentList.Add(candidateDomain);
             return Process.Start(startInfo)
                 ?? throw new InvalidOperationException("The coverage lease probe process could not start.");
         }
