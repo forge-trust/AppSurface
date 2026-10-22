@@ -331,3 +331,7 @@ Diagnostics and traces are bounded and private. Sanitize paths, controls, nested
 If a limit, warning, status, or diagnostic differs in an installed build, follow that build's verified command help and release documentation. Update this proposed guide only after the implementation contract and consumer proof are reconciled; do not label measured savings or shipped behavior without the corresponding captured evidence.
 
 On Windows, deletable archive and staging candidates coordinate through one empty private `.appsurface-coverage-candidates.lock` file in the domain root. A deterministic byte-range offset derived from the candidate's physical identity keeps independent candidates concurrent. The file stays zero-length because locking beyond its end does not allocate payload storage. Source-output leases keep their existing protocol. Every candidate operation verifies both retained directory and lock-file identities; a hash collision causes safe contention. The fixed file is never removed to force admission. See [Windows byte-range locking](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex).
+
+## Repository cross-platform verification
+
+AppSurface maintains its own storage implementation using [verified cross-platform coverage](coverage-fan-in.md). That workflow retains the full solution aggregate gate and extends patch evidence with matching native executions; consumers receive the storage defaults through their normal upgrade.

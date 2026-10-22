@@ -97,3 +97,6 @@ examples/web-pwa-install/pwa-verify-v3.json
 # Generated assets
 **/*.gen.css
 Web/ForgeTrust.RazorWire/assets/.test-build/
+
+# Python validation helpers
+__pycache__/

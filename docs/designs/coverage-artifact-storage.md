@@ -1038,3 +1038,7 @@ The human reply `rec` parsed successfully against gate revision 1: d1a, d2a, d3a
 Approved choices: retain the provisional bounded resource envelope and measure it first; preview explicit maintenance and require --apply; use the documented user-local policy.json and effective status; approve the amended plan as-is. The original coverage-quality constraint remains binding.
 
 Completion: DONE_WITH_CONCERNS. Native CEO/DX/engineering reviews completed; outside Claude Code was unavailable; final spec fixes were not independently re-verified. Nine implementation tasks and sixteen test-flow groups remain to execute. Review-log status issues_open represents mapped work and incomplete evidence, not a rejection of the approved direction. No feature implementation is authorized by this gate.
+
+## Approved implementation verification adjustment
+
+On October 22, 2026 the owner approved [verified cross-platform coverage fan-in](../../guides/coverage-fan-in.md) using matching source and SDK. Repository acceptance keeps the full solution aggregate 95% line / 85% branch gate and the 95% line / 85% branch Codecov patch gate with existing tolerance and coverage scope. Actual native execution can cover platform-specific paths. Mismatched source, SDK or workflow provenance is rejected; historical XML is never relabeled as fresh evidence. This adjusts verification composition only and does not require downstream consumers to adopt a matrix.
