@@ -105,6 +105,14 @@ public sealed class DurableDoctorInstalledToolTests
                 var connectionString = scenario.Unavailable
                     ? CreateUnavailableConnectionString(fixture.RuntimeConnectionString)
                     : fixture.RuntimeConnectionString;
+                // Exact 15s equality belongs to the pure matrix. A real child can cross the
+                // boundary after seeding; bracket its observation with the same database clock.
+                var boundaryHeartbeat = scenario.MatrixId == "D04"
+                    ? await fixture.ReadHeartbeatAsync(cancellationToken: testDeadline.Token)
+                    : null;
+                DateTimeOffset? earliestObservation = scenario.MatrixId == "D04"
+                    ? await fixture.ReadDatabaseTimeAsync(testDeadline.Token)
+                    : null;
                 var run = await RunDoctorAsync(
                     installedExecutable,
                     toolPath,
@@ -118,6 +126,13 @@ public sealed class DurableDoctorInstalledToolTests
                     extraArguments: [],
                     testDeadline.Token);
 
+                if (scenario.MatrixId == "D04")
+                {
+                    var latestObservation = await fixture.ReadDatabaseTimeAsync(testDeadline.Token);
+                    row = AssertBoundaryHeartbeatOutput(
+                        run, matrixRows, Assert.IsType<DurableDoctorHeartbeat>(boundaryHeartbeat),
+                        earliestObservation!.Value, latestObservation);
+                }
                 AssertDoctorProcessOutput(run, row, connectionString, "json", customConnectionName, customEpochName,
                     scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
                 var after = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
@@ -842,6 +857,38 @@ public sealed class DurableDoctorInstalledToolTests
                 scenario.Draining,
                 cancellationToken);
         }
+    }
+
+    /// <summary>Checks the actual child observation, then selects the exact current/stale matrix expectations.</summary>
+    /// <remarks>
+    /// The seeded row and independent PostgreSQL clock bracket prevent a reported age or status from choosing its own
+    /// expectation. The pure matrix separately requires success at 15 seconds and failure one tick later.
+    /// </remarks>
+    private static DurableDoctorMatrixRow AssertBoundaryHeartbeatOutput(
+        ProcessResult run,
+        IReadOnlyList<DurableDoctorMatrixRow> matrixRows,
+        DurableDoctorHeartbeat heartbeat,
+        DateTimeOffset earliestObservation,
+        DateTimeOffset latestObservation)
+    {
+        Assert.False(run.TimedOut, "The installed boundary doctor exceeded its finite timeout.");
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var root = document.RootElement;
+        var observedAt = root.GetProperty("observedAtUtc").GetDateTimeOffset();
+        Assert.InRange(observedAt, earliestObservation, latestObservation);
+        var worker = root.GetProperty("worker");
+        Assert.True(worker.GetProperty("found").GetBoolean());
+        Assert.Equal(DurableDoctorFixture.RuntimeWorkerId, worker.GetProperty("workerId").GetString());
+        Assert.Equal(heartbeat.RuntimeEpoch, worker.GetProperty("runtimeEpoch").GetGuid());
+        Assert.False(worker.GetProperty("isDraining").GetBoolean());
+        Assert.Equal(heartbeat.LastHeartbeatAtUtc, worker.GetProperty("lastHeartbeatAtUtc").GetDateTimeOffset());
+        var age = Math.Max(0L, (observedAt - heartbeat.LastHeartbeatAtUtc!.Value).Ticks);
+        Assert.Equal(age, worker.GetProperty("ageTicks").GetInt64());
+        var staleAfter = DurableDoctorFixture.ReferenceStaleAfter.Ticks;
+        Assert.Equal(staleAfter, worker.GetProperty("staleAfterTicks").GetInt64());
+        var stale = age > staleAfter;
+        Assert.Equal(stale ? "stale" : "current", worker.GetProperty("state").GetString());
+        return Assert.Single(matrixRows, candidate => candidate.Id == (stale ? "D05" : "D04"));
     }
 
     private static string CreateUnavailableConnectionString(string baseConnectionString) =>
