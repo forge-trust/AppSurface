@@ -478,8 +478,9 @@ public sealed class HandoffBoundaryTests
         Assert.False(appUpdate.IsCompleted);
         Assert.True(await HasSharedMigrationFenceAsync(lab, ownerPid));
 
-        // Observe idle rollback through the blocked operations and the server's timeout error first.
-        // Check process teardown after consuming that error and disposing the caller resources.
+        // Let idle-transaction teardown finish before starting the separate completion budget
+        // for cancellation, epoch rotation, and the application update.
+        await WaitForBackendGoneAsync(lab.Database.DataSource, ownerPid, BarrierTimeout);
         await Task.WhenAll(cancellation, rotation, appUpdate).WaitAsync(BarrierTimeout);
         Assert.False(await HasSharedMigrationFenceAsync(lab, ownerPid));
         var canceled = await cancellation;

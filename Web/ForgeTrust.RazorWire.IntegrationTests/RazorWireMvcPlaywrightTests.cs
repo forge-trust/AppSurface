@@ -228,7 +228,7 @@ public sealed class RazorWireMvcPlaywrightTests
     [Fact]
     public async Task FormInteractionsSample_ReplacesPageLocalJavaScriptForConditionalAndCollectionRows()
     {
-        await using var context = await _fixture.Browser.NewContextAsync();
+        await using var context = await CreateFormInteractionsContextAsync();
         var page = await context.NewPageAsync();
         var browserMessages = CaptureBrowserMessages(page);
 
@@ -303,7 +303,7 @@ public sealed class RazorWireMvcPlaywrightTests
     [Fact]
     public async Task FormInteractionsSample_RedisplaysValidationErrorsForInvalidPostedState()
     {
-        await using var context = await _fixture.Browser.NewContextAsync();
+        await using var context = await CreateFormInteractionsContextAsync();
         var page = await context.NewPageAsync();
         var browserMessages = CaptureBrowserMessages(page);
 
@@ -1518,6 +1518,32 @@ public sealed class RazorWireMvcPlaywrightTests
         };
 
         return messages;
+    }
+
+    /// <summary>Creates a functional form-test context whose readiness is independent of the sample's decorative web font.</summary>
+    /// <returns>A browser context that serves the Google Fonts stylesheet locally while loading application assets normally.</returns>
+    /// <remarks>
+    /// The stylesheet precedes parser-blocking scripts in the sample layout. A stalled font request therefore blocks
+    /// runtime initialization even though these tests assert form behavior rather than font rendering.
+    /// </remarks>
+    private async Task<IBrowserContext> CreateFormInteractionsContextAsync()
+    {
+        var context = await _fixture.Browser.NewContextAsync();
+        try
+        {
+            await context.RouteAsync("https://fonts.googleapis.com/**", route => route.FulfillAsync(new RouteFulfillOptions
+            {
+                Status = StatusCodes.Status200OK,
+                ContentType = "text/css",
+                Body = "/* Functional form tests use the sample's system-font fallback. */"
+            }));
+            return context;
+        }
+        catch
+        {
+            await context.DisposeAsync();
+            throw;
+        }
     }
 
     /// <summary>
