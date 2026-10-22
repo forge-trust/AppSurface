@@ -106,8 +106,18 @@ These are [APT acquisition options](https://manpages.debian.org/trixie/apt/apt-t
 and [download retries](https://manpages.debian.org/trixie/apt/apt.conf.5.en.html#Retries),
 not a native-control retry or a new process deadline. Exhausting the same total
 setup limit still fails the job before copying a runtime or launching controls.
-The package, feed selection, APT authentication and complete OS audit stay in
-force; a transport retry does not qualify a runtime image.
+The workflow replaces the runner's Azure Ubuntu mirror entry with Ubuntu's
+[canonical HTTPS archive](https://archive.ubuntu.com/ubuntu/). It retains the
+public mirror list before and after that replacement as
+`runtime-mirrors-before.txt` and `runtime-mirrors-after.txt`. Setup requires the
+expected Azure entry before replacement, then requires the canonical entry and
+absence of the old entry afterward. If that expected entry is missing or remains
+after rewriting, setup fails before any package is installed. Other entries in
+the runner mirror list are retained and remain visible in the saved lists. This avoids the observed stalled Azure runtime
+package transfer without changing Ubuntu package versions or signature checks.
+The APT candidate/origin log records the actual selected archive. The complete
+OS audit stays in force; a mirror change or transport retry does not qualify a
+runtime image.
 The worker job has a 50-minute outer limit so its sequential bounded package,
 copy, publication and native phases leave time for setup and private retention;
 the native procedure's existing 900-second outer process limit and original

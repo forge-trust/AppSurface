@@ -90,6 +90,19 @@ jobs:
           # The private 10.0.401 SDK remains the only compiler host. The
           # distribution SDK supplies the complete OS-matched runtime image;
           # none of its SDK/packs content is copied into the protected runtime.
+          # Retain the runner's public mirror configuration, then select Ubuntu's canonical HTTPS archive.
+          # Package signatures and distribution versions remain verified by APT.
+          cp /etc/apt/apt-mirrors.txt "$C1_EVIDENCE/runtime-mirrors-before.txt"
+          grep --fixed-strings --quiet 'http://azure.archive.ubuntu.com/ubuntu' /etc/apt/apt-mirrors.txt
+          sudo --non-interactive sed --in-place \
+            's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/apt-mirrors.txt
+          cp /etc/apt/apt-mirrors.txt "$C1_EVIDENCE/runtime-mirrors-after.txt"
+          grep --fixed-strings --quiet 'https://archive.ubuntu.com/ubuntu' /etc/apt/apt-mirrors.txt
+          if grep --fixed-strings --quiet 'http://azure.archive.ubuntu.com/ubuntu' /etc/apt/apt-mirrors.txt; then
+            printf '%s\n' 'runtime-mirror-selection-rejected' >&2
+            exit 1
+          fi
           # Bound stalled mirror connections inside the unchanged update/install deadlines.
           # APT retries only dependency downloads; native procedures and tests are never retried here.
           apt_acquire=(-o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
