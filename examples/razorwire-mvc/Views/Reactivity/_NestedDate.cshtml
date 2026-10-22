@@ -1,0 +1,21 @@
+@model RazorWireWebExample.Models.NestedDateModel
+@{
+    var prefix = $"{ViewData["ActionPrefix"]}.Dates[{Model.ClientIndex}]";
+    var id = prefix.Replace("[", "_").Replace("]", "_").Replace(".", "_");
+}
+<fieldset rw-form-collection-row rw-form-index="@Model.ClientIndex" data-rw-form-collection-row-state="@(Model.Delete ? "removed" : "active")" hidden="@Model.Delete" class="space-y-2">
+    <legend>Date</legend>
+    <input type="hidden" name="@(ViewData["ActionPrefix"]).Dates.index" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).ClientIndex" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).Id" value="@Model.Id" data-rw-form-collection-preserve />
+    <input type="hidden" name="@(prefix).ConcurrencyToken" value="@Model.ConcurrencyToken" />
+    <input type="hidden" name="@(prefix).Delete" value="@Model.Delete.ToString().ToLowerInvariant()" data-rw-form-collection-delete-field />
+    <label for="@(id)_Kind">Date kind</label>
+    @Html.TextBox($"{prefix}.Kind", Model.Kind, Model.Delete ? new Dictionary<string, object> { ["id"] = $"{id}_Kind", ["class"] = "nested-field", ["disabled"] = "disabled" } : new Dictionary<string, object> { ["id"] = $"{id}_Kind", ["class"] = "nested-field" })
+    @Html.ValidationMessage($"{prefix}.Kind")
+    <label for="@(id)_Date">Date (yyyy-MM-dd)</label>
+    @Html.TextBox($"{prefix}.Date", Model.Date?.ToString("yyyy-MM-dd"), Model.Delete ? new Dictionary<string, object> { ["id"] = $"{id}_Date", ["class"] = "nested-field", ["disabled"] = "disabled" } : new Dictionary<string, object> { ["id"] = $"{id}_Date", ["class"] = "nested-field" })
+    @Html.ValidationMessage($"{prefix}.Date")
+    <button rw-form-collection-duplicate class="nested-command">Duplicate date</button>
+    <button data-rw-form-collection-remove="true" type="button" class="nested-command">Remove date</button>
+</fieldset>
