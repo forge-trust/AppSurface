@@ -116,11 +116,11 @@ public sealed class CoverageArtifactInspectionFinalPathsTests
         }
     }
 
-    [Fact]
+    [CoverageUnixFact]
     public void ReadCollectorRisk_RejectsADeviceFileAsNonregular()
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-            throw Xunit.Sdk.SkipException.ForSkip("The nonregular device fixture is available on Linux and macOS.");
+            throw new PlatformNotSupportedException("This test requires a Unix device file.");
 
         var result = CoverageArtifactInspector.ReadCollectorRisk("/dev/null");
 
@@ -128,11 +128,11 @@ public sealed class CoverageArtifactInspectionFinalPathsTests
         Assert.Equal("settings-file-not-regular-or-unavailable", result.Cause);
     }
 
-    [Fact]
+    [CoverageUnixFact]
     public void ReadCollectorRisk_ReportsASettingsOpenFailure()
     {
         if (OperatingSystem.IsWindows())
-            throw Xunit.Sdk.SkipException.ForSkip("Unix file modes are required to create a deterministic access failure.");
+            throw new PlatformNotSupportedException("This test requires Unix file-mode enforcement.");
 
         using var fixture = TestDirectory.Create();
         var settings = fixture.WriteFile("inaccessible.runsettings", DisabledSettings);

@@ -323,13 +323,17 @@ public sealed class CoverageStorageRenderingDecisionTests
     }
 
     [Fact]
-    public async Task InvalidDomainPathReturnsUnknownIdentityWithSanitizedFailureEnvelope()
+    public async Task NonDirectoryDomainReturnsUnknownIdentityWithSanitizedFailureEnvelope()
     {
-        using var configured = ConfigureStore("\0");
+        using var temp = TestDirectory.Create();
+        var invalidDomain = temp.WriteFile("domain", "retained private contents");
+        using var configured = ConfigureStore(invalidDomain);
         using var result = await ExecuteFailureAsync(new ProbeCommand("status"));
         Assert.Equal("domain-unknown", result.Document.RootElement.GetProperty("domainId").GetString());
         Assert.Equal("failed", result.Document.RootElement.GetProperty("status").GetString());
         Assert.Equal("none", result.Document.RootElement.GetProperty("sideEffects").GetString());
+        Assert.Equal("retained private contents", File.ReadAllText(invalidDomain));
+        Assert.DoesNotContain("retained private contents", result.Output, StringComparison.Ordinal);
     }
 
     private static object? StatusDetails(string detailsCase) => detailsCase switch

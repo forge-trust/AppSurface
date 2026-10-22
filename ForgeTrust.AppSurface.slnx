@@ -158,6 +158,7 @@
     <Project Path="tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ForgeTrust.AppSurface.CoverageLeaseProbe/ForgeTrust.AppSurface.CoverageLeaseProbe.csproj" />
     <Project Path="tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
   </Folder>

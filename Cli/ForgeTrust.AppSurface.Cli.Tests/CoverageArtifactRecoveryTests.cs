@@ -114,6 +114,32 @@ public sealed class CoverageArtifactRecoveryTests
         Assert.False(Directory.Exists(Path.Join(stagingPath, stageName)));
     }
 
+    [Fact]
+    public async Task SnapshotRetryAfterPublishedInterruptionRequiresMaintenanceAndPreservesArchive()
+    {
+        using var fixture = new Fixture();
+        var contents = Encoding.UTF8.GetBytes("published archive pending metadata recovery");
+        var run = fixture.CreateRun(contents);
+        using var store = fixture.OpenStore();
+        await store.RegisterAsync(run, CancellationToken.None);
+        await store.SnapshotAsync(run, false, false, CancellationToken.None);
+        var reservation = fixture.SimulatePublishedButUnregistered(run.ManifestBase.RunId, false);
+        var original = fixture.CaptureArchiveFiles(run.ManifestBase.RunId);
+        Assert.Equal(0, store.GetStatus().ArchivedRuns);
+        Assert.Equal(CoverageArtifactLimits.DomainStagingMaxBytes, store.GetStatus().StagingReservedBytes);
+        await Assert.ThrowsAsync<IOException>(() => store.SnapshotAsync(run, false, false, CancellationToken.None));
+        Assert.True(fixture.HasReservation(reservation));
+        fixture.AssertArchiveFilesEqual(run.ManifestBase.RunId, original);
+        Assert.Equal(contents, File.ReadAllBytes(Path.Join(run.OutputPath, "coverage.xml")));
+        await store.MaintainAsync(true, CancellationToken.None);
+        Assert.Equal(1, store.GetStatus().ArchivedRuns);
+        Assert.Equal(0, store.GetStatus().StagingReservedBytes);
+        Assert.False(fixture.HasReservation(reservation));
+        fixture.AssertArchiveFilesEqual(run.ManifestBase.RunId, original);
+        Assert.Equal(contents, File.ReadAllBytes(Path.Join(run.OutputPath, "coverage.xml")));
+        Assert.True((await store.SnapshotAsync(run, false, false, CancellationToken.None)).Complete);
+    }
+
     private sealed class Fixture : IDisposable
     {
         private const string ReservationId = "11111111111141118111111111111111";

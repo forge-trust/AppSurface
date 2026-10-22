@@ -119,12 +119,12 @@ public sealed class CoverageArtifactCallerFinalPathsTests
         Assert.Equal("keep", File.ReadAllText(reserved));
     }
 
-    [Theory]
+    [CoverageUnixTheory]
     [InlineData(17)]
     [InlineData(CoverageArtifactLimits.OperationBufferMaxBytes + 128)]
     public void InventoryRejectsLengthChangesEvenWhenItsFinalReadMatchesTheOriginalLength(int size)
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("This test requires Unix file-mode or file-sharing semantics.");
         using var temp = TestDirectory.Create();
         var path = Path.Join(temp.Path, "report.xml");
         File.WriteAllBytes(path, new byte[size]);

@@ -8,6 +8,7 @@ public sealed class CoverageArtifactRecoveryFinalPathsTests
 {
     [Theory]
     [InlineData("source-missing")]
+    [InlineData("source-busy")]
     [InlineData("archive-busy")]
     [InlineData("repository-rebound")]
     [InlineData("manifest-length")]

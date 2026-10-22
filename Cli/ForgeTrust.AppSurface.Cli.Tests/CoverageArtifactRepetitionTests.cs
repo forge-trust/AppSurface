@@ -169,7 +169,14 @@ public sealed class CoverageArtifactRepetitionTests
             {
                 for (var attempt = 0; attempt < 5; attempt++)
                 {
-                    try { return (await store.SnapshotAsync(run, false, false, CancellationToken.None)).Complete; }
+                    try
+                    {
+                        // A fail-fast metadata conflict can leave a verified published archive
+                        // and its reservation. Recover that state before retrying publication;
+                        // repeatedly retrying Snapshot alone cannot release its accounting.
+                        await store.MaintainAsync(apply: true, CancellationToken.None);
+                        return (await store.SnapshotAsync(run, false, false, CancellationToken.None)).Complete;
+                    }
                     catch (Exception exception) when (attempt < 4 && exception is (CoverageExecutionException or IOException))
                     {
                         await Task.Delay(10 * (attempt + 1));

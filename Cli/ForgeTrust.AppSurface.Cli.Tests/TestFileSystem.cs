@@ -38,6 +38,14 @@ internal sealed class TestDirectory(string path) : IDisposable
     {
         if (Directory.Exists(Path))
         {
+            if (OperatingSystem.IsWindows())
+            {
+                // Git stores loose objects as read-only files on Windows. Normalize only
+                // owned fixture files; linked entries are never followed during cleanup.
+                foreach (var file in Directory.EnumerateFiles(Path, "*", new EnumerationOptions
+                { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint }))
+                    File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+            }
             Directory.Delete(Path, recursive: true);
         }
     }

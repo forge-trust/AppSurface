@@ -472,10 +472,16 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <param name="routineBudget">Optional invocation-wide maintenance budget; explicit maintenance has no deadline.</param>
     /// <param name="apply">False returns candidates without deleting them.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <param name="heldSourceLease">Optional live exclusive source lease owned by the calling session; reused only for its matching physical output, never disposed by maintenance.</param>
     /// <param name="onArchiveDeleted">Receives each run identifier immediately after physical deletion, even if later metadata persistence fails. The callback must not throw.</param>
     internal async Task<IReadOnlyList<string>> MaintainAsync(bool apply, CancellationToken cancellationToken, CoverageArtifactWorkBudget? routineBudget = null,
-        Action<string>? onArchiveDeleted = null)
+        Action<string>? onArchiveDeleted = null, CoverageArtifactOperationLease? heldSourceLease = null)
     {
+        if (heldSourceLease is not null)
+        {
+            heldSourceLease.VerifyBinding();
+            if (!heldSourceLease.IsExclusive) throw new ArgumentException("Recovery requires an exclusive source lease.", nameof(heldSourceLease));
+        }
         if (apply) ThrowIfReadOnly();
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
@@ -489,7 +495,7 @@ internal sealed class CoverageArtifactStore : IDisposable
                 using var root = CoverageRunOutputLease.AcquireArtifactDirectory(RootPath, false, true)!;
                 RemoveAbandonedRegistryStage(root);
             }
-            await RecoverAbandonedSnapshotsAsync(cancellationToken, routineBudget).ConfigureAwait(false);
+            await RecoverAbandonedSnapshotsAsync(cancellationToken, routineBudget, heldSourceLease).ConfigureAwait(false);
         }
         StoreRegistration[] registrations;
         using (var readLease = _readOnly ? null : CoverageArtifactOperationLease.Acquire(RootPath, exclusive: false))
@@ -571,7 +577,8 @@ internal sealed class CoverageArtifactStore : IDisposable
         return apply ? removed : remove.Select(item => item.RunId).ToArray();
     }
 
-    private async Task RecoverAbandonedSnapshotsAsync(CancellationToken token, CoverageArtifactWorkBudget? budget)
+    private async Task RecoverAbandonedSnapshotsAsync(CancellationToken token, CoverageArtifactWorkBudget? budget,
+        CoverageArtifactOperationLease? heldSourceLease)
     {
         StoreReservation[] reservations;
         StoreRegistration[] registrations;
@@ -595,14 +602,16 @@ internal sealed class CoverageArtifactStore : IDisposable
 
             if (Directory.Exists(archivePath) || File.Exists(archivePath))
             {
-                await RecoverPublishedArchiveAsync(reservation, registration, archivePath, token, budget).ConfigureAwait(false);
+                await RecoverPublishedArchiveAsync(reservation, registration, archivePath, token, budget, heldSourceLease).ConfigureAwait(false);
                 continue;
             }
 
-            CoverageArtifactOperationLease source;
-            try { source = CoverageArtifactOperationLease.Acquire(registration.OutputPath, true); }
+            CoverageArtifactOperationLease? acquiredSource;
+            try { acquiredSource = AcquireRecoverySource(registration, heldSourceLease); }
             catch (Exception exception) when (IsOptionalFailure(exception)) { continue; }
-            using var sourceLease = source;
+            using var ownedSource = acquiredSource;
+            var sourceLease = acquiredSource ?? heldSourceLease!;
+            sourceLease.VerifyBinding();
             if (sourceLease.PhysicalIdentity != registration.OutputIdentity) continue;
             if (GetDirectoryIdentity(registration.RepositoryPath) != registration.RepositoryIdentity) continue;
             if (!Directory.Exists(stagePath))
@@ -662,13 +671,16 @@ internal sealed class CoverageArtifactStore : IDisposable
         StoreRegistration registration,
         string archivePath,
         CancellationToken token,
-        CoverageArtifactWorkBudget? budget)
+        CoverageArtifactWorkBudget? budget,
+        CoverageArtifactOperationLease? heldSourceLease)
     {
-        CoverageArtifactOperationLease sourceLease;
-        try { sourceLease = CoverageArtifactOperationLease.Acquire(registration.OutputPath, exclusive: true); }
+        CoverageArtifactOperationLease? acquiredSource;
+        try { acquiredSource = AcquireRecoverySource(registration, heldSourceLease); }
         catch (Exception exception) when (IsOptionalFailure(exception)) { return; }
-        using (sourceLease)
+        using (acquiredSource)
         {
+            var sourceLease = acquiredSource ?? heldSourceLease!;
+            sourceLease.VerifyBinding();
             if (sourceLease.PhysicalIdentity != registration.OutputIdentity) return;
             try
             {
@@ -740,6 +752,19 @@ internal sealed class CoverageArtifactStore : IDisposable
                 }
             }
         }
+    }
+
+    private static CoverageArtifactOperationLease? AcquireRecoverySource(StoreRegistration registration,
+        CoverageArtifactOperationLease? heldSourceLease)
+    {
+        if (heldSourceLease is not null && heldSourceLease.PhysicalIdentity == registration.OutputIdentity)
+        {
+            // MaintainAsync validates the immutable exclusive mode before recovery starts.
+            // Recheck the live binding here, immediately before borrowing the authority.
+            heldSourceLease.VerifyBinding();
+            return null;
+        }
+        return CoverageArtifactOperationLease.Acquire(registration.OutputPath, exclusive: true);
     }
 
     private static bool RegistrationMatchesManifest(StoreRegistration registration, CoverageArtifactRunManifest manifest)

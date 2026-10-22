@@ -48,3 +48,5 @@ from x64; output traversal, collector artifact reads, and storage inspection mus
 use the matching pair. Unverified Linux architectures fail before opening a
 candidate. The selector has decision tests, while the native no-follow tests in
 the [platform matrix](../../.github/workflows/build.yml) verify actual host behavior.
+
+Recovery invoked by an existing coverage session reuses that session's live exclusive output lease only when its physical identity matches the stored registration. Shared, disposed or unrelated leases grant no recovery authority. The manager keeps ownership of any separately acquired leases and never releases a borrowed session lease. See the [storage lifecycle and recovery guide](../../guides/coverage-storage.md#recovery-recipes).

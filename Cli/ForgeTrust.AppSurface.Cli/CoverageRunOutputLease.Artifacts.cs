@@ -220,10 +220,10 @@ internal sealed partial class CoverageRunOutputLease
         {
             try
             {
-                handle = OpenWindowsFile(Path.Join(_outputPath, name),
-                    createNew ? WindowsGenericRead | WindowsGenericWrite : WindowsGenericRead,
-                    createNew ? WindowsCreateNew : WindowsOpenExisting,
-                    shareMode: WindowsShareRead);
+                handle = createNew
+                    ? CreateArtifactWindowsFile(Path.Join(_outputPath, name))
+                    : OpenWindowsFile(Path.Join(_outputPath, name), WindowsGenericRead,
+                        WindowsOpenExisting, shareMode: WindowsShareRead);
             }
             catch (IOException exception) when (!createNew && exception.InnerException is Win32Exception { NativeErrorCode: 2 or 3 })
             {
@@ -428,6 +428,45 @@ internal sealed partial class CoverageRunOutputLease
         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         new DirectoryInfo(path).Create(security);
+    }
+
+    // Windows takes a new file's owner from the token's default owner, which can be
+    // Administrators for an elevated process. Set the current user atomically at creation;
+    // accepting another owner or repairing an existing file would weaken store admission.
+    private static unsafe SafeFileHandle CreateArtifactWindowsFile(string path)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        var user = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(user);
+        security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl, AccessControlType.Allow));
+        var descriptor = security.GetSecurityDescriptorBinaryForm();
+        fixed (byte* descriptorPointer = descriptor)
+        {
+            var attributes = new ArtifactWindowsSecurityAttributes
+            {
+                Length = sizeof(ArtifactWindowsSecurityAttributes),
+                SecurityDescriptor = (nint)descriptorPointer,
+                InheritHandle = 0
+            };
+            var handle = WindowsCreateFile(path, WindowsGenericRead | WindowsGenericWrite, WindowsShareRead,
+                (nint)(&attributes), WindowsCreateNew, WindowsOpenReparsePoint, 0);
+            if (!handle.IsInvalid) return handle;
+            var error = Marshal.GetLastPInvokeError();
+            handle.Dispose();
+            throw new IOException("Unable to create private artifact file.", new Win32Exception(error));
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ArtifactWindowsSecurityAttributes
+    {
+        internal int Length;
+        internal nint SecurityDescriptor;
+        internal int InheritHandle;
     }
 
     private void ValidateArtifactPrivateAccess(SafeFileHandle handle, bool directory)

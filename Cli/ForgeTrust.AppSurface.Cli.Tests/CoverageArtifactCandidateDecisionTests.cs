@@ -74,6 +74,7 @@ public sealed class CoverageArtifactCandidateDecisionTests
         var path = Path.Join(temp.Path, "candidate");
         File.WriteAllBytes(path, [1, 2, 3]);
         var descriptor = -1;
+        string? openedIdentity = null;
         var calls = new CoverageArtifactCandidateCalls
         {
             IsWindows = false,
@@ -83,6 +84,8 @@ public sealed class CoverageArtifactCandidateDecisionTests
             UnixOpen = (name, _) =>
             {
                 descriptor = ForgeTrust.AppSurface.Evidence.Coverage.CoverageFileSystemInterop.UnixOpen(name, 0);
+                using var observed = new SafeFileHandle((nint)descriptor, ownsHandle: false);
+                openedIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(observed);
                 return descriptor;
             },
             UnixStat = (_, buffer) =>
@@ -116,10 +119,34 @@ public sealed class CoverageArtifactCandidateDecisionTests
             return;
         }
         Assert.True(descriptor >= 0);
-        var nativeState = Marshal.AllocHGlobal(512);
-        try { Assert.Equal(-1, ForgeTrust.AppSurface.Evidence.Coverage.CoverageFileSystemInterop.UnixFStat(descriptor, nativeState)); }
-        finally { Marshal.FreeHGlobal(nativeState); }
+        // Other test threads may reuse the descriptor number immediately after close.
+        // Rejection or a different physical identity proves our original file was released;
+        // observing the original identity would still fail this cleanup assertion.
+        AssertDescriptorReleased(descriptor, openedIdentity!);
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void DescriptorReleaseAssertionRejectsAStillOpenOriginalObject()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var temp = TestDirectory.Create();
+        var path = temp.WriteFile("candidate", "owned");
+        using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read);
+        var descriptor = handle.DangerousGetHandle().ToInt32();
+        var identity = CoverageRunOutputLease.GetArtifactObjectIdentity(handle);
+        Assert.Throws<Xunit.Sdk.NotEqualException>(() => AssertDescriptorReleased(descriptor, identity));
+        handle.Dispose();
+        AssertDescriptorReleased(descriptor, identity);
+    }
+
+    private static void AssertDescriptorReleased(int descriptor, string originalIdentity)
+    {
+        string? rebound = null;
+        using var probe = new SafeFileHandle((nint)descriptor, ownsHandle: false);
+        var error = Record.Exception(() => rebound = CoverageRunOutputLease.GetArtifactObjectIdentity(probe));
+        if (error is not null) Assert.IsType<IOException>(error);
+        else Assert.NotEqual(originalIdentity, rebound);
     }
 
     [Fact]

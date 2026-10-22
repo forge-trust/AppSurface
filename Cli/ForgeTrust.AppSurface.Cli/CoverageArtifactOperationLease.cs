@@ -69,11 +69,13 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
     private CoverageArtifactOperationLease(
         CoverageRunOutputLease directory,
         CoverageArtifactOperationLeaseOptions options,
-        bool isWindows)
+        bool isWindows,
+        bool exclusive)
     {
         _directory = directory;
         _options = options;
         _isWindows = isWindows;
+        IsExclusive = exclusive;
         PhysicalIdentity = directory.ArtifactDirectoryIdentity;
     }
 
@@ -81,8 +83,9 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
         CoverageRunOutputLease directory,
         CoverageArtifactOperationLeaseOptions options,
         bool isWindows,
-        SafeFileHandle windowsLock)
-        : this(directory, options, isWindows)
+        SafeFileHandle windowsLock,
+        bool exclusive)
+        : this(directory, options, isWindows, exclusive)
     {
         _windowsLock = windowsLock;
         _windowsLockIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(windowsLock);
@@ -90,6 +93,9 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
 
     /// <summary>Gets the physical volume/object identity used to order compatible operations.</summary>
     internal string PhysicalIdentity { get; }
+
+    /// <summary>Gets whether this retained lease authorizes mutation and recovery of its physical output.</summary>
+    internal bool IsExclusive { get; }
 
     /// <summary>Acquires one nonblocking strongest-mode lease without performing output cleanup.</summary>
     /// <param name="existingDirectory">An existing directory validated without following ancestor links.</param>
@@ -132,7 +138,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
             if (isWindows)
             {
                 lockHandle = options.OpenWindowsLock?.Invoke(directory) ?? directory.OpenArtifactOperationLock();
-                var lease = new CoverageArtifactOperationLease(directory, options, isWindows, lockHandle);
+                var lease = new CoverageArtifactOperationLease(directory, options, isWindows, lockHandle, exclusive);
                 var flags = (exclusive ? 2u : 0u) | 1u;
                 var attempt = TryWindowsLock(lockHandle, flags, lease, options);
                 if (!attempt.Acquired)
@@ -158,7 +164,7 @@ internal sealed partial class CoverageArtifactOperationLease : IDisposable
 
             unixLocked = true;
             VerifyUnixBinding(directory, options);
-            return new CoverageArtifactOperationLease(directory, options, isWindows);
+            return new CoverageArtifactOperationLease(directory, options, isWindows, exclusive);
         }
         catch
         {

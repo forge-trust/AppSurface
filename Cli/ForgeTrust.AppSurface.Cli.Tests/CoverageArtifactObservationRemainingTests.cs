@@ -98,9 +98,10 @@ public sealed class CoverageArtifactObservationRemainingTests
     {
         using var temp = TestDirectory.Create();
         var repository = temp.CreateDirectory("repo");
-        Assert.Equal(temp.Path, CoverageArtifactDisplay.PathLabel(temp.Path, repository));
+        Assert.Equal(CoverageArtifactDisplay.PathLabel(temp.Path), CoverageArtifactDisplay.PathLabel(temp.Path, repository));
         var sibling = temp.CreateDirectory("sibling");
-        Assert.Equal(sibling, CoverageArtifactDisplay.PathLabel(sibling, repository));
+        Assert.Equal(CoverageArtifactDisplay.PathLabel(sibling), CoverageArtifactDisplay.PathLabel(sibling, repository));
+        Assert.Equal("inside.xml", CoverageArtifactDisplay.PathLabel(Path.Join(repository, "inside.xml"), repository));
     }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider

@@ -62,6 +62,8 @@ internal sealed class CoverageArtifactSession : IDisposable
         CoverageArtifactStore? store = null;
         try
         {
+            if (!operation.IsExclusive) throw new ArgumentException("A coverage session requires an exclusive output lease.", nameof(operationLease));
+            operation.VerifyBinding();
             using var repositoryDirectory = CoverageRunOutputLease.AcquireArtifactDirectory(repository, false, false)
                 ?? throw new IOException("Repository root is missing.");
             var routineBudget = new CoverageArtifactWorkBudget(clock,
@@ -75,6 +77,18 @@ internal sealed class CoverageArtifactSession : IDisposable
                 repositoryDirectory.ArtifactDirectoryIdentity, writers, clock);
             await session.Warnings.ObserveAsync(terminal: false, inventory: null, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
+            if (store is not null)
+            {
+                try
+                {
+                    session._expiredRuns += (await store.MaintainAsync(apply: true, token, routineBudget,
+                        heldSourceLease: operation).ConfigureAwait(false)).Count;
+                }
+                catch (Exception exception) when (IsOptionalFailure(exception))
+                {
+                    await WriteDiagnosticSafelyAsync(CoverageArtifactDiagnostic.Failure("ASCOV204", "maintenance", exception), writers.Error);
+                }
+            }
             if (clean && store is not null)
             {
                 try
@@ -115,7 +129,11 @@ internal sealed class CoverageArtifactSession : IDisposable
             }
             if (store is not null)
             {
-                try { session._expiredRuns = (await store.MaintainAsync(apply: true, token, routineBudget).ConfigureAwait(false)).Count; }
+                try
+                {
+                    session._expiredRuns += (await store.MaintainAsync(apply: true, token, routineBudget,
+                    heldSourceLease: operation).ConfigureAwait(false)).Count;
+                }
                 catch (Exception exception) when (IsOptionalFailure(exception))
                 {
                     await WriteDiagnosticSafelyAsync(CoverageArtifactDiagnostic.Failure("ASCOV204", "maintenance", exception), writers.Error);

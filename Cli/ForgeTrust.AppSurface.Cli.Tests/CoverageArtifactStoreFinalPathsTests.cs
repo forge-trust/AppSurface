@@ -37,10 +37,10 @@ public sealed class CoverageArtifactStoreFinalPathsTests
         Assert.True(File.Exists(fixture.SourceFilePath(candidate)));
     }
 
-    [Fact]
+    [CoverageUnixFact]
     public async Task RegisterAsync_NonprivateRootModeRejectsBeforeMetadataMutation()
     {
-        if (OperatingSystem.IsWindows()) return;
+        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("This test requires Unix file-mode or file-sharing semantics.");
 
         using var fixture = new Fixture();
         using var store = fixture.OpenStore();
