@@ -133,13 +133,14 @@ public sealed class FormToggleTargetTagHelper : TagHelper
 }
 
 /// <summary>
-/// Marks an application-authored element as a one-dimensional model-bound collection root.
+/// Marks an application-authored element as a model-bound collection root.
 /// </summary>
 /// <remarks>
 /// The collection root scopes row commands, templates, sparse index markers,
-/// and diagnostics for one ASP.NET Core collection property. RazorWire stable
-/// v1 intentionally does not support nested collections, reordering, generated
-/// model fields, or app persistence decisions.
+/// and diagnostics for one ASP.NET Core collection property. Nested collection
+/// roots use their own index-token placeholder while remaining scoped to their
+/// owning row. This helper does not generate model fields or make app
+/// persistence decisions.
 /// </remarks>
 [HtmlTargetElement(Attributes = "rw-form-collection")]
 public sealed class FormCollectionTagHelper : TagHelper
@@ -176,14 +177,34 @@ public sealed class FormCollectionTagHelper : TagHelper
     [HtmlAttributeName("rw-form-collection-remove-mode")]
     public string? RemoveMode { get; set; }
 
+    /// <summary>
+    /// Gets or sets the unresolved placeholder used by this collection's row template.
+    /// </summary>
+    /// <remarks>
+    /// The value is trimmed and emitted as
+    /// <c>data-rw-form-collection-index-token</c>. Missing or whitespace-only
+    /// values use <c>__index__</c>. A nonblank value should match
+    /// <c>__[A-Za-z][A-Za-z0-9_]*__</c>; nonblank values outside that syntax are
+    /// emitted unchanged after trimming so the browser runtime can report a
+    /// collection-scoped diagnostic. This placeholder is distinct from the
+    /// concrete opaque key submitted by an enabled hidden <c>.index</c> marker
+    /// and from any persisted model <c>Id</c> value.
+    /// </remarks>
+    [HtmlAttributeName("rw-form-collection-index-token")]
+    public string? IndexToken { get; set; }
+
     /// <inheritdoc />
     public override void Process(TagHelperContext context, TagHelperOutput output)
     {
         output.Attributes.RemoveAll("rw-form-collection");
         output.Attributes.RemoveAll("rw-form-collection-label");
         output.Attributes.RemoveAll("rw-form-collection-remove-mode");
+        output.Attributes.RemoveAll("rw-form-collection-index-token");
 
         output.Attributes.SetAttribute("data-rw-form-collection", Name?.Trim() ?? string.Empty);
+        output.Attributes.SetAttribute(
+            "data-rw-form-collection-index-token",
+            string.IsNullOrWhiteSpace(IndexToken) ? "__index__" : IndexToken.Trim());
         if (!string.IsNullOrWhiteSpace(Label))
         {
             output.Attributes.SetAttribute("data-rw-form-collection-label", Label.Trim());
@@ -200,8 +221,9 @@ public sealed class FormCollectionTagHelper : TagHelper
 /// Marks an application-authored element as a row inside a RazorWire form collection.
 /// </summary>
 /// <remarks>
-/// Rows must contain app-owned hidden <c>Collection.index</c> markers for ASP.NET
-/// Core sparse collection binding. The helper marks the row and may emit the
+/// Nested rows require owned enabled hidden <c>Collection.index</c> markers for
+/// ASP.NET Core sparse collection binding. Legacy one-level rows may use the
+/// existing metadata-only fallback. The helper marks the row and may emit the
 /// optional current index, but it does not create hidden markers or generated
 /// input fields.
 /// </remarks>
@@ -235,10 +257,17 @@ public sealed class FormCollectionRowTagHelper : TagHelper
 /// Marks a template containing app-authored collection row markup.
 /// </summary>
 /// <remarks>
-/// The template must contain the literal <c>__index__</c> token in row field
-/// names, ids, label references, validation references, and the hidden
-/// <c>.index</c> value. RazorWire clones and rewrites this markup but does not
-/// invent app fields.
+/// Use the owning collection's <see cref="FormCollectionTagHelper.IndexToken"/>,
+/// which defaults to <c>__index__</c>, in its row binding names and enabled
+/// hidden <c>.index</c> marker value. The runtime validates those owned fields
+/// and markers; a token appearing only in text or unrelated attributes is not
+/// sufficient. Nested templates require the marker; legacy top-level templates
+/// may omit it when they contain a correctly prefixed owned field, and Add
+/// creates it during final preparation. Nested unresolved ancestors use
+/// distinct local placeholders.
+/// Author IDs and their references consistently with the template fields;
+/// RazorWire rebases binding paths and maps DOM IDs separately while preserving
+/// descendant template placeholders. It does not invent application fields.
 /// </remarks>
 [HtmlTargetElement("template", Attributes = "rw-form-collection-template")]
 public sealed class FormCollectionTemplateTagHelper : TagHelper
