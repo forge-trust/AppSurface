@@ -1,0 +1,55 @@
+@model RazorWireWebExample.Models.SkoolitV4CollectionActionModel
+@using RazorWireWebExample.Models
+@{
+    var prefix = $"Actions[{Model.ClientIndex}]";
+    var actionPosition = Convert.ToString(ViewData["ActionPosition"], System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+}
+<fieldset rw-form-collection-row
+          rw-form-index="@Model.ClientIndex"
+          data-rw-form-collection-row-state="@(Model.Delete ? "removed" : "active")"
+          hidden="@Model.Delete">
+    <legend>Action</legend>
+    <input type="hidden" name="Actions.index" value="@Model.ClientIndex" />
+    <input type="hidden" name="@(prefix).ClientIndex" value="@Model.ClientIndex" />
+    @Html.Hidden($"{prefix}.Id", Model.Id, new { data_rw_form_collection_preserve = "true" })
+    @Html.Hidden($"{prefix}.RowVersion", Model.RowVersion)
+    <input type="hidden" name="@(prefix).Delete" value="@Model.Delete.ToString().ToLowerInvariant()" data-rw-form-collection-delete-field />
+
+    <label for="@($"{Model.DomId}-title")">Action label</label>
+    @Html.TextBox($"{prefix}.Title", Model.Title, new { id = $"{Model.DomId}-title", autocomplete = "off" })
+    @Html.ValidationMessage($"{prefix}.Title", null, new { @class = "field-validation-error" })
+
+    <section rw-form-collection="@(prefix).Dates"
+             rw-form-collection-index-token="__date_index__"
+             rw-form-collection-label="date"
+             rw-form-collection-remove-mode="@ViewData["RemoveMode"]">
+        @for (var datePosition = 0; datePosition < Model.Dates.Count; datePosition++)
+        {
+            ViewData["DatePosition"] = datePosition;
+            @await Html.PartialAsync("~/Views/Reactivity/_SkoolitV4CollectionDate.cshtml", Model.Dates[datePosition], ViewData)
+        }
+        <template rw-form-collection-template>
+            @{ ViewData["DatePosition"] = "0"; }
+            @await Html.PartialAsync(
+                "~/Views/Reactivity/_SkoolitV4CollectionDate.cshtml",
+                new SkoolitV4CollectionDateModel { ClientIndex = "__date_index__", ActionClientIndex = Model.ClientIndex },
+                ViewData)
+        </template>
+        <div class="commands">
+            <button type="button" rw-form-collection-add>Add date</button>
+            <span data-rw-form-collection-status role="status" aria-live="polite"></span>
+        </div>
+        <noscript>
+            <button type="submit" name="draftIntent" value="add-date|@actionPosition" formnovalidate>Add date on server</button>
+        </noscript>
+    </section>
+
+    <div class="commands">
+        <button type="button" rw-form-collection-duplicate>Duplicate action</button>
+        <button type="button" data-rw-form-collection-remove="true">Remove action</button>
+    </div>
+    <noscript>
+        <button type="submit" name="draftIntent" value="duplicate-action|@actionPosition" formnovalidate>Duplicate action on server</button>
+        <button type="submit" name="draftIntent" value="remove-action|@actionPosition" formnovalidate>Remove action on server</button>
+    </noscript>
+</fieldset>

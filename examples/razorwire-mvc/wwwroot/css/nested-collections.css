@@ -1,0 +1,34 @@
+.nested-command {
+    min-height: 44px;
+    padding: .5rem 1rem;
+    border: 1px solid #64748b;
+    border-radius: .375rem;
+    color: #0f172a;
+    background: #fff;
+}
+
+.nested-command:focus-visible, .nested-field:focus-visible {
+    outline: 3px solid #4338ca;
+    outline-offset: 2px;
+}
+
+.nested-field {
+    width: 100%;
+    min-height: 44px;
+    border: 1px solid #64748b;
+    padding: .5rem;
+    color: #0f172a;
+    background: #fff;
+}
+
+[data-nested-proof] fieldset {
+    min-width: 0;
+    padding: 1rem;
+    border: 1px solid #64748b;
+    border-radius: .375rem;
+}
+
+[data-nested-proof] .field-validation-error {
+    color: #991b1b;
+    overflow-wrap: anywhere;
+}

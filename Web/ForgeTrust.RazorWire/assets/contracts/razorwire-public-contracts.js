@@ -698,7 +698,7 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
- * Form interactions manager for conditional form targets and one-dimensional model-bound collection mechanics.
+ * Form interactions manager for conditional form targets and nested model-bound collection mechanics.
  * @public
  * @namespace RazorWire
  * @config window.RazorWire.formInteractionsManager
@@ -712,6 +712,17 @@ window.RazorWire = window.RazorWire || {};
  * @property {string} getDiagnostics[].fix - Required remediation guidance.
  * @property {string} getDiagnostics[].docs - Required repository documentation path for troubleshooting.
  * @property {Function} clearDiagnostics - Clears recorded diagnostics.
+ */
+
+/**
+ * Local unresolved row token for a model-bound collection template.
+ * @public
+ * @namespace RazorWire
+ * @attribute data-rw-form-collection-index-token
+ * @target [data-rw-form-collection]
+ * @type {string}
+ * @default __index__
+ * @description Optional; authored by rw-form-collection-index-token. Missing or blank values use __index__; nonblank values are trimmed and must match __[A-Za-z][A-Za-z0-9_]*__. Simultaneously unresolved ancestors use distinct tokens, while sibling templates may reuse tokens. Invalid authoring blocks Add or cloning through that template with an owner-scoped diagnostic. Concrete hidden .index values remain opaque keys. See Web/ForgeTrust.RazorWire/Docs/form-interactions.md#nested-collections-and-index-tokens.
  */
 
 /**
@@ -750,11 +761,11 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-add
  * @target [data-rw-form-collection-add]
- * @firesWhen An add command has cloned the app-authored template and allocated a sparse collection index, before insertion.
+ * @firesWhen Add has rebased detached template attributes and allocated an index, before clearing editable values and assigning the final row metadata/marker. Cancellation prevents runtime mutation; ownership, markers, tokens, and IDs are revalidated after listeners return.
  * @property {HTMLFormElement} detail.form - Owning form.
- * @property {HTMLElement} detail.root - Collection root.
+ * @property {HTMLElement} detail.root - Owning collection root, including the child root for a nested command.
  * @property {HTMLElement} detail.control - Command button.
- * @property {HTMLElement} detail.row - Row that will be inserted.
+ * @property {HTMLElement} detail.row - Attribute-rebased detached row before Add's value clearing and final marker assignment.
  * @property {string} detail.index - New sparse model-binding index.
  * @property {"add"} detail.action - Collection action.
  * @bubbles true
@@ -784,11 +795,11 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-duplicate
  * @target [data-rw-form-collection-duplicate]
- * @firesWhen A duplicate command has cloned the source row, rewritten index tokens, and prepared copyable user values before insertion.
+ * @firesWhen Duplicate has fully prepared the detached clone, including owned descendant keys, copied live values, cleared identities, and omitted tombstones. Cancellation prevents runtime mutation; live structural preconditions and planned IDs are revalidated after listeners return.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
  * @property {HTMLElement} detail.control - Command button.
- * @property {HTMLElement} detail.row - Cloned row that will be inserted.
+ * @property {HTMLElement} detail.row - Fully prepared detached clone that will be inserted.
  * @property {string|null} detail.previousIndex - Source row index.
  * @property {string} detail.index - New sparse model-binding index.
  * @property {"duplicate"} detail.action - Collection action.
@@ -820,7 +831,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:before-remove
  * @target [data-rw-form-collection-remove]
- * @firesWhen A remove command resolves its physical-remove or mark-remove mode, before RazorWire mutates the row.
+ * @firesWhen Remove resolves its owned live row and removal mode, before mutation. Cancellation preserves listener edits; ownership and canonical markers are revalidated after listeners return.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
  * @property {HTMLElement} detail.control - Command button.
@@ -838,7 +849,7 @@ window.RazorWire = window.RazorWire || {};
  * @namespace RazorWire
  * @event razorwire:form-collection:remove
  * @target [data-rw-form-collection-remove]
- * @firesWhen RazorWire finishes physically removing a row or marking it for app-owned deletion.
+ * @firesWhen RazorWire finishes physically removing a row or marking it for app-owned deletion. Physical removal dispatches on the connected owning root because the command is detached; detail.control and detail.row still identify the original command and affected row.
  * @property {HTMLFormElement} detail.form - Owning form.
  * @property {HTMLElement} detail.root - Collection root.
  * @property {HTMLElement} detail.control - Command button.
@@ -869,7 +880,7 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
- * Marks a one-dimensional ASP.NET Core model-bound collection root.
+ * Marks an ASP.NET Core model-bound collection root, scoped to its owning row when nested.
  * @public
  * @namespace RazorWire
  * @attribute data-rw-form-collection
@@ -887,7 +898,7 @@ window.RazorWire = window.RazorWire || {};
  */
 
 /**
- * Marks the app-authored row template that contains the `__index__` token.
+ * Marks the app-authored row template with owned binding names using its collection's local index token, default `__index__`. Nested templates require an enabled hidden `.index` marker with that token; legacy top-level templates may omit it when a correctly prefixed owned field exists. Display text or unrelated attributes do not satisfy template validation.
  * @public
  * @namespace RazorWire
  * @attribute data-rw-form-collection-template
