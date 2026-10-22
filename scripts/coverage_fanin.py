@@ -21,6 +21,7 @@ POLICY = {
     "format": "cobertura",
     "exclude": "[*.Tests]*,[*.IntegrationTests]*",
     "include": None,
+    "normalization": "appsurface-coverage-merge",
 }
 NATIVE_FILTER = (
     "FullyQualifiedName~CoverageRunArtifactReaderTests|"
@@ -92,6 +93,33 @@ def checked_xml(path: Path) -> ET.Element:
     return root
 
 
+def verify_normalization(raw: ET.Element, normalized: ET.Element, source_root: str) -> None:
+    """Require the existing merger to retain every collector source point and hit.
+
+    ReportGenerator folds compiler-generated class names. Compare file/line
+    execution across that transformation, then retain normalized class records
+    unchanged for conservative composition. Never discard a native-only point.
+    """
+    def observations(document: ET.Element) -> dict[tuple[str, int], bool]:
+        points: dict[tuple[str, int], bool] = {}
+        for cls in document.findall("packages/package/classes/class"):
+            filename = relative_filename(cls.attrib["filename"], source_root)
+            for line in cls.findall("lines/line"):
+                number, hits = int(line.attrib["number"]), int(line.attrib["hits"])
+                if number <= 0 or hits < 0:
+                    raise ValueError("Invalid source line or hit count")
+                key = filename, number
+                points[key] = points.get(key, False) or hits > 0
+        return points
+
+    before, after = observations(raw), observations(normalized)
+    if not before or any(point not in after or hit and not after[point]
+                         for point, hit in before.items()):
+        raise ValueError("Native normalization removed source points or observed execution")
+    if int(normalized.attrib["branches-valid"]) < int(raw.attrib["branches-valid"]):
+        raise ValueError("Native normalization reduced measurable branches")
+
+
 def verify_solution(root: Path, timings: dict, configuration: str) -> None:
     """Reject filtered, incomplete or failed primary solution collection."""
     solution = ET.parse(root / "ForgeTrust.AppSurface.slnx")
@@ -116,19 +144,26 @@ def verify_solution(root: Path, timings: dict, configuration: str) -> None:
 
 
 def capture(root: Path, report: Path, output: Path, configuration: str, scope: str,
-            timings: Path | None = None) -> None:
+            timings: Path | None = None, raw_report: Path | None = None) -> None:
     """Snapshot bytes after a successful producer step; manifests are CI evidence, not signatures."""
     identity = source_identity(root)
-    checked_xml(report)
+    document = checked_xml(report)
     if output.exists():
         raise ValueError("Evidence destination must be fresh")
     if scope == "solution":
         if timings is None:
             raise ValueError("Full solution timing inventory is required")
         verify_solution(root, read_json(timings), configuration)
+    elif scope == "native":
+        if raw_report is None:
+            raise ValueError("Native evidence requires the original collector report")
+        verify_normalization(checked_xml(raw_report), document, str(root.resolve()))
     output.mkdir(parents=True)
     shutil.copyfile(report, output / "coverage.cobertura.xml")
     files = {"coverage.cobertura.xml": digest(output / "coverage.cobertura.xml")}
+    if scope == "native":
+        shutil.copyfile(raw_report, output / "collector.cobertura.xml")
+        files["collector.cobertura.xml"] = digest(output / "collector.cobertura.xml")
     if scope == "solution":
         shutil.copyfile(timings, output / "timings.json")
         files["timings.json"] = digest(output / "timings.json")
@@ -150,7 +185,8 @@ def load_evidence(root: Path, path: Path, identity: dict, configuration: str) ->
     if any(manifest.get(key) != value for key, value in expected.items()):
         raise ValueError(f"Source, SDK, configuration or instrumentation mismatch: {path}")
     scope = manifest.get("scope")
-    expected_files = {"coverage.cobertura.xml", "timings.json"} if scope == "solution" else {"coverage.cobertura.xml"}
+    expected_files = ({"coverage.cobertura.xml", "timings.json"} if scope == "solution"
+                      else {"coverage.cobertura.xml", "collector.cobertura.xml"})
     if scope not in {"solution", "native"} or set(manifest.get("files", {})) != expected_files:
         raise ValueError("Unexpected evidence scope or inventory")
     if manifest.get("filter") != (NATIVE_FILTER if scope == "native" else None):
@@ -162,7 +198,11 @@ def load_evidence(root: Path, path: Path, identity: dict, configuration: str) ->
             raise ValueError(f"Evidence checksum mismatch: {item}")
     if scope == "solution":
         verify_solution(root, read_json(path / "timings.json"), configuration)
-    return manifest, checked_xml(path / "coverage.cobertura.xml")
+    document = checked_xml(path / "coverage.cobertura.xml")
+    if scope == "native":
+        verify_normalization(checked_xml(path / "collector.cobertura.xml"), document,
+                             manifest["sourceRoot"])
+    return manifest, document
 
 
 def branch_counts(line: ET.Element) -> tuple[int, int]:
@@ -267,22 +307,52 @@ def merge(root: Path, primary: Path, native: Path, output: Path, configuration: 
     (output / "verification.json").write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
 
 
+def prepare_default_output(root: Path, output: Path) -> None:
+    """Retire only a byte-verified previous composition at the wrapper's default path.
+
+    Custom output paths remain caller-managed and fresh. Unknown files, modified
+    reports and links prevent cleanup; validate the entire inventory before any
+    unlink so a rejected preparation preserves all previous material.
+    """
+    expected = root / "TestResults" / "coverage-fanin"
+    if output.absolute() != expected.absolute() or output.is_symlink():
+        raise ValueError("Only the wrapper's non-linked default composition can be prepared")
+    if not output.exists():
+        return
+    names = {"coverage.cobertura.xml", "primary-paths.cobertura.xml", "verification.json"}
+    entries = list(output.iterdir())
+    if {entry.name for entry in entries} != names or any(not entry.is_file() or entry.is_symlink() for entry in entries):
+        raise ValueError("Unknown composition contents must be preserved")
+    receipt = read_json(output / "verification.json")
+    if (receipt.get("policy") != POLICY
+            or digest(output / "coverage.cobertura.xml") != receipt.get("outputSha256")
+            or digest(output / "primary-paths.cobertura.xml") != receipt.get("primaryPathsSha256")):
+        raise ValueError("Modified composition contents must be preserved")
+    for entry in entries:
+        entry.unlink()
+    output.rmdir()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("capture", "merge"))
+    parser.add_argument("mode", choices=("capture", "merge", "prepare-default"))
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--configuration", choices=("Debug", "Release"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--raw-report", type=Path)
     parser.add_argument("--scope", choices=("solution", "native"))
     parser.add_argument("--timings", type=Path)
     parser.add_argument("--primary", type=Path)
     parser.add_argument("--native", type=Path)
     args = parser.parse_args()
-    if args.mode == "capture":
+    if args.mode == "prepare-default":
+        prepare_default_output(args.root, args.output)
+    elif args.mode == "capture":
         if args.report is None or args.scope is None:
             parser.error("capture requires --report and --scope")
-        capture(args.root, args.report, args.output, args.configuration, args.scope, args.timings)
+        capture(args.root, args.report, args.output, args.configuration, args.scope,
+                args.timings, args.raw_report)
     else:
         if args.primary is None or args.native is None:
             parser.error("merge requires --primary and --native")

@@ -106,6 +106,48 @@ public sealed class CoverageArtifactInspectionCursorStoreTests
     }
 
     [Fact]
+    public void Write_DropsExpiredScopeWhenPublishingCurrentScope()
+    {
+        using var temp = TempDirectory.Create();
+        using var store = CoverageArtifactStore.Open(Path.Join(temp.Path, "store"));
+        var start = DateTimeOffset.Parse("2026-10-01T12:00:00Z");
+        var initialClock = new FixedTimeProvider(start);
+        var currentClock = new FixedTimeProvider(start.AddDays(8));
+        var expiredScope = new string('a', 64);
+        var currentScope = new string('b', 64);
+
+        CoverageArtifactInspectionCursorStore.Write(store, expiredScope, ["old/pending"], initialClock);
+        CoverageArtifactInspectionCursorStore.Write(store, currentScope, ["new/first", "new/second"], currentClock);
+
+        var statePath = Path.Join(store.RootPath, "staging", "inspection", "state.json");
+        using var state = System.Text.Json.JsonDocument.Parse(File.ReadAllText(statePath));
+        Assert.DoesNotContain(state.RootElement.GetProperty("Scopes").EnumerateArray(), scope =>
+            scope.GetProperty("ScopeId").GetString() == expiredScope);
+        Assert.Null(CoverageArtifactInspectionCursorStore.Read(store, expiredScope, currentClock));
+        Assert.Equal(["new/first", "new/second"],
+            CoverageArtifactInspectionCursorStore.Read(store, currentScope, currentClock));
+    }
+
+    [Fact]
+    public void Write_DropsFutureDatedScopeWhenPublishingCurrentScope()
+    {
+        using var temp = TempDirectory.Create();
+        using var store = CoverageArtifactStore.Open(Path.Join(temp.Path, "store"));
+        var now = DateTimeOffset.Parse("2026-10-01T12:00:00Z");
+        var currentClock = new FixedTimeProvider(now);
+        var futureClock = new FixedTimeProvider(now.AddDays(1));
+        var futureScope = new string('c', 64);
+        var currentScope = new string('d', 64);
+
+        CoverageArtifactInspectionCursorStore.Write(store, futureScope, ["future/pending"], futureClock);
+        CoverageArtifactInspectionCursorStore.Write(store, currentScope, ["current/first", "current/second"], currentClock);
+
+        Assert.Null(CoverageArtifactInspectionCursorStore.Read(store, futureScope, currentClock));
+        Assert.Equal(["current/first", "current/second"],
+            CoverageArtifactInspectionCursorStore.Read(store, currentScope, currentClock));
+    }
+
+    [Fact]
     public void Write_BoundsEncodedCursorWithoutReorderingRetainedPaths()
     {
         using var temp = TempDirectory.Create();

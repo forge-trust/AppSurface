@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Debug}"
 COVERAGE_GATE_DIFF_BASE="${COVERAGE_GATE_DIFF_BASE-origin/main}"
 COVERAGE_DIRECTORY="${COVERAGE_DIRECTORY:-$ROOT_DIR/TestResults/coverage-merged}"
+COVERAGE_FANIN_REPORT="${COVERAGE_FANIN_REPORT:-$(dirname "$COVERAGE_DIRECTORY")/coverage-fanin}"
 CLI_PROJECT="$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj"
 cli=(dotnet run --project "$CLI_PROJECT" --configuration "$BUILD_CONFIGURATION")
 if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
@@ -22,16 +23,16 @@ if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
     --configuration "$BUILD_CONFIGURATION" \
     --primary "$COVERAGE_DIRECTORY/fanin-primary" --native "$COVERAGE_FANIN_NATIVE" \
     --output "$verified_directory/report"
-  cmp "$verified_directory/report/coverage.cobertura.xml" "$COVERAGE_DIRECTORY/fanin/coverage.cobertura.xml"
-  cmp "$verified_directory/report/primary-paths.cobertura.xml" "$COVERAGE_DIRECTORY/fanin/primary-paths.cobertura.xml"
-  aggregate_args=(--coverage "$COVERAGE_DIRECTORY/fanin/primary-paths.cobertura.xml"
+  cmp "$verified_directory/report/coverage.cobertura.xml" "$COVERAGE_FANIN_REPORT/coverage.cobertura.xml"
+  cmp "$verified_directory/report/primary-paths.cobertura.xml" "$COVERAGE_FANIN_REPORT/primary-paths.cobertura.xml"
+  aggregate_args=(--coverage "$COVERAGE_FANIN_REPORT/primary-paths.cobertura.xml"
     --min-line 95 --min-branch 85 --output "$COVERAGE_DIRECTORY/aggregate-gate")
   if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
     aggregate_args+=(--diff-base "$COVERAGE_GATE_DIFF_BASE" --patch-line-mode codecov)
   fi
   "${cli[@]}" "${aggregate_args[@]}"
   if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
-    "${cli[@]}" --coverage "$COVERAGE_DIRECTORY/fanin/coverage.cobertura.xml" \
+    "${cli[@]}" --coverage "$COVERAGE_FANIN_REPORT/coverage.cobertura.xml" \
       --diff-base "$COVERAGE_GATE_DIFF_BASE" --min-patch-line 95 --min-patch-branch 85 \
       --patch-line-mode codecov --output "$COVERAGE_DIRECTORY"
     python3 - "$COVERAGE_DIRECTORY" <<'CHECK'

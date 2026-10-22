@@ -64,6 +64,23 @@ public sealed class CoverageArtifactInspectionContinuationTests
     }
 
     [Fact]
+    public void ResumedContinuationRejectsPathInsideNestedRepository()
+    {
+        using var fixture = TestDirectory.Create();
+        var nestedRepository = fixture.CreateDirectory("nested");
+        Directory.CreateDirectory(Path.Join(nestedRepository, ".git"));
+        var output = fixture.CreateDirectory("nested/TestResults");
+        File.WriteAllText(Path.Join(output, "report.xml"), "must not count");
+
+        var result = CoverageArtifactInspector.Inspect(fixture.Path, TimeProvider.System,
+            TimeSpan.FromSeconds(1), 100, CancellationToken.None, ["nested/TestResults"]);
+
+        Assert.False(result.Complete);
+        Assert.Equal(0, result.Bytes);
+        Assert.Contains(result.Errors, error => error.Type == "ContinuationUnavailable");
+    }
+
+    [Fact]
     public void OversizedPendingQueueIsPartialAndBoundedWithoutInventingTotals()
     {
         using var fixture = TestDirectory.Create();

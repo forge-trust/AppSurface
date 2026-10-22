@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -137,7 +138,7 @@ class CoverageFaninTests(unittest.TestCase):
         with mock.patch.object(fanin.platform, "system", return_value=platform), \
                 mock.patch.dict(os.environ, RUN):
             fanin.capture(self.root, report, folder / "captured", CONFIGURATION, scope,
-                          shutil_timings)
+                          shutil_timings, report if scope == "native" else None)
         return folder / "captured"
 
     def make_bundle(self, *, platforms: tuple[str, ...] = PLATFORMS,
@@ -358,6 +359,180 @@ class CoverageFaninTests(unittest.TestCase):
         self.write_report(report, [], empty=True)
         with self.assertRaisesRegex(ValueError, "empty or out of range"):
             fanin.checked_xml(report)
+
+    def test_native_capture_requires_raw_collector_before_creating_destination(self) -> None:
+        report = self.evidence / "normalized.xml"
+        self.write_report(report, [class_row("C", "src/C.cs", line(1, 1))])
+        output = self.evidence / "missing-collector"
+        with self.assertRaisesRegex(ValueError, "original collector"):
+            fanin.capture(self.root, report, output, CONFIGURATION, "native")
+        self.assertFalse(output.exists())
+
+    def test_native_capture_retains_collector_bytes_and_normalization_policy(self) -> None:
+        captured = self.make_evidence("collector-roundtrip", "native", "Linux")
+        manifest = json.loads((captured / "manifest.json").read_text())
+        self.assertEqual(set(manifest["files"]), {"coverage.cobertura.xml", "collector.cobertura.xml"})
+        self.assertEqual(manifest["policy"]["normalization"], "appsurface-coverage-merge")
+        self.assertEqual((captured / "collector.cobertura.xml").read_bytes(),
+                         (captured / "coverage.cobertura.xml").read_bytes())
+        self.assertEqual(manifest["files"]["collector.cobertura.xml"],
+                         fanin.digest(captured / "collector.cobertura.xml"))
+
+    def test_normalization_accepts_class_folding_without_losing_execution(self) -> None:
+        raw = document([class_row("C/<M>d__0", "src/C.cs", line(1, 1), line(2, 0))])
+        normalized = document([class_row("C", "src/C.cs", line(1, 1), line(2, 0))])
+        fanin.verify_normalization(raw, normalized, "/checkout")
+
+    def test_normalization_rejects_lost_points_hits_and_branch_scope(self) -> None:
+        raw = document([class_row("C", "src/C.cs", line(1, 1, (1, 2)), line(2, 0))])
+        for rows in ([line(1, 1, (1, 2))],
+                     [line(1, 0, (1, 2)), line(2, 0)],
+                     [line(1, 1), line(2, 0)]):
+            with self.subTest(rows=rows), self.assertRaisesRegex(ValueError, "normalization"):
+                fanin.verify_normalization(raw, document([class_row("C", "src/C.cs", *rows)]),
+                                           "/checkout")
+
+    def test_tampered_collector_is_rejected_by_loading_and_composition(self) -> None:
+        primary, native = self.make_bundle(prefix="collector-tamper-")
+        shard = native / "linux"
+        with (shard / "collector.cobertura.xml").open("a") as stream:
+            stream.write("<!-- changed -->")
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            fanin.load_evidence(self.root, shard, self.identity, CONFIGURATION)
+        with self.assertRaisesRegex(ValueError, "checksum"):
+            fanin.merge(self.root, primary, native, self.evidence / "tampered-output", CONFIGURATION)
+
+    def test_default_output_can_be_prepared_and_composed_repeatedly(self) -> None:
+        primary, native = self.make_bundle(prefix="repeat-")
+        output = self.root / "TestResults/coverage-fanin"
+        fanin.prepare_default_output(self.root, output)
+        for _ in range(2):
+            fanin.merge(self.root, primary, native, output, CONFIGURATION)
+            self.assertTrue((output / "verification.json").is_file())
+            fanin.prepare_default_output(self.root, output)
+            self.assertFalse(output.exists())
+
+    def test_preparation_preserves_unknown_or_modified_composition_contents(self) -> None:
+        primary, native = self.make_bundle(prefix="preserve-")
+        output = self.root / "TestResults/coverage-fanin"
+        fanin.merge(self.root, primary, native, output, CONFIGURATION)
+        stranger = output / "caller-notes.txt"
+        stranger.write_text("preserve caller evidence")
+        before = {item.name: item.read_bytes() for item in output.iterdir()}
+        with self.assertRaisesRegex(ValueError, "Unknown"):
+            fanin.prepare_default_output(self.root, output)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+        stranger.unlink()
+        with (output / "coverage.cobertura.xml").open("a") as stream:
+            stream.write("<!-- preserve edited evidence -->")
+        before = {item.name: item.read_bytes() for item in output.iterdir()}
+        with self.assertRaisesRegex(ValueError, "Modified"):
+            fanin.prepare_default_output(self.root, output)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+
+    def test_preparation_rejects_custom_output_without_mutation(self) -> None:
+        custom = self.evidence / "custom"
+        custom.mkdir()
+        sentinel = custom / "caller.txt"
+        sentinel.write_text("keep")
+        with self.assertRaisesRegex(ValueError, "default composition"):
+            fanin.prepare_default_output(self.root, custom)
+        self.assertEqual(sentinel.read_text(), "keep")
+
+
+class CoverageFaninHelperTests(unittest.TestCase):
+    """Execute the real shell helper and provenance verifier with a guarded CLI fixture."""
+
+    def setUp(self) -> None:
+        self.fixture = CoverageFaninTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.root = self.fixture.root
+        scripts = self.root / "scripts"
+        scripts.mkdir()
+        for name in ("coverage-gate-fanin.sh", "coverage_fanin.py"):
+            shutil.copyfile(REPO_ROOT / "scripts" / name, scripts / name)
+        subprocess.run(["git", "add", "scripts"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "helper fixture"], cwd=self.root, check=True)
+        self.fixture.identity = fanin.source_identity(self.root)
+        primary, self.native = self.fixture.make_bundle()
+        self.coverage = self.fixture.base / "coverage-merged"
+        self.coverage.mkdir()
+        shutil.copytree(primary, self.coverage / "fanin-primary")
+        self.composed = self.fixture.base / "coverage-fanin"
+        fanin.merge(self.root, self.coverage / "fanin-primary", self.native,
+                    self.composed, CONFIGURATION)
+        (self.fixture.commands / "dotnet").write_text(GUARDED_DOTNET, encoding="utf-8")
+
+    def run_helper(self, *, status: int = 0, diff_base: str = "origin/main") -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env.update(COVERAGE_DIRECTORY=str(self.coverage), COVERAGE_FANIN_NATIVE=str(self.native),
+                   BUILD_CONFIGURATION=CONFIGURATION, BUILD_NO_RESTORE="true",
+                   COVERAGE_GATE_DIFF_BASE=diff_base, FAKE_PATCH_STATUS=str(status))
+        return subprocess.run(["bash", "scripts/coverage-gate-fanin.sh"], cwd=self.root,
+                              env=env, capture_output=True, text=True)
+
+    def test_helper_publishes_canonical_reports_without_input_output_overlap(self) -> None:
+        result = self.run_helper()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("coverage-gate.json", "coverage-gate.md",
+                     "coverage-patch-targets.json", "coverage-patch-targets.md"):
+            self.assertTrue((self.coverage / name).is_file(), name)
+        self.assertTrue((self.coverage / "aggregate-gate/coverage-gate.json").is_file())
+        calls = [json.loads(line) for line in (self.fixture.base / "gate-calls.jsonl").read_text().splitlines()]
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1]["coverage"], str((self.composed / "coverage.cobertura.xml").resolve()))
+        self.assertEqual(calls[1]["output"], str(self.coverage.resolve()))
+
+    def test_failed_patch_gate_returns_failure_and_keeps_failure_reports(self) -> None:
+        result = self.run_helper(status=1)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        report = json.loads((self.coverage / "coverage-gate.json").read_text())
+        self.assertFalse(report["passed"])
+        self.assertTrue((self.coverage / "coverage-patch-targets.json").is_file())
+
+    def test_empty_base_runs_only_the_unchanged_aggregate_gate(self) -> None:
+        result = self.run_helper(diff_base="")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.coverage / "aggregate-gate/coverage-gate.json").is_file())
+        self.assertFalse((self.coverage / "coverage-gate.json").exists())
+
+    def test_changed_composition_is_rejected_before_either_gate(self) -> None:
+        with (self.composed / "coverage.cobertura.xml").open("a") as stream:
+            stream.write("<!-- stale composition -->")
+        result = self.run_helper()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.fixture.base / "gate-calls.jsonl").exists())
+
+
+GUARDED_DOTNET = r'''#!/usr/bin/env python3
+import json, os, pathlib, sys
+args = sys.argv[1:]
+if args == ["--version"]:
+    print("10.0.100")
+    raise SystemExit(0)
+if "gate" not in args:
+    raise SystemExit("Unexpected CLI invocation")
+def option(name):
+    return args[args.index(name) + 1]
+coverage = pathlib.Path(option("--coverage")).resolve()
+output = pathlib.Path(option("--output")).resolve()
+if output == coverage or output in coverage.parents:
+    print("ASCOV009 --output must not contain the input coverage file.", file=sys.stderr)
+    raise SystemExit(2)
+with (output.parent / "gate-calls.jsonl" if output.name == "coverage-merged" else output.parent.parent / "gate-calls.jsonl").open("a") as stream:
+    stream.write(json.dumps({"coverage": str(coverage), "output": str(output)}) + "\n")
+patch = "--min-patch-line" in args
+status = int(os.environ["FAKE_PATCH_STATUS"]) if patch else 0
+report = {"passed": status == 0, "tolerancePercent": 0.5, "patchLineMode": "codecov",
+          "patchDiffSource": {"diffBase": "origin/main"},
+          "thresholds": {"line": 95, "branch": 85, "patchLine": 95, "patchBranch": 85},
+          "patchLine": {"measurable": 10}, "patchBranch": {"measurable": 5}}
+output.mkdir(parents=True, exist_ok=True)
+for name in ("coverage-gate.json", "coverage-gate.md", "coverage-patch-targets.json", "coverage-patch-targets.md"):
+    (output / name).write_text(json.dumps(report))
+raise SystemExit(status)
+'''
 
 
 if __name__ == "__main__":

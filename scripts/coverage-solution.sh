@@ -107,11 +107,15 @@ if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
     --report "$ROOT_DIR/TestResults/coverage-merged/coverage.cobertura.xml" \
     --timings "$ROOT_DIR/TestResults/coverage-merged/timings.json" \
     --output "$ROOT_DIR/TestResults/coverage-merged/fanin-primary"
+  if [[ -z "${COVERAGE_FANIN_REPORT:-}" ]]; then
+    python3 "$ROOT_DIR/scripts/coverage_fanin.py" prepare-default \
+      --configuration "$BUILD_CONFIGURATION" --output "$ROOT_DIR/TestResults/coverage-fanin"
+  fi
   python3 "$ROOT_DIR/scripts/coverage_fanin.py" merge \
     --configuration "$BUILD_CONFIGURATION" \
     --primary "$ROOT_DIR/TestResults/coverage-merged/fanin-primary" \
     --native "$COVERAGE_FANIN_NATIVE" \
-    --output "$ROOT_DIR/TestResults/coverage-merged/fanin"
+    --output "${COVERAGE_FANIN_REPORT:-$ROOT_DIR/TestResults/coverage-fanin}"
 fi
 
 "$ROOT_DIR/scripts/coverage-gate-fanin.sh"

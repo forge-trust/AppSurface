@@ -130,7 +130,9 @@ jobs:
         run: |
           $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
           if ($reports.Count -ne 1) { throw "Expected exactly one fresh native coverage report" }
-          python scripts/coverage_fanin.py capture --configuration Release --scope native --report $reports[0].FullName --output "${{ runner.temp }}/coverage-native"
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --no-build --no-restore -- coverage merge --source "${{ runner.temp }}/coverage-native-results" --output "${{ runner.temp }}/coverage-native-canonical"
+          if ($LASTEXITCODE -ne 0) { throw "Native coverage normalization failed" }
+          python scripts/coverage_fanin.py capture --configuration Release --scope native --raw-report $reports[0].FullName --report "${{ runner.temp }}/coverage-native-canonical/coverage.cobertura.xml" --output "${{ runner.temp }}/coverage-native"
 
       - name: Upload attested native coverage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -566,7 +568,7 @@ jobs:
           name: coverage-gate-reports
           path: |
             TestResults/coverage-merged/fanin-primary/**
-            TestResults/coverage-merged/fanin/**
+            TestResults/coverage-fanin/**
             TestResults/coverage-merged/aggregate-gate/**
             TestResults/coverage-merged/coverage-gate.json
             TestResults/coverage-merged/coverage-gate.md

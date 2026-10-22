@@ -47,7 +47,7 @@ A standalone gate can extend an existing current inventory with its newly writte
 
 ## Retention modes and replacement boundaries
 
-Coverage run and merge accept the exact selector **--artifact-retention managed|full**; the default is managed. Managed removes a redundant current-invocation collector XML only after normalization and byte equivalence have been verified, while retaining canonical reports and required attachments. Full retains the current invocation's duplicate XML for consumers that read raw collector paths. Neither mode changes test selection, instrumentation, coverage configuration, exclusions, metrics, or gate thresholds. Coverage merge also accepts **--no-clean** with its existing preservation meaning.
+Coverage run and merge accept the exact selector **--artifact-retention managed|full**; the default is managed. For a clean coverage run, managed removes raw Cobertura duplicates only after the canonical report is published and byte-verified identical; full retains those raw copies. `--no-clean` skips that run cleanup. Coverage merge validates the selector but does not use it to prune its staged inputs: both managed and full retain every selected shard copied under `reportgenerator-input/`. Neither mode changes test selection, instrumentation, coverage configuration, exclusions, metrics, or gate thresholds. Coverage merge also accepts **--no-clean** with its existing preservation meaning.
 
 The public Evidence declaration exposes the init-only string property **CoverageArtifactRetention**, serialized as **coverageArtifactRetention**. Omission defaults to managed; the accepted values are exactly managed and full. Evidence does not add a no-clean option. The following command shapes are illustrative; use the consumer's actual solution, projects, inputs, and gates:
 
@@ -58,10 +58,10 @@ appsurface coverage merge --source ./shards --output ./TestResults/coverage-merg
 
 | Invocation or setting | Prior-run snapshot | Current-invocation duplicate handling | Boundary |
 | --- | --- | --- | --- |
-| Clean coverage run or coverage merge, default managed | Attempt one verified snapshot immediately before existing cleanup/replacement | Remove only verified redundant XML whose path is not a consumer contract | Normal replacement boundary |
-| Clean run or merge with --artifact-retention full | Same snapshot attempt | Preserve current-invocation duplicate XML; normal history expiry still applies | Full retains duplicates from this run, not all future history |
-| Run or merge with --no-clean | No automatic prior-run snapshot | Suppress pre-run cleanup and automatic removal/compression inside that output; selected canonical files may still be replaced as they are today | Preservation mode is not an immutable backup |
-| --no-clean plus --artifact-retention full | No automatic prior-run snapshot | --no-clean wins; preserve output contents from automatic cleanup/removal | Pin a verified archive before replacement if an exact prior copy is required |
+| Clean coverage run with --artifact-retention managed | Attempt one verified snapshot immediately before existing cleanup/replacement | Remove only raw Cobertura duplicates verified byte-identical to the published canonical report | Cleanup is best-effort; it does not change coverage results |
+| Clean coverage run with --artifact-retention full | Same snapshot attempt | Preserve raw Cobertura duplicates | Full retains duplicates from this run, not all future history |
+| Clean coverage merge with --artifact-retention managed or full | Same snapshot attempt | Retain every selected shard staged under `reportgenerator-input/`; the selector does not prune these public-contract inputs | Both values have the same staged-input retention behavior |
+| Run or merge with --no-clean | No automatic prior-run snapshot | Skip pre-run cleanup; run preserves raw duplicates, while merge retains its staged inputs in either retention mode. Selected canonical files may still be replaced. | Preservation mode is not an immutable backup |
 | Standalone coverage gate | No automatic archive of the coverage run | Gate report updates extend the current inventory under the output lease | A gate cannot infer that external readers are finished |
 | First-party Evidence coverage | Same managed default through the existing declaration; full is an optional declaration value | Same artifact policy; no new Evidence no-clean option | Nested run and gate reuse the same execution context; see the [EvidenceHost guide](../start-here/evidencehost.md) and [private coverage engine guide](../Evidence/ForgeTrust.AppSurface.Evidence.Coverage/README.md) |
 | Explicit coverage clean | Does not create a snapshot | Retains its existing authorized deletion behavior and reports whether a verified archive already exists | Cleanup does not promise to save history |
@@ -71,7 +71,7 @@ appsurface coverage merge --source ./shards --output ./TestResults/coverage-merg
 | coverage storage unpin --run ID | Not applicable | Removes the pin from a verified archive | It may become eligible on the next maintenance pass; no grace period is promised |
 | coverage storage restore --run ID --output DIR | Not applicable | Restores to a fresh destination using private staging and atomic no-replace publication | Never overwrites current or partial output |
 
-The default managed mode retains canonical per-project and top-level Cobertura reports, project and run manifests, summaries, gate reports, timings, JUnit, logs, VSTest sequences and attachments, ReportGenerator output required by consumers, and contract-required merge staging. Full additionally keeps inventoried raw duplicate XML. The [PackageIndex consumer proof](../tools/ForgeTrust.AppSurface.PackageIndex/README.md) is a compatibility boundary for staged inputs and project manifests.
+Managed coverage run retains canonical per-project and top-level Cobertura reports, project and run manifests, summaries, gate reports, timings, JUnit, logs, VSTest sequences and attachments, and ReportGenerator output required by consumers while removing only verified raw duplicates. Coverage merge retains all selected public-contract inputs staged under `reportgenerator-input/` in both modes; managed does not prune merge copies. Savings depend on the actual artifacts, and merge has no guaranteed percentage reduction, including no universal 50% reduction. The [PackageIndex consumer proof](../tools/ForgeTrust.AppSurface.PackageIndex/README.md) is a compatibility boundary for staged inputs and project manifests.
 
 A normal clean run can continue if its best-effort snapshot exceeds a limit, runs out of space, or otherwise fails. In that case, emit the history-not-saved diagnostic, publish no completed archive, and do not promise recovery of the replaced files. The existing primary run or gate outcome remains authoritative.
 
@@ -252,7 +252,7 @@ A bounded registry or metadata category reached its count or byte limit. The man
 
 ### ASCOV208: Invalid storage input
 
-A storage command argument or policy value failed validation. The result identifies the field and allowed form without echoing secret-like input. Run identifiers accept exactly 32 hexadecimal characters without hyphens; restore also requires a nonempty `--output` naming a fresh destination directory. Correct the named option before retrying. Unknown policy schema or invalid policy values must disable optional management without preventing required coverage. Invalid policy schema or values are reported as ASCOV201 when opening the optional store. ASCOV208 identifies invalid explicit command arguments before the store is opened.
+An explicit coverage storage command argument failed validation. The result identifies the field and allowed form without echoing secret-like input. Run identifiers accept exactly 32 hexadecimal characters without hyphens; restore also requires a nonempty `--output` naming a fresh destination directory. Correct the named option before retrying. Unknown policy schema or invalid policy values must disable optional management without preventing required coverage; they are reported as ASCOV201 when opening the optional store. ASCOV208 identifies invalid command arguments before the store is opened.
 
 ### ASCOV209: Implicit collector risk
 
