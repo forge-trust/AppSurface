@@ -40,7 +40,7 @@ The streaming gzip prototype verified original-byte round trips for 186 mixed-co
 | 128 MiB | 29/30 | 350.5 | 448.3 | 2,236.1 |
 | 256 MiB | 29/30 | 728.5 | 854.5 | 3,246.1 |
 
-This **fails** the original all-warm-trials two-second acceptance bar at 128 and 256 MiB. On October 21, 2026, the user approved validating a five-second cumulative allowance with the existing 256 MiB automatic cap. The implementation and fixed-limit contract now use five seconds; final-source resource trials remain required. The resource decision does not change code coverage quality.
+This **fails** the original all-warm-trials two-second acceptance bar at 128 and 256 MiB. On October 21, 2026, the user approved validating a five-second cumulative allowance with the existing 256 MiB automatic cap. The implementation and fixed-limit contract now use five seconds. A follow-up isolated manager run on candidate `55288ddb` completed all 93 trials and verified every original SHA-256. Warm maxima were 146.4 ms at 35 MiB, 349.7 ms at 128 MiB, and 564.6 ms at 256 MiB; all 90 warm trials and all three cold-order trials completed within five seconds. This is candidate-specific local evidence; later source changes require renewed verification. The process-memory API returned zero on this host, so peak working set remains unknown rather than being reported as zero memory use. The resource decision does not change code coverage quality.
 
 Reproducible benchmark payloads were removed after preserving raw result records and fixture fingerprints, reclaiming approximately 7.7 GiB of task-owned scratch. Their deletion was development scratch maintenance, not evidence that the product reclaims arbitrary consumer data.
 

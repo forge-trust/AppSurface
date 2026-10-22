@@ -7,3 +7,15 @@ The assembly owns one in-process implementation of coverage discovery, execution
 All coverage orchestration types are internal and visible only to first-party assemblies. Consumers should use the documented public [coverage commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) and [EvidenceHost workflow](../../start-here/evidencehost.md).
 
 The [coverage storage guide](../../guides/coverage-storage.md) documents the in-progress retention contract shared by CLI and Evidence coverage producers. Its `managed` default permits removal only of verified redundant collector XML after canonical publication; `full` retains it. A CLI run using `--no-clean` preserves prior artifacts in either mode, so retained output can include files from earlier invocations. The Evidence declaration's additive `coverageArtifactRetention` property defaults to `managed`; older JSON omitting it remains valid. These docs describe the branch implementation and do not claim an installed package proof or measured storage savings.
+
+### Native operation verification
+
+Artifact safety keeps managed decisions and native acceptance separate. Internal,
+per-call observations cover file-state decoding, private Unix ownership/mode
+checks, Windows rename-buffer encoding, lock-result classification, and
+filesystem/mount classification. Production defaults call the host APIs and retain
+normal no-follow path, identity, and publication checks. The observations are test
+seams, not consumer configuration; they never establish another operating system's
+ABI or filesystem guarantees. Native acceptance still runs on the supported
+Windows/NTFS, macOS/APFS, and Linux/ext4 lanes described in the
+[storage validation record](../../docs/designs/coverage-artifact-storage-validation.md).

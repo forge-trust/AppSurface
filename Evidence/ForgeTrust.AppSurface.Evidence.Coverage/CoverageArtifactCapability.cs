@@ -27,7 +27,10 @@ internal sealed partial record CoverageArtifactCapability(
         using var privateRoot = CoverageRunOutputLease.AcquireArtifactDirectory(fullPath, createMissing: false, requirePrivate: true)
             ?? throw new DirectoryNotFoundException("The artifact capability root does not exist.");
         var (fileSystem, isLocal) = ReadFileSystem(privateRoot);
-        var platform = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+        var platform = OperatingSystem.IsWindows() ? "windows"
+            : OperatingSystem.IsMacOS() ? "macos"
+            : OperatingSystem.IsLinux() ? "linux"
+            : "other";
         if (!IsSupportedFileSystem(platform, fileSystem, isLocal))
             throw new IOException($"Artifact storage requires a local NTFS, APFS, or ext4 filesystem; found '{fileSystem}'.");
 
@@ -125,62 +128,134 @@ internal sealed partial record CoverageArtifactCapability(
 
     private static (string FileSystem, bool IsLocal) ReadFileSystem(CoverageRunOutputLease root)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            var volumeRoot = Path.GetPathRoot(root.ArtifactDirectoryPath)
-                ?? throw new IOException("Unable to identify the artifact volume root.");
-            var drive = new DriveInfo(volumeRoot);
-            if (!drive.IsReady) throw new IOException("The artifact volume is unavailable.");
-            return (drive.DriveFormat, drive.DriveType == DriveType.Fixed);
-        }
-
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
-            throw new PlatformNotSupportedException("Artifact capability checks support Windows, macOS, and Linux.");
-        var buffer = Marshal.AllocHGlobal(4096);
-        try
-        {
-            for (var index = 0; index < 4096; index++) Marshal.WriteByte(buffer, index, 0);
-            var descriptor = root.ArtifactDirectoryHandle.DangerousGetHandle().ToInt32();
-            var result = UnixFStatFs(descriptor, buffer);
-            if (result != 0)
-                throw new IOException("Unable to inspect the artifact filesystem.", new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
-            if (OperatingSystem.IsMacOS())
-            {
-                // Darwin struct statfs includes two MAXPATHLEN mount names; reserve the full ABI size.
-                var name = Marshal.PtrToStringUTF8(buffer + 72, 16)?.TrimEnd('\0') ?? string.Empty;
-                const int mountLocalFlag = 0x00001000;
-                return (name, (Marshal.ReadInt32(buffer, 64) & mountLocalFlag) != 0);
-            }
-
-            var magic = unchecked((uint)Marshal.ReadInt32(buffer));
-            var mountType = ReadLinuxMountType(root.ArtifactDirectoryPath);
-            return (magic == LinuxExtSuperMagic ? mountType : $"unknown-0x{magic:x8}", true);
-        }
-        finally { Marshal.FreeHGlobal(buffer); }
+        var platform = OperatingSystem.IsWindows() ? "windows"
+            : OperatingSystem.IsMacOS() ? "macos"
+            : OperatingSystem.IsLinux() ? "linux"
+            : "other";
+        return ReadFileSystem(root, platform, ObserveWindowsVolume, UnixFStatFs,
+            _ => File.ReadLines("/proc/self/mountinfo"));
     }
 
-    private static string ReadLinuxMountType(string path)
+    /// <summary>
+    /// Reads filesystem metadata through narrow platform observations while keeping the retained
+    /// directory handle and all path validation under the normal capability probe.
+    /// </summary>
+    /// <param name="root">The already-validated retained private-root lease.</param>
+    /// <param name="platform">The platform lane: <c>windows</c>, <c>macos</c>, or <c>linux</c>.</param>
+    /// <param name="windowsVolumeObservation">
+    /// Reads readiness, filesystem format, and drive type for a Windows volume root. It is called
+    /// only in the Windows lane and should avoid reading the format when the volume is not ready.
+    /// </param>
+    /// <param name="unixFStatFs">Runs <c>fstatfs</c> against the retained directory descriptor and supplied buffer.</param>
+    /// <param name="linuxMountInfo">Returns Linux mountinfo lines for the retained directory path.</param>
+    /// <returns>The observed filesystem name and whether the volume is local.</returns>
+    /// <remarks>
+    /// Production supplies <see cref="DriveInfo"/>, the native <c>fstatfs</c> call, and
+    /// <see cref="File.ReadLines(string)"/>. Tests may inject observations to verify result and
+    /// failure orchestration; injected values do not establish native filesystem guarantees. The
+    /// platform argument exists to exercise each decision lane on any test host. All callers still
+    /// need a real retained lease, and the public capability probe continues its no-follow path,
+    /// identity, locking, and rename checks after this observation succeeds.
+    /// </remarks>
+    internal static (string FileSystem, bool IsLocal) ReadFileSystem(
+        CoverageRunOutputLease root,
+        string platform,
+        Func<string, CoverageArtifactVolumeObservation> windowsVolumeObservation,
+        Func<int, nint, int> unixFStatFs,
+        Func<string, IEnumerable<string>> linuxMountInfo)
     {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentException.ThrowIfNullOrWhiteSpace(platform);
+        ArgumentNullException.ThrowIfNull(windowsVolumeObservation);
+        ArgumentNullException.ThrowIfNull(unixFStatFs);
+        ArgumentNullException.ThrowIfNull(linuxMountInfo);
+
+        switch (platform.ToLowerInvariant())
+        {
+            case "windows":
+                {
+                    var volumeRoot = Path.GetPathRoot(root.ArtifactDirectoryPath)
+                        ?? throw new IOException("Unable to identify the artifact volume root.");
+                    var volume = windowsVolumeObservation(volumeRoot);
+                    if (!volume.IsReady) throw new IOException("The artifact volume is unavailable.");
+                    return (volume.FileSystem, volume.DriveType == DriveType.Fixed);
+                }
+            case "macos":
+            case "linux":
+                {
+                    var buffer = Marshal.AllocHGlobal(4096);
+                    try
+                    {
+                        for (var index = 0; index < 4096; index++) Marshal.WriteByte(buffer, index, 0);
+                        var descriptor = root.ArtifactDirectoryHandle.DangerousGetHandle().ToInt32();
+                        var result = unixFStatFs(descriptor, buffer);
+                        if (result != 0)
+                            throw new IOException("Unable to inspect the artifact filesystem.", new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+                        if (platform.Equals("macos", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Darwin struct statfs includes two MAXPATHLEN mount names; reserve the full ABI size.
+                            var name = Marshal.PtrToStringUTF8(buffer + 72, 16)?.TrimEnd('\0') ?? string.Empty;
+                            const int mountLocalFlag = 0x00001000;
+                            return (name, (Marshal.ReadInt32(buffer, 64) & mountLocalFlag) != 0);
+                        }
+
+                        var magic = unchecked((uint)Marshal.ReadInt32(buffer));
+                        var mountType = ReadLinuxMountType(root.ArtifactDirectoryPath, linuxMountInfo(root.ArtifactDirectoryPath));
+                        return (magic == LinuxExtSuperMagic ? mountType : $"unknown-0x{magic:x8}", true);
+                    }
+                    finally { Marshal.FreeHGlobal(buffer); }
+                }
+            default:
+                throw new PlatformNotSupportedException("Artifact capability checks support Windows, macOS, and Linux.");
+        }
+    }
+
+    private static CoverageArtifactVolumeObservation ObserveWindowsVolume(string volumeRoot)
+    {
+        var drive = new DriveInfo(volumeRoot);
+        if (!drive.IsReady) return new CoverageArtifactVolumeObservation(false, string.Empty, drive.DriveType);
+        return new CoverageArtifactVolumeObservation(true, drive.DriveFormat, drive.DriveType);
+    }
+
+    /// <summary>Finds the filesystem type of the longest Linux mountpoint containing a path.</summary>
+    /// <param name="path">An absolute Linux path, normally taken from the retained directory lease.</param>
+    /// <param name="mountInfoLines">Lines from <c>/proc/self/mountinfo</c>; ordering does not affect the result.</param>
+    /// <returns>The filesystem type from the matching mountinfo record.</returns>
+    /// <remarks>
+    /// Structurally malformed records and records with non-absolute mountpoints are skipped. Mount
+    /// paths are decoded using mountinfo octal escapes and matched on path-component boundaries;
+    /// if no valid record contains <paramref name="path"/>, the parser throws <see cref="IOException"/>.
+    /// Callers should pass the retained absolute Linux path and the complete mountinfo snapshot.
+    /// </remarks>
+    internal static string ReadLinuxMountType(string path, IEnumerable<string> mountInfoLines)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(mountInfoLines);
         string? bestMount = null;
         string? bestType = null;
-        foreach (var line in File.ReadLines("/proc/self/mountinfo"))
+        foreach (var line in mountInfoLines)
         {
             var separator = line.IndexOf(" - ", StringComparison.Ordinal);
             if (separator < 0) continue;
             var left = line[..separator].Split(' ', StringSplitOptions.RemoveEmptyEntries);
             var right = line[(separator + 3)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (left.Length < 5 || right.Length < 1) continue;
+            if (left.Length < 6 || right.Length < 3) continue;
             var mount = DecodeMountField(left[4]);
-            if ((mount == Path.DirectorySeparatorChar.ToString()
-                    || path.Equals(mount, StringComparison.Ordinal)
-                    || path.StartsWith(Path.TrimEndingDirectorySeparator(mount) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                && (bestMount is null || mount.Length > bestMount.Length))
+            if (!mount.StartsWith("/", StringComparison.Ordinal) || !IsLinuxPathWithinMount(path, mount)) continue;
+            if (bestMount is null || mount.Length > bestMount.Length)
             {
                 bestMount = mount;
                 bestType = right[0];
             }
         }
         return bestType ?? throw new IOException("Unable to identify the artifact mount filesystem.");
+    }
+
+    private static bool IsLinuxPathWithinMount(string path, string mount)
+    {
+        if (mount == "/") return path.StartsWith("/", StringComparison.Ordinal);
+        return path.Equals(mount, StringComparison.Ordinal)
+            || path.StartsWith(mount.TrimEnd('/') + "/", StringComparison.Ordinal);
     }
 
     private static string DecodeMountField(string value)
@@ -205,6 +280,12 @@ internal sealed partial record CoverageArtifactCapability(
     private static partial int UnixFStatFs(int descriptor, nint buffer);
 
 }
+
+/// <summary>Windows volume metadata returned by a capability filesystem observation.</summary>
+/// <param name="IsReady">Whether the volume can currently be inspected.</param>
+/// <param name="FileSystem">The reported volume format; ignored when <paramref name="IsReady"/> is false.</param>
+/// <param name="DriveType">The reported drive type used to classify local storage.</param>
+internal readonly record struct CoverageArtifactVolumeObservation(bool IsReady, string FileSystem, DriveType DriveType);
 
 /// <summary>Native file identity and mutation fingerprint captured from one open handle.</summary>
 /// <param name="Identity">Stable native volume/object identity.</param>

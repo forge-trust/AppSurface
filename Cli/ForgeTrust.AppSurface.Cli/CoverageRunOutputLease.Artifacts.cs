@@ -30,40 +30,43 @@ internal sealed partial class CoverageRunOutputLease
 
     /// <summary>Reads native identity, length, last-write time and change time from an open regular file.</summary>
     /// <param name="handle">A retained native handle to the file.</param>
+    /// <param name="nativeCalls">Optional per-call native observations for decision tests; omission uses the actual host APIs.</param>
     /// <returns>The file state used to detect in-place changes across an archive read.</returns>
-    internal static CoverageArtifactObjectState GetArtifactObjectState(SafeFileHandle handle)
+    /// <remarks>Injected observations verify managed decoding and rejection decisions, not the native filesystem or ABI.</remarks>
+    internal static CoverageArtifactObjectState GetArtifactObjectState(SafeFileHandle handle, CoverageArtifactStateCalls? nativeCalls = null)
     {
+        var calls = nativeCalls ?? CoverageArtifactStateCalls.Default;
         ArgumentNullException.ThrowIfNull(handle);
         if (handle.IsInvalid || handle.IsClosed) throw new IOException("Artifact file handle is unavailable.");
 
-        if (OperatingSystem.IsWindows())
+        if (calls.IsWindows)
         {
             const int fileBasicInformation = 0;
-            if (!WindowsGetFileBasicInformationByHandleEx(handle, fileBasicInformation,
+            if (!calls.WindowsBasic(handle, fileBasicInformation,
                     out var basic, (uint)Marshal.SizeOf<WindowsFileBasicInformation>())
-                || !WindowsGetFileInformationByHandle(handle, out var information))
+                || !calls.WindowsInformation(handle, out var information))
                 throw new IOException("Unable to inspect artifact file state.", new Win32Exception(Marshal.GetLastPInvokeError()));
             var length = ((ulong)information.FileSizeHigh << 32) | information.FileSizeLow;
             if (length > long.MaxValue) throw new IOException("Artifact file length exceeds the supported range.");
             return new CoverageArtifactObjectState(
-                GetWindowsIdentity(handle).ToString(), (long)length,
+                calls.Identity(handle), (long)length,
                 basic.LastWriteTime / 10_000_000, basic.LastWriteTime % 10_000_000,
                 basic.ChangeTime / 10_000_000, basic.ChangeTime % 10_000_000);
         }
 
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        if (!calls.IsLinux && !calls.IsMacOS)
             throw new PlatformNotSupportedException("Native artifact file-state inspection is unavailable.");
         var stat = Marshal.AllocHGlobal(512);
         try
         {
-            if (UnixFStat(handle.DangerousGetHandle().ToInt32(), stat) != 0)
+            if (calls.UnixStat(handle.DangerousGetHandle().ToInt32(), stat) != 0)
                 throw NativeIOException("Unable to inspect artifact file state.");
             long length;
             int modifiedSecondsOffset;
             int modifiedNanosecondsOffset;
             int changedSecondsOffset;
             int changedNanosecondsOffset;
-            if (OperatingSystem.IsMacOS())
+            if (calls.IsMacOS)
             {
                 length = Marshal.ReadInt64(stat, 96);
                 modifiedSecondsOffset = 48;
@@ -71,7 +74,7 @@ internal sealed partial class CoverageRunOutputLease
                 changedSecondsOffset = 64;
                 changedNanosecondsOffset = 72;
             }
-            else if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+            else if (calls.Architecture == Architecture.X64)
             {
                 length = Marshal.ReadInt64(stat, 48);
                 modifiedSecondsOffset = 88;
@@ -79,7 +82,7 @@ internal sealed partial class CoverageRunOutputLease
                 changedSecondsOffset = 104;
                 changedNanosecondsOffset = 112;
             }
-            else if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+            else if (calls.Architecture == Architecture.Arm64)
             {
                 length = Marshal.ReadInt64(stat, 48);
                 modifiedSecondsOffset = 88;
@@ -93,7 +96,7 @@ internal sealed partial class CoverageRunOutputLease
             }
             if (length < 0) throw new IOException("Artifact file has a negative native length.");
             return new CoverageArtifactObjectState(
-                GetUnixIdentity(handle).ToString(), length,
+                calls.Identity(handle), length,
                 Marshal.ReadInt64(stat, modifiedSecondsOffset), Marshal.ReadInt64(stat, modifiedNanosecondsOffset),
                 Marshal.ReadInt64(stat, changedSecondsOffset), Marshal.ReadInt64(stat, changedNanosecondsOffset));
         }
@@ -107,9 +110,11 @@ internal sealed partial class CoverageRunOutputLease
     /// <returns>A retained directory, or null when an existing-only path is missing.</returns>
     /// <remarks>Existing permissions are validated, never repaired. Callers separately validate store/schema authority.</remarks>
     /// <param name="allowWindowsRenameSharing">Whether a cooperative lease needs compatible writer sharing rather than restore-parent exclusion.</param>
-    internal static CoverageRunOutputLease? AcquireArtifactDirectory(string path, bool createMissing, bool requirePrivate, bool allowWindowsRenameSharing = false)
+    /// <param name="unixFChmod">Optional per-lease native permission operation for failure tests; defaults to fchmod.</param>
+    internal static CoverageRunOutputLease? AcquireArtifactDirectory(string path, bool createMissing, bool requirePrivate, bool allowWindowsRenameSharing = false,
+        Func<int, uint, int>? unixFChmod = null)
     {
-        var lease = new CoverageRunOutputLease(NormalizePlatformPath(Path.GetFullPath(path)));
+        var lease = new CoverageRunOutputLease(NormalizePlatformPath(Path.GetFullPath(path)), unixFChmod);
         try
         {
             if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
@@ -193,7 +198,7 @@ internal sealed partial class CoverageRunOutputLease
         {
             using var created = OpenAt(_outputHandle!, name, directory: true)
                 ?? throw new IOException("Created private artifact directory disappeared.");
-            if (UnixFChmod(created.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
+            if (_unixFChmod(created.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
                 throw NativeIOException("Unable to restrict newly created private directory permissions.");
         }
         VerifyBinding();
@@ -247,7 +252,7 @@ internal sealed partial class CoverageRunOutputLease
             handle = new SafeFileHandle((nint)fd, ownsHandle: true);
             try
             {
-                if (createNew && UnixFChmod(fd, 0x180) != 0)
+                if (createNew && _unixFChmod(fd, 0x180) != 0)
                     throw NativeIOException("Unable to restrict newly created artifact file permissions.");
                 RejectUnixWrongKind(handle, expectDirectory: false);
                 ValidateArtifactUnixMetadata(handle, directory: false, requirePrivate);
@@ -372,7 +377,7 @@ internal sealed partial class CoverageRunOutputLease
                 if (!created && Marshal.GetLastPInvokeError() != UnixAlreadyExists)
                     throw NativeIOException("Unable to create private directory component.");
                 next = OpenAt(current, component, directory: true) ?? throw new IOException("Private directory disappeared.");
-                if (created && UnixFChmod(next.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
+                if (created && _unixFChmod(next.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
                 {
                     next.Dispose();
                     throw NativeIOException("Unable to restrict newly created private directory permissions.");
@@ -446,22 +451,31 @@ internal sealed partial class CoverageRunOutputLease
                 throw new IOException("Artifact store has permissions for another principal.");
     }
 
-    private static void ValidateArtifactUnixMetadata(SafeFileHandle handle, bool directory, bool requirePrivate)
+    /// <summary>Validates ownership, link count and private permissions from one retained Unix object.</summary>
+    /// <param name="handle">The retained native file or directory.</param>
+    /// <param name="directory">Whether directory permissions and link-count semantics apply.</param>
+    /// <param name="requirePrivate">Whether exact private permissions and current-user ownership are required.</param>
+    /// <param name="nativeCalls">Optional per-call stat observation for decoding tests; defaults to the actual host.</param>
+    /// <param name="effectiveUserId">Optional effective user identity for policy-decision tests; defaults to geteuid.</param>
+    /// <remarks>Synthetic observations test rejection policy and stat decoding, not another platform's native ABI.</remarks>
+    internal static void ValidateArtifactUnixMetadata(SafeFileHandle handle, bool directory, bool requirePrivate,
+        CoverageArtifactStateCalls? nativeCalls = null, uint? effectiveUserId = null)
     {
+        var calls = nativeCalls ?? CoverageArtifactStateCalls.Default;
         var stat = Marshal.AllocHGlobal(512);
         try
         {
-            if (UnixFStat(handle.DangerousGetHandle().ToInt32(), stat) != 0) throw NativeIOException("Unable to inspect artifact permissions.");
-            var mac = OperatingSystem.IsMacOS();
-            var x64 = RuntimeInformation.ProcessArchitecture == Architecture.X64;
-            if (!mac && !x64 && RuntimeInformation.ProcessArchitecture != Architecture.Arm64)
+            if (calls.UnixStat(handle.DangerousGetHandle().ToInt32(), stat) != 0) throw NativeIOException("Unable to inspect artifact permissions.");
+            var mac = calls.IsMacOS;
+            var x64 = calls.Architecture == Architecture.X64;
+            if (!mac && !x64 && calls.Architecture != Architecture.Arm64)
                 throw new PlatformNotSupportedException("Unsupported native stat layout.");
             var mode = mac ? unchecked((ushort)Marshal.ReadInt16(stat, 4)) : unchecked((uint)Marshal.ReadInt32(stat, x64 ? 24 : 16));
             var owner = unchecked((uint)Marshal.ReadInt32(stat, mac ? 16 : x64 ? 28 : 24));
             var links = mac ? unchecked((ushort)Marshal.ReadInt16(stat, 6)) : x64
                 ? unchecked((ulong)Marshal.ReadInt64(stat, 16)) : unchecked((uint)Marshal.ReadInt32(stat, 20));
             if (!directory && links != 1) throw new IOException("Artifact file must have exactly one hard link.");
-            if (requirePrivate && (owner != ArtifactEffectiveUserId() || (mode & 0xfff) != (directory ? 0x1c0u : 0x180u)))
+            if (requirePrivate && (owner != (effectiveUserId ?? ArtifactEffectiveUserId()) || (mode & 0xfff) != (directory ? 0x1c0u : 0x180u)))
                 throw new IOException("Artifact storage requires current-user ownership and private 0700 directories / 0600 files.");
         }
         finally { Marshal.FreeHGlobal(stat); }
@@ -527,7 +541,16 @@ internal sealed partial class CoverageRunOutputLease
         foreach (var name in names) CaptureArtifactSnapshot(child, InspectEntry(child, name), path, snapshot, maximumEntries, depth + 1);
     }
 
-    private static void RenameArtifactWindows(SafeFileHandle source, SafeFileHandle destination, string name, bool replace)
+    /// <summary>Encodes a Windows handle-relative rename and rejects unsuccessful native publication.</summary>
+    /// <param name="source">Source object retained for the whole native call.</param>
+    /// <param name="destination">Retained destination directory handle.</param>
+    /// <param name="name">An immediate filename already validated by the caller.</param>
+    /// <param name="replace">Whether the caller authorized replacing one regular metadata file.</param>
+    /// <param name="publish">Optional native call for buffer and failure tests; defaults to NtSetInformationFile.</param>
+    /// <param name="translateError">Optional native error translation for tests; defaults to RtlNtStatusToDosError.</param>
+    /// <remarks>Tests can inspect the encoded request without executing Windows or attesting to its ABI.</remarks>
+    internal static void RenameArtifactWindows(SafeFileHandle source, SafeFileHandle destination, string name, bool replace,
+        Func<SafeFileHandle, nint, uint, int>? publish = null, Func<int, uint>? translateError = null)
     {
         var bytes = System.Text.Encoding.Unicode.GetBytes(name);
         var rootOffset = Marshal.OffsetOf<WindowsFileRenameInformation>(nameof(WindowsFileRenameInformation.RootDirectory)).ToInt32();
@@ -542,8 +565,9 @@ internal sealed partial class CoverageRunOutputLease
             Marshal.WriteIntPtr(buffer, rootOffset, destination.DangerousGetHandle());
             Marshal.WriteInt32(buffer, lengthOffset, bytes.Length);
             Marshal.Copy(bytes, 0, buffer + nameOffset, bytes.Length);
-            var status = NtSetInformationFile(source, out _, buffer, (uint)size, WindowsFileRenameInformationClass);
-            if (status != WindowsStatusSuccess) throw new IOException("Unable to publish artifact entry.", new Win32Exception(unchecked((int)RtlNtStatusToDosError(status))));
+            var status = publish is null ? NtSetInformationFile(source, out _, buffer, (uint)size, WindowsFileRenameInformationClass)
+                : publish(source, buffer, (uint)size);
+            if (status != WindowsStatusSuccess) throw new IOException("Unable to publish artifact entry.", new Win32Exception(unchecked((int)(translateError is null ? RtlNtStatusToDosError(status) : translateError(status)))));
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
@@ -563,3 +587,45 @@ internal sealed partial class CoverageRunOutputLease
 /// <param name="IsDirectory">Whether the opened object is a directory.</param>
 /// <param name="Identity">Native volume/object identity of the opened entry.</param>
 internal sealed record CoverageArtifactDirectoryEntry(string Name, bool IsDirectory, string Identity);
+
+/// <summary>Per-call native observations used to verify file-state decoding without altering global platform state.</summary>
+/// <remarks>
+/// Defaults call the host APIs. Tests may supply a platform, native results and retained-object identity;
+/// callers must not mix synthetic stat bytes with a real filesystem claim. No ownership check is bypassed in production.
+/// </remarks>
+internal sealed class CoverageArtifactStateCalls
+{
+    /// <summary>Reads Windows basic timestamps using the native result convention.</summary>
+    internal delegate bool ReadWindowsBasic(SafeFileHandle handle, int informationClass,
+        out WindowsFileBasicInformation information, uint size);
+
+    /// <summary>Reads Windows size metadata using the native result convention.</summary>
+    internal delegate bool ReadWindowsInformation(SafeFileHandle handle, out WindowsByHandleFileInformation information);
+
+    /// <summary>Gets the host-bound default operations.</summary>
+    internal static CoverageArtifactStateCalls Default { get; } = new();
+
+    /// <summary>Gets whether Windows file-state decoding is selected.</summary>
+    internal bool IsWindows { get; init; } = OperatingSystem.IsWindows();
+
+    /// <summary>Gets whether Darwin stat decoding is selected.</summary>
+    internal bool IsMacOS { get; init; } = OperatingSystem.IsMacOS();
+
+    /// <summary>Gets whether Linux stat decoding is available.</summary>
+    internal bool IsLinux { get; init; } = OperatingSystem.IsLinux();
+
+    /// <summary>Gets the native process architecture used for Linux stat layouts.</summary>
+    internal Architecture Architecture { get; init; } = RuntimeInformation.ProcessArchitecture;
+
+    /// <summary>Gets the native Windows timestamp call, including its success result.</summary>
+    internal ReadWindowsBasic WindowsBasic { get; init; } = WindowsGetFileBasicInformationByHandleEx;
+
+    /// <summary>Gets the native Windows size and identity metadata call.</summary>
+    internal ReadWindowsInformation WindowsInformation { get; init; } = WindowsGetFileInformationByHandle;
+
+    /// <summary>Gets the native Unix stat call; failure leaves the P/Invoke error available.</summary>
+    internal Func<int, nint, int> UnixStat { get; init; } = UnixFStat;
+
+    /// <summary>Gets the identity observer for the same retained handle.</summary>
+    internal Func<SafeFileHandle, string> Identity { get; init; } = CoverageRunOutputLease.GetArtifactObjectIdentity;
+}
