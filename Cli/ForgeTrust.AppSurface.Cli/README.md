@@ -95,6 +95,13 @@ online deadline includes connection and fence waits; work is limited to 28 secon
 the remaining 2 seconds. Timeout, cancellation, broken transport, uncertain unlock, cleanup failure, or unknown result
 is a nonzero result with no success output. A one-slot runtime pool must not cause a nested connection acquisition.
 
+The [preflight integration tests](../ForgeTrust.AppSurface.Cli.Tests/DurablePreflightIntegrationTests.cs) distinguish
+physical client disposal from server-observed backend exit. PostgreSQL sends no acknowledgement for connection
+termination, so both successful and rejected sequential caller checks observe the exact application-name session
+exiting within the original 30-second budget before asserting zero sessions. The existing 10-second observation cap,
+SQLSTATE checks, immediate fence-release checks, and final all-session zero assertions remain in force. A retained
+backend still fails the bounded observation; this barrier does not retry preflight or make a rejected caller succeed.
+
 The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
 role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or
 database/package-object ownership; exact raw runtime targets on all managed policies; exactly the heartbeat runtime
