@@ -129,29 +129,7 @@ internal static partial class CoverageArtifactInspectionCursorStore
     }
 
     private static void Publish(CoverageRunOutputLease directory, byte[] bytes)
-    {
-        var temp = "state-" + Guid.NewGuid().ToString("N") + ".tmp";
-        string? identity = null;
-        try
-        {
-            using (var stream = directory.OpenArtifactFile(temp, createNew: true))
-            {
-                identity = CoverageRunOutputLease.GetArtifactObjectIdentity(stream.SafeFileHandle);
-                stream.Write(bytes);
-                stream.Flush(true);
-            }
-            directory.MoveArtifactEntry(temp, directory, StateName, replaceFile: true, expectedSourceIdentity: identity);
-            identity = null;
-        }
-        finally
-        {
-            if (identity is not null)
-            {
-                try { directory.DeleteArtifactEntry(temp, 1, identity); }
-                catch (FileNotFoundException) { }
-            }
-        }
-    }
+        => CoverageArtifactMetadataPublication.Write(directory, StateName, bytes, MaxStateBytes);
 
     private static int EncodedSize(CursorState state) => JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions).Length;
 

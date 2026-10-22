@@ -994,6 +994,14 @@ internal sealed class CoverageArtifactStore : IDisposable
             || registry.OverflowObservations.Length > CoverageArtifactLimits.MaximumOverflowObservations
             || registry.Reservations.Any(item => item is null || item.Bytes < 0 || item.Bytes > CoverageArtifactLimits.DomainStagingMaxBytes))
             throw new InvalidDataException("The artifact registry uses an unsupported schema or exceeds its registration bound.");
+        if (registry.OverflowObservations.Any(item => item is null
+                || !Guid.TryParseExact(item.RunId, "N", out _)
+                || string.IsNullOrWhiteSpace(item.OutputIdentity) || item.CurrentBytes < 0)
+            || registry.ExpiryReceipts.Any(item => item is null
+                || !Guid.TryParseExact(item.RunId, "N", out _)
+                || item.Outcome is not ("success" or "failed" or "interrupted")
+                || item.StoredBytes < 0 || string.IsNullOrWhiteSpace(item.Reason)))
+            throw new InvalidDataException("The artifact registry contains invalid observation or expiry receipt facts.");
         if (registry.Registrations.Any(item => item is null)
             || registry.Registrations.Select(item => item.RunId).Distinct(StringComparer.Ordinal).Count() != registry.Registrations.Length)
             throw new InvalidDataException("The artifact registry contains duplicate run identifiers.");
@@ -1165,8 +1173,12 @@ internal sealed class CoverageArtifactStore : IDisposable
             foreach (var entry in state.EnumerateArtifactEntries(4))
             {
                 if (entry.IsDirectory || entry.Name == ".appsurface-coverage-operation.lock") continue;
-                if (entry.Name != "state.json") throw new InvalidDataException("Unknown observation metadata requires reconciliation.");
+                if (entry.Name != "state.json" && entry.Name != CoverageArtifactMetadataPublication.StagingName)
+                    throw new InvalidDataException("Unknown observation metadata requires reconciliation.");
                 using var stream = state.OpenArtifactFile(entry.Name, false);
+                var maximum = name == "inspection" ? 64L * 1024 : CoverageArtifactLimits.WarningStateMaxBytes;
+                if (stream.Length > maximum)
+                    throw new InvalidDataException("Observation metadata exceeds its category byte limit.");
                 total = checked(total + stream.Length);
             }
         }

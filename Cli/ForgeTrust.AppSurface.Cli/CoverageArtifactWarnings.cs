@@ -145,9 +145,8 @@ internal sealed class CoverageArtifactWarnings(string repository, CoverageArtifa
                 {
                     var encoded = JsonSerializer.SerializeToUtf8Bytes(saved, JsonOptions);
                     if (encoded.Length > CoverageArtifactLimits.WarningStateMaxBytes) throw new InvalidDataException("Warning state exceeds its byte limit.");
-                    var name = "state-" + Guid.NewGuid().ToString("N");
-                    using (var output = state.OpenArtifactFile(name, true)) { output.Write(encoded); output.Flush(true); }
-                    state.MoveArtifactEntry(name, state, "state.json", replaceFile: true);
+                    CoverageArtifactMetadataPublication.Write(state, "state.json", encoded,
+                        CoverageArtifactLimits.WarningStateMaxBytes);
                 }
             }
         }

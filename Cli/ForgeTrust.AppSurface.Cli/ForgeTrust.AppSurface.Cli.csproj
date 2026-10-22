@@ -51,6 +51,7 @@
     <Compile Remove="CoverageArtifactSettings.cs" />
     <Compile Remove="CoverageArtifactWarnings.cs" />
     <Compile Remove="CoverageArtifactJson.cs" />
+    <Compile Remove="CoverageArtifactMetadataPublication.cs" />
     <Compile Remove="CoverageArtifactInspectionCursorStore.cs" />
     <Compile Remove="CoverageProjectManifest.cs" />
     <Compile Remove="CoverageRunSlowTestDiagnostics.cs" />

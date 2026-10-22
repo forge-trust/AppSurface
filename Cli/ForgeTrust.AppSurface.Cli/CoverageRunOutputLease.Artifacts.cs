@@ -481,10 +481,16 @@ internal sealed partial class CoverageRunOutputLease
         finally { Marshal.FreeHGlobal(stat); }
     }
 
-    private static IReadOnlyList<string> ReadArtifactWindowsNames(SafeFileHandle directory, int maximumEntries)
+    /// <summary>Collects bounded immediate Windows names from the retained directory.</summary>
+    /// <param name="directory">Retained directory handle.</param>
+    /// <param name="maximumEntries">Strict bound, checked before retaining another name.</param>
+    /// <param name="enumerate">Optional per-call name observation for iterator failure tests; defaults to the native bound path.</param>
+    /// <remarks>Injected names verify the count and iterator decisions; they do not prove Windows enumeration.</remarks>
+    internal static IReadOnlyList<string> ReadArtifactWindowsNames(SafeFileHandle directory, int maximumEntries,
+        Func<SafeFileHandle, IEnumerable<string>>? enumerate = null)
     {
         var result = new List<string>();
-        foreach (var path in Directory.EnumerateFileSystemEntries(GetStableDirectoryPath(directory)))
+        foreach (var path in enumerate is null ? Directory.EnumerateFileSystemEntries(GetStableDirectoryPath(directory)) : enumerate(directory))
         {
             if (result.Count >= maximumEntries) throw new IOException("Artifact entry inspection limit reached.");
             result.Add(Path.GetFileName(path));
@@ -492,20 +498,27 @@ internal sealed partial class CoverageRunOutputLease
         return result;
     }
 
-    private static IReadOnlyList<string> ReadArtifactUnixNames(SafeFileHandle directory, int maximumEntries)
+    /// <summary>Enumerates a bounded Unix directory with explicit descriptor/stream ownership.</summary>
+    /// <param name="directory">Retained source directory handle, never disposed by this method.</param>
+    /// <param name="maximumEntries">Strict entry count bound, excluding dot entries.</param>
+    /// <param name="nativeCalls">Optional per-call native enumeration operations for failure/cleanup tests.</param>
+    /// <remarks>Omission uses the host APIs; fake results exercise orchestration, not the kernel ABI.</remarks>
+    internal static IReadOnlyList<string> ReadArtifactUnixNames(SafeFileHandle directory, int maximumEntries,
+        CoverageArtifactEnumerationCalls? nativeCalls = null)
     {
-        var fd = DuplicateCloseOnExec(directory.DangerousGetHandle().ToInt32());
+        var calls = nativeCalls ?? CoverageArtifactEnumerationCalls.Default;
+        var fd = calls.Duplicate(directory.DangerousGetHandle().ToInt32());
         if (fd < 0) throw NativeIOException("Unable to duplicate artifact directory descriptor.");
-        if (Seek(fd, 0, UnixSeekStart) < 0) { _ = Close(fd); throw NativeIOException("Unable to rewind artifact directory."); }
-        var stream = FdOpenDirectory(fd);
-        if (stream == 0) { _ = Close(fd); throw NativeIOException("Unable to enumerate artifact directory."); }
+        if (calls.Seek(fd, 0, UnixSeekStart) < 0) { _ = calls.Close(fd); throw NativeIOException("Unable to rewind artifact directory."); }
+        var stream = calls.OpenDirectory(fd);
+        if (stream == 0) { _ = calls.Close(fd); throw NativeIOException("Unable to enumerate artifact directory."); }
         try
         {
             var names = new List<string>();
             while (true)
             {
                 Marshal.SetLastPInvokeError(0);
-                var entry = ReadDirectory(stream);
+                var entry = calls.ReadDirectory(stream);
                 if (entry == 0)
                 {
                     if (Marshal.GetLastPInvokeError() != 0) throw NativeIOException("Artifact enumeration failed.");
@@ -518,7 +531,27 @@ internal sealed partial class CoverageRunOutputLease
                 names.Add(name);
             }
         }
-        finally { _ = CloseDirectory(stream); }
+        finally { _ = calls.CloseDirectory(stream); }
+    }
+
+    /// <summary>Per-call native Unix enumeration results with production descriptor ownership defaults.</summary>
+    /// <remarks>Fake results must describe their own descriptors and pointers; they do not establish filesystem support.</remarks>
+    internal sealed class CoverageArtifactEnumerationCalls
+    {
+        /// <summary>Gets the immutable default call set.</summary>
+        internal static CoverageArtifactEnumerationCalls Default { get; } = new();
+        /// <summary>Gets a fresh close-on-exec descriptor for the same directory.</summary>
+        internal Func<int, int> Duplicate { get; init; } = DuplicateCloseOnExec;
+        /// <summary>Gets the rewind operation on the fresh descriptor.</summary>
+        internal Func<int, long, int, long> Seek { get; init; } = CoverageRunOutputLease.Seek;
+        /// <summary>Gets the operation transferring descriptor ownership to a directory stream.</summary>
+        internal Func<int, nint> OpenDirectory { get; init; } = FdOpenDirectory;
+        /// <summary>Gets the next native directory entry or zero at end/failure.</summary>
+        internal Func<nint, nint> ReadDirectory { get; init; } = CoverageRunOutputLease.ReadDirectory;
+        /// <summary>Gets the close operation before stream ownership transfers.</summary>
+        internal Func<int, int> Close { get; init; } = CoverageRunOutputLease.Close;
+        /// <summary>Gets the operation closing the directory stream and its descriptor.</summary>
+        internal Func<nint, int> CloseDirectory { get; init; } = CoverageRunOutputLease.CloseDirectory;
     }
 
     /// <summary>Atomically duplicates a Unix descriptor with close-on-exec set.</summary>

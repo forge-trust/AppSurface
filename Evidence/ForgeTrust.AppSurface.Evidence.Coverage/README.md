@@ -19,3 +19,12 @@ seams, not consumer configuration; they never establish another operating system
 ABI or filesystem guarantees. Native acceptance still runs on the supported
 Windows/NTFS, macOS/APFS, and Linux/ext4 lanes described in the
 [storage validation record](../../docs/designs/coverage-artifact-storage-validation.md).
+
+Observation state uses a single bounded publication slot per private observation
+directory. Writers hold that directory's exclusive operation lease while they
+reconcile the known slot, flush the new state, and atomically replace the current
+state. A failed or interrupted write can therefore retain at most one known slot;
+unknown files and changed identities are preserved for inspection. Registry input
+validation rejects malformed observation and expiry-receipt entries before they
+reach status or maintenance, keeping optional metadata failures separate from the
+primary coverage outcome. See the [storage recovery guide](../../guides/coverage-storage.md#recovery-recipes).

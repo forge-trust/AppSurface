@@ -47,6 +47,7 @@
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactSettings.cs" Link="CoverageArtifactSettings.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactWarnings.cs" Link="CoverageArtifactWarnings.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactJson.cs" Link="CoverageArtifactJson.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactMetadataPublication.cs" Link="CoverageArtifactMetadataPublication.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactInspectionCursorStore.cs" Link="CoverageArtifactInspectionCursorStore.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageProjectManifest.cs" Link="CoverageProjectManifest.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunSlowTestDiagnostics.cs" Link="CoverageRunSlowTestDiagnostics.cs" />
