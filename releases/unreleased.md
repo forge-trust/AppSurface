@@ -8,7 +8,7 @@ This is the living release note for the next coordinated AppSurface version afte
 
 <!-- appsurface:unreleased-entries section="taking-shape" -->
 
-- Document the in-progress coverage artifact retention defaults and compatibility boundaries in the [coverage storage guide](../guides/coverage-storage.md); package installation proof and storage measurements remain pending.
+- Introduce managed coverage artifact defaults that remove verified redundant XML, retain bounded lossless history and warn about unmanaged growth. The [coverage storage guide](../guides/coverage-storage.md) explains upgrade behavior and compatibility; the [validation record](../docs/designs/coverage-artifact-storage-validation.md) tracks candidate proofs and acceptance requirements.
 
 ## Included in the next coordinated version
 

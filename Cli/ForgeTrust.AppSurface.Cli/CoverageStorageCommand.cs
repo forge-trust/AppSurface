@@ -466,6 +466,7 @@ internal sealed partial class CoverageStorageRestoreCommand : CoverageStorageCom
     {
         if (!Guid.TryParseExact(Run, "N", out _) || string.IsNullOrWhiteSpace(Output))
             throw new ArgumentException("restore requires --run and a fresh --output.");
+        _ = Path.GetFullPath(Output);
     }
     /// <inheritdoc />
     protected override string InvalidInputGuidance => !Guid.TryParseExact(Run, "N", out _)

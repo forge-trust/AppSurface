@@ -250,6 +250,26 @@ public sealed class CoverageStorageCommandTests
     }
 
     [Fact]
+    public async Task Restore_invalid_output_syntax_is_rejected_before_store_initialization()
+    {
+        using var domain = TestDirectory.Create();
+        using var configured = ConfigureDomain(domain.Path);
+        using var console = new FakeInMemoryConsole();
+
+        var error = await Assert.ThrowsAsync<CliFx.CommandException>(async () =>
+            await new CoverageStorageRestoreCommand { Run = Guid.NewGuid().ToString("N"), Output = "secret\0output", Json = true }
+                .ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Equal(2, error.ExitCode);
+        using var document = System.Text.Json.JsonDocument.Parse(console.ReadOutputString());
+        Assert.Equal("ASCOV208", document.RootElement.GetProperty("diagnostics")[0].GetProperty("code").GetString());
+        Assert.Contains("--output", document.RootElement.GetProperty("recoveryAction").GetString(), StringComparison.Ordinal);
+        Assert.Equal("none", document.RootElement.GetProperty("sideEffects").GetString());
+        Assert.DoesNotContain("secret", console.ReadOutputString(), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(domain.Path, "private-store")));
+    }
+
+    [Fact]
     public async Task Inspect_missing_root_reports_partial_and_typed_diagnostic()
     {
         using var domain = TestDirectory.Create();
