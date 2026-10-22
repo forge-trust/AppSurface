@@ -372,6 +372,12 @@ public sealed class LinuxControlConnectionTests
             cancellation.Cancel();
             Assert.False(read.IsCompleted);
             stream.ReleaseRead();
+            // Releasing an await is not completion: force a paused continuation before the final read step.
+            await stream.ReadReleased.Task.WaitAsync(Guard);
+            Assert.False(stream.ReadFinished);
+            Assert.False(read.IsCompleted);
+            stream.FinishRead();
+            await stream.ReadCompleted.Task.WaitAsync(Guard);
             Assert.True(stream.ReadFinished);
             Assert.False(read.IsCompleted);
             stream.ReleaseClose();
@@ -383,6 +389,7 @@ public sealed class LinuxControlConnectionTests
         finally
         {
             stream.ReleaseRead();
+            stream.FinishRead();
             stream.ReleaseClose();
             if (closer is not null) await closer.WaitAsync(Guard);
             try { await read.WaitAsync(Guard); } catch (OperationCanceledException) { }
@@ -418,15 +425,20 @@ public sealed class LinuxControlConnectionTests
     {
         private readonly MemoryStream _input = new(Ready, writable: false);
         private readonly ManualResetEventSlim _releaseClose = new(false);
-        // Inline continuations deliberately make ReleaseRead drain the completed original read before returning.
-        private readonly TaskCompletionSource _releaseRead = new();
+        // Independent gates model a continuation that has resumed but has not completed its original read.
+        // Callers await ReadCompleted instead of assuming TrySetResult runs that continuation inline.
+        private readonly TaskCompletionSource _releaseRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _finishRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _closeCalls;
         internal TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReadReleased { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReadCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource CloseEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool ReadFinished { get; private set; }
         internal bool CloseTimedOut { get; private set; }
         internal int CloseCalls => Volatile.Read(ref _closeCalls);
         internal void ReleaseRead() => _releaseRead.TrySetResult();
+        internal void FinishRead() => _finishRead.TrySetResult();
         internal void ReleaseClose() => _releaseClose.Set();
         public override bool CanRead => true;
         public override bool CanWrite => true;
@@ -436,9 +448,15 @@ public sealed class LinuxControlConnectionTests
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             ReadEntered.TrySetResult();
-            if (gateRead) await _releaseRead.Task.ConfigureAwait(false);
+            if (gateRead)
+            {
+                await _releaseRead.Task.ConfigureAwait(false);
+                ReadReleased.TrySetResult();
+                await _finishRead.Task.ConfigureAwait(false);
+            }
             var count = _input.Read(buffer.Span);
             ReadFinished = true;
+            ReadCompleted.TrySetResult();
             return count;
         }
         protected override void Dispose(bool disposing)
