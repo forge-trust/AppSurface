@@ -83,8 +83,8 @@ public sealed class DurableDoctorInstalledToolTests
                 new InstalledScenario("D01", null, null, null, false),
                 new InstalledScenario("D02", DurableDoctorFixture.RuntimeWorkerId, null, null, false),
                 new InstalledScenario("D03", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(5), null, false),
-                // The pure matrix owns exact 15-second equality; the installed fixture uses the existing 12-second live margin.
-                new InstalledScenario("D04", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(12), null, false),
+                // Exact equality is covered by the pure matrix; the independent database-clock bracket below validates the live child.
+                new InstalledScenario("D04", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(14), null, false),
                 new InstalledScenario("D05", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(17), null, false),
                 new InstalledScenario("D06", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.Zero, null, true),
                 new InstalledScenario("D07", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.Zero, OtherEpoch, false, OtherEpoch),
