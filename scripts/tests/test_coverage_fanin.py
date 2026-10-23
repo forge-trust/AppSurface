@@ -498,7 +498,15 @@ class CoverageFaninTests(unittest.TestCase):
 
     def test_default_primary_recapture_preserves_unknown_modified_or_linked_material(self) -> None:
         report, timings, output = self.default_primary()
-        for defect in ("unknown", "report", "timings", "manifest", "link"):
+        metadata_mutations = {
+            "manifest": {"policy": {"driver": "other"}},
+            "schema": {"schemaVersion": fanin.SCHEMA + 1},
+            "scope": {"scope": "native"},
+            "filter": {"filter": "unapproved"},
+            "missing-inventory": {"files": None},
+            "extra-inventory": None,
+        }
+        for defect in ("unknown", "report", "timings", *metadata_mutations, "link"):
             with self.subTest(defect=defect):
                 if output.exists():
                     shutil.rmtree(output)
@@ -509,9 +517,12 @@ class CoverageFaninTests(unittest.TestCase):
                     name = "coverage.cobertura.xml" if defect == "report" else "timings.json"
                     with (output / name).open("a") as stream:
                         stream.write("changed")
-                elif defect == "manifest":
+                elif defect in metadata_mutations:
                     manifest = json.loads((output / "manifest.json").read_text())
-                    manifest["policy"] = {"driver": "other"}
+                    if defect == "extra-inventory":
+                        manifest["files"]["caller.txt"] = "0" * 64
+                    else:
+                        manifest.update(metadata_mutations[defect])
                     (output / "manifest.json").write_text(json.dumps(manifest))
                 else:
                     outside = self.evidence / "outside-report.xml"
