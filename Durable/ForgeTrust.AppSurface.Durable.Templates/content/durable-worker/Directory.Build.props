@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- This nearest-file boundary keeps the generated consumer independent of repository-wide imports. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+</Project>

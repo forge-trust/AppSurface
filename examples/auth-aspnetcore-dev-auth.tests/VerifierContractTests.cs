@@ -251,14 +251,17 @@ public sealed class VerifierContractTests
     }
 
     [Theory]
-    [InlineData("INT", 130, "INTERRUPTED_INT")]
-    [InlineData("TERM", 143, "INTERRUPTED_TERM")]
+    [InlineData("resistant-child", "INT", 130, "INTERRUPTED_INT")]
+    [InlineData("resistant-child", "TERM", 143, "INTERRUPTED_TERM")]
+    [InlineData("resistant-child-delayed-readiness", "INT", 130, "INTERRUPTED_INT")]
+    [InlineData("resistant-child-delayed-readiness", "TERM", 143, "INTERRUPTED_TERM")]
     public async Task RepeatedSignal_IsMaskedUntilTheOwnedChildIsReaped(
+        string mode,
         string signal,
         int expectedExitCode,
         string expectedReason)
     {
-        await using var fixture = await VerifierFixture.CreateAsync("resistant-child");
+        await using var fixture = await VerifierFixture.CreateAsync(mode);
 
         var result = await fixture.RunAndSignalTwiceAsync(signal, TimeSpan.FromSeconds(12));
 
@@ -608,7 +611,7 @@ public sealed class VerifierContractTests
             {
                 if (signal is not null)
                 {
-                    await WaitForChildLaunchAsync(processTimeout);
+                    await WaitForChildSignalReadinessAsync(processTimeout);
                     await SendSignalAsync(process.Id, signal);
                     if (sendSecondSignal)
                     {
@@ -730,12 +733,14 @@ public sealed class VerifierContractTests
             return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
         }
 
-        private async Task WaitForChildLaunchAsync(TimeSpan timeout)
+        private async Task WaitForChildSignalReadinessAsync(TimeSpan timeout)
         {
             var deadline = DateTime.UtcNow + timeout;
             while (DateTime.UtcNow < deadline)
             {
-                if (ChildProcessIds.Count > 0)
+                // Recording a PID precedes installing the shim's signal handlers.
+                var events = ReadEventLines();
+                if (ChildProcessIds.Any(pid => events.Contains($"signal-ready {pid}", StringComparer.Ordinal)))
                 {
                     return;
                 }
@@ -743,7 +748,7 @@ public sealed class VerifierContractTests
                 await Task.Delay(20);
             }
 
-            throw new TimeoutException($"Verifier fixture '{Mode}' did not launch a child.");
+            throw new TimeoutException($"Verifier fixture '{Mode}' did not prepare a child for signals.");
         }
 
         private async Task WriteExecutableAsync(string name, string contents)
@@ -856,10 +861,15 @@ public sealed class VerifierContractTests
             ;;
           timeout|foreign-endpoint)
             trap 'exit 0' TERM INT
+            printf 'signal-ready %s\n' "$$" >> "$events"
             while :; do sleep 1; done
             ;;
-          resistant-child)
+          resistant-child|resistant-child-delayed-readiness)
+            if [[ "$mode" == "resistant-child-delayed-readiness" ]]; then
+              sleep 1
+            fi
             trap '' TERM
+            printf 'signal-ready %s\n' "$$" >> "$events"
             while :; do sleep 1; done
             ;;
           sensitive-http-failure)

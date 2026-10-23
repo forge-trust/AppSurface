@@ -894,6 +894,8 @@ public sealed class DurableDoctorClassificationTests
                 Assert.Equal("application-verifier", action.Kind);
                 Assert.Null(action.Command);
                 Assert.Equal(["consumer verifier command"], action.RequiredInputs);
+                Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                    action.DocumentationUrl.AbsoluteUri);
                 break;
             case "status":
                 Assert.Equal("command", action.Kind);

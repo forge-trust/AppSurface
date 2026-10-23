@@ -1,11 +1,22 @@
 using System.Collections.Concurrent;
 using FakeItEasy;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Internal;
 
 namespace ForgeTrust.AppSurface.Caching.Tests;
 
 public class MemoTests : IDisposable
 {
+    // MemoryCache reads this clock for expiration; wall-clock scheduling cannot advance it.
+    private sealed class CacheClock : ISystemClock
+    {
+        private long _ticks = DateTimeOffset.UnixEpoch.Ticks;
+
+        public DateTimeOffset UtcNow => new(Interlocked.Read(ref _ticks), TimeSpan.Zero);
+
+        public void Advance(TimeSpan elapsed) => Interlocked.Add(ref _ticks, elapsed.Ticks);
+    }
+
     private sealed class Wrapper<T>
     {
         public async Task<T> Get(IMemo memo, T value)
@@ -606,8 +617,8 @@ public class MemoTests : IDisposable
     [Fact]
     public async Task GetAsync_AbsoluteExpiration_Evicts()
     {
-        var memo = CreateMemoWithOptions(
-            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var clock = new CacheClock();
+        var memo = CreateMemoWithOptions(new MemoryCacheOptions { Clock = clock });
         var callCount = 0;
 
         Task<int> Factory()
@@ -617,13 +628,16 @@ public class MemoTests : IDisposable
             return Task.FromResult(callCount);
         }
 
-        var first = await memo.GetAsync(Factory, CachePolicy.Absolute(TimeSpan.FromMilliseconds(50)));
+        Task<int> GetValue() => memo.GetAsync(Factory, CachePolicy.Absolute(TimeSpan.FromMilliseconds(50)));
+
+        var first = await GetValue();
         Assert.Equal(1, first);
 
-        // Wait for expiration
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(49));
+        Assert.Equal(1, await GetValue());
 
-        var second = await memo.GetAsync(Factory, CachePolicy.Absolute(TimeSpan.FromMilliseconds(50)));
+        clock.Advance(TimeSpan.FromMilliseconds(1));
+        var second = await GetValue();
         Assert.Equal(2, second);
         Assert.Equal(2, callCount);
     }
@@ -1021,8 +1035,8 @@ public class MemoTests : IDisposable
     [Fact]
     public async Task GetAsync_SlidingExpiration_KeepsAliveOnAccess()
     {
-        var memo = CreateMemoWithOptions(
-            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var clock = new CacheClock();
+        var memo = CreateMemoWithOptions(new MemoryCacheOptions { Clock = clock });
         var callCount = 0;
 
         Task<int> Factory()
@@ -1035,24 +1049,29 @@ public class MemoTests : IDisposable
         var policy = CachePolicy.Sliding(TimeSpan.FromMilliseconds(200));
         async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
 
-        await GetValue();
+        Assert.Equal(1, await GetValue());
 
         // Access before expiration to keep it alive
-        await Task.Delay(100);
-        await GetValue();
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        Assert.Equal(1, await GetValue());
 
-        await Task.Delay(100);
-        await GetValue();
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        Assert.Equal(1, await GetValue());
+
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+        Assert.Equal(1, await GetValue());
 
         // Should still be the first call's result
         Assert.Equal(1, callCount);
     }
 
-    [Fact]
-    public async Task GetAsync_SlidingExpiration_EvictsAfterIdle()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetAsync_SlidingExpiration_EvictsAfterIdle(bool absoluteCeiling)
     {
-        var memo = CreateMemoWithOptions(
-            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var clock = new CacheClock();
+        var memo = CreateMemoWithOptions(new MemoryCacheOptions { Clock = clock });
         var callCount = 0;
 
         Task<int> Factory()
@@ -1062,22 +1081,25 @@ public class MemoTests : IDisposable
             return Task.FromResult(callCount);
         }
 
-        var policy = CachePolicy.Sliding(TimeSpan.FromMilliseconds(50));
+        var policy = absoluteCeiling
+            ? CachePolicy.SlidingWithAbsolute(TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(200))
+            : CachePolicy.Sliding(TimeSpan.FromMilliseconds(50));
+        Task<int> GetValue() => memo.GetAsync(Factory, policy);
 
-        await memo.GetAsync(Factory, policy);
+        Assert.Equal(1, await GetValue());
 
-        // Wait for idle expiration
-        await Task.Delay(100);
+        clock.Advance(TimeSpan.FromMilliseconds(50));
 
-        var second = await memo.GetAsync(Factory, policy);
+        var second = await GetValue();
         Assert.Equal(2, second);
+        Assert.Equal(2, callCount);
     }
 
     [Fact]
     public async Task GetAsync_SlidingWithAbsolute_EnforcesCeiling()
     {
-        var memo = CreateMemoWithOptions(
-            new MemoryCacheOptions { ExpirationScanFrequency = TimeSpan.FromMilliseconds(10) });
+        var clock = new CacheClock();
+        var memo = CreateMemoWithOptions(new MemoryCacheOptions { Clock = clock });
         var callCount = 0;
 
         Task<int> Factory()
@@ -1094,18 +1116,21 @@ public class MemoTests : IDisposable
 
         async Task<int> GetValue() => await memo.GetAsync(Factory, policy);
 
-        await GetValue();
+        Assert.Equal(1, await GetValue());
 
         // Access within sliding window to keep alive
-        await Task.Delay(80);
-        var second = await GetValue();
-        Assert.Equal(1, second); // Still cached
+        clock.Advance(TimeSpan.FromMilliseconds(80));
+        Assert.Equal(1, await GetValue());
 
-        // Wait past the absolute ceiling
-        await Task.Delay(200);
+        clock.Advance(TimeSpan.FromMilliseconds(80));
+        Assert.Equal(1, await GetValue());
+
+        // The last access is only 40ms old: expiration must come from the 200ms absolute ceiling.
+        clock.Advance(TimeSpan.FromMilliseconds(40));
 
         var third = await GetValue();
         Assert.Equal(2, third); // Evicted by absolute ceiling
+        Assert.Equal(2, callCount);
     }
 
     [Fact]

@@ -6,7 +6,7 @@ using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
-public sealed class PackageArtifactValidationTests : IDisposable
+public sealed partial class PackageArtifactValidationTests : IDisposable
 {
     private const string PackageVersion = "0.0.0-ci.42";
     private const string RequiredPackageProjectUrl = "https://appsurface.dev";

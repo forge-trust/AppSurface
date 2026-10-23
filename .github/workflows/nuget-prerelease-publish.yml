@@ -130,6 +130,18 @@ jobs:
       expected_subject_sha256: ${{ needs.pack-and-verify.outputs.expected_subject_sha256 }}
       artifact_manifest_file: package-artifact-manifest.unapproved.json
 
+  durable-template-evidence:
+    needs: [validate-tag, validate-source-ci, pack-and-verify]
+    permissions:
+      actions: read
+      contents: read
+    uses: ./.github/workflows/durable-template-evidence.yml
+    with:
+      package_version: ${{ needs.validate-tag.outputs.package-version }}
+      source_commit: ${{ needs.validate-tag.outputs.tag-commit }}
+      producer_artifact_id: ${{ needs.pack-and-verify.outputs.producer_artifact_id }}
+      artifact_manifest_file: package-artifact-manifest.unapproved.json
+
   validate-source-ci:
     needs: validate-tag
     runs-on: ubuntu-latest
@@ -365,6 +377,7 @@ jobs:
       - validate-tag
       - validate-release-environment
       - native-host-evidence
+      - durable-template-evidence
       - pack-and-verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -470,6 +483,13 @@ jobs:
         with:
           artifact-ids: ${{ env.PRODUCER_ARTIFACT_ID }}
           path: ${{ runner.temp }}/package-artifacts
+
+      - name: Download exact Durable template OS receipts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.durable-template-evidence.outputs.receipt_artifact_ids }}
+          path: ${{ runner.temp }}/durable-template-evidence
+          merge-multiple: true
 
       - name: Download retained candidate preflight evidence
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -583,6 +603,14 @@ jobs:
             --publication-directory "$PUBLICATION_DIRECTORY" --publication-start-receipt "$START_RECEIPT_PATH" \
             --publication-start-artifact-id "$START_ARTIFACT_ID" --report-directory "$VALIDATION_REPORT_DIRECTORY"
 
+      - name: Validate Durable template evidence before requesting credentials
+        run: |
+          set -euo pipefail
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" verify-durable-template-evidence \
+            --repo-root "$GITHUB_WORKSPACE" --artifacts-input "$PACKAGE_ARTIFACTS" \
+            --artifact-manifest "$PACKAGE_ARTIFACTS/package-artifact-manifest.json" \
+            --durable-template-evidence "$RUNNER_TEMP/durable-template-evidence" --preflight-source-commit "$SOURCE_COMMIT"
+
       - name: Validate NuGet trusted publishing configuration
         env:
           NUGET_USER: ${{ vars.NUGET_USER }}
@@ -617,7 +645,7 @@ jobs:
             --repository-id "$REPOSITORY_ID" --producer-run-id "$PRODUCER_RUN_ID" --source-commit "$SOURCE_COMMIT")
           aggregate_args=(--aggregate-input "$AGGREGATE_DIRECTORY" --aggregate-artifact-id "$AGGREGATE_ARTIFACT_ID" \
             --expected-aggregate-sha256 "$EXPECTED_AGGREGATE_SHA256")
-          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" publish-prerelease \
+          dotnet "$RUNNER_TEMP/package-index/ForgeTrust.AppSurface.PackageIndex.dll" publish-prerelease --durable-template-evidence "$RUNNER_TEMP/durable-template-evidence" \
             "${bundle_args[@]}" "${aggregate_args[@]}" --publication-directory "$PUBLICATION_DIRECTORY" \
             --publication-start-receipt "$START_RECEIPT_PATH" --publication-start-artifact-id "$START_ARTIFACT_ID" \
             --publish-log "$PACKAGE_ARTIFACTS/package-publish-log.md" --report-directory "$PUBLISH_REPORT_DIRECTORY" \
