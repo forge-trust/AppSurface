@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -44,10 +45,13 @@ public sealed class CoverageArtifactSessionRecoveryEdgesTests
     }
 
     [Theory]
-    [InlineData("run")]
-    [InlineData("output")]
-    [InlineData("inventory")]
-    public async Task GateSidecarMetadataMismatchPreservesRegisteredProvenance(string fault)
+    [InlineData("run", false)]
+    [InlineData("output", false)]
+    [InlineData("inventory", false)]
+    [InlineData("run", true)]
+    [InlineData("output", true)]
+    [InlineData("inventory", true)]
+    public async Task GateSidecarMetadataMismatchPreservesRegisteredProvenance(string fault, bool failDiagnostics)
     {
         using var temp = TestDirectory.Create();
         using var configured = ConfigureStore(Path.Join(temp.Path, "store"));
@@ -69,14 +73,38 @@ public sealed class CoverageArtifactSessionRecoveryEdgesTests
         if (fault == "inventory") sidecar["inventory"]![0]!["length"] = 100;
         var corrupt = sidecar.ToJsonString();
         File.WriteAllText(sidecarPath, corrupt);
-        using var errors = new StringWriter();
+        // Admit the actual envelope bytes so this checks semantic disagreement after hash verification.
+        var sidecarBytes = File.ReadAllBytes(sidecarPath);
+        prior = prior with
+        {
+            Inventory = prior.Inventory.Select(entry => entry.Path == CoverageArtifactSession.SidecarName
+                ? entry with { Length = sidecarBytes.Length, Sha256 = Convert.ToHexString(SHA256.HashData(sidecarBytes)).ToLowerInvariant() }
+                : entry).ToArray()
+        };
+        using (var registration = CoverageArtifactStore.Open())
+            await registration.RegisterAsync(prior, CancellationToken.None);
+        using StringWriter errors = failDiagnostics ? new FailingDiagnosticWriter() : new StringWriter();
         using var outputLease = CoverageArtifactOperationLease.Acquire(output, exclusive: true);
         await CoverageArtifactSession.UpdateRegisteredInventoryAsync(output, [], errors, outputLease);
-        Assert.Contains("ASCOV201 gate-inventory", errors.ToString(), StringComparison.Ordinal);
+        if (errors is FailingDiagnosticWriter failedWriter)
+            Assert.Equal(1, failedWriter.Attempts);
+        else
+            Assert.Contains("ASCOV201 gate-inventory", errors.ToString(), StringComparison.Ordinal);
         Assert.Equal(corrupt, File.ReadAllText(sidecarPath));
         using var final = CoverageArtifactStore.Open();
         Assert.Equal(prior.ManifestBase.RunId, final.GetCurrentRun(output)!.ManifestBase.RunId);
         Assert.Equal(prior.Inventory.ToArray(), final.GetCurrentRun(output)!.Inventory.ToArray());
+    }
+
+    private sealed class FailingDiagnosticWriter : StringWriter
+    {
+        internal int Attempts { get; private set; }
+
+        public override Task WriteLineAsync(string? value)
+        {
+            Attempts++;
+            return Task.FromException(new IOException("Diagnostic output is unavailable."));
+        }
     }
 
     private static IDisposable ConfigureStore(string root)

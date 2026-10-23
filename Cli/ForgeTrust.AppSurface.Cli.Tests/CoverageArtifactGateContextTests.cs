@@ -416,6 +416,39 @@ public sealed class CoverageArtifactGateContextTests
     }
 
     [Fact]
+    public async Task RecordReportsAsync_CopiedOutputSidecarDoesNotAdoptItsUnregisteredDestination()
+    {
+        using var fixture = TestDirectory.Create();
+        using var storeHome = TestDirectory.Create();
+        using var configuredHome = ConfigureStore(storeHome.Path);
+        var repository = fixture.CreateDirectory("repo");
+        var original = fixture.CreateDirectory("repo/original");
+        await RegisterRunAsync(original, repository, Path.Join(original, "coverage.xml"), "coverage"u8.ToArray());
+        var copied = fixture.CreateDirectory("repo/copied");
+        var coverage = Path.Join(copied, "coverage.xml");
+        File.Copy(Path.Join(original, "coverage.xml"), coverage);
+        var sidecarPath = Path.Join(copied, CoverageArtifactSession.SidecarName);
+        File.Copy(Path.Join(original, CoverageArtifactSession.SidecarName), sidecarPath);
+        var sidecarBefore = await File.ReadAllBytesAsync(sidecarPath);
+        var registryPath = Path.Join(storeHome.Path, "private-store", "registry.json");
+        var registryBefore = await File.ReadAllBytesAsync(registryPath);
+        var request = new CoverageGateRequest(coverage, copied, 0, 0);
+        var result = await WriteGateReportsAsync(coverage, copied);
+        using var errors = new StringWriter();
+
+        using (var context = await CoverageArtifactGateContext.AcquireAsync(request, errors, CancellationToken.None))
+            await context.RecordReportsAsync(request, result, CancellationToken.None);
+
+        Assert.Empty(errors.ToString());
+        Assert.Equal(sidecarBefore, await File.ReadAllBytesAsync(sidecarPath));
+        Assert.Equal(registryBefore, await File.ReadAllBytesAsync(registryPath));
+        Assert.Equal("gate json", await File.ReadAllTextAsync(result.JsonReportPath));
+        using var store = CoverageArtifactStore.Open();
+        Assert.Null(store.GetCurrentRun(copied));
+        Assert.NotNull(store.GetCurrentRun(original));
+    }
+
+    [Fact]
     public async Task AcquireAsync_WhenSecondLeaseIsBusy_ReleasesEarlierLease()
     {
         using var fixture = TestDirectory.Create();

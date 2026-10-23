@@ -65,6 +65,29 @@ public sealed class CoverageStorageCommandTestsBoundary
     }
 
     [Fact]
+    public async Task Maintain_apply_with_no_history_reports_no_deletion_effects()
+    {
+        using var domain = TestDirectory.Create();
+        using var configured = ConfigureDomain(domain.Path);
+        using (var store = CoverageArtifactStore.Open())
+            Assert.Equal(0, store.GetStatus().ArchivedRuns);
+        using var console = new FakeInMemoryConsole();
+
+        await new CoverageStorageMaintainCommand { Apply = true, Json = true }.ExecuteAsync(console, CancellationToken.None);
+
+        using var document = JsonDocument.Parse(console.ReadOutputString());
+        var result = document.RootElement;
+        Assert.Equal("complete", result.GetProperty("status").GetString());
+        Assert.Equal("none", result.GetProperty("sideEffects").GetString());
+        Assert.True(result.GetProperty("data").GetProperty("apply").GetBoolean());
+        Assert.Empty(result.GetProperty("data").GetProperty("deletedRunIds").EnumerateArray());
+        Assert.Empty(result.GetProperty("data").GetProperty("candidateRunIds").EnumerateArray());
+        using var current = CoverageArtifactStore.OpenReadOnly();
+        Assert.Equal(0, current.GetStatus().ArchivedRuns);
+        Assert.Equal(0, current.GetStatus().CurrentRuns);
+    }
+
+    [Fact]
     public async Task Pin_and_unpin_commands_report_state_and_persist_the_round_trip()
     {
         using var domain = TestDirectory.Create();
