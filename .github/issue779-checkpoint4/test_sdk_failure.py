@@ -225,7 +225,7 @@ class FailureDiagnosticDataTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(RuntimeError): subject.require_worker(candidate, expected, images)
         shared = 'ForgeTrust.AppSurface.Evidence.Cli.dll'
         self.assertEqual(7, len(worker['modules']))
-        for mutation in ('missing', 'duplicate', 'alias', 'image', 'host', 'cached', 'absent', 'prior'):
+        for mutation in ('missing', 'duplicate', 'alias', 'image', 'host', 'cached'):
             candidate = json.loads(json.dumps(worker))
             row = next(item for item in candidate['modules'] if item['module'] == shared)
             if mutation == 'missing':
@@ -236,10 +236,32 @@ class FailureDiagnosticDataTests(unittest.TestCase):
                 row['module'] = shared[:-4]
             elif mutation in ('image', 'host', 'cached'):
                 row[{'image': 'module_sha256', 'host': 'host_sha256', 'cached': 'cached_sha256'}[mutation]] = 'd' * 64
-            else:
-                row['outcome'] = 'worker-file-absent' if mutation == 'absent' else 'prior-root-file-unchanged'
             with self.subTest(shared_cli=mutation), self.assertRaises(RuntimeError):
                 subject.require_worker(candidate, expected, images)
+        # The SDK entry runs Aspire directly; retaining an instrumented image is not proof it was loaded.
+        for outcome in ('worker-file-absent', 'prior-root-file-unchanged'):
+            candidate = json.loads(json.dumps(worker))
+            row = next(item for item in candidate['modules'] if item['module'] == shared)
+            row['outcome'] = outcome
+            for key in ('worker_sha256', 'cached_sha256', 'host_sha256'):
+                row.pop(key)
+            with self.subTest(unused_shared_cli=outcome):
+                subject.require_worker(candidate, expected, images)
+            row['module_sha256'] = 'd' * 64
+            with self.subTest(unused_image=outcome), self.assertRaisesRegex(RuntimeError, 'worker-image'):
+                subject.require_worker(candidate, expected, images)
+        # Every genuinely used SDK module still needs a complete and equal worker/cache/host handoff.
+        for module in ('Cli', 'Evidence.Contracts', 'Evidence.Coverage', 'Evidence.Aspire'):
+            for mutation in ('absent', 'cached', 'host'):
+                candidate = json.loads(json.dumps(worker))
+                row = next(item for item in candidate['modules']
+                           if item['module'] == 'ForgeTrust.AppSurface.' + module + '.dll')
+                if mutation == 'absent':
+                    row['outcome'] = 'worker-file-absent'
+                else:
+                    row[mutation + '_sha256'] = 'd' * 64
+                with self.subTest(required_sdk_module=module, mutation=mutation), self.assertRaises(RuntimeError):
+                    subject.require_worker(candidate, expected, images)
 
     def test_separate_report_requires_current_source_bound_failure_arm_before_it_can_be_merged(self):
         with tempfile.TemporaryDirectory() as temp:

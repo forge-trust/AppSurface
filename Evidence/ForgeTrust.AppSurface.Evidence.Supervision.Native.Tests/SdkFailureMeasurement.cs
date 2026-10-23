@@ -151,9 +151,9 @@ internal static class SdkFailureMeasurement
         var rows = worker.GetProperty("modules").EnumerateArray().ToArray();
         Assert.Equal(Modules.Select(static name => name + ".dll").Order(StringComparer.Ordinal),
             rows.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
+        // The SDK worker calls the Aspire host directly; Evidence.Cli remains in the closed image inventory.
         var required = new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll",
-            "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll",
-            "ForgeTrust.AppSurface.Evidence.Cli.dll" }.ToHashSet(StringComparer.Ordinal);
+            "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" }.ToHashSet(StringComparer.Ordinal);
         foreach (var row in rows)
         {
             var name = row.GetProperty("module").GetString()!;
@@ -171,13 +171,6 @@ internal static class SdkFailureMeasurement
         using var report = JsonDocument.Parse(coverage);
         Assert.Equal(Modules.Select(static name => name + ".dll").Order(StringComparer.Ordinal),
             report.RootElement.EnumerateObject().Select(static row => Path.GetFileName(row.Name)).Order(StringComparer.Ordinal));
-        var cliModule = Assert.Single(report.RootElement.EnumerateObject(), static module =>
-            Path.GetFileName(module.Name) == "ForgeTrust.AppSurface.Evidence.Cli.dll");
-        Assert.Contains(cliModule.Value.EnumerateObject(), static document =>
-            Path.GetFileName(document.Name) == "EvidenceProtectedCliExecution.cs"
-            && document.Value.EnumerateObject().SelectMany(static type => type.Value.EnumerateObject())
-                .SelectMany(static method => method.Value.GetProperty("Lines").EnumerateObject())
-                .Any(static line => line.Value.GetInt32() > 0));
         // Locate the current failure-only statement from source, not a mutable report label or a guessed line offset.
         var lines = producerSource.Split('\n');
         var marker = Assert.Single(lines.Select((text, index) => (text, index)), static line =>

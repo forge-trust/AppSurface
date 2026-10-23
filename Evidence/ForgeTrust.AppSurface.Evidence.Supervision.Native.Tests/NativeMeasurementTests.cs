@@ -159,13 +159,20 @@ public sealed class NativeMeasurementTests
         Assert.False(sdkWorker.GetProperty("native_acceptance").GetBoolean());
         var sdkModules = sdkWorker.GetProperty("modules").EnumerateArray().ToArray();
         Assert.Equal(Modules.Order(StringComparer.Ordinal), sdkModules.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
-        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll", "ForgeTrust.AppSurface.Evidence.Cli.dll" })
+        var sdkRequired = new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll",
+            "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" }.ToHashSet(StringComparer.Ordinal);
+        foreach (var row in sdkModules)
         {
-            var row = Assert.Single(sdkModules, value => value.GetProperty("module").GetString() == name);
-            Assert.Equal("unchanged-worker-handoff", row.GetProperty("outcome").GetString());
+            var name = row.GetProperty("module").GetString()!;
             Assert.Equal(binding.GetProperty("sdk_instrumented").GetProperty(name).GetString(), row.GetProperty("module_sha256").GetString());
-            Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
-            Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
+            var outcome = row.GetProperty("outcome").GetString();
+            if (sdkRequired.Contains(name) || outcome == "unchanged-worker-handoff")
+            {
+                Assert.Equal("unchanged-worker-handoff", outcome);
+                Assert.Matches("^[0-9a-f]{64}$", row.GetProperty("worker_sha256").GetString()!);
+                Assert.Equal(row.GetProperty("worker_sha256").GetString(), row.GetProperty("host_sha256").GetString());
+            }
+            else Assert.Contains(outcome, new[] { "worker-file-absent", "prior-root-file-unchanged" });
         }
         using var sdkReport = JsonDocument.Parse(sdkCoverage);
         Assert.Equal(Modules.Order(StringComparer.Ordinal), sdkReport.RootElement.EnumerateObject()
@@ -173,7 +180,6 @@ public sealed class NativeMeasurementTests
         foreach (var name in new[] { "EvidenceHostBootstrap.cs", "EvidenceRestrictedAspireApplication.cs" })
             Assert.Contains(sdkReport.RootElement.EnumerateObject().SelectMany(static module => module.Value.EnumerateObject()),
                 document => Path.GetFileName(document.Name) == name && HasHits(document.Value));
-        RequireProtectedCliHits(sdkReport.RootElement);
         using var report = JsonDocument.Parse(coverage);
         RequireProtectedCliHits(report.RootElement);
         var modules = report.RootElement.EnumerateObject().ToArray();

@@ -556,7 +556,7 @@ def require_worker(worker, expected, instrumented):
     require(type(worker['start_time']) is int and worker['start_time'] > 0 and worker['cgroup'] == expected['cgroup'], 'worker-identity')
     rows = worker['modules']
     require(len(rows) == len(MODULES) and {row['module'] for row in rows} == {name + '.dll' for name in MODULES}, 'worker-modules')
-    required = {'ForgeTrust.AppSurface.' + name + '.dll' for name in ('Cli', 'Evidence.Contracts', 'Evidence.Coverage', 'Evidence.Aspire', 'Evidence.Cli')}
+    required = {'ForgeTrust.AppSurface.' + name + '.dll' for name in ('Cli', 'Evidence.Contracts', 'Evidence.Coverage', 'Evidence.Aspire')}
     for row in rows:
         require(row['module_sha256'] == instrumented[row['module']], 'worker-image')
         if row['module'] in required or row['outcome'] == 'unchanged-worker-handoff':

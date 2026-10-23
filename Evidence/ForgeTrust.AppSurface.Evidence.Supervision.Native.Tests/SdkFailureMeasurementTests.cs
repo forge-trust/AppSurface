@@ -19,9 +19,15 @@ public sealed class SdkFailureMeasurementTests
     }
 
     [Theory]
-    [InlineData("worker-file-absent")]
-    [InlineData("prior-root-file-unchanged")]
-    public void OptionalUnusedRowsCannotStandInForRequiredWorkerHandoffs(string outcome)
+    [InlineData("worker-file-absent", "ForgeTrust.AppSurface.Cli.dll")]
+    [InlineData("prior-root-file-unchanged", "ForgeTrust.AppSurface.Cli.dll")]
+    [InlineData("worker-file-absent", "ForgeTrust.AppSurface.Evidence.Contracts.dll")]
+    [InlineData("prior-root-file-unchanged", "ForgeTrust.AppSurface.Evidence.Contracts.dll")]
+    [InlineData("worker-file-absent", "ForgeTrust.AppSurface.Evidence.Coverage.dll")]
+    [InlineData("prior-root-file-unchanged", "ForgeTrust.AppSurface.Evidence.Coverage.dll")]
+    [InlineData("worker-file-absent", "ForgeTrust.AppSurface.Evidence.Aspire.dll")]
+    [InlineData("prior-root-file-unchanged", "ForgeTrust.AppSurface.Evidence.Aspire.dll")]
+    public void OptionalUnusedRowsCannotStandInForRequiredWorkerHandoffs(string outcome, string requiredModule)
     {
         var fixture = new Fixture();
         foreach (var index in new[] { 2, 5 })
@@ -31,7 +37,26 @@ public sealed class SdkFailureMeasurementTests
             row.Remove("worker_sha256"); row.Remove("cached_sha256"); row.Remove("host_sha256");
         }
         fixture.Validate();
-        fixture.Root["worker_measurements"]![0]!["modules"]![0]!["outcome"] = outcome;
+        var required = fixture.Root["worker_measurements"]![0]!["modules"]!.AsArray()
+            .Single(value => value!["module"]!.GetValue<string>() == requiredModule)!.AsObject();
+        required["outcome"] = outcome;
+        foreach (var key in new[] { "worker_sha256", "cached_sha256", "host_sha256" }) required.Remove(key);
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
+    /// <summary>Each original required SDK handoff remains bound to its actual instrumented image.</summary>
+    [Theory]
+    [InlineData("ForgeTrust.AppSurface.Cli.dll")]
+    [InlineData("ForgeTrust.AppSurface.Evidence.Contracts.dll")]
+    [InlineData("ForgeTrust.AppSurface.Evidence.Coverage.dll")]
+    [InlineData("ForgeTrust.AppSurface.Evidence.Aspire.dll")]
+    public void OriginalSdkHandoffsCannotClaimAnotherImage(string module)
+    {
+        var fixture = new Fixture();
+        fixture.Validate();
+        var row = fixture.Root["worker_measurements"]![0]!["modules"]!.AsArray()
+            .Single(value => value!["module"]!.GetValue<string>() == module)!.AsObject();
+        row["module_sha256"] = new string('d', 64);
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
     }
 
@@ -122,12 +147,10 @@ public sealed class SdkFailureMeasurementTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
     }
 
-    /// <summary>The seventh module is mandatory even after every outer receipt and report digest is rebound.</summary>
+    /// <summary>The seventh inventory row and any reported handoff remain bound after outer digests are rebound.</summary>
     [Theory]
     [InlineData("missing-worker")]
     [InlineData("duplicate-worker")]
-    [InlineData("absent-worker")]
-    [InlineData("prior-worker")]
     [InlineData("worker-image")]
     [InlineData("worker-cache")]
     [InlineData("worker-bytes")]
@@ -140,8 +163,6 @@ public sealed class SdkFailureMeasurementTests
     [InlineData("unchanged-dll")]
     [InlineData("missing-report")]
     [InlineData("duplicate-report")]
-    [InlineData("missing-document")]
-    [InlineData("zero-document")]
     public void SeventhModuleCannotBeOmittedOrProjectedFromTheFailedSdkPacket(string mutation)
     {
         const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
@@ -153,11 +174,6 @@ public sealed class SdkFailureMeasurementTests
         {
             case "missing-worker": modules.Remove(row); break;
             case "duplicate-worker": row["module"] = "ForgeTrust.AppSurface.Cli.dll"; break;
-            case "absent-worker":
-            case "prior-worker":
-                row["outcome"] = mutation == "absent-worker" ? "worker-file-absent" : "prior-root-file-unchanged";
-                foreach (var key in new[] { "worker_sha256", "cached_sha256", "host_sha256" }) row.Remove(key);
-                break;
             case "worker-image": row["module_sha256"] = new string('d', 64); break;
             case "worker-cache": row["cached_sha256"] = new string('d', 64); break;
             case "worker-bytes": row["worker_sha256"] = new string('d', 64); break;
@@ -173,11 +189,34 @@ public sealed class SdkFailureMeasurementTests
                 fixture.Report.Remove(module);
                 fixture.Report["/duplicate/ForgeTrust.AppSurface.Cli.dll"] = new JsonObject();
                 break;
-            case "missing-document": fixture.Report[module]!.AsObject().Clear(); break;
-            case "zero-document": fixture.Report[module]!["EvidenceProtectedCliExecution.cs"]!["DetachedProtectedCli"]!["RunAsync"]!["Lines"]!["1"] = 0; break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
+    /// <summary>The SDK host need not execute protected CLI code; its seven-module inventory remains complete.</summary>
+    [Theory]
+    [InlineData("worker-file-absent", "missing-document")]
+    [InlineData("worker-file-absent", "zero-document")]
+    [InlineData("prior-root-file-unchanged", "missing-document")]
+    [InlineData("prior-root-file-unchanged", "zero-document")]
+    [InlineData("unchanged-worker-handoff", "missing-document")]
+    [InlineData("unchanged-worker-handoff", "zero-document")]
+    public void SdkEvidenceCliMayBeUnusedWithoutProjectingTheImage(string outcome, string document)
+    {
+        const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
+        var fixture = new Fixture();
+        fixture.Validate();
+        var row = fixture.Root["worker_measurements"]![0]!["modules"]!.AsArray()
+            .Single(static value => value!["module"]!.GetValue<string>() == module)!.AsObject();
+        row["outcome"] = outcome;
+        if (outcome != "unchanged-worker-handoff")
+            foreach (var key in new[] { "worker_sha256", "cached_sha256", "host_sha256" }) row.Remove(key);
+        if (document == "missing-document") fixture.Report[module]!.AsObject().Clear();
+        else fixture.Report[module]!["EvidenceProtectedCliExecution.cs"]!["DetachedProtectedCli"]!["RunAsync"]!["Lines"]!["1"] = 0;
+        fixture.Validate();
+        Assert.Equal(1, fixture.Root["root_exit"]!.GetValue<int>());
+        Assert.False(fixture.Root["native_acceptance"]!.GetValue<bool>());
     }
 
     private sealed class Fixture

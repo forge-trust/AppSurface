@@ -116,7 +116,7 @@ The named support-assembly ProcessExit handler owns every operation below:
 The root side must accept only a complete stable worker-owned `0600`, regular,
 single-link READY with the exact nonce, while its original retained pidfd is live
 and all four UID/GID samples still match. It caches the required original tracker
-files using exact module/GUID/header/count/length/ownership checks. It then writes
+files using exact module/GUID/header/count/length/ownership checks. The required SDK set is CLI, Contracts, Coverage and Aspire, matching the [direct SDK host entry](../../../Cli/ForgeTrust.AppSurface.Cli/EvidenceWorkerCommand.cs). All seven instrumented image plans remain bound; an unused Evidence.Cli tracker can remain absent without fabricating a file or execution credit. If it has emitted a handoff, its bytes retain every existing equality check. It then writes
 `ack.pending` exclusively, flushes, seals it root/root `0444`, and atomically renames
 it to `ack` with no replacement. Partial publication is not a valid acknowledgement.
 After ACK publication, root must observe its original retained pidfd still live under

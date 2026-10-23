@@ -6,7 +6,7 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 ## Test surface and selection
 
-`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all seven instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts, Coverage and Evidence.Cli worker hit-file handoffs. The SDK control additionally binds those handoffs and Aspire against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits.
+`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all seven instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts, Coverage and Evidence.Cli worker hit-file handoffs. The SDK control requires CLI, Contracts, Coverage and Aspire handoffs against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits. Evidence.Cli remains in the SDK image and report inventories, with its actual handoff or allowed unused outcome checked as described below.
 
 `LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all application, account and producer inputs below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
@@ -25,15 +25,39 @@ an omitted seventh module or a second spelling of another basename cannot replac
 These checks follow the [private measurement contract](../../.github/issue779-checkpoint4/measurement/README.md)
 and [producer-root lineage reference](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md).
 
-The normal CLI and normal SDK witnesses both require an unchanged Evidence.Cli
-worker/host handoff against their own instrumented image hashes. The separate
-failed-SDK witness also requires Evidence.Cli's identical cached, worker and host
-hashes under the existing pre-exit v3 protocol. Its original status remains one;
-a passing data comparison cannot turn that failed execution into a successful one.
-The normal and failed SDK reports, and the normal CLI report, must contain positive
-line hits in the real shared [protected CLI execution document](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs)
-inside the Evidence.Cli module. This uses the actual document name and does not
-assume a generated state-machine ordinal.
+The [worker entry's compiled branches](../../Cli/ForgeTrust.AppSurface.Cli/EvidenceWorkerCommand.cs)
+select different consumers. The normal CLI calls the shared
+[protected CLI execution path](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs).
+The private SDK branch calls the [Aspire host](../ForgeTrust.AppSurface.Evidence.Aspire/README.md)
+directly and need not load or execute Evidence.Cli. Image inclusion alone does not
+establish execution, and a passive filesystem-event count of zero does not prove absence.
+
+| Check | Normal CLI | Normal SDK | Failed SDK |
+| --- | --- | --- | --- |
+| Seven module names and fourteen DLL/PDB image leaves | Required | Required | Required |
+| Seven standard report module basenames | Required | Required | Required |
+| Evidence.Cli row's instrumented image hash | Required | Required | Required |
+| Evidence.Cli worker/host hit-file handoff | Required | Required only when reported | Required only when reported, also equal to cached bytes |
+| Positive `EvidenceProtectedCliExecution.cs` document hits | Required | Not required | Not required |
+| Original CLI, Contracts, Coverage and Aspire SDK handoffs | Existing CLI requirements apply | Required | Required |
+
+SDK Evidence.Cli rows may retain the existing `worker-file-absent` or
+`prior-root-file-unchanged` outcomes. Those outcomes provide no worker-execution
+credit and do not remove the module from any image or report map. A reported
+`unchanged-worker-handoff` must still match its instrumented image and worker/host
+hashes; the failed-SDK v3 protocol additionally requires identical cached bytes.
+The SDK host-bootstrap and restricted-application witnesses remain required.
+The failed SDK also retains its exact source-bound failed-producer statement,
+original status one, barrier/identity checks, and settlement requirements. A passing
+data comparison cannot turn that failed execution into a successful one.
+
+The [detached failed-SDK controls](SdkFailureMeasurementTests.cs) independently
+reject unused outcomes and image mismatches for each of the four original required
+SDK modules. They accept unused Evidence.Cli rows and missing or zero protected-CLI
+document hits while retaining all seven image/report names. The seventh-module
+negative cases still reject missing or duplicate rows, missing DLL/PDB leaves,
+incorrect image or handoff hashes, and projected reports. Every mutation rebinds
+outer serialization digests; these are data comparisons, not native execution.
 
 Six-module packets remain historical evidence for their original source. They fail
 this seven-module source contract even if their enclosing report and predecessor
@@ -101,7 +125,7 @@ artifact and measurement checks remain mandatory.
 
 ## Instrumentation and native controls
 
-In the application workflow, Coverlet Console 10.0.1 instruments exactly the private CLI, Contracts, Planner, Coverage, Aspire and Supervision modules before the wrapper starts the original native runner. Every original/instrumented DLL and PDB hash is bound. The [private C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) retains the actual worker's private temporary directory before descriptor publication, then copies its genuine first-normal-worker hit bytes unchanged after original normal exit. The root tracker and standard collector perform all counter accumulation and interpretation. This fixture is absent from ordinary images; no production environment, grant, deadline or supervision policy changes.
+In the application workflow, Coverlet Console 10.0.1 instruments exactly the private CLI, Contracts, Planner, Coverage, Aspire, Supervision and Evidence.Cli modules before the wrapper starts the original native runner. Every original/instrumented DLL and PDB hash is bound. The [private C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) retains the actual worker's private temporary directory before descriptor publication, then copies its genuine first-normal-worker hit bytes unchanged after original normal exit. The root tracker and standard collector perform all counter accumulation and interpretation. This fixture is absent from ordinary images; no production environment, grant, deadline or supervision policy changes.
 
 The runner requires root on Linux x86-64 with systemd 255 and executes seven independently bounded cases through the real C# root supervisor:
 
