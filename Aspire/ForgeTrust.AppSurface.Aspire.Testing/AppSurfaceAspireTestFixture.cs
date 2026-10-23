@@ -168,8 +168,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
                 {
                     ownedProbeClient.Dispose();
                 }
-                catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+                catch (Exception cleanupException)
                 {
+                    ReadinessCleanup.ThrowIfFatal(cleanupException, AspireExceptionUtilities.IsProcessFatal);
                     RecordSafeSecondaryCleanup(primaryException);
                 }
             }
@@ -180,8 +181,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
                 {
                     await operations.CleanupAsync(builder).ConfigureAwait(false);
                 }
-                catch (Exception cleanupException) when (!AspireExceptionUtilities.IsProcessFatal(cleanupException))
+                catch (Exception cleanupException)
                 {
+                    ReadinessCleanup.ThrowIfFatal(cleanupException, AspireExceptionUtilities.IsProcessFatal);
                     RecordSafeSecondaryCleanup(primaryException);
                 }
             }
@@ -276,8 +278,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
         {
             client.Dispose();
         }
-        catch (Exception exception) when (!AspireExceptionUtilities.IsProcessFatal(exception))
+        catch (Exception exception)
         {
+            ReadinessCleanup.ThrowIfFatal(exception, AspireExceptionUtilities.IsProcessFatal);
             clientCleanupException = exception;
         }
 
@@ -339,8 +342,9 @@ public sealed class AppSurfaceAspireTestFixture : IAsyncDisposable
         {
             primaryException.Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure;
         }
-        catch (Exception exception) when (!AspireExceptionUtilities.IsProcessFatal(exception))
+        catch (Exception exception)
         {
+            ReadinessCleanup.ThrowIfFatal(exception, AspireExceptionUtilities.IsProcessFatal);
             // Nonfatal diagnostic-storage failures cannot replace the primary error.
         }
     }

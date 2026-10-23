@@ -102,7 +102,9 @@ For `Deadline` and `AttemptLimit`, `LastCause`, `LastStatusCode`, and `LastHttpR
 
 Generated readiness messages and fields must not include endpoint or path values, query strings, headers, credentials, response bodies, raw transport messages, raw transport inner exceptions, or arbitrary exception data. The API does not automatically log caller exceptions and does not promise that caller-owned exception text is redacted. Do not copy an arbitrary original exception into a safe readiness field.
 
-`ReadinessException.Data` is normally empty. If typed-fixture startup fails and client or builder cleanup also fails, or an Evidence.Aspire readiness wait fails and its owned client cleanup also fails, the original exception remains primary and receives only `Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure`; the raw secondary exception is not retained. Redaction checks should allow this fixed enum entry on that dual-failure path.
+`ReadinessException.Data` is normally empty. If typed-fixture startup fails and client or builder cleanup also fails nonfatally, or an Evidence.Aspire readiness wait fails and its owned client cleanup also fails nonfatally, the original exception remains primary and receives only `Data["AppSurface.Readiness.CleanupFailure"] = ReadinessFailureCategory.CleanupFailure`; the raw secondary exception is not retained. Redaction checks should allow this fixed enum entry on that dual-failure path.
+
+The [typed fixture](https://github.com/forge-trust/AppSurface/blob/main/Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) and [Evidence adapter](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#http-readiness-adapter) preserve their existing fatal-type policies when classifying cleanup or diagnostic-storage failures. If a nested `AggregateException` contains a fatal leaf, that original fatal exception propagates before safe secondary metadata is recorded. An aggregate containing only nonfatal failures remains eligible for the safe cleanup contract.
 
 ## Troubleshooting
 

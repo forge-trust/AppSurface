@@ -324,6 +324,7 @@ public sealed class HttpReadinessProbeTests
             }));
 
         Assert.True(entered.Task.IsCompletedSuccessfully);
+        // gstack-timing-ok: exercises the real HttpClient timer; retain the 3s bound below the 5s overall budget.
         Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"The shorter client timeout took {stopwatch.Elapsed}.");
         Assert.Equal(ReadinessFailureCategory.RequestTimeout, exception.LastCause);
         Assert.Equal(1, exception.Attempts);

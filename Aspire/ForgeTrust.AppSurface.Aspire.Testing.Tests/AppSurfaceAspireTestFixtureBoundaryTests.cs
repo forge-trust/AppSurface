@@ -7,28 +7,37 @@ using Microsoft.Extensions.Time.Testing;
 
 public sealed partial class AppSurfaceAspireTestFixtureTests
 {
-    // Value: fatal cleanup and diagnostic-storage failures must propagate unchanged, including after an earlier ordinary failure.
-    // Seam: synthetic exception instances from controlled client/builder disposal and Exception.Data; no actual resource exhaustion.
+    // Value: protects=fatal client, builder and diagnostic-storage identity through nested cleanup aggregates;
+    // fails_when=an outer aggregate is downgraded after an ordinary failure; why_new=direct fatal cases miss wrapped failures;
+    // seam=existing FixtureOperations used by StartAsync; no_claim=synthetic exceptions do not simulate resource exhaustion.
     [Theory]
-    [InlineData("client-success")]
-    [InlineData("client-primary")]
-    [InlineData("client-before-probe")]
-    [InlineData("builder-primary")]
-    [InlineData("metadata")]
-    public async Task FatalCleanupFailures_PropagateWithoutWrappingOrSuppression(string phase)
+    [InlineData("client-success", false)]
+    [InlineData("client-primary", false)]
+    [InlineData("client-before-probe", false)]
+    [InlineData("builder-primary", false)]
+    [InlineData("metadata", false)]
+    [InlineData("client-success", true)]
+    [InlineData("client-primary", true)]
+    [InlineData("client-before-probe", true)]
+    [InlineData("builder-primary", true)]
+    [InlineData("metadata", true)]
+    public async Task FatalCleanupFailures_PropagateWithoutWrappingOrSuppression(string phase, bool aggregate)
     {
         foreach (var fatal in new Exception[] { new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException() })
         {
+            var cleanupFailure = aggregate
+                ? new AggregateException(new InvalidOperationException("ordinary nested cleanup"), new AggregateException(fatal))
+                : fatal;
             await using var application = CreateApplication();
             await using var builder = CreateBuilder();
             using var caller = new CancellationTokenSource();
-            var primary = phase == "metadata" ? new FatalFixtureDataException(fatal) : new Exception("ordinary startup failure");
+            var primary = phase == "metadata" ? new FatalFixtureDataException(cleanupFailure) : new Exception("ordinary startup failure");
             var clientDisposals = 0;
             var builderCleanups = 0;
             using var client = new HttpClient(new StubHandler(_ => new(HttpStatusCode.OK), () =>
             {
                 clientDisposals++;
-                if (phase.StartsWith("client", StringComparison.Ordinal)) throw fatal;
+                if (phase.StartsWith("client", StringComparison.Ordinal)) throw cleanupFailure;
                 if (phase == "metadata") throw new InvalidOperationException("ordinary cleanup failure");
             }));
             var operations = CreateOperations(application, [], []) with
@@ -37,7 +46,7 @@ public sealed partial class AppSurfaceAspireTestFixtureTests
                 CleanupAsync = _ =>
                 {
                     builderCleanups++;
-                    if (phase == "builder-primary") throw fatal;
+                    if (phase == "builder-primary") throw cleanupFailure;
                     return ValueTask.CompletedTask;
                 },
             };

@@ -11,22 +11,28 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceAspireHttpReadinessTests
 {
-    // Value: process-fatal cleanup keeps its identity after success or an ordinary primary failure, while draining ownership.
-    // Seam: synthetic exceptions from handler disposal; no actual resource exhaustion or corrupted process state.
+    // Value: protects=original fatal cleanup identity through nested aggregates after success or primary failure;
+    // fails_when=only the outer cleanup type is classified; why_new=direct fatal cases cannot detect aggregate suppression;
+    // seam=none; no_claim=synthetic exceptions do not simulate actual resource exhaustion or corrupted process state.
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task FatalClientCleanupFailures_PropagateWithoutWrappingOrSuppression(bool primaryFails)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task FatalClientCleanupFailures_PropagateWithoutWrappingOrSuppression(bool primaryFails, bool aggregate)
     {
         foreach (var fatal in new Exception[] { new OutOfMemoryException(), new StackOverflowException(), new AccessViolationException(), new AppDomainUnloadedException() })
         {
+            var cleanupFailure = aggregate
+                ? new AggregateException(new InvalidOperationException("ordinary nested cleanup"), new AggregateException(fatal))
+                : fatal;
             var primary = new InvalidOperationException("ordinary operation failure");
             var clientDisposals = 0;
             var leaseDisposals = 0;
             var adapter = Create(
                 client: _ => primaryFails
-                    ? Client((_, _) => Task.FromException<HttpResponseMessage>(primary), () => { clientDisposals++; throw fatal; })
-                    : Client(dispose: () => { clientDisposals++; throw fatal; }),
+                    ? Client((_, _) => Task.FromException<HttpResponseMessage>(primary), () => { clientDisposals++; throw cleanupFailure; })
+                    : Client(dispose: () => { clientDisposals++; throw cleanupFailure; }),
                 cleanup: () => { leaseDisposals++; return ValueTask.CompletedTask; });
 
             var error = await Record.ExceptionAsync(() => adapter.WaitUntilReadyAsync(default));
@@ -38,12 +44,16 @@ public sealed class EvidenceAspireHttpReadinessTests
         }
     }
 
-    // Value: a fatal failure reading caller diagnostic storage must not be hidden as ordinary secondary metadata failure.
-    [Fact]
-    public async Task FatalCleanupMetadataFailure_PropagatesUnchanged()
+    // Value: protects=fatal diagnostic-storage identity even inside nested aggregates;
+    // fails_when=secondary metadata handling swallows a fatal leaf; why_new=direct fatal metadata coverage misses aggregates;
+    // seam=none; no_claim=uses synthetic exception storage rather than actual process exhaustion.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FatalCleanupMetadataFailure_PropagatesUnchanged(bool aggregate)
     {
         var fatal = new OutOfMemoryException();
-        var primary = new FatalAdapterDataException(fatal);
+        var primary = new FatalAdapterDataException(aggregate ? new AggregateException(new AggregateException(fatal)) : fatal);
         var adapter = Create(client: _ => Client(
             (_, _) => Task.FromException<HttpResponseMessage>(primary),
             () => throw new InvalidOperationException("ordinary client cleanup failure")));

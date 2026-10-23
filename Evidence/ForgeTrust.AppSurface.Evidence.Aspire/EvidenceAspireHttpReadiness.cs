@@ -267,9 +267,9 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
 
         if (clientCleanupFailure is not null)
         {
-            if (!EvidenceHostBootstrap.IsNonFatalException(clientCleanupFailure))
+            if (FindFatalCleanupFailure(clientCleanupFailure) is { } fatalFailure)
             {
-                ExceptionDispatchInfo.Capture(clientCleanupFailure).Throw();
+                ExceptionDispatchInfo.Capture(fatalFailure).Throw();
             }
 
             if (operationFailure is null)
@@ -339,20 +339,11 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
         }
     }
 
-    /// <summary>Preserves a fatal cleanup failure even when cancellation callbacks wrapped it in aggregates.</summary>
-    /// <param name="exception">One cleanup failure, including nested cancellation callback aggregates.</param>
+    /// <summary>Preserves a fatal cleanup or diagnostic-storage leaf using the adapter's existing type policy.</summary>
+    /// <param name="exception">One failure, including nested client, callback, or registration cleanup aggregates.</param>
     /// <returns>The first original fatal failure, or null when all failures are nonfatal.</returns>
-    private static Exception? FindFatalCleanupFailure(Exception exception)
-    {
-        if (!EvidenceHostBootstrap.IsNonFatalException(exception))
-        {
-            return exception;
-        }
-
-        return exception is AggregateException aggregate
-            ? aggregate.InnerExceptions.Select(FindFatalCleanupFailure).FirstOrDefault(static failure => failure is not null)
-            : null;
-    }
+    private static Exception? FindFatalCleanupFailure(Exception exception) =>
+        ReadinessCleanup.FindFatal(exception, static failure => !EvidenceHostBootstrap.IsNonFatalException(failure));
 
     private void FinishWait()
     {
@@ -375,8 +366,13 @@ internal sealed class EvidenceAspireHttpReadiness : IEvidenceResourceReadiness, 
         {
             primaryFailure.Data[CleanupFailureDataKey] = ReadinessFailureCategory.CleanupFailure;
         }
-        catch (Exception exception) when (EvidenceHostBootstrap.IsNonFatalException(exception))
+        catch (Exception exception)
         {
+            if (FindFatalCleanupFailure(exception) is { } fatalFailure)
+            {
+                ExceptionDispatchInfo.Capture(fatalFailure).Throw();
+            }
+
             // Nonfatal diagnostic-storage failures cannot replace the primary error.
         }
     }
