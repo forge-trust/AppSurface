@@ -65,12 +65,17 @@ Its own receipt must identify the private C2Measure image and exactly one case;
 it cannot claim seven-case completion.
 
 Use a fresh, independently instrumented image with pinned Coverlet Console 10.0.1,
-the existing six modules and one isolated standard JSON report. Initially use no
+seven selected modules and one isolated standard JSON report. The probe includes
+the shared [Evidence.Cli workflow assembly](../../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md)
+in addition to the existing six-module root set: the public CLI delegates its
+protected producer workflow to that library. The private C2Measure helper alone
+includes the seventh tracker plan; ordinary and C3/C3Sdk image selections retain
+their previous module set during this isolated probe. Initially use no
 `--merge-with` input and import no report into the current coverage chain. Retain
 the actual implementation source capture, original/instrumented image hashes,
 sealed worker descriptor, raw bounded owner output and restored original hashes.
 The controller must match the actual descriptor to the v1 witness and require
-unchanged CLI/Contracts/Coverage worker handoffs. A missing helper, absent required
+unchanged CLI/Contracts/Coverage/shared Evidence.Cli worker handoffs. A missing helper, absent required
 handoff or prior root hit file is a failed probe, not permission to manufacture,
 clear, add or replace counters.
 

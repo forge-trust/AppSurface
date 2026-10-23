@@ -22,8 +22,11 @@ import sys
 import time
 import uuid
 
-from measurement_arguments import MODULES, arguments
-from producer_roots import BASE, NAMES, TOTAL, decode, image, read, source, write
+from measurement_arguments import MODULES as ROOT_MODULES, arguments
+from producer_roots import BASE, TOTAL, decode, read, source, write
+
+MODULES = (*ROOT_MODULES, 'ForgeTrust.AppSurface.Evidence.Cli')
+NAMES = tuple(name + suffix for name in MODULES for suffix in ('.dll', '.pdb'))
 
 ROOT = Path(__file__).resolve().parents[2]
 SELF = Path(__file__).resolve()
@@ -49,6 +52,16 @@ def require(value, reason):
 
 def digest(body):
     return hashlib.sha256(body).hexdigest()
+
+
+def image(tool):
+    """Inventory the private seven-module closure; ordinary six-module measurements stay unchanged."""
+    rows = {}
+    for name in NAMES:
+        body = read(tool / name, TOTAL)
+        require(body, 'empty-module')
+        rows[name] = digest(body)
+    return rows
 
 
 def driver():
@@ -115,7 +128,8 @@ def validate_handoff(value, descriptor, instrumented):
                     and set(row) == {'module', 'outcome', 'module_sha256'}, 'no-prior-root-import')
     require(all(name in handed for name in (
         'ForgeTrust.AppSurface.Cli.dll', 'ForgeTrust.AppSurface.Evidence.Contracts.dll',
-        'ForgeTrust.AppSurface.Evidence.Coverage.dll')), 'required-worker-modules')
+        'ForgeTrust.AppSurface.Evidence.Coverage.dll',
+        'ForgeTrust.AppSurface.Evidence.Cli.dll')), 'required-worker-modules')
     return handed
 
 

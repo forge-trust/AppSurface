@@ -47,6 +47,28 @@ class PrivateWorkerProbeDataTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'module-list'):
             probe.validate_handoff(value, descriptor, hashes)
 
+    def test_shared_cli_worker_handoff_cannot_be_omitted(self):
+        value, descriptor, hashes = self.fixture()
+        self.assertEqual('ForgeTrust.AppSurface.Evidence.Cli.dll', value['modules'][-1]['module'])
+        row = value['modules'][-1]
+        value['modules'][-1] = {'module': row['module'], 'outcome': 'worker-file-absent',
+                                'module_sha256': row['module_sha256']}
+        with self.assertRaisesRegex(ValueError, 'required-worker-modules'):
+            probe.validate_handoff(value, descriptor, hashes)
+
+    def test_seven_module_inventory_requires_fourteen_real_selected_leaves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in probe.NAMES:
+                (root / name).write_bytes(name.encode())
+            actual = probe.image(root)
+            self.assertEqual(14, len(actual))
+            name = 'ForgeTrust.AppSurface.Evidence.Cli.dll'
+            self.assertEqual(hashlib.sha256(name.encode()).hexdigest(), actual[name])
+            (root / name).unlink()
+            with self.assertRaises(FileNotFoundError):
+                probe.image(root)
+
     def test_one_changed_identity_or_terminal_field_rejects(self):
         for key, bad in [('pid', 124), ('uid', 1003), ('gid', 1004), ('start_time', True),
                          ('cgroup', '/system.slice/foreign.service'),

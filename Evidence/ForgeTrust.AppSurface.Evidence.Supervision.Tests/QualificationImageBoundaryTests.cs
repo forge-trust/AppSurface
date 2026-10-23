@@ -222,6 +222,15 @@ public sealed class QualificationImageBoundaryTests
         Assert.Contains("LinuxWorkerMeasurement.TryCapture", calls);
         Assert.Contains("LinuxWorkerMeasurement.CaptureNormalExit", calls);
         Assert.Contains("LinuxWorkerMeasurement.Dispose", calls);
+#if EVIDENCE_PRIVATE_C2_MEASURE
+        Assert.Equal(
+        [
+            "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
+            "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
+            "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision",
+            "ForgeTrust.AppSurface.Evidence.Cli",
+        ], LinuxWorkerMeasurement.Modules);
+#endif
 #else
         Assert.DoesNotContain("LinuxWorkerMeasurement", types);
         Assert.DoesNotContain("LinuxWorkerMeasurement.TryCapture", methods);
