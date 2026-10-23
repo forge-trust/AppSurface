@@ -258,7 +258,10 @@ public sealed class CoverageArtifactGateContextTests
         await File.WriteAllTextAsync(sentinel, "preserve unrelated metadata");
         var sidecarPath = Path.Join(output, CoverageArtifactSession.SidecarName);
         var originalSidecar = await File.ReadAllTextAsync(sidecarPath);
-        var changed = originalSidecar.Replace(output, foreign, StringComparison.Ordinal);
+        using var originalDocument = System.Text.Json.JsonDocument.Parse(originalSidecar);
+        var registeredOutput = originalDocument.RootElement.GetProperty("outputPath").GetString()!;
+        var changed = originalSidecar.Replace(System.Text.Json.JsonSerializer.Serialize(registeredOutput),
+            System.Text.Json.JsonSerializer.Serialize(CoverageRunOutputLease.NormalizePlatformPath(foreign)), StringComparison.Ordinal);
         Assert.NotEqual(originalSidecar, changed);
         Assert.Equal(originalSidecar.Length, changed.Length);
         await File.WriteAllTextAsync(sidecarPath, changeLength ? changed + " " : changed);
