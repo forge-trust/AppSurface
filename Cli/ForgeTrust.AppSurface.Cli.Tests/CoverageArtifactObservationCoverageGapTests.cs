@@ -24,7 +24,7 @@ public sealed class CoverageArtifactObservationCoverageGapTests
             new MutableClock(FixedUtc),
             TimeSpan.FromSeconds(1),
             maximumEntries: 2,
-            token: CancellationToken.None,
+            CancellationToken.None,
             continuationDirectories: ["TestResults"]);
 
         Assert.False(observation.Complete);
