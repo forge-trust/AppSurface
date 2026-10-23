@@ -10,7 +10,7 @@ public sealed class CoverageArtifactProvenanceTests
     private static readonly CoverageArtifactProvenance Policy = new(null, "unknown", "configuration-fingerprint");
 
     [Fact]
-    public async Task ReadAsync_FingerprintsCommittedCleanAndDirtyRepositoriesWithoutExposingStatus()
+    public async Task ReadAsync_RealGitMatchesIndependentObservationsOrReportsAnActualDeadline()
     {
         using var temp = TestDirectory.Create();
         await Git(temp.Path, "init", "-q");
@@ -20,22 +20,17 @@ public sealed class CoverageArtifactProvenanceTests
         var cleanObservation = await reader.ReadWithOutcomeAsync(temp.Path, Policy);
         var clean = cleanObservation.Provenance;
         var expectedRevision = ExpectedFingerprint((await GitOutput(temp.Path, "rev-parse", "--verify", "HEAD")).Trim());
-        Assert.Equal(expectedRevision, clean.GitRevisionFingerprint);
-        Assert.NotNull(clean.GitRevisionFingerprint);
-        Assert.Equal(64, clean.GitRevisionFingerprint.Length);
         var cleanStatus = await GitOutput(temp.Path, "status", "--porcelain=v1", "--untracked-files=normal");
         Assert.Equal(string.Empty, cleanStatus);
-        AssertRealStateProbe(cleanObservation, cleanStatus);
+        AssertRealProbe(cleanObservation, expectedRevision, cleanStatus);
         Assert.Equal(Policy.ConfigurationFingerprint, clean.ConfigurationFingerprint);
 
         File.WriteAllText(Path.Join(temp.Path, "untracked-secret-name.txt"), "private contents");
         var dirtyObservation = await reader.ReadWithOutcomeAsync(temp.Path, Policy);
         var dirty = dirtyObservation.Provenance;
-        Assert.Equal(expectedRevision, dirty.GitRevisionFingerprint);
-        Assert.Equal(clean.GitRevisionFingerprint, dirty.GitRevisionFingerprint);
         var dirtyStatus = await GitOutput(temp.Path, "status", "--porcelain=v1", "--untracked-files=normal");
         Assert.Contains("untracked-secret-name.txt", dirtyStatus);
-        AssertRealStateProbe(dirtyObservation, dirtyStatus);
+        AssertRealProbe(dirtyObservation, expectedRevision, dirtyStatus);
         if (cleanObservation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted
             && dirtyObservation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted)
             Assert.NotEqual(clean.GitStateFingerprint, dirty.GitStateFingerprint);
@@ -106,21 +101,45 @@ public sealed class CoverageArtifactProvenanceTests
         Assert.DoesNotContain("private repository detail", observed.Provenance.GitStateFingerprint);
     }
 
-    [Fact]
-    public async Task ReadWithOutcomeAsync_DoesNotTreatUnrequestedRunnerCancellationAsDeadlineExpiry()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadWithOutcomeAsync_DoesNotTreatUnrequestedRunnerCancellationAsDeadlineExpiry(bool cancelRevision)
     {
         var calls = 0;
         var reader = new CoverageArtifactProvenanceReader((_, _, _, _) =>
         {
-            if (++calls == 1) return Task.FromResult<string?>(new string('a', 40));
+            if (++calls == 1 && !cancelRevision) return Task.FromResult<string?>(new string('a', 40));
             return Task.FromException<string?>(new OperationCanceledException("runner canceled without the deadline token"));
         });
 
         var observed = await reader.ReadWithOutcomeAsync("unused", Policy);
 
-        Assert.NotNull(observed.Provenance.GitRevisionFingerprint);
+        Assert.Equal(cancelRevision ? null : ExpectedFingerprint(new string('a', 40)), observed.Provenance.GitRevisionFingerprint);
         Assert.Equal("unknown", observed.Provenance.GitStateFingerprint);
-        Assert.Equal(CoverageArtifactGitStateProbeOutcome.RunnerCancelled, observed.GitStateProbeOutcome);
+        Assert.Equal(cancelRevision ? CoverageArtifactGitStateProbeOutcome.NotAttempted : CoverageArtifactGitStateProbeOutcome.RunnerCancelled,
+            observed.GitStateProbeOutcome);
+    }
+
+    [Fact]
+    public async Task ReadWithOutcomeAsync_RevisionDeadlineKeepsUnknownWithoutAttemptingStatus()
+    {
+        var calls = 0;
+        var reader = new CoverageArtifactProvenanceReader(async (_, _, timeout, token) =>
+        {
+            calls++;
+            Assert.Equal(TimeSpan.FromMilliseconds(500), timeout);
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return null;
+        });
+
+        var observed = await reader.ReadWithOutcomeAsync("unused", Policy);
+
+        Assert.Equal(1, calls);
+        Assert.Null(observed.Provenance.GitRevisionFingerprint);
+        Assert.Equal("unknown", observed.Provenance.GitStateFingerprint);
+        Assert.Equal(Policy.ConfigurationFingerprint, observed.Provenance.ConfigurationFingerprint);
+        Assert.Equal(CoverageArtifactGitStateProbeOutcome.RevisionDeadlineExceeded, observed.GitStateProbeOutcome);
     }
 
     [Fact]
@@ -166,8 +185,15 @@ public sealed class CoverageArtifactProvenanceTests
         return outputText;
     }
 
-    private static void AssertRealStateProbe(CoverageArtifactProvenanceReadResult observation, string expectedStatus)
+    private static void AssertRealProbe(CoverageArtifactProvenanceReadResult observation, string expectedRevision, string expectedStatus)
     {
+        if (observation.Provenance.GitRevisionFingerprint is null)
+        {
+            Assert.Equal(CoverageArtifactGitStateProbeOutcome.RevisionDeadlineExceeded, observation.GitStateProbeOutcome);
+            Assert.Equal("unknown", observation.Provenance.GitStateFingerprint);
+            return;
+        }
+        Assert.Equal(expectedRevision, observation.Provenance.GitRevisionFingerprint);
         var expectedClassification = expectedStatus.Length == 0 ? "clean" : "dirty";
         if (observation.GitStateProbeOutcome == CoverageArtifactGitStateProbeOutcome.Fingerprinted)
         {

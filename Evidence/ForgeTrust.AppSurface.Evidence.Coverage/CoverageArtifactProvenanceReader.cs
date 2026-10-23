@@ -63,6 +63,8 @@ internal sealed class CoverageArtifactProvenanceReader
             return new(new(revision, Fingerprint(state + "\n" + status), policy.ConfigurationFingerprint),
                 CoverageArtifactGitStateProbeOutcome.Fingerprinted);
         }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested && !token.IsCancellationRequested)
+        { return new(new(null, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.RevisionDeadlineExceeded); }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         { return new(new(null, "unknown", policy.ConfigurationFingerprint), CoverageArtifactGitStateProbeOutcome.NotAttempted); }
         catch (Exception exception) when (IsUnavailable(exception))
@@ -147,6 +149,8 @@ internal enum CoverageArtifactGitStateProbeOutcome
 {
     /// <summary>The revision was unavailable or invalid, so no state probe was attempted.</summary>
     NotAttempted,
+    /// <summary>The shared 500 ms deadline expired during the revision probe, so no state probe was attempted.</summary>
+    RevisionDeadlineExceeded,
     /// <summary>The bounded status probe completed and its result was fingerprinted.</summary>
     Fingerprinted,
     /// <summary>The shared 500 ms deadline expired during the status probe.</summary>
