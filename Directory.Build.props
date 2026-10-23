@@ -34,6 +34,7 @@
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk'">$(DefineConstants);EVIDENCE_PRIVATE_C3</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk'">$(DefineConstants);EVIDENCE_PRIVATE_C3_SDK</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C2'">$(DefineConstants);EVIDENCE_PRIVATE_C2_ARTIFACT_MUTATION</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C2Measure'">$(DefineConstants);EVIDENCE_PRIVATE_C2_MEASURE</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N04'">$(DefineConstants);EVIDENCE_PRIVATE_N04</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N05'">$(DefineConstants);EVIDENCE_PRIVATE_N05</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N06'">$(DefineConstants);EVIDENCE_PRIVATE_N06</DefineConstants>
@@ -49,8 +50,8 @@
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'N14'">$(DefineConstants);EVIDENCE_PRIVATE_N14;EVIDENCE_PRIVATE_ACCEPTED_WORK</DefineConstants>
   </PropertyGroup>
   <Target Name="ValidateEvidencePrivateQualification" BeforeTargets="PrepareForBuild">
-    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'C2' and '$(EvidencePrivateQualification)' != 'C3' and '$(EvidencePrivateQualification)' != 'C3Sdk' and '$(EvidencePrivateQualification)' != 'C4Accounts' and '$(EvidencePrivateQualification)' != 'C4AccountRollback' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06' and '$(EvidencePrivateQualification)' != 'N07' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N10' and '$(EvidencePrivateQualification)' != 'N11' and '$(EvidencePrivateQualification)' != 'N12' and '$(EvidencePrivateQualification)' != 'N13' and '$(EvidencePrivateQualification)' != 'N14' and '$(EvidencePrivateQualification)' != 'N15' and '$(EvidencePrivateQualification)' != 'N16'"
-           Text="EvidencePrivateQualification must be None, C2, C3, C3Sdk, C4Accounts, C4AccountRollback, N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15 or N16." />
+    <Error Condition="'$(EvidencePrivateQualification)' != 'None' and '$(EvidencePrivateQualification)' != 'C2' and '$(EvidencePrivateQualification)' != 'C2Measure' and '$(EvidencePrivateQualification)' != 'C3' and '$(EvidencePrivateQualification)' != 'C3Sdk' and '$(EvidencePrivateQualification)' != 'C4Accounts' and '$(EvidencePrivateQualification)' != 'C4AccountRollback' and '$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06' and '$(EvidencePrivateQualification)' != 'N07' and '$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09' and '$(EvidencePrivateQualification)' != 'N10' and '$(EvidencePrivateQualification)' != 'N11' and '$(EvidencePrivateQualification)' != 'N12' and '$(EvidencePrivateQualification)' != 'N13' and '$(EvidencePrivateQualification)' != 'N14' and '$(EvidencePrivateQualification)' != 'N15' and '$(EvidencePrivateQualification)' != 'N16'"
+           Text="EvidencePrivateQualification must be None, C2, C2Measure, C3, C3Sdk, C4Accounts, C4AccountRollback, N04, N05, N06, N07, N08, N09, N10, N11, N12, N13, N14, N15 or N16." />
   </Target>
   <Target Name="RejectPrivateEvidenceQualificationPackage" BeforeTargets="Pack">
     <Error Condition="'$(EvidencePrivateQualification)' != 'None'"

@@ -99,7 +99,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(25), startup.Token).ConfigureAwait(false);
             }
             RequireActive(startup.Token);
-#if EVIDENCE_PRIVATE_C3
+#if EVIDENCE_PRIVATE_C3 || EVIDENCE_PRIVATE_C2_MEASURE
 #if EVIDENCE_PRIVATE_C3_SDK
             LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.TrackerCaptureStart);
 #endif
@@ -154,7 +154,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 {
                     _owner.RequireControlIdentity(token);
                     _naturalTerminal = facts;
-#if EVIDENCE_PRIVATE_C3
+#if EVIDENCE_PRIVATE_C3 || EVIDENCE_PRIVATE_C2_MEASURE
                     if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 0) _measurement?.CaptureNormalExit(facts, token);
 #if EVIDENCE_PRIVATE_C3_SDK
                     else if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 1) _measurement?.CaptureFailedNormalExit(facts, token);
@@ -346,7 +346,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         catch { failed = true; }
         try { await _listener.DisposeAsync().ConfigureAwait(false); }
         catch { failed = true; }
-#if EVIDENCE_PRIVATE_C3
+#if EVIDENCE_PRIVATE_C3 || EVIDENCE_PRIVATE_C2_MEASURE
         try { _measurement?.Dispose(); }
         catch { failed = true; }
 #endif
@@ -396,7 +396,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private LinuxSystemdBackend? _backend;
     private LinuxSystemdBackend? _observations;
     private LinuxProcessIdentity? _worker;
-#if EVIDENCE_PRIVATE_C3
+#if EVIDENCE_PRIVATE_C3 || EVIDENCE_PRIVATE_C2_MEASURE
     private LinuxWorkerMeasurement? _measurement;
 #endif
     private LinuxWorkerUnit? _recipe;

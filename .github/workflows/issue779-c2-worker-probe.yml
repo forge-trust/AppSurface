@@ -1,0 +1,89 @@
+name: Issue 779 private normal worker counter custody probe
+on:
+  push:
+    branches: [codex/issue779-c2-worker-probe-20261023]
+permissions:
+  contents: read
+concurrency:
+  group: issue779-c2-worker-probe-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        env:
+          DOTNET_INSTALL_DIR: ${{ runner.temp }}/c2-probe-sdk
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind source and validate private probe data guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -m 0700 "$RUNNER_TEMP/c2-probe-evidence"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/c2-probe-evidence/source.json"
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_c2_worker_probe.py > "$RUNNER_TEMP/c2-probe-evidence/data-controls.log" 2>&1
+      - name: Publish a separate nonpackable measurement image
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0
+          timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode --disable-parallel -p:UseSharedCompilation=false > "$RUNNER_TEMP/c2-probe-evidence/restore.log" 2>&1
+          timeout --signal=KILL 180 dotnet publish Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --no-restore -c Release --self-contained false -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C2Measure -o "$RUNNER_TEMP/c2-probe-tool" > "$RUNNER_TEMP/c2-probe-evidence/publish.log" 2>&1
+          mkdir -p "$RUNNER_TEMP/c2-probe-tool/reportgenerator/net10.0"
+          cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$RUNNER_TEMP/c2-probe-tool/reportgenerator/net10.0/"
+      - name: Acquire pinned subject SDK packages without subject evaluation
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 120 dotnet restore .github/issue779-checkpoint2/NuGetContentHash/NuGetContentHash.csproj --locked-mode --disable-parallel > "$RUNNER_TEMP/c2-probe-evidence/hasher-restore.log" 2>&1
+          timeout --signal=KILL 120 dotnet build .github/issue779-checkpoint2/NuGetContentHash/NuGetContentHash.csproj --no-restore -p:UseSharedCompilation=false -o "$RUNNER_TEMP/c2-probe-hasher" > "$RUNNER_TEMP/c2-probe-evidence/hasher-build.log" 2>&1
+          timeout --signal=KILL 180 python3 -B .github/issue779-checkpoint2/run-native.py --hash-runtime "$(command -v dotnet)" --package-hasher "$RUNNER_TEMP/c2-probe-hasher/NuGetContentHash.dll" --acquire-packages .github/issue779-checkpoint2/subject/packages.lock.json --package-cache "$RUNNER_TEMP/c2-probe-tool/nuget" > "$RUNNER_TEMP/c2-probe-evidence/package-acquisition.json"
+          timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/c2-probe-coverlet" > "$RUNNER_TEMP/c2-probe-evidence/collector-install.log" 2>&1
+      - name: Measure one unchanged normal producer procedure and its real worker handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          sdk="$(dirname "$(readlink -f "$(command -v dotnet)")")"
+          console="$RUNNER_TEMP/c2-probe-coverlet/.store/coverlet.console/10.0.1/coverlet.console/10.0.1/tools/net10.0/any/coverlet.console.dll"
+          timeout --signal=KILL 1000 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            /usr/bin/python3 -B .github/issue779-checkpoint4/c2_worker_probe.py run \
+            --tool "$RUNNER_TEMP/c2-probe-tool" --runtime "$sdk" \
+            --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint2/subject" \
+            --console "$console" --evidence "$RUNNER_TEMP/c2-probe-evidence" --source "$GITHUB_SHA" \
+            > "$RUNNER_TEMP/c2-probe-evidence/probe-driver.log" 2>&1
+      - name: Recheck complete source after the isolated probe
+        if: always()
+        shell: bash
+        run: |
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$RUNNER_TEMP/c2-probe-evidence/source.json" --verify
+      - name: Bound private evidence independently of probe success
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/c2-probe-evidence"
+          python3 -B - "$RUNNER_TEMP/c2-probe-evidence" <<'PY'
+          import sys
+          sys.path.insert(0, '.github/issue779-checkpoint4')
+          from c2_worker_probe import retain
+          retain(sys.argv[1])
+          PY
+      - name: Retain the private one-case report and original failed outcomes
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-c2-worker-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/c2-probe-evidence
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error

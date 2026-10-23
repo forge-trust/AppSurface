@@ -15,7 +15,7 @@
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk'">
+  <ItemGroup Condition="'$(EvidencePrivateQualification)' == 'C3' or '$(EvidencePrivateQualification)' == 'C3Sdk' or '$(EvidencePrivateQualification)' == 'C2Measure'">
     <Compile Include="../../.github/issue779-checkpoint4/measurement/LinuxWorkerMeasurement.cs" Link="Measurement/LinuxWorkerMeasurement.cs" />
   </ItemGroup>
 

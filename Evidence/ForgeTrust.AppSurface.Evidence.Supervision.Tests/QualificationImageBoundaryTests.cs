@@ -1,4 +1,8 @@
+using System.Buffers.Binary;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -205,15 +209,28 @@ public sealed class QualificationImageBoundaryTests
         Assert.Contains("LinuxWorkerProcess", names);
     }
 
-    /// <summary>Raw tracker capture is validation-only and cannot ship in the ordinary C# owner.</summary>
+    /// <summary>Private tracker capture types and emitted calls follow only their compiled measurement selectors.</summary>
     [Fact]
     public void PrivateWorkerMeasurementIsAbsentFromOrdinaryImages()
     {
         var types = ReadTypeNames();
-#if EVIDENCE_PRIVATE_C3
+        var methods = ReadMethodDefinitions();
+        var calls = ReadWorkerMeasurementCalls();
+#if EVIDENCE_PRIVATE_C3 || EVIDENCE_PRIVATE_C2_MEASURE
         Assert.Contains("LinuxWorkerMeasurement", types);
+        Assert.Contains("LinuxWorkerMeasurement.TryCapture", methods);
+        Assert.Contains("LinuxWorkerMeasurement.TryCapture", calls);
+        Assert.Contains("LinuxWorkerMeasurement.CaptureNormalExit", calls);
+        Assert.Contains("LinuxWorkerMeasurement.Dispose", calls);
 #else
         Assert.DoesNotContain("LinuxWorkerMeasurement", types);
+        Assert.DoesNotContain("LinuxWorkerMeasurement.TryCapture", methods);
+        Assert.DoesNotContain(calls, name => name.StartsWith("LinuxWorkerMeasurement.", StringComparison.Ordinal));
+#endif
+#if !EVIDENCE_PRIVATE_C3_SDK
+        Assert.DoesNotContain("LinuxWorkerMeasurement.CaptureFailedNormalExit", calls);
+        Assert.DoesNotContain("LinuxWorkerMeasurement.PrepareFailedExitBarrier", calls);
+        Assert.DoesNotContain("LinuxWorkerMeasurement.ObserveFailedExitBarrier", calls);
 #endif
     }
 
@@ -241,6 +258,74 @@ public sealed class QualificationImageBoundaryTests
         Assert.DoesNotContain("LinuxRunAccounts.PrepareAccountMeasurementCollisionAsync", methods);
         Assert.DoesNotContain("LinuxRunAccounts.RecordAccountMeasurementRollback", methods);
 #endif
+    }
+
+    // Decode actual emitted operands, rather than matching token-shaped bytes inside unrelated operands.
+    // Reflection reads only the public BCL opcode catalogue; native owner types are never loaded or reflected.
+    private static HashSet<string> ReadWorkerMeasurementCalls()
+    {
+        var operandTypes = typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.FieldType == typeof(OpCode))
+            .Select(field => (OpCode)field.GetValue(null)!)
+            .GroupBy(opcode => unchecked((ushort)opcode.Value))
+            .ToDictionary(group => group.Key, group => group.First().OperandType);
+        using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Supervision.dll"));
+        using var image = new PEReader(file);
+        var metadata = image.GetMetadataReader();
+        var calls = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var typeHandle in metadata.TypeDefinitions)
+        {
+            var type = metadata.GetTypeDefinition(typeHandle);
+            var declaring = type.GetDeclaringType();
+            if (declaring.IsNil || metadata.GetString(metadata.GetTypeDefinition(declaring).Name) != "LinuxWorkerProcess")
+                continue;
+            foreach (var methodHandle in type.GetMethods())
+            {
+                var method = metadata.GetMethodDefinition(methodHandle);
+                if (metadata.GetString(method.Name) != "MoveNext" || method.RelativeVirtualAddress == 0) continue;
+                var il = image.GetMethodBody(method.RelativeVirtualAddress).GetILBytes()!;
+                for (var offset = 0; offset < il.Length;)
+                {
+                    ushort opcode = il[offset++];
+                    if (opcode == 0xfe) opcode = (ushort)(0xfe00 | il[offset++]);
+                    Assert.True(operandTypes.TryGetValue(opcode, out var operand));
+                    var bytes = operand switch
+                    {
+                        OperandType.InlineNone => 0,
+                        OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+                        OperandType.InlineVar => 2,
+                        OperandType.InlineI8 or OperandType.InlineR => 8,
+                        OperandType.InlineBrTarget or OperandType.InlineField or OperandType.InlineI
+                            or OperandType.InlineMethod or OperandType.InlineSig or OperandType.InlineString
+                            or OperandType.InlineTok or OperandType.InlineType or OperandType.ShortInlineR => 4,
+                        OperandType.InlineSwitch => checked(4 + 4 * BinaryPrimitives.ReadInt32LittleEndian(il.AsSpan(offset, 4))),
+                        _ => throw new InvalidOperationException("Unsupported emitted IL operand."),
+                    };
+                    Assert.InRange(bytes, 0, il.Length - offset);
+                    if (operand == OperandType.InlineMethod)
+                    {
+                        var target = MetadataTokens.EntityHandle(BinaryPrimitives.ReadInt32LittleEndian(il.AsSpan(offset, 4)));
+                        if (target.Kind == HandleKind.MethodDefinition)
+                        {
+                            var definition = metadata.GetMethodDefinition((MethodDefinitionHandle)target);
+                            var owner = metadata.GetTypeDefinition(definition.GetDeclaringType());
+                            calls.Add($"{metadata.GetString(owner.Name)}.{metadata.GetString(definition.Name)}");
+                        }
+                        else if (target.Kind == HandleKind.MemberReference)
+                        {
+                            var reference = metadata.GetMemberReference((MemberReferenceHandle)target);
+                            if (reference.Parent.Kind == HandleKind.TypeReference)
+                            {
+                                var owner = metadata.GetTypeReference((TypeReferenceHandle)reference.Parent);
+                                calls.Add($"{metadata.GetString(owner.Name)}.{metadata.GetString(reference.Name)}");
+                            }
+                        }
+                    }
+                    offset += bytes;
+                }
+            }
+        }
+        return calls;
     }
 
     private static HashSet<string> ReadMethodReferences()

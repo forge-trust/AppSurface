@@ -11,13 +11,15 @@ using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxFileSystem;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Private C3 measurement fixture, compiled out of every ordinary product image.</summary>
+/// <summary>Private C3/C3Sdk and C2Measure fixture, compiled out of ordinary None and mutation C2 images.</summary>
 /// <remarks>
 /// Retains the authentic worker's private temporary directory before descriptor publication. On its
 /// original normal exit, copies only genuine pinned Coverlet hit bytes before the root tracker flushes.
 /// It grants no process, artifact, admission or proof authority. Root/worker policies and deadlines do
 /// not change. A prior root hit file is left unchanged, so only the first normal worker contributes;
 /// subsequent root processes accumulate their own counters through Coverlet's original implementation.
+/// C2Measure reuses only the natural status0 call from the original monitor. Its separate one-normal-case
+/// probe retains the existing v1 witness; it enables no SDK exit barrier or failed-natural-exit import.
 /// </remarks>
 internal sealed partial class LinuxWorkerMeasurement : IDisposable
 {
@@ -37,7 +39,7 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
         SafeFileHandle hostTemporary, SafeFileHandle notification, TrackerPlan[] plans)
     { _worker = worker; _temporary = temporary; _hostTemporary = hostTemporary; _notification = notification; _plans = plans; }
 
-    /// <summary>Returns null for an uninstrumented C3 image; otherwise pins actual live kernel identity.</summary>
+    /// <summary>Returns null for an uninstrumented private image; otherwise pins actual live kernel identity.</summary>
     internal static LinuxWorkerMeasurement? TryCapture(LinuxProcessIdentity worker, CancellationToken token)
     {
         if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) throw new IOException();
