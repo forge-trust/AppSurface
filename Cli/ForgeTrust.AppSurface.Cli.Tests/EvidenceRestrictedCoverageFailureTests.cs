@@ -683,12 +683,13 @@ public sealed class EvidenceRestrictedCoverageFailureTests
         {
             MergeCount++;
             MergeCancellationToken = cancellationToken;
-            var reportGlob = Assert.Single(coverageFiles);
-            var wildcardMarker = Path.DirectorySeparatorChar + "**" + Path.DirectorySeparatorChar;
-            var wildcardIndex = reportGlob.IndexOf(wildcardMarker, StringComparison.Ordinal);
-            Assert.True(wildcardIndex > 0, "Expected the shared merge workflow's recursive report glob.");
-            var inputRoot = reportGlob[..wildcardIndex];
-            Assert.NotEmpty(Directory.GetFiles(inputRoot, "coverage.cobertura.xml", SearchOption.AllDirectories));
+            Assert.NotEmpty(coverageFiles);
+            Assert.All(coverageFiles, path =>
+            {
+                Assert.True(Path.IsPathFullyQualified(path));
+                Assert.Equal("coverage.cobertura.xml", Path.GetFileName(path));
+                Assert.True(File.Exists(path));
+            });
             Directory.CreateDirectory(outputDirectory);
 
             if (MergeHandler is { } handler)
