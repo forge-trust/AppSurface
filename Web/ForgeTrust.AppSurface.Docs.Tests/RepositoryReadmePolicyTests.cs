@@ -136,7 +136,7 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(42, requiredReadmes.Length);
+        Assert.Equal(43, requiredReadmes.Length);
         Assert.Contains("Config/ForgeTrust.AppSurface.Config.Testing/README.md", requiredReadmes);
         Assert.Contains(
             "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
@@ -173,6 +173,9 @@ public sealed partial class RepositoryReadmePolicyTests
             requiredReadmes);
         Assert.Contains(
             "Durable/ForgeTrust.AppSurface.Durable.Testing/README.md",
+            requiredReadmes);
+        Assert.Contains(
+            "Durable/ForgeTrust.AppSurface.Durable.Templates/README.md",
             requiredReadmes);
         Assert.Contains(
             "Workers/ForgeTrust.AppSurface.Workers/README.md",
