@@ -111,6 +111,8 @@ converts a failed normal procedure or incomplete account cleanup into a pass.
 The evidence includes original and instrumented module hashes, the exact copied
 sealed worker descriptor, original bounded owner output, the existing unchanged
 hit-handoff witness, the isolated standard JSON report and restoration result.
+Witness module names are the exact DLL filenames, including `.dll`, as emitted
+by the existing tracker plan; bare assembly-name aliases are rejected.
 Only `normal-report.json` may reach 32 MiB; other leaves keep an 8 MiB cap, with
 64 files and 48 MiB total. Files are private 0600 and directories 0700. No raw
 counter reconstruction, report arithmetic or prior report input is permitted.

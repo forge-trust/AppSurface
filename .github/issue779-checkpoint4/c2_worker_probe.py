@@ -97,11 +97,11 @@ def validate_handoff(value, descriptor, instrumented):
     rows = value['modules']
     require(type(rows) is list and len(rows) == len(MODULES)
             and all(type(row) is dict for row in rows)
-            and [row.get('module') for row in rows] == list(MODULES), 'module-list')
+            and [row.get('module') for row in rows] == [name + '.dll' for name in MODULES], 'module-list')
     handed = []
     for row in rows:
         name = row['module']
-        require(row.get('module_sha256') == instrumented[name + '.dll'], 'module-image')
+        require(row.get('module_sha256') == instrumented[name], 'module-image')
         if row.get('outcome') == 'unchanged-worker-handoff':
             require(set(row) == {'module', 'outcome', 'candidates', 'worker_sha256',
                                  'host_sha256', 'module_sha256'}, 'handoff-fields')
@@ -114,8 +114,8 @@ def validate_handoff(value, descriptor, instrumented):
             require(row.get('outcome') == 'worker-file-absent'
                     and set(row) == {'module', 'outcome', 'module_sha256'}, 'no-prior-root-import')
     require(all(name in handed for name in (
-        'ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts',
-        'ForgeTrust.AppSurface.Evidence.Coverage')), 'required-worker-modules')
+        'ForgeTrust.AppSurface.Cli.dll', 'ForgeTrust.AppSurface.Evidence.Contracts.dll',
+        'ForgeTrust.AppSurface.Evidence.Coverage.dll')), 'required-worker-modules')
     return handed
 
 

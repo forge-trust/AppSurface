@@ -21,7 +21,7 @@ class PrivateWorkerProbeDataTests(unittest.TestCase):
                       'cgroup': '/system.slice/appsurface-evidence-worker-' + 'a' * 32 + '.service'}
         hashes = {name + suffix: hashlib.sha256((name + suffix).encode()).hexdigest()
                   for name in probe.MODULES for suffix in ('.dll', '.pdb')}
-        rows = [{'module': name, 'outcome': 'unchanged-worker-handoff', 'candidates': 2,
+        rows = [{'module': name + '.dll', 'outcome': 'unchanged-worker-handoff', 'candidates': 2,
                  'worker_sha256': 'b' * 64, 'host_sha256': 'b' * 64,
                  'module_sha256': hashes[name + '.dll']} for name in probe.MODULES]
         value = {'schema': 'evidence-worker-measurement-v1', 'pid': 123, 'start_time': 456,
@@ -31,13 +31,21 @@ class PrivateWorkerProbeDataTests(unittest.TestCase):
 
     def test_unchanged_worker_rows_are_data_only_and_optional_unused_module_is_absent(self):
         value, descriptor, hashes = self.fixture()
-        self.assertEqual(list(probe.MODULES), probe.validate_handoff(value, descriptor, hashes))
+        self.assertEqual([name + '.dll' for name in probe.MODULES], probe.validate_handoff(value, descriptor, hashes))
         row = value['modules'][4]
         value['modules'][4] = {key: item for key, item in row.items()
                                if key in ('module', 'module_sha256')}
         value['modules'][4]['outcome'] = 'worker-file-absent'
-        self.assertNotIn(probe.MODULES[4], probe.validate_handoff(value, descriptor, hashes))
+        self.assertNotIn(probe.MODULES[4] + '.dll', probe.validate_handoff(value, descriptor, hashes))
         self.assertIs(value['native_acceptance'], False)
+
+    def test_module_names_require_exact_actual_dll_filenames(self):
+        value, descriptor, hashes = self.fixture()
+        self.assertEqual(probe.MODULES[0] + '.dll',
+                         probe.validate_handoff(value, descriptor, hashes)[0])
+        value['modules'][0]['module'] = probe.MODULES[0]
+        with self.assertRaisesRegex(ValueError, 'module-list'):
+            probe.validate_handoff(value, descriptor, hashes)
 
     def test_one_changed_identity_or_terminal_field_rejects(self):
         for key, bad in [('pid', 124), ('uid', 1003), ('gid', 1004), ('start_time', True),
