@@ -46,7 +46,7 @@ jobs:
         run: python scripts/verify_config_package_consumer.py --work-directory "${{ runner.temp }}/config-package-contract"
       - name: Upload contract evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: config-package-contract-${{ matrix.os }}
           path: |
@@ -105,7 +105,7 @@ jobs:
 
       - name: Upload coverage security diagnostics
         if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-security-diagnostics-${{ matrix.os }}
           path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
@@ -348,7 +348,7 @@ jobs:
           diagnostic="pass"
 
       - name: Upload secret-safe Keycloak theme evidence
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: keycloak-theme-evidence
@@ -438,7 +438,7 @@ jobs:
           version: 11.1.3
 
       - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -488,14 +488,14 @@ jobs:
 
       - name: Upload docs outline layout evidence
         if: ${{ always() && !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docs-outline-layout-evidence
           path: ${{ runner.temp }}/docs-outline-layout-evidence
           if-no-files-found: warn
 
       - name: Upload test-result diagnostics
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() }}
         with:
           name: test-result-diagnostics
@@ -509,7 +509,7 @@ jobs:
           retention-days: 14
 
       - name: Upload coverage gate reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && !cancelled() }}
         with:
           name: coverage-gate-reports
