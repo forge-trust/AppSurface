@@ -156,8 +156,10 @@ public sealed class CoverageArtifactStoreLifecycleTests
         Assert.True(Directory.Exists(fixture.ArchivePath(pinnedId)));
     }
 
-    [Fact]
-    public async Task PinCurrent_SnapshotsVerifiedRun_AndRestorePreservesBytesProvenanceAndNoClobber()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PinCurrent_SnapshotsVerifiedRun_AndRestorePreservesBytesProvenanceAndNoClobber(bool trailingSeparator)
     {
         using var fixture = new StoreFixture();
         using var store = fixture.OpenStore();
@@ -174,7 +176,8 @@ public sealed class CoverageArtifactStoreLifecycleTests
 
         using var restoreParent = fixture.CreatePrivateDirectory("restore-parent");
         var restored = Path.Join(restoreParent.ArtifactDirectoryPath, "restored");
-        await store.RestoreAsync(run.ManifestBase.RunId, restored, CancellationToken.None);
+        var restoreDestination = trailingSeparator ? restored + Path.DirectorySeparatorChar : restored;
+        await store.RestoreAsync(run.ManifestBase.RunId, restoreDestination, CancellationToken.None);
         Assert.Equal(original, File.ReadAllBytes(Path.Join(restored, "nested", "coverage.xml")));
 
         using (var receipt = JsonDocument.Parse(File.ReadAllBytes(Path.Join(restored, "coverage-history.json"))))
@@ -199,8 +202,11 @@ public sealed class CoverageArtifactStoreLifecycleTests
                 sentinel.Write(bytes);
                 sentinel.Flush(true);
             }
+            var existingDestination = trailingSeparator
+                ? existing.ArtifactDirectoryPath + Path.DirectorySeparatorChar
+                : existing.ArtifactDirectoryPath;
             await Assert.ThrowsAsync<IOException>(() => store.RestoreAsync(
-                run.ManifestBase.RunId, existing.ArtifactDirectoryPath, CancellationToken.None));
+                run.ManifestBase.RunId, existingDestination, CancellationToken.None));
             Assert.Equal("leave this directory alone", File.ReadAllText(Path.Join(existing.ArtifactDirectoryPath, "sentinel.txt")));
         }
     }

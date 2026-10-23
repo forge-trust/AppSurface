@@ -903,17 +903,25 @@ internal sealed class CoverageArtifactStore : IDisposable
     }
 
     /// <summary>Restores a verified archive into a fresh private output directory.</summary>
+    /// <remarks>
+    /// The destination is made absolute with <see cref="Path.GetFullPath(string)"/> and normalized with
+    /// <see cref="Path.TrimEndingDirectorySeparator(string)"/> before checking existence or deriving its parent and final name.
+    /// A trailing directory separator is accepted. The parent must already exist and pass safe traversal checks;
+    /// an existing destination is never overwritten.
+    /// </remarks>
     /// <param name="runId">The opaque N-format run identifier.</param>
     /// <param name="freshOutputPath">A new destination path that must not already exist.</param>
     /// <param name="cancellationToken">The caller's cancellation token.</param>
+    /// <remarks>Normalizes the absolute destination and trailing directory separator before parent and no-overwrite checks.</remarks>
     internal async Task RestoreAsync(string runId, string freshOutputPath, CancellationToken cancellationToken)
     {
         ThrowIfReadOnly();
         ValidateRunId(runId);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        if (Directory.Exists(freshOutputPath) || File.Exists(freshOutputPath)) throw new IOException("Restore destination must not already exist.");
-        var parentPath = Path.GetDirectoryName(Path.GetFullPath(freshOutputPath))!;
+        var outputPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(freshOutputPath));
+        if (Directory.Exists(outputPath) || File.Exists(outputPath)) throw new IOException("Restore destination must not already exist.");
+        var parentPath = Path.GetDirectoryName(outputPath)!;
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(parentPath, false, false)
             ?? throw new IOException("Restore requires an existing safe parent directory.");
         var archivePath = Path.Join(RootPath, ArchivesName, runId);
@@ -954,7 +962,7 @@ internal sealed class CoverageArtifactStore : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             stage.Dispose();
             archiveLease.VerifyBinding();
-            parent.MoveArtifactEntry(stageName, parent, Path.GetFileName(freshOutputPath), expectedSourceIdentity: stageIdentity);
+            parent.MoveArtifactEntry(stageName, parent, Path.GetFileName(outputPath), expectedSourceIdentity: stageIdentity);
             published = true;
         }
         finally

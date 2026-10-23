@@ -475,6 +475,100 @@ class CoverageFaninTests(unittest.TestCase):
             fanin.prepare_default_output(self.root, output)
             self.assertFalse(output.exists())
 
+    def default_primary(self) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+        # Match the real checkout's ignored output without weakening source attestation.
+        (self.root / ".gitignore").write_text("/TestResults\n")
+        subprocess.run(["git", "add", ".gitignore"], cwd=self.root, check=True)
+        subprocess.run(["git", "commit", "-qm", "ignore generated fixture output"],
+                       cwd=self.root, check=True)
+        report = self.evidence / "current-primary.xml"
+        self.write_report(report, [class_row("Baseline", "src/Baseline.cs", line(1, 1))])
+        timings = self.evidence / "current-timings.json"
+        timings.write_text(json.dumps(self.timings()))
+        return report, timings, self.root / "TestResults/coverage-merged/fanin-primary"
+
+    def test_default_primary_capture_can_repeat_after_successful_collection(self) -> None:
+        report, timings, output = self.default_primary()
+        with mock.patch.dict(os.environ, RUN):
+            fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+            original = {item.name: item.read_bytes() for item in output.iterdir()}
+            fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        self.assertEqual(original, {item.name: item.read_bytes() for item in output.iterdir()})
+        self.assertEqual(set(original), {"manifest.json", "coverage.cobertura.xml", "timings.json"})
+
+    def test_default_primary_recapture_preserves_unknown_modified_or_linked_material(self) -> None:
+        report, timings, output = self.default_primary()
+        for defect in ("unknown", "report", "timings", "manifest", "link"):
+            with self.subTest(defect=defect):
+                if output.exists():
+                    shutil.rmtree(output)
+                fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+                if defect == "unknown":
+                    (output / "caller.txt").write_text("preserve")
+                elif defect in {"report", "timings"}:
+                    name = "coverage.cobertura.xml" if defect == "report" else "timings.json"
+                    with (output / name).open("a") as stream:
+                        stream.write("changed")
+                elif defect == "manifest":
+                    manifest = json.loads((output / "manifest.json").read_text())
+                    manifest["policy"] = {"driver": "other"}
+                    (output / "manifest.json").write_text(json.dumps(manifest))
+                else:
+                    outside = self.evidence / "outside-report.xml"
+                    outside.write_text("preserve external evidence")
+                    (output / "coverage.cobertura.xml").unlink()
+                    (output / "coverage.cobertura.xml").symlink_to(outside)
+                before = {item.name: item.read_bytes() for item in output.iterdir()}
+                with self.assertRaises((ValueError, OSError)):
+                    fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+                self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+                if defect == "link":
+                    self.assertTrue((output / "coverage.cobertura.xml").is_symlink())
+                    self.assertEqual(outside.read_text(), "preserve external evidence")
+
+    def test_invalid_new_primary_preserves_previous_primary_before_recapture(self) -> None:
+        report, timings, output = self.default_primary()
+        fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        before = {item.name: item.read_bytes() for item in output.iterdir()}
+        invalid = self.timings()
+        invalid["projects"].pop()
+        timings.write_text(json.dumps(invalid))
+        with self.assertRaisesRegex(ValueError, "every solution test project"):
+            fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+
+    def test_default_primary_capture_rejects_linked_ancestors_without_outside_mutation(self) -> None:
+        report, timings, output = self.default_primary()
+        outside = self.evidence / "outside-results"
+        (outside / "coverage-merged").mkdir(parents=True)
+        sentinel = outside / "coverage-merged/caller.txt"
+        sentinel.write_text("preserve outside evidence")
+        (self.root / "TestResults").symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "non-linked"):
+            fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        self.assertEqual(sentinel.read_text(), "preserve outside evidence")
+        self.assertFalse((outside / "coverage-merged/fanin-primary").exists())
+
+    def test_custom_primary_capture_requires_fresh_destination(self) -> None:
+        report, timings, _ = self.default_primary()
+        output = self.evidence / "custom-primary"
+        fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        before = {item.name: item.read_bytes() for item in output.iterdir()}
+        with self.assertRaisesRegex(ValueError, "must be fresh"):
+            fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+
+    def test_primary_recapture_cannot_retire_its_own_producer_inputs(self) -> None:
+        report, timings, output = self.default_primary()
+        fanin.capture(self.root, report, output, CONFIGURATION, "solution", timings)
+        before = {item.name: item.read_bytes() for item in output.iterdir()}
+        for primary_report, primary_timings in (
+                (output / "coverage.cobertura.xml", timings), (report, output / "timings.json")):
+            with self.subTest(report=primary_report, timings=primary_timings):
+                with self.assertRaisesRegex(ValueError, "producer inputs"):
+                    fanin.capture(self.root, primary_report, output, CONFIGURATION, "solution", primary_timings)
+                self.assertEqual(before, {item.name: item.read_bytes() for item in output.iterdir()})
+
     def test_preparation_preserves_unknown_or_modified_composition_contents(self) -> None:
         primary, native = self.make_bundle(prefix="preserve-")
         output = self.root / "TestResults/coverage-fanin"

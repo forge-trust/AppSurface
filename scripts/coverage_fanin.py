@@ -147,11 +147,18 @@ def verify_solution(root: Path, timings: dict, configuration: str) -> None:
 
 def capture(root: Path, report: Path, output: Path, configuration: str, scope: str,
             timings: Path | None = None, raw_report: Path | None = None) -> None:
-    """Snapshot bytes after a successful producer step; manifests are CI evidence, not signatures."""
+    """Snapshot successful producer bytes; replace only a verified default solution capture.
+
+    Custom/native destinations stay fresh-only. Manifests are local CI evidence,
+    not signatures; replacement never makes previous source evidence current.
+    The destination cannot contain any producer input that replacement would retire.
+    """
     identity = source_identity(root)
+    destination = output.resolve()
+    if any(source is not None and source.resolve().is_relative_to(destination)
+           for source in (report, timings, raw_report)):
+        raise ValueError("Capture destination must not contain producer inputs")
     document = checked_xml(report)
-    if output.exists():
-        raise ValueError("Evidence destination must be fresh")
     if scope == "solution":
         if timings is None:
             raise ValueError("Full solution timing inventory is required")
@@ -160,6 +167,11 @@ def capture(root: Path, report: Path, output: Path, configuration: str, scope: s
         if raw_report is None:
             raise ValueError("Native evidence requires the original collector report")
         verify_normalization(checked_xml(raw_report), document, str(root.resolve()))
+    if scope == "solution" and output.absolute() == (root / "TestResults/coverage-merged/fanin-primary").absolute():
+        # Validate the new producer before retiring any previous default capture.
+        _prepare_default_output(root, output, ("TestResults", "coverage-merged", "fanin-primary"), primary=True)
+    elif output.exists():
+        raise ValueError("Evidence destination must be fresh")
     output.mkdir(parents=True)
     shutil.copyfile(report, output / "coverage.cobertura.xml")
     files = {"coverage.cobertura.xml": digest(output / "coverage.cobertura.xml")}
@@ -355,15 +367,26 @@ def prepare_default_output(root: Path, output: Path) -> None:
     uses retained no-follow directory handles; a parent rename cannot redirect
     its unlinks. Hosts without those capabilities must preserve existing output.
     """
-    expected = root / "TestResults" / "coverage-fanin"
-    if (output.absolute() != expected.absolute() or output.is_symlink()
-            or expected.parent.is_symlink()):
-        raise ValueError("Only the wrapper's non-linked default composition can be prepared")
+    _prepare_default_output(root, output, ("TestResults", "coverage-fanin"), primary=False)
+
+
+def _prepare_default_output(root: Path, output: Path, parts: tuple[str, ...], *, primary: bool) -> None:
+    """Retire a complete hash-verified default capture/composition, never arbitrary files.
+
+    Previous capture identity may be historical; new capture inputs have already
+    passed current-source validation. These saved bytes grant cleanup authority
+    only, and are never accepted as evidence for the next producer.
+    """
+    label = "primary evidence" if primary else "composition"
+    expected = root.joinpath(*parts)
+    if (output.absolute() != expected.absolute()
+            or any(root.joinpath(*parts[:index]).is_symlink() for index in range(1, len(parts) + 1))):
+        raise ValueError(f"Only the wrapper's non-linked default {label} can be prepared")
     if not output.exists():
         return
     required = {os.open, os.stat, os.unlink, os.rmdir}
     if not required <= os.supports_dir_fd or os.listdir not in os.supports_fd or not hasattr(os, "O_NOFOLLOW"):
-        raise ValueError("Existing default composition requires no-follow directory handles")
+        raise ValueError(f"Existing default {label} requires no-follow directory handles")
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     with ExitStack() as handles:
         def directory(name: str | Path, parent: int | None = None) -> int:
@@ -372,42 +395,57 @@ def prepare_default_output(root: Path, output: Path) -> None:
             return descriptor
 
         root_fd = directory(root)
+        bindings = []
         try:
-            parent_fd = directory("TestResults", root_fd)
-            output_fd = directory("coverage-fanin", parent_fd)
+            parent_fd = root_fd
+            for name in parts[:-1]:
+                descriptor = directory(name, parent_fd)
+                bindings.append((name, parent_fd, descriptor))
+                parent_fd = descriptor
+            output_fd = directory(parts[-1], parent_fd)
         except OSError as error:
-            raise ValueError("Only a non-linked default composition can be prepared") from error
-        names = {"coverage.cobertura.xml", "primary-paths.cobertura.xml", "verification.json"}
+            raise ValueError(f"Only a non-linked default {label} can be prepared") from error
+        receipt_name = "manifest.json" if primary else "verification.json"
+        hashes = ({"coverage.cobertura.xml": None, "timings.json": None} if primary
+                  else {"coverage.cobertura.xml": "outputSha256", "primary-paths.cobertura.xml": "primaryPathsSha256"})
+        names = set(hashes) | {receipt_name}
         if set(os.listdir(output_fd)) != names:
-            raise ValueError("Unknown composition contents must be preserved")
+            raise ValueError(f"Unknown {label} contents must be preserved")
 
         def regular_file(name: str):
             stream = handles.enter_context(os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW,
                                                              dir_fd=output_fd), "rb"))
             info = os.fstat(stream.fileno())
-            limit = 1024 * 1024 if name == "verification.json" else MAX_REPORT_BYTES
+            limit = 1024 * 1024 if name.endswith(".json") else MAX_REPORT_BYTES
             if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
-                raise ValueError("Unknown composition contents must be preserved")
+                raise ValueError(f"Unknown {label} contents must be preserved")
             return stream
 
-        receipt = json.loads(regular_file("verification.json").read(1024 * 1024 + 1))
-        if (receipt.get("policy") != POLICY
-                or hashlib.file_digest(regular_file("coverage.cobertura.xml"), "sha256").hexdigest() != receipt.get("outputSha256")
-                or hashlib.file_digest(regular_file("primary-paths.cobertura.xml"), "sha256").hexdigest() != receipt.get("primaryPathsSha256")):
-            raise ValueError("Modified composition contents must be preserved")
+        receipt = json.loads(regular_file(receipt_name).read(1024 * 1024 + 1))
+        if not isinstance(receipt, dict) or receipt.get("policy") != POLICY:
+            raise ValueError(f"Modified {label} contents must be preserved")
+        if primary and (receipt.get("schemaVersion") != SCHEMA or receipt.get("scope") != "solution"
+                        or receipt.get("filter") is not None or not isinstance(receipt.get("files"), dict)
+                        or set(receipt["files"]) != set(hashes)):
+            raise ValueError("Modified primary evidence inventory must be preserved")
+        for name, key in hashes.items():
+            expected_hash = receipt["files"][name] if primary else receipt.get(key)
+            if hashlib.file_digest(regular_file(name), "sha256").hexdigest() != expected_hash:
+                raise ValueError(f"Modified {label} contents must be preserved")
 
         def bound(name: str, parent: int, descriptor: int) -> bool:
             current = os.stat(name, dir_fd=parent, follow_symlinks=False)
             retained = os.fstat(descriptor)
             return (current.st_dev, current.st_ino) == (retained.st_dev, retained.st_ino)
 
-        if not bound("TestResults", root_fd, parent_fd) or not bound("coverage-fanin", parent_fd, output_fd):
-            raise ValueError("Default composition directory changed; preserve its contents")
+        if (any(not bound(name, parent, descriptor) for name, parent, descriptor in bindings)
+                or not bound(parts[-1], parent_fd, output_fd)):
+            raise ValueError(f"Default {label} directory changed; preserve its contents")
         for name in names:
             os.unlink(name, dir_fd=output_fd)
-        if not bound("coverage-fanin", parent_fd, output_fd):
-            raise ValueError("Default composition directory changed before removal")
-        os.rmdir("coverage-fanin", dir_fd=parent_fd)
+        if not bound(parts[-1], parent_fd, output_fd):
+            raise ValueError(f"Default {label} directory changed before removal")
+        os.rmdir(parts[-1], dir_fd=parent_fd)
 
 
 def main() -> None:
