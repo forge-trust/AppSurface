@@ -295,10 +295,14 @@ jobs:
                             'current_run_qualification': False}))
           PY_STATUS
           }
+          sdk_data="$RUNNER_TEMP/n04-forensic-sdk-data"
+          test ! -e "$sdk_data"
+          test ! -L "$sdk_data"
+          sudo --non-interactive install --directory --mode=0700 --owner=root --group=root "$sdk_data"
           snapshot_status before
           set +e
           timeout --signal=KILL 1200 sudo --non-interactive /usr/bin/env -i \
-            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp XDG_DATA_HOME="$sdk_data" \
             "$C1_RUNTIME/dotnet" "$C1_COVERLET" "$C1_INPUTS/tool/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
             --include '[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Linux*' '[ForgeTrust.AppSurface.Evidence.Supervision]ForgeTrust.AppSurface.Evidence.Supervision.Supervision*' --include-test-assembly \
