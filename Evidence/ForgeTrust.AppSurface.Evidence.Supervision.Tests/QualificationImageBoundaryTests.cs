@@ -6,6 +6,43 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 /// <summary>Inspects built image metadata without loading or accessing private native owners.</summary>
 public sealed class QualificationImageBoundaryTests
 {
+    /// <summary>Shared async operations keep the same compiler identities across private image selections.</summary>
+    /// <remarks>This inspects actual emitted metadata; it neither invokes an owner nor establishes native authority.</remarks>
+    [Fact]
+    public void CommonAsyncOperationsPrecedeSelectorOnlyMembersInEmittedMetadata()
+    {
+        RequireAsyncIdentities("LinuxWorkerProcess",
+        [
+            "JoinPhysicalCleanupAsync", "StartCoreAsync", "MonitorExitAsync", "ContainAsync",
+            "StopSelectedUnitAsync", "FinalizeAsync", "DisposeCoreAsync", "JoinOriginalExitMonitorAsync",
+        ]);
+        RequireAsyncIdentities("LinuxEmptyObservationControlServer",
+        [
+            "RunOwnedAsync", "RunCoreAsync", "HandleRegisteredAsync", "HandleAsync", "StopEmptyDescendantsAsync",
+        ]);
+    }
+
+    private static void RequireAsyncIdentities(string owner, IReadOnlyList<string> methods)
+    {
+        using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Supervision.dll"));
+        using var image = new PEReader(file);
+        var metadata = image.GetMetadataReader();
+        var names = new List<string>();
+        foreach (var handle in metadata.TypeDefinitions)
+        {
+            var type = metadata.GetTypeDefinition(handle);
+            var declaring = type.GetDeclaringType();
+            if (!declaring.IsNil && metadata.GetString(metadata.GetTypeDefinition(declaring).Name) == owner)
+                names.Add(metadata.GetString(type.Name));
+        }
+
+        for (var index = 0; index < methods.Count; index++)
+        {
+            var prefix = $"<{methods[index]}>d__";
+            Assert.Equal([prefix + index], names.Where(name => name.StartsWith(prefix, StringComparison.Ordinal)));
+        }
+    }
+
     /// <summary>Only the selected native rendezvous implementation is physically present in the image.</summary>
     [Fact]
     public void NativeRendezvousImplementationsMatchTheCompiledSelector()

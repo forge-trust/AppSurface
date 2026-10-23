@@ -22,365 +22,8 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// </remarks>
 internal sealed class LinuxEmptyObservationControlServer
 {
-    private readonly LinuxOwnerActivation _owner;
-    private readonly LinuxControlListener _listener;
-    private readonly LinuxWorkerProcess _worker;
-    private readonly EvidenceProtectedLaunchInput _input;
-    private readonly LinuxRunAccounts _accounts;
-    private readonly LinuxRunWorkspace _workspace;
-    private LinuxCoverageControlOperations? _coverage;
-    private LinuxApplicationProcess? _application;
-#if EVIDENCE_PRIVATE_N04
-    private LinuxN04CheckpointOwner? _n04;
-#endif
-#if EVIDENCE_PRIVATE_N07
-    private LinuxN07CheckpointOwner? _n07;
-    private int _n07OriginalTasksCompleted;
-    private int _n07LocalCloseAttemptCompleted;
-#endif
-    private readonly SupervisionWorkRegistry _ledger = new();
-    private readonly SupervisionControlSequence _sequence;
-    private readonly SupervisionSingleAttempt _run = new();
-    private readonly SemaphoreSlim _replyOrder = new(1, 1);
-    private readonly TaskCompletionSource _exitCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private int _negativeReadyCommitted; // A past authenticated write event, not whole-protocol success.
-    private readonly TaskCompletionSource _exitIntent = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly object _executionGate = new();
-    private Task? _execution;
-    private int _ioJoined;
-    private int _localOwnersClosed;
-    private int _connectionCloseFailed;
-    private readonly LinuxControlFailureLatch _failures = new();
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-    private readonly TaskCompletionSource _cancellationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
-#endif
-    private readonly TaskCompletionSource _cancellationFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private Task? _cancellationSignal;
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-    private int _signalClaimed;
-#endif
-#if EVIDENCE_PRIVATE_ACCEPTED_WORK
-    private readonly object _n16Gate = new();
-    private readonly TaskCompletionSource _n16BodyEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource _n16Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource _n16StopStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly TaskCompletionSource _n16WaitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private Task? _n16Work;
-    private int _n16WorkClaimed;
-    private int _n16AcceptedCommitted;
-    private int _n16ResponseCommitted;
-    private int _n16StopCommitted;
-    private int _n16WaitCommitted;
-    private int _n16ControlsOverlapped;
-#if EVIDENCE_PRIVATE_N16
-    private LinuxN16ProgressMark? _n16LastProgress;
-#endif
-#endif
-
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-    /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
-    internal bool CancellationSignalJoined => _cancellationSignal?.IsCompletedSuccessfully == true;
-
-#endif
-#if EVIDENCE_PRIVATE_ACCEPTED_WORK
-#if EVIDENCE_PRIVATE_N16
-    /// <summary>Projects private N16 past write/task events only after original server and native holder joins.</summary>
-    /// <remarks>
-    /// Requires the original custody owners, all accepted-body/control joins, authenticated response
-    /// writes and the final committed EXIT. This bounded record is failure-only data; it grants no completion, admission,
-    /// account deletion, product acceptance or authority to a reader.
-    /// </remarks>
-    internal byte[] CaptureAcceptedBlockedWork(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-        if (!_sequence.ExitAcknowledged || !_exitCommitted.Task.IsCompletedSuccessfully) throw Rejected();
-        lock (_n16Gate)
-            if (_n16Work?.IsCompletedSuccessfully != true || Volatile.Read(ref _n16WorkClaimed) != 1
-                || Volatile.Read(ref _n16AcceptedCommitted) != 1 || Volatile.Read(ref _n16ResponseCommitted) != 1
-                || Volatile.Read(ref _n16StopCommitted) != 1 || Volatile.Read(ref _n16WaitCommitted) != 1
-                || Volatile.Read(ref _n16ControlsOverlapped) != 1) throw Rejected();
-        var bytes = EvidenceCanonicalJson.Serialize(new
-        {
-            schema = "issue779-accepted-blocked-work-v1", generation = owner.RunId.ToString("N"),
-            @case = "N16", accepted_write_committed = true, request_blocked_during_control_overlap = true,
-            original_body_joined = true, original_request_response_committed = true,
-            stop_write_committed = true, positive_wait_write_committed = true,
-            exit_write_committed = true,
-            handlers_joined = true, active_workloads = 0, active_controls = 0,
-            native_authority = false, native_acceptance = false
-        });
-        token.ThrowIfCancellationRequested();
-        if (bytes.Length is 0 or > 4096) throw Rejected();
-        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-        return bytes;
-    }
-#endif
-#endif
-
-#if EVIDENCE_PRIVATE_N16
-    /// <summary>Copies only existing N16 server flags and the age of its last observed original milestone.</summary>
-    /// <remarks>This method performs no owner, admission, custody, wait, token, or kernel operation.</remarks>
-    internal LinuxN16ProgressDiagnostic.Snapshot CaptureN16ProgressDiagnostic()
-    {
-        var mark = Volatile.Read(ref _n16LastProgress);
-        long? elapsed = mark is null ? null : LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
-            mark.Timestamp, Stopwatch.GetTimestamp(), Stopwatch.Frequency);
-        return new(
-            mark?.Milestone ?? LinuxN16ProgressDiagnostic.Milestone.Unknown,
-            elapsed,
-            Volatile.Read(ref _n16WorkClaimed) == 1,
-            _n16BodyEntered.Task.IsCompletedSuccessfully,
-            Volatile.Read(ref _n16AcceptedCommitted) == 1,
-            Volatile.Read(ref _n16ResponseCommitted) == 1,
-            _n16StopStarted.Task.IsCompletedSuccessfully,
-            _n16WaitStarted.Task.IsCompletedSuccessfully,
-            Volatile.Read(ref _n16ControlsOverlapped) == 1,
-            Volatile.Read(ref _n16StopCommitted) == 1,
-            Volatile.Read(ref _n16WaitCommitted) == 1,
-            _exitCommitted.Task.IsCompletedSuccessfully,
-            null);
-    }
-
-    private void ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone milestone) =>
-        Volatile.Write(ref _n16LastProgress, new(milestone, Stopwatch.GetTimestamp()));
-
-    private sealed record LinuxN16ProgressMark(LinuxN16ProgressDiagnostic.Milestone Milestone, long Timestamp);
-#endif
-
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-    /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
-    /// <remarks>Successful syscall and READY observations still cannot establish caller-token delivery.</remarks>
-    internal string CaptureCancellationSignal(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-        if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
-            || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully || Volatile.Read(ref _negativeReadyCommitted) != 1)
-            throw Rejected();
-        return System.Text.Json.JsonSerializer.Serialize(new
-        {
-            schema = "issue779-cancellation-signal-v1",
-            generation = _owner.RunId.ToString("N"),
-            @case = EvidenceOriginalCancellationCheckpoint.Case,
-            signal = 2,
-            syscall_exit = 0,
-            original_signal_task_joined = true,
-            ready_committed = true,
-            phase_observed = true,
-            native_authority = false
-        });
-    }
-
-#endif
-#if EVIDENCE_PRIVATE_N09
-    /// <summary>Rechecks and closes the actual N09 allocation holder after original worker joins.</summary>
-    /// <remarks>The bounded metadata record is consistency data only and cannot establish native acceptance.</remarks>
-    internal byte[]? CaptureAndCloseN09AllocationSlot(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        if (!workspace.HasN09AllocationSlot) return null;
-        try
-        {
-            RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-            worker.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
-            if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
-                || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully
-                || Volatile.Read(ref _negativeReadyCommitted) != 1) throw Rejected();
-            return workspace.CloseAndCaptureN09AllocationSlot(token);
-        }
-        catch (Exception error) when (Recoverable(error))
-        {
-            try { workspace.CloseN09AllocationSlotWithoutCapture(); }
-            catch (Exception closeError) when (Recoverable(closeError)) { /* Preserve the original failure; workspace remains quarantined. */ }
-            throw;
-        }
-    }
-#endif
-
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-    private async Task SignalCancellationOwnedAsync(Task dispatch, CancellationToken token)
-    {
-        await dispatch.ConfigureAwait(false);
-        try
-        {
-            await _cancellationReady.Task.WaitAsync(token).ConfigureAwait(false);
-            await _worker.CancellationPhaseObserved.WaitAsync(token).ConfigureAwait(false);
-            _worker.RequireServerOwner(_input, _owner, _accounts, _workspace, _listener, token);
-            var identity = _worker.RequireWorker(token);
-#if EVIDENCE_PRIVATE_N09
-            // Retain the real allocated output slot after the authenticated phase/READY and
-            // immediately before the original, identity-bound SIGINT.
-            _workspace.RetainN09AllocationSlot(token);
-#endif
-            if (Interlocked.Exchange(ref _signalClaimed, 1) != 0) throw Rejected();
-            LinuxOriginalCancellationSignal.Send(_worker, identity, _owner, token);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception error) when (Recoverable(error))
-        {
-            _cancellationFailed.TrySetException(error);
-            _ = _cancellationFailed.Task.Exception;
-            throw;
-        }
-    }
-
-#endif
-    /// <summary>Gets first caught server-fault data; this establishes no protocol or native outcome.</summary>
-    internal LinuxControlFailure? FirstFailure => _failures.First;
-
-    private LinuxEmptyObservationControlServer(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, LinuxWorkerProcess worker,
-        LinuxCoverageControlOperations? coverage)
-    {
-        _input = input; _owner = owner; _listener = listener; _worker = worker;
-        _accounts = accounts; _workspace = workspace;
-        _coverage = coverage;
-        _sequence = new(_ledger, StopEmptyDescendantsAsync);
-    }
-
-    /// <summary>Binds the actual owners and resolves the protected empty or coverage targeted policy before dispatch.</summary>
-    /// <remarks>This cannot activate the reserved supervisor entry or qualify an application/consumer.</remarks>
-    internal static LinuxEmptyObservationControlServer Create(EvidenceProtectedLaunchInput input,
-        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
-        LinuxControlListener listener, LinuxWorkerProcess worker, CancellationToken token,
-        LinuxProducerWorkspace? producerWorkspace = null, SupervisionRunOutputBudget? output = null,
-        LinuxApplicationWorkspace? applicationWorkspace = null, EvidenceApplicationSelection? applicationSelection = null)
-    {
-        ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
-        ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
-        ArgumentNullException.ThrowIfNull(listener); ArgumentNullException.ThrowIfNull(worker);
-        worker.ClaimControlServer(input, owner, accounts, workspace, listener, token);
-        var plan = input.Request.ObservationProducerIds.Count == 0
-            ? EvidenceEmptyObservationPlan.FromInput(input, token) : input.Request.ApplicationId is null
-                ? EvidenceCoverageObservationPlan.FromInput(input, token) : EvidenceApplicationSelection.ResolvePlan(input, token);
-        // Ownership references may be retained before startup. RunCoreAsync still requires the
-        // actual joined startup and rechecks live kernel identity before any accepted request.
-        worker.RequireServerOwner(input, owner, accounts, workspace, listener, token);
-        var server = new LinuxEmptyObservationControlServer(input, owner, accounts, workspace, listener, worker, null);
-        if (plan.Profile.Producers.Count != 0)
-        {
-            if (producerWorkspace is null || output is null) throw Rejected();
-            server._coverage = LinuxCoverageControlOperations.Create(input, owner, accounts, workspace,
-                producerWorkspace, server._ledger, output, token);
-        }
-        if (applicationWorkspace is not null || applicationSelection is not null)
-        {
-            if (applicationWorkspace is null || applicationSelection is null || producerWorkspace is null || output is null) throw Rejected();
-            server._application = LinuxApplicationProcess.Create(input, owner, accounts, workspace, producerWorkspace,
-                applicationWorkspace, applicationSelection, server._ledger, output, token);
-        }
-        return server;
-    }
-
-    /// <summary>Registers and joins every original accept, handler, response write and accepted connection close.</summary>
-    /// <param name="token">Independent root/control lifetime; a worker's per-operation cancellation never owns this token.</param>
-    /// <remarks>
-    /// One pending accept and at most 32 handlers are retained. Per-request I/O is capped by the protected
-    /// admission bound and original job remainder. Cleanup has one cumulative stop/cleanup bound; later
-    /// requests cannot reset it. The reply semaphore orders ACK commits, including a client which sends
-    /// its next request immediately after receiving LF while the prior server continuation still runs.
-    /// No handler calls this drain or the worker's final stop/join. Caller cancellation closes actual I/O;
-    /// every original operation remains joined before return, including ignored cancellation.
-    /// A valid EXIT claim signals intent, forbids further accept dispatch and joins listening admission before
-    /// ACK bytes. Intent grants no successful commit. Current handlers and connections remain retained through
-    /// writes, release and final owner checks, then full listener disposal closes the native named handles.
-    /// </remarks>
-    internal Task RunAsync(CancellationToken token)
-    {
-        var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Task execution;
-        lock (_executionGate)
-        {
-            _run.Claim();
-            execution = RunOwnedAsync(dispatch.Task, token);
-            _execution = execution;
-        }
-        dispatch.SetResult();
-        return execution;
-    }
-
-    /// <summary>Requires actual completed server I/O and original native references before filesystem custody.</summary>
-    /// <remarks>Protocol failure may remain; this guard grants neither successful execution nor account deletion.</remarks>
-    internal void RequireCustodyOwner(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
-            || !ReferenceEquals(worker, _worker)) throw Rejected();
-        owner.RequireControlIdentity(token);
-        lock (_executionGate)
-            if (_execution?.IsCompleted != true || Volatile.Read(ref _ioJoined) == 0
-                || Volatile.Read(ref _localOwnersClosed) == 0 || Volatile.Read(ref _connectionCloseFailed) != 0
-                || !_ledger.IsControlAdmissionClosed || _ledger.ActiveControls != 0
-                || !_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
-        owner.RequireControlIdentity(token);
-    }
-
-    /// <summary>Gets descriptor data only after an actual peer-bound READY write committed and handlers joined.</summary>
-    /// <param name="input">Reference-equal original protected input.</param>
-    /// <param name="owner">Original actual owner.</param>
-    /// <param name="accounts">Original actual accounts.</param>
-    /// <param name="workspace">Original retained workspace and immutable sealed descriptor.</param>
-    /// <param name="worker">Original selected worker, never caller PID data.</param>
-    /// <param name="token">Original cleanup token, not a new deadline.</param>
-    /// <returns>Descriptor SHA256 data; it authenticates neither an external record nor a subsequent action.</returns>
-    /// <remarks>
-    /// Unlike successful-sequence ReadyAcknowledged, the past event remains observable after a later
-    /// negative outcome. It is set only after existing authenticated response I/O, connection release,
-    /// owner checks and CompleteWrite succeed. Missing events reject; no failure flag is cleared.
-    /// </remarks>
-    internal string RequireNegativeReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-        if (Volatile.Read(ref _negativeReadyCommitted) != 1 || _workspace.DescriptorSha256 is not { } descriptor)
-            throw Rejected();
-        return descriptor;
-    }
-
-    /// <summary>Obtains the actual drained listener's original named-inode comparison data for native custody.</summary>
-    /// <remarks>Does not seal an inode, clear any failure or release accounts.</remarks>
-    internal LinuxProtectedMetadata RequireCustodySocket(CancellationToken token)
-    {
-        RequireCustodyOwner(_input, _owner, _accounts, _workspace, _worker, token);
-        return _listener.RequireCustodySocket(_owner, _accounts, _workspace, token);
-    }
-
-#if EVIDENCE_PRIVATE_N07
-    internal string RequireN07FailedReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
-        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
-    {
-        token.ThrowIfCancellationRequested();
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
-            || !ReferenceEquals(worker, _worker)) throw Rejected();
-        owner.RequireCleanupLaunchInput(input, token);
-        lock (_executionGate)
-            if (_execution?.IsCompleted != true || Volatile.Read(ref _n07OriginalTasksCompleted) != 1
-                || Volatile.Read(ref _n07LocalCloseAttemptCompleted) != 1 || _n07?.JoinedAttempt != true
-                || Volatile.Read(ref _negativeReadyCommitted) != 1 || _ledger.ActiveControls != 0) throw Rejected();
-        var descriptor = _workspace.DescriptorSha256 ?? throw Rejected();
-        owner.RequireCleanupLaunchInput(input, token);
-        return descriptor;
-    }
-
-    internal TaskStatus N07ExecutionStatus
-    {
-        get { lock (_executionGate) return _execution is { IsCompleted: true } task ? task.Status : throw Rejected(); }
-    }
-#endif
-
-    /// <summary>Requires the original successful server task and all committed protocol steps before final-file claims.</summary>
-    /// <remarks>Physical custody after a failed protocol remains possible, but cannot pass this success guard.</remarks>
-    internal void RequireSuccessfulCompletion(CancellationToken token)
-    {
-        RequireCustodyOwner(_input, _owner, _accounts, _workspace, _worker, token);
-        lock (_executionGate)
-            if (_execution?.IsCompletedSuccessfully != true || !_sequence.ExitAcknowledged
-                || !_ledger.IsSettled) throw Rejected();
-        _owner.RequireControlIdentity(token);
-    }
+    // Keep common async declarations first so qualification selectors do not shift
+    // their compiler-generated state-machine identities. Preserve field initializer order.
 
     private async Task RunOwnedAsync(Task dispatch, CancellationToken token)
     {
@@ -1050,6 +693,367 @@ internal sealed class LinuxEmptyObservationControlServer
         // This private server has no work-dispatch path or external workload registration API.
         // These are observations of the genuine empty descendant set, not worker exit assertions.
         return new SupervisionControlJoinFacts(true, true, true);
+    }
+
+
+    private readonly LinuxOwnerActivation _owner;
+    private readonly LinuxControlListener _listener;
+    private readonly LinuxWorkerProcess _worker;
+    private readonly EvidenceProtectedLaunchInput _input;
+    private readonly LinuxRunAccounts _accounts;
+    private readonly LinuxRunWorkspace _workspace;
+    private LinuxCoverageControlOperations? _coverage;
+    private LinuxApplicationProcess? _application;
+#if EVIDENCE_PRIVATE_N04
+    private LinuxN04CheckpointOwner? _n04;
+#endif
+#if EVIDENCE_PRIVATE_N07
+    private LinuxN07CheckpointOwner? _n07;
+    private int _n07OriginalTasksCompleted;
+    private int _n07LocalCloseAttemptCompleted;
+#endif
+    private readonly SupervisionWorkRegistry _ledger = new();
+    private readonly SupervisionControlSequence _sequence;
+    private readonly SupervisionSingleAttempt _run = new();
+    private readonly SemaphoreSlim _replyOrder = new(1, 1);
+    private readonly TaskCompletionSource _exitCommitted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _negativeReadyCommitted; // A past authenticated write event, not whole-protocol success.
+    private readonly TaskCompletionSource _exitIntent = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _executionGate = new();
+    private Task? _execution;
+    private int _ioJoined;
+    private int _localOwnersClosed;
+    private int _connectionCloseFailed;
+    private readonly LinuxControlFailureLatch _failures = new();
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+    private readonly TaskCompletionSource _cancellationReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
+    private readonly TaskCompletionSource _cancellationFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _cancellationSignal;
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+    private int _signalClaimed;
+#endif
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    private readonly object _n16Gate = new();
+    private readonly TaskCompletionSource _n16BodyEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16StopStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _n16WaitStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _n16Work;
+    private int _n16WorkClaimed;
+    private int _n16AcceptedCommitted;
+    private int _n16ResponseCommitted;
+    private int _n16StopCommitted;
+    private int _n16WaitCommitted;
+    private int _n16ControlsOverlapped;
+#if EVIDENCE_PRIVATE_N16
+    private LinuxN16ProgressMark? _n16LastProgress;
+#endif
+#endif
+
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+    /// <summary>Whether the original registered signal task joined successfully; not token delivery.</summary>
+    internal bool CancellationSignalJoined => _cancellationSignal?.IsCompletedSuccessfully == true;
+
+#endif
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Projects private N16 past write/task events only after original server and native holder joins.</summary>
+    /// <remarks>
+    /// Requires the original custody owners, all accepted-body/control joins, authenticated response
+    /// writes and the final committed EXIT. This bounded record is failure-only data; it grants no completion, admission,
+    /// account deletion, product acceptance or authority to a reader.
+    /// </remarks>
+    internal byte[] CaptureAcceptedBlockedWork(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (!_sequence.ExitAcknowledged || !_exitCommitted.Task.IsCompletedSuccessfully) throw Rejected();
+        lock (_n16Gate)
+            if (_n16Work?.IsCompletedSuccessfully != true || Volatile.Read(ref _n16WorkClaimed) != 1
+                || Volatile.Read(ref _n16AcceptedCommitted) != 1 || Volatile.Read(ref _n16ResponseCommitted) != 1
+                || Volatile.Read(ref _n16StopCommitted) != 1 || Volatile.Read(ref _n16WaitCommitted) != 1
+                || Volatile.Read(ref _n16ControlsOverlapped) != 1) throw Rejected();
+        var bytes = EvidenceCanonicalJson.Serialize(new
+        {
+            schema = "issue779-accepted-blocked-work-v1", generation = owner.RunId.ToString("N"),
+            @case = "N16", accepted_write_committed = true, request_blocked_during_control_overlap = true,
+            original_body_joined = true, original_request_response_committed = true,
+            stop_write_committed = true, positive_wait_write_committed = true,
+            exit_write_committed = true,
+            handlers_joined = true, active_workloads = 0, active_controls = 0,
+            native_authority = false, native_acceptance = false
+        });
+        token.ThrowIfCancellationRequested();
+        if (bytes.Length is 0 or > 4096) throw Rejected();
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        return bytes;
+    }
+#endif
+#endif
+
+#if EVIDENCE_PRIVATE_N16
+    /// <summary>Copies only existing N16 server flags and the age of its last observed original milestone.</summary>
+    /// <remarks>This method performs no owner, admission, custody, wait, token, or kernel operation.</remarks>
+    internal LinuxN16ProgressDiagnostic.Snapshot CaptureN16ProgressDiagnostic()
+    {
+        var mark = Volatile.Read(ref _n16LastProgress);
+        long? elapsed = mark is null ? null : LinuxN16ProgressDiagnostic.ElapsedMilliseconds(
+            mark.Timestamp, Stopwatch.GetTimestamp(), Stopwatch.Frequency);
+        return new(
+            mark?.Milestone ?? LinuxN16ProgressDiagnostic.Milestone.Unknown,
+            elapsed,
+            Volatile.Read(ref _n16WorkClaimed) == 1,
+            _n16BodyEntered.Task.IsCompletedSuccessfully,
+            Volatile.Read(ref _n16AcceptedCommitted) == 1,
+            Volatile.Read(ref _n16ResponseCommitted) == 1,
+            _n16StopStarted.Task.IsCompletedSuccessfully,
+            _n16WaitStarted.Task.IsCompletedSuccessfully,
+            Volatile.Read(ref _n16ControlsOverlapped) == 1,
+            Volatile.Read(ref _n16StopCommitted) == 1,
+            Volatile.Read(ref _n16WaitCommitted) == 1,
+            _exitCommitted.Task.IsCompletedSuccessfully,
+            null);
+    }
+
+    private void ObserveN16Progress(LinuxN16ProgressDiagnostic.Milestone milestone) =>
+        Volatile.Write(ref _n16LastProgress, new(milestone, Stopwatch.GetTimestamp()));
+
+    private sealed record LinuxN16ProgressMark(LinuxN16ProgressDiagnostic.Milestone Milestone, long Timestamp);
+#endif
+
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+    /// <summary>Projects the original signal task only after the existing server/holder joins.</summary>
+    /// <remarks>Successful syscall and READY observations still cannot establish caller-token delivery.</remarks>
+    internal string CaptureCancellationSignal(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
+            || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully || Volatile.Read(ref _negativeReadyCommitted) != 1)
+            throw Rejected();
+        return System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schema = "issue779-cancellation-signal-v1",
+            generation = _owner.RunId.ToString("N"),
+            @case = EvidenceOriginalCancellationCheckpoint.Case,
+            signal = 2,
+            syscall_exit = 0,
+            original_signal_task_joined = true,
+            ready_committed = true,
+            phase_observed = true,
+            native_authority = false
+        });
+    }
+
+#endif
+#if EVIDENCE_PRIVATE_N09
+    /// <summary>Rechecks and closes the actual N09 allocation holder after original worker joins.</summary>
+    /// <remarks>The bounded metadata record is consistency data only and cannot establish native acceptance.</remarks>
+    internal byte[]? CaptureAndCloseN09AllocationSlot(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        if (!workspace.HasN09AllocationSlot) return null;
+        try
+        {
+            RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+            worker.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
+            if (!CancellationSignalJoined || Volatile.Read(ref _signalClaimed) != 1
+                || !_worker.CancellationPhaseObserved.IsCompletedSuccessfully
+                || Volatile.Read(ref _negativeReadyCommitted) != 1) throw Rejected();
+            return workspace.CloseAndCaptureN09AllocationSlot(token);
+        }
+        catch (Exception error) when (Recoverable(error))
+        {
+            try { workspace.CloseN09AllocationSlotWithoutCapture(); }
+            catch (Exception closeError) when (Recoverable(closeError)) { /* Preserve the original failure; workspace remains quarantined. */ }
+            throw;
+        }
+    }
+#endif
+
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+    private async Task SignalCancellationOwnedAsync(Task dispatch, CancellationToken token)
+    {
+        await dispatch.ConfigureAwait(false);
+        try
+        {
+            await _cancellationReady.Task.WaitAsync(token).ConfigureAwait(false);
+            await _worker.CancellationPhaseObserved.WaitAsync(token).ConfigureAwait(false);
+            _worker.RequireServerOwner(_input, _owner, _accounts, _workspace, _listener, token);
+            var identity = _worker.RequireWorker(token);
+#if EVIDENCE_PRIVATE_N09
+            // Retain the real allocated output slot after the authenticated phase/READY and
+            // immediately before the original, identity-bound SIGINT.
+            _workspace.RetainN09AllocationSlot(token);
+#endif
+            if (Interlocked.Exchange(ref _signalClaimed, 1) != 0) throw Rejected();
+            LinuxOriginalCancellationSignal.Send(_worker, identity, _owner, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception error) when (Recoverable(error))
+        {
+            _cancellationFailed.TrySetException(error);
+            _ = _cancellationFailed.Task.Exception;
+            throw;
+        }
+    }
+
+#endif
+    /// <summary>Gets first caught server-fault data; this establishes no protocol or native outcome.</summary>
+    internal LinuxControlFailure? FirstFailure => _failures.First;
+
+    private LinuxEmptyObservationControlServer(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, LinuxWorkerProcess worker,
+        LinuxCoverageControlOperations? coverage)
+    {
+        _input = input; _owner = owner; _listener = listener; _worker = worker;
+        _accounts = accounts; _workspace = workspace;
+        _coverage = coverage;
+        _sequence = new(_ledger, StopEmptyDescendantsAsync);
+    }
+
+    /// <summary>Binds the actual owners and resolves the protected empty or coverage targeted policy before dispatch.</summary>
+    /// <remarks>This cannot activate the reserved supervisor entry or qualify an application/consumer.</remarks>
+    internal static LinuxEmptyObservationControlServer Create(EvidenceProtectedLaunchInput input,
+        LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace,
+        LinuxControlListener listener, LinuxWorkerProcess worker, CancellationToken token,
+        LinuxProducerWorkspace? producerWorkspace = null, SupervisionRunOutputBudget? output = null,
+        LinuxApplicationWorkspace? applicationWorkspace = null, EvidenceApplicationSelection? applicationSelection = null)
+    {
+        ArgumentNullException.ThrowIfNull(input); ArgumentNullException.ThrowIfNull(owner);
+        ArgumentNullException.ThrowIfNull(accounts); ArgumentNullException.ThrowIfNull(workspace);
+        ArgumentNullException.ThrowIfNull(listener); ArgumentNullException.ThrowIfNull(worker);
+        worker.ClaimControlServer(input, owner, accounts, workspace, listener, token);
+        var plan = input.Request.ObservationProducerIds.Count == 0
+            ? EvidenceEmptyObservationPlan.FromInput(input, token) : input.Request.ApplicationId is null
+                ? EvidenceCoverageObservationPlan.FromInput(input, token) : EvidenceApplicationSelection.ResolvePlan(input, token);
+        // Ownership references may be retained before startup. RunCoreAsync still requires the
+        // actual joined startup and rechecks live kernel identity before any accepted request.
+        worker.RequireServerOwner(input, owner, accounts, workspace, listener, token);
+        var server = new LinuxEmptyObservationControlServer(input, owner, accounts, workspace, listener, worker, null);
+        if (plan.Profile.Producers.Count != 0)
+        {
+            if (producerWorkspace is null || output is null) throw Rejected();
+            server._coverage = LinuxCoverageControlOperations.Create(input, owner, accounts, workspace,
+                producerWorkspace, server._ledger, output, token);
+        }
+        if (applicationWorkspace is not null || applicationSelection is not null)
+        {
+            if (applicationWorkspace is null || applicationSelection is null || producerWorkspace is null || output is null) throw Rejected();
+            server._application = LinuxApplicationProcess.Create(input, owner, accounts, workspace, producerWorkspace,
+                applicationWorkspace, applicationSelection, server._ledger, output, token);
+        }
+        return server;
+    }
+
+    /// <summary>Registers and joins every original accept, handler, response write and accepted connection close.</summary>
+    /// <param name="token">Independent root/control lifetime; a worker's per-operation cancellation never owns this token.</param>
+    /// <remarks>
+    /// One pending accept and at most 32 handlers are retained. Per-request I/O is capped by the protected
+    /// admission bound and original job remainder. Cleanup has one cumulative stop/cleanup bound; later
+    /// requests cannot reset it. The reply semaphore orders ACK commits, including a client which sends
+    /// its next request immediately after receiving LF while the prior server continuation still runs.
+    /// No handler calls this drain or the worker's final stop/join. Caller cancellation closes actual I/O;
+    /// every original operation remains joined before return, including ignored cancellation.
+    /// A valid EXIT claim signals intent, forbids further accept dispatch and joins listening admission before
+    /// ACK bytes. Intent grants no successful commit. Current handlers and connections remain retained through
+    /// writes, release and final owner checks, then full listener disposal closes the native named handles.
+    /// </remarks>
+    internal Task RunAsync(CancellationToken token)
+    {
+        var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task execution;
+        lock (_executionGate)
+        {
+            _run.Claim();
+            execution = RunOwnedAsync(dispatch.Task, token);
+            _execution = execution;
+        }
+        dispatch.SetResult();
+        return execution;
+    }
+
+    /// <summary>Requires actual completed server I/O and original native references before filesystem custody.</summary>
+    /// <remarks>Protocol failure may remain; this guard grants neither successful execution nor account deletion.</remarks>
+    internal void RequireCustodyOwner(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !ReferenceEquals(worker, _worker)) throw Rejected();
+        owner.RequireControlIdentity(token);
+        lock (_executionGate)
+            if (_execution?.IsCompleted != true || Volatile.Read(ref _ioJoined) == 0
+                || Volatile.Read(ref _localOwnersClosed) == 0 || Volatile.Read(ref _connectionCloseFailed) != 0
+                || !_ledger.IsControlAdmissionClosed || _ledger.ActiveControls != 0
+                || !_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
+        owner.RequireControlIdentity(token);
+    }
+
+    /// <summary>Gets descriptor data only after an actual peer-bound READY write committed and handlers joined.</summary>
+    /// <param name="input">Reference-equal original protected input.</param>
+    /// <param name="owner">Original actual owner.</param>
+    /// <param name="accounts">Original actual accounts.</param>
+    /// <param name="workspace">Original retained workspace and immutable sealed descriptor.</param>
+    /// <param name="worker">Original selected worker, never caller PID data.</param>
+    /// <param name="token">Original cleanup token, not a new deadline.</param>
+    /// <returns>Descriptor SHA256 data; it authenticates neither an external record nor a subsequent action.</returns>
+    /// <remarks>
+    /// Unlike successful-sequence ReadyAcknowledged, the past event remains observable after a later
+    /// negative outcome. It is set only after existing authenticated response I/O, connection release,
+    /// owner checks and CompleteWrite succeed. Missing events reject; no failure flag is cleared.
+    /// </remarks>
+    internal string RequireNegativeReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
+        if (Volatile.Read(ref _negativeReadyCommitted) != 1 || _workspace.DescriptorSha256 is not { } descriptor)
+            throw Rejected();
+        return descriptor;
+    }
+
+    /// <summary>Obtains the actual drained listener's original named-inode comparison data for native custody.</summary>
+    /// <remarks>Does not seal an inode, clear any failure or release accounts.</remarks>
+    internal LinuxProtectedMetadata RequireCustodySocket(CancellationToken token)
+    {
+        RequireCustodyOwner(_input, _owner, _accounts, _workspace, _worker, token);
+        return _listener.RequireCustodySocket(_owner, _accounts, _workspace, token);
+    }
+
+#if EVIDENCE_PRIVATE_N07
+    internal string RequireN07FailedReadyDescriptor(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
+            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !ReferenceEquals(worker, _worker)) throw Rejected();
+        owner.RequireCleanupLaunchInput(input, token);
+        lock (_executionGate)
+            if (_execution?.IsCompleted != true || Volatile.Read(ref _n07OriginalTasksCompleted) != 1
+                || Volatile.Read(ref _n07LocalCloseAttemptCompleted) != 1 || _n07?.JoinedAttempt != true
+                || Volatile.Read(ref _negativeReadyCommitted) != 1 || _ledger.ActiveControls != 0) throw Rejected();
+        var descriptor = _workspace.DescriptorSha256 ?? throw Rejected();
+        owner.RequireCleanupLaunchInput(input, token);
+        return descriptor;
+    }
+
+    internal TaskStatus N07ExecutionStatus
+    {
+        get { lock (_executionGate) return _execution is { IsCompleted: true } task ? task.Status : throw Rejected(); }
+    }
+#endif
+
+    /// <summary>Requires the original successful server task and all committed protocol steps before final-file claims.</summary>
+    /// <remarks>Physical custody after a failed protocol remains possible, but cannot pass this success guard.</remarks>
+    internal void RequireSuccessfulCompletion(CancellationToken token)
+    {
+        RequireCustodyOwner(_input, _owner, _accounts, _workspace, _worker, token);
+        lock (_executionGate)
+            if (_execution?.IsCompletedSuccessfully != true || !_sequence.ExitAcknowledged
+                || !_ledger.IsSettled) throw Rejected();
+        _owner.RequireControlIdentity(token);
     }
 
 #if EVIDENCE_PRIVATE_ACCEPTED_WORK

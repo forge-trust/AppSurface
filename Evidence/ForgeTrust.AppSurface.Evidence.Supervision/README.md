@@ -1852,6 +1852,23 @@ stop, native monitor, cgroup, output drain, custody or account-close requirement
 The [finished-image metadata tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
 check actual implementation absence as well as matching private-image presence.
 
+## Shared asynchronous compiler identities
+
+The common asynchronous operations in [`LinuxWorkerProcess`](LinuxWorkerProcess.cs) and
+[`LinuxEmptyObservationControlServer`](LinuxEmptyObservationControlServer.cs) intentionally precede
+the retained state and selector-only members in each class. The C# compiler includes preceding
+member declarations when assigning generated state-machine names. A conditional field can therefore
+give identical shared source methods different generated identities in two qualification images.
+Stable common identities let the standard coverage tools combine those observations consistently.
+
+This ordering changes no method body, constructor body, field initializer order, authentication check
+or runtime allowance. Keep always-present async operations in the first region, and keep conditional
+operations outside it. Do not insert placeholder members or reorder initializers to adjust compiler
+names. The [image boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+read emitted PE metadata and verify the common method-to-state-machine mapping for the selected
+image; they invoke no private owner. Compiler identity consistency supplies no native authority or
+coverage by itself. Every selected image still requires its original execution and retained evidence.
+
 ## Validation-only worker measurement
 
 The [C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) is compiled into private C3/C3Sdk validation images only. Its three worker-holder call sites retain an already authenticated worker's private temporary directory before descriptor publication, capture genuine pinned tracker bytes after the original normal exit, and close the extra handles after the original monitor joins. The ordinary executable contains neither those call sites nor the fixture type, verified through PE metadata. It grants no admission, process owner, artifact custody, proof or production registration. Product environment, isolation, permissions, budgets and cleanup order are unchanged. The fixture reference documents the pinned format dependency, actual helper proof, first-worker-only scope and current native integration requirement.

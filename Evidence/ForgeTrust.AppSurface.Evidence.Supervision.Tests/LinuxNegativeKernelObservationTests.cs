@@ -198,4 +198,157 @@ public sealed class LinuxNegativeKernelObservationTests
         Assert.Equal("ASEVD410: Negative kernel observation data rejected.", error.Message);
         Assert.Null(error.InnerException);
     }
+
+    private static readonly Guid JoinedGeneration = Guid.Parse("00000000-0000-0000-0000-000000000001");
+
+    private static SupervisionOutputStreamReceipt JoinedStream(byte[] bytes) =>
+        new(bytes.Length, ImmutableArray.CreateRange(bytes), true, SupervisionOutputFailure.None);
+
+    private static SupervisionOutputReceipt JoinedPair(byte[]? stdout = null, byte[]? stderr = null)
+    {
+        var first = JoinedStream(stdout ?? []);
+        var second = JoinedStream(stderr ?? []);
+        return new(first, second, first.ReceivedBytes + second.ReceivedBytes,
+            16 * 1024 * 1024, SupervisionOutputFailure.None, false, false);
+    }
+
+    private static byte[] EncodeJoined(SupervisionOutputReceipt output, CancellationToken token = default) =>
+        LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached(JoinedGeneration, output, token);
+
+    private static void AssertJoinedEncoding(SupervisionOutputReceipt expected, byte[] encoded)
+    {
+        using var json = JsonDocument.Parse(encoded);
+        var root = json.RootElement;
+        Assert.Equal(new[]
+        {
+            "schema", "generation", "stdout", "stderr", "received_bytes", "received_byte_limit",
+            "observation_only", "native_authority", "native_acceptance",
+        }, root.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal("issue779-cancellation-joined-streams-v1", root.GetProperty("schema").GetString());
+        Assert.Equal(JoinedGeneration.ToString("N"), root.GetProperty("generation").GetString());
+        Assert.Equal(expected.ReceivedBytes, root.GetProperty("received_bytes").GetInt64());
+        Assert.Equal(expected.ReceivedByteLimit, root.GetProperty("received_byte_limit").GetInt64());
+        Assert.True(root.GetProperty("observation_only").GetBoolean());
+        Assert.False(root.GetProperty("native_authority").GetBoolean());
+        Assert.False(root.GetProperty("native_acceptance").GetBoolean());
+        AssertJoinedStream(root.GetProperty("stdout"), expected.Stdout);
+        AssertJoinedStream(root.GetProperty("stderr"), expected.Stderr);
+        Assert.InRange(encoded.Length + 1, 1, LinuxNegativeKernelObservation.MaximumJoinedStreamLineBytes);
+    }
+
+    private static void AssertJoinedStream(JsonElement actual, SupervisionOutputStreamReceipt expected)
+    {
+        Assert.Equal(new[]
+        {
+            "received_bytes", "retained_bytes", "discarded_bytes", "eof", "failure", "sha256", "base64",
+        }, actual.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal(expected.ReceivedBytes, actual.GetProperty("received_bytes").GetInt64());
+        Assert.Equal(expected.Prefix.Length, actual.GetProperty("retained_bytes").GetInt32());
+        Assert.Equal(0, actual.GetProperty("discarded_bytes").GetInt64());
+        Assert.True(actual.GetProperty("eof").GetBoolean());
+        Assert.Equal("None", actual.GetProperty("failure").GetString());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(expected.Prefix.AsSpan())),
+            actual.GetProperty("sha256").GetString());
+        Assert.Equal(expected.Prefix.ToArray(), Convert.FromBase64String(actual.GetProperty("base64").GetString()!));
+    }
+
+    private static void RejectJoined(SupervisionOutputReceipt? output, Guid? generation = null)
+    {
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxNegativeKernelObservation.EncodeJoinedStreamsDetached(generation ?? JoinedGeneration, output!));
+        Assert.Equal("ASEVD410: Negative kernel observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-output-canary", error.ToString());
+    }
+
+    /// <summary>Empty detached receipts encode empty bytes without implying a live capture or native result.</summary>
+    [Fact]
+    public void JoinedCodecEncodesEmptyDetachedPairWithClosedShape()
+    {
+        var pair = JoinedPair();
+        AssertJoinedEncoding(pair, EncodeJoined(pair));
+    }
+
+    /// <summary>Both streams preserve NUL and invalid UTF-8 bytes exactly in base64 and full-byte hashes.</summary>
+    [Fact]
+    public void JoinedCodecEncodesBinaryStdoutAndStderrWithoutTextConversion()
+    {
+        var pair = JoinedPair([0x00, 0xff, 0xc3, 0x28], [0x00, 0x80, 0xc0, 0xaf]);
+        AssertJoinedEncoding(pair, EncodeJoined(pair));
+    }
+
+    /// <summary>A coherent 64 KiB pair fits the detached export bound without truncation.</summary>
+    [Fact]
+    public void JoinedCodecAcceptsExact64KiBPair()
+    {
+        var pair = JoinedPair(Enumerable.Repeat((byte)0xfb, 32_767).ToArray(),
+            Enumerable.Repeat((byte)0xff, 32_769).ToArray());
+        Assert.Equal(LinuxNegativeKernelObservation.MaximumJoinedStreamBytes, pair.ReceivedBytes);
+        AssertJoinedEncoding(pair, EncodeJoined(pair));
+    }
+
+    /// <summary>One byte beyond the pair export bound is rejected without returning raw data.</summary>
+    [Fact]
+    public void JoinedCodecRejects64KiBPlusOne()
+    {
+        RejectJoined(JoinedPair(new byte[LinuxNegativeKernelObservation.MaximumJoinedStreamBytes], [0x01]));
+    }
+
+    /// <summary>The original cancelled token propagates before detached encoding.</summary>
+    [Fact]
+    public void JoinedCodecPreservesOriginalCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var error = Assert.Throws<OperationCanceledException>(() => EncodeJoined(JoinedPair(), cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+    }
+
+    /// <summary>Each invalid detached receipt shape rejects with the fixed sanitized error.</summary>
+    /// <param name="field">One distinct codec precondition or accounting failure.</param>
+    [Theory]
+    [InlineData("null-receipt")]
+    [InlineData("empty-generation")]
+    [InlineData("null-stdout")]
+    [InlineData("null-stderr")]
+    [InlineData("default-prefix")]
+    [InlineData("negative-counter")]
+    [InlineData("prefix-counter-mismatch")]
+    [InlineData("eof-false")]
+    [InlineData("pump-failure")]
+    [InlineData("shared-failure")]
+    [InlineData("shared-quota")]
+    [InlineData("stop-signal-failure")]
+    [InlineData("discarded")]
+    [InlineData("shared-counter")]
+    [InlineData("zero-limit")]
+    [InlineData("raised-limit")]
+    public void JoinedCodecRejectsInvalidDetachedReceipt(string field)
+    {
+        var pair = JoinedPair(Encoding.UTF8.GetBytes("private-output-canary"), [0x00, 0xff]);
+        switch (field)
+        {
+            case "null-receipt": RejectJoined(null); return;
+            case "empty-generation": RejectJoined(pair, Guid.Empty); return;
+            case "null-stdout": RejectJoined(pair with { Stdout = null! }); return;
+            case "null-stderr": RejectJoined(pair with { Stderr = null! }); return;
+            case "default-prefix": RejectJoined(pair with { Stdout = pair.Stdout with { Prefix = default } }); return;
+            case "negative-counter": RejectJoined(pair with { Stdout = pair.Stdout with { ReceivedBytes = -1 } }); return;
+            case "prefix-counter-mismatch": RejectJoined(pair with
+                { Stdout = pair.Stdout with { ReceivedBytes = pair.Stdout.Prefix.Length - 1 } }); return;
+            case "eof-false": RejectJoined(pair with { Stdout = pair.Stdout with { EndOfStream = false } }); return;
+            case "pump-failure": RejectJoined(pair with
+                { Stderr = pair.Stderr with { Failure = SupervisionOutputFailure.ReadFailed } }); return;
+            case "shared-failure": RejectJoined(pair with { Failure = SupervisionOutputFailure.ReadFailed }); return;
+            case "shared-quota": RejectJoined(pair with { QuotaExceeded = true }); return;
+            case "stop-signal-failure": RejectJoined(pair with { StopSignalFailed = true }); return;
+            case "discarded": RejectJoined(pair with
+                { Stdout = pair.Stdout with { ReceivedBytes = pair.Stdout.ReceivedBytes + 1 },
+                    ReceivedBytes = pair.ReceivedBytes + 1 }); return;
+            case "shared-counter": RejectJoined(pair with { ReceivedBytes = pair.ReceivedBytes + 1 }); return;
+            case "zero-limit": RejectJoined(pair with { ReceivedByteLimit = 0 }); return;
+            case "raised-limit": RejectJoined(pair with { ReceivedByteLimit = 16 * 1024 * 1024 + 1 }); return;
+            default: throw new ArgumentOutOfRangeException(nameof(field));
+        }
+    }
 }

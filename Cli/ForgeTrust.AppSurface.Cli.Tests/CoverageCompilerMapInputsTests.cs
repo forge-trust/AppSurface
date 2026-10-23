@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Linq;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -379,7 +380,7 @@ public sealed class CoverageCompilerMapInputsTests
 
         private string GetPath(string relativePath)
         {
-            var path = System.IO.Path.Combine(Path, relativePath);
+            var path = TestPathUtils.PathUnder(Path, relativePath);
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             return path;
         }
