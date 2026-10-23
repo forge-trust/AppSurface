@@ -68,12 +68,45 @@ public sealed class AccountMeasurementLineageTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
     }
 
+    /// <summary>Rebinding all descendant hashes cannot enroll a six-module ancestor or immediate predecessor.</summary>
+    [Theory]
+    [InlineData("C3", "original-dll")]
+    [InlineData("C3", "instrumented-pdb")]
+    [InlineData("C3", "missing-report")]
+    [InlineData("C3", "duplicate-report")]
+    [InlineData("C4Accounts", "original-dll")]
+    [InlineData("C4Accounts", "instrumented-pdb")]
+    [InlineData("C4Accounts", "missing-report")]
+    [InlineData("C4Accounts", "duplicate-report")]
+    public void SeventhModuleMustExistAtEveryAccountAncestor(string ancestor, string mutation)
+    {
+        const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
+        var fixture = new Fixture();
+        fixture.Validate();
+        var binding = ancestor == "C3" ? fixture.C3Binding : fixture.Creation.Binding;
+        var report = ancestor == "C3" ? fixture.C3Report : fixture.Creation.Report;
+        switch (mutation)
+        {
+            case "original-dll": binding["original"]!.AsObject().Remove(module); break;
+            case "instrumented-pdb": binding["instrumented"]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli.pdb"); break;
+            case "missing-report": report.Remove(module); break;
+            case "duplicate-report":
+                report.Remove(module);
+                report["/duplicate/ForgeTrust.AppSurface.Cli.dll"] = new JsonObject();
+                break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        fixture.RebindChain();
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
     private sealed class Fixture
     {
         internal AccountMeasurementTests.Fixture Creation { get; } = new("C4Accounts");
         internal AccountMeasurementTests.Fixture Rollback { get; } = new("C4AccountRollback");
         internal JsonObject C3Binding { get; } = new();
         internal JsonObject C3Native { get; } = new();
+        internal JsonObject C3Report => _c3Report;
         private readonly JsonObject _c3Report;
         private readonly byte[] _trx;
 

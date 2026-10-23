@@ -32,15 +32,19 @@ def model():
 
 
 class MeasuredBuildDataTests(unittest.TestCase):
-    def test_only_root_supervision_changes_while_six_report_modules_remain_bound(self):
+    def test_only_root_supervision_changes_while_seven_report_modules_remain_bound(self):
         original, value, capture = model()
         actual = binding.validate_build(value, capture, HEAD, "N10")
         self.assertEqual(HEAD, actual["source"])
         self.assertEqual(original["commands"], value["commands"])
         self.assertFalse(value["native_execution"])
         self.assertEqual(2, len(value["measurement"]["instrumented_modules"]))
+        self.assertEqual(14, len(binding.MEASUREMENT_NAMES))
+        self.assertEqual({"ForgeTrust.AppSurface.Evidence.Supervision.dll",
+                          "ForgeTrust.AppSurface.Evidence.Supervision.pdb"},
+                         binding.MEASUREMENT_INSTRUMENTED_NAMES)
         # Coverlet may leave the selected PDB unchanged; the root DLL must
-        # differ while all five other managed images remain original.
+        # differ while all six other managed images remain original.
         for name in binding.MEASUREMENT_INSTRUMENTED_NAMES:
             if name.endswith(".pdb"):
                 value["tool"]["files"][name]["sha256"] = SHA
@@ -51,13 +55,22 @@ class MeasuredBuildDataTests(unittest.TestCase):
         original, value, capture = model()
         binding.validate_build(value, capture, HEAD, "N10")
         unselected = binding.MEASUREMENT_NAMES - binding.MEASUREMENT_INSTRUMENTED_NAMES
-        self.assertEqual(10, len(unselected))
+        self.assertEqual(12, len(unselected))
         for name in sorted(unselected):
             self.assertEqual(original["tool"]["files"][name], value["tool"]["files"][name])
             bad = copy.deepcopy(value)
             bad["tool"]["files"][name]["sha256"] = OTHER
             with self.subTest(file=name), self.assertRaises(binding.Rejected):
                 binding.validate_build(bad, capture, HEAD, "N10")
+
+    def test_shared_cli_pair_cannot_be_projected_out_of_both_image_inventories(self):
+        for suffix in ('.dll', '.pdb'):
+            _, value, capture = model()
+            name = 'ForgeTrust.AppSurface.Evidence.Cli' + suffix
+            del value['tool']['files'][name]
+            del value['measurement']['original_tool']['files'][name]
+            with self.subTest(leaf=name), self.assertRaisesRegex(binding.Rejected, 'measurement-module-set'):
+                binding.validate_build(value, capture, HEAD, 'N10')
 
     def test_root_collector_filters_leave_the_direct_non_root_worker_bootstrap_uninstrumented(self):
         self.assertEqual((

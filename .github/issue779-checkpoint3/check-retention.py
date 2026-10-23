@@ -1,4 +1,4 @@
-"""Bound the six-module C3 measurement artifact; product quotas and C2 retention are unchanged."""
+"""Bound the seven-module C3 measurement artifact; product quotas and C2 retention are unchanged."""
 from pathlib import Path
 import stat
 import sys

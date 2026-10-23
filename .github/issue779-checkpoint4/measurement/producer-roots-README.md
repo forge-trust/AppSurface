@@ -7,6 +7,13 @@ qualification, threshold, exclusion, or native acceptance. No worker tracker is 
 worker and producer PrivateTmp files may disappear without being collected. Root hits
 are the only measurement claim. Portable data tests do not prove native execution.
 
+The closed [module list](../measurement_arguments.py) includes the shared
+[Evidence.Cli workflow assembly](../../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md)
+as the seventh managed image. The public CLI calls that workflow during genuine
+protected producer execution, so retaining only the outer CLI assembly omits its
+process counters. Original and instrumented inventories require all fourteen
+DLL/PDB leaves; missing seventh-module data fails the current-source chain.
+
 ## API and ordering
 
 [`producer_roots.py`](../producer_roots.py) exposes three closed CLI operations:
@@ -14,7 +21,7 @@ are the only measurement claim. Portable data tests do not prove native executio
 1. `bind`: after the ordinary package smoke and existing C2 publish/acquisition, before
    either collector starts. It reads the complete existing `source.json` capture,
    verifies every listed source byte and mode, binds the successful package smoke,
-   pinned console bytes, and all six DLL/PDB pairs **in each image**. All new output
+   pinned console bytes, and all seven DLL/PDB pairs **in each image**. All new output
    leaves and `evidence/native` must be absent. The None image must be the installed
    package image named by the unchanged successful package smoke receipt.
 2. `target --stage inner`: the outer None collector's target. It launches one fixed
@@ -22,11 +29,11 @@ are the only measurement claim. Portable data tests do not prove native executio
    its actual exit. `target --stage driver`, the inner collector's target, first binds
    **both already instrumented maps** and then runs the existing C2 driver exactly
    once with its original arguments via `runpy`. The driver stages both images after
-   instrumentation. All six DLLs per image must differ from their originals; all
-   twelve DLL/PDB hashes are retained, even when a PDB stays byte-identical.
+   instrumentation. All seven DLLs per image must differ from their originals; all
+   fourteen DLL/PDB hashes are retained, even when a PDB stays byte-identical.
 3. `finalize --collector-exit N`: after the outer collector joins and restores its image.
    Require both actual collector exits and the driver exit to be zero; compare all
-   twelve restored files per image with the originals; bind the actual native receipt,
+   fourteen restored files per image with the originals; bind the actual native receipt,
    each case receipt and owner stdout/stderr, staged inventories, unchanged full source,
    raw inner report and merged outer report. Missing or failed evidence rejects the
    measurement; this API does not convert a failed case to success or fabricate a manifest.
@@ -109,7 +116,7 @@ RUNTIME/dotnet CONSOLE NONE/ForgeTrust.AppSurface.Cli.dll
   --merge-with EVIDENCE/native-producer-roots-c2.json
 ```
 
-The inner argv has the same six includes and format, uses
+The inner argv has the same seven includes and format, uses
 `C2/ForgeTrust.AppSurface.Cli.dll`, `--stage driver`, and
 `--output EVIDENCE/native-producer-roots-c2.json`, with **no `--merge-with` in v1**.
 `CONSOLE` is exactly
@@ -139,8 +146,8 @@ rechecks immediately before publication. A later self-consistent but different p
 cannot replace the bound predecessor.
 
 Only `issue779-c4-account-measurement-v2` / `C4AccountRollback` is accepted. The
-reader requires the current full source/head, six standard modules, exact original
-and instrumented twelve-file maps, changed DLLs, pinned collector, actual native
+reader requires the current full source/head, seven standard modules, exact original
+and instrumented fourteen-file maps, changed DLLs, pinned collector, actual native
 wrapper exit zero, settled groups and strict rollback receipt. The existing
 [`run-accounts.py`](../run-accounts.py) **data-only** image, receipt and source-witness
 validators enforce the original failure stage/code, utility settlement, original-handle
@@ -197,8 +204,8 @@ Exactly seven new retained leaves, in the existing evidence directory:
 
 | Leaf | Content |
 | --- | --- |
-| `producer-roots-original.json` | Full-capture/package/console binding and both original 12-file maps |
-| `producer-roots-instrumented.json` | Both instrumented 12-file maps, captured before staging |
+| `producer-roots-original.json` | Full-capture/package/console binding and both original 14-file maps |
+| `producer-roots-instrumented.json` | Both instrumented 14-file maps, captured before staging |
 | `producer-roots-inner-exit.json` | Actual joined inner collector exit and original binding hash |
 | `producer-roots-target.json` | Actual driver exit and instrumented binding hash |
 | `native-producer-roots-c2.json` | Unmodified standard inner C2 report (v1 alone; v2 with rollback ancestry) |
@@ -243,7 +250,7 @@ has `Charge` line173 **0** hits, line172 **0**, line174 **0**, and line175 **255
 Generic positive `Charge` entry hits therefore provide no new witness. No source25
 report is imported here, and no per-case numerical attribution or coverage gain is claimed.
 
-Fresh Linux proof remains required: package PDB/all-six-module availability, optimized
+Fresh Linux proof remains required: package PDB/all-seven-module availability, optimized
 None sequence points, standard trackers surviving genuine root exit (including all
 negative exits), actual restoration and report sizes must be observed. Missing symbols,
 missing/zero witnesses, nonzero collectors, or exhausted original allowance are blockers,

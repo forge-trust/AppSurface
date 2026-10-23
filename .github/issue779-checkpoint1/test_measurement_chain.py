@@ -257,8 +257,16 @@ class MeasurementChainDataTests(unittest.TestCase):
         _, bodies = subject.source(binding.canonical(value), HEAD, time.monotonic() + 5)
         producer, measured = subject.validators(bodies)
         self.assertEqual(7, len(producer.CASES))
+        self.assertEqual(binding.MEASUREMENT_MODULES, producer.MODULES)
+        self.assertEqual(7, len(producer.MODULES))
         modules = {name + '.dll': {} for name in binding.MEASUREMENT_MODULES}
         measured.report_json(binding.canonical(modules))
+        del modules['ForgeTrust.AppSurface.Evidence.Cli.dll']
+        raw = binding.canonical(modules)
+        with self.assertRaises(binding.Rejected):
+            measured.report_json(raw)
+        with self.assertRaisesRegex(ValueError, 'report-modules'):
+            producer.report(raw)
         for first in (required[0], '.github/issue779-checkpoint1/publish.py'):
             changed = copy.deepcopy(value)
             changed['files'][first]['sha256'] = '0' * 64

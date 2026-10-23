@@ -108,6 +108,18 @@ class AccountDriverDataTests(unittest.TestCase):
                 subject.validate_instrumentation(original, value, 'c' * 40, 'C4Accounts')
         value = copy.deepcopy(instrumented); value['files'][subject.NAMES[0]] = original['files'][subject.NAMES[0]]
         with self.assertRaises(RuntimeError): subject.validate_instrumentation(original, value, 'c' * 40, 'C4Accounts')
+        self.assertEqual(14, len(original['files']))
+        for mutation in ('missing-dll', 'missing-pdb', 'alias', 'unchanged'):
+            value = copy.deepcopy(instrumented)
+            name = 'ForgeTrust.AppSurface.Evidence.Cli.' + ('pdb' if mutation == 'missing-pdb' else 'dll')
+            if mutation.startswith('missing'):
+                del value['files'][name]
+            elif mutation == 'alias':
+                value['files']['other.dll'] = value['files'].pop(name)
+            else:
+                value['files'][name] = original['files'][name]
+            with self.subTest(shared_cli=mutation), self.assertRaises(RuntimeError):
+                subject.validate_instrumentation(original, value, 'c' * 40, 'C4Accounts')
 
     def test_reader_rejects_links_and_oversize_after_real_regular_neighbor(self):
         with tempfile.TemporaryDirectory() as temporary:

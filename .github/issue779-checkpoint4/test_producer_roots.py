@@ -131,17 +131,46 @@ class ProducerRootsDataTests(unittest.TestCase):
         self.assertEqual(str(args.evidence / subject.FILES[4]), outer[outer.index('--merge-with') + 1])
         self.assertIn('--stage driver', inner[inner.index('--targetargs') + 1])
         self.assertIn('--stage inner', outer[outer.index('--targetargs') + 1])
-        self.assertEqual(6, sum(item.startswith('[ForgeTrust.') for item in inner))
+        self.assertEqual(7, sum(item.startswith('[ForgeTrust.') for item in inner))
+        self.assertIn('[ForgeTrust.AppSurface.Evidence.Cli]*', inner)
+        self.assertIn('[ForgeTrust.AppSurface.Evidence.Cli]*', outer)
 
-    def test_instrumentation_requires_all_six_dlls_and_keeps_all_twelve_hashes(self):
+    def test_instrumentation_requires_all_seven_dlls_and_keeps_all_fourteen_hashes(self):
         args = SimpleNamespace(tool=Path('/none'), mutation_tool=Path('/c2'))
         original = {'original': {v: {n: 'a' * 64 for n in subject.NAMES} for v in ('None', 'C2')}}
         changed = {n: ('b' * 64 if n.endswith('.dll') else 'a' * 64) for n in subject.NAMES}
         with patch.object(subject, 'image', return_value=changed):
-            self.assertEqual(12, len(subject.instrumented(args, original)['None']))
+            self.assertEqual(14, len(subject.instrumented(args, original)['None']))
         changed[subject.NAMES[0]] = 'a' * 64
         with patch.object(subject, 'image', return_value=changed), self.assertRaises(ValueError):
             subject.instrumented(args, original)
+
+    def test_shared_cli_is_required_in_each_closed_image_and_standard_report(self):
+        original = {'original': {v: {n: 'a' * 64 for n in subject.NAMES} for v in ('None', 'C2')}}
+        maps = {v: {n: ('b' if n.endswith('.dll') else 'a') * 64 for n in subject.NAMES}
+                for v in ('None', 'C2')}
+        subject.validate_instrumented(maps, original)
+        for variant in ('None', 'C2'):
+            for mutation in ('missing-dll', 'missing-pdb', 'alias', 'unchanged'):
+                changed = copy.deepcopy(maps)
+                name = 'ForgeTrust.AppSurface.Evidence.Cli.' + ('pdb' if mutation == 'missing-pdb' else 'dll')
+                if mutation.startswith('missing'):
+                    del changed[variant][name]
+                elif mutation == 'alias':
+                    changed[variant]['other.dll'] = changed[variant].pop(name)
+                else:
+                    changed[variant][name] = original['original'][variant][name]
+                with self.subTest(variant=variant, mutation=mutation), self.assertRaises(ValueError):
+                    subject.validate_instrumented(changed, original)
+        for mutation in ('missing', 'duplicate-basename', 'alias'):
+            report = self.standard_report()
+            del report['ForgeTrust.AppSurface.Evidence.Cli.dll']
+            if mutation == 'duplicate-basename':
+                report['/other/ForgeTrust.AppSurface.Cli.dll'] = {}
+            elif mutation == 'alias':
+                report['ForgeTrust.AppSurface.Evidence.Cli'] = {}
+            with self.subTest(report=mutation), self.assertRaisesRegex(ValueError, 'report-modules'):
+                subject.report(subject.canonical(report))
 
 
 class ProducerRootsSmallFileTests(unittest.TestCase):
@@ -391,7 +420,7 @@ class ProducerRootsPredecessorTests(unittest.TestCase):
         ids['subject_uid'] = 102
         self.native['receipt']['operation_failure']['exec_main_code'] = 2; self.publish_prior(); self.reject()
 
-    def test_image_maps_bind_all_twelve_files_and_each_changed_dll(self):
+    def test_image_maps_bind_all_fourteen_files_and_each_changed_dll(self):
         name = subject.NAMES[0]
         self.binding['instrumented'][name] = self.binding['original'][name]; self.publish_prior(); self.reject()
         self.binding['instrumented'][name] = 'b' * 64

@@ -183,7 +183,7 @@ def report_json(raw):
     except (UnicodeError, json.JSONDecodeError, RecursionError):
         raise binding.Rejected("measurement-report-encoding") from None
     expected = {m + ".dll" for m in binding.MEASUREMENT_MODULES}
-    require(type(value) is dict and len(value) == 6
+    require(type(value) is dict and len(value) == len(binding.MEASUREMENT_MODULES)
             and {Path(k).name for k in value} == expected, "measurement-report-modules")
     for documents in value.values():
         require(type(documents) is dict, "measurement-report-documents")

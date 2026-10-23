@@ -127,7 +127,7 @@ jobs:
           timeout --signal=KILL 1260 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp DOTNET_CLI_TELEMETRY_OPTOUT=1 \
             "$C4_RUNTIME/dotnet" "$C4_COVERLET" "$C4_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' '[ForgeTrust.AppSurface.Evidence.Cli]*' --include-test-assembly \
             --merge-with "$C4_PRIOR/coverage.json" \
             --format json --output "$C4_EVIDENCE/native-accounts" > "$C4_EVIDENCE/collector.log" 2>&1
           collector_exit=$?

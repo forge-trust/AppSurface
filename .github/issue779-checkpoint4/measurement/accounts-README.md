@@ -162,13 +162,15 @@ still require their own fresh evidence.
 
 ## Driver ordering and report custody
 
-The driver performs `bind` before the pinned collector instruments the six selected modules,
+The driver performs `bind` before the pinned collector instruments the seven selected modules,
 then `run` as its actual target, and `finalize` only after collection and restoration of all
-twelve original DLL/PDB files. Each compiled variant has a separate job, source capture,
+fourteen original DLL/PDB files. Each compiled variant has a separate job, source capture,
 artifact and report. The root-owned staged inputs use the existing C3 owner recipe and
 its 1100-second service lifetime inside one 1200-second driver bound; the request retains
 more than 1110 seconds at publication to cover that service plus stop time. It supplies
 no solution, application, producer or consumer.
+
+The closed module set is CLI, Contracts, Planner, Coverage, Aspire, Supervision and the shared [Evidence.Cli workflow assembly](../../../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md). Its DLL and PDB join the same source-bound original/instrumented inventory and restoration checks. Both account stages require the exact seven-module predecessor and output report; a missing or aliased Evidence.Cli module fails even when the remaining six modules and their hashes are consistent. Account utility counts, deadlines, retention limits and native cleanup criteria are unchanged.
 
 Finalization checks exact source/variant/image bindings, the native result and strict
 receipt, original bytes restored, and real account/owner source hits in the standard
@@ -249,8 +251,8 @@ preserves the original source/image/report/native-receipt fields plus:
 | `prior_root_trx_sha256` | Actual C3 TRX digest; null for the immediate account predecessor |
 
 Bind, target entry and finalization each revalidate prior inputs. Finalization
-requires restoration of all twelve original DLL/PDB bytes, unchanged prior input
-hashes, a passing own native receipt and the completed six-module report. It emits
+requires restoration of all fourteen original DLL/PDB bytes, unchanged prior input
+hashes, a passing own native receipt and the completed seven-module report. It emits
 its binding only after those checks. A nonzero collector exit remains the workflow
 exit even if finalization also fails.
 
@@ -258,7 +260,7 @@ Each account collector receives exactly one `--merge-with` path. The first reads
 the original C3 `native-supervision.json`; the second reads the successful first
 account stage's combined `native-accounts.json`. Only standard Coverlet performs
 these merges. Module-key compatibility across the private variants remains a
-native validation obligation; six-module shape checks fail closed if it is absent.
+native validation obligation; seven-module shape checks fail closed if it is absent.
 
 ### Final staged paths and C# lineage validation
 

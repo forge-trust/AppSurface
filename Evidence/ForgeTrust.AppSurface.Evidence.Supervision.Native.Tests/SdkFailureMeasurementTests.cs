@@ -122,6 +122,64 @@ public sealed class SdkFailureMeasurementTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
     }
 
+    /// <summary>The seventh module is mandatory even after every outer receipt and report digest is rebound.</summary>
+    [Theory]
+    [InlineData("missing-worker")]
+    [InlineData("duplicate-worker")]
+    [InlineData("absent-worker")]
+    [InlineData("prior-worker")]
+    [InlineData("worker-image")]
+    [InlineData("worker-cache")]
+    [InlineData("worker-bytes")]
+    [InlineData("host-bytes")]
+    [InlineData("original-dll")]
+    [InlineData("original-pdb")]
+    [InlineData("original-hash")]
+    [InlineData("instrumented-dll")]
+    [InlineData("instrumented-pdb")]
+    [InlineData("unchanged-dll")]
+    [InlineData("missing-report")]
+    [InlineData("duplicate-report")]
+    [InlineData("missing-document")]
+    [InlineData("zero-document")]
+    public void SeventhModuleCannotBeOmittedOrProjectedFromTheFailedSdkPacket(string mutation)
+    {
+        const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
+        var fixture = new Fixture();
+        fixture.Validate();
+        var modules = fixture.Root["worker_measurements"]![0]!["modules"]!.AsArray();
+        var row = modules.Single(static value => value!["module"]!.GetValue<string>() == module)!.AsObject();
+        switch (mutation)
+        {
+            case "missing-worker": modules.Remove(row); break;
+            case "duplicate-worker": row["module"] = "ForgeTrust.AppSurface.Cli.dll"; break;
+            case "absent-worker":
+            case "prior-worker":
+                row["outcome"] = mutation == "absent-worker" ? "worker-file-absent" : "prior-root-file-unchanged";
+                foreach (var key in new[] { "worker_sha256", "cached_sha256", "host_sha256" }) row.Remove(key);
+                break;
+            case "worker-image": row["module_sha256"] = new string('d', 64); break;
+            case "worker-cache": row["cached_sha256"] = new string('d', 64); break;
+            case "worker-bytes": row["worker_sha256"] = new string('d', 64); break;
+            case "host-bytes": row["host_sha256"] = new string('d', 64); break;
+            case "original-dll": fixture.Root["sdk_original"]!.AsObject().Remove(module); break;
+            case "original-pdb": fixture.Root["sdk_original"]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli.pdb"); break;
+            case "original-hash": fixture.Root["sdk_original"]![module] = new string('d', 64); break;
+            case "instrumented-dll": fixture.Root["sdk_instrumented"]!.AsObject().Remove(module); break;
+            case "instrumented-pdb": fixture.Root["sdk_instrumented"]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli.pdb"); break;
+            case "unchanged-dll": fixture.Root["sdk_instrumented"]![module] = new string('a', 64); break;
+            case "missing-report": fixture.Report.Remove(module); break;
+            case "duplicate-report":
+                fixture.Report.Remove(module);
+                fixture.Report["/duplicate/ForgeTrust.AppSurface.Cli.dll"] = new JsonObject();
+                break;
+            case "missing-document": fixture.Report[module]!.AsObject().Clear(); break;
+            case "zero-document": fixture.Report[module]!["EvidenceProtectedCliExecution.cs"]!["DetachedProtectedCli"]!["RunAsync"]!["Lines"]!["1"] = 0; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
     private sealed class Fixture
     {
         internal JsonObject Root { get; } = new();
@@ -132,7 +190,7 @@ public sealed class SdkFailureMeasurementTests
         {
             var modules = new[] { "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
                 "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Aspire",
-                "ForgeTrust.AppSurface.Evidence.Supervision" };
+                "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli" };
             var original = new JsonObject(); var instrumented = new JsonObject(); var handoffs = new JsonArray();
             foreach (var module in modules)
             {
@@ -149,6 +207,11 @@ public sealed class SdkFailureMeasurementTests
             {
                 ["EvidenceRestrictedCoverageProducer.cs"] = new JsonObject { ["Producer"] = new JsonObject
                     { ["RunAsync"] = new JsonObject { ["Lines"] = new JsonObject { ["2"] = 1 } } } }
+            };
+            Report["ForgeTrust.AppSurface.Evidence.Cli.dll"] = new JsonObject
+            {
+                ["EvidenceProtectedCliExecution.cs"] = new JsonObject { ["DetachedProtectedCli"] = new JsonObject
+                    { ["RunAsync"] = new JsonObject { ["Lines"] = new JsonObject { ["1"] = 1 } } } }
             };
             _binding["sdk_original"] = original.DeepClone();
             Root["sdk_original"] = original; Root["sdk_instrumented"] = instrumented;

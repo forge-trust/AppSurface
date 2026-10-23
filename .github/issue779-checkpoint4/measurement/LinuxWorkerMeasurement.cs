@@ -22,7 +22,8 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 internal sealed partial class LinuxWorkerMeasurement : IDisposable
 {
     internal static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
-        "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision"];
+        "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage", "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision",
+        "ForgeTrust.AppSurface.Evidence.Cli"];
     private const ulong DirectoryFlags = 0x10000 | 0x80000;
     private const ulong FileFlags = 0x80000 | 0x20000 | 0x800;
     private const int MaximumHits = 4 * 1024 * 1024;

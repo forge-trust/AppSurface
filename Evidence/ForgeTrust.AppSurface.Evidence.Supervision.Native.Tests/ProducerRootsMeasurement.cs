@@ -26,7 +26,7 @@ internal static class ProducerRootsMeasurement
     private const string QuotaHash = "1603bed8d52f248cbca947dbe5f97827b2df6857727ecebc2482b1f5c6825f7d";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
-        "ForgeTrust.AppSurface.Evidence.Aspire", Supervision];
+        "ForgeTrust.AppSurface.Evidence.Aspire", Supervision, "ForgeTrust.AppSurface.Evidence.Cli"];
     private static readonly string[] Cases = ["normal", "test-failure", "cancel", "quota", "ignored-cancel",
         "artifact-mutation", "cleanup-failure"];
     private static readonly string[] Order = ["C3", "C4Accounts", "C4AccountRollback", "C2", "None"];

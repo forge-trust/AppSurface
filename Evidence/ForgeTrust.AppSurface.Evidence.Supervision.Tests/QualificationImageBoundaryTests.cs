@@ -212,6 +212,10 @@ public sealed class QualificationImageBoundaryTests
         var types = ReadTypeNames();
 #if EVIDENCE_PRIVATE_C3
         Assert.Contains("LinuxWorkerMeasurement", types);
+        Assert.Equal(new[] { "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
+            "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
+            "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision",
+            "ForgeTrust.AppSurface.Evidence.Cli" }, LinuxWorkerMeasurement.Modules);
 #else
         Assert.DoesNotContain("LinuxWorkerMeasurement", types);
 #endif

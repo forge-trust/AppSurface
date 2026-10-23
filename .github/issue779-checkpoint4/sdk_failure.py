@@ -555,8 +555,8 @@ def require_worker(worker, expected, instrumented):
         require(type(value) is int and 0 < value < 4294967295 and value == expected[descriptor_key], 'worker-binding')
     require(type(worker['start_time']) is int and worker['start_time'] > 0 and worker['cgroup'] == expected['cgroup'], 'worker-identity')
     rows = worker['modules']
-    require(len(rows) == 6 and {row['module'] for row in rows} == {name + '.dll' for name in MODULES}, 'worker-modules')
-    required = {'ForgeTrust.AppSurface.' + name + '.dll' for name in ('Cli', 'Evidence.Contracts', 'Evidence.Coverage', 'Evidence.Aspire')}
+    require(len(rows) == len(MODULES) and {row['module'] for row in rows} == {name + '.dll' for name in MODULES}, 'worker-modules')
+    required = {'ForgeTrust.AppSurface.' + name + '.dll' for name in ('Cli', 'Evidence.Contracts', 'Evidence.Coverage', 'Evidence.Aspire', 'Evidence.Cli')}
     for row in rows:
         require(row['module_sha256'] == instrumented[row['module']], 'worker-image')
         if row['module'] in required or row['outcome'] == 'unchanged-worker-handoff':
@@ -570,7 +570,7 @@ def require_worker(worker, expected, instrumented):
 def require_failed_report(body, workspace, source_capture):
     # Standard collector module/class names are case sensitive. Do not apply state-field alias rules here.
     report = json.loads(body)
-    require(len(report) == 6 and {Path(name).name for name in report} == {name + '.dll' for name in MODULES}, 'report-modules')
+    require(len(report) == len(MODULES) and {Path(name).name for name in report} == {name + '.dll' for name in MODULES}, 'report-modules')
     relative = 'Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs'
     source = (workspace / relative).read_bytes()
     require(hashlib.sha256(source).hexdigest() == source_capture['files'][relative]['sha256'], 'producer-source')

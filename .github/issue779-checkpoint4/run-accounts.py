@@ -262,7 +262,7 @@ def prior_binding(args):
     report = read_file(args.merge_report, MAX_REPORT)
     require(report, 'prior-report')
     modules = json.loads(report)  # Case-sensitive Coverlet module/class names.
-    require(type(modules) is dict and len(modules) == 6
+    require(type(modules) is dict and len(modules) == len(MODULES)
             and {Path(name).name for name in modules} == {name + '.dll' for name in MODULES}, 'prior-modules')
     binding_body = read_file(args.merge_binding, MAX_LOG)
     value = strict_json(binding_body)
@@ -448,7 +448,7 @@ def finalize(args):
     validate_receipt(native['receipt'], args.variant, native['generation'], instrumented['files']['ForgeTrust.AppSurface.Cli.dll'])
     report = read_file(args.evidence / 'native-accounts.json', MAX_REPORT)
     modules = json.loads(report)
-    require(len(modules) == 6 and {Path(name).name for name in modules} == {name + '.dll' for name in MODULES}, 'report-modules')
+    require(len(modules) == len(MODULES) and {Path(name).name for name in modules} == {name + '.dll' for name in MODULES}, 'report-modules')
     capture = strict_json(read_file(args.evidence / 'source.json', MAX_LOG))
     witness = require_current_witness(modules, capture, args.variant)
     prior = prior_binding(args)

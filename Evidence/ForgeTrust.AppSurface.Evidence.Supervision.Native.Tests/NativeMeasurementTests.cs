@@ -11,7 +11,7 @@ public sealed class NativeMeasurementTests
 {
     private const string Module = "ForgeTrust.AppSurface.Evidence.Supervision.dll";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Planner.dll",
-        "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll", Module];
+        "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll", Module, "ForgeTrust.AppSurface.Evidence.Cli.dll"];
     private static readonly string[] Cases = ["normal", "sdk-normal", "readiness", "factory-stall", "cancel", "stuck-descendant", "disposal-failure"];
 
     [LinuxMeasurementFact]
@@ -99,6 +99,11 @@ public sealed class NativeMeasurementTests
         Assert.Equal("coverlet.console/10.0.1", binding.GetProperty("collector").GetString());
         foreach (var item in new[] { ("source_capture", source), ("native_receipt", native), ("coverage", coverage), ("sdk_coverage", sdkCoverage) })
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(item.Item2)), binding.GetProperty(item.Item1 + "_sha256").GetString());
+        var imageNames = Modules.SelectMany(static name => new[] { name, Path.ChangeExtension(name, ".pdb") }).Order(StringComparer.Ordinal);
+        foreach (var prefix in new[] { string.Empty, "sdk_" })
+        foreach (var kind in new[] { "original", "instrumented" })
+            Assert.Equal(imageNames, binding.GetProperty(prefix + kind).EnumerateObject()
+                .Select(static row => row.Name).Order(StringComparer.Ordinal));
         foreach (var prefix in new[] { string.Empty, "sdk_" })
         foreach (var name in Modules)
         {
@@ -140,7 +145,7 @@ public sealed class NativeMeasurementTests
         Assert.True(worker.GetProperty("start_time").GetUInt64() > 0);
         var workerModules = worker.GetProperty("modules").EnumerateArray().ToArray();
         Assert.Equal(Modules.Order(StringComparer.Ordinal), workerModules.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
-        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll" })
+        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Cli.dll" })
         {
             var row = Assert.Single(workerModules, value => value.GetProperty("module").GetString() == name);
             Assert.Equal("unchanged-worker-handoff", row.GetProperty("outcome").GetString());
@@ -154,7 +159,7 @@ public sealed class NativeMeasurementTests
         Assert.False(sdkWorker.GetProperty("native_acceptance").GetBoolean());
         var sdkModules = sdkWorker.GetProperty("modules").EnumerateArray().ToArray();
         Assert.Equal(Modules.Order(StringComparer.Ordinal), sdkModules.Select(static row => row.GetProperty("module").GetString()).Order(StringComparer.Ordinal));
-        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll" })
+        foreach (var name in new[] { "ForgeTrust.AppSurface.Cli.dll", "ForgeTrust.AppSurface.Evidence.Contracts.dll", "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll", "ForgeTrust.AppSurface.Evidence.Cli.dll" })
         {
             var row = Assert.Single(sdkModules, value => value.GetProperty("module").GetString() == name);
             Assert.Equal("unchanged-worker-handoff", row.GetProperty("outcome").GetString());
@@ -168,7 +173,9 @@ public sealed class NativeMeasurementTests
         foreach (var name in new[] { "EvidenceHostBootstrap.cs", "EvidenceRestrictedAspireApplication.cs" })
             Assert.Contains(sdkReport.RootElement.EnumerateObject().SelectMany(static module => module.Value.EnumerateObject()),
                 document => Path.GetFileName(document.Name) == name && HasHits(document.Value));
+        RequireProtectedCliHits(sdkReport.RootElement);
         using var report = JsonDocument.Parse(coverage);
+        RequireProtectedCliHits(report.RootElement);
         var modules = report.RootElement.EnumerateObject().ToArray();
         Assert.Equal(Modules.Order(StringComparer.Ordinal), modules.Select(static value => Path.GetFileName(value.Name)).Order(StringComparer.Ordinal));
         var observedNativeRoot = false;
@@ -186,6 +193,14 @@ public sealed class NativeMeasurementTests
         }
         Assert.True(observedNativeRoot, "The report must contain actual guarded native root execution hits.");
         Assert.True(observedNativeWorker, "The report must contain the actual authenticated worker connection, not presumed visibility across PrivateTmp.");
+    }
+
+    private static void RequireProtectedCliHits(JsonElement report)
+    {
+        var module = Assert.Single(report.EnumerateObject(), static row =>
+            Path.GetFileName(row.Name) == "ForgeTrust.AppSurface.Evidence.Cli.dll");
+        Assert.Contains(module.Value.EnumerateObject(), static document =>
+            Path.GetFileName(document.Name) == "EvidenceProtectedCliExecution.cs" && HasHits(document.Value));
     }
 
     private static bool HasHits(JsonElement document) => document.EnumerateObject()

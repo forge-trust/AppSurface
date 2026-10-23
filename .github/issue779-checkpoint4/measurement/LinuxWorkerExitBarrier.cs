@@ -86,7 +86,8 @@ internal sealed partial class LinuxWorkerMeasurement
             if (hit is null)
             {
                 if (plan.Module is "ForgeTrust.AppSurface.Cli.dll" or "ForgeTrust.AppSurface.Evidence.Contracts.dll"
-                    or "ForgeTrust.AppSurface.Evidence.Coverage.dll" or "ForgeTrust.AppSurface.Evidence.Aspire.dll") throw new IOException();
+                    or "ForgeTrust.AppSurface.Evidence.Coverage.dll" or "ForgeTrust.AppSurface.Evidence.Aspire.dll"
+                    or "ForgeTrust.AppSurface.Evidence.Cli.dll") throw new IOException();
                 cached.Add(new(plan, null));
                 continue;
             }

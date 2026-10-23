@@ -211,7 +211,7 @@ jobs:
           python3 -B - "$CHECKPOINT3_TOOL" "$CHECKPOINT3_EVIDENCE/original-supervision.json" "$GITHUB_SHA" "$CHECKPOINT3_SDK_TOOL" <<'PY'
           import hashlib, json, pathlib, sys
           tool = pathlib.Path(sys.argv[1])
-          names = tuple(name + suffix for name in ('ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision') for suffix in ('.dll', '.pdb'))
+          names = tuple(name + suffix for name in ('ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts', 'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage', 'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision', 'ForgeTrust.AppSurface.Evidence.Cli') for suffix in ('.dll', '.pdb'))
           sdk_tool = pathlib.Path(sys.argv[4])
           value = {'source': sys.argv[3], 'files': {name: hashlib.sha256((tool / name).read_bytes()).hexdigest() for name in names}, 'sdk_files': {name: hashlib.sha256((sdk_tool / name).read_bytes()).hexdigest() for name in names}}
           support_names = ['ForgeTrust.AppSurface.Evidence.ExitBarrier.Support' + suffix for suffix in ('.dll', '.pdb')]
@@ -235,7 +235,7 @@ jobs:
           timeout --signal=KILL 900 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_SDK_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target /usr/bin/python3 --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' '[ForgeTrust.AppSurface.Evidence.Cli]*' --include-test-assembly \
             --format json --output "$CHECKPOINT3_EVIDENCE/native-sdk-failure" > "$CHECKPOINT3_EVIDENCE/sdk-test-failure-diagnostics.log" 2>&1
           collector_exit=$?
           timeout --signal=KILL 30 sudo --non-interactive python3 -B .github/issue779-checkpoint4/sdk_failure.py finalize --collector-exit "$collector_exit" "${common[@]}"
@@ -260,7 +260,7 @@ jobs:
           timeout --signal=KILL 2820 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
             "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$CHECKPOINT3_TOOL/ForgeTrust.AppSurface.Cli.dll" \
             --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
-            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' --include-test-assembly \
+            --include '[ForgeTrust.AppSurface.Cli]*' '[ForgeTrust.AppSurface.Evidence.Contracts]*' '[ForgeTrust.AppSurface.Evidence.Planner]*' '[ForgeTrust.AppSurface.Evidence.Coverage]*' '[ForgeTrust.AppSurface.Evidence.Aspire]*' '[ForgeTrust.AppSurface.Evidence.Supervision]*' '[ForgeTrust.AppSurface.Evidence.Cli]*' --include-test-assembly \
             --merge-with "$CHECKPOINT3_EVIDENCE/native-sdk.json" \
             --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision" > "$CHECKPOINT3_EVIDENCE/native-driver.log" 2>&1
           sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" "$CHECKPOINT3_SDK_TOOL" <<'PY'

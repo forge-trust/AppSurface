@@ -25,7 +25,7 @@ internal static class AccountMeasurement
     private const string OwnerSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
-        "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision"];
+        "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli"];
     private static readonly string[] ReceiptFields = ["schema", "variant", "creation_succeeded", "generation",
         "managed_entry_sha256", "native_acceptance", "consumer_started", "shared_close_task", "closed_holder_rejected",
         "names_absent", "numeric_ids_absent", "utilities", "settled_utilities", "failed_utilities", "close_completed",

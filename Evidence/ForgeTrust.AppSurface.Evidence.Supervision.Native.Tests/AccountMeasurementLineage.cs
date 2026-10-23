@@ -17,7 +17,7 @@ internal static class AccountMeasurementLineage
     private const int Mib = 1024 * 1024;
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
-        "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision"];
+        "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli"];
 
     /// <summary>Validates both immediate links and their common original C3 ancestor using actual supplied bytes.</summary>
     /// <param name="currentSourceBytes">Independently verified full parent source capture, not a refreshed or projected map.</param>

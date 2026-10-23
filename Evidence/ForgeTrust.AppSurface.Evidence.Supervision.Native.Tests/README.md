@@ -6,11 +6,45 @@ For the supervision contract and its lifecycle boundaries, see the [supervision 
 
 ## Test surface and selection
 
-`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all six instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts and Coverage worker hit-file handoffs. The SDK control additionally binds those handoffs and Aspire against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits.
+`NativeMeasurementTests.LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls` reads the prepared inputs from `TestResults/issue779-native-measurement`. It verifies the source revision against the checked-out Git `HEAD`, checks the SHA-256 bindings, requires the recorded Coverlet version and changed hashes for all seven instrumented assemblies in each CLI/SDK image, validates the native receipt and its seven ordered cases, checks each case's settlement and final group state, and inspects the Coverlet JSON for nonzero root hits in `LinuxEmptyObservationExecution.cs` and authenticated worker connection hits. The first CLI control must bind genuine CLI, Contracts, Coverage and Evidence.Cli worker hit-file handoffs. The SDK control additionally binds those handoffs and Aspire against its own image, and its separate report must contain actual host-bootstrap and restricted-application execution hits.
 
 `LinuxMeasurementFactAttribute` selects this test only when the host is Linux **and** `EVIDENCEHOST_NATIVE_MEASUREMENT=1`. macOS, Windows, and ordinary Linux runs without the opt-in report an explicit skip. This keeps unrelated Linux test runs from failing because they do not carry the dedicated workflow's prepared evidence. In the dedicated lane, the workflow sets the flag only after it downloads and stages all application, account and producer inputs below and writes `native.runsettings`. Once selected, a missing input, wrong source or digest, incomplete case set, failed control, or absent native-root coverage hit fails the test. The flag controls test selection and the project runsettings condition only; it is not authority or evidence by itself.
 
 Run the test as part of the complete [solution coverage gate](../../scripts/coverage-solution.sh) in the prepared runtime workflow. The project targets `net10.0` and uses the centrally pinned `coverlet.collector` 10.0.1 as a private test dependency. Its Linux-only `RunSettingsFilePath` is enabled by the same `EVIDENCEHOST_NATIVE_MEASUREMENT=1` property. A local invocation without prepared inputs is expected to skip; setting the flag manually selects the test and therefore requires the complete prepared input set and runsettings.
+
+## Closed seven-module measurement shape
+
+The full-image validators require exactly `ForgeTrust.AppSurface.Cli`,
+`ForgeTrust.AppSurface.Evidence.Contracts`, `ForgeTrust.AppSurface.Evidence.Planner`,
+`ForgeTrust.AppSurface.Evidence.Coverage`, `ForgeTrust.AppSurface.Evidence.Aspire`,
+`ForgeTrust.AppSurface.Evidence.Supervision`, and `ForgeTrust.AppSurface.Evidence.Cli`.
+Each image map has their fourteen named DLL/PDB leaves, with changed instrumented
+DLL hashes and byte-identical original/restored hashes wherever restoration maps
+are part of the contract. Report module basenames must match this same closed set;
+an omitted seventh module or a second spelling of another basename cannot replace it.
+These checks follow the [private measurement contract](../../.github/issue779-checkpoint4/measurement/README.md)
+and [producer-root lineage reference](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md).
+
+The normal CLI and normal SDK witnesses both require an unchanged Evidence.Cli
+worker/host handoff against their own instrumented image hashes. The separate
+failed-SDK witness also requires Evidence.Cli's identical cached, worker and host
+hashes under the existing pre-exit v3 protocol. Its original status remains one;
+a passing data comparison cannot turn that failed execution into a successful one.
+The normal and failed SDK reports, and the normal CLI report, must contain positive
+line hits in the real shared [protected CLI execution document](../ForgeTrust.AppSurface.Evidence.Cli/EvidenceProtectedCliExecution.cs)
+inside the Evidence.Cli module. This uses the actual document name and does not
+assume a generated state-machine ordinal.
+
+Six-module packets remain historical evidence for their original source. They fail
+this seven-module source contract even if their enclosing report and predecessor
+hashes are consistently recomputed. The [SDK](SdkFailureMeasurementTests.cs),
+[account](AccountMeasurementTests.cs), [account lineage](AccountMeasurementLineageTests.cs)
+and [producer-root](ProducerRootsMeasurementTests.cs) regression fixtures construct
+only detached data in memory. Their positive fixtures and rebound malformed packets
+provide neither actual measurement inputs in `TestResults` nor native execution,
+admission or gate credit. The [qualification image boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+inspect the built helper's seven names only for the existing C3 compilation branch;
+ordinary images continue to require the helper's absence.
 
 ## Prepared inputs and merge settings
 
@@ -43,7 +77,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 
 | File | Meaning |
 | --- | --- |
-| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all six selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
+| `measurement-binding.json` | Schema, source revision, collector identity, original and instrumented DLL/PDB hashes for all seven selected modules, and hashes of the source/receipt/report inputs and the root filesystem TRX. |
 | `native-supervision.json` | Current-run native Coverlet JSON emitted by the private Coverlet Console measurement. |
 | `native-sdk.json` | Separate standard SDK-image report, hash-bound before the outer collector's standard report merge. |
 | `native-sdk-failure.json` | Independently finalized standard report for the genuine failed-test SDK control. |
@@ -57,7 +91,7 @@ The two account stages each supply `source.json`, `measurement-binding.json`, `n
 
 After those copies succeed, the workflow validates the [current worker measurement chain](../../.github/issue779-checkpoint1/measurement-chain-README.md) and writes `native.runsettings` with the standard `XPlat Code Coverage` collector, `Format` set to `cobertura`, and `MergeWith` set to that chain's final, unchanged standard JSON report. The ordered chain is application → account creation → account rollback → inner C2 → outer packaged None → C1 None → C1 N04 → C1 N07 → C1 N16. Each C1 stage uses a separate disposable Linux runner and consumes its completed predecessor exactly once through standard Coverlet `--merge-with`. The four measured selectors contain six original native cases; they do not replace the separate all-sixteen C1 matrix and aggregate. The original C3, account and producer reports remain separate for the consistency checks; the solution collector consumes only the final cumulative report, without separately merging its ancestors again. Coverlet's collector reads `MergeWith` as a supported setting. That behavior is present in the pinned Coverlet source at commit [`d21b5b6a08d48f51405ba2c5c5660f91a565776d`](https://github.com/coverlet-coverage/coverlet/tree/d21b5b6a08d48f51405ba2c5c5660f91a565776d), in [`CoverletSettingsParser.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverletSettingsParser.cs) and [`CoverageWrapper.cs`](https://github.com/coverlet-coverage/coverlet/blob/d21b5b6a08d48f51405ba2c5c5660f91a565776d/src/legacy/coverlet.collector/DataCollection/CoverageWrapper.cs). The collector remains the driver for the test run and merge; the project does not use `coverlet.msbuild` or edit report counters.
 
-The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain exactly the six selected modules, an executed root path in `LinuxEmptyObservationExecution.cs`, and an executed worker `ConnectAsync` path. First-worker raw-hit hashes must match the unchanged host handoff and the instrumented module hashes. A JSON file's presence or a plausible percentage alone cannot pass these checks.
+The test treats these files as measurements. It reads each with a size bound, verifies the recorded source and hashes, requires different original and instrumented assembly hashes, and checks that the source capture and native receipt identify the same `HEAD`. The coverage JSON must contain exactly the seven selected modules, an executed root path in `LinuxEmptyObservationExecution.cs`, and an executed worker `ConnectAsync` path. First-worker raw-hit hashes must match the unchanged host handoff and the instrumented module hashes. A JSON file's presence or a plausible percentage alone cannot pass these checks.
 
 All prepared-input paths use the shared [TestPathUtils.PathUnder](../../tests/ForgeTrust.AppSurface.Testing/README.md)
 helper, including dynamic folder and filename parameters. It validates lexical containment
@@ -160,7 +194,7 @@ bytes, final measurement binding, original native receipt, and unmodified standa
 report. Each byte input is bounded at 8 MiB. The caller must compare the full capture
 byte-for-byte to its independently verified parent capture; this helper performs no
 Git refresh, process launch or ownership construction. Its current v1 contract checks
-all twelve module hashes, source/report/native byte digests, exact five-ID domains,
+all fourteen DLL/PDB hashes, source/report/native byte digests, exact five-ID domains,
 variant-specific utility/cleanup outcomes, and real account/owner document hits.
 `ValidateMerged` retains the same receipt and image checks for v2 packets, allowing
 32 MiB only for standard reports. Before using rollback data, the actual native test
@@ -197,7 +231,7 @@ Its [detached model controls](ProducerRootsMeasurementTests.cs) test comparisons
 Only the completed v2 [producer-root packet](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md)
 is eligible for the final merge. Its external predecessor must bind those exact
 rollback bytes and the same workflow run/attempt. Both original/instrumented/restored
-six-module DLL/PDB maps, zero collector/driver exits, seven ordered native controls,
+seven-module DLL/PDB maps, zero collector/driver exits, seven ordered native controls,
 physical settlement/account outcomes and exact current-source witnesses are required.
 The C2 mutation method and the packaged None quota arm have separate source mappings;
 an earlier positive method cannot stand in for either current witness. Metadata never
@@ -211,7 +245,7 @@ were verified. V1 has no external predecessor and remains ineligible as the fina
 input. The connected v2 chain still requires its own current-source native result and
 the unchanged full gate; standalone success supplies neither.
 
-The integrated data checks passed 189 source-built cases: 132 producer-root cases
+The earlier six-module integration data checks passed 189 source-built cases: 132 producer-root cases
 and 57 existing account/lineage cases, with zero failures, skips or compiler diagnostic
 lines. Exact-file formatting completed without changing source bytes. The integrated
 Python predecessor suite passed all 30 data controls. These local checks verify the

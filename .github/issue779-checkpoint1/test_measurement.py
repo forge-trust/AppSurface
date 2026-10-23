@@ -78,6 +78,19 @@ class MeasurementDataTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(binding.Rejected):
                 subject.report_json(binding.canonical(value))
 
+    def test_shared_cli_report_is_required_even_when_six_modules_are_otherwise_valid(self):
+        good = modules()
+        self.assertEqual(7, len(good))
+        for mutation in ('missing', 'duplicate-basename', 'alias'):
+            value = copy.deepcopy(good)
+            del value['ForgeTrust.AppSurface.Evidence.Cli.dll']
+            if mutation == 'duplicate-basename':
+                value['/other/ForgeTrust.AppSurface.Cli.dll'] = {}
+            elif mutation == 'alias':
+                value['ForgeTrust.AppSurface.Evidence.Cli'] = {}
+            with self.subTest(shared_cli=mutation), self.assertRaisesRegex(binding.Rejected, 'measurement-report-modules'):
+                subject.report_json(binding.canonical(value))
+
     def test_numeric_boolean_negative_and_float_counters_reject(self):
         for bad in (True, False, -1, 1.5, "1", 2**63):
             value = modules()
@@ -138,7 +151,7 @@ class MeasurementDataTests(unittest.TestCase):
             with self.subTest(bytes_count=len(raw)), self.assertRaises(binding.Rejected):
                 subject.report_xml(raw)
 
-    def test_v2_projection_preserves_twelve_inputs_and_only_root_supervision_instrumentation(self):
+    def test_v2_projection_preserves_fourteen_inputs_and_only_root_supervision_instrumentation(self):
         original, measured, capture = measured_model()
         binding.validate_build(measured, capture, HEAD, "N10")
         self.assertEqual(original["commands"], measured["commands"])

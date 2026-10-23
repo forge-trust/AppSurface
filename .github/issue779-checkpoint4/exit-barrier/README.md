@@ -17,7 +17,7 @@ a test project nor packable. Its [empty net10.0 lock](packages.lock.json) is cop
 byte-for-byte from the [existing dependency-free NativeHttpResource fixture](../../issue779-checkpoint3/payload/NativeHttpResource/packages.lock.json) so the
 repository's mandatory locked restore remains enabled; no audit setting is disabled.
 Its assembly name is `ForgeTrust.AppSurface.Evidence.ExitBarrier.Support`, outside
-all six existing measurement module names. Keep it **uninstrumented**: the complete
+all seven existing measurement module names. Keep it **uninstrumented**: the complete
 ProcessExit delegate, polling, native reads/writes, errors and descriptor disposal
 execute in this support assembly. It must not call instrumented product code at exit.
 
@@ -173,6 +173,6 @@ Parent validation must additionally cover:
 
 The workflow and negative finalizer bind the support DLL/PDB hashes before and after
 standard instrumentation, staged deployment and collector restoration. These files
-remain outside the six fixed instrumentation modules. Their exact source remains in
+remain outside the seven fixed instrumentation modules. Their exact source remains in
 the full source capture; no new coverage exclusion or public package dependency is
 introduced.

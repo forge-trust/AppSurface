@@ -64,7 +64,7 @@ public sealed class ProducerRootsMeasurementTests
         Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
     }
 
-    /// <summary>Both variants require all twelve restored hashes and six changed DLLs, not a projected image map.</summary>
+    /// <summary>Both variants require all fourteen restored hashes and seven changed DLLs, not a projected image map.</summary>
     [Theory]
     [InlineData("None", "restoration")]
     [InlineData("C2", "restoration")]
@@ -91,6 +91,75 @@ public sealed class ProducerRootsMeasurementTests
             case "bad-hash": instrumented[dll] = new string('B', 64); break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
+        Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
+    }
+
+    /// <summary>All fourteen leaves are required in each original, instrumented and restored variant map.</summary>
+    [Theory]
+    [InlineData("None", "original", ".dll")]
+    [InlineData("None", "original", ".pdb")]
+    [InlineData("None", "instrumented", ".dll")]
+    [InlineData("None", "instrumented", ".pdb")]
+    [InlineData("None", "restored", ".dll")]
+    [InlineData("None", "restored", ".pdb")]
+    [InlineData("C2", "original", ".dll")]
+    [InlineData("C2", "original", ".pdb")]
+    [InlineData("C2", "instrumented", ".dll")]
+    [InlineData("C2", "instrumented", ".pdb")]
+    [InlineData("C2", "restored", ".dll")]
+    [InlineData("C2", "restored", ".pdb")]
+    public void SeventhImageLeavesCannotBeRemoved(string variant, string kind, string suffix)
+    {
+        var fixture = new Fixture();
+        fixture.Packets().Validate();
+        fixture.Binding[kind]![variant]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli" + suffix);
+        Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
+    }
+
+    /// <summary>The seventh DLL must change under instrumentation and match its original after restoration.</summary>
+    [Theory]
+    [InlineData("None", "unchanged")]
+    [InlineData("C2", "unchanged")]
+    [InlineData("None", "restoration")]
+    [InlineData("C2", "restoration")]
+    [InlineData("None", "hash")]
+    [InlineData("C2", "hash")]
+    public void SeventhImageHashesRemainBound(string variant, string mutation)
+    {
+        const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
+        var fixture = new Fixture();
+        fixture.Packets().Validate();
+        switch (mutation)
+        {
+            case "unchanged": fixture.Binding["instrumented"]![variant]![module] = new string('a', 64); break;
+            case "restoration": fixture.Binding["restored"]![variant]![module] = new string('d', 64); break;
+            case "hash": fixture.Binding["original"]![variant]![module] = new string('B', 64); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
+    }
+
+    /// <summary>Rebound inner, combined and rollback report digests cannot hide an omitted or duplicate seventh module.</summary>
+    [Theory]
+    [InlineData("inner", false)]
+    [InlineData("combined", false)]
+    [InlineData("rollback", false)]
+    [InlineData("inner", true)]
+    [InlineData("combined", true)]
+    [InlineData("rollback", true)]
+    public void SeventhReportModuleCannotBeReplacedByAnotherBasename(string partition, bool duplicate)
+    {
+        var fixture = new Fixture();
+        fixture.Packets().Validate();
+        var report = partition switch
+        {
+            "inner" => fixture.Inner,
+            "combined" => fixture.Combined,
+            "rollback" => fixture.Rollback.Report,
+            _ => throw new ArgumentOutOfRangeException(nameof(partition))
+        };
+        report.Remove("ForgeTrust.AppSurface.Evidence.Cli.dll");
+        if (duplicate) report["/duplicate/ForgeTrust.AppSurface.Cli.dll"] = new JsonObject();
         Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
     }
 

@@ -40,9 +40,10 @@ HELPER_PROJECTS = {
 }
 MEASUREMENT_MODULES = ("ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
     "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
-    "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision")
+    "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision",
+    "ForgeTrust.AppSurface.Evidence.Cli")
 MEASUREMENT_NAMES = frozenset(name + suffix for name in MEASUREMENT_MODULES for suffix in (".dll", ".pdb"))
-# This supplemental collector observes root supervision only. Full six-module
+# This supplemental collector observes root supervision only. Full seven-module
 # reports remain required because the completed consumer predecessor is merged.
 MEASUREMENT_INSTRUMENTED_NAMES = frozenset(
     "ForgeTrust.AppSurface.Evidence.Supervision" + suffix for suffix in (".dll", ".pdb"))

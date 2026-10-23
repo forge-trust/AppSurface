@@ -1,8 +1,10 @@
 """Private measurement wiring data only; fabricated byte samples are never native coverage."""
 from pathlib import Path
+import ast
 import hashlib
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -17,7 +19,13 @@ class ArgumentControls(unittest.TestCase):
     def inputs(self):
         return ['/evidence', '/tool', '/sdk-tool', '/runtime', '/prepared', '/workspace', 'a' * 40, '/collector/coverlet.dll']
 
-    def test_both_collectors_select_the_same_six_modules_and_only_one_existing_driver(self):
+    def test_both_collectors_select_the_same_seven_modules_and_only_one_existing_driver(self):
+        self.assertEqual((
+            'ForgeTrust.AppSurface.Cli', 'ForgeTrust.AppSurface.Evidence.Contracts',
+            'ForgeTrust.AppSurface.Evidence.Planner', 'ForgeTrust.AppSurface.Evidence.Coverage',
+            'ForgeTrust.AppSurface.Evidence.Aspire', 'ForgeTrust.AppSurface.Evidence.Supervision',
+            'ForgeTrust.AppSurface.Evidence.Cli',
+        ), arguments.MODULES)
         values = arguments.build(*self.inputs())
         self.assertEqual('/sdk-tool/ForgeTrust.AppSurface.Cli.dll', values[1])
         self.assertEqual('/usr/bin/python3', values[values.index('--target') + 1])
@@ -37,6 +45,22 @@ class ArgumentControls(unittest.TestCase):
             with self.subTest(values=type(values[0])):
                 with self.assertRaises(ValueError):
                     arguments.arguments(values)
+
+    def test_whole_image_workflows_select_the_same_closed_modules_and_original_leaves(self):
+        workflows = Path(__file__).resolve().parents[1] / 'workflows'
+        expected = ['[' + module + ']*' for module in arguments.MODULES]
+        for filename, count in (('issue779-checkpoint3-application.yml', 2),
+                                ('issue779-checkpoint4-accounts.yml', 1)):
+            text = (workflows / filename).read_text()
+            rows = [row for row in text.splitlines() if "--include '[ForgeTrust.AppSurface.Cli]*'" in row]
+            with self.subTest(workflow=filename):
+                self.assertEqual(count, len(rows))
+                for row in rows:
+                    self.assertEqual(expected, re.findall(r"'([^']+)'", row))
+        text = (workflows / 'issue779-checkpoint3-application.yml').read_text()
+        row = next(row.strip() for row in text.splitlines() if row.strip().startswith('names = tuple('))
+        expression = ast.parse(row).body[0].value.args[0]
+        self.assertEqual(arguments.MODULES, ast.literal_eval(expression.generators[0].iter))
 
     def test_unclosed_inputs_reject_before_a_command_can_be_constructed(self):
         for index, value in ((0, 'relative'), (1, '/tool\ncanary'), (2, '/sdk"canary'),
@@ -69,6 +93,16 @@ class ImageBindingControls(unittest.TestCase):
                 original['sdk_files'].pop(names[0])
             if mutation == 'extra-module':
                 original['files']['unexpected.dll'] = 'a' * 64
+            if mutation and mutation.startswith('shared:'):
+                _, operation, key, suffix = mutation.split(':')
+                name = 'ForgeTrust.AppSurface.Evidence.Cli.' + suffix
+                if operation == 'missing':
+                    del original[key][name]
+                elif operation == 'alias':
+                    original[key]['other.dll'] = original[key].pop(name)
+                else:
+                    image = tool if key == 'files' else sdk
+                    (image / name).write_bytes((key + name + '-before').encode())
             capture = root / 'original.json'
             capture.write_text(json.dumps(original))
             binding = root / 'binding.json'
@@ -85,6 +119,8 @@ class ImageBindingControls(unittest.TestCase):
                     wrapper.main()
                     run.assert_called_once()
                     row = json.loads(binding.read_text())
+                    self.assertEqual(14, len(row['instrumented']))
+                    self.assertEqual(14, len(row['sdk_instrumented']))
                     self.assertEqual(set(names), set(row['sdk_instrumented']))
                     self.assertEqual(original['sdk_files'], row['sdk_original'])
                     for name in names:
@@ -97,6 +133,14 @@ class ImageBindingControls(unittest.TestCase):
         for mutation in ('unchanged-sdk', 'missing-sdk', 'extra-module'):
             with self.subTest(mutation=mutation):
                 self.exercise(mutation)
+
+    def test_shared_cli_inputs_must_exist_in_both_images_and_be_instrumented(self):
+        for key in ('files', 'sdk_files'):
+            for operation, suffix in (('missing', 'dll'), ('missing', 'pdb'),
+                                      ('alias', 'dll'), ('unchanged', 'dll')):
+                mutation = 'shared:' + operation + ':' + key + ':' + suffix
+                with self.subTest(image=key, operation=operation, suffix=suffix):
+                    self.exercise(mutation)
 
 
 if __name__ == '__main__':

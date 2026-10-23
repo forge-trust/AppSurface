@@ -103,6 +103,30 @@ class LineageDataTests(unittest.TestCase):
         self.assertEqual(sha(self.args.merge_binding.read_bytes()), value['prior_input_binding_sha256'])
         self.assertEqual(sha(self.args.merge_root_trx.read_bytes()), value['prior_root_trx_sha256'])
 
+    def assert_rebound_shared_cli_report_rejects(self):
+        raw = self.args.merge_report.read_bytes()
+        for mutation in ('missing', 'duplicate-basename', 'alias'):
+            report = json.loads(raw)
+            del report['ForgeTrust.AppSurface.Evidence.Cli.dll']
+            if mutation == 'duplicate-basename':
+                report['/other/ForgeTrust.AppSurface.Cli.dll'] = {}
+            elif mutation == 'alias':
+                report['ForgeTrust.AppSurface.Evidence.Cli'] = {}
+            body = subject.canonical(report)
+            self.args.merge_report.write_bytes(body)
+            self.binding['coverage_sha256'] = sha(body)
+            self.save_binding()
+            with self.subTest(prior=self.args.prior_kind, shared_cli=mutation):
+                with self.assertRaisesRegex(RuntimeError, 'prior-modules'):
+                    subject.prior_binding(self.args)
+        self.args.merge_report.write_bytes(raw)
+        self.binding['coverage_sha256'] = sha(raw)
+        self.save_binding()
+        subject.prior_binding(self.args)
+
+    def test_rebound_c3_report_cannot_omit_or_alias_the_shared_cli(self):
+        self.assert_rebound_shared_cli_report_rejects()
+
     def test_semantically_equal_but_different_source_bytes_reject(self):
         self.args.merge_source.write_bytes(self.args.merge_source.read_bytes() + b' ')
         with self.assertRaises(RuntimeError): subject.prior_binding(self.args)
@@ -176,6 +200,7 @@ class LineageDataTests(unittest.TestCase):
         self.args.variant = 'C4AccountRollback'; self.args.prior_kind = 'accounts'
         self.args.prior_artifact_name = 'issue779-c4-accounts-C4Accounts-123-1'; self.args.merge_root_trx = None
         self.assertEqual('C4Accounts', subject.prior_binding(self.args)['prior_variant'])
+        self.assert_rebound_shared_cli_report_rejects()
         native['receipt']['numeric_ids_absent'] = False
         body = subject.canonical(native); self.args.merge_native.write_bytes(body)
         self.binding['native_receipt_sha256'] = sha(body); self.save_binding()

@@ -9,7 +9,7 @@ namespace ForgeTrust.AppSurface.Evidence.ExitBarrier.Support;
 
 /// <summary>Private measurement-only rendezvous owned entirely by an independently built support assembly.</summary>
 /// <remarks>
-/// No product assembly, callback, environment input or execution capability is accepted. The six selected
+/// No product assembly, callback, environment input or execution capability is accepted. The seven selected
 /// product modules must be the only instrumentation targets; this assembly must remain uninstrumented.
 /// Missing or malformed root plans leave measurement unavailable and never alter the original exit code.
 /// </remarks>

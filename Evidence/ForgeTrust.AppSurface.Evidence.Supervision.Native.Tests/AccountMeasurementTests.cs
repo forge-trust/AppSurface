@@ -97,6 +97,50 @@ public sealed class AccountMeasurementTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate(rebind));
     }
 
+    /// <summary>Both account variants reject projected seven-module maps with rebound serialization hashes.</summary>
+    [Theory]
+    [InlineData("C4Accounts", "original-dll")]
+    [InlineData("C4Accounts", "original-pdb")]
+    [InlineData("C4Accounts", "instrumented-dll")]
+    [InlineData("C4Accounts", "instrumented-pdb")]
+    [InlineData("C4Accounts", "unchanged-dll")]
+    [InlineData("C4Accounts", "bad-hash")]
+    [InlineData("C4Accounts", "missing-report")]
+    [InlineData("C4Accounts", "duplicate-report")]
+    [InlineData("C4Accounts", "missing-positive-document")]
+    [InlineData("C4AccountRollback", "original-dll")]
+    [InlineData("C4AccountRollback", "original-pdb")]
+    [InlineData("C4AccountRollback", "instrumented-dll")]
+    [InlineData("C4AccountRollback", "instrumented-pdb")]
+    [InlineData("C4AccountRollback", "unchanged-dll")]
+    [InlineData("C4AccountRollback", "bad-hash")]
+    [InlineData("C4AccountRollback", "missing-report")]
+    [InlineData("C4AccountRollback", "duplicate-report")]
+    [InlineData("C4AccountRollback", "missing-positive-document")]
+    public void SeventhModuleAndExistingPositiveDocumentsRemainRequired(string variant, string mutation)
+    {
+        const string module = "ForgeTrust.AppSurface.Evidence.Cli.dll";
+        var fixture = new Fixture(variant);
+        fixture.Validate();
+        switch (mutation)
+        {
+            case "original-dll": fixture.Binding["original"]!.AsObject().Remove(module); break;
+            case "original-pdb": fixture.Binding["original"]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli.pdb"); break;
+            case "instrumented-dll": fixture.Binding["instrumented"]!.AsObject().Remove(module); break;
+            case "instrumented-pdb": fixture.Binding["instrumented"]!.AsObject().Remove("ForgeTrust.AppSurface.Evidence.Cli.pdb"); break;
+            case "unchanged-dll": fixture.Binding["instrumented"]![module] = new string('a', 64); break;
+            case "bad-hash": fixture.Binding["original"]![module] = new string('B', 64); break;
+            case "missing-report": fixture.Report.Remove(module); break;
+            case "duplicate-report":
+                fixture.Report.Remove(module);
+                fixture.Report["/duplicate/ForgeTrust.AppSurface.Cli.dll"] = new JsonObject();
+                break;
+            case "missing-positive-document": fixture.Supervision.Remove(Fixture.OwnerPath); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
     /// <summary>Reusable detached packet builder for data-only lineage controls; no native holders are constructed.</summary>
     internal sealed class Fixture
     {
@@ -119,7 +163,7 @@ public sealed class AccountMeasurementTests
             var instrumented = new JsonObject();
             foreach (var module in new[] { "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
                 "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
-                "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision" })
+                "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli" })
             {
                 foreach (var suffix in new[] { ".dll", ".pdb" })
                 {

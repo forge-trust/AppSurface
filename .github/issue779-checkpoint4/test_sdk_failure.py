@@ -223,6 +223,23 @@ class FailureDiagnosticDataTests(unittest.TestCase):
         for field, value in [('module_sha256', 'c' * 64), ('host_sha256', 'c' * 64), ('cached_sha256', 'c' * 64), ('outcome', 'worker-file-absent')]:
             candidate = json.loads(json.dumps(worker)); candidate['modules'][0][field] = value
             with self.subTest(field=field), self.assertRaises(RuntimeError): subject.require_worker(candidate, expected, images)
+        shared = 'ForgeTrust.AppSurface.Evidence.Cli.dll'
+        self.assertEqual(7, len(worker['modules']))
+        for mutation in ('missing', 'duplicate', 'alias', 'image', 'host', 'cached', 'absent', 'prior'):
+            candidate = json.loads(json.dumps(worker))
+            row = next(item for item in candidate['modules'] if item['module'] == shared)
+            if mutation == 'missing':
+                candidate['modules'].remove(row)
+            elif mutation == 'duplicate':
+                row.update(candidate['modules'][0])
+            elif mutation == 'alias':
+                row['module'] = shared[:-4]
+            elif mutation in ('image', 'host', 'cached'):
+                row[{'image': 'module_sha256', 'host': 'host_sha256', 'cached': 'cached_sha256'}[mutation]] = 'd' * 64
+            else:
+                row['outcome'] = 'worker-file-absent' if mutation == 'absent' else 'prior-root-file-unchanged'
+            with self.subTest(shared_cli=mutation), self.assertRaises(RuntimeError):
+                subject.require_worker(candidate, expected, images)
 
     def test_separate_report_requires_current_source_bound_failure_arm_before_it_can_be_merged(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -235,6 +252,16 @@ class FailureDiagnosticDataTests(unittest.TestCase):
             report = {name + '.dll': {} for name in arguments.MODULES}
             report['ForgeTrust.AppSurface.Evidence.Coverage.dll'] = {'EvidenceRestrictedCoverageProducer.cs': {'Producer': {'RunAsync': {'Lines': {'2': 1}}}}}
             subject.require_failed_report(json.dumps(report).encode(), workspace, capture)
+            shared = 'ForgeTrust.AppSurface.Evidence.Cli.dll'
+            for mutation in ('missing', 'duplicate-basename', 'alias'):
+                changed = json.loads(json.dumps(report))
+                del changed[shared]
+                if mutation == 'duplicate-basename':
+                    changed['/other/ForgeTrust.AppSurface.Cli.dll'] = {}
+                elif mutation == 'alias':
+                    changed[shared[:-4]] = {}
+                with self.subTest(shared_cli=mutation), self.assertRaisesRegex(RuntimeError, 'report-modules'):
+                    subject.require_failed_report(json.dumps(changed).encode(), workspace, capture)
             report['ForgeTrust.AppSurface.Evidence.Coverage.dll']['EvidenceRestrictedCoverageProducer.cs']['Producer']['RunAsync']['Lines']['2'] = 0
             with self.assertRaises(RuntimeError): subject.require_failed_report(json.dumps(report).encode(), workspace, capture)
             report['ForgeTrust.AppSurface.Evidence.Coverage.dll']['EvidenceRestrictedCoverageProducer.cs']['Producer']['RunAsync']['Lines']['2'] = 1
@@ -267,7 +294,7 @@ class PassiveTmpEventDataTests(unittest.TestCase):
             data.feed(self.record(name, 0x108), self.watch)
             self.assertEqual((1, 1, 0), tuple(data.rows[i][key] for key in ('create', 'close_write', 'delete')))
         self.assertNotIn('01234567', json.dumps(data.rows))
-        self.assertEqual(8, data.events)
+        self.assertEqual(9, data.events)
 
     def test_unknown_names_paths_uppercase_guids_and_directories_are_not_file_counts(self):
         self.valid()

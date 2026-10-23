@@ -65,10 +65,10 @@ The fixed captured `producer_roots.py` native/report/witness validators are load
 only after checking their source bytes and fixed imported helper against the
 current full capture. C2 requires v2 eligibility, matching external/context
 predecessors, current run artifact naming, all three numeric zero exits, exact
-12-file maps for both original/instrumented/restored images, actual seven native
+14-file maps for both original/instrumented/restored images, actual seven native
 rows including the intentional quarantined cleanup failure, raw case/owner logs,
 staged inventories and both current witness arms. C1 links require original v1
-publication plus measured v2, the fixed selector, six-module standard reports,
+publication plus measured v2, the fixed selector, seven-module standard reports,
 wrapper command argv/log hashes, native plan/result/execution/evidence and
 restoration observations. Pinned Coverlet keys collected modules by DLL basename;
 no alternate 12/24-module geometry is silently accepted.
