@@ -102,22 +102,43 @@ public sealed class DurableDoctorInstalledToolTests
                 testDeadline.Token.ThrowIfCancellationRequested();
                 var row = Assert.Single(matrixRows, candidate => candidate.Id == scenario.MatrixId);
                 await ConfigureScenarioAsync(fixture, scenario, testDeadline.Token);
-                var before = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
+                var before = scenario.MatrixId == "D04"
+                    ? string.Empty
+                    : await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
                 var connectionString = scenario.Unavailable
                     ? CreateUnavailableConnectionString(fixture.RuntimeConnectionString)
                     : fixture.RuntimeConnectionString;
-                var run = await RunDoctorAsync(
-                    installedExecutable,
-                    toolPath,
-                    processEnvironment,
-                    customConnectionName,
-                    customEpochName,
-                    connectionString,
-                    fixture.RuntimeEpoch,
-                    scenario.WorkerId,
-                    json: true,
-                    extraArguments: [],
-                    testDeadline.Token);
+                ProcessResult run;
+                if (scenario.MatrixId == "D04")
+                {
+                    (run, before, connectionString) = await RunFreshBoundaryDoctorAsync(
+                        fixture,
+                        installedExecutable,
+                        toolPath,
+                        processEnvironment,
+                        customConnectionName,
+                        customEpochName,
+                        fixture.RuntimeConnectionString,
+                        fixture.RuntimeEpoch,
+                        scenario.WorkerId!,
+                        testDeadline.Token);
+                }
+                else
+                {
+                    run = await RunDoctorAsync(
+                        installedExecutable,
+                        toolPath,
+                        processEnvironment,
+                        customConnectionName,
+                        customEpochName,
+                        connectionString,
+                        fixture.RuntimeEpoch,
+                        scenario.WorkerId,
+                        json: true,
+                        extraArguments: [],
+                        testDeadline.Token);
+
+                }
 
                 AssertDoctorProcessOutput(run, row, connectionString, "json", customConnectionName, customEpochName,
                     scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
@@ -903,6 +924,99 @@ public sealed class DurableDoctorInstalledToolTests
         return await RunProcessAsync(startInfo, DoctorTimeout, cancellationToken);
     }
 
+    /// <summary>Arranges a live heartbeat after process startup, before the doctor's read-only snapshot.</summary>
+    /// <remarks>The existing ten-second work deadline is shorter than the unchanged fifteen-second freshness
+    /// threshold. Exact equality remains covered by the pure D04 matrix, independent of process scheduling.</remarks>
+    private static async Task<(ProcessResult Run, string Before, string ConnectionString)> RunFreshBoundaryDoctorAsync(
+        DurableDoctorFixture fixture,
+        string executable,
+        string toolPath,
+        IReadOnlyDictionary<string, string> baseEnvironment,
+        string connectionEnvironmentName,
+        string epochEnvironmentName,
+        string connectionString,
+        Guid runtimeEpoch,
+        string workerId,
+        CancellationToken cancellationToken)
+    {
+        var applicationName = $"doctor-installed-d04-{Guid.NewGuid():N}";
+        var identifiedConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            ApplicationName = applicationName,
+        }.ConnectionString;
+        await using var fenceConnection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.AdministrativeConnectionString)
+        {
+            Pooling = false,
+        }.ConnectionString);
+        await fenceConnection.OpenAsync(cancellationToken);
+        await using (var fenceCommand = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_lock(@key)", fenceConnection))
+        {
+            fenceCommand.Parameters.AddWithValue("key", DurableDoctorService.MigrationAdvisoryLock);
+            await fenceCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var doctorTask = RunDoctorAsync(
+                executable,
+                toolPath,
+                baseEnvironment,
+                connectionEnvironmentName,
+                epochEnvironmentName,
+                identifiedConnectionString,
+                runtimeEpoch,
+                workerId,
+                json: true,
+                extraArguments: [],
+                cancellationToken);
+        string before;
+        ProcessResult result;
+        try
+        {
+            await WaitForAdvisoryLockWaiterAsync(
+                fixture,
+                applicationName,
+                TimeSpan.FromSeconds(7),
+                cancellationToken);
+            await fixture.SeedHeartbeatAsync(workerId, TimeSpan.Zero, runtimeEpoch, draining: false, cancellationToken);
+            before = await fixture.ReadDurableStateFingerprintAsync(cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                await UnlockAndCloseFenceAsync(fenceConnection);
+            }
+            finally
+            {
+                // RunDoctorAsync already owns the original process and kill deadlines. Always join it.
+                result = await doctorTask;
+            }
+        }
+
+        return (result, before, identifiedConnectionString);
+    }
+
+    private static async Task UnlockAndCloseFenceAsync(NpgsqlConnection connection)
+    {
+        if (connection.FullState == System.Data.ConnectionState.Closed)
+        {
+            return;
+        }
+
+        try
+        {
+            using var cleanup = new CancellationTokenSource(KillWaitTimeout);
+            await using var unlock = new NpgsqlCommand(
+                "SELECT pg_catalog.pg_advisory_unlock(@key)", connection);
+            unlock.Parameters.AddWithValue("key", DurableDoctorService.MigrationAdvisoryLock);
+            Assert.True(await unlock.ExecuteScalarAsync(cleanup.Token) is true,
+                "The installed doctor fixture did not release its owned migration fence.");
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
     private static void AssertDoctorProcessOutput(
         ProcessResult run,
         DurableDoctorMatrixRow row,
@@ -924,6 +1038,13 @@ public sealed class DurableDoctorInstalledToolTests
             foreach (var code in row.ExpectedCodes)
             {
                 Assert.Contains(code, run.StandardOutput, StringComparison.Ordinal);
+            }
+            if (row.NextAction == "verify")
+            {
+                Assert.Contains("Next action: Run the application's composition verifier", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Required input: consumer verifier command\n", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n",
+                    run.StandardOutput, StringComparison.Ordinal);
             }
             return;
         }
@@ -998,6 +1119,10 @@ public sealed class DurableDoctorInstalledToolTests
         if (row.NextAction == "verify")
         {
             Assert.Equal(JsonValueKind.Null, command.ValueKind);
+            Assert.Equal(["consumer verifier command"],
+                action.GetProperty("requiredInputs").EnumerateArray().Select(static input => input.GetString()));
+            Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                action.GetProperty("documentationUrl").GetString());
             return;
         }
 

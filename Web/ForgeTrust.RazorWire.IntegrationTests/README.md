@@ -55,6 +55,12 @@ The fixture passes the same runtime settings that the standalone smoke path need
 
 When adding AppSurface Docs browser coverage, use the shared fixture or `AppSurfaceDocsInProcessHost`. Avoid starting the standalone app as a child process from tests; that can rebuild unrelated projects during fixture startup and can hide stale output bugs during focused local test runs.
 
+### Contributor timestamp rendering
+
+The contributor-strip rendering regression uses [`AppSurfaceDocsContributorTimestampFixture`](AppSurfaceDocsContributorTimestampFixture.cs), a private source corpus served by the real Docs host. It supplies the documented [`contributor.last_updated_override`](../ForgeTrust.AppSurface.Docs/README.md#page-level-overrides) so the test always exercises a real server-rendered timestamp and the packaged browser formatter. The shared source-backed fixture continues to use Git freshness for its other tests. [Git freshness is optional and bounded](../ForgeTrust.AppSurface.Docs/README.md#contributor-provenance); do not require any particular page's timestamp from a large repository harvest or increase its production budget to satisfy a rendering test.
+
+[`AppSurfaceDocsTimestampReadiness.WaitAsync`](AppSurfaceDocsTimestampReadiness.cs) retains the rendering regression's nonempty, non-UTC text predicate and 60-second default. When that wait fails, it preserves the original timeout as the inner exception and adds only bounded timestamp/attribute/runtime booleans and a capped element count. A missing timestamp, invalid datetime or absent formatter remains a failure. Snapshot collection has a separate five-second cap; if it cannot complete, the original failure still surfaces with `State: unavailable`. The allowance must be a positive integer; zero is rejected because Playwright would otherwise disable its timeout. Synthetic negative probes use a short readiness allowance only to verify the diagnostic branches. The helper does not retry or initialize the formatter.
+
 ### Release-page visual baselines
 
 The macOS Chromium screenshot tests compare the light and Graphite presets with PNGs in

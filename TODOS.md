@@ -93,7 +93,7 @@
 
 **Cons:** New signing identity, storage lifecycle, authorization, and remote-package semantics.
 
-**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host.
+**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host. The [#806 template design](docs/designs/issue-806-durable-worker-template.md) reuses this trusted Actions boundary and keeps portable signing/storage here; a local template receipt alone does not authenticate an outside observer.
 
 **Effort:** L human / M agent
 **Priority:** P3
