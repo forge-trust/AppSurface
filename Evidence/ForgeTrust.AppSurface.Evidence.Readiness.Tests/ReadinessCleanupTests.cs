@@ -2,8 +2,10 @@ namespace ForgeTrust.AppSurface.Evidence.Readiness.Tests;
 
 public sealed class ReadinessCleanupTests
 {
-    // Value: preserves fatal identity and depth-first precedence without stack exhaustion at a deep cleanup boundary.
-    // Failure: recursive traversal exhausts the process stack; reversed ordering selects the later fatal sibling.
+    // Value: protects=fatal identity and depth-first precedence through deeply nested cleanup aggregates;
+    // fails_when=recursive traversal exhausts the call stack or traversal selects the later fatal sibling;
+    // why_new=existing adapter theories cover shallow aggregates but do not exercise deep nesting;
+    // seam=none; no_claim=unit classification only; adapter lifecycle and real resource readiness have separate tests.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
