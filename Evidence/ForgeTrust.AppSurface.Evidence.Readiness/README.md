@@ -122,7 +122,9 @@ The exception's fixed [`DocumentationUrl`](#readinessexception) always ends in `
 | `Http` + `TransportFailure` | `HTTP transport failed.` | `HTTP transport category: {HttpRequestError}.` | `Check reachability and caller proxy or certificate policy.` |
 | `Http` + `RequestTimeout` | `HTTP request timed out.` | `The request budget or a shorter client timer expired.` | `Check responsiveness and the explicit request or client limits.` |
 | `EndpointResolution` + `EndpointUnavailable` | `Named HTTP endpoint unavailable.` | `The explicit resource or endpoint could not be resolved to HTTP(S).` | `Check the resource name, endpoint name, and allocated endpoint.` |
-| `Cleanup` + `CleanupFailure` | `Owned cleanup failed.` | `Owned cleanup exception type: Exception.` | `Inspect owner cleanup without claiming readiness.` |
+| `Cleanup` + `CleanupFailure` | `Owned cleanup failed.` | `Owned cleanup exception type: {allowlisted cleanup type}.` | `Inspect owner cleanup without claiming readiness.` |
+
+The cleanup type is one of `InvalidOperationException`, `ObjectDisposedException`, `TimeoutException`, `OperationCanceledException`, `HttpRequestException`, or `AggregateException`; all other types map to `Exception`. Arbitrary exception type names are never included.
 
 The base `Message` uses only `Phase`, `Category`, `Attempts`, `LastCause`, numeric `LastStatusCode`, and `LastHttpRequestError` in this shape: `Readiness failed in {Phase}: {Category}; attempts={Attempts}; last cause={LastCause}; status={numeric status or null}; transport={HttpRequestError or null}.` Caller cancellation has no generated readiness fields: it propagates as `OperationCanceledException` carrying the original caller token. The cancellation recovery guidance below is for the caller and is not attached to or logged by the package.
 
@@ -141,7 +143,7 @@ The base `Message` uses only `Phase`, `Category`, `Attempts`, `LastCause`, numer
 | [Null client factory](#client-factory) | A custom factory did not return a usable fresh client. | Return a non-null, newly owned `HttpClient`; the adapter disposes it after the wait. |
 | [Invalid builder state](#builder-state) | A fixture factory returned a builder that is built, disposed, preparing, or not exclusively owned. | Return one active, unbuilt builder and let the fixture own it after transfer. |
 | [Predicate failure](#predicate) | The synchronous status predicate threw. | Fix the predicate; it is a caller configuration failure and is not retried or wrapped. |
-| [Factory/build failure](#factory-build) | User-supplied creation or build code threw. | Diagnose at the original call site; the exception remains primary and is not automatically logged by the readiness package. |
+| [Factory/build failure](#factorybuild) | User-supplied creation or build code threw. | Diagnose at the original call site; the exception remains primary and is not automatically logged by the readiness package. |
 
 ### Deadline
 

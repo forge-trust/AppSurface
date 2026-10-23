@@ -31,6 +31,8 @@ Each call injects an immutable `GateScenario` through `CreateConfiguredAsync` an
 
 The equivalence is native Aspire startup/readiness only. Browser execution, authentication, test data, and billing or monitoring assertions remain downstream responsibilities. The executable resource serves its local `/healthz` path so the packed consumer can exercise the fixture without relying on a remote service.
 
+Aspire allocates the executable's HTTP target port and injects it through `PORT`. The health server binds only to `127.0.0.1` at that port; it does not require port 8080 to be available or listen on external network interfaces.
+
 Prerequisites are a clean committed repository checkout, the .NET 10 SDK, network access to NuGet.org for Aspire dependencies, and an OS-supported Aspire 13.4.4 AppHost/DCP runtime. This fixture graph contains an executable resource and does not require a container image. The repository script retains the generated feed and restore/build/run logs under `.gstack/tmp/issue-867-readiness-consumers`; use its `packageVersion`, `sourceCommit`, `sourceTree`, and `feed` values for the exact local install:
 
 ```sh

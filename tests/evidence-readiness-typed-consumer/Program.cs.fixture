@@ -112,7 +112,9 @@ public static class Program
     private static async Task<int> RunHealthServerAsync()
     {
         var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://0.0.0.0:8080");
+        var port = Environment.GetEnvironmentVariable("PORT")
+            ?? throw new InvalidOperationException("Aspire did not supply the health-server PORT.");
+        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
         var application = builder.Build();
         application.MapGet("/healthz", () => Results.Ok());
         await application.RunAsync();
@@ -364,6 +366,6 @@ public sealed class WebComponent : IAspireComponent<ExecutableResource>
                 AppContext.BaseDirectory,
                 typeof(Program).Assembly.Location,
                 "--health-server")
-            .WithHttpEndpoint(targetPort: 8080, name: Program.EndpointName)
+            .WithHttpEndpoint(name: Program.EndpointName, env: "PORT")
             .WithHttpHealthCheck(Program.ProbePath);
 }
