@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import stat
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 
@@ -76,7 +77,12 @@ def write_new(path, raw):
 
 
 def command(args, original, index, deadline):
-    """Use the existing joined process/EOF owner under the original caller's remaining bound."""
+    """Run a joined SDK phase with disposable private XDG data, using the original remaining bound.
+
+    The directory is outside the source/evidence trees and is removed on success
+    or failure. Its environment belongs only to this trusted SDK command, not to
+    the original native procedure or the protected worker's environment.
+    """
     root, sdk, _, _, data = paths(args, original)
     phase = ('data-restore', 'data-build', 'data-run')[index]
     reserve = 60 if index == 2 else 10
@@ -85,7 +91,16 @@ def command(args, original, index, deadline):
     env = os.environ.copy()
     env.update(DOTNET_ROOT=str(sdk.parent), DOTNET_CLI_USE_MSBUILD_SERVER='0',
                MSBUILDDISABLENODEREUSE='1', DOTNET_CLI_TELEMETRY_OPTOUT='1', DOTNET_NOLOGO='1')
-    row = publish.command(argv(args, original)[index], phase, data / (phase + '.log'), root, env, end)
+    # NuGet's first-use migration must never fall back to a relative .local path
+    # when the fixed outer harness HOME does not exist. This directory belongs
+    # only to the trusted SDK process; it is never passed to a native worker.
+    parent = args.evidence.parent.resolve(strict=True)
+    need(parent != root and root not in parent.parents, 'sdk-data-parent')
+    with tempfile.TemporaryDirectory(prefix='c1-sdk-data-', dir=parent) as directory:
+        sdk_data = Path(directory).resolve(strict=True)
+        need(sdk_data.is_absolute() and not binding.overlaps(root, sdk_data), 'sdk-data-root')
+        env['XDG_DATA_HOME'] = str(sdk_data)
+        row = publish.command(argv(args, original)[index], phase, data / (phase + '.log'), root, env, end)
     need(type(row['exit']) is int and row['exit'] == 0 and row['joined'] is True
          and row['timed_out'] is False, 'command')
     return row

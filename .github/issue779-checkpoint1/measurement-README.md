@@ -69,6 +69,13 @@ project in locked mode and builds the same Release selector with warnings as err
 disabled. It requires the test-output Supervision DLL/PDB bytes to equal the original published pair,
 and retains those originals plus command logs in fresh private `data-tests/` evidence.
 
+Each supplemental SDK command receives a fresh mode-0700 temporary `XDG_DATA_HOME`, outside the
+source checkout and retained evidence tree. [NuGet's Unix data-directory selection](https://github.com/NuGet/NuGet.Client/blob/dev/src/NuGet.Core/NuGet.Common/PathUtil/NuGetEnvironment.cs)
+can otherwise place first-use migration state under a relative `.local/share` when the harness's fixed
+`HOME=/nonexistent` supplies no usable home. The SDK directory is removed after the joined command,
+including failure. It changes neither the native command environment nor a worker/subject sandbox;
+all original command deadlines, clean-source checks and receipt schemas remain in force.
+
 After the original native procedure has finished, `run(args, original, prepared, deadline=...)` copies
 only the collector's actual instrumented Supervision DLL/PDB into the fixed test-output directory.
 The DLL must actually differ from its original. Each replacement retains its original single-link inode

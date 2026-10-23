@@ -64,6 +64,89 @@ def model(selector='N07'):
     return args, original, prepared, raws
 
 
+class SdkDataDirectoryControls(unittest.TestCase):
+    """SDK environment and real temporary-file controls; no SDK or native case is fabricated."""
+
+    def test_each_sdk_phase_uses_private_absolute_data_outside_the_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            source = parent / 'source'
+            evidence = parent / 'evidence'
+            source.mkdir()
+            evidence.mkdir()
+            args, original, _, _ = model('N04')
+            args.evidence = evidence
+            original['source_root'] = str(source)
+            seen = []
+
+            def execute(argv, phase, log, root, environment, deadline):
+                state = Path(environment['XDG_DATA_HOME'])
+                self.assertTrue(state.is_absolute())
+                self.assertEqual(0o700, state.stat().st_mode & 0o777)
+                self.assertEqual(os.geteuid(), state.stat().st_uid)
+                self.assertFalse(binding.overlaps(root, state))
+                self.assertFalse(binding.overlaps(evidence, state))
+                self.assertEqual('/nonexistent', environment['HOME'])
+                self.assertEqual(subject.argv(args, original)[len(seen)], argv)
+                self.assertEqual(440, deadline)
+                # Model NuGet's migration write through its selected data root.
+                marker = state / 'NuGet/Migrations/1'
+                marker.parent.mkdir(parents=True)
+                marker.write_bytes(b'')
+                seen.append(state)
+                return {'exit': 0, 'joined': True, 'timed_out': False}
+
+            with patch.dict(os.environ, {'HOME': '/nonexistent', 'XDG_DATA_HOME': 'relative-unselected'}), \
+                    patch.object(subject.time, 'monotonic', return_value=400), \
+                    patch.object(subject.publish, 'command', side_effect=execute):
+                for index in range(3):
+                    # The final command keeps the original 60-second reserve;
+                    # earlier phases have only their original 10-second reserve.
+                    original_deadline = 500 if index == 2 else 450
+                    subject.command(args, original, index, original_deadline)
+                    self.assertFalse(seen[-1].exists())
+                self.assertEqual('relative-unselected', os.environ['XDG_DATA_HOME'])
+            self.assertEqual(3, len(set(seen)))
+            self.assertFalse((source / '.local').exists())
+            self.assertEqual([], list(source.iterdir()))
+
+    def test_sdk_failure_still_removes_its_owned_temporary_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            args, original, _, _ = model('N04')
+            args.evidence = parent / 'evidence'
+            args.evidence.mkdir()
+            original['source_root'] = str(parent / 'source')
+            (parent / 'source').mkdir()
+            seen = []
+
+            def fail(*argv):
+                state = Path(argv[4]['XDG_DATA_HOME'])
+                seen.append(state)
+                (state / 'owned-state').write_bytes(b'private-canary')
+                raise RuntimeError('sdk-command-failed')
+
+            with patch.object(subject.publish, 'command', side_effect=fail):
+                with self.assertRaisesRegex(RuntimeError, '^sdk-command-failed$'):
+                    subject.command(args, original, 2, time.monotonic() + 300)
+            self.assertEqual(1, len(seen))
+            self.assertFalse(seen[0].exists())
+            self.assertEqual([], list((parent / 'source').iterdir()))
+
+    def test_source_parent_rejects_before_creating_sdk_state_or_dispatching(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            args, original, _, _ = model('N04')
+            args.evidence = root / 'evidence'
+            args.evidence.mkdir()
+            original['source_root'] = str(root)
+            with patch.object(subject.tempfile, 'TemporaryDirectory', side_effect=AssertionError('create')), \
+                    patch.object(subject.publish, 'command', side_effect=AssertionError('dispatch')):
+                with self.assertRaises(binding.Rejected):
+                    subject.command(args, original, 2, time.monotonic() + 300)
+            self.assertEqual(['evidence'], [path.name for path in root.iterdir()])
+
+
 class DataMeasurementControls(unittest.TestCase):
     def test_each_fixed_recipe_accepts_closed_data_without_any_os_read_or_dispatch(self):
         for selector in subject.CLASSES:
