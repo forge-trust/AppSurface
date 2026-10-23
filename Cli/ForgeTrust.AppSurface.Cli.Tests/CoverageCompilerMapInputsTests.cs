@@ -108,6 +108,117 @@ public sealed class CoverageCompilerMapInputsTests
         Assert.True(XNode.DeepEquals(originalClasses.Single(element => (string?)element.Attribute("name") == "Demo.Worker"), nonCollidingMap));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_ShouldPassThroughDisjointGeneratedMapsWithoutChangingBytes(bool reverseGeneratedMaps)
+    {
+        using var temp = new TempDirectory();
+        var sourceFile = Path.GetFullPath(Path.Combine(temp.Path, "src", "Worker.cs"));
+        var document = CreateCollisionReport(sourceFile, reverseGeneratedMaps, includeNonCollidingClass: false);
+        var secondMap = FindClass(document.Descendants("class"), SecondGeneratedName);
+        foreach (var line in secondMap.Descendants("line"))
+        {
+            line.SetAttributeValue("number", (int)line.Attribute("number")! + 64);
+        }
+        var inputPath = temp.WriteDocument("disjoint.cobertura.xml", document);
+        var originalInputHash = ComputeFileHash(inputPath);
+        var outputDirectory = Path.Combine(temp.Path, "merge-output");
+
+        var preparedPaths = await CoverageCompilerMapInputs.PrepareAsync([inputPath], outputDirectory, CancellationToken.None);
+
+        Assert.Equal([inputPath], preparedPaths);
+        Assert.Equal(originalInputHash, ComputeFileHash(inputPath));
+        Assert.False(Directory.Exists(outputDirectory));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_ShouldPassThroughRepeatedGeneratedNamesWithoutCombiningCounters(bool reverseGeneratedMaps)
+    {
+        using var temp = new TempDirectory();
+        var sourceFile = Path.GetFullPath(Path.Combine(temp.Path, "src", "Worker.cs"));
+        var document = CreateCollisionReport(sourceFile, reverseGeneratedMaps, includeNonCollidingClass: false);
+        foreach (var map in document.Descendants("class"))
+        {
+            map.SetAttributeValue("name", FirstGeneratedName);
+        }
+        var inputPath = temp.WriteDocument("repeated-names.cobertura.xml", document);
+        var originalInputHash = ComputeFileHash(inputPath);
+        var outputDirectory = Path.Combine(temp.Path, "merge-output");
+
+        var preparedPaths = await CoverageCompilerMapInputs.PrepareAsync([inputPath], outputDirectory, CancellationToken.None);
+
+        Assert.Equal([inputPath], preparedPaths);
+        Assert.Equal(originalInputHash, ComputeFileHash(inputPath));
+        Assert.False(Directory.Exists(outputDirectory));
+        var retainedMaps = XDocument.Load(Assert.Single(preparedPaths)).Descendants("class").ToArray();
+        Assert.Equal(2, retainedMaps.Length);
+        Assert.All(retainedMaps, map => Assert.Equal(FirstGeneratedName, (string?)map.Attribute("name")));
+        Assert.Equal(ComputeClassProjectionHash(document.Descendants("class")), ComputeClassProjectionHash(retainedMaps));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PrepareAsync_ShouldPartitionOnlyTheOverlappingFamily(bool reverseInputOrder)
+    {
+        using var temp = new TempDirectory();
+        var sourceFile = Path.GetFullPath(Path.Combine(temp.Path, "src", "Worker.cs"));
+        var document = CreateCollisionReport(sourceFile, reverseGeneratedMaps: false, includeNonCollidingClass: false);
+        const string firstDisjointName = "Demo.OtherWorker/<Run>d__3";
+        const string secondDisjointName = "Demo.OtherWorker/<Run>d__9";
+        var firstDisjointMap = CreateGeneratedClass(firstDisjointName, sourceFile, 7);
+        var secondDisjointMap = CreateGeneratedClass(secondDisjointName, sourceFile, 0);
+        foreach (var line in secondDisjointMap.Descendants("line"))
+        {
+            line.SetAttributeValue("number", (int)line.Attribute("number")! + 64);
+        }
+        var classContainer = Assert.Single(document.Descendants("classes"));
+        classContainer.Add(firstDisjointMap, secondDisjointMap);
+        if (reverseInputOrder)
+        {
+            classContainer.ReplaceNodes(classContainer.Elements("class").Reverse().Select(map => new XElement(map)).ToArray());
+        }
+        var originalClasses = document.Descendants("class").Select(map => new XElement(map)).ToArray();
+        var inputPath = temp.WriteDocument("independent-families.cobertura.xml", document);
+        var originalInputHash = ComputeFileHash(inputPath);
+        var outputDirectory = Path.Combine(temp.Path, "merge-output");
+
+        var preparedPaths = await CoverageCompilerMapInputs.PrepareAsync([inputPath], outputDirectory, CancellationToken.None);
+
+        Assert.Equal(3, preparedPaths.Count);
+        Assert.DoesNotContain(inputPath, preparedPaths);
+        Assert.All(preparedPaths, path => Assert.True(File.Exists(path)));
+        var stagingDirectory = Path.GetDirectoryName(preparedPaths[0])!;
+        Assert.Equal(Path.GetFullPath(outputDirectory), Path.GetDirectoryName(stagingDirectory));
+        Assert.All(preparedPaths, path => Assert.Equal(stagingDirectory, Path.GetDirectoryName(path)));
+        var preparedDocuments = preparedPaths.Select(path => XDocument.Load(path)).ToArray();
+        var preparedClasses = preparedDocuments.SelectMany(prepared => prepared.Descendants("class")).ToArray();
+        Assert.Equal(4, preparedClasses.Length);
+        Assert.Equal(ComputeClassProjectionHash(originalClasses), ComputeClassProjectionHash(preparedClasses));
+        foreach (var original in originalClasses)
+        {
+            var retained = FindClass(preparedClasses, (string)original.Attribute("name")!);
+            Assert.True(XNode.DeepEquals(original, retained));
+        }
+
+        var baseDocument = Assert.Single(preparedDocuments,
+            prepared => prepared.Descendants("class").Any(map => (string?)map.Attribute("name") == firstDisjointName));
+        var expectedBaseNames = originalClasses
+            .Select(map => (string)map.Attribute("name")!)
+            .Where(name => name is firstDisjointName or secondDisjointName);
+        Assert.Equal(expectedBaseNames, baseDocument.Descendants("class").Select(map => (string)map.Attribute("name")!));
+        foreach (var name in new[] { FirstGeneratedName, SecondGeneratedName })
+        {
+            var partition = Assert.Single(preparedDocuments,
+                prepared => prepared.Descendants("class").Any(map => (string?)map.Attribute("name") == name));
+            Assert.Equal(name, (string?)Assert.Single(partition.Descendants("class")).Attribute("name"));
+        }
+        Assert.Equal(originalInputHash, ComputeFileHash(inputPath));
+    }
+
     [Fact]
     public async Task PrepareAsync_ShouldPassThroughEmptyCoberturaWithoutStaging()
     {

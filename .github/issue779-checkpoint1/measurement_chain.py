@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Data-only, source-bound four-selector standard Coverlet chain custody.
+"""Data-only, source-bound segmented standard Coverlet chain custody.
 
 No collector, native procedure, process or merge is executed here. Reports are
 retained byte-for-byte. The separate all-sixteen C1 lane remains mandatory.
@@ -22,9 +22,11 @@ from types import SimpleNamespace
 
 import binding
 
-ORDER = ('None', 'N04', 'N07', 'N16')
-CASES = {'None': ('N01', 'N02', 'N03'), 'N04': ('N04',), 'N07': ('N07',), 'N16': ('N16',)}
-SCHEMA = 'issue779-c1-measurement-chain-v1'
+ORDER = ('None', 'N04', 'N05', 'N06', 'N07', 'N08', 'N09', 'N10',
+         'N11', 'N12', 'N13', 'N14', 'N15', 'N16')
+CASES = {selector: (('N01', 'N02', 'N03') if selector == 'None' else (selector,))
+         for selector in ORDER}
+SCHEMA = 'issue779-c1-measurement-chain-v2'
 MAX_REPORT = 32 * 1024 * 1024
 MAX_LEAF = 8 * 1024 * 1024
 MAX_ARCHIVE = 33_619_968
@@ -159,6 +161,7 @@ def source(raw, head, deadline):
                 '.github/issue779-checkpoint1/measurement_data_tests.py',
                 '.github/issue779-checkpoint1/publish.py',
                 '.github/issue779-checkpoint1/measurement_chain.py',
+                '.github/issue779-checkpoint1/measurement_custody.py',
                 '.github/issue779-checkpoint4/producer_roots.py',
                 '.github/issue779-checkpoint4/measurement_arguments.py',
                 'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRetainedReportSet.cs',
@@ -219,7 +222,8 @@ def record(source_raw, head, identity, prefix, predecessor, links, report_sha, f
             'coverage_credit': False, 'all_sixteen_claimed': False}
 
 
-def validate_record(value, source_raw, head, identity, prefix, files):
+def validate_record_fields(value, source_raw, head, identity, prefix):
+    """Validate manifest claims only; this does not establish their raw custody."""
     binding.exact(value, FIELDS, 'measurement-chain-fields')
     need(value['schema'] == SCHEMA and value['source'] == head
          and value['source_capture_sha256'] == sha(source_raw) and value['workflow_identity'] == identity
@@ -245,6 +249,19 @@ def validate_record(value, source_raw, head, identity, prefix, files):
             need(type(link[key]) is str and binding.HEX64.fullmatch(link[key]), 'link-hash')
         previous = link['report_sha256']
     need(previous == value['report_sha256'], 'last-report')
+    total = 0
+    need(0 < len(value['files']) <= MAX_FILES, 'manifest-count')
+    for name, row in value['files'].items():
+        binding.exact(row, ('sha256', 'bytes'), 'measurement-chain-file-fields')
+        need(type(row['sha256']) is str and binding.HEX64.fullmatch(row['sha256'])
+             and type(row['bytes']) is int and 0 <= row['bytes'] <= leaf_limit(name), 'manifest-leaf')
+        total += row['bytes']
+    need(total <= MAX_TOTAL, 'manifest-total')
+
+
+def validate_record(value, source_raw, head, identity, prefix, files):
+    """Bind every manifest row to the actual supplied unchanged bytes."""
+    validate_record_fields(value, source_raw, head, identity, prefix)
     need(value['files'] == {n: {'sha256': sha(b), 'bytes': len(b)} for n, b in sorted(files.items())}, 'raw-file-map')
 
 
@@ -420,46 +437,14 @@ def n16_custody(raws, packet, leaves):
 
 
 def native_custody(raws, result, source_raw, head, selector, identity, build_raw, execution, capture, deadline):
-    """Close post-wrapper leaf substitution without kernel or image queries."""
-    prefix = '.github/issue779-checkpoint1/'
-    if selector in ('None', 'N04', 'N07'):
-        names = ['native/' + row['case'] + '-evidence.json' for row in result['cases']]
-        raw = raws[names[0]]
-        need(all(raws[n] == raw for n in names), 'slot-case-envelope-equality')
-        packet = binding.decode(raw)
-        binding.exact(packet, ('schema', 'source', 'selector', 'input_generation', 'source_capture_sha256',
-            'build_receipt_sha256', 'base_revision', 'procedure_sha256', 'archive_sha256', 'files', 'commands'),
-            'measurement-chain-slot-packet-fields')
-        shell = prefix + 'procedures/slot/' + ('checkpoint-none.sh' if selector == 'None'
-                                               else 'checkpoint-' + selector.lower() + '.sh')
-        need(packet['schema'] == 'issue779-checkpoint1-native-family-v1' and packet['source'] == head
-             and packet['selector'] == selector and packet['input_generation'] == execution['generation']
-             and packet['source_capture_sha256'] == sha(source_raw) and packet['build_receipt_sha256'] == sha(build_raw)
-             and type(packet['base_revision']) is str and binding.HEX40.fullmatch(packet['base_revision'])
-             and packet['procedure_sha256'] == capture['files'][shell]['sha256']
-             and all(row['procedure_sha256'] == packet['procedure_sha256'] for row in result['cases']), 'slot-packet-binding')
-        bridge_path = prefix + 'procedures/slot/bridge.py'
-        bridge = types.ModuleType('c1_chain_slot_custody_data')
-        bridge.__file__ = str(ROOT / bridge_path)
-        exec(compile(captured_data(bridge_path, capture, deadline), bridge.__file__, 'exec', dont_inherit=True), bridge.__dict__)
-        allowed = literal_set(captured_data(prefix + 'procedures/slot/records-' + selector.lower() + '.py',
-                                           capture, deadline), 'ARCHIVE_NAMES')
-        slot_custody(raws, packet, bridge, allowed)
-    else:
-        packet = binding.decode(raws['native/N16-evidence.json'])
-        binding.exact(packet, ('schema', 'source', 'selector', 'input_generation', 'workflow_identity',
-            'source_capture_sha256', 'build_receipt_sha256', 'procedure_sha256', 'base_revision',
-            'build_raw', 'nodes', 'files'), 'measurement-chain-n16-packet-fields')
-        shell = prefix + 'procedures/n16/checkpoint-n16-accepted-work.sh'
-        need(packet['schema'] == 'issue779-checkpoint1-n16-evidence-v1' and packet['source'] == head
-             and packet['selector'] == selector and packet['workflow_identity'] == identity
-             and packet['input_generation'] == execution['generation'] and packet['source_capture_sha256'] == sha(source_raw)
-             and packet['build_receipt_sha256'] == sha(build_raw)
-             and base64.b64decode(packet['build_raw'], validate=True) == build_raw
-             and packet['procedure_sha256'] == capture['files'][shell]['sha256']
-             and result['cases'][0]['procedure_sha256'] == packet['procedure_sha256'], 'n16-packet-binding')
-        leaves = literal_set(captured_data(prefix + 'procedures/n16/adapter.py', capture, deadline), 'LEAVES')
-        n16_custody(raws, packet, leaves)
+    """Reconcile the selected original family's raw native evidence as data."""
+    path = '.github/issue779-checkpoint1/measurement_custody.py'
+    module = types.ModuleType('c1_chain_native_custody')
+    module.__file__ = str(ROOT / path)
+    exec(compile(captured_data(path, capture, deadline), module.__file__, 'exec',
+                 dont_inherit=True), module.__dict__)
+    module.validate(raws, result, source_raw, head, selector, identity, build_raw,
+                    execution, capture, deadline=deadline)
 
 
 def stage(raws, source_raw, head, selector, identity, prior_raw, prior_report, measured, capture, *, deadline):
@@ -601,39 +586,53 @@ def lineage(raws):
     return {name: raw for name, raw in raws.items() if name.startswith('lineage/')}
 
 
-def verify_chain(source_raw, raws, identity, prefix, deadline):
+def seed_files(raws):
+    """Select the raw initial C2 endpoint; no selector report becomes a new base."""
+    return {n: raw for n, raw in raws.items() if n.startswith('lineage/c2/')}
+
+
+def verify_segment(source_raw, raws, identity, prefix, deadline):
+    """Verify this raw segment and its immediate prior manifest/report.
+
+    Earlier manifests are claims until validate_final reads every actual segment.
+    This function grants neither native acceptance nor final coverage eligibility.
+    """
+    need(type(prefix) in (tuple, list) and 0 < len(prefix) <= len(ORDER)
+         and tuple(prefix) == ORDER[:len(prefix)], 'segment-prefix')
     head = binding.decode(source_raw)['source']
     capture, bodies = source(source_raw, head, deadline)
     producer, measured = validators(bodies)
-    need(raws.get('source.json') == source_raw and 'chain-binding.json' in raws and 'coverage.json' in raws, 'chain-leaves')
+    need(raws.get('source.json') == source_raw and 'chain-binding.json' in raws
+         and 'coverage.json' in raws, 'chain-leaves')
     files = lineage(raws)
+    need(set(raws) == {'source.json', 'chain-binding.json', 'coverage.json'} | set(files),
+         'segment-extra')
     value = binding.decode(raws['chain-binding.json'])
     need(raws['chain-binding.json'] == binding.canonical(value), 'canonical-chain-record')
     validate_record(value, source_raw, head, identity, prefix, files)
-    base = {name.removeprefix('lineage/c2/'): raw for name, raw in files.items() if name.startswith('lineage/c2/')}
+    seeds = seed_files(files)
+    base = {n.removeprefix('lineage/c2/'): raw for n, raw in seeds.items()}
     predecessor = c2(base, source_raw, head, identity, producer, measured, capture)
     need(value['predecessor'] == predecessor, 'chain-c2')
-    previous_report = base['native-producer-roots.json']
-    previous_links = []
-    consumed = set('lineage/c2/' + name for name in base)
-    for index, selector in enumerate(prefix):
-        check(deadline)
-        stem = 'lineage/selectors/' + selector + '/'
-        node = {n.removeprefix(stem): raw for n, raw in files.items() if n.startswith(stem)}
-        prior_raw = node.get('prior-binding.json')
-        need(prior_raw is not None, 'raw-prior-binding')
-        prior_value = binding.decode(prior_raw)
-        prior_files = {n: raw for n, raw in files.items() if n in consumed}
-        validate_record(prior_value, source_raw, head, identity, prefix[:index], prior_files)
-        need(prior_value['predecessor'] == predecessor and prior_value['links'] == previous_links
-             and prior_value['report_sha256'] == sha(previous_report), 'raw-prior-prefix')
-        link = stage(node, source_raw, head, selector, identity, prior_raw, previous_report, measured, capture, deadline=deadline)
-        need(link == value['links'][index], 'raw-link')
-        previous_links.append(link)
-        previous_report = node['coverage.json']
-        consumed.update(stem + name for name in node)
-    need(consumed == set(files) and sha(raws['coverage.json']) == value['report_sha256']
-         and raws['coverage.json'] == previous_report, 'chain-final-report')
+    selector = prefix[-1]
+    stem = 'lineage/selectors/' + selector + '/'
+    node = {n.removeprefix(stem): raw for n, raw in files.items() if n.startswith(stem)}
+    need(set(files) == set(seeds) | {stem + n for n in node}, 'segment-selector-set')
+    need('prior-binding.json' in node and 'prior-report.json' in node, 'raw-prior-inputs')
+    prior_raw, prior_report = node['prior-binding.json'], node['prior-report.json']
+    prior_value = binding.decode(prior_raw)
+    need(prior_raw == binding.canonical(prior_value), 'canonical-prior-record')
+    validate_record_fields(prior_value, source_raw, head, identity, prefix[:-1])
+    need(prior_value['predecessor'] == predecessor
+         and prior_value['links'] == value['links'][:-1]
+         and prior_value['report_sha256'] == sha(prior_report), 'raw-prior-prefix')
+    if len(prefix) == 1:
+        validate_record(prior_value, source_raw, head, identity, (), seeds)
+        need(prior_report == base['native-producer-roots.json'], 'raw-c2-report')
+    link = stage(node, source_raw, head, selector, identity, prior_raw, prior_report,
+                 measured, capture, deadline=deadline)
+    need(link == value['links'][-1] and raws['coverage.json'] == node['coverage.json'],
+         'segment-final-report')
     return value
 
 
@@ -663,6 +662,7 @@ def fresh(path, raws, deadline):
 
 
 def prepare(args):
+    """Retain one verified predecessor for finalizer rechecking, without renewal."""
     end = time.monotonic() + 140
     source_raw = read(args.source_capture, MAX_LEAF, end)
     capture, bodies = source(source_raw, args.source, end)
@@ -674,6 +674,7 @@ def prepare(args):
     need(args.input_artifact == expected, 'input-artifact')
     incoming = scan(args.input, end)
     need(incoming.get('source.json') == source_raw, 'input-source')
+    previous = {}
     if index == 0:
         predecessor = c2(incoming, source_raw, args.source, identity, producer, measured, capture)
         selected = {name: incoming[name] for name in incoming if name in C2_FILES or name.startswith('native/')}
@@ -681,16 +682,18 @@ def prepare(args):
         value = record(source_raw, args.source, identity, (), predecessor, [], predecessor['report_sha256'], files)
         report_raw = incoming['native-producer-roots.json']
     else:
-        chain = {n.removeprefix('chain/'): raw for n, raw in incoming.items() if n.startswith('chain/')}
-        value = verify_chain(source_raw, chain, identity, ORDER[:index], end)
-        files = lineage(chain)
-        report_raw = chain['coverage.json']
+        segment = {n.removeprefix('chain/'): raw for n, raw in incoming.items() if n.startswith('chain/')}
+        value = verify_segment(source_raw, segment, identity, ORDER[:index], end)
+        files = seed_files(segment)
+        report_raw = segment['coverage.json']
+        previous = {'previous/' + n: raw for n, raw in segment.items()}
     fresh(args.output, {'source.json': source_raw, 'prior-report.json': report_raw,
-        'prior-binding.json': binding.canonical(value), **files}, end)
+        'prior-binding.json': binding.canonical(value), **files, **previous}, end)
     return {'selector': args.selector, 'completed': list(ORDER[:index]), 'native_acceptance': False}
 
 
 def finalize(args):
+    """Repeat actual predecessor custody and publish only the current raw segment."""
     end = time.monotonic() + 140
     source_raw = read(args.source_capture, MAX_LEAF, end)
     capture, bodies = source(source_raw, args.source, end)
@@ -698,14 +701,26 @@ def finalize(args):
     workflow(args.workflow_identity)
     index = ORDER.index(args.selector)
     prior = scan(args.input, end)
-    need(prior.get('source.json') == source_raw and 'prior-binding.json' in prior and 'prior-report.json' in prior, 'prepared-input')
-    files = lineage(prior)
+    need(prior.get('source.json') == source_raw and 'prior-binding.json' in prior
+         and 'prior-report.json' in prior, 'prepared-input')
+    files = seed_files(prior)
     value = binding.decode(prior['prior-binding.json'])
     need(prior['prior-binding.json'] == binding.canonical(value), 'canonical-prior-record')
-    validate_record(value, source_raw, args.source, args.workflow_identity, ORDER[:index], files)
-    # Repeat all earlier semantic checks, not merely the top-level map.
-    verify_chain(source_raw, {'source.json': source_raw, 'coverage.json': prior['prior-report.json'],
-        'chain-binding.json': prior['prior-binding.json'], **files}, args.workflow_identity, ORDER[:index], end)
+    previous = {n.removeprefix('previous/'): raw for n, raw in prior.items() if n.startswith('previous/')}
+    need(set(prior) == {'source.json', 'prior-binding.json', 'prior-report.json'}
+         | set(files) | {'previous/' + n for n in previous}, 'prepared-extra')
+    if index == 0:
+        need(not previous, 'initial-no-selector')
+        validate_record(value, source_raw, args.source, args.workflow_identity, (), files)
+        base = {n.removeprefix('lineage/c2/'): raw for n, raw in files.items()}
+        predecessor = c2(base, source_raw, args.source, args.workflow_identity, producer, measured, capture)
+        need(value['predecessor'] == predecessor
+             and prior['prior-report.json'] == base['native-producer-roots.json'], 'prepared-c2')
+    else:
+        checked = verify_segment(source_raw, previous, args.workflow_identity, ORDER[:index], end)
+        need(checked == value and previous['chain-binding.json'] == prior['prior-binding.json']
+             and previous['coverage.json'] == prior['prior-report.json']
+             and seed_files(previous) == files, 'prepared-predecessor')
     evidence = scan(args.evidence, end)
     original_build = binding.decode(evidence['build.json'])
     log_names = {Path(row['log_path']).name for row in original_build['commands']}
@@ -715,28 +730,50 @@ def finalize(args):
     link = stage(selected, source_raw, args.source, args.selector, args.workflow_identity,
                  prior['prior-binding.json'], prior['prior-report.json'], measured, capture, deadline=end)
     selected['prior-binding.json'] = prior['prior-binding.json']
+    selected['prior-report.json'] = prior['prior-report.json']
     stem = 'lineage/selectors/' + args.selector + '/'
     files.update({stem + n: raw for n, raw in selected.items()})
     result = record(source_raw, args.source, args.workflow_identity, ORDER[:index + 1],
                     value['predecessor'], [*value['links'], link], link['report_sha256'], files)
     outgoing = {'source.json': source_raw, 'coverage.json': selected['coverage.json'],
                 'chain-binding.json': binding.canonical(result), **files}
-    verify_chain(source_raw, outgoing, args.workflow_identity, ORDER[:index + 1], end)
+    verify_segment(source_raw, outgoing, args.workflow_identity, ORDER[:index + 1], end)
     fresh(args.output, outgoing, end)
     return {'selector': args.selector, 'completed': list(ORDER[:index + 1]), 'cases': result['cases'],
             'native_acceptance': False, 'coverage_credit': False}
 
 
-def validate_final(source_raw, chain_root, workflow_identity, deadline):
-    """Validate the exact four-link/six-case chain and return its unchanged JSON.
+def validate_final(source_raw, segments_root, workflow_identity, deadline):
+    """Read all fourteen actual segments, then return the final unchanged JSON.
 
-    Pure artifact/source I/O only: this is not a native execution receipt. Earlier
-    C3/C4/C2 full lineage and the separate original all16 lane remain gate inputs.
-    ``deadline`` belongs to the caller and is never renewed.
+    Every fixed selector directory is one separately bounded downloaded artifact.
+    Earlier native evidence is never represented solely by a receipt or digest.
+    Only standard Coverlet has merged the one C2 seed and subsequent executions.
+    The caller's deadline is checked throughout and never renewed here.
     """
-    raws = scan(chain_root, deadline)
-    verify_chain(source_raw, raws, workflow_identity, ORDER, deadline)
-    return binding.absolute(str(chain_root)) / 'coverage.json'
+    root = binding.absolute(str(segments_root))
+    need(root.resolve(strict=True) == root and stat.S_ISDIR(root.lstat().st_mode), 'segments-root')
+    original = binding._identity(root.lstat())
+    with os.scandir(root) as entries:
+        observed = list(entries)
+    need(len(observed) == len(ORDER) and {e.name for e in observed} == set(ORDER)
+         and all(e.is_dir(follow_symlinks=False) for e in observed), 'segments-set')
+    prior_binding = prior_report = seeds = None
+    for index, selector in enumerate(ORDER):
+        check(deadline)
+        segment = scan(root / selector / 'chain', deadline)
+        verify_segment(source_raw, segment, workflow_identity, ORDER[:index + 1], deadline)
+        stem = 'lineage/selectors/' + selector + '/'
+        if index:
+            need(segment[stem + 'prior-binding.json'] == prior_binding
+                 and segment[stem + 'prior-report.json'] == prior_report
+                 and seed_files(segment) == seeds, 'actual-predecessor-segment')
+        else:
+            seeds = seed_files(segment)
+        prior_binding, prior_report = segment['chain-binding.json'], segment['coverage.json']
+    need(binding._identity(root.lstat()) == original, 'segments-root-changed')
+    check(deadline)
+    return root / ORDER[-1] / 'chain/coverage.json'
 
 
 def parser():

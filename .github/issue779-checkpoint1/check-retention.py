@@ -5,7 +5,7 @@ The sealed source, SDK and publication trees remain outside the artifact root.
 All nodes are checked before any permission change. The fixed 96 MiB total,
 32 MiB file and 512-file limits are retention limits, not product quotas. The
 fixed native-private.tar and N15 native.tar leaves retain their original
-33,619,968-byte USTAR bound. Only the dedicated four-link measurement workflow
+33,619,968-byte USTAR bound. Only the dedicated segmented measurement workflow
 selects --measurement with 192 MiB/1,024 files; ordinary invocation is unchanged.
 """
 
@@ -39,7 +39,7 @@ def check(root, *, deadline=None):
 
 
 def check_measurement(root, *, deadline=None):
-    """Retain four cumulative measurement links within 192 MiB and 1,024 files.
+    """Retain one measurement segment within 192 MiB and 1,024 files.
 
     Only the dedicated measurement workflow selects this fixed contract. The
     ordinary native lane retains its original 96 MiB/512-file contract, and all

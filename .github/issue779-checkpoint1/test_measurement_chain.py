@@ -11,6 +11,8 @@ import stat
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import binding
 import measurement_chain as subject
@@ -28,19 +30,118 @@ def seed():
     return source_raw, files, predecessor
 
 
+def transition_segment(source_raw, seeds, predecessor, prefix, prior_raw, prior_report):
+    """Detached orchestration fixture; these bytes are not a native result."""
+    selector = prefix[-1]
+    node = {
+        'source.json': source_raw,
+        'build.json': binding.canonical({'commands': [], 'helpers': {}}),
+        'measurement-binding.json': ('detached-binding:' + selector).encode(),
+        'coverage.json': binding.canonical({'transition-only': selector}),
+        'native/transition-input': b'ordinary retained fixture; no kernel proof',
+        'prior-binding.json': prior_raw,
+        'prior-report.json': prior_report,
+    }
+    prior = binding.decode(prior_raw)
+    link = transition_link(node, selector, prior_raw, prior_report)
+    files = {**seeds, **{'lineage/selectors/' + selector + '/' + n: b for n, b in node.items()}}
+    value = subject.record(source_raw, HEAD, IDENTITY, prefix, predecessor,
+                           [*prior['links'], link], link['report_sha256'], files)
+    return {'source.json': source_raw, 'coverage.json': node['coverage.json'],
+            'chain-binding.json': binding.canonical(value), **files}
+
+
+def transition_link(node, selector, prior_raw, prior_report):
+    """Return data-only link fields; never fabricate a positive native packet."""
+    subject.need(node.get('native/transition-input') ==
+                 b'ordinary retained fixture; no kernel proof', 'transition-native-input')
+    return {'selector': selector, 'artifact_name': subject.artifact(selector, IDENTITY),
+            'measurement_binding_sha256': subject.sha(node['measurement-binding.json']),
+            'report_sha256': subject.sha(node['coverage.json']),
+            'prior_report_sha256': subject.sha(prior_report),
+            'prior_binding_sha256': subject.sha(prior_raw),
+            'native_result_sha256': subject.sha(node['native/transition-input'])}
+
+
+def transition_segments():
+    """Build structurally linked records for testing transitions only."""
+    raw, seeds, predecessor = seed()
+    initial = subject.record(raw, HEAD, IDENTITY, (), predecessor, [],
+                             predecessor['report_sha256'], seeds)
+    prior_raw, prior_report = binding.canonical(initial), seeds['lineage/c2/native-producer-roots.json']
+    segments = {}
+    for index, selector in enumerate(subject.ORDER):
+        segment = transition_segment(raw, seeds, predecessor, subject.ORDER[:index + 1],
+                                     prior_raw, prior_report)
+        segments[selector] = segment
+        prior_raw, prior_report = segment['chain-binding.json'], segment['coverage.json']
+    return raw, seeds, predecessor, segments
+
+
+@contextmanager
+def transition_seams(raw, seeds, predecessor):
+    """Stub only source/helper, C2 and stage data boundaries, never filesystem I/O."""
+    def source(actual, head, deadline):
+        subject.check(deadline)
+        subject.need(actual == raw and head == HEAD, 'transition-source')
+        return {'source': HEAD}, {}
+
+    def c2(actual, source_raw, head, identity, producer, measured, capture):
+        subject.need(source_raw == raw and head == HEAD and identity == IDENTITY
+                     and actual == {n.removeprefix('lineage/c2/'): b for n, b in seeds.items()},
+                     'transition-c2')
+        return predecessor
+
+    def stage(node, source_raw, head, selector, identity, prior_raw, prior_report,
+              measured, capture, *, deadline):
+        subject.check(deadline)
+        subject.need(source_raw == raw and head == HEAD and identity == IDENTITY,
+                     'transition-stage-identity')
+        return transition_link(node, selector, prior_raw, prior_report)
+
+    with patch.object(subject, 'source', side_effect=source) as source_mock, \
+            patch.object(subject, 'validators', return_value=(None, None)) as helpers_mock, \
+            patch.object(subject, 'c2', side_effect=c2) as c2_mock, \
+            patch.object(subject, 'stage', side_effect=stage) as stage_mock:
+        yield types.SimpleNamespace(source=source_mock, helpers=helpers_mock,
+                                    c2=c2_mock, stage=stage_mock)
+
+
+def publish_transition_artifacts(root, raw, segments):
+    """Publish ordinary private files through the real bounded byte writer."""
+    if not root.exists():
+        root.mkdir(mode=0o700)
+    old = os.umask(0o077)
+    try:
+        for selector, segment in segments.items():
+            subject.fresh(root / selector, {'source.json': raw,
+                          **{'chain/' + n: b for n, b in segment.items()}},
+                          time.monotonic() + 5)
+    finally:
+        os.umask(old)
+
+
+def refresh_segment_map(segment):
+    """Rebind detached metadata to changed ordinary files for negative controls."""
+    value = binding.decode(segment['chain-binding.json'])
+    value['files'] = {n: {'sha256': subject.sha(b), 'bytes': len(b)}
+                      for n, b in sorted(subject.lineage(segment).items())}
+    segment['chain-binding.json'] = binding.canonical(value)
+
+
 class MeasurementChainDataTests(unittest.TestCase):
-    def test_valid_initial_and_all_four_prefixes_never_claim_sixteen(self):
+    def test_valid_initial_and_all_fourteen_prefixes_keep_authority_false(self):
         raw, files, predecessor = seed()
         links = []
         previous = predecessor['report_sha256']
-        for index in range(5):
+        for index in range(len(subject.ORDER) + 1):
             prefix = subject.ORDER[:index]
             value = subject.record(raw, HEAD, IDENTITY, prefix, predecessor, copy.deepcopy(links), previous, files)
             subject.validate_record(value, raw, HEAD, IDENTITY, prefix, files)
             self.assertEqual(predecessor['report_sha256'], value['predecessor']['report_sha256'])
             self.assertFalse(value['all_sixteen_claimed'])
-            self.assertEqual(6 if index == 4 else len(subject.flattened(prefix)), len(value['cases']))
-            if index < 4:
+            self.assertEqual(0 if index == 0 else index + 2, len(value['cases']))
+            if index < len(subject.ORDER):
                 selector = subject.ORDER[index]
                 new = subject.sha(selector.encode())
                 links.append({'selector': selector, 'artifact_name': subject.artifact(selector, IDENTITY),
@@ -90,6 +191,231 @@ class MeasurementChainDataTests(unittest.TestCase):
             bad = copy.deepcopy(value); bad['links'][0][key] = bad_value
             with self.subTest(key=key), self.assertRaises(binding.Rejected):
                 subject.validate_record(bad, raw, HEAD, IDENTITY, ('None',), files)
+
+
+    def test_segment_v2_exact_order_cases_and_current_only_inventory(self):
+        expected = ('None', *(f'N{i:02d}' for i in range(4, 17)))
+        self.assertEqual(expected, subject.ORDER)
+        self.assertEqual('issue779-c1-measurement-chain-v2', subject.SCHEMA)
+        raw, seeds, predecessor, segments = transition_segments()
+        with transition_seams(raw, seeds, predecessor) as seams:
+            for index, selector in enumerate(expected):
+                segment = segments[selector]
+                value = subject.verify_segment(raw, segment, IDENTITY,
+                                               expected[:index + 1], time.monotonic() + 5)
+                self.assertEqual(list(expected[:index + 1]), value['completed'])
+                self.assertEqual(index + 3, len(value['cases']))
+                self.assertFalse(value['all_sixteen_claimed'])
+                stems = {n.split('/')[2] for n in subject.lineage(segment)
+                         if n.startswith('lineage/selectors/')}
+                self.assertEqual({selector}, stems)
+                self.assertEqual(subject.seed_files(segment), seeds)
+            self.assertEqual(list(expected), [call.args[3] for call in seams.stage.call_args_list])
+        self.assertEqual([f'N{i:02d}' for i in range(1, 17)],
+                         binding.decode(segments['N16']['chain-binding.json'])['cases'])
+
+    def test_bad_segment_prefix_rejects_before_source_or_stage_callbacks(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        for prefix in ((), ('N04',), ('None', 'N05'), tuple(reversed(subject.ORDER)),
+                       (*subject.ORDER, 'N16')):
+            with self.subTest(prefix=prefix), transition_seams(raw, seeds, predecessor) as seams:
+                with self.assertRaises(binding.Rejected):
+                    subject.verify_segment(raw, segments['None'], IDENTITY, prefix,
+                                           time.monotonic() + 5)
+                seams.source.assert_not_called()
+                seams.stage.assert_not_called()
+
+    def test_segment_raw_maps_extra_nodes_source_and_seed_fail_before_stage(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        for fault in ('missing-node', 'earlier-selector', 'extra-top', 'wrong-source',
+                      'reset-c2', 'missing-prior-report'):
+            segment = copy.deepcopy(segments['N04'])
+            stem = 'lineage/selectors/N04/'
+            if fault == 'missing-node':
+                del segment[stem + 'native/transition-input']
+            elif fault == 'earlier-selector':
+                segment['lineage/selectors/None/extra'] = b'forbidden copied prefix'
+                refresh_segment_map(segment)
+            elif fault == 'extra-top':
+                segment['previous/extra'] = b'forbidden exported predecessor'
+            elif fault == 'wrong-source':
+                segment['source.json'] += b' '
+            elif fault == 'reset-c2':
+                segment['lineage/c2/native-producer-roots.json'] += b' '
+                refresh_segment_map(segment)
+            else:
+                del segment[stem + 'prior-report.json']
+                refresh_segment_map(segment)
+            with self.subTest(fault=fault), transition_seams(raw, seeds, predecessor) as seams:
+                with self.assertRaises(binding.Rejected):
+                    subject.verify_segment(raw, segment, IDENTITY, subject.ORDER[:2],
+                                           time.monotonic() + 5)
+                seams.stage.assert_not_called()
+
+    def test_final_reads_all_fourteen_actual_segments_in_order_and_returns_raw_n16(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            publish_transition_artifacts(root, raw, segments)
+            with transition_seams(raw, seeds, predecessor) as seams:
+                result = subject.validate_final(raw, root, IDENTITY, time.monotonic() + 5)
+                self.assertEqual(root / 'N16/chain/coverage.json', result)
+                self.assertEqual(segments['N16']['coverage.json'], result.read_bytes())
+                self.assertEqual(list(subject.ORDER),
+                                 [call.args[3] for call in seams.stage.call_args_list])
+                self.assertEqual(14, seams.c2.call_count)
+
+
+    def test_final_bounds_each_segment_without_a_monolithic_export(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        largest = max(sum(map(len, segment.values())) for segment in segments.values())
+        self.assertGreater(sum(sum(map(len, segment.values())) for segment in segments.values()),
+                           largest * 2)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            publish_transition_artifacts(root, raw, segments)
+            with patch.object(subject, 'MAX_TOTAL', largest), \
+                    transition_seams(raw, seeds, predecessor) as seams:
+                result = subject.validate_final(raw, root, IDENTITY, time.monotonic() + 5)
+                self.assertEqual(segments['N16']['coverage.json'], result.read_bytes())
+                self.assertEqual(14, seams.stage.call_count)
+                self.assertEqual(set(subject.ORDER), {p.name for p in root.iterdir()})
+
+    def test_final_exact_directory_set_rejects_before_any_data_callback(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        for fault in ('missing', 'extra', 'symlink', 'plain-file'):
+            with self.subTest(fault=fault), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                for selector in subject.ORDER:
+                    if selector != 'N08':
+                        (root / selector).mkdir()
+                if fault == 'extra':
+                    (root / 'N08').mkdir()
+                    (root / 'N17').mkdir()
+                elif fault == 'symlink':
+                    (root / 'N08').symlink_to(root / 'None', target_is_directory=True)
+                elif fault == 'plain-file':
+                    (root / 'N08').write_bytes(b'ordinary file')
+                with transition_seams(raw, seeds, predecessor) as seams:
+                    with self.assertRaises(binding.Rejected):
+                        subject.validate_final(raw, root, IDENTITY, time.monotonic() + 5)
+                    seams.source.assert_not_called()
+                    seams.c2.assert_not_called()
+                    seams.stage.assert_not_called()
+
+    def test_final_rejects_self_consistent_forged_prior_binding_or_report_bytes(self):
+        raw, seeds, predecessor, original = transition_segments()
+        for fault in ('prior-binding', 'prior-report'):
+            segments = copy.deepcopy(original)
+            old = segments['N04']
+            stem = 'lineage/selectors/N04/'
+            prior = binding.decode(old[stem + 'prior-binding.json'])
+            report = old[stem + 'prior-report.json']
+            if fault == 'prior-binding':
+                row = prior['files']['lineage/selectors/None/native/transition-input']
+                row['sha256'] = 'a' * 64
+            else:
+                report += b' '
+                prior['report_sha256'] = subject.sha(report)
+                prior['links'][-1]['report_sha256'] = subject.sha(report)
+            segments['N04'] = transition_segment(raw, seeds, predecessor, subject.ORDER[:2],
+                                                binding.canonical(prior), report)
+            with self.subTest(fault=fault), transition_seams(raw, seeds, predecessor):
+                # Structural prior claims alone intentionally do not close prior custody.
+                subject.verify_segment(raw, segments['N04'], IDENTITY, subject.ORDER[:2],
+                                       time.monotonic() + 5)
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                publish_transition_artifacts(root, raw, segments)
+                with transition_seams(raw, seeds, predecessor) as seams:
+                    with self.assertRaisesRegex(binding.Rejected, 'actual-predecessor-segment'):
+                        subject.validate_final(raw, root, IDENTITY, time.monotonic() + 5)
+                    self.assertEqual(['None', 'N04'],
+                                     [call.args[3] for call in seams.stage.call_args_list])
+
+    def test_final_revalidates_actual_earlier_native_data_despite_rebound_manifest(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        del segments['None']['lineage/selectors/None/native/transition-input']
+        refresh_segment_map(segments['None'])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            publish_transition_artifacts(root, raw, segments)
+            with transition_seams(raw, seeds, predecessor) as seams:
+                with self.assertRaisesRegex(binding.Rejected, 'transition-native-input'):
+                    subject.validate_final(raw, root, IDENTITY, time.monotonic() + 5)
+                self.assertEqual(['None'], [call.args[3] for call in seams.stage.call_args_list])
+
+    def test_reordered_or_extra_baseline_link_and_changed_source_reject_before_stage(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        for fault in ('order', 'double-baseline', 'reset', 'source'):
+            segment = copy.deepcopy(segments['N04'])
+            value = binding.decode(segment['chain-binding.json'])
+            if fault == 'order':
+                value['links'].reverse()
+            elif fault == 'double-baseline':
+                value['links'].insert(0, copy.deepcopy(value['links'][0]))
+            elif fault == 'reset':
+                value['links'][-1]['prior_report_sha256'] = predecessor['report_sha256']
+            else:
+                value['source'] = 'a' * 40
+            segment['chain-binding.json'] = binding.canonical(value)
+            with self.subTest(fault=fault), transition_seams(raw, seeds, predecessor) as seams:
+                with self.assertRaises(binding.Rejected):
+                    subject.verify_segment(raw, segment, IDENTITY, subject.ORDER[:2],
+                                           time.monotonic() + 5)
+                seams.c2.assert_not_called()
+                seams.stage.assert_not_called()
+
+    def test_prepare_retains_actual_previous_segment_finalize_checks_then_does_not_export_it(self):
+        raw, seeds, predecessor, segments = transition_segments()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            download = root / 'download'
+            publish_transition_artifacts(download, raw, {'None': segments['None']})
+            capture = root / 'capture.json'
+            capture.write_bytes(raw)
+            prepared = root / 'prepared'
+            args = types.SimpleNamespace(source_capture=capture, source=HEAD,
+                workflow_identity=IDENTITY, selector='N04', input=download / 'None',
+                input_artifact=subject.artifact('None', IDENTITY), output=prepared)
+            with transition_seams(raw, seeds, predecessor):
+                subject.prepare(args)
+            prior = subject.scan(prepared, time.monotonic() + 5)
+            self.assertEqual(segments['None'], {n.removeprefix('previous/'): b
+                             for n, b in prior.items() if n.startswith('previous/')})
+            self.assertEqual(seeds, subject.seed_files(prior))
+            self.assertFalse(any(n.startswith('lineage/selectors/') for n in prior))
+            node = {n.removeprefix('lineage/selectors/N04/'): b
+                    for n, b in segments['N04'].items()
+                    if n.startswith('lineage/selectors/N04/')}
+            evidence = root / 'evidence'
+            subject.fresh(evidence, {n: b for n, b in node.items()
+                          if n not in ('prior-binding.json', 'prior-report.json')},
+                          time.monotonic() + 5)
+            args = types.SimpleNamespace(source_capture=capture, source=HEAD,
+                workflow_identity=IDENTITY, selector='N04', input=prepared,
+                evidence=evidence, output=evidence / 'chain')
+            with transition_seams(raw, seeds, predecessor) as seams:
+                subject.finalize(args)
+                self.assertEqual(['None', 'N04', 'N04'],
+                                 [call.args[3] for call in seams.stage.call_args_list])
+            actual = subject.scan(evidence / 'chain', time.monotonic() + 5)
+            self.assertFalse(any(n.startswith(('previous/', 'lineage/selectors/None/'))
+                                 for n in actual))
+            self.assertEqual(seeds, subject.seed_files(actual))
+            self.assertEqual(segments['N04']['coverage.json'], actual['coverage.json'])
+            for fault in ('missing-previous', 'incomplete-native'):
+                bad = root / fault
+                content = {n: b for n, b in prior.items()
+                           if not (n.startswith('previous/') if fault == 'missing-previous'
+                                   else n == 'previous/lineage/selectors/None/native/transition-input')}
+                subject.fresh(bad, content, time.monotonic() + 5)
+                args.input, args.output = bad, root / (fault + '-output')
+                with self.subTest(fault=fault), transition_seams(raw, seeds, predecessor) as seams:
+                    with self.assertRaises(binding.Rejected):
+                        subject.finalize(args)
+                    seams.stage.assert_not_called()
+                self.assertFalse(args.output.exists())
 
     def test_workflow_and_path_grammar_reject_closed_neighbors(self):
         self.assertEqual(('12345', '2'), subject.workflow(IDENTITY))
@@ -243,7 +569,8 @@ class MeasurementChainDataTests(unittest.TestCase):
         required = ('.github/issue779-checkpoint1/binding.py', '.github/issue779-checkpoint1/measurement.py',
             '.github/issue779-checkpoint1/measurement_data_tests.py',
             '.github/issue779-checkpoint1/publish.py',
-            '.github/issue779-checkpoint1/measurement_chain.py', '.github/issue779-checkpoint4/producer_roots.py',
+            '.github/issue779-checkpoint1/measurement_chain.py',
+            '.github/issue779-checkpoint1/measurement_custody.py', '.github/issue779-checkpoint4/producer_roots.py',
             '.github/issue779-checkpoint4/measurement_arguments.py',
             'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRetainedReportSet.cs',
             'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionRunOutputBudget.cs')

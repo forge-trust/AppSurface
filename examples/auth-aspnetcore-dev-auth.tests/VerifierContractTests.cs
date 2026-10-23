@@ -352,6 +352,7 @@ public sealed class VerifierContractTests
     private sealed class VerifierFixture : IAsyncDisposable
     {
         internal const string CleanupSignalHandlerStartedMarker = "[stage=CLEANUP] Received ";
+        private const string ParentReadinessMarker = "[stage=READINESS] Waiting for child-owned Kestrel evidence";
         private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
 
         private VerifierFixture(string root, string mode)
@@ -602,14 +603,21 @@ public sealed class VerifierContractTests
             var cleanupSignalHandlerStarted = sendSecondSignal
                 ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
                 : null;
-            var standardOutput = process.StandardOutput.ReadToEndAsync();
+            var parentReadiness = signal is not null
+                ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+                : null;
+            var standardOutput = ReadStandardOutputAsync(process.StandardOutput, parentReadiness);
             var standardError = ReadStandardErrorAsync(process.StandardError, cleanupSignalHandlerStarted);
 
             try
             {
                 if (signal is not null)
                 {
-                    await WaitForChildLaunchAsync(processTimeout);
+                    // A child can record its PID before the parent finishes its
+                    // asynchronous launch setup. Observe the parent's real phase
+                    // as well, sharing the original startup-wait budget.
+                    await Task.WhenAll(WaitForChildLaunchAsync(processTimeout), parentReadiness!.Task)
+                        .WaitAsync(processTimeout);
                     await SendSignalAsync(process.Id, signal);
                     if (sendSecondSignal)
                     {
@@ -719,6 +727,38 @@ public sealed class VerifierContractTests
 
         private static string GetCompletedOutput(Task<string> output) =>
             output.Status == TaskStatus.RanToCompletion ? output.Result : string.Empty;
+
+        private static async Task<string> ReadStandardOutputAsync(
+            StreamReader standardOutput,
+            TaskCompletionSource? parentReadiness)
+        {
+            if (parentReadiness is null)
+            {
+                return await standardOutput.ReadToEndAsync();
+            }
+
+            var output = new System.Text.StringBuilder();
+            var buffer = new char[1024];
+            while (true)
+            {
+                var count = await standardOutput.ReadAsync(buffer.AsMemory());
+                if (count == 0)
+                {
+                    parentReadiness.TrySetException(new InvalidOperationException(
+                        "The verifier exited before reporting parent readiness."));
+                    return output.ToString();
+                }
+
+                var previousLength = output.Length;
+                output.Append(buffer, 0, count);
+                var searchStart = Math.Max(0, previousLength - ParentReadinessMarker.Length + 1);
+                if (output.ToString(searchStart, output.Length - searchStart)
+                    .Contains(ParentReadinessMarker, StringComparison.Ordinal))
+                {
+                    parentReadiness.TrySetResult();
+                }
+            }
+        }
 
         private static async Task<string> ReadStandardErrorAsync(
             StreamReader standardError,

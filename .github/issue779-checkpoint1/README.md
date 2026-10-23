@@ -260,21 +260,26 @@ The [private C1 measurement wrapper](measurement-README.md#root-only-collection-
 `binding.validate_measured_build` is a detached data check. `binding.verify_build` additionally reads the original v1 receipt and collector through the existing bounded stable-file reader, compares all original publication fields, and verifies the actual staged image before native execution. These checks cannot create an owner, bypass the OS audit, or establish a native result. The wrapper leaves the original run, product, stop and cleanup clocks in charge. Isolated worker tracker bytes are not imported by this root-only lane.
 
 The [isolated measured-selector workflow](../workflows/issue779-checkpoint1-measurement.yml)
-adds a fixed `None → N04 → N07 → N16` sequence after packaged C2 acceptance.
+adds a fixed `None → N04 → N05 → N06 → N07 → N08 → N09 → N10 → N11 → N12 → N13 → N14 → N15 → N16`
+sequence after packaged C2 acceptance. All fourteen original procedures are measured;
+`None` accounts for N01/N02/N03. Standard Coverlet merges only the immediate
+predecessor, preserving the single initial C2 baseline.
 Each selector gets a fresh VM, the ordinary current publisher and the original
 native procedure. The [chain data reference](measurement-chain-README.md)
 describes source/run/attempt, predecessor, image, report and retained-result
-bindings. This runs six original cases while collecting the root component's
+bindings. This runs all sixteen original cases while collecting the root component's
 normal-exit counters; case execution alone does not imply worker coverage. It neither promises coverage from deliberately killed owners nor
 imports isolated worker tracker files. The separate fourteen-selector matrix and
 its sixteen-case aggregate remain mandatory. These are private CI fixture
 orchestrators; the [C# runtime cutover](../../docs/plans/issue-779-csharp-supervision-migration.md#checkpoint-4-cutover-and-full-verification)
 continues to use the C# owner/server and does not restore the retired Python runtime.
 
-The [four-link measurement chain](measurement-chain-README.md#validation-and-bounds)
-retains cumulative raw reports and native evidence with the fixed
+The [segmented measurement chain](measurement-chain-README.md#validation-and-bounds)
+retains each selector’s raw report and native evidence in its own artifact,
+with raw immediate-predecessor inputs and the fixed
 `check-retention.py --measurement ROOT` contract: 192 MiB, 1,024 files and 2,048
-nodes. Ordinary C1 retention remains 96 MiB/512 files/1,024 nodes. Both contracts
+nodes per artifact. Gate validation reads all fourteen actual segments in order;
+earlier native evidence is never replaced by manifest hashes. Ordinary C1 retention remains 96 MiB/512 files/1,024 nodes. Both contracts
 reject links, special nodes, unstable files and oversized leaves before changing
 permissions, retain exact bytes, and publish private 0700/0600 artifacts. These
 limits do not change product quotas or the solution/patch coverage thresholds.

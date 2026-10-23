@@ -63,25 +63,105 @@ jobs:
       selector: "N04"
       prior_artifact_name: ${{ needs.worker-measurement-none.outputs.artifact_name }}
 
-  worker-measurement-n07:
-    name: Standard root measurement for current C1 N07
+  worker-measurement-n05:
+    name: Standard root measurement for current C1 N05
     needs: worker-measurement-n04
     uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
     with:
-      selector: "N07"
+      selector: "N05"
       prior_artifact_name: ${{ needs.worker-measurement-n04.outputs.artifact_name }}
 
-  worker-measurement-n16:
-    name: Standard root measurement for current C1 N16
+  worker-measurement-n06:
+    name: Standard root measurement for current C1 N06
+    needs: worker-measurement-n05
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N06"
+      prior_artifact_name: ${{ needs.worker-measurement-n05.outputs.artifact_name }}
+
+  worker-measurement-n07:
+    name: Standard root measurement for current C1 N07
+    needs: worker-measurement-n06
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N07"
+      prior_artifact_name: ${{ needs.worker-measurement-n06.outputs.artifact_name }}
+
+  worker-measurement-n08:
+    name: Standard root measurement for current C1 N08
     needs: worker-measurement-n07
     uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
     with:
-      selector: "N16"
+      selector: "N08"
       prior_artifact_name: ${{ needs.worker-measurement-n07.outputs.artifact_name }}
+
+  worker-measurement-n09:
+    name: Standard root measurement for current C1 N09
+    needs: worker-measurement-n08
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N09"
+      prior_artifact_name: ${{ needs.worker-measurement-n08.outputs.artifact_name }}
+
+  worker-measurement-n10:
+    name: Standard root measurement for current C1 N10
+    needs: worker-measurement-n09
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N10"
+      prior_artifact_name: ${{ needs.worker-measurement-n09.outputs.artifact_name }}
+
+  worker-measurement-n11:
+    name: Standard root measurement for current C1 N11
+    needs: worker-measurement-n10
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N11"
+      prior_artifact_name: ${{ needs.worker-measurement-n10.outputs.artifact_name }}
+
+  worker-measurement-n12:
+    name: Standard root measurement for current C1 N12
+    needs: worker-measurement-n11
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N12"
+      prior_artifact_name: ${{ needs.worker-measurement-n11.outputs.artifact_name }}
+
+  worker-measurement-n13:
+    name: Standard root measurement for current C1 N13
+    needs: worker-measurement-n12
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N13"
+      prior_artifact_name: ${{ needs.worker-measurement-n12.outputs.artifact_name }}
+
+  worker-measurement-n14:
+    name: Standard root measurement for current C1 N14
+    needs: worker-measurement-n13
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N14"
+      prior_artifact_name: ${{ needs.worker-measurement-n13.outputs.artifact_name }}
+
+  worker-measurement-n15:
+    name: Standard root measurement for current C1 N15
+    needs: worker-measurement-n14
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N15"
+      prior_artifact_name: ${{ needs.worker-measurement-n14.outputs.artifact_name }}
+
+  worker-measurement-n16:
+    name: Standard root measurement for current C1 N16
+    needs: worker-measurement-n15
+    uses: ./.github/workflows/issue779-checkpoint1-measurement.yml
+    with:
+      selector: "N16"
+      prior_artifact_name: ${{ needs.worker-measurement-n15.outputs.artifact_name }}
 
   solution-coverage:
     name: Unchanged solution and codecov patch gates
-    needs: [worker-controls, application-consumers, account-creation, account-rollback, packaged-producer, worker-measurement-n16]
+    needs: [worker-controls, application-consumers, account-creation, account-rollback, packaged-producer, worker-measurement-none, worker-measurement-n04, worker-measurement-n05, worker-measurement-n06, worker-measurement-n07, worker-measurement-n08, worker-measurement-n09, worker-measurement-n10, worker-measurement-n11, worker-measurement-n12, worker-measurement-n13, worker-measurement-n14, worker-measurement-n15, worker-measurement-n16]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -136,11 +216,76 @@ jobs:
         with:
           name: issue779-csharp-checkpoint2-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/checkpoint4-producer-input
-      - name: Download the completed current worker measurement chain
+      - name: Download current worker measurement segment None
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-none.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/None
+      - name: Download current worker measurement segment N04
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n04.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N04
+      - name: Download current worker measurement segment N05
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n05.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N05
+      - name: Download current worker measurement segment N06
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n06.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N06
+      - name: Download current worker measurement segment N07
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n07.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N07
+      - name: Download current worker measurement segment N08
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n08.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N08
+      - name: Download current worker measurement segment N09
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n09.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N09
+      - name: Download current worker measurement segment N10
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n10.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N10
+      - name: Download current worker measurement segment N11
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n11.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N11
+      - name: Download current worker measurement segment N12
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n12.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N12
+      - name: Download current worker measurement segment N13
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n13.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N13
+      - name: Download current worker measurement segment N14
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n14.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N14
+      - name: Download current worker measurement segment N15
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ needs.worker-measurement-n15.outputs.artifact_name }}
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N15
+      - name: Download current worker measurement segment N16
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: ${{ needs.worker-measurement-n16.outputs.artifact_name }}
-          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input
+          path: ${{ runner.temp }}/checkpoint4-worker-measurement-input/N16
       - name: Stage only fixed source-bound native measurement inputs
         run: |
           set -euo pipefail
@@ -186,13 +331,13 @@ jobs:
           source_raw = (root / 'source.json').read_bytes()
           capture = binding.validate_capture(binding.decode(source_raw), os.environ['GITHUB_SHA'])
           binding.verify_source(capture, Path.cwd(), deadline=time.monotonic() + 120)
-          chain = Path(os.environ['RUNNER_TEMP']) / 'checkpoint4-worker-measurement-input/chain'
-          final_report = validate_final(source_raw, chain,
+          segments = Path(os.environ['RUNNER_TEMP']) / 'checkpoint4-worker-measurement-input'
+          final_report = validate_final(source_raw, segments,
               'github-actions-' + os.environ['GITHUB_RUN_ID'] + '-' + os.environ['GITHUB_RUN_ATTEMPT'],
               deadline=time.monotonic() + 120)
           # The first chain report must be the exact producer report already staged above.
           prior_sha = binding.digest((root / 'producer-roots/native-producer-roots.json').read_bytes())
-          chain_data = binding.decode((chain / 'chain-binding.json').read_bytes())
+          chain_data = binding.decode((segments / 'N16/chain/chain-binding.json').read_bytes())
           assert chain_data['predecessor']['report_sha256'] == prior_sha
           ET.SubElement(configuration, 'MergeWith').text = str(final_report)
           ET.SubElement(configuration, 'Format').text = 'cobertura'

@@ -61,7 +61,9 @@ The fixed recipes are `N04` (`LinuxN04CheckpointOrderTests`, `LinuxNegativeKerne
 `N07` (`LinuxFailedSettlementObservationTests`, `LinuxWorkerStopTimingTests`,
 `LinuxN07FailureSettlementTests`), and `N16` (`LinuxN16ProgressDiagnosticTests`,
 `LinuxNegativeKernelObservationTests`), all in the existing Supervision test namespace. `None` performs
-no supplemental I/O. Other selectors are not part of this four-link measurement chain.
+no supplemental I/O. All fourteen selectors run their original genuine procedure in the
+[segmented measurement chain](measurement-chain-README.md); only N04, N07 and N16
+have supplemental data tests. Each report is merged once with its immediate predecessor.
 
 The internal `prepare(args, original, capture_raw, deadline=...)` API runs during bind's existing
 240-second budget. It derives the SDK from the verified original build command, restores the fixed test
