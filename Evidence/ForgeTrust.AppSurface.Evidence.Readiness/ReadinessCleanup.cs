@@ -10,20 +10,23 @@ internal static class ReadinessCleanup
     /// <param name="exception">The non-null cleanup or diagnostic-storage failure.</param>
     /// <param name="isFatal">The owning adapter's non-null fatal-type classifier.</param>
     /// <returns>The original fatal exception, or null when every leaf is nonfatal.</returns>
+    /// <remarks>Traversal uses an explicit stack so aggregate nesting does not consume the runtime call stack.</remarks>
     internal static Exception? FindFatal(Exception exception, Func<Exception, bool> isFatal)
     {
-        if (isFatal(exception))
+        var pending = new Stack<Exception>();
+        pending.Push(exception);
+        while (pending.TryPop(out var current))
         {
-            return exception;
-        }
-
-        if (exception is AggregateException aggregate)
-        {
-            foreach (var inner in aggregate.InnerExceptions)
+            if (isFatal(current))
             {
-                if (FindFatal(inner, isFatal) is { } fatal)
+                return current;
+            }
+
+            if (current is AggregateException aggregate)
+            {
+                for (var index = aggregate.InnerExceptions.Count - 1; index >= 0; index--)
                 {
-                    return fatal;
+                    pending.Push(aggregate.InnerExceptions[index]);
                 }
             }
         }
