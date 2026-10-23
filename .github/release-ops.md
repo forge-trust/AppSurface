@@ -184,6 +184,19 @@ Stable publishing is intentionally separate from prerelease publishing so the
 environment protections, trusted-publishing policy, and smoke-install proof stay
 auditable for the public stable line.
 
+### Durable template candidate evidence
+
+Every successful [Package Artifacts producer](./workflows/package-artifacts.yml) intentionally invokes the
+[Durable template evidence workflow](./workflows/durable-template-evidence.yml), including pull requests, pushes to
+`main`, and manual dispatch. Candidate validation must catch package and generated-consumer regressions before
+publication, so it is not restricted to publishing runs. The workflow runs three native OS jobs plus the primed and
+cold timing jobs; each timing job has a 100-minute outer bound. The cold job owns five isolated privileged Docker-in-Docker
+daemons, one per sample, and removes them during cleanup without purging shared caches.
+
+These jobs consume the producer's exact artifact ID, source commit and package version. Their receipts establish
+candidate correctness and timing for that bundle; they do not publish packages or replace the separate public-feed,
+human-adopter or release approvals described in the [Durable worker guide](../start-here/durable-worker.md#bounds-for-correctness-and-timing-evidence).
+
 ## Tailwind artifact provenance (issue #798)
 
 For a coordinated plan containing Tailwind, the [provenance reference](../docs/tailwind-artifact-provenance.md) defines the required producer-to-push proof. The protected workflows implement that contract; the [PackageIndex maintainer guide](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#tailwind-artifact-provenance-798) documents the typed CLI.

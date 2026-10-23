@@ -1,6 +1,6 @@
 # AppSurface CLI
 
-Use [appsurface durable doctor](../../Durable/runtime-doctor.md) for a non-mutating store/runtime diagnosis in text or version-one JSON. It accepts environment-source names and optional paired worker/actual-threshold inputs, and supplies explicit exits and next actions.
+Use [appsurface durable doctor](../../Durable/runtime-doctor.md) for a non-mutating store/runtime diagnosis in text or version-one JSON. It accepts environment-source names and optional paired worker/actual-threshold inputs, and supplies explicit exits and next actions. Clean output links the [canonical Durable worker starter](../../start-here/durable-worker.md) while requiring the diagnosed application's own composition verifier; its null command does not invent or execute that verifier.
 
 For `appsurface durable schema` rollout of migration 0011, follow the [canonical heartbeat retention deployment and recovery guide](../../Durable/heartbeat-retention-operations.md#deploy-schema-11). Pending preflight is an expected downtime finding; activation requires the complete reviewed-manifest gate and the [combined deployment receipt procedure](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist).
 
@@ -95,12 +95,12 @@ online deadline includes connection and fence waits; work is limited to 28 secon
 the remaining 2 seconds. Timeout, cancellation, broken transport, uncertain unlock, cleanup failure, or unknown result
 is a nonzero result with no success output. A one-slot runtime pool must not cause a nested connection acquisition.
 
-The [preflight integration tests](../ForgeTrust.AppSurface.Cli.Tests/DurablePreflightIntegrationTests.cs) distinguish
-physical client disposal from server-observed backend exit. PostgreSQL sends no acknowledgement for connection
-termination, so both successful and rejected sequential caller checks observe the exact application-name session
-exiting within the original 30-second budget before asserting zero sessions. The existing 10-second observation cap,
-SQLSTATE checks, immediate fence-release checks, and final all-session zero assertions remain in force. A retained
-backend still fails the bounded observation; this barrier does not retry preflight or make a rejected caller succeed.
+Client disposal does not acknowledge PostgreSQL backend exit; the [termination protocol](https://www.postgresql.org/docs/16/protocol-flow.html#PROTOCOL-FLOW-TERMINATION)
+closes the client without waiting for backend acknowledgement. The [preflight integration tests](../ForgeTrust.AppSurface.Cli.Tests/DurablePreflightIntegrationTests.cs)
+therefore observe the exact application-name session exiting after success and expected connection rejection, using the existing ten-second polling
+window within the same 30-second deadline as the preflight call. They retain the expected SQLSTATE and final zero-session
+assertions and immediate fence-release checks. A held real backend must still fail observation; the barrier neither retries
+the preflight, makes a rejected caller succeed, nor extends its deadline.
 
 The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
 role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or

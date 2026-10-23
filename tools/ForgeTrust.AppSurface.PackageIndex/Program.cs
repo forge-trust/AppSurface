@@ -18,6 +18,9 @@ internal static class Program
     private const string VerifyTailwindConsumerCommand = "verify-tailwind-consumer";
     private const string VerifyTailwindEvidenceCommand = "verify-tailwind-evidence";
     private const string VerifyPreflightArtifactsCommand = "verify-preflight-artifact";
+    private const string VerifyDurableTemplateEvidenceCommand = "verify-durable-template-evidence";
+    private const string VerifyDurableTemplateCommand = "verify-durable-template";
+    private const string VerifyDurableTemplateTimingCommand = "verify-durable-template-timing";
     private const string InspectPythonParserCandidateCommand = "inspect-python-parser-candidate";
 
     private static readonly string Usage = """
@@ -37,6 +40,12 @@ internal static class Program
                       Verify a local-only Tailwind consumer or run a producer-bound native release proof.
           verify-tailwind-evidence
                       Validate producer-binding, aggregate five native receipts, prepare publication inputs, or validate an uploaded publication-start receipt before credentials.
+          verify-durable-template-evidence
+                      Validate the trusted three-OS receipts against --preflight-source-commit and the exact producer manifest before credentials.
+          verify-durable-template
+                      Prove exact local template archives in independent consumer roots; --native-pg-bin selects native ordinary-startup smoke.
+          verify-durable-template-timing
+                      Measure five serial three-command workloads; --clock primed|cold and cold --docker-hosts select the cache protocol.
           verify-preflight-artifact
                       Consume or validate/promote an exact frozen package bundle with the disposable PostgreSQL runtime-preflight proof.
           publish-prerelease
@@ -83,6 +92,9 @@ internal static class Program
           --smoke-work-dir <path>
                                 Isolated smoke install work directory. Defaults to artifacts/package-smoke.
           --smoke-report <path> Smoke install report path. Defaults to artifacts/package-smoke-report.md.
+          --durable-template-evidence <path>
+                                Trusted three-OS receipts required for template publication.
+          --native-pg-bin <path> Native PostgreSQL tools for verify-durable-template.
           --preflight-source-commit <sha> --preflight-run-id <id> --preflight-artifact-id <id>
           --preflight-candidate-receipt <path>
                                 Required by the published smoke carrier to bind the candidate proof and package bundle.
@@ -178,11 +190,69 @@ internal static class Program
                 and not VerifyTailwindConsumerCommand
                 and not VerifyTailwindEvidenceCommand
                 and not VerifyPreflightArtifactsCommand
-                and not InspectPythonParserCandidateCommand)
+                and not InspectPythonParserCandidateCommand
+                and not VerifyDurableTemplateCommand
+                and not VerifyDurableTemplateTimingCommand
+                and not VerifyDurableTemplateEvidenceCommand)
             {
                 await standardError.WriteLineAsync($"Unknown command '{command}'.");
                 await standardError.WriteLineAsync(Usage);
                 return 1;
+            }
+
+            if (normalizedCommand == VerifyDurableTemplateEvidenceCommand)
+            {
+                var evidenceOptions = CommandLineOptions.Parse(args.Skip(1).ToArray(), currentDirectory);
+                var evidenceManifest = await new PackageArtifactManifestReader().ReadAsync(evidenceOptions.ArtifactManifestPath, cancellationToken);
+                DurableTemplateReleaseEvidence.Require(evidenceOptions.DurableTemplateEvidenceDirectory,
+                    evidenceOptions.PreflightSourceCommit, evidenceManifest, evidenceOptions.ArtifactsInputPath);
+                await standardOut.WriteLineAsync("Durable template source, candidate and three-OS evidence validated before credentials.");
+                return 0;
+            }
+
+            if (normalizedCommand == VerifyDurableTemplateCommand)
+            {
+                var receipt = await DurableTemplateCommand.RunAsync(args.Skip(1).ToArray(), currentDirectory,
+                    preflightCommandRunner ?? new CliWrapCommandRunner(), cancellationToken);
+                await standardOut.WriteLineAsync(receipt.Succeeded
+                    ? "Durable template installed-artifact proof passed after owned cleanup."
+                    : $"Durable template proof failed: {receipt.FailureCode}, phase={receipt.FailurePhase}. See start-here/durable-worker.md and rerun verify-durable-template with the same candidate inputs.");
+                return receipt.Succeeded ? 0 : 1;
+            }
+
+            if (normalizedCommand == VerifyDurableTemplateTimingCommand)
+            {
+                var timingArgs = args.Skip(1).ToArray();
+                var common = new List<string>();
+                string? clock = null;
+                string? hosts = null;
+                for (var index = 0; index < timingArgs.Length; index += 2)
+                {
+                    if (index + 1 >= timingArgs.Length) throw new PackageIndexException("Timing options require explicit values.");
+                    if (timingArgs[index] == "--clock")
+                    {
+                        if (clock is not null) throw new PackageIndexException("Timing clock is duplicated.");
+                        clock = timingArgs[index + 1];
+                    }
+                    else if (timingArgs[index] == "--docker-hosts")
+                    {
+                        if (hosts is not null) throw new PackageIndexException("Cold Docker endpoints are duplicated.");
+                        hosts = timingArgs[index + 1];
+                    }
+                    else common.AddRange([timingArgs[index], timingArgs[index + 1]]);
+                }
+                var mode = clock switch
+                {
+                    "primed" => DurableTemplateTimingMode.Primed,
+                    "cold" => DurableTemplateTimingMode.Cold,
+                    _ => throw new PackageIndexException("Timing requires --clock primed or cold.")
+                };
+                var input = DurableTemplateCommandOptions.Parse(common.ToArray(), currentDirectory);
+                var receipt = await new DurableTemplateTimingWorkflow(preflightCommandRunner ?? new CliWrapCommandRunner())
+                    .RunAsync(input, mode, hosts?.Split(',') ?? [], cancellationToken);
+                await standardOut.WriteLineAsync(receipt.Succeeded ? "Durable template five-sample timing proof passed."
+                    : "Durable template timing series failed; every attempt remains in its safe receipt.");
+                return receipt.Succeeded ? 0 : 1;
             }
 
             if (normalizedCommand == VerifyPreflightArtifactsCommand)
@@ -514,6 +584,8 @@ internal static class Program
 /// <param name="PreflightSourceCommit">Source commit bound to candidate and published preflight receipts.</param>
 /// <param name="PreflightRunId">Producer run identifier bound to candidate and published preflight receipts.</param>
 /// <param name="PreflightArtifactId">Immutable producer artifact identifier bound to candidate and published preflight receipts.</param>
+/// <param name="DurableTemplateEvidenceDirectory">Trusted exact-ID OS receipt directory required for template publication.</param>
+/// <param name="NativePgBin">Optional resolved native PostgreSQL tool directory for installed-template smoke.</param>
 /// <param name="PreflightCandidateReceiptPath">Retained candidate proof receipt required by production smoke-install.</param>
 internal sealed record CommandLineOptions(
     PackageIndexRequest Request,
@@ -538,7 +610,8 @@ internal sealed record CommandLineOptions(
     string? PreflightSourceCommit,
     string? PreflightRunId,
     string? PreflightArtifactId,
-    string? PreflightCandidateReceiptPath)
+    string? PreflightCandidateReceiptPath,
+    string? DurableTemplateEvidenceDirectory = null, string? NativePgBin = null)
 {
     /// <summary>
     /// Parses path-related CLI options into a resolved chooser request.
@@ -575,6 +648,8 @@ internal sealed record CommandLineOptions(
         string? preflightRunId = null;
         string? preflightArtifactId = null;
         string? preflightCandidateReceiptPath = null;
+        string? durableTemplateEvidenceDirectory = null;
+        string? nativePgBin = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -735,6 +810,16 @@ internal sealed record CommandLineOptions(
                 continue;
             }
 
+            if (argument == "--durable-template-evidence")
+            {
+                durableTemplateEvidenceDirectory = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
+            if (argument == "--native-pg-bin")
+            {
+                nativePgBin = ReadRequiredValue(args, ref index, argument);
+                continue;
+            }
             throw new PackageIndexException($"Unknown option '{argument}'.");
         }
 
@@ -781,7 +866,9 @@ internal sealed record CommandLineOptions(
             preflightSourceCommit,
             preflightRunId,
             preflightArtifactId,
-            resolvedPreflightCandidateReceiptPath);
+            resolvedPreflightCandidateReceiptPath,
+            durableTemplateEvidenceDirectory is null ? null : ResolvePath(durableTemplateEvidenceDirectory, repoRoot, durableTemplateEvidenceDirectory),
+            nativePgBin is null ? null : ResolvePath(nativePgBin, repoRoot, nativePgBin));
     }
 
     /// <summary>
@@ -831,7 +918,7 @@ internal sealed record CommandLineOptions(
             PublishLogPath,
             Source,
             ApiKeyEnvironmentVariable,
-            tailwindEvidence);
+            tailwindEvidence, DurableTemplateEvidenceDirectory, tailwind?.SourceCommit ?? PreflightSourceCommit);
     }
 
     /// <summary>

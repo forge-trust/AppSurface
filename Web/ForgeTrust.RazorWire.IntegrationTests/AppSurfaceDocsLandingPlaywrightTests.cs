@@ -171,10 +171,11 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
     [Fact]
     public async Task DetailsPage_RendersContributorProvenanceStrip_AboveTrustBar()
     {
+        await using var host = await AppSurfaceDocsContributorTimestampFixture.StartAsync();
         await using var context = await _fixture.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        await page.GotoAsync($"{_fixture.DocsUrl}/releases/unreleased");
+        await page.GotoAsync(host.PageUrl);
         await page.WaitForSelectorAsync(".docs-provenance-strip", new PageWaitForSelectorOptions
         {
             Timeout = 30_000,
@@ -185,10 +186,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
             Timeout = 30_000,
             State = WaitForSelectorState.Visible
         });
-        await page.WaitForFunctionAsync(
-            "() => { const time = document.querySelector('.docs-provenance-strip time'); return Boolean(time?.textContent) && !time.textContent.includes('UTC'); }",
-            null,
-            new PageWaitForFunctionOptions { Timeout = 60_000 });
+        await AppSurfaceDocsTimestampReadiness.WaitAsync(page);
 
         Assert.Contains("Source of truth", await page.InnerTextAsync(".docs-provenance-strip"), StringComparison.OrdinalIgnoreCase);
         Assert.Equal(
@@ -204,6 +202,7 @@ public sealed class AppSurfaceDocsLandingPlaywrightTests
         var datetime = await page.GetAttributeAsync(".docs-provenance-strip time", "datetime");
         Assert.NotNull(datetime);
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}T", datetime!);
+        Assert.Equal("2026-04-22T23:19:00.0000000+00:00", datetime);
 
         var provenancePrecedesTrustBar = await page.EvaluateAsync<bool>(
             "() => { const provenance = document.querySelector('.docs-provenance-strip'); const trust = document.querySelector('.docs-trust-bar'); return Boolean(provenance && trust) && (provenance.compareDocumentPosition(trust) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0; }");

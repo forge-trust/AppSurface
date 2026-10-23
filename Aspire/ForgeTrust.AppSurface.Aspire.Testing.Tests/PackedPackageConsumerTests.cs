@@ -704,6 +704,8 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         Assert.Equal("13.4.4", dependencies["Aspire.Hosting.AppHost"]);
         Assert.Equal("13.4.4", dependencies["Aspire.Hosting.Testing"]);
         Assert.Equal(expectedPackageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
+        // Both NuGet spellings require inclusive 2.5.303 and allow later consumer-selected versions.
+        Assert.Contains(dependencies["MessagePack"], new[] { "2.5.303", "[2.5.303, )" });
     }
 
     /// <summary>Runs a shell-free, bounded dotnet command shared by packed proofs and version regressions.</summary>

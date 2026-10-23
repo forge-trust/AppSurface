@@ -21,6 +21,10 @@ public sealed class DurableDoctorInstalledToolTests
     private static readonly TimeSpan DoctorTimeout = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan KillWaitTimeout = TimeSpan.FromSeconds(5);
 
+    // Value: protects=installed doctor classifies independently bracketed ages and a synchronized live D04 observation;
+    // fails_when=reported clock/age chooses its own expectation or a fresh live heartbeat is misclassified;
+    // why_new=the two merged proofs cover distinct near-boundary and definitely-current child observations;
+    // seam=none; no_claim=real PostgreSQL and the installed candidate prove this fixture, not arbitrary deployment timing.
     [Fact(Timeout = 600_000)]
     public async Task Installed_candidate_matches_exact_package_bytes_and_runs_the_real_diagnosis_matrix()
     {
@@ -83,7 +87,8 @@ public sealed class DurableDoctorInstalledToolTests
                 new InstalledScenario("D01", null, null, null, false),
                 new InstalledScenario("D02", DurableDoctorFixture.RuntimeWorkerId, null, null, false),
                 new InstalledScenario("D03", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(5), null, false),
-                // Exact equality is covered by the pure matrix; the independent database-clock bracket below validates the live child.
+                // Value: D04 proves both a 14-second seeded heartbeat bracketed by PostgreSQL's clock and a synchronized
+                // fresh-heartbeat observation after the child starts; exact equality remains the pure-matrix boundary.
                 new InstalledScenario("D04", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(14), null, false),
                 new InstalledScenario("D05", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(17), null, false),
                 new InstalledScenario("D06", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.Zero, null, true),
@@ -138,6 +143,33 @@ public sealed class DurableDoctorInstalledToolTests
                     scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
                 var after = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
                 Assert.Equal(before, after);
+
+                if (scenario.MatrixId == "D04")
+                {
+                    var synchronized = await RunFreshBoundaryDoctorAsync(
+                        fixture,
+                        installedExecutable,
+                        toolPath,
+                        processEnvironment,
+                        customConnectionName,
+                        customEpochName,
+                        fixture.RuntimeConnectionString,
+                        fixture.RuntimeEpoch,
+                        scenario.WorkerId!,
+                        testDeadline.Token);
+                    var exactBoundaryRow = Assert.Single(matrixRows, static candidate => candidate.Id == "D04");
+                    AssertDoctorProcessOutput(
+                        synchronized.Run,
+                        exactBoundaryRow,
+                        synchronized.ConnectionString,
+                        "json",
+                        customConnectionName,
+                        customEpochName,
+                        TimeSpan.FromSeconds(15));
+                    Assert.Equal(
+                        synchronized.Before,
+                        await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token));
+                }
 
                 if (scenario.MatrixId is "D01" or "D06")
                 {
@@ -860,6 +892,99 @@ public sealed class DurableDoctorInstalledToolTests
         }
     }
 
+    /// <summary>Arranges a live heartbeat after process startup, before the doctor's read-only snapshot.</summary>
+    /// <remarks>The existing ten-second work deadline is shorter than the unchanged fifteen-second freshness
+    /// threshold. Exact equality remains covered by the pure D04 matrix, independent of process scheduling.</remarks>
+    private static async Task<(ProcessResult Run, string Before, string ConnectionString)> RunFreshBoundaryDoctorAsync(
+        DurableDoctorFixture fixture,
+        string executable,
+        string toolPath,
+        IReadOnlyDictionary<string, string> baseEnvironment,
+        string connectionEnvironmentName,
+        string epochEnvironmentName,
+        string connectionString,
+        Guid runtimeEpoch,
+        string workerId,
+        CancellationToken cancellationToken)
+    {
+        var applicationName = $"doctor-installed-d04-{Guid.NewGuid():N}";
+        var identifiedConnectionString = new NpgsqlConnectionStringBuilder(connectionString)
+        {
+            ApplicationName = applicationName,
+        }.ConnectionString;
+        await using var fenceConnection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(fixture.AdministrativeConnectionString)
+        {
+            Pooling = false,
+        }.ConnectionString);
+        await fenceConnection.OpenAsync(cancellationToken);
+        await using (var fenceCommand = new NpgsqlCommand("SELECT pg_catalog.pg_advisory_lock(@key)", fenceConnection))
+        {
+            fenceCommand.Parameters.AddWithValue("key", DurableDoctorService.MigrationAdvisoryLock);
+            await fenceCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var doctorTask = RunDoctorAsync(
+                executable,
+                toolPath,
+                baseEnvironment,
+                connectionEnvironmentName,
+                epochEnvironmentName,
+                identifiedConnectionString,
+                runtimeEpoch,
+                workerId,
+                json: true,
+                extraArguments: [],
+                cancellationToken);
+        string before;
+        ProcessResult result;
+        try
+        {
+            await WaitForAdvisoryLockWaiterAsync(
+                fixture,
+                applicationName,
+                TimeSpan.FromSeconds(7),
+                cancellationToken);
+            await fixture.SeedHeartbeatAsync(workerId, TimeSpan.Zero, runtimeEpoch, draining: false, cancellationToken);
+            before = await fixture.ReadDurableStateFingerprintAsync(cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                await UnlockAndCloseFenceAsync(fenceConnection);
+            }
+            finally
+            {
+                // RunDoctorAsync already owns the original process and kill deadlines. Always join it.
+                result = await doctorTask;
+            }
+        }
+
+        return (result, before, identifiedConnectionString);
+    }
+
+    private static async Task UnlockAndCloseFenceAsync(NpgsqlConnection connection)
+    {
+        if (connection.FullState == System.Data.ConnectionState.Closed)
+        {
+            return;
+        }
+
+        try
+        {
+            using var cleanup = new CancellationTokenSource(KillWaitTimeout);
+            await using var unlock = new NpgsqlCommand(
+                "SELECT pg_catalog.pg_advisory_unlock(@key)", connection);
+            unlock.Parameters.AddWithValue("key", DurableDoctorService.MigrationAdvisoryLock);
+            Assert.True(await unlock.ExecuteScalarAsync(cleanup.Token) is true,
+                "The installed doctor fixture did not release its owned migration fence.");
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+    }
+
     /// <summary>Checks the actual child observation, then selects the exact current/stale matrix expectations.</summary>
     /// <remarks>
     /// The seeded row and independent PostgreSQL clock bracket prevent a reported age or status from choosing its own
@@ -972,6 +1097,13 @@ public sealed class DurableDoctorInstalledToolTests
             {
                 Assert.Contains(code, run.StandardOutput, StringComparison.Ordinal);
             }
+            if (row.NextAction == "verify")
+            {
+                Assert.Contains("Next action: Run the application's composition verifier", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Required input: consumer verifier command\n", run.StandardOutput, StringComparison.Ordinal);
+                Assert.Contains("  Documentation: https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md\n",
+                    run.StandardOutput, StringComparison.Ordinal);
+            }
             return;
         }
 
@@ -1045,6 +1177,10 @@ public sealed class DurableDoctorInstalledToolTests
         if (row.NextAction == "verify")
         {
             Assert.Equal(JsonValueKind.Null, command.ValueKind);
+            Assert.Equal(["consumer verifier command"],
+                action.GetProperty("requiredInputs").EnumerateArray().Select(static input => input.GetString()));
+            Assert.Equal("https://github.com/forge-trust/AppSurface/blob/main/start-here/durable-worker.md",
+                action.GetProperty("documentationUrl").GetString());
             return;
         }
 
