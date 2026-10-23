@@ -223,49 +223,85 @@ def branch_counts(line: ET.Element) -> tuple[int, int]:
 
 
 def compose(documents: list[tuple[dict, ET.Element]]) -> tuple[ET.Element, dict]:
-    """Keep every class/line point. Only merge repeated observations of that same point.
+    """Preserve the class and method records consumed by the existing gate.
 
-    Cobertura cannot identify which outcome a partial observation hit. Preserve
-    the first observation's branch counts unless another observation of the same
-    class/line proves every branch covered with the identical denominator.
-    Different classes on a source line remain separate, as in the existing gate.
+    The patch reader visits both line collections and sums their branch counts.
+    Keep method overloads and repeated records distinct; dropping method lines
+    would shrink its denominator even when the root aggregate stayed intact.
+    Root counters continue to describe class lines, as in normalized Cobertura.
+    Only a fully covered observation with the same denominator promotes a point;
+    partial observations are never added together to infer full coverage.
     """
-    points: dict[tuple[str, str, str], dict[int, tuple[int, int, int]]] = {}
-    original_counts = []
-    for manifest, document in documents:
+    points: dict[tuple[str, str, str, int], dict] = {}
+    original_counts, original_method_counts = [], []
+
+    def observe(target: dict, source: ET.Element | None) -> int:
+        occurrences: dict[int, int] = {}
+        if source is None:
+            return 0
         count = 0
+        for line in source.findall("line"):
+            number, hits = int(line.attrib["number"]), int(line.attrib["hits"])
+            if number <= 0 or hits < 0:
+                raise ValueError("Invalid source line or hit count")
+            occurrence = occurrences.get(number, 0)
+            occurrences[number] = occurrence + 1
+            key = number, occurrence
+            covered, valid = branch_counts(line)
+            previous = target.get(key)
+            if previous is None:
+                target[key] = hits, covered, valid
+            else:
+                promote = valid == previous[2] and covered == valid
+                target[key] = (max(previous[0], hits),
+                               covered if promote else previous[1], previous[2])
+            count += 1
+        return count
+
+    for manifest, document in documents:
+        count = method_count = 0
+        class_occurrences: dict[tuple[str, str, str], int] = {}
         for package in document.findall("packages/package"):
             for cls in package.findall("classes/class"):
                 filename = relative_filename(cls.attrib["filename"], manifest["sourceRoot"])
-                key = package.attrib["name"], cls.attrib["name"], filename
-                lines = points.setdefault(key, {})
-                for line in cls.findall("lines/line"):
-                    number, hits = int(line.attrib["number"]), int(line.attrib["hits"])
-                    if number <= 0 or hits < 0:
-                        raise ValueError("Invalid source line or hit count")
-                    covered, valid = branch_counts(line)
-                    previous = lines.get(number)
-                    if previous is None:
-                        lines[number] = hits, covered, valid
-                    else:
-                        promote = valid == previous[2] and covered == valid
-                        lines[number] = (max(previous[0], hits),
-                                         covered if promote else previous[1], previous[2])
-                    count += 1
+                identity = package.attrib["name"], cls.attrib["name"], filename
+                occurrence = class_occurrences.get(identity, 0)
+                class_occurrences[identity] = occurrence + 1
+                target = points.setdefault((*identity, occurrence), {"lines": {}, "methods": {}})
+                count += observe(target["lines"], cls.find("lines"))
+                method_occurrences: dict[tuple[str, str], int] = {}
+                for method in cls.findall("methods/method"):
+                    method_identity = method.get("name", ""), method.get("signature", "")
+                    occurrence = method_occurrences.get(method_identity, 0)
+                    method_occurrences[method_identity] = occurrence + 1
+                    lines = target["methods"].setdefault((*method_identity, occurrence), {})
+                    method_count += observe(lines, method.find("lines"))
         if count == 0:
             raise ValueError("Evidence contains no measurable class lines")
         original_counts.append(count)
-    output = ET.Element("coverage", version="appsurface-verified-fanin-v1")
-    packages = ET.SubElement(output, "packages")
-    lc = lv = bc = bv = 0
-    for (package_name, class_name, filename), lines in sorted(points.items()):
-        package = ET.SubElement(packages, "package", name=package_name)
-        cls = ET.SubElement(ET.SubElement(package, "classes"), "class", name=class_name, filename=filename)
-        target = ET.SubElement(cls, "lines")
-        for number, (hits, covered, valid) in sorted(lines.items()):
+        original_method_counts.append(method_count)
+
+    def write_lines(parent: ET.Element, lines: dict) -> None:
+        target = ET.SubElement(parent, "lines")
+        for (number, _), (hits, covered, valid) in sorted(lines.items()):
             line = ET.SubElement(target, "line", number=str(number), hits=str(hits), branch=str(valid > 0).lower())
             if valid:
                 line.set("condition-coverage", f"{covered * 100 / valid:g}% ({covered}/{valid})")
+
+    output = ET.Element("coverage", version="appsurface-verified-fanin-v1")
+    packages = ET.SubElement(output, "packages")
+    lc = lv = bc = bv = retained_method_lines = 0
+    for (package_name, class_name, filename, _), records in sorted(points.items()):
+        package = ET.SubElement(packages, "package", name=package_name)
+        cls = ET.SubElement(ET.SubElement(package, "classes"), "class", name=class_name, filename=filename)
+        if records["methods"]:
+            methods = ET.SubElement(cls, "methods")
+            for (name, signature, _), lines in sorted(records["methods"].items()):
+                method = ET.SubElement(methods, "method", name=name, signature=signature)
+                write_lines(method, lines)
+                retained_method_lines += len(lines)
+        write_lines(cls, records["lines"])
+        for hits, covered, valid in records["lines"].values():
             lv += 1
             lc += int(hits > 0)
             bc += covered
@@ -274,6 +310,7 @@ def compose(documents: list[tuple[dict, ET.Element]]) -> tuple[ET.Element, dict]
                           "branches-covered": str(bc), "branches-valid": str(bv),
                           "line-rate": str(lc / lv), "branch-rate": str(bc / bv if bv else 1)})
     return output, {"inputClassLines": original_counts, "retainedClassLines": lv,
+                    "inputMethodLines": original_method_counts, "retainedMethodLines": retained_method_lines,
                     "linesCovered": lc, "branchesValid": bv, "branchesCovered": bc}
 
 

@@ -313,7 +313,7 @@ class CoverageFaninTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 fanin.relative_filename(value, source_root)
 
-    def test_compose_retains_baseline_points_distinct_classes_and_ignores_method_lines(self) -> None:
+    def test_compose_retains_baseline_points_distinct_classes_and_method_lines(self) -> None:
         first = document([
             class_row("Alpha", "src/Shared.cs", line(10, 1)),
             class_row("Beta", "src/Shared.cs", line(10, 0), line(11, 1)),
@@ -330,9 +330,72 @@ class CoverageFaninTests(unittest.TestCase):
         self.assertEqual({cls.get("name") for cls in classes}, {"Alpha", "Beta", "Gamma"})
         self.assertEqual(inventory["inputClassLines"], [3, 2])
         self.assertEqual(inventory["retainedClassLines"], 4)
+        self.assertEqual(inventory["inputMethodLines"], [2, 0])
+        self.assertEqual(inventory["retainedMethodLines"], 2)
         alpha_lines = next(cls for cls in classes if cls.get("name") == "Alpha").findall("lines/line")
         self.assertEqual([item.get("number") for item in alpha_lines], ["10"])
         self.assertNotIn("999", [item.get("number") for item in alpha_lines])
+        alpha_methods = next(cls for cls in classes if cls.get("name") == "Alpha").findall("methods/method/lines/line")
+        self.assertEqual([item.get("number") for item in alpha_methods], ["10", "999"])
+
+    def test_compose_retains_the_gate_method_and_class_branch_denominator(self) -> None:
+        first = document([class_row("Branchy", "src/Branchy.cs", line(20, 1, (1, 2)))])
+        cls = first.find("packages/package/classes/class")
+        method = ET.SubElement(ET.SubElement(cls, "methods"), "method", name="M", signature="()")
+        ET.SubElement(method, "lines").append(ET.fromstring(
+            '<line number="20" hits="1" branch="true" condition-coverage="50% (1/2)" />'))
+        result, inventory = fanin.compose([({"sourceRoot": "/checkout"}, first)])
+        # The existing gate reads both line collections, including their branch records.
+        self.assertEqual(sum(fanin.branch_counts(item)[1] for item in first.iter("line")), 4)
+        self.assertEqual(sum(fanin.branch_counts(item)[1] for item in result.iter("line")), 4)
+        self.assertEqual(inventory["retainedMethodLines"], 1)
+        self.assertEqual(int(result.get("branches-valid")), 2)
+
+    def test_compose_method_promotions_keep_overloads_and_partial_observations_separate(self) -> None:
+        def with_methods(branches: tuple[int, int], signature: str = "()") -> ET.Element:
+            value = document([class_row("Branchy", "src/Branchy.cs", line(20, 1, (1, 2)))])
+            cls = value.find("packages/package/classes/class")
+            method = ET.SubElement(ET.SubElement(cls, "methods"), "method", name="M", signature=signature)
+            covered, valid = branches
+            ET.SubElement(ET.SubElement(method, "lines"), "line", number="20", hits="1", branch="true",
+                          **{"condition-coverage": f"50% ({covered}/{valid})"})
+            return value
+
+        for other, expected in (((1, 2), (1, 2)), ((2, 2), (2, 2)), ((4, 4), (1, 2))):
+            with self.subTest(other=other):
+                result, _ = fanin.compose([
+                    ({"sourceRoot": "/checkout"}, with_methods((1, 2))),
+                    ({"sourceRoot": "/checkout"}, with_methods(other)),
+                ])
+                methods = result.findall("packages/package/classes/class/methods/method")
+                self.assertEqual(len(methods), 1)
+                self.assertEqual(fanin.branch_counts(methods[0].find("lines/line")), expected)
+                self.assertEqual(sum(fanin.branch_counts(item)[1] for item in result.iter("line")), 4)
+        result, _ = fanin.compose([
+            ({"sourceRoot": "/checkout"}, with_methods((1, 2))),
+            ({"sourceRoot": "/checkout"}, with_methods((2, 2), "(System.Int32)")),
+        ])
+        methods = result.findall("packages/package/classes/class/methods/method")
+        self.assertEqual({item.get("signature") for item in methods}, {"()", "(System.Int32)"})
+        self.assertEqual(sum(fanin.branch_counts(item)[1] for item in result.iter("line")), 6)
+
+    def test_compose_retains_repeated_records_within_a_single_observation(self) -> None:
+        first = document([class_row("Branchy", "src/Branchy.cs", line(20, 1, (1, 2)))])
+        cls = first.find("packages/package/classes/class")
+        methods = ET.SubElement(cls, "methods")
+        for _ in range(2):
+            method = ET.SubElement(methods, "method", name="M", signature="()")
+            lines = ET.SubElement(method, "lines")
+            for _ in range(2):
+                ET.SubElement(lines, "line", number="20", hits="1", branch="true",
+                              **{"condition-coverage": "50% (1/2)"})
+        result, inventory = fanin.compose([
+            ({"sourceRoot": "/checkout"}, first),
+            ({"sourceRoot": "/checkout"}, first),
+        ])
+        self.assertEqual(inventory["retainedMethodLines"], 4)
+        self.assertEqual(len(result.findall("packages/package/classes/class/methods/method")), 2)
+        self.assertEqual(sum(fanin.branch_counts(item)[1] for item in result.iter("line")), 10)
 
     @staticmethod
     def composed_branch(first: tuple[int, int], second: tuple[int, int]) -> tuple[int, int]:
