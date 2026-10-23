@@ -6,6 +6,33 @@ The assembly owns one in-process implementation of coverage discovery, execution
 
 Coverage orchestration and transports remain internal. The metadata-only factory below exposes the fixed registration needed for exact first-party host matching; it is not an injectable execution extension. Consumers should use the documented public [coverage commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) and [EvidenceHost workflow](../../start-here/evidencehost.md).
 
+## Compiler-map input preservation
+
+The ordinary `CoverageRunReportGenerator` passes explicit, staged report files through internal
+`CoverageCompilerMapInputs.PrepareAsync(coverageFiles, outputDirectory, token)` before invoking the same
+packaged ReportGenerator. This also applies to the public [coverage merge command](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-merge).
+It addresses a ReportGenerator 5.5.10 input-order defect: different C# async state-machine classes for
+one source method can overlap at a source line, and folding them within one input can replace an
+executed observation with a later zero-hit observation.
+
+The adapter retains each colliding class map in a separate fresh XML input, keeps all other classes
+together, and selects every original class exactly once. It preserves the complete original class,
+method, line and condition nodes; it does no counter arithmetic and does not equate condition IDs
+from different builds. Untaken conditions remain untaken in their original maps. The standard reporter
+then parses these inputs and computes its usual output. Coverage filters, gate rules and the original
+reports stay unchanged. A retained map inventory is not a deduplicated inventory of semantic source
+branches, and this preservation cannot recover information already conflated by an earlier collector.
+
+Partition files are retained under a fresh `compiler-map-inputs-*` directory inside the owned merge
+output. Explicit reports need absolute class filenames, or a single absolute `<sources><source>`
+anchor with canonical relative filenames. The filename and source-anchor nodes remain unchanged.
+Non-colliding inputs, ambiguous relative-filename reports and direct reporter glob
+expressions pass through unchanged. XML parsing ignores external DTDs and has no resolver; malformed
+input rejects with a fixed `InvalidDataException`. Cancellation uses the original merge token during
+reading, partitioning and writing, with no new timeout. This internal adapter grants no execution,
+native ownership or coverage-gate authority. The protected reporter transport continues to consume
+its separately retained subject reports through its existing custody contract.
+
 The package depends on [Evidence.Contracts](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#shared-lifecycle-and-output-limits)
 for the run-wide received-byte quota shared by subject and reporter output. Every received byte is charged even
 when only a bounded prefix is retained. Crossing the limit closes admission and cancels and drains the owned

@@ -7,6 +7,13 @@ six case rows (N01/N02/N03/N04/N07/N16). The independent
 [original C1 all16 workflow](../workflows/issue779-checkpoint1-worker.yml)
 remains required; this chain cannot replace it or claim sixteen measured cases.
 
+Current target/final bindings use the version 2 contract described in the
+[per-selector wrapper reference](measurement-README.md#existing-private-image-data-controls).
+For N04, N07 and N16 the chain additionally retains the fixed `data-tests/` leaves and validates their
+separate source-bound receipt and actual TRX. Those data tests run inside the same standard collector
+session after the original native procedure, add no native case IDs, and change neither the report
+selection order nor its counters. `None` requires a null data-receipt hash and no supplemental leaves.
+
 ## API and ordering
 
 Run `python3 -B .github/issue779-checkpoint1/measurement_chain.py prepare` with:

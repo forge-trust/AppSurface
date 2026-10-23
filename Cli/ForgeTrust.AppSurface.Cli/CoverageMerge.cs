@@ -162,11 +162,10 @@ internal sealed class CoverageMergeWorkflow
         var mergeStarted = _timeProvider.GetTimestamp();
         var reportGeneratorDirectory = Path.Join(outputDirectory, "reportgenerator");
         Directory.CreateDirectory(reportGeneratorDirectory);
-        var reportGlob = Path.Join(stagingDirectory, "**", "coverage.cobertura.xml");
         CoverageRunMergeResult merge;
         try
         {
-            merge = await _reportGenerator.MergeAsync([reportGlob], reportGeneratorDirectory, cancellationToken);
+            merge = await _reportGenerator.MergeAsync(stagedReports, reportGeneratorDirectory, cancellationToken);
         }
         catch (CommandException exception) when (exception.Message.Contains("ASCOV114", StringComparison.Ordinal))
         {

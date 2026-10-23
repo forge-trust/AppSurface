@@ -26,7 +26,7 @@ public sealed class LinuxApplicationDcpIdentityTests
 
         foreach (var malformed in new[]
         {
-            "", "1", "\n", "0\n", "+1\n", "-1\n", "01\n", "01x\n", "2147483648\n",
+            "", "1", "\n", "0\n", "+1\n", "-1\n", "01\n", "01x\n", "1x\n", "2147483648\n",
             "1\n1\n", string.Join("\n", Enumerable.Range(1, LinuxApplicationDcpIdentity.MaximumProcesses + 1)) + "\n",
         })
             Reject(() => LinuxApplicationDcpIdentity.ParseProcessIds(Encoding.ASCII.GetBytes(malformed)));
@@ -88,9 +88,14 @@ public sealed class LinuxApplicationDcpIdentityTests
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
             CommandBytes(RuntimeHost, ResourceDll, "/run/other/http.sock"), RuntimeHost, ResourceDll, SocketPath));
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
+            Array.Empty<byte>(), RuntimeHost, ResourceDll, SocketPath));
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
+            new byte[] { 0 }, RuntimeHost, ResourceDll, SocketPath));
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
             Encoding.UTF8.GetBytes(RuntimeHost + "\0--socket\0" + SocketPath + "\0" + ResourceDll + "\0--case\0normal\0"),
             RuntimeHost, ResourceDll, SocketPath));
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes([.. valid, (byte)'x'], RuntimeHost, ResourceDll, SocketPath));
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes([.. valid, (byte)0], RuntimeHost, ResourceDll, SocketPath));
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(valid[..^1], RuntimeHost, ResourceDll, SocketPath));
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
             new byte[LinuxApplicationDcpIdentity.MaximumProcessBytes + 1], RuntimeHost, ResourceDll, SocketPath));
@@ -102,12 +107,14 @@ public sealed class LinuxApplicationDcpIdentityTests
     [InlineData(0, "Io", 13)]
     [InlineData(1, "Unsupported", 38)]
     [InlineData(2, "Other", null)]
+    [InlineData(3, "AccessDenied", null)]
     public void CaptureDiagnosticsKeepOnlyClosedCheckpointCountsAndKnownErrno(int variant, string kind, int? errno)
     {
         Exception error = variant switch
         {
             0 => new IOException("CANARY-io", new System.ComponentModel.Win32Exception(13)),
             1 => new PlatformNotSupportedException("CANARY-unsupported", new System.ComponentModel.Win32Exception(38)),
+            3 => new UnauthorizedAccessException("CANARY-access-denied"),
             _ => new InvalidOperationException("CANARY-private-exception"),
         };
         var data = LinuxApplicationDcpIdentity.CaptureFailure(LinuxDcpCaptureStage.CandidateExecutable, error, 4, 0);
@@ -122,6 +129,38 @@ public sealed class LinuxApplicationDcpIdentityTests
     }
 
     [Fact]
+    public void PreCanceledCapturePropagatesCancellationWithOnlyClosedSelectionDiagnostics()
+    {
+        var token = new CancellationToken(canceled: true);
+        LinuxDcpCaptureFailure? diagnostic = null;
+        var error = Assert.Throws<OperationCanceledException>(() =>
+            LinuxApplicationDcpIdentity.Capture(Unit, 65010, 65011, "/run/CANARY/dcp", token, out diagnostic));
+
+        Assert.Equal(token, error.CancellationToken);
+        Assert.Equal(LinuxDcpCaptureStage.Selection, diagnostic?.Stage);
+        Assert.Equal("Cancelled", diagnostic?.ErrorKind);
+        Assert.Null(diagnostic?.NativeErrno);
+        Assert.Equal(0, diagnostic?.ObservedProcesses);
+        Assert.Equal(0, diagnostic?.MatchingExecutables);
+        Assert.DoesNotContain("CANARY", Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(diagnostic!)));
+
+        var commandError = Assert.Throws<OperationCanceledException>(() =>
+            LinuxApplicationDcpIdentity.RequireResourceCommand(null!, RuntimeHost, ResourceDll, SocketPath, token));
+        Assert.Equal(token, commandError.CancellationToken);
+    }
+
+    [Fact]
+    public void ResourceCaptureRejectsMissingAuthenticatedPeerBeforeNativeCapture()
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() => LinuxApplicationDcpIdentity.CaptureForResource(
+            Unit, 65010, 65011, "/run/CANARY/dcp", null!, CancellationToken.None, out _));
+
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("CANARY", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RuntimeHostMetadataRequiresRootOwnedReadonlyExecutableAndExactIdentity()
     {
         var expected = new LinuxDcpFileMetadata(8, 1, 42, 0x8000, 0, 0x816d, 8192);
@@ -131,6 +170,7 @@ public sealed class LinuxApplicationDcpIdentityTests
         Assert.False(LinuxApplicationDcpIdentity.SameExecutable(expected with { Inode = 43 }, expected));
         foreach (var invalid in new[]
         {
+            expected with { Inode = 0 }, expected with { Type = 0x4000 },
             expected with { Uid = 1 }, expected with { Mode = 0x81ed },
             expected with { Mode = 0x8124 }, expected with { Length = 0 },
         })
@@ -173,6 +213,9 @@ public sealed class LinuxApplicationDcpIdentityTests
     [InlineData(3)]
     [InlineData(4)]
     [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    [InlineData(8)]
     public void MultipleCandidateMetadataCannotInventOrExtendTheNearestAncestry(int variant)
     {
         var resource = Sample(123, 444);
@@ -186,6 +229,9 @@ public sealed class LinuxApplicationDcpIdentityTests
             case 3: chain = [chain[0], new(121, 120, candidates[0])]; break;
             case 4: chain = [new(123, 999, resource)]; break;
             case 5: chain = [new(123, 121, resource with { Stat = new(123, 999, 'S') })]; break;
+            case 6: chain = [new(124, 500, Sample(124, 445))]; break;
+            case 7: chain = [new(123, 124, resource), new(124, 123, Sample(124, 445)), new(123, 121, resource)]; break;
+            case 8: chain = [new(123, 0, resource)]; break;
         }
         // Detached comparisons only: no fake process owner, supervisor or admission is issued.
         Reject(() => LinuxApplicationDcpIdentity.FindNearestDcpAncestor(chain, resource, candidates, 65010, 65011, Unit));
@@ -242,6 +288,7 @@ public sealed class LinuxApplicationDcpIdentityTests
         Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
             [new(123, 124, sample)], sample, sample, 65010, 65011, Unit));
         Reject(() => LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "2147483648")));
+        Reject(() => LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "4294967296")));
         Assert.Equal(0u, LinuxApplicationDcpIdentity.ParseParentLink(Stat(parent: "0")).ParentPid);
         Reject(() => LinuxApplicationDcpIdentity.RequireParentChain(
             [new(123, 0, sample)], sample, Sample(121, 442), 65010, 65011, Unit));

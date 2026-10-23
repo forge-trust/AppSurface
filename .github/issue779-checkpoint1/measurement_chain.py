@@ -156,6 +156,8 @@ def source(raw, head, deadline):
     # checked against this full immutable capture before any helper import.
     required = ('.github/issue779-checkpoint1/binding.py',
                 '.github/issue779-checkpoint1/measurement.py',
+                '.github/issue779-checkpoint1/measurement_data_tests.py',
+                '.github/issue779-checkpoint1/publish.py',
                 '.github/issue779-checkpoint1/measurement_chain.py',
                 '.github/issue779-checkpoint4/producer_roots.py',
                 '.github/issue779-checkpoint4/measurement_arguments.py',
@@ -472,9 +474,9 @@ def stage(raws, source_raw, head, selector, identity, prior_raw, prior_report, m
         'measured_build_sha256', 'target_sha256', 'prior_report_sha256', 'prior_binding_sha256',
         'report_json_sha256', 'report_cobertura_sha256', 'instrumented_modules', 'restored_tool_sha256',
         'restored', 'commands', 'native_acceptance', 'coverage_credit', 'plan_sha256',
-        'native_result_sha256', 'execution_sha256', 'cases')
+        'native_result_sha256', 'execution_sha256', 'cases', 'data_tests_sha256')
     binding.exact(value, expected, 'measurement-chain-final-fields')
-    need(value['schema'] == 'issue779-c1-final-measurement-v1' and value['source'] == head
+    need(value['schema'] == 'issue779-c1-final-measurement-v2' and value['source'] == head
          and value['selector'] == selector and value['workflow_identity'] == identity
          and value['source_capture_sha256'] == sha(source_raw)
          and value['collector'] == 'coverlet.console/10.0.1'
@@ -546,13 +548,13 @@ def stage(raws, source_raw, head, selector, identity, prior_raw, prior_report, m
     target = binding.decode(get('measurement-target.json'))
     binding.exact(target, ('schema', 'source', 'selector', 'workflow_identity', 'original_binding_sha256',
         'measured_build_sha256', 'commands', 'exit', 'native_acceptance', 'coverage_credit', 'plan_sha256',
-        'native_result_sha256', 'execution_sha256', 'cases'), 'measurement-chain-target-fields')
-    need(target['schema'] == 'issue779-c1-measurement-target-v1' and target['source'] == head
+        'native_result_sha256', 'execution_sha256', 'cases', 'data_tests_sha256'), 'measurement-chain-target-fields')
+    need(target['schema'] == 'issue779-c1-measurement-target-v2' and target['source'] == head
          and target['selector'] == selector and target['workflow_identity'] == identity
          and type(target['exit']) is int and target['exit'] == 0
          and target['native_acceptance'] is False and target['coverage_credit'] is False
          and all(target[k] == value[k] for k in ('original_binding_sha256', 'measured_build_sha256',
-              'commands', 'plan_sha256', 'native_result_sha256', 'execution_sha256', 'cases')), 'selector-target')
+              'commands', 'plan_sha256', 'native_result_sha256', 'execution_sha256', 'cases', 'data_tests_sha256')), 'selector-target')
     need(type(value['commands']) is list and len(value['commands']) == 2, 'selector-command-count')
     binding.exact(baseline['paths'], measured.COMMON_PATHS, 'measurement-chain-path-fields')
     args = SimpleNamespace(**{k: Path(v) for k, v in baseline['paths'].items()}, source=head,
@@ -575,6 +577,20 @@ def stage(raws, source_raw, head, selector, identity, prior_raw, prior_report, m
         log_name = Path(row['log_path']).name
         need(row['log_path'] == str(Path(baseline['paths']['evidence']) / log_name)
              and sha(get(log_name)) == row['log_sha256'] and len(get(log_name)) == row['log_bytes'], 'selector-publish-log')
+    data_raws = {name: raw for name, raw in raws.items() if name.startswith('data-tests/')}
+    if selector in measured.DATA_SELECTORS:
+        prepared = binding.decode(get('data-tests/prepared.json'))
+        data_module = types.ModuleType('c1_chain_private_data_tests')
+        data_path = '.github/issue779-checkpoint1/measurement_data_tests.py'
+        data_module.__file__ = str(ROOT / data_path)
+        exec(compile(captured_data(data_path, capture, deadline), str(ROOT / data_path),
+                     'exec', dont_inherit=True), data_module.__dict__)
+        data_result = data_module.validate(data_raws, args, original, prepared, deadline=deadline)
+        need({name: value['sha256'] for name, value in data_result['instrumented'].items()}
+             == armed['measurement']['instrumented_modules'], 'selector-data-image-binding')
+        need(sha(get('data-tests/result.json')) == value['data_tests_sha256'], 'selector-data-tests')
+    else:
+        need(value['data_tests_sha256'] is None and not data_raws, 'selector-no-data-tests')
     return {'selector': selector, 'artifact_name': artifact(selector, identity),
             'measurement_binding_sha256': sha(get('measurement-binding.json')), 'report_sha256': sha(get('coverage.json')),
             'prior_report_sha256': sha(prior_report), 'prior_binding_sha256': sha(prior_raw),
@@ -695,7 +711,7 @@ def finalize(args):
     log_names = {Path(row['log_path']).name for row in original_build['commands']}
     for helper in original_build['helpers'].values():
         log_names.update(Path(row['log_path']).name for row in helper['commands'])
-    selected = {n: raw for n, raw in evidence.items() if n in C1_FILES or n in log_names or n.startswith(('plan/', 'native/'))}
+    selected = {n: raw for n, raw in evidence.items() if n in C1_FILES or n in log_names or n.startswith(('plan/', 'native/', 'data-tests/'))}
     link = stage(selected, source_raw, args.source, args.selector, args.workflow_identity,
                  prior['prior-binding.json'], prior['prior-report.json'], measured, capture, deadline=end)
     selected['prior-binding.json'] = prior['prior-binding.json']

@@ -241,6 +241,8 @@ class MeasurementChainDataTests(unittest.TestCase):
 
     def test_capture_bound_data_import_checks_actual_source_bytes_before_import(self):
         required = ('.github/issue779-checkpoint1/binding.py', '.github/issue779-checkpoint1/measurement.py',
+            '.github/issue779-checkpoint1/measurement_data_tests.py',
+            '.github/issue779-checkpoint1/publish.py',
             '.github/issue779-checkpoint1/measurement_chain.py', '.github/issue779-checkpoint4/producer_roots.py',
             '.github/issue779-checkpoint4/measurement_arguments.py',
             'Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRetainedReportSet.cs',
@@ -257,10 +259,11 @@ class MeasurementChainDataTests(unittest.TestCase):
         self.assertEqual(7, len(producer.CASES))
         modules = {name + '.dll': {} for name in binding.MEASUREMENT_MODULES}
         measured.report_json(binding.canonical(modules))
-        first = required[0]
-        value['files'][first]['sha256'] = '0' * 64
-        with self.assertRaises(binding.Rejected):
-            subject.source(binding.canonical(value), HEAD, time.monotonic() + 5)
+        for first in (required[0], '.github/issue779-checkpoint1/publish.py'):
+            changed = copy.deepcopy(value)
+            changed['files'][first]['sha256'] = '0' * 64
+            with self.subTest(helper=first), self.assertRaises(binding.Rejected):
+                subject.source(binding.canonical(changed), HEAD, time.monotonic() + 5)
 
 
 if __name__ == '__main__': unittest.main()

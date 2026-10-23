@@ -154,14 +154,43 @@ public sealed class LinuxDcpParentPolicyTests
         const string runtime = "/run/runtime/dotnet";
         const string resource = "/run/bundle/resource/NativeHttpResource.dll";
         const string socket = "/run/scratch/http.sock";
-        byte[] command = [.. new[] { runtime, resource, "--socket", socket, "--case", "normal" }
-            .SelectMany(static value => Encoding.UTF8.GetBytes(value + "\0"))];
+        byte[] command = CommandBytes(runtime, resource, socket);
         LinuxApplicationDcpIdentity.RequireResourceCommandBytes(command, runtime, resource, socket);
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(command,
             field == "runtime" ? path : runtime,
             field == "resource" ? path : resource,
             field == "socket" ? path : socket));
     }
+
+    [Fact]
+    public void ExpectedResourcePathsRejectValuesOutsideTheLengthBounds()
+    {
+        const string runtime = "/run/runtime/dotnet";
+        const string resource = "/run/bundle/resource/NativeHttpResource.dll";
+        const string socket = "/run/scratch/http.sock";
+        var command = CommandBytes(runtime, resource, socket);
+
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(command, "/", resource, socket));
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
+            command, "/" + new string('a', 4096), resource, socket));
+    }
+
+    [Fact]
+    public void ExpectedResourcePathWithMalformedUtf16IsRejectedWithoutEchoingInput()
+    {
+        const string runtime = "/run/runtime/dotnet";
+        const string resource = "/run/bundle/resource/NativeHttpResource.dll";
+        const string socket = "/run/scratch/http.sock";
+        var command = CommandBytes(runtime, resource, socket);
+        var malformedRuntime = "/run/CANARY-\uD800/dotnet";
+
+        Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
+            command, malformedRuntime, resource, socket));
+    }
+
+    private static byte[] CommandBytes(string runtime, string resource, string socket) =>
+        [.. new[] { runtime, resource, "--socket", socket, "--case", "normal" }
+            .SelectMany(static value => Encoding.UTF8.GetBytes(value + "\0"))];
 
     private static ParentFact[] Chain() => [new(300, 301, Sample(300)), new(301, 500, Sample(301))];
 

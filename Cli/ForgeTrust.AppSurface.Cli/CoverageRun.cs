@@ -3989,7 +3989,9 @@ internal sealed class CoverageRunReportGenerator : ICoverageRunReportGenerator
         EvidenceRunByteQuota? processOutputQuota = null)
     {
         var reportGeneratorDll = _locator.ResolveReportGeneratorDll();
-        var reports = string.Join(';', coverageFiles);
+        var reportInputs = await CoverageCompilerMapInputs.PrepareAsync(coverageFiles, outputDirectory,
+            cancellationToken).ConfigureAwait(false);
+        var reports = string.Join(';', reportInputs);
         var result = await _processRunner.RunAsync(
             new CoverageRunProcessRequest(
                 "dotnet",

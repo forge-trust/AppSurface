@@ -289,5 +289,53 @@ class MeasurementOrdinaryFileTests(unittest.TestCase):
             subject.validate_commands(rows, args, original, self.end)
 
 
+class SupplementalDataSourceControls(unittest.TestCase):
+    """Helper-source and no-op controls only; no native record or test execution is synthesized."""
+
+    def test_unselected_images_do_no_supplemental_io(self):
+        args = argparse.Namespace(selector="None")
+        with patch.object(subject, "read", side_effect=AssertionError("unexpected read")), \
+                patch.object(subject, "data_tests_module", side_effect=AssertionError("unexpected import")):
+            self.assertIsNone(subject.data_tests_fact(args, {}, b"{}", time.monotonic() + 5))
+
+    def test_only_matching_helper_bytes_and_mode_are_imported(self):
+        with tempfile.TemporaryDirectory(prefix="measurement-data-source-") as temporary:
+            root = Path(temporary).resolve()
+            relative = ".github/issue779-checkpoint1/measurement_data_tests.py"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            body = b"VALUE = 7\n"
+            path.write_bytes(body)
+            path.chmod(0o644)
+            value = {"files": {relative: {"sha256": binding.digest(body), "mode": "0644"}}}
+            with patch.object(subject, "SOURCE_ROOT", root):
+                module = subject.data_tests_module(binding.canonical(value), time.monotonic() + 5)
+                self.assertEqual(7, module.VALUE)
+                for field, bad in (("sha256", "0" * 64), ("mode", "0600")):
+                    changed = copy.deepcopy(value)
+                    changed["files"][relative][field] = bad
+                    with self.subTest(field=field), self.assertRaises(binding.Rejected):
+                        subject.data_tests_module(binding.canonical(changed), time.monotonic() + 5)
+            self.assertEqual(body, path.read_bytes())
+
+    def test_substituted_helper_never_executes_its_body(self):
+        with tempfile.TemporaryDirectory(prefix="measurement-data-source-") as temporary:
+            root = Path(temporary).resolve()
+            relative = ".github/issue779-checkpoint1/measurement_data_tests.py"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"raise AssertionError('private-helper-canary')\n")
+            path.chmod(0o644)
+            capture = binding.canonical({"files": {relative: {"sha256": "0" * 64, "mode": "0644"}}})
+            with patch.object(subject, "SOURCE_ROOT", root), self.assertRaises(binding.Rejected) as caught:
+                subject.data_tests_module(capture, time.monotonic() + 5)
+            self.assertNotIn("private-helper-canary", str(caught.exception))
+
+    def test_expired_helper_import_rejects_before_opening_any_file(self):
+        with patch.object(subject.os, "open", side_effect=AssertionError("unexpected open")):
+            with self.assertRaises(binding.Rejected):
+                subject.data_tests_module(b"{}", time.monotonic() - 1)
+
+
 if __name__ == "__main__":
     unittest.main()

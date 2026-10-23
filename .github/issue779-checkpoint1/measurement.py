@@ -31,6 +31,7 @@ COMMON_PATHS = ("source_capture", "build_receipt", "collector", "evidence", "pri
 BASE_FIELDS = ("schema", "source", "selector", "workflow_identity", "paths", "source_capture_sha256",
                "original_build_sha256", "original_tool", "collector_sha256", "prior_report_sha256",
                "prior_binding_sha256", "evidence_owner", "native_acceptance", "coverage_credit")
+DATA_SELECTORS = ("N04", "N07", "N16")
 
 
 def require(condition, category):
@@ -39,6 +40,54 @@ def require(condition, category):
 
 def check(end):
     binding._remaining(end)
+
+
+def data_tests_module(capture_raw, end):
+    """Load only the fixed current-source data-test helper after checking captured bytes and mode."""
+    relative = ".github/issue779-checkpoint1/measurement_data_tests.py"
+    capture = binding.decode(capture_raw)
+    body = read(SOURCE_ROOT / relative, binding.MAX_LOG, end)
+    entry = capture["files"].get(relative)
+    require(type(entry) is dict and binding.digest(body) == entry["sha256"]
+            and format(stat.S_IMODE((SOURCE_ROOT / relative).lstat().st_mode), "04o") == entry["mode"],
+            "measurement-data-helper-source")
+    spec = importlib.util.spec_from_file_location("c1_measurement_data_tests", SOURCE_ROOT / relative)
+    require(spec is not None, "measurement-data-helper-loader")
+    module = importlib.util.module_from_spec(spec)
+    exec(compile(body, str(SOURCE_ROOT / relative), "exec", dont_inherit=True), module.__dict__)
+    return module
+
+
+def data_tests_fact(args, original, capture_raw, end):
+    """Re-read fixed supplemental data evidence; it supplies no native case or authority."""
+    if args.selector not in DATA_SELECTORS:
+        return None
+    root = canonical_path(args.evidence / "data-tests")
+    require(stat.S_ISDIR(root.lstat().st_mode) and stat.S_IMODE(root.lstat().st_mode) == 0o700,
+            "measurement-data-directory")
+    raws = {}
+    total = 0
+    directories = 0
+    for directory, names, files in os.walk(root, followlinks=False):
+        check(end)
+        directories += 1
+        require(directories <= 128 and len(names) <= 128, "measurement-data-directories")
+        for name in names:
+            require(stat.S_ISDIR((Path(directory) / name).lstat().st_mode), "measurement-data-parent")
+        for name in files:
+            path = Path(directory) / name
+            body = read(path, binding.MAX_LOG, end)
+            total += len(body)
+            require(len(raws) < 64 and total <= 32 * 1024 * 1024, "measurement-data-bound")
+            raws["data-tests/" + path.relative_to(root).as_posix()] = body
+    require("data-tests/prepared.json" in raws and "data-tests/result.json" in raws,
+            "measurement-data-leaves")
+    prepared = binding.decode(raws["data-tests/prepared.json"])
+    data_result = data_tests_module(capture_raw, end).validate(raws, args, original, prepared, deadline=end)
+    measured = binding.decode(read(args.evidence / "build-measured.json", binding.MAX_JSON, end))
+    require({name: value["sha256"] for name, value in data_result["instrumented"].items()}
+            == measured["measurement"]["instrumented_modules"], "measurement-data-image-binding")
+    return binding.digest(raws["data-tests/result.json"])
 
 
 def identity(s):
@@ -245,6 +294,8 @@ def bind(args):
                  "measurement-binding.json", "plan", "native", "coverage.json", "coverage.cobertura.xml",
                  "measurement-prepare.log", "measurement-native.log"):
         require(not os.path.lexists(args.evidence / name), "measurement-fresh-output")
+    if args.selector in DATA_SELECTORS:
+        data_tests_module(capture_raw, end).prepare(args, original, capture_raw, deadline=end)
     # Bind only after verification, and re-read predecessors after the work.
     require(inputs(args, end)[0] == initial, "measurement-bind-changed")
     save(args.evidence / "measurement-original.json", initial, end)
@@ -300,9 +351,13 @@ def retained(args, measured_raw, capture_raw, end):
         raw = read(args.evidence / "native" / (row["case"] + "-evidence.json"), binding.MAX_JSON, end)
         require(binding.digest(raw) == row["evidence_sha256"], "measurement-case-evidence")
     check(end)
+    data_sha = None
+    if args.selector in DATA_SELECTORS:
+        original = binding.decode(read(args.build_receipt, binding.MAX_JSON, end))
+        data_sha = data_tests_fact(args, original, capture_raw, end)
     return {"plan_sha256": binding.digest(plan_raw), "native_result_sha256": binding.digest(native_raw),
             "execution_sha256": binding.digest(execution_raw),
-            "cases": [row["case"] for row in native["cases"]]}
+            "cases": [row["case"] for row in native["cases"]], "data_tests_sha256": data_sha}
 
 
 def command_argv(args, original):
@@ -348,11 +403,14 @@ def target(args):
                               SOURCE_ROOT, environment(), command_end)
         commands.append(row)
         require(row["exit"] == 0, "measurement-target-command")
+    if args.selector in DATA_SELECTORS:
+        prepared = binding.decode(read(args.evidence / "data-tests/prepared.json", binding.MAX_JSON, end))
+        data_tests_module(capture_raw, end).run(args, original, prepared, deadline=end)
     measured_raw = read(args.evidence / "build-measured.json", binding.MAX_JSON, end)
     require(measured_raw == binding.canonical(measured), "measurement-measured-changed")
     facts = retained(args, measured_raw, capture_raw, end)
     require(baseline(args, end)[3] == saved_raw, "measurement-target-input-changed")
-    result = {"schema": "issue779-c1-measurement-target-v1", "source": args.source,
+    result = {"schema": "issue779-c1-measurement-target-v2", "source": args.source,
               "selector": args.selector, "workflow_identity": args.workflow_identity,
               "original_binding_sha256": binding.digest(saved_raw), "measured_build_sha256": binding.digest(measured_raw),
               "commands": commands, "exit": 0, "native_acceptance": False, "coverage_credit": False, **facts}
@@ -399,7 +457,7 @@ def finalize(args):
     expected_fields = ("schema", "source", "selector", "workflow_identity", "original_binding_sha256",
                        "measured_build_sha256", "commands", "exit", "native_acceptance", "coverage_credit", *facts)
     binding.exact(terminal, expected_fields, "measurement-target-fields")
-    require(terminal["schema"] == "issue779-c1-measurement-target-v1" and terminal["source"] == args.source
+    require(terminal["schema"] == "issue779-c1-measurement-target-v2" and terminal["source"] == args.source
             and terminal["selector"] == args.selector and terminal["workflow_identity"] == args.workflow_identity
             and terminal["original_binding_sha256"] == binding.digest(saved_raw)
             and terminal["measured_build_sha256"] == binding.digest(measured_raw)
@@ -420,7 +478,7 @@ def finalize(args):
     require(retained(args, measured_raw, capture_raw, end) == facts, "measurement-final-evidence-changed")
     validate_commands(terminal["commands"], args, original, end)
     binding.verify_build(original, capture_raw, args.source, args.selector, deadline=end)
-    result = {"schema": "issue779-c1-final-measurement-v1", "source": args.source, "selector": args.selector,
+    result = {"schema": "issue779-c1-final-measurement-v2", "source": args.source, "selector": args.selector,
               "workflow_identity": args.workflow_identity, "collector": "coverlet.console/10.0.1", "collector_exit": 0,
               "collector_sha256": saved["collector_sha256"], "source_capture_sha256": binding.digest(capture_raw),
               "original_binding_sha256": binding.digest(saved_raw), "original_build_sha256": saved["original_build_sha256"],

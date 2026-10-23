@@ -31,14 +31,16 @@ Revision 57's actual measured `None` attempt failed: the direct non-root N03 pro
 
 ## Final record
 
-The exact final schema is `issue779-c1-final-measurement-v1`. Its fields are:
+The exact final schema is `issue779-c1-final-measurement-v2`. The target schema is
+`issue779-c1-measurement-target-v2`. Version 2 additionally binds the separate data-test receipt;
+old version 1 receipts remain historical and cannot satisfy this current-source contract. Its fields are:
 
 ```text
 schema, source, selector, workflow_identity,
 collector, collector_exit, collector_sha256, source_capture_sha256,
 original_binding_sha256, original_build_sha256, measured_build_sha256, target_sha256,
 prior_report_sha256, prior_binding_sha256, report_json_sha256, report_cobertura_sha256,
-instrumented_modules, restored_tool_sha256, restored, commands,
+instrumented_modules, restored_tool_sha256, restored, commands, data_tests_sha256,
 native_acceptance, coverage_credit, plan_sha256, native_result_sha256,
 execution_sha256, cases
 ```
@@ -46,6 +48,51 @@ execution_sha256, cases
 `collector` is `coverlet.console/10.0.1`, `collector_exit` is integer zero, `restored` is true, and `native_acceptance` and `coverage_credit` are false. `instrumented_modules` maps exactly the root Supervision DLL/PDB pair to its observed SHA256. The complete original/measured inventories still retain all twelve fixed managed inputs. `restored_tool_sha256` hashes the canonical complete restored inventory. The two ordered `commands` rows have exactly `phase, argv, exit, timed_out, joined, log_path, log_sha256, log_bytes`, matching [`publish.command`](publish.py). `original_binding_sha256` binds the raw `measurement-original.json`; `target_sha256` binds raw `measurement-target.json`. Other SHA fields bind raw files except the explicitly canonical restored tool inventory. `cases` contains only this selector's actual retained case identifiers. A measured subset never proves the full sixteen-case matrix; the separate original matrix and aggregate remain required.
 
 The final binding records predecessor hashes without interpreting predecessor success or lineage semantics. The parent must validate and stage its current C2 or earlier measured predecessor before bind. This split prevents a data hash from being mistaken for native authorship or a coverage gate verdict. No callable `validate_final_measurement` API is promised; the three CLI commands and strict retained files are the integration interface.
+
+## Existing private-image data controls
+
+[`measurement_data_tests.py`](measurement_data_tests.py) measures the existing metadata and ordering
+tests against the actual selected runtime assembly. Ordinary `None` builds deliberately omit these
+private implementations, and their linked test-assembly copies do not establish execution of the
+native runtime's methods. This supplemental step uses the same instrumented runtime image already
+owned by the standard collector; it neither imports a report nor writes a hit file.
+
+The fixed recipes are `N04` (`LinuxN04CheckpointOrderTests`, `LinuxNegativeKernelObservationTests`),
+`N07` (`LinuxFailedSettlementObservationTests`, `LinuxWorkerStopTimingTests`,
+`LinuxN07FailureSettlementTests`), and `N16` (`LinuxN16ProgressDiagnosticTests`,
+`LinuxNegativeKernelObservationTests`), all in the existing Supervision test namespace. `None` performs
+no supplemental I/O. Other selectors are not part of this four-link measurement chain.
+
+The internal `prepare(args, original, capture_raw, deadline=...)` API runs during bind's existing
+240-second budget. It derives the SDK from the verified original build command, restores the fixed test
+project in locked mode and builds the same Release selector with warnings as errors and shared compilation
+disabled. It requires the test-output Supervision DLL/PDB bytes to equal the original published pair,
+and retains those originals plus command logs in fresh private `data-tests/` evidence.
+
+After the original native procedure has finished, `run(args, original, prepared, deadline=...)` copies
+only the collector's actual instrumented Supervision DLL/PDB into the fixed test-output directory.
+The DLL must actually differ from its original. Each replacement retains its original single-link inode
+before the first write. The fixed SDK runs VSTest directly over the already-built tests, with a fixed
+class filter and no restore or MSBuild evaluation. Its command is bounded by at most 180 seconds of the
+original 1,150-second target remainder, leaving 60 seconds for final verification. It cannot renew or
+shorten the original native command's clocks. Both test-output originals are restored and checked even
+when a test or copy fails; a substituted inode cannot be adopted for restoration. The published image
+stays with the standard collector, which performs its existing restoration after all target work joins.
+
+`validate(raws, args, original, prepared, deadline=...)` is a process-free data API for the aggregate.
+It checks the exact retained leaf set, original and measured image identities, fixed argv, both build
+logs and the joined test command log, and actual TRX classes/counters/results. Failed, skipped, missing
+or unselected cases reject. `data-tests/prepared.json` and `data-tests/result.json` retain the closed
+`issue779-c1-data-prepared-v1` and `issue779-c1-data-result-v1` schemas. The final/target
+`data_tests_sha256` is the raw result hash for the three recipes and null for `None`. The current source
+capture pins this helper before import, and the chain rechecks every retained byte and the data receipt.
+The new [portable controls](test_measurement_data_tests.py) validate receipt grammar and real owned-file
+replacement only; their synthetic metadata fixtures are not evidence of a test process or native case.
+
+These tests exercise data parsing, failure projection and bookkeeping. They supply no native owner,
+admission, accepted lease, application health or physical-exit proof, and add no native case IDs. The
+original sixteen controls, consumer acceptance and unchanged solution/patch gates remain separate
+requirements. No coverage gain is credited merely because these controls are defined or pass locally.
 
 ## Validation limits
 
