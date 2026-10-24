@@ -1,5 +1,7 @@
 # EvidenceHost Cookbook
 
+For a checked-in executable example, see [native EvidenceHost acceptance](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). AppSurface uses that recipe to validate its packed storage CLI and installed-package consumer through the same explicit producer contracts available to applications.
+
 This cookbook turns the [EvidenceHost guide](../start-here/evidencehost.md) into concrete CI patterns. The goal is not a higher coverage number. The goal is a visible, truthful claim that the changed risk was mediated.
 
 ## Documentation-only change

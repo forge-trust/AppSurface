@@ -73,6 +73,8 @@ Similarly, v1 validates a registered release envelope but labels it `ValidatedNo
 
 ## Read next
 
+For a complete native example that validates AppSurface's own packed CLI and installed consumer, use the [native EvidenceHost acceptance recipe](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). It demonstrates bounded commands, owned storage, independent assertions and durable manifest output.
+
 For the in-progress coverage artifact retention behavior, see the [coverage storage guide](../guides/coverage-storage.md). Evidence coverage producers default to managed retention, accept an additive `coverageArtifactRetention` value of `managed` or `full`, and keep the legacy declaration constructor shape. Retention changes raw duplicate preservation only; it does not change collection or gates. The CLI's `--no-clean` preservation boundary wins in either retention mode. The guide describes the source change under development; it does not assert installed-package proof or measured savings.
 
 - [EvidenceHost cookbook](../guides/evidencehost-cookbook.md)

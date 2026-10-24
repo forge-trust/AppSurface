@@ -530,6 +530,84 @@ public sealed class EvidenceHostBootstrapTests
         Assert.Contains("cleanup failed", manifest.Metrics.CleanupDiagnostic, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldAwaitCancelledProducerBeforeDisposingItsWorkspace()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var producer = new CleanupOrderingProducer();
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            registration.AddResource(new ReadyResource("postgres"));
+            registration.AddProducer(producer);
+        });
+        var run = host.RunAsync(cancellationToken: cancellation.Token);
+        await producer.Started.Task;
+        cancellation.Cancel();
+        await producer.Stopping.Task;
+
+        Assert.False(producer.Disposed);
+        Assert.False(run.IsCompleted);
+        producer.FinishCleanup.SetResult();
+        var manifest = await run;
+
+        Assert.True(producer.Disposed);
+        Assert.True(manifest.Metrics.CleanupCompleted);
+        Assert.Equal(EvidenceProducerOutcome.Cancelled, Assert.Single(manifest.ProducerResults).Outcome);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveOwnershipWhenProducerCannotStop()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var producer = new CleanupOrderingProducer();
+        await using var host = EvidenceHostBootstrap.Create(CreatePlan(), registration =>
+        {
+            registration.AddResource(new ReadyResource("postgres"));
+            registration.AddProducer(producer);
+        }, new EvidenceHostOptions { ProducerCleanupTimeout = TimeSpan.FromMilliseconds(50) });
+        var run = host.RunAsync(cancellationToken: cancellation.Token);
+        await producer.Started.Task;
+        cancellation.Cancel();
+        var manifest = await run;
+
+        Assert.False(producer.Disposed);
+        Assert.False(manifest.Metrics.CleanupCompleted);
+        Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+        Assert.Contains("preserved", manifest.Metrics.CleanupDiagnostic, StringComparison.Ordinal);
+        producer.FinishCleanup.SetResult();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(61)]
+    public void Create_ShouldRejectUnboundedProducerCleanup(int seconds) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => EvidenceHostBootstrap.Create(CreatePlan(), _ => { },
+            new EvidenceHostOptions { ProducerCleanupTimeout = TimeSpan.FromSeconds(seconds) }));
+
+    private sealed class CleanupOrderingProducer : IEvidenceProducer, IAsyncDisposable
+    {
+        public string Id => "coverage";
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Stopping { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FinishCleanup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Disposed { get; private set; }
+
+        public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+        {
+            Started.SetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            finally { Stopping.SetResult(); await FinishCleanup.Task; }
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
+    }
+
     private static EvidencePlan CreatePlan(
         int resourceDeadlineSeconds = 30,
         EvidenceProfileScope scope = EvidenceProfileScope.Targeted,
