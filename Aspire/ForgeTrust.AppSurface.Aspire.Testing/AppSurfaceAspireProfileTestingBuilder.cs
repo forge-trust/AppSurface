@@ -350,6 +350,26 @@ public sealed class AppSurfaceAspireProfileTestingBuilder : IDistributedApplicat
     }
 
     /// <summary>
+    /// Verifies that ownership was transferred while the builder is active and before its single build.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The builder has been built, is building, is preparing, or has faulted.</exception>
+    /// <exception cref="ObjectDisposedException">The builder is disposing or has been disposed.</exception>
+    internal void EnsureActiveUnbuilt()
+    {
+        var state = Volatile.Read(ref _state);
+        if (state is Disposing or Disposed)
+        {
+            throw new ObjectDisposedException(nameof(AppSurfaceAspireProfileTestingBuilder));
+        }
+
+        if (state != Active)
+        {
+            throw new InvalidOperationException(
+                "The readiness fixture requires an active Aspire testing builder that has not been built.");
+        }
+    }
+
+    /// <summary>
     /// Aborts factory preparation through the internal ownership path and invalidates captured references.
     /// </summary>
     /// <returns>A task joining cleanup of unbuilt Aspire resources before activation services.</returns>

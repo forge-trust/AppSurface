@@ -24,6 +24,9 @@
     <None Include="../configure-postgresql-roles.sql"
           Pack="true"
           PackagePath="contentFiles/any/any/configure-postgresql-roles.sql"
+          PackageBuildAction="None"
+          PackageCopyToOutput="true"
+          PackageFlatten="true"
           CopyToOutputDirectory="Never" />
   </ItemGroup>
 

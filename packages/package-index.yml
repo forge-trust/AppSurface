@@ -429,6 +429,42 @@ packages:
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
       - ForgeTrust.AppSurface.Durable.Provider
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates/ForgeTrust.AppSurface.Durable.Templates.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 50
+    use_when: Create an application-owned externally activated PostgreSQL Work host and prove its first completed Work from an installed template.
+    includes: Native dotnet-new starter, required activation authorization, passive restricted-role composition, typed sample Work, readiness and exported-activity proof, and disposable test provisioning.
+    does_not_include: A new runtime, hosted service, production credentials, startup migrations, automatic source upgrades, or a guarantee about downstream identity policies.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.Templates/README.md
+    recipe_summary: Install the coordinated template with dotnet new install, create a standalone worker, and run its real first-Work test; follow the [canonical guide](../start-here/durable-worker.md) for prerequisites, production composition and safe replacement.
+    depends_on: []
+    expected_dependency_package_ids: []
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates/content/durable-worker/src/AppSurfaceDurableWorker/AppSurfaceDurableWorker.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    publish_reason: Maintained application-owned template source; verified outside the repository against published or candidate packages.
+    product_family: internal_support
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 51
+    note: Standalone authored starter, not a separately published runtime package; generated source belongs to each adopter.
+  - project: Durable/ForgeTrust.AppSurface.Durable.Templates.VerificationHost/ForgeTrust.AppSurface.Durable.Templates.VerificationHost.csproj
+    classification: excluded
+    publish_decision: do_not_publish
+    product_family: internal_support
+    publish_reason: Non-packable coverage assembly for authored template host sources; never substitutes for installed-package proof.
+    release_status: excluded
+    commercial_status: not_applicable
+    release_notes_path: releases/unreleased.md
+    order: 52
+    note: Coverage-only source verification project that links generated host C# into a non-test assembly and is never packed or published.
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost/ForgeTrust.AppSurface.Durable.PostgreSql.TestHost.csproj
     classification: excluded
     publish_decision: do_not_publish
@@ -515,6 +551,20 @@ packages:
       - ForgeTrust.AppSurface.Deployment
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Deployment
+  - project: Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj
+    release_guidance_variant: default
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    order: 56
+    use_when: Add this for explicit status-only HTTP readiness in ordinary tests or resource-backed evidence without taking an Aspire or EvidenceHost dependency.
+    includes: Borrowed-client HTTP probing, one cooperative monotonic deadline, per-request bounds, fixed-delay retries, optional attempt cap, configurable status acceptance, and safe phase and cause diagnostics.
+    does_not_include: Application startup or ownership, resource discovery, body or business assertions, browser execution, credentials, global transport policy, EvidenceHost bootstrap, or provenance claims.
+    start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md
+    recipe_summary: Start with `ForgeTrust.AppSurface.Evidence.Readiness` for a neutral HTTP condition; add the typed Aspire fixture or existing EvidenceHost adapter only when that owner is needed.
   - project: Evidence/ForgeTrust.AppSurface.Evidence.Contracts/ForgeTrust.AppSurface.Evidence.Contracts.csproj
     release_guidance_variant: default
     classification: public
@@ -587,14 +637,16 @@ packages:
     release_track: coordinated
     order: 59
     use_when: Add this in a consumer test or CI composition root when resource-backed coverage, API, or browser E2E producers need explicit Aspire readiness, bounded lifecycle ownership, cleanup, and a truthful evidence manifest separate from normal application startup.
-    includes: Explicit EvidenceHost bootstrap and registration, resource dependency ordering and readiness deadlines, typed producer execution deadlines, failure and cleanup handling, trusted-envelope extension point, observation-only claims, and manifest collection.
+    includes: Explicit EvidenceHost bootstrap and registration, resource dependency ordering and readiness deadlines, typed producer execution deadlines, failure and cleanup handling, shared HTTP readiness under an existing lease, trusted-envelope extension point, observation-only claims, and manifest collection.
     does_not_include: Normal AppHost registration, automatic resource or producer discovery, reuse or mutation of the normal development AppHost graph, Docker sandboxing, independent provenance attestation, cloud provisioning, cross-job aggregation, hosted dashboards, or test framework/browser implementation.
     start_here_path: Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Evidence.Aspire` only to test or CI composition for explicit resource-backed evidence; keep application AppHosts and runtime projects unaware of it.
     depends_on:
       - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Readiness
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Evidence.Contracts
+      - ForgeTrust.AppSurface.Evidence.Readiness
   - project: Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj
     release_guidance_variant: apphost
     classification: public
@@ -622,14 +674,16 @@ packages:
     release_track: coordinated
     order: 61
     use_when: Add this to tests for an AppSurface profile-based AppHost when the resource graph or constructor inputs must be selected per call without invoking the asynchronous AppHost entry point.
-    includes: Typed AppHost, module, and profile selection; CreateConfiguredAsync pre-activation configuration and service hooks; a pre-composition Aspire builder hook; immutable per-call scenario injection; one-build enforcement; deterministic activation-host cleanup; and verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings.
-    does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, readiness policy, higher-level fixtures, or stable diagnostic codes.
+    includes: Typed AppHost, module, and profile selection; CreateConfiguredAsync pre-activation configuration and service hooks; a pre-composition Aspire builder hook; immutable per-call scenario injection; one-build enforcement; deterministic activation-host cleanup; verified-shape Aspire failed-build provider cleanup with non-blocking compatibility warnings; and an opt-in single-resource startup fixture with native health and bounded HTTP readiness.
+    does_not_include: Native AppHost replacement, CliFx option or positional-parameter binding, cross-assembly profiles, browser or business readiness, multi-resource coordination, or global transport policy.
     start_here_path: Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md
     recipe_summary: Add `ForgeTrust.AppSurface.Aspire.Testing` to tests for profile-based AppHosts; use the [configured graph-only proof](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof) when per-call values must reach profile constructors, and keep native AppHosts on Aspire's native testing API.
     depends_on:
       - ForgeTrust.AppSurface.Aspire
+      - ForgeTrust.AppSurface.Evidence.Readiness
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Aspire
+      - ForgeTrust.AppSurface.Evidence.Readiness
   - project: Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj
     release_guidance_variant: default
     classification: public
