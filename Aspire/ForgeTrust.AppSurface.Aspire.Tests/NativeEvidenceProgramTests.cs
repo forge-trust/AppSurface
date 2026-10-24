@@ -82,6 +82,7 @@ public sealed class NativeEvidenceProgramTests
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Native validation failed", result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -216,6 +217,7 @@ public sealed class NativeEvidenceProgramTests
             var result = await InvokeAsync(args.ToArray());
 
             Assert.Equal(1, result.ExitCode);
+            Assert.Contains("ArgumentException", result.StandardError, StringComparison.Ordinal);
             Assert.False(Directory.Exists(output));
         }
         finally { Directory.Delete(root, recursive: true); }
