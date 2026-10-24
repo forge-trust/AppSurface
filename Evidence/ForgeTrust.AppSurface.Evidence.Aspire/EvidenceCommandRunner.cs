@@ -21,7 +21,7 @@ public sealed class EvidenceCommandException : Exception
 /// <param name="FileName">Executable name or path passed directly to the operating system.</param>
 /// <param name="Arguments">Arguments passed as individual argv entries; no shell parsing is performed.</param>
 /// <param name="WorkingDirectory">Absolute working directory for the child process.</param>
-/// <param name="Timeout">Maximum execution duration.</param>
+/// <param name="Timeout">Positive maximum execution duration, at most 4,294,967,294 milliseconds.</param>
 public sealed record EvidenceCommandRequest(
     string FileName,
     IReadOnlyList<string> Arguments,
@@ -327,7 +327,7 @@ public sealed class EvidenceCommandRunner
         if (string.IsNullOrWhiteSpace(request.FileName)) throw new ArgumentException("A command file name is required.", nameof(request));
         if (request.Arguments is null) throw new ArgumentException("Command arguments are required.", nameof(request));
         if (!Path.IsPathFullyQualified(request.WorkingDirectory)) throw new ArgumentException("The working directory must be absolute.", nameof(request));
-        if (request.Timeout <= TimeSpan.Zero || request.Timeout == Timeout.InfiniteTimeSpan) throw new ArgumentOutOfRangeException(nameof(request), "The command timeout must be positive and finite.");
+        if (request.Timeout <= TimeSpan.Zero || request.Timeout > TimeSpan.FromMilliseconds(uint.MaxValue - 1)) throw new ArgumentOutOfRangeException(nameof(request), "The command timeout must be positive and at most 4,294,967,294 milliseconds.");
         if (request.MaximumOutputBytes <= 0 || request.MaximumOutputBytes > 256L * 1024 * 1024) throw new ArgumentOutOfRangeException(nameof(request), "The output budget must be positive and at most 256 MiB.");
         if (!Directory.Exists(request.WorkingDirectory)) throw new DirectoryNotFoundException(request.WorkingDirectory);
         foreach (var pair in request.Environment)

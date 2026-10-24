@@ -251,18 +251,25 @@ public sealed class EvidenceCommandRunnerTests
         var pidPath = Path.Join(parent.FullName, "child.pid");
         try
         {
-            var runner = new EvidenceCommandRunner(_ => throw new InvalidOperationException("adapter failed"));
+            var pid = 0;
+            var runner = new EvidenceCommandRunner(_ =>
+            {
+                var readiness = Stopwatch.StartNew();
+                while (readiness.Elapsed < TimeSpan.FromSeconds(2))
+                {
+                    if (File.Exists(pidPath) && int.TryParse(File.ReadAllText(pidPath), out pid))
+                    {
+                        throw new InvalidOperationException("adapter failed");
+                    }
+                    Thread.Sleep(10);
+                }
+                throw new InvalidOperationException("child readiness failed");
+            });
             var request = new EvidenceCommandRequest("sh", ["-c", $"echo $$ > '{pidPath}'; exec sleep 30"], parent.FullName, TimeSpan.FromSeconds(5));
 
             var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(request));
             Assert.Equal("capture_failed", exception.Code);
-            for (var attempt = 0; attempt < 20 && !File.Exists(pidPath); attempt++)
-            {
-                await Task.Delay(25);
-            }
-
-            Assert.True(File.Exists(pidPath));
-            var pid = int.Parse(File.ReadAllText(pidPath));
+            Assert.True(pid > 0, "The child must report its process identity before capture fails.");
             try
             {
                 Assert.True(Process.GetProcessById(pid).HasExited);
@@ -310,6 +317,25 @@ public sealed class EvidenceCommandRunnerTests
 
         Assert.Equal("drain_timeout", exception.Code);
         Assert.Equal(2, stopped);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldClassifyMissingExecutableWithoutExposingTheInput()
+    {
+        const string missing = "evidence-private-missing-command-4ab10b9b";
+        var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => new EvidenceCommandRunner().RunAsync(
+            new EvidenceCommandRequest(missing, ["private-argument"], Environment.CurrentDirectory, TimeSpan.FromSeconds(10))));
+
+        Assert.Equal("start_failed", exception.Code);
+        Assert.DoesNotContain(missing, exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-argument", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldRejectAnUnsupportedDeadlineBeforeAnyCommandCanStart()
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => new EvidenceCommandRunner().RunAsync(
+            new EvidenceCommandRequest("evidence-must-not-start", [], Environment.CurrentDirectory, TimeSpan.MaxValue)));
     }
 
     private sealed class HoldingCaptureStream(Action stopped) : MemoryStream

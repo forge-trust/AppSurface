@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
@@ -58,7 +59,7 @@ public sealed class NativeEvidenceValidationTests
                 {
                     var relative = Path.GetRelativePath(fixture, file);
                     if (relative.Split(Path.DirectorySeparatorChar).Any(part => part is "bin" or "obj")) continue;
-                    var target = Path.Join(consumer, relative);
+                    var target = TestPathUtils.PathUnder(consumer, relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     File.Copy(file, target);
                 }
@@ -125,6 +126,45 @@ public sealed class NativeEvidenceValidationTests
 
             Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
             Assert.Empty(result.SatisfiedAssertionIds);
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PackedStorage_RefusesCommandFailuresAndReleasesOnlyOwnedScratch(bool missingExecutable)
+    {
+        var parent = Directory.CreateTempSubdirectory("appsurface-native-command-failure-").FullName;
+        try
+        {
+            var packagePath = Path.Join(parent, "candidate.nupkg");
+            using (var package = ZipFile.Open(packagePath, ZipArchiveMode.Create))
+            {
+                using (var writer = new StreamWriter(package.CreateEntry("candidate.nuspec").Open()))
+                    writer.Write("<package><metadata><id>ForgeTrust.AppSurface.Cli</id><version>1.0.0</version><repository commit='source' /></metadata></package>");
+                package.CreateEntry("tools/net10.0/any/ForgeTrust.AppSurface.Cli.dll");
+            }
+            var sentinel = Path.Join(parent, "caller-owned.txt");
+            await File.WriteAllTextAsync(sentinel, "preserve");
+            var settings = new ValidationSettings(TestPathUtils.FindRepoRoot(AppContext.BaseDirectory), packagePath,
+                "1.0.0", "source", missingExecutable ? Path.Join(parent, "missing-dotnet") : ResolveDotnetHost(), parent, parent,
+                MinimumFreeBytes: 0);
+            await using (var producer = new PackedStorageProducer(settings))
+            {
+                var declaration = Declaration(producer.Id, ["storage/published-cli@1"], false);
+                var context = new EvidenceProducerContext(new EvidencePlan("1", "p", "pd", "diff",
+                    new("p", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "digest"), declaration, TimeProvider.System);
+
+                var result = await producer.ProduceAsync(context, CancellationToken.None);
+
+                Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+                Assert.Empty(result.SatisfiedAssertionIds);
+                Assert.Contains(missingExecutable ? "start_failed" : "storage command exit and complete capture", result.Diagnostic, StringComparison.Ordinal);
+            }
+            Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
+            Assert.Equal("preserve", await File.ReadAllTextAsync(sentinel));
+            Assert.True(File.Exists(packagePath));
         }
         finally { Directory.Delete(parent, recursive: true); }
     }

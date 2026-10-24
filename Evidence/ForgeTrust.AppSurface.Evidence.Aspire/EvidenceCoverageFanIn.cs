@@ -209,7 +209,7 @@ public static class EvidenceCoverageFanIn
         if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > limit) throw Reject($"Invalid or oversized evidence: {path}");
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous);
         using var memory = new MemoryStream((int)Math.Min(info.Length, int.MaxValue));
-        await new BoundedReadStream(stream, limit, ct).CopyToAsync(memory, ct).ConfigureAwait(false);
+        await new EvidenceBoundedReadStream(stream, limit, ct).CopyToAsync(memory, ct).ConfigureAwait(false);
         return memory.ToArray();
     }
     private static bool ExactFiles(string directory, IEnumerable<string> expected)
@@ -271,83 +271,7 @@ public static class EvidenceCoverageFanIn
         var info = new FileInfo(path);
         if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > limit)
             throw Reject($"Invalid or oversized coverage report: {path}");
-        return new BoundedXmlStream(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous), limit, cancellationToken);
-    }
-    private sealed class BoundedReadStream(Stream inner, long limit, CancellationToken cancellationToken) : Stream
-    {
-        private long _count;
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var read = inner.Read(buffer, offset, count);
-            Count(read);
-            return read;
-        }
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ct.ThrowIfCancellationRequested();
-            var read = await inner.ReadAsync(buffer, ct).ConfigureAwait(false);
-            Count(read);
-            return read;
-        }
-        private void Count(int read)
-        {
-            _count += read;
-            if (_count > limit) throw Reject("Evidence exceeds its size limit.");
-        }
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) inner.Dispose();
-            base.Dispose(disposing);
-        }
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => inner.Length;
-        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
-        public override void Flush() => inner.Flush();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    }
-    private sealed class BoundedXmlStream(Stream inner, long limit, CancellationToken cancellationToken) : Stream
-    {
-        private long _count;
-        public override int Read(byte[] buffer, int offset, int count)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var read = inner.Read(buffer, offset, count);
-            Count(read);
-            return read;
-        }
-        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ct.ThrowIfCancellationRequested();
-            var read = await inner.ReadAsync(buffer, ct).ConfigureAwait(false);
-            Count(read);
-            return read;
-        }
-        private void Count(int read)
-        {
-            _count += read;
-            if (_count > limit) throw Reject("Coverage XML exceeds its size limit.");
-        }
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) inner.Dispose();
-            base.Dispose(disposing);
-        }
-        public override bool CanRead => true;
-        public override bool CanSeek => false;
-        public override bool CanWrite => false;
-        public override long Length => inner.Length;
-        public override long Position { get => inner.Position; set => throw new NotSupportedException(); }
-        public override void Flush() => inner.Flush();
-        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
-        public override void SetLength(long value) => throw new NotSupportedException();
-        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        return new EvidenceBoundedReadStream(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous), limit, cancellationToken);
     }
     private static void ValidateCoberturaShape(XElement root)
     {

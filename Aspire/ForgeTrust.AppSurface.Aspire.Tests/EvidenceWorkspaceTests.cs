@@ -293,6 +293,175 @@ public sealed class EvidenceWorkspaceTests
         finally { Directory.Delete(parent, recursive: true); }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Create_ShouldCleanItsOwnRootWhenTheInitialBudgetCannotBeAdmitted(bool logicalLimit)
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var sentinel = Path.Join(parent, "caller.txt");
+            File.WriteAllText(sentinel, "preserve");
+            var options = logicalLimit
+                ? new EvidenceWorkspaceOptions(MaximumBytes: 0, MinimumFreeBytes: 0)
+                : new EvidenceWorkspaceOptions(MinimumFreeBytes: long.MaxValue);
+
+            Assert.Throws<EvidenceWorkspaceBudgetException>(() => EvidenceWorkspace.Create(parent, options));
+
+            Assert.Equal("preserve", File.ReadAllText(sentinel));
+            Assert.Empty(Directory.EnumerateDirectories(parent));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public void Create_ShouldRejectALinkedParentWithoutTouchingItsTarget()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var parent = NewDirectory();
+        var target = NewDirectory();
+        try
+        {
+            var link = Path.Join(parent, "linked-parent");
+            Directory.CreateSymbolicLink(link, target);
+            File.WriteAllText(Path.Join(target, "caller.txt"), "preserve");
+
+            Assert.Throws<IOException>(() => EvidenceWorkspace.Create(link));
+
+            Assert.Equal("preserve", File.ReadAllText(Path.Join(target, "caller.txt")));
+            Assert.Empty(Directory.EnumerateDirectories(target));
+        }
+        finally { Directory.Delete(parent, recursive: true); Directory.Delete(target, recursive: true); }
+    }
+
+    [Fact]
+    public async Task CreateForTests_AllowsDefaultOptionsAndAWorkspaceWithinBothBudgets()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            await using var workspace = EvidenceWorkspace.CreateForTests(parent, null, _ => 9, _ => long.MaxValue);
+            workspace.CheckBudget();
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task CheckBudget_ReportsFreeSpaceFailureWhenLogicalBudgetIsWithinLimit()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            await using var workspace = EvidenceWorkspace.CreateForTests(
+                parent,
+                new EvidenceWorkspaceOptions(MaximumBytes: 10, MinimumFreeBytes: 20),
+                _ => 9,
+                _ => 19);
+
+            var exception = Assert.Throws<EvidenceWorkspaceBudgetException>(workspace.CheckBudget);
+            Assert.Equal(9, exception.LogicalBytes);
+            Assert.Equal(10, exception.MaximumBytes);
+            Assert.Equal(19, exception.FreeBytes);
+            Assert.Equal(20, exception.MinimumFreeBytes);
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task CheckBudget_RejectsMissingOwnershipMarkerAndPreservesWorkspace()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var workspace = EvidenceWorkspace.Create(parent);
+            File.Delete(Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner"));
+
+            Assert.Throws<IOException>(workspace.CheckBudget);
+            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+            Assert.True(Directory.Exists(workspace.RootPath));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task CheckBudget_RejectsRootReplacedWithALinkAndPreservesTarget()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var parent = NewDirectory();
+        var external = NewDirectory();
+        try
+        {
+            var workspace = EvidenceWorkspace.Create(parent);
+            var sentinel = Path.Join(external, "caller-owned.txt");
+            File.WriteAllText(sentinel, "preserve");
+            Directory.Delete(workspace.RootPath, recursive: true);
+            Directory.CreateSymbolicLink(workspace.RootPath, external);
+
+            Assert.Throws<IOException>(workspace.CheckBudget);
+            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+            Assert.Equal("preserve", File.ReadAllText(sentinel));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+            Directory.Delete(external, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Create_PreservesItsRootWhenCleanupCannotReinventoryAfterAnInitialFailure()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var sentinel = Path.Join(parent, "caller.txt");
+            File.WriteAllText(sentinel, "preserve");
+
+            Assert.Throws<IOException>(() => EvidenceWorkspace.Create(parent, new EvidenceWorkspaceOptions(MaxDepth: 0)));
+
+            Assert.Equal("preserve", File.ReadAllText(sentinel));
+            var roots = Directory.EnumerateDirectories(parent).ToArray();
+            Assert.Single(roots);
+            Directory.Delete(roots[0], recursive: true);
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task GetPath_RejectsLiveLinkInNestedChildDirectoryAndPreservesTarget()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var parent = NewDirectory();
+        var external = NewDirectory();
+        try
+        {
+            var workspace = EvidenceWorkspace.Create(parent);
+            var nested = Path.Join(workspace.RootPath, "nested");
+            Directory.CreateDirectory(nested);
+            var targetFile = Path.Join(external, "keep.txt");
+            File.WriteAllText(targetFile, "keep");
+            Directory.CreateSymbolicLink(Path.Join(nested, "linked"), external);
+
+            Assert.Throws<IOException>(() => workspace.GetPath("nested/linked/result.json"));
+            Assert.Equal("keep", File.ReadAllText(targetFile));
+            Directory.Delete(workspace.RootPath, recursive: true);
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+            Directory.Delete(external, recursive: true);
+        }
+    }
+
     private static string NewDirectory()
     {
         var path = Path.Join(Path.GetTempPath(), $"appsurface-evidence-workspace-tests-{Guid.NewGuid():N}");
