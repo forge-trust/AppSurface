@@ -101,6 +101,9 @@ public sealed class DurableDoctorInstalledToolTests
                 testDeadline.Token.ThrowIfCancellationRequested();
                 var row = Assert.Single(matrixRows, candidate => candidate.Id == scenario.MatrixId);
                 await ConfigureScenarioAsync(fixture, scenario, testDeadline.Token);
+                var boundaryHeartbeat = scenario.MatrixId == "D04"
+                    ? await fixture.ReadHeartbeatAsync(cancellationToken: testDeadline.Token)
+                    : null;
                 var before = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
                 var connectionString = scenario.Unavailable
                     ? CreateUnavailableConnectionString(fixture.RuntimeConnectionString)
@@ -118,6 +121,12 @@ public sealed class DurableDoctorInstalledToolTests
                     extraArguments: [],
                     testDeadline.Token);
 
+                if (scenario.MatrixId == "D04")
+                {
+                    Assert.NotNull(boundaryHeartbeat);
+                    row = RowForCapturedHeartbeatBoundary(run, boundaryHeartbeat.LastHeartbeatAtUtc!.Value,
+                        fixture.RuntimeEpoch, matrixRows);
+                }
                 AssertDoctorProcessOutput(run, row, connectionString, "json", customConnectionName, customEpochName,
                     scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
                 var after = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
@@ -235,6 +244,89 @@ public sealed class DurableDoctorInstalledToolTests
         {
             TryDeleteTemporaryDirectory(temporaryRoot);
         }
+    }
+
+    [Theory]
+    [InlineData(149_999_999L, "D04")]
+    [InlineData(150_000_000L, "D04")]
+    [InlineData(150_000_001L, "D05")]
+    public void Installed_heartbeat_boundary_uses_captured_database_time(long ageTicks, string expectedRow)
+    {
+        var observed = new DateTimeOffset(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
+        var heartbeat = observed.Subtract(TimeSpan.FromTicks(ageTicks));
+        var output = JsonSerializer.Serialize(new
+        {
+            observedAtUtc = observed,
+            exitCode = 999, // Expected classification must not be selected from the candidate's verdict.
+            worker = new
+            {
+                workerId = DurableDoctorFixture.RuntimeWorkerId,
+                found = true,
+                runtimeEpoch = OtherEpoch,
+                lastHeartbeatAtUtc = heartbeat,
+                isDraining = false,
+                ageTicks,
+                staleAfterTicks = TimeSpan.FromSeconds(15).Ticks,
+            },
+        });
+
+        var row = RowForCapturedHeartbeatBoundary(new ProcessResult(999, output, string.Empty, false),
+            heartbeat, OtherEpoch, DurableDoctorV1Matrix.Load());
+
+        Assert.Equal(expectedRow, row.Id);
+    }
+
+    [Theory]
+    [InlineData("timestamp")]
+    [InlineData("age")]
+    [InlineData("threshold")]
+    public void Installed_heartbeat_boundary_rejects_changed_seed_or_time_facts(string changed)
+    {
+        var observed = new DateTimeOffset(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
+        var heartbeat = observed.Subtract(TimeSpan.FromSeconds(15));
+        var output = JsonSerializer.Serialize(new
+        {
+            observedAtUtc = observed,
+            worker = new
+            {
+                workerId = DurableDoctorFixture.RuntimeWorkerId,
+                found = true,
+                runtimeEpoch = OtherEpoch,
+                lastHeartbeatAtUtc = changed == "timestamp" ? heartbeat.AddTicks(1) : heartbeat,
+                isDraining = false,
+                ageTicks = TimeSpan.FromSeconds(15).Ticks + (changed == "age" ? 1 : 0),
+                staleAfterTicks = TimeSpan.FromSeconds(15).Ticks + (changed == "threshold" ? 1 : 0),
+            },
+        });
+
+        Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => RowForCapturedHeartbeatBoundary(
+            new ProcessResult(0, output, string.Empty, false), heartbeat, OtherEpoch, DurableDoctorV1Matrix.Load()));
+    }
+
+    /// <summary>Checks the installed near-boundary observation against its unchanged seed and the fixed 15s rule.</summary>
+    /// <remarks>
+    /// The separate process and database snapshot can legitimately cross the boundary after seeding. Expected
+    /// classification comes only from captured timestamps, not the candidate's exit, status, finding or age claim.
+    /// Exact equality and one-tick boundaries remain independently covered by the fixed-observation matrix.
+    /// </remarks>
+    private static DurableDoctorMatrixRow RowForCapturedHeartbeatBoundary(ProcessResult run,
+        DateTimeOffset expectedHeartbeat, Guid expectedEpoch, IReadOnlyList<DurableDoctorMatrixRow> rows)
+    {
+        Assert.False(run.TimedOut);
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var root = document.RootElement;
+        var observed = root.GetProperty("observedAtUtc").GetDateTimeOffset();
+        var worker = root.GetProperty("worker");
+        Assert.Equal(DurableDoctorFixture.RuntimeWorkerId, worker.GetProperty("workerId").GetString());
+        Assert.True(worker.GetProperty("found").GetBoolean());
+        Assert.Equal(expectedEpoch, worker.GetProperty("runtimeEpoch").GetGuid());
+        Assert.False(worker.GetProperty("isDraining").GetBoolean());
+        Assert.Equal(expectedHeartbeat, worker.GetProperty("lastHeartbeatAtUtc").GetDateTimeOffset());
+        var ageTicks = Math.Max(0L, (observed - expectedHeartbeat).Ticks);
+        Assert.Equal(ageTicks, worker.GetProperty("ageTicks").GetInt64());
+        var threshold = TimeSpan.FromSeconds(15).Ticks;
+        Assert.Equal(threshold, worker.GetProperty("staleAfterTicks").GetInt64());
+        return Assert.Single(rows, row => row.Id == (ageTicks > threshold ? "D05" : "D04"));
     }
 
     private static async Task PackAndInstallCandidateAsync(

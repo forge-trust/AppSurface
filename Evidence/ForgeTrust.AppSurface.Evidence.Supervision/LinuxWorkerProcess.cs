@@ -15,7 +15,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// PhysicallySettled permits subsequent custody work after failure; it is not successful execution,
 /// artifact custody, account deletion permission, worker admission or accepted consumer proof.
 /// </remarks>
-internal sealed class LinuxWorkerProcess : IAsyncDisposable
+internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
 {
     // Keep common async declarations first so qualification selectors do not shift
     // their compiler-generated state-machine identities. Preserve field initializer order.
@@ -37,12 +37,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             _outputDeadline = LinuxOutputPipes.CreateDrainDeadline(_owner.TeardownCancellation, _owner.Remaining);
             _pipes = LinuxOutputPipes.Create();
             _ = _pipes.BeginCollectAsync(_outputDeadline.Token,
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-                cancellationPhase: EvidenceNativeQualification.CancellationEnabled ? _cancellationPhase : null,
-#endif
-#if EVIDENCE_PRIVATE_N12
-                descendant: EvidenceNativeQualification.DescendantEnabled ? _descendant : null,
-#endif
+                cancellationPhase: _qualification.CancellationPhase,
+                descendant: _qualification.Descendant,
                 runBudget: _runOutput);
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(_jobDeadline.Token);
             startup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.Remaining.Ticks,
@@ -61,24 +57,13 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 {
                     RequireActive(ct);
                     Interlocked.Exchange(ref _dispatchAttempted, 1); // Before ambiguous OS I/O.
-#if EVIDENCE_PRIVATE_N10
-                    return EvidenceNativeQualification.PendingStartRaceEnabled
-                        ? _backend.StartWorkerForN10Async(_recipe, _n10PendingStart, ct)
-                        : _backend.StartWorkerAsync(_recipe, ct);
-#else
-#if EVIDENCE_PRIVATE_C3_SDK
-                    LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.NativeDispatch);
-#endif
-                    return _backend.StartWorkerAsync(_recipe, ct);
-#endif
+                    return _qualification.StartWorkerAsync(_backend, _recipe, ct);
                 }, startup.Token).ConfigureAwait(false);
             }
             finally { _pipes.CloseWriteCopies(); } // The original FD-transfer/start task is joined.
             // Observation cancellation may abort its bus connection. Keep it separate from the
             // original starting connection, whose AddRef must survive through final settlement.
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.NativeStartJoined);
-#endif
+            _qualification.ObserveNativeStartJoined();
             _observations = await LinuxSystemdBackend.ConnectAsync(startup.Token).ConfigureAwait(false);
             while (true)
             {
@@ -87,9 +72,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 var state = _recipe.ClassifyStartup(facts);
                 if (state == LinuxWorkerStartupState.Running)
                 {
-#if EVIDENCE_PRIVATE_C3_SDK
-                    LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.RunningIdentity);
-#endif
+                    _qualification.ObserveRunningIdentity();
                     _worker = LinuxProcessIdentity.Capture(facts.MainPid, _accountData.WorkerUid,
                         _accountData.WorkerGid, Unit, startup.Token);
                     break;
@@ -99,25 +82,10 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromMilliseconds(25), startup.Token).ConfigureAwait(false);
             }
             RequireActive(startup.Token);
-#if EVIDENCE_PRIVATE_C3
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.TrackerCaptureStart);
-#endif
-            _measurement = LinuxWorkerMeasurement.TryCapture(_worker, startup.Token);
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.TrackerCaptureJoined);
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.ExitPlanStart);
-            _measurement?.PrepareFailedExitBarrier(_input.Request.JobDeadlineUtc, startup.Token);
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.ExitPlanJoined);
-#endif
-#endif
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.DescriptorStart);
-#endif
+            _qualification.CaptureMeasurement(_worker, startup.Token);
+            _qualification.ObserveDescriptorStart();
             _workspace.WriteDescriptor(Descriptor(_worker, _owner.Remaining).DescriptorBytes, startup.Token);
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.DescriptorJoined);
-#endif
+            _qualification.ObserveDescriptorJoined();
             _worker.Recheck(startup.Token);
             RequireActive(startup.Token);
             var dispatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -129,9 +97,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 _exit = MonitorExitAsync(dispatch.Task, _jobDeadline.Token);
             }
             dispatch.TrySetResult(); // Native monitor work dispatches only outside the ownership lock.
-#if EVIDENCE_PRIVATE_C3_SDK
-            LinuxWorkerMeasurement.ObserveStartup(WorkerMeasurementStartup.MonitorRegistered);
-#endif
+            _qualification.ObserveMonitorRegistered();
         }
         catch { Fail(); throw; }
     }
@@ -146,20 +112,13 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 // The worker may exit naturally: owner/input remain live, proc liveness is not demanded here.
                 _owner.RequireCleanupLaunchInput(_input, token);
                 RequireOutputNotFailed();
-#if EVIDENCE_PRIVATE_C3_SDK
-                _measurement?.ObserveFailedExitBarrier(token);
-#endif
+                _qualification.ObserveFailedExitBarrier(token);
                 var facts = await _observations!.ReadUnitAsync(Unit, token).ConfigureAwait(false);
                 if (_recipe!.HasExitedExecution(facts, _worker!.Pid))
                 {
                     _owner.RequireControlIdentity(token);
                     _naturalTerminal = facts;
-#if EVIDENCE_PRIVATE_C3
-                    if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 0) _measurement?.CaptureNormalExit(facts, token);
-#if EVIDENCE_PRIVATE_C3_SDK
-                    else if (facts.ExecMainCode == 1 && facts.ExecMainStatus == 1) _measurement?.CaptureFailedNormalExit(facts, token);
-#endif
-#endif
+                    _qualification.CaptureExit(facts, token);
                     if (facts.ExecMainCode != 1 || facts.ExecMainStatus != 0)
                         Interlocked.Exchange(ref _failed, 1); // Failed work, not failed physical cleanup.
                     return facts;
@@ -183,9 +142,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     private async Task ContainAsync()
     {
-#if EVIDENCE_PRIVATE_N11
-        _stopTiming?.Observe(LinuxWorkerStopMilestone.ContainmentStarted);
-#endif
+        _qualification.ObserveContainmentStarted();
         try
         {
             _owner.BeginRootTeardown();
@@ -197,22 +154,16 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
 
     private async Task StopSelectedUnitAsync(CancellationToken token)
     {
-#if EVIDENCE_PRIVATE_N10
-        if (EvidenceNativeQualification.PendingStartRaceEnabled) Interlocked.Increment(ref _n10StopProcedureCalls);
-#endif
+        _qualification.RecordStopProcedureCall();
         if (Volatile.Read(ref _dispatchAttempted) == 0) return;
         _owner.RequireCleanup(token);
         using var stopDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         stopDeadline.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
             TimeSpan.FromSeconds(_input.Request.StoppingSeconds).Ticks)));
         using var stop = await LinuxSystemdBackend.ConnectAsync(stopDeadline.Token).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N11
-        var stopAttempt = _stopTiming?.StopRequestStarted();
-#endif
+        var stopAttempt = _qualification.StopRequestStarted();
         await stop.StopUnitAsync(Unit, stopDeadline.Token).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N11
-        if (stopAttempt is int attempt) _stopTiming?.StopRequestReplied(attempt);
-#endif
+        _qualification.StopRequestReplied(stopAttempt);
         _owner.RequireCleanup(stopDeadline.Token);
     }
 
@@ -237,9 +188,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                         && (_worker is null || stopped.ExecMainPid == _worker.Pid)
                         && LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, _cleanupDeadline.Token)))
                     {
-#if EVIDENCE_PRIVATE_N11
-                        _stopTiming?.Observe(LinuxWorkerStopMilestone.UnitAndGroupStopped);
-#endif
+                        _qualification.ObserveUnitAndGroupStopped();
                         groupJoined = true; unitJoined = true; break;
                     }
                     await Task.Delay(TimeSpan.FromMilliseconds(25), _cleanupDeadline.Token).ConfigureAwait(false);
@@ -251,9 +200,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         {
             if (!await JoinOriginalExitMonitorAsync(_exit, _jobDeadline!.Token).ConfigureAwait(false)) failed = true;
             monitorJoined = _exit.IsCompleted;
-#if EVIDENCE_PRIVATE_N11
-            if (monitorJoined) _stopTiming?.Observe(LinuxWorkerStopMilestone.MonitorJoined);
-#endif
+            if (monitorJoined) _qualification.ObserveMonitorJoined();
         }
         if (_pipes is not null)
         {
@@ -262,9 +209,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
             try
             {
                 _output = await _pipes.JoinAsync().ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N11
-                _stopTiming?.Observe(LinuxWorkerStopMilestone.PumpsJoined);
-#endif
+                _qualification.ObservePumpsJoined();
                 if (!OutputDrainedForCleanup()) failed = true;
             }
             catch { failed = true; }
@@ -281,18 +226,11 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
                 // Keep the original AddRef until this last authenticated terminal/kernel observation
                 // after pumps and the original monitor have joined. No renewed deadline is introduced.
                 var stopped = await _backend!.ReadUnitAsync(Unit, _cleanupDeadline!.Token).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11
-                _failedSettlementUnit = stopped;
-#endif
+                _qualification.RecordSettlementUnit(stopped);
                 unitJoined &= _recipe!.HasStopped(stopped) && (_worker is null || stopped.ExecMainPid == _worker.Pid);
                 var finalGroup = LinuxCgroupProbe.Read(Unit, default);
-#if EVIDENCE_PRIVATE_N07 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N10 || EVIDENCE_PRIVATE_N11
-                _failedSettlementGroup = finalGroup;
-                _failedSettlementGroupAfterPumps = true;
-#endif
-#if EVIDENCE_PRIVATE_N11
-                _stopTiming?.Observe(LinuxWorkerStopMilestone.FinalUnitAndGroupSampled);
-#endif
+                _qualification.RecordSettlementGroup(finalGroup);
+                _qualification.ObserveFinalUnitAndGroupSampled();
                 groupJoined &= LinuxAccountUtility.GroupEmpty(finalGroup);
             }
             _backend?.Dispose();
@@ -306,25 +244,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Even a failed inspection must attempt the original connection close, after all real task joins.
         try { _backend?.Dispose(); }
         catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
-#if EVIDENCE_PRIVATE_N07
-        try
-        {
-            if (EvidenceNativeQualification.ParentReplacementEnabled
-                && monitorJoined && _exit is { IsCompleted: true }
-                && _worker is not null && _failedSettlementUnit is not null && _failedSettlementGroup is not null
-                && _output is not null)
-            {
-                var pending = _pending.Snapshot;
-                // A correctly contained negative worker can settle without a holder failure.
-                // Retain its joined facts here; the failed original server is required on capture.
-                var data = LinuxN07FailureSettlement.CreateDetached(_owner.RunId, _worker.SampledFacts,
-                    _failedSettlementUnit, _failedSettlementGroup, _output, _exit.Status,
-                    _lifetime.StartJoined, pending.StopJoined, unitJoined, groupJoined, pipesClosed);
-                Interlocked.CompareExchange(ref _failureSettlement, data, null);
-            }
-        }
-        catch (Exception) { } // Diagnostic construction cannot replace the original failed cleanup.
-#endif
+        _qualification.CaptureFailureSettlement(monitorJoined, unitJoined, groupJoined, pipesClosed);
         if (failed)
         {
             Interlocked.Exchange(ref _physicallySettled, 0);
@@ -334,9 +254,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         // Publish only after every fallible final check and close. No concurrent reader may see a
         // transient true projection that a later owner recheck or descriptor close could revoke.
         Interlocked.Exchange(ref _physicallySettled, 1);
-#if EVIDENCE_PRIVATE_N11
-        _stopTiming?.Observe(LinuxWorkerStopMilestone.SettlementPublished);
-#endif
+        _qualification.ObserveSettlementPublished();
     }
 
     private async Task DisposeCoreAsync(TaskCompletionSource completion)
@@ -346,10 +264,8 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         catch { failed = true; }
         try { await _listener.DisposeAsync().ConfigureAwait(false); }
         catch { failed = true; }
-#if EVIDENCE_PRIVATE_C3
-        try { _measurement?.Dispose(); }
+        try { _qualification.DisposeMeasurement(); }
         catch { failed = true; }
-#endif
         try { _worker?.Dispose(); }
         catch { failed = true; }
         foreach (var source in new[] { _jobDeadline, _outputDeadline, _cleanupDeadline })
@@ -392,6 +308,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     private readonly SupervisionWorkerLifetime _lifetime = new();
     private readonly SupervisionSingleAttempt _serverCreation = new();
     private readonly SupervisionPendingStart _pending;
+    private readonly Qualification _qualification;
     private LinuxOutputPipes? _pipes;
     private LinuxSystemdBackend? _backend;
     private LinuxSystemdBackend? _observations;
@@ -453,6 +370,7 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
         _runOutput = runOutput;
         _producerWorkspace = producerWorkspace;
         _pending = new(LinuxUnitName.Create(LinuxUnitRole.Worker, owner.RunId));
+        _qualification = new(this);
     }
 
     /// <summary>Gets the generated unit name as data, not an ownership or exit receipt.</summary>
@@ -926,29 +844,11 @@ internal sealed class LinuxWorkerProcess : IAsyncDisposable
     /// </remarks>
     internal Task StopAndJoinAsync()
     {
-#if EVIDENCE_PRIVATE_N11
-        if (_stopTiming is not null)
-        {
-            try { _stopTiming.Begin(_input.DiagnosticRemaining, TimeSpan.FromSeconds(_input.Request.StoppingSeconds), _recipe?.RuntimeMicroseconds); }
-            catch (Exception) { } // Numeric diagnostics cannot replace the original stop result.
-        }
-#endif
+        _qualification.BeginStopTiming();
         _ = _lifetime.StopAsync(ContainAsync, FinalizeAsync); // Observed through the retained original cleanup join.
         var stop = JoinPhysicalCleanupAsync();
-#if EVIDENCE_PRIVATE_N11
-        return _stopTiming is null ? stop : ObserveStopJoinAsync(stop);
-#else
-        return stop;
-#endif
+        return _qualification.ObserveStopJoinAsync(stop);
     }
-
-#if EVIDENCE_PRIVATE_N11
-    private async Task ObserveStopJoinAsync(Task original)
-    {
-        try { await original.ConfigureAwait(false); }
-        finally { _stopTiming!.Observe(LinuxWorkerStopMilestone.StopJoined); }
-    }
-#endif
 
     /// <summary>Requires natural zero-status exit, successful original startup/cleanup/output and a live cleanup bound.</summary>
     /// <remarks>A force-stopped worker, nonzero exit, incomplete output or sticky earlier failure cannot pass this guard.</remarks>

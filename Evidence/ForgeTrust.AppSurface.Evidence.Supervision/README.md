@@ -1982,3 +1982,19 @@ The [projection tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/Linux
 The [portable pipe ownership controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOutputPipesTests.cs) pass an already completed real run-output ledger to the existing ownership primitive. Rejected registration dispatches neither read. Collection-task failure remains fixed `CollectionFailed`; an earlier write-close failure takes precedence as `CloseFailed`, while a later read-close failure cannot replace the original collection failure. Both writer and reader close attempts still occur once, and repeated disposal returns the same task. These tests model stream ownership, not native identity or successful output drainage.
 
 The [root Linux factory control](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs) separately uses actual `pipe2` endpoints from `LinuxOutputPipes.Create`, kernel descriptor duplication with `FD_CLOEXEC`, known byte writes and genuine EOFs. It retains one duplicated writer after the owner's local write copies close, requiring both original collection and disposal to stay pending until that final endpoint closes. The test never owns a borrowed factory handle, creates a unit or grants account/admission authority. It explicitly skips outside root Linux x64; local compilation is not a native result.
+# Worker orchestration qualification boundary
+
+`LinuxWorkerProcess` keeps `JoinPhysicalCleanupAsync`, `StartCoreAsync`,
+`MonitorExitAsync`, `ContainAsync`, `StopSelectedUnitAsync`, `FinalizeAsync`,
+`DisposeCoreAsync`, and `JoinOriginalExitMonitorAsync` as one common declaration
+region. Selector-only measurement and negative-image plumbing is held by its
+private `Qualification` object. The holder is constructed by the private worker
+constructor and cannot be supplied by a caller. Its hooks preserve the original
+native dispatch, retained start task, identity checks, EOF and pump joins,
+cleanup deadlines, first-failure behavior, and settlement publication order.
+
+The holder is a source-shape boundary, not an authority boundary. It does not
+admit a process, create an owner, add a timeout, change account or root custody,
+or publish a completion result. `QualificationImageBoundaryTests` checks the
+emitted common async identities and selected private method presence from the
+built image; it does not invoke private members or fabricate native capability.

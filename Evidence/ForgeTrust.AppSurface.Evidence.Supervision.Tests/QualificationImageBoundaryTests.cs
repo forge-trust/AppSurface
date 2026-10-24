@@ -178,10 +178,11 @@ public sealed class QualificationImageBoundaryTests
 #else
         Assert.DoesNotContain("LinuxWorkerProcess.CaptureFailedSettlementObservation", methods);
 #endif
+        Assert.Contains("Qualification.ObserveStopJoinAsync", methods);
 #if EVIDENCE_PRIVATE_N11
-        Assert.Contains("LinuxWorkerProcess.ObserveStopJoinAsync", methods);
+        Assert.Contains("Qualification.ObserveStopJoinActualAsync", methods);
 #else
-        Assert.DoesNotContain("LinuxWorkerProcess.ObserveStopJoinAsync", methods);
+        Assert.DoesNotContain("Qualification.ObserveStopJoinActualAsync", methods);
 #endif
 #if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_ACCEPTED_WORK
         Assert.Contains("LinuxWorkerProcess.CaptureNegativeObservation", methods);

@@ -85,6 +85,70 @@ def main():
         omitted_mode = run("omitted-mode", [*entry, "evidence", "run"], cwd=work, expected=1)
         if b"ASEVD401: Select --mode trusted or --mode observation explicitly." not in omitted_mode:
             raise ValueError("The installed tool did not enforce explicit mode selection.")
+        # Exercise the published planning journey against the installed image. These commands
+        # create plans only; protected execution still belongs to the genuine Linux controls.
+        journey = work / "planning-consumer"
+        journey.mkdir(mode=0o700)
+        run("evidence-starter", [*entry, "evidence", "init", "--sample"], cwd=journey)
+        starter = journey / ".appsurface/evidence"
+        marked = {name: (starter / name).read_bytes()
+                  for name in ("evidence.policy.json", "EvidenceHost.cs", "README.md")}
+        if {path.name for path in starter.iterdir()} != set(marked):
+            raise ValueError("The installed starter wrote unexpected files.")
+        policy = json.loads(marked["evidence.policy.json"])
+        profiles = {profile["id"]: profile for profile in policy["profiles"]}
+        if (policy["generatedBy"] != "appsurface-evidence-starter-v1"
+                or policy["conservativeProfileId"] != "targeted-coverage"
+                or profiles["no-evidence"]["producers"] != []
+                or [producer["id"] for producer in profiles["targeted-coverage"]["producers"]] != ["coverage"]):
+            raise ValueError("The installed starter does not retain its documented policy.")
+        policy_arg = ".appsurface/evidence/evidence.policy.json"
+        doctor = run("evidence-doctor", [*entry, "evidence", "doctor", "--policy", policy_arg,
+                                       "--path", "docs/README.md"], cwd=journey)
+        if (b"unverified trusted-envelope:" not in doctor
+                or b"do not grant admission" not in doctor
+                or b"issue779-consumer-acceptance.md" not in doctor):
+            raise ValueError("The installed doctor did not preserve the planning-only boundary.")
+        if (journey / "TestResults").exists():
+            raise ValueError("Doctor unexpectedly wrote execution artifacts.")
+        explain = run("evidence-explain", [*entry, "evidence", "explain", "--policy", policy_arg,
+                                         "--path", "src/Orders/SubmitOrder.cs"], cwd=journey)
+        for expected in (b"Evidence plan: targeted-coverage (targeted)", b"Required producers: coverage",
+                         b"Required resources: none", b"changed-behavior-covered"):
+            if expected not in explain:
+                raise ValueError("The installed explain output diverged from its documented policy.")
+        plan_root = journey / "TestResults/evidence"
+        if {path.name for path in plan_root.iterdir()} != {"evidence-plan.json", "evidence-summary.json"}:
+            raise ValueError("Planning produced an execution artifact.")
+        repeat = run("evidence-starter-repeat", [*entry, "evidence", "init", "--sample"],
+                     cwd=journey, expected=1)
+        if b"ASEVD202" not in repeat or any((starter / name).read_bytes() != body for name, body in marked.items()):
+            raise ValueError("The installed starter overwrote its original marked files.")
+        rejected = run("evidence-observation-without-control", [*entry, "evidence", "run",
+                       "--mode", "observation"], cwd=journey, expected=1)
+        if b"ASEVD402" not in rejected or (plan_root / "evidence-manifest.json").exists():
+            raise ValueError("A local Observation request bypassed authenticated execution.")
+        legacy = run("evidence-legacy-observation-without-control", [*entry, "evidence", "run",
+                     "--observation-only"], cwd=journey, expected=1)
+        if legacy != rejected:
+            raise ValueError("The legacy Observation alias changed admission behavior.")
+        conflict = run("evidence-conflicting-mode", [*entry, "evidence", "run", "--mode", "trusted",
+                       "--observation-only"], cwd=journey, expected=1)
+        if b"ASEVD401" not in conflict or {path.name for path in plan_root.iterdir()} != {
+                "evidence-plan.json", "evidence-summary.json"}:
+            raise ValueError("Conflicting mode selection did not reject before execution.")
+        summary = json.loads((plan_root / "evidence-summary.json").read_bytes())
+        if (summary["kind"] != "plan" or summary["profile"] != "targeted-coverage"
+                or summary["obligations"] != ["changed-behavior-covered"]
+                or "not use this plan as gate evidence" not in summary["next"]):
+            raise ValueError("The installed planning summary overclaimed execution.")
+        receipt["planning_journey"] = {
+            "starter_sha256": {name: hashlib.sha256(body).hexdigest() for name, body in marked.items()},
+            "plan_sha256": hashlib.sha256((plan_root / "evidence-plan.json").read_bytes()).hexdigest(),
+            "summary_sha256": hashlib.sha256((plan_root / "evidence-summary.json").read_bytes()).hexdigest(),
+            "entry": "installed-nuget-tool", "producer_execution": False,
+            "trusted_acceptance": False, "independent_human_usability": False,
+        }
         for name in ("Contracts", "Planner", "Coverage", "Aspire"):
             project = ROOT / ("Evidence/ForgeTrust.AppSurface.Evidence." + name) / ("ForgeTrust.AppSurface.Evidence." + name + ".csproj")
             run("sdk-pack-" + name.lower(), ["dotnet", "pack", str(project), *common])
@@ -101,8 +165,41 @@ def main():
 </ItemGroup></Project>''')
         (consumer / "Program.cs").write_text('''using ForgeTrust.AppSurface.Evidence.Aspire;
 using ForgeTrust.AppSurface.Evidence.Contracts;
-Console.WriteLine(typeof(EvidenceHostBootstrap).FullName);
-Console.WriteLine(typeof(IEvidenceProducer).FullName);
+using ForgeTrust.AppSurface.Evidence.Planner;
+using System.Text.Json;
+var policy = EvidenceCanonicalJson.Deserialize<EvidencePolicy>(File.ReadAllBytes(args[0]));
+var plan = new EvidencePlanner().Resolve(policy, [new NormalizedDiffPath("src/Orders/SubmitOrder.cs")]);
+if (plan.Profile.Id != "targeted-coverage") throw new InvalidOperationException("SDK plan mismatch.");
+var canonical = EvidenceCanonicalJson.Serialize(plan);
+if (!canonical.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(
+    EvidenceCanonicalJson.Deserialize<EvidencePlan>(canonical))))
+    throw new InvalidOperationException("SDK canonical roundtrip mismatch.");
+try
+{
+    _ = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan with { ContractVersion = "2.0" }));
+    throw new InvalidOperationException("Unsupported schema was accepted.");
+}
+catch (JsonException error) when (error.InnerException is null) { }
+foreach (var observation in new[] { false, true })
+{
+    try
+    {
+        _ = EvidenceManifestBuilder.Build(plan, [], observationOnly: observation,
+            envelopeStatus: EvidenceEnvelopeStatus.ValidatedNotAttested);
+        throw new InvalidOperationException("A Boolean/status-enum builder granted admission.");
+    }
+    catch (EvidenceAdmissionException error) when (error.Code == "ASEVD400" && error.InnerException is null) { }
+}
+var configured = false;
+await using var host = EvidenceHostBootstrap.Create(plan, _ => configured = true);
+try
+{
+    await host.RunAsync(new EvidenceExecutionRequest(EvidenceExecutionMode.Observation, args[1]));
+    throw new InvalidOperationException("Unsupervised SDK execution was accepted.");
+}
+catch (EvidenceAdmissionException error) when (error.Code == "ASEVD402" && error.InnerException is null) { }
+if (configured) throw new InvalidOperationException("Configuration ran before authentication.");
+Console.WriteLine("Exact packaged SDK planning, schema and closed-entry controls passed.");
 ''')
         # A fresh package cache forces actual restore of the local SDK graph and its declared external dependencies.
         run("sdk-restore", ["dotnet", "restore", "Consumer.csproj", "--packages", str(work / "sdk-packages"),
@@ -110,7 +207,8 @@ Console.WriteLine(typeof(IEvidenceProducer).FullName);
         run("sdk-locked-restore", ["dotnet", "restore", "Consumer.csproj", "--packages", str(work / "sdk-packages"),
                                    "--source", str(feed), "--source", "https://api.nuget.org/v3/index.json", "--locked-mode", "-warnaserror"], cwd=consumer)
         run("sdk-build", ["dotnet", "build", "Consumer.csproj", "--no-restore", "-warnaserror", "-p:UseSharedCompilation=false"], cwd=consumer)
-        run("sdk-load", ["dotnet", str(consumer / "bin/Debug/net10.0/Consumer.dll")], cwd=consumer)
+        run("sdk-load", ["dotnet", str(consumer / "bin/Debug/net10.0/Consumer.dll"),
+                         str(starter / "evidence.policy.json"), str(journey / "missing-control.sock")], cwd=consumer)
         dependencies = json.loads((consumer / "bin/Debug/net10.0/Consumer.deps.json").read_bytes())["libraries"]
         for name in ("Contracts", "Planner", "Coverage", "Aspire"):
             if "ForgeTrust.AppSurface.Evidence." + name + "/" + version not in dependencies:
