@@ -75,7 +75,7 @@ public sealed class MaterializationTests
         Assert.Equal(Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Select(path => Path.GetRelativePath(destination, path).Replace('\\', '/')).Order(StringComparer.Ordinal), result.ExpectedFinalFiles.Keys.Order(StringComparer.Ordinal));
         Assert.All(result.ExpectedFinalFiles, pair => Assert.Equal(HexFile(Path.Combine(destination, pair.Key)), pair.Value));
         Assert.Equal(Directory.EnumerateDirectories(destination, "*", SearchOption.AllDirectories).Select(path => Path.GetRelativePath(destination, path).Replace('\\', '/')).Order(StringComparer.Ordinal), result.FinalDirectories.Select(x => x.RelativePath).Order(StringComparer.Ordinal));
-        if (!OperatingSystem.IsWindows()) foreach (var directory in result.FinalDirectories) Assert.Equal(File.GetUnixFileMode(Path.Combine(destination, directory.RelativePath)), directory.Mode);
+        if (!OperatingSystem.IsWindows()) foreach (var directory in result.FinalDirectories) Assert.Equal(File.GetUnixFileMode(TestPathUtils.PathUnder(destination, directory.RelativePath)), directory.Mode);
         Assert.True(File.Exists(Path.Combine(destination, "inputs", "oci", "runtime", "index.json")));
         Assert.True(File.Exists(Path.Combine(destination, "inputs", "oci", "frontend", "index.json")));
     }
@@ -610,7 +610,7 @@ public sealed class MaterializationTests
         var root = Path.Combine(fixture.Root, "default-cli-input");
         var input = CreateRichInput(fixture, root);
         const string relativeCli = "bin/client/keycloak-admin-cli-26.7.2.jar";
-        var sourceJar = Path.Combine(input.Source.RootPath, relativeCli);
+        var sourceJar = TestPathUtils.PathUnder(input.Source.RootPath, relativeCli);
         Directory.CreateDirectory(Path.GetDirectoryName(sourceJar)!);
         var replacementJar = Path.Combine(root, "replacement.jar");
         WriteTinyJar(sourceJar, "1", "old");
@@ -633,7 +633,7 @@ public sealed class MaterializationTests
             ExpectedRepairedCliSha256 = null
         };
         var first = await ContextMaterialization.MaterializeAsync(input, Path.Combine(fixture.Root, "optional-digest-context"));
-        var repairedPath = Path.Combine(first.ContextPath, "rootfs", "opt", "keycloak", relativeCli);
+        var repairedPath = TestPathUtils.PathUnder(first.ContextPath, "rootfs", "opt", "keycloak", relativeCli);
         var repairedBytes = await File.ReadAllBytesAsync(repairedPath);
         var repairedDigest = HexFile(repairedPath);
         Assert.Equal(repairedDigest, first.RepairedCliSha256);
@@ -654,7 +654,7 @@ public sealed class MaterializationTests
         var second = await ContextMaterialization.MaterializeAsync(input with { ExpectedRepairedCliSha256 = repairedDigest },
             Path.Combine(fixture.Root, "exact-digest-context"));
         Assert.Equal(repairedDigest, second.RepairedCliSha256);
-        Assert.Equal(repairedBytes, await File.ReadAllBytesAsync(Path.Combine(second.ContextPath, "rootfs", "opt", "keycloak", relativeCli)));
+        Assert.Equal(repairedBytes, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(second.ContextPath, "rootfs", "opt", "keycloak", relativeCli)));
         Assert.Equal(first.ContextDigest, second.ContextDigest);
         Assert.Equal(originalBytes, await File.ReadAllBytesAsync(sourceJar));
         Assert.Equal(replacementBytes, await File.ReadAllBytesAsync(replacementJar));
