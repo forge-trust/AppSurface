@@ -672,6 +672,10 @@ authority. The separate private SDK helper dependency/build fix remains necessar
 loader failure; earlier rejection only makes a terminal startup failure observable without waiting
 for cancellation. Detached classifier tests establish this data behavior, not native execution.
 
+The internal [worker cleanup procedure](worker-cleanup.md) preserves the finalization order and immediate
+failure latches while allowing ordinary task/barrier verification. Its borrowed operations create no native
+authority; the private worker retains every unit/group read, original task, deadline and publication guard.
+
 `WaitForExitAsync` joins the original monitor of the authenticated unit's captured main PID. The monitor
 cannot demand live proc files after a running sample: natural exit can occur between those observations.
 Live kernel continuity is checked separately on every admitted control I/O. `StopAndJoinAsync` closes

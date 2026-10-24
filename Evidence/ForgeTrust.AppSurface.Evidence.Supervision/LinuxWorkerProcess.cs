@@ -174,7 +174,8 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         var unitJoined = groupJoined;
         var pipesClosed = _pipes is null;
         var monitorJoined = _exit is null;
-        try
+        await SupervisionWorkerCleanup.RunAsync(new(
+        JoinUnitAndGroup: async () =>
         {
             if (!groupJoined)
             {
@@ -194,31 +195,24 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
                     await Task.Delay(TimeSpan.FromMilliseconds(25), _cleanupDeadline.Token).ConfigureAwait(false);
                 }
             }
-        }
-        catch { failed = true; }
-        if (_exit is not null)
+        },
+        JoinMonitor: _exit is null ? null : async () =>
         {
             if (!await JoinOriginalExitMonitorAsync(_exit, _jobDeadline!.Token).ConfigureAwait(false)) failed = true;
             monitorJoined = _exit.IsCompleted;
             if (monitorJoined) _qualification.ObserveMonitorJoined();
-        }
-        if (_pipes is not null)
+        },
+        Pipes: _pipes is null ? null : new(
+        CloseWriteCopies: () => _pipes.CloseWriteCopies(),
+        JoinPumps: async () =>
         {
-            try { _pipes.CloseWriteCopies(); }
-            catch { failed = true; }
-            try
-            {
-                _output = await _pipes.JoinAsync().ConfigureAwait(false);
-                _qualification.ObservePumpsJoined();
-                if (!OutputDrainedForCleanup()) failed = true;
-            }
-            catch { failed = true; }
-            try { await _pipes.DisposeAsync().ConfigureAwait(false); pipesClosed = true; }
-            catch { failed = true; }
-        }
-        try { _observations?.Dispose(); }
-        catch { failed = true; unitJoined = false; }
-        try
+            _output = await _pipes.JoinAsync().ConfigureAwait(false);
+            _qualification.ObservePumpsJoined();
+            if (!OutputDrainedForCleanup()) failed = true;
+        },
+        DisposeAsync: async () => { await _pipes.DisposeAsync().ConfigureAwait(false); pipesClosed = true; }),
+        CloseObservation: () => _observations?.Dispose(),
+        InspectAndClose: async () =>
         {
             _owner.RequireCleanup(default);
             if (Volatile.Read(ref _dispatchAttempted) != 0)
@@ -239,11 +233,16 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
                 groupJoined = false;
             if (failed || !unitJoined || !groupJoined || !pipesClosed || !monitorJoined) failed = true;
             _owner.RequireCleanup(default);
-        }
-        catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
+        },
         // Even a failed inspection must attempt the original connection close, after all real task joins.
-        try { _backend?.Dispose(); }
-        catch { failed = true; Interlocked.Exchange(ref _physicallySettled, 0); }
+        CloseStartConnection: () => _backend?.Dispose()),
+        stage =>
+        {
+            failed = true;
+            if (stage == SupervisionWorkerCleanupStage.ObservationClose) unitJoined = false;
+            if (stage is SupervisionWorkerCleanupStage.FinalInspection or SupervisionWorkerCleanupStage.StartConnectionClose)
+                Interlocked.Exchange(ref _physicallySettled, 0);
+        }).ConfigureAwait(false);
         _qualification.CaptureFailureSettlement(monitorJoined, unitJoined, groupJoined, pipesClosed);
         if (failed)
         {
