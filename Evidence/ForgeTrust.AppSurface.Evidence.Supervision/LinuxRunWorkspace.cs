@@ -552,18 +552,10 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
         if (LinuxProtectedMetadata.From(StatFd(file)) != expected) throw LinuxWorkspaceLayout.Invalid();
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[4096];
-        long offset = 0;
-        while ((ulong)offset < expected.Length)
-        {
-            Check(token, purpose);
-            var count = RandomAccess.Read(file, buffer.AsSpan(0,
-                (int)Math.Min((ulong)buffer.Length, expected.Length - (ulong)offset)), offset);
-            if (count == 0) throw LinuxWorkspaceLayout.Invalid();
-            hash.AppendData(buffer.AsSpan(0, count)); offset += count;
-            Check(token, purpose);
-        }
-        if (RandomAccess.Read(file, buffer.AsSpan(0, 1), offset) != 0
-            || LinuxProtectedMetadata.From(StatFd(file)) != expected) throw LinuxWorkspaceLayout.Invalid();
+        SupervisionDeclaredFileRead.Read(file, expected.Length, buffer, () => Check(token, purpose),
+            bytes => { hash.AppendData(bytes.Span); Check(token, purpose); },
+            static () => { }, LinuxWorkspaceLayout.Invalid);
+        if (LinuxProtectedMetadata.From(StatFd(file)) != expected) throw LinuxWorkspaceLayout.Invalid();
         Check(token, purpose);
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }

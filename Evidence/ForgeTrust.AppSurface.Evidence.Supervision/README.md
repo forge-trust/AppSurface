@@ -9,6 +9,10 @@ The [restricted application owner](application-execution.md) extends the same C#
 
 The internal [producer cleanup procedure](producer-cleanup.md) preserves pending-stop, stopped observation, pump joins and local closes in their original failure-preserving order. It creates no native owner or settlement fact.
 
+The [declared-length file reader](#declared-length-file-io) shares positional read arithmetic and strict EOF
+checks across retained deployment, application bundle and terminal custody reads. Each native caller
+retains its original metadata/name checks, deadline and buffer policy.
+
 The [producer settlement policy](producer-settlement.md) keeps report readiness separate from physical cleanup. Its copied-data controls cannot authenticate a producer; the native process still checks its original owner, accounts, workspace, quota and original task joins.
 
 The [workspace owner data policy](workspace-policy.md) enforces the existing captured UID/GID and generated-root comparisons after each wrapper’s original reference checks. It cannot construct or authenticate an owner or workspace.
@@ -2043,3 +2047,38 @@ The [control server state guards](control-server-state.md) and [producer workspa
 The [exception policy](exception-policy.md) records the existing broad fatal exclusions and the two narrower workspace exception families. Catch bodies, failure latches and native cleanup stay with their original owners.
 
 The existing [root custody supplement](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) also exercises cancellation before opening a selected tree and rejects zero/oversized chunk bounds and a nonzero initial offset through genuine retained report sets. Each failed read poisons only its own set. These Linux root checks retain the original nine test rows and require fresh native execution; local compilation on other platforms is not native evidence.
+
+## Declared-length file IO
+
+[`SupervisionDeclaredFileRead.Read`](SupervisionDeclaredFileRead.cs) is an internal synchronous IO
+primitive. Its arguments are the original open `SafeFileHandle`, retained `ulong` length, caller-owned
+nonempty byte buffer, per-read check, synchronous chunk consumer, pre-EOF check and fixed rejection
+factory. It returns no receipt or capability. It selects no path and cannot open a deployment, establish
+root ownership, transfer custody or authorize account release.
+
+The length must fit a signed file offset. Native callers still enforce their existing smaller file-size
+bounds before reading. The helper reads from offset zero in buffer-sized chunks without changing a
+stream's shared position. It calls the original per-read check before every data read, delivers only the
+bytes actually read, and rejects an early zero-byte read. At the declared end it invokes the original
+pre-EOF check once and requires a one-byte positional probe to return EOF. An empty declaration still
+performs this end probe. There is no retry, timer, new cancellation token or alternate file selection.
+
+The chunk memory borrows the caller's buffer and is valid only during the consumer callback. Copy or
+hash it synchronously; retaining it would observe later buffer reuse. IO and callback exceptions propagate
+unchanged. Only truncation and excess data invoke the caller's original fixed rejection factory. Missing
+required arguments, an empty buffer or a length beyond `Int64.MaxValue` reject before file IO.
+
+The [deployment reader](LinuxProtectedDeployment.cs) keeps its initial/final checks and name/identity
+rechecks, original pooled buffer, and clearing return in `finally`. The
+[application bundle reader](LinuxApplicationWorkspace.cs) keeps its 64 KiB buffer and original deadline
+cadence. The [workspace descriptor reader](LinuxRunWorkspace.cs) and
+[terminal custody reader](LinuxRunWorkspace.Custody.cs) retain their 4 KiB buffers, metadata checks,
+diagnostic checkpoints and final digest/name checks. The helper's callbacks are fixed private bindings
+at those existing call sites; no public factory or native owner accepts an injected reader.
+
+Sharing this loop makes EOF, growth and callback failure behavior directly verifiable without exposing
+native ownership. [`SupervisionDeclaredFileReadTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDeclaredFileReadTests.cs)
+use real ordinary file descriptors and deterministic local mutations. They do not replace the
+[genuine Linux retained-file controls](../ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md).
+Returning bytes from this primitive alone establishes neither stable metadata nor custody; accepting a
+digest still requires every original native caller check.

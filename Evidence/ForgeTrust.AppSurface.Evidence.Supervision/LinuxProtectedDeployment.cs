@@ -296,17 +296,9 @@ internal sealed class LinuxProtectedNode
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
-            long offset = 0;
-            while ((ulong)offset < Metadata.Length)
-            {
-                Check(token, deadline ?? _deadline);
-                var count = (int)Math.Min((ulong)buffer.Length, Metadata.Length - (ulong)offset);
-                var read = RandomAccess.Read(_handle, buffer.AsSpan(0, count), offset);
-                if (read == 0) throw LinuxProtectedDeployment.InvalidDeployment();
-                receive(buffer.AsMemory(0, read)); offset += read;
-            }
-            Check(token, deadline ?? _deadline);
-            if (RandomAccess.Read(_handle, buffer.AsSpan(0, 1), offset) != 0) throw LinuxProtectedDeployment.InvalidDeployment();
+            SupervisionDeclaredFileRead.Read(_handle, Metadata.Length, buffer,
+                () => Check(token, deadline ?? _deadline), receive,
+                () => Check(token, deadline ?? _deadline), LinuxProtectedDeployment.InvalidDeployment);
             Check(token, deadline ?? _deadline); Recheck();
         }
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }

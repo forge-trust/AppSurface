@@ -1045,18 +1045,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[64 * 1024];
-        long offset = 0;
-        while ((ulong)offset < node.Metadata.Length)
-        {
-            _deadline.Check(token);
-            var count = (int)Math.Min((ulong)buffer.Length, node.Metadata.Length - (ulong)offset);
-            var read = RandomAccess.Read(node.Handle, buffer.AsSpan(0, count), offset);
-            if (read == 0) throw LinuxApplicationWorkspaceLayout.Invalid();
-            hash.AppendData(buffer.AsSpan(0, read));
-            offset += read;
-        }
-        _deadline.Check(token);
-        if (RandomAccess.Read(node.Handle, buffer.AsSpan(0, 1), offset) != 0) throw LinuxApplicationWorkspaceLayout.Invalid();
+        SupervisionDeclaredFileRead.Read(node.Handle, node.Metadata.Length, buffer,
+            () => _deadline.Check(token), bytes => hash.AppendData(bytes.Span),
+            () => _deadline.Check(token), LinuxApplicationWorkspaceLayout.Invalid);
         return Convert.ToHexStringLower(hash.GetHashAndReset());
     }
 

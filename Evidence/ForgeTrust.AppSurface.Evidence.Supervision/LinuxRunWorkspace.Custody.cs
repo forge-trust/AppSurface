@@ -571,18 +571,11 @@ internal sealed partial class LinuxRunWorkspace
             if (LinuxProtectedMetadata.From(Inspect(node.Handle, node.Kind)) != expected) throw LinuxWorkspaceLayout.Invalid();
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buffer = new byte[4096];
-            long offset = 0;
-            while ((ulong)offset < expected.Length)
-            {
-                Check(token);
-                At(LinuxCustodyOperation.HashRead, node.Kind);
-                var count = RandomAccess.Read(node.Handle, buffer.AsSpan(0, (int)Math.Min((ulong)buffer.Length, expected.Length - (ulong)offset)), offset);
-                if (count == 0) throw LinuxWorkspaceLayout.Invalid();
-                hash.AppendData(buffer.AsSpan(0, count)); offset += count;
-            }
-            At(LinuxCustodyOperation.HashEof, node.Kind);
-            if (RandomAccess.Read(node.Handle, buffer.AsSpan(0, 1), offset) != 0
-                || LinuxProtectedMetadata.From(Inspect(node.Handle, node.Kind)) != expected) throw LinuxWorkspaceLayout.Invalid();
+            SupervisionDeclaredFileRead.Read(node.Handle, expected.Length, buffer,
+                () => { Check(token); At(LinuxCustodyOperation.HashRead, node.Kind); },
+                bytes => hash.AppendData(bytes.Span), () => At(LinuxCustodyOperation.HashEof, node.Kind),
+                LinuxWorkspaceLayout.Invalid);
+            if (LinuxProtectedMetadata.From(Inspect(node.Handle, node.Kind)) != expected) throw LinuxWorkspaceLayout.Invalid();
             RequireNamed(node, expected); Check(token);
             At(LinuxCustodyOperation.HashFinalize, node.Kind);
             return Convert.ToHexStringLower(hash.GetHashAndReset());
