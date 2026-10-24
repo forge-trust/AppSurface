@@ -97,9 +97,10 @@ is a nonzero result with no success output. A one-slot runtime pool must not cau
 
 Client disposal does not acknowledge PostgreSQL backend exit; the [termination protocol](https://www.postgresql.org/docs/16/protocol-flow.html#PROTOCOL-FLOW-TERMINATION)
 closes the client without waiting for backend acknowledgement. The [preflight integration tests](../ForgeTrust.AppSurface.Cli.Tests/DurablePreflightIntegrationTests.cs)
-therefore observe backend exit after success and expected connection rejection, using the existing ten-second polling
+therefore observe the exact application-name session exiting after success and expected connection rejection, using the existing ten-second polling
 window within the same 30-second deadline as the preflight call. They retain the expected SQLSTATE and final zero-session
-assertions. A held real backend must still fail observation; the barrier neither retries the preflight nor extends its deadline.
+assertions and immediate fence-release checks. A held real backend must still fail observation; the barrier neither retries
+the preflight, makes a rejected caller succeed, nor extends its deadline.
 
 The manifest authorizes the expected set; database policies and ACLs are evidence only. Checks require every expected
 role to resolve exactly once and be a restricted LOGIN leaf with no forbidden attributes, membership edges, or
