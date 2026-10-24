@@ -618,6 +618,40 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
     }
 
     [Fact]
+    public void ThemeReleaseEvidence_RejectsMissingObservedImage()
+    {
+        using var directory = new TempDirectory();
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
+        var evidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(contract,
+            $"registry.example/theme:1.0@sha256:{new string('b', 64)}");
+        Assert.Throws<ArgumentNullException>(() => evidence.VerifyObservedImage(null!));
+    }
+
+    [Fact]
+    // protects: an unrelated inspected recipe cannot authenticate this theme release tuple.
+    // fails_when: missing, duplicate, or wrong theme observations pass; no_claim: does not run Docker.
+    public void ThemeReleaseEvidence_RequiresActualThemeMembersOnBoundImage()
+    {
+        using var directory = new TempDirectory();
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
+        var digest = "sha256:" + new string('b', 64);
+        var evidence = AppSurfaceKeycloakThemeReleaseEvidence.Create(contract, $"registry.example/theme:1.0@{digest}");
+        var image = new ForgeTrust.AppSurface.Auth.Keycloak.KeycloakInspectionImage(digest, digest, contract.Registration.Platform, [digest]);
+        var checks = contract.PackagedManifest.Files.Select(file => new ForgeTrust.AppSurface.Auth.Keycloak.KeycloakObservedCheck(
+            $"file:opt/keycloak/themes/{contract.Registration.Name}/{file.RelativePath}", "sha256:" + file.Sha256, "sha256:" + file.Sha256)).ToArray();
+        ForgeTrust.AppSurface.Auth.Keycloak.VerifiedKeycloakImageEvidence Observed(
+            ForgeTrust.AppSurface.Auth.Keycloak.KeycloakInspectionImage selected,
+            IEnumerable<ForgeTrust.AppSurface.Auth.Keycloak.KeycloakObservedCheck> observations) =>
+            new("plan", selected, ForgeTrust.AppSurface.Auth.Keycloak.KeycloakRecipeMode.ThemeOnly, observations);
+        evidence.VerifyObservedImage(Observed(image, checks));
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image with { Platform = "unsupported" }, checks)));
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image with { ManifestDigest = "sha256:" + new string('c', 64) }, checks)));
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Skip(1))));
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Concat([checks[0]]))));
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Select(check => check with { Observed = "sha256:" + new string('0', 64) }))));
+    }
+
+    [Fact]
     public void ThemeReleaseEvidence_Write_WhenDestinationAppearsDuringAtomicMove_ThrowsBuildDiagnosticAndCleansTemporaryFile()
     {
         using var directory = new TempDirectory();

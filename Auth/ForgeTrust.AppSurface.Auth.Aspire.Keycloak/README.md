@@ -327,3 +327,9 @@ compatibility guidance, and readiness.
 ---
 
 [Back to Auth List](../ForgeTrust.AppSurface.Auth/README.md) | [Back to Root](../../README.md)
+
+## Captured security recipes
+
+The shared [Keycloak recipe package](../ForgeTrust.AppSurface.Auth.Keycloak/README.md) captures explicit source/runtime/material pins, executes supported alignment/runtime/archive operations and inspects actual immutable images. It has no Aspire dependency. AppHost projects retain the local theme loop described above.
+
+`AppSurfaceKeycloakThemeReleaseEvidence` remains a declaration tuple. `VerifyObservedImage` accepts only evidence returned by `KeycloakSecurity.InspectAsync` and checks that its actual platform manifest, platform, and every packaged theme file hash match this tuple; it does not convert a declaration into inspected evidence. Include the complete packaged theme and its reviewed baseline in the captured recipe, then inspect the final host-composed image. Scan, CLI, browser, upgrade/restore and authorized publication remain separate [release gates](../ForgeTrust.AppSurface.Auth.Keycloak/docs/api-and-contracts.md).

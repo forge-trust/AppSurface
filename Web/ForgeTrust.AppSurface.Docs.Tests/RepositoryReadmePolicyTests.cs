@@ -136,7 +136,8 @@ public sealed partial class RepositoryReadmePolicyTests
             .Select(entry => entry.StartHerePath!)
             .ToArray();
 
-        Assert.Equal(41, requiredReadmes.Length);
+        // Public source-only rows remain harvested even when publication is held.
+        Assert.Equal(42, requiredReadmes.Length);
         Assert.Contains("Config/ForgeTrust.AppSurface.Config.Testing/README.md", requiredReadmes);
         Assert.Contains(
             "Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md",
@@ -242,10 +243,34 @@ public sealed partial class RepositoryReadmePolicyTests
         AssertMarkdownLinksTo(repoRoot, "packages/README.md", expectedLadderTarget);
 
         var authReadmes = ReadPackageManifestEntries(repoRoot)
-            .Where(IsPublishedAuthPackageEntry)
+            .Where(IsPublicAuthPackageEntry)
             .Select(entry => entry.StartHerePath!)
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        var heldAuthReadmes = ReadPackageManifestEntries(repoRoot)
+            .Where(IsHeldAuthPackageEntry)
+            .Select(entry => entry.StartHerePath!)
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md"
+            ],
+            heldAuthReadmes);
+        Assert.Equal(
+            [
+                "Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.AspNetCore.Oidc/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.AspNetCore/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth.Testing/README.md",
+                "Auth/ForgeTrust.AppSurface.Auth/README.md"
+            ],
+            authReadmes);
+        Assert.Contains("## Held Auth Sources and Discovery", File.ReadAllText(ladderFullPath), StringComparison.Ordinal);
 
         foreach (var readmePath in authReadmes)
         {
@@ -262,6 +287,15 @@ public sealed partial class RepositoryReadmePolicyTests
             Assert.True(
                 linkTargets.Any(target => string.Equals(target, expectedLadderTarget, StringComparison.Ordinal)),
                 $"{readmePath} must link to the Auth adoption ladder.");
+        }
+
+        foreach (var readmePath in heldAuthReadmes)
+        {
+            var fullReadmePath = ResolveRepositoryRelativePath(repoRoot, readmePath, $"{readmePath} README path");
+            AssertMarkdownLinksTo(repoRoot, ladderPath, Path.GetFullPath(fullReadmePath));
+            Assert.True(
+                policy.ShouldIncludeFilePath(readmePath, AppSurfaceDocsHarvestSourceKind.Markdown),
+                $"Held source-only README {readmePath} must remain in the standalone discovery harvest.");
         }
 
         AssertMarkdownLinksTo(repoRoot, "examples/auth-web-razorwire-proof/README.md", expectedLadderTarget);
@@ -283,7 +317,6 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.Equal(
             [
                 "ForgeTrust.AppSurface.Auth",
-                "ForgeTrust.AppSurface.Auth.Aspire.Keycloak",
                 "ForgeTrust.AppSurface.Auth.AspNetCore",
                 "ForgeTrust.AppSurface.Auth.AspNetCore.DevAuth",
                 "ForgeTrust.AppSurface.Auth.AspNetCore.Oidc",
@@ -304,6 +337,16 @@ public sealed partial class RepositoryReadmePolicyTests
         Assert.Contains("Cause", ladder, StringComparison.Ordinal);
         Assert.Contains("Fix", ladder, StringComparison.Ordinal);
         Assert.Contains("Docs", ladder, StringComparison.Ordinal);
+        Assert.Contains("## Package Ladder", ladder, StringComparison.Ordinal);
+        Assert.Contains("## Held Auth Sources and Discovery", ladder, StringComparison.Ordinal);
+        Assert.Contains(
+            "[ForgeTrust.AppSurface.Auth.Keycloak](../Auth/ForgeTrust.AppSurface.Auth.Keycloak/README.md)",
+            ladder,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[ForgeTrust.AppSurface.Auth.Aspire.Keycloak](../Auth/ForgeTrust.AppSurface.Auth.Aspire.Keycloak/README.md)",
+            ladder,
+            StringComparison.Ordinal);
 
         Assert.DoesNotContain("dotnet package add ForgeTrust.AppSurface.Auth.Keycloak", ladder, StringComparison.Ordinal);
         Assert.DoesNotContain("AppSurface secures your app", ladder, StringComparison.Ordinal);
@@ -420,8 +463,27 @@ public sealed partial class RepositoryReadmePolicyTests
 
     private static bool IsPublishedAuthPackageEntry(PackageManifestReadmeEntry entry)
     {
-        return IsPublicStartHereEntry(entry)
+        return IsPublishedStartHereEntry(entry)
                && entry.Project.StartsWith("Auth/ForgeTrust.AppSurface.Auth", StringComparison.Ordinal);
+    }
+
+    private static bool IsPublishedStartHereEntry(PackageManifestReadmeEntry entry)
+    {
+        return IsPublicStartHereEntry(entry)
+               && string.Equals(entry.PublishDecision, "publish", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPublicAuthPackageEntry(PackageManifestReadmeEntry entry)
+    {
+        return IsPublicStartHereEntry(entry)
+               && entry.Project.StartsWith("Auth/ForgeTrust.AppSurface.Auth", StringComparison.Ordinal)
+               && !entry.Project.Contains("/realm-ready/", StringComparison.Ordinal);
+    }
+
+    private static bool IsHeldAuthPackageEntry(PackageManifestReadmeEntry entry)
+    {
+        return IsPublicAuthPackageEntry(entry)
+               && string.Equals(entry.PublishDecision, "do_not_publish", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ResolveRepositoryRelativePath(string repoRoot, string repositoryRelativePath, string description)

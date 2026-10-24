@@ -72,11 +72,6 @@
         "resolved": "18.0.0",
         "contentHash": "ptHVgcYmLejGuWXV7RMFoEqFKYMXnieOlWLPzEslfDtzZ9ngMhjYwykfqjBN2+fMEAEyobozkj07lKEpR4dssA=="
       },
-      "BouncyCastle.Cryptography": {
-        "type": "Transitive",
-        "resolved": "2.7.0",
-        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
-      },
       "Docker.DotNet.Enhanced": {
         "type": "Transitive",
         "resolved": "4.3.3",
@@ -786,28 +781,8 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "ForgeTrust.AppSurface.Core": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.linux-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-arm64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Core": "[0.1.0, )"
         }
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.linux-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-arm64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.osx-x64": {
-        "type": "Project"
-      },
-      "forgetrust.appsurface.web.tailwind.runtime.win-x64": {
-        "type": "Project"
       },
       "forgetrust.appsurface.workers": {
         "type": "Project",
@@ -857,6 +832,12 @@
         "dependencies": {
           "AngleSharp": "[1.5.0, 2.0.0)"
         }
+      },
+      "BouncyCastle.Cryptography": {
+        "type": "CentralTransitive",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "CliFx": {
         "type": "CentralTransitive",
