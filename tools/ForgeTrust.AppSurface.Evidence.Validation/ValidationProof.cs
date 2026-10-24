@@ -44,6 +44,40 @@ internal static class ValidationProof
         return json.RootElement.GetProperty("data").Clone();
     }
 
+    /// <summary>Reads a candidate-produced JSON file with a cumulative byte limit.</summary>
+    internal static JsonDocument ReadJsonFile(string path, long maximumBytes, CancellationToken cancellationToken)
+    {
+        if (maximumBytes <= 0 || maximumBytes > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length <= 0 || info.Length > maximumBytes)
+            throw new InvalidDataException("Candidate JSON is missing or exceeds its size limit.");
+
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
+        using var bytes = new MemoryStream((int)info.Length);
+        var buffer = new byte[64 * 1024];
+        long total = 0;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = input.Read(buffer, 0, buffer.Length);
+            if (read == 0) break;
+            total += read;
+            if (total > maximumBytes) throw new InvalidDataException("Candidate JSON exceeds its size limit.");
+            bytes.Write(buffer, 0, read);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            return JsonDocument.Parse(bytes.GetBuffer().AsMemory(0, checked((int)bytes.Length)));
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException("Candidate JSON is invalid.", exception);
+        }
+    }
+
     /// <summary>Inventories original bytes, excluding transient lock files only.</summary>
     internal static async Task<SortedDictionary<string, string>> InventoryAsync(string root, CancellationToken cancellationToken)
     {

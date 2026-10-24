@@ -44,6 +44,8 @@ The source repository is read for identity/integrity and cloned into scratch. Th
 
 `--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. The native [workspace budget](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#owned-workspaces-and-command-budgets) checks before commands and during execution. Measurements are sampled, so a child can allocate between checks; this is not an operating-system disk quota. A budget failure must stop the command and prevent a complete claim. Entry/depth limits also bound filesystem inspection.
 
+Candidate JSON readers also enforce cumulative byte limits: 1 MiB for the consumer's `coverage-gate.json` and 16 MiB for the storage run's `.appsurface-coverage-run.json`. Missing, empty, linked, oversized or invalid JSON fails acceptance. These bounds apply before parsing and throughout reading, with cancellation checks; they do not trim evidence or relax coverage requirements.
+
 `--scratch-parent` must already exist and defaults to the platform temporary directory. Each producer owns a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. Durable `--output` must be fresh and outside scratch, and remains caller-owned. If cleanup cannot complete, EvidenceHost records an incomplete result. Use trusted local workspaces; path checks do not provide an adversarial filesystem sandbox.
 
 ## Evidence and claims

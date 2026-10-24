@@ -92,7 +92,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
             await File.WriteAllTextAsync(shard, FixtureCoverage, cancellationToken);
             await Run(0, "coverage", "merge", "--source", "shards", "--output", "merged");
             var currentRoot = _workspace.GetPath("merged");
-            using var firstManifest = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(currentRoot, ".appsurface-coverage-run.json"), cancellationToken));
+            using var firstManifest = ValidationProof.ReadJsonFile(Path.Join(currentRoot, ".appsurface-coverage-run.json"), 16 * 1024 * 1024, cancellationToken);
             var first = firstManifest.RootElement.GetProperty("inventory").EnumerateArray().ToDictionary(
                 item => item.GetProperty("path").GetString()!, item => item.GetProperty("sha256").GetString()!, StringComparer.Ordinal);
             var actualFirst = await ValidationProof.InventoryAsync(currentRoot, cancellationToken);

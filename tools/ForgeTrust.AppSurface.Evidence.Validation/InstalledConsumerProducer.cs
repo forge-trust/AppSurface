@@ -324,7 +324,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         var junitFiles = Directory.EnumerateFiles(output, "junit-*.xml", SearchOption.TopDirectoryOnly).ToArray();
         _stageDetail = "gate-report";
         if (junitFiles.Length != source.ExpectedProjectCount) throw new InvalidDataException();
-        ValidateGateReport(output, options.DiffBase is not null);
+        ValidateGateReport(output, options.DiffBase is not null, cancellationToken);
         var canonicalCoverage = Path.Join(output, "coverage.cobertura.xml");
         _stageDetail = "retention";
         if (!File.Exists(canonicalCoverage) || Directory.EnumerateFiles(output, "coverage.cobertura.xml", SearchOption.AllDirectories).Count() != source.ExpectedProjectCount + 1)
@@ -393,7 +393,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
     internal static void ValidateRequiredTestFragmentsForTests(IReadOnlyList<string> fragments, IReadOnlyList<XElement> testCases) => ValidateRequiredTestFragments(fragments, testCases);
 
     /// <summary>Validates the exact gate thresholds and zero-tolerance result JSON.</summary>
-    internal static void ValidateGateReportForTests(string output, bool hasPatch) => ValidateGateReport(output, hasPatch);
+    internal static void ValidateGateReportForTests(string output, bool hasPatch, CancellationToken cancellationToken = default) => ValidateGateReport(output, hasPatch, cancellationToken);
 
     private static void ValidateSettingsContract(ValidationSettings settings)
     {
@@ -586,10 +586,9 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         return path;
     }
 
-    private static void ValidateGateReport(string output, bool hasPatch)
+    private static void ValidateGateReport(string output, bool hasPatch, CancellationToken cancellationToken)
     {
-        using var stream = File.OpenRead(Path.Join(output, "coverage-gate.json"));
-        using var document = JsonDocument.Parse(stream);
+        using var document = ValidationProof.ReadJsonFile(Path.Join(output, "coverage-gate.json"), 1024 * 1024, cancellationToken);
         var root = document.RootElement;
         ValidationProof.Require(root.GetProperty("passed").GetBoolean(), "coverage gate passed");
         ValidationProof.Require(root.GetProperty("tolerancePercent").GetDecimal() == 0m, "coverage gate zero tolerance");

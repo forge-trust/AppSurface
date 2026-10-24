@@ -48,7 +48,7 @@ jobs:
       - name: Test native lifecycle contracts
         shell: pwsh
         run: |
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests'
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Pack candidate and execute native journeys
         shell: pwsh
