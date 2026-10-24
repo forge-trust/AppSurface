@@ -31,8 +31,9 @@ public sealed class ExplicitConfigActivationTests
         using var ready = new CountdownEvent(workerCount);
         using var attempted = new CountdownEvent(workerCount);
         using var start = new ManualResetEventSlim();
+        // These workers block on synchronous gates; dedicated threads avoid starving a small test-host pool.
         var firstTasks = Enumerable.Range(0, workerCount)
-            .Select(_ => Task.Run(() =>
+            .Select(_ => Task.Factory.StartNew(() =>
             {
                 ready.Signal();
                 if (!start.Wait(BarrierTimeout))
@@ -42,7 +43,7 @@ public sealed class ExplicitConfigActivationTests
 
                 attempted.Signal();
                 return firstProvider.GetRequiredService<ConcurrentActivationConfig>();
-            }))
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default))
             .ToArray();
 
         try

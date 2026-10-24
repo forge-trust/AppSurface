@@ -1,0 +1,371 @@
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+using CliFx.Binding;
+using ForgeTrust.AppSurface.Aspire;
+using ForgeTrust.AppSurface.Aspire.Testing;
+using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Evidence.Readiness;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Xml.Linq;
+
+namespace EvidenceReadinessTypedConsumer;
+
+public static class Program
+{
+    private const string SkoolitSourceCommit = "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e";
+    internal const string ResourceName = "skoolit-web";
+    internal const string EndpointName = "http";
+    internal const string ProbePath = "/healthz";
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(2);
+    private const int MaximumAttempts = 30;
+
+    public static async Task<int> Main(string[] args)
+    {
+        if (args is ["--health-server"])
+        {
+            return await RunHealthServerAsync();
+        }
+
+        var packageVersion = RequiredArgument(args, "--package-version");
+        var sourceCommit = RequiredArgument(args, "--source-commit");
+        var sourceTreeStatus = RequiredArgument(args, "--source-tree-status");
+        var packageCache = RequiredArgument(args, "--package-cache");
+        var localFeed = RequiredArgument(args, "--local-feed");
+        AssertTypedRestoreClosure(packageVersion, sourceCommit, packageCache, localFeed);
+        AssertNativeDcpMetadata();
+
+        await RunPinnedGateEquivalentAsync("monitoring-receipt", CancellationToken.None);
+        await RunPinnedGateEquivalentAsync("billing-tier", CancellationToken.None);
+
+        Console.WriteLine(
+            $"READINESS_TYPED_CONSUMER_OK proofKind=packed-typed-fixture-real-process-gate-equivalence " +
+            $"packageId=ForgeTrust.AppSurface.Aspire.Testing packageVersion={packageVersion} " +
+            $"sourceCommit={sourceCommit} skoolitSourceCommit={SkoolitSourceCommit} " +
+            $"sourceTree={sourceTreeStatus} " +
+            "resource=skoolit-web endpoint=http path=/healthz aspire=13.4.4 " +
+            "startupTimeout=3m maxAttempts=30 requestTimeout=3s retryDelay=250ms useProxy=false connectTimeout=2s " +
+            "nativeDcpMetadata=present timing=unmeasured");
+        return 0;
+    }
+
+    private static async Task RunPinnedGateEquivalentAsync(string gate, CancellationToken cancellationToken)
+    {
+        using var callerTimeout = new CancellationTokenSource(StartupTimeout);
+        using var linkedCallerToken = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, callerTimeout.Token);
+        var options = new AppSurfaceAspireStartupOptions
+        {
+            StartupTimeout = StartupTimeout,
+            Http = new HttpReadinessOptions
+            {
+                RequestTimeout = RequestTimeout,
+                RetryDelay = RetryDelay,
+                MaxAttempts = MaximumAttempts,
+            },
+            CreateProbeClient = endpoint => new HttpClient(new SocketsHttpHandler
+            {
+                UseProxy = false,
+                ConnectTimeout = ConnectTimeout,
+            })
+            {
+                BaseAddress = endpoint,
+                Timeout = RequestTimeout,
+            },
+        };
+
+        await using var fixture = await AppSurfaceAspireTestFixture.StartAsync(
+            token => AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+                ConsumerAppHost,
+                ConsumerModule,
+                ConsumerProfile>(new AppSurfaceAspireTestingOptions
+                {
+                    ConfigureActivationServices = services => services.AddSingleton(new GateScenario(gate)),
+                }, token),
+            new AspireHttpReadinessTarget(ResourceName, EndpointName, ProbePath),
+            options,
+            linkedCallerToken.Token);
+
+        if (!fixture.Endpoint.IsAbsoluteUri || fixture.Endpoint.Scheme != Uri.UriSchemeHttp)
+        {
+            throw new InvalidOperationException("The typed readiness fixture did not return its allocated HTTP endpoint.");
+        }
+
+        Console.WriteLine(
+            $"READINESS_GATE_EQUIVALENCE gate={gate} sourceCommit={SkoolitSourceCommit} " +
+            $"resource={ResourceName} endpoint={EndpointName} path={ProbePath} startupTimeout=3m " +
+            "maxAttempts=30 requestTimeout=3s retryDelay=250ms useProxy=false connectTimeout=2s " +
+            "fixture=completed timing=unmeasured");
+    }
+
+    private static async Task<int> RunHealthServerAsync()
+    {
+        var builder = WebApplication.CreateBuilder();
+        var port = Environment.GetEnvironmentVariable("PORT")
+            ?? throw new InvalidOperationException("Aspire did not supply the health-server PORT.");
+        builder.WebHost.UseUrls($"http://127.0.0.1:{port}");
+        var application = builder.Build();
+        application.MapGet("/healthz", () => Results.Ok());
+        await application.RunAsync();
+        return 0;
+    }
+
+    private static void AssertTypedRestoreClosure(
+        string packageVersion,
+        string sourceCommit,
+        string packageCache,
+        string localFeed)
+    {
+        var assetsPath = Path.Join(Environment.CurrentDirectory, "obj", "project.assets.json");
+        using var document = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        var assets = document.RootElement;
+        var libraries = assets.GetProperty("libraries");
+        var packageFolder = assets.GetProperty("packageFolders").EnumerateObject().Single();
+        if (!SamePath(packageFolder.Name, packageCache))
+        {
+            throw new InvalidOperationException("Typed restore did not use the isolated NuGet package cache.");
+        }
+
+        var restoreSources = assets.GetProperty("project").GetProperty("restore").GetProperty("sources");
+        if (!restoreSources.EnumerateObject().Any(source => SamePath(source.Name, localFeed)))
+        {
+            throw new InvalidOperationException("Typed restore did not use the isolated local package feed.");
+        }
+
+        RequirePackage(libraries, "ForgeTrust.AppSurface.Aspire.Testing", packageVersion);
+        RequirePackage(libraries, "ForgeTrust.AppSurface.Evidence.Readiness", packageVersion);
+        RequirePackage(libraries, "Aspire.Hosting", "13.4.4");
+        RequirePackage(libraries, "Aspire.Hosting.AppHost", "13.4.4");
+        RequirePackage(libraries, "Aspire.Hosting.Testing", "13.4.4");
+
+        var restoredFirstPartyPackages = new[]
+        {
+            "ForgeTrust.AppSurface.Core",
+            "ForgeTrust.AppSurface.Console",
+            "ForgeTrust.AppSurface.Deployment",
+            "ForgeTrust.AppSurface.Aspire",
+            "ForgeTrust.AppSurface.Aspire.Testing",
+            "ForgeTrust.AppSurface.Evidence.Readiness",
+        };
+        foreach (var packageId in restoredFirstPartyPackages)
+        {
+            var package = libraries.EnumerateObject().SingleOrDefault(library =>
+                library.Name.Equals($"{packageId}/{packageVersion}", StringComparison.OrdinalIgnoreCase));
+            if (package.Equals(default(JsonProperty)) ||
+                !package.Value.GetProperty("type").GetString()!.Equals("package", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Typed restore did not contain packed package {packageId}/{packageVersion}.");
+            }
+
+            var nupkgPath = Path.Join(localFeed, $"{packageId}.{packageVersion}.nupkg");
+            var packageHash = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(nupkgPath)));
+            var cachedHashPath = Path.Join(
+                packageCache, packageId.ToLowerInvariant(), packageVersion,
+                $"{packageId.ToLowerInvariant()}.{packageVersion}.nupkg.sha512");
+            if (!string.Equals(packageHash, package.Value.GetProperty("sha512").GetString(), StringComparison.Ordinal) ||
+                !string.Equals(packageHash, File.ReadAllText(cachedHashPath).Trim(), StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Typed restore bytes for {packageId} do not match the fresh local-feed nupkg.");
+            }
+        }
+
+        var packedFirstPartyPackages = new[]
+        {
+            "ForgeTrust.AppSurface.Core",
+            "ForgeTrust.AppSurface.Console",
+            "ForgeTrust.AppSurface.Deployment",
+            "ForgeTrust.AppSurface.Aspire",
+            "ForgeTrust.AppSurface.Aspire.Testing",
+            "ForgeTrust.AppSurface.Evidence.Readiness",
+            "ForgeTrust.AppSurface.Evidence.Contracts",
+            "ForgeTrust.AppSurface.Evidence.Aspire",
+        };
+        foreach (var packageId in packedFirstPartyPackages)
+        {
+            var nupkgPath = Path.Join(localFeed, $"{packageId}.{packageVersion}.nupkg");
+            AssertNuspec(nupkgPath, packageId, packageVersion, sourceCommit,
+                packageId == "ForgeTrust.AppSurface.Evidence.Aspire");
+        }
+
+        if (libraries.EnumerateObject().Any(library =>
+                library.Value.GetProperty("type").GetString()!.Equals("project", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("The packed typed consumer restore graph contains project references.");
+        }
+
+        var directDependencies = assets.GetProperty("project")
+            .GetProperty("frameworks")
+            .GetProperty("net10.0")
+            .GetProperty("dependencies");
+        var explicitDirectIds = directDependencies.EnumerateObject()
+            .Where(property => !property.Value.TryGetProperty("autoReferenced", out var autoReferenced) ||
+                               !autoReferenced.GetBoolean())
+            .Select(property => property.Name)
+            .Order(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (!explicitDirectIds.SequenceEqual(
+                new[] { "Aspire.Hosting.AppHost", "ForgeTrust.AppSurface.Aspire.Testing" }
+                    .Order(StringComparer.OrdinalIgnoreCase),
+                StringComparer.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The typed consumer direct references differ from its prepared package project.");
+        }
+    }
+
+    private static void AssertNuspec(
+        string packagePath,
+        string packageId,
+        string packageVersion,
+        string sourceCommit,
+        bool evidenceAspire)
+    {
+        using var archive = ZipFile.OpenRead(packagePath);
+        using var stream = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal)).Open();
+        var metadata = XDocument.Load(stream).Descendants().Single(element => element.Name.LocalName == "metadata");
+        var dependencies = metadata.Descendants().Where(element => element.Name.LocalName == "dependency").ToArray();
+        if (metadata.Elements().Single(element => element.Name.LocalName == "id").Value != packageId ||
+            metadata.Elements().Single(element => element.Name.LocalName == "version").Value != packageVersion ||
+            metadata.Elements().Single(element => element.Name.LocalName == "repository").Attribute("commit")?.Value != sourceCommit)
+        {
+            throw new InvalidOperationException($"Packed nuspec identity or source commit is incorrect for {packageId}.");
+        }
+
+        if (!evidenceAspire)
+        {
+            return;
+        }
+
+        // Central transitive pinning also promotes existing third-party dependencies into the nuspec.
+        // Protect the intended first-party boundary without rejecting those coordinated pins.
+        var firstPartyIds = dependencies.Select(dependency => dependency.Attribute("id")?.Value ?? string.Empty)
+            .Where(id => id.StartsWith("ForgeTrust.", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.OrdinalIgnoreCase);
+        var hostingDependency = dependencies.SingleOrDefault(dependency =>
+            string.Equals(dependency.Attribute("id")?.Value, "Aspire.Hosting", StringComparison.OrdinalIgnoreCase));
+        if (!firstPartyIds.SequenceEqual(new[]
+            {
+                "ForgeTrust.AppSurface.Evidence.Contracts",
+                "ForgeTrust.AppSurface.Evidence.Readiness",
+            }, StringComparer.OrdinalIgnoreCase) ||
+            hostingDependency?.Attribute("version")?.Value.Replace(" ", string.Empty) != "[13.4.4,14.0.0)" ||
+            dependencies.Any(dependency => string.Equals(dependency.Attribute("id")?.Value,
+                "Aspire.Hosting.Testing", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException("Evidence.Aspire must reference only Contracts and Readiness first-party packages, require the supported Aspire.Hosting range, and have no Aspire.Hosting.Testing dependency.");
+        }
+    }
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static void RequirePackage(JsonElement libraries, string packageId, string version)
+    {
+        var entry = libraries.EnumerateObject().SingleOrDefault(library =>
+            library.Name.StartsWith($"{packageId}/", StringComparison.OrdinalIgnoreCase));
+        if (entry.Equals(default(JsonProperty)) ||
+            !entry.Name.Equals($"{packageId}/{version}", StringComparison.OrdinalIgnoreCase) ||
+            !entry.Value.GetProperty("type").GetString()!.Equals("package", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Typed consumer did not restore {packageId}/{version} from the packed feed.");
+        }
+    }
+
+    private static void AssertNativeDcpMetadata()
+    {
+        var dcpPath = typeof(ConsumerAppHost).Assembly
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .SingleOrDefault(attribute => attribute.Key == "dcpclipath")?.Value;
+        if (string.IsNullOrWhiteSpace(dcpPath) || !File.Exists(dcpPath))
+        {
+            throw new InvalidOperationException("The prepared AppHost assembly has no usable native DCP CLI metadata.");
+        }
+
+        var expectedArchitecture = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm64 => "arm64",
+            Architecture.X64 => "x64",
+            _ => null,
+        };
+        if (expectedArchitecture is null || !dcpPath.Contains(expectedArchitecture, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The prepared AppHost DCP metadata does not match the current process architecture.");
+        }
+    }
+
+    private static string RequiredArgument(string[] args, string name)
+    {
+        var index = Array.IndexOf(args, name);
+        if (index < 0 || index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
+        {
+            throw new ArgumentException($"Expected {name} followed by a value.", nameof(args));
+        }
+
+        return args[index + 1];
+    }
+}
+
+public sealed class ConsumerAppHost
+{
+    public static string ProjectPath => Path.GetDirectoryName(typeof(ConsumerAppHost).Assembly.Location)!;
+}
+
+public sealed class ConsumerModule : IAppSurfaceHostModule
+{
+    public void ConfigureServices(StartupContext context, IServiceCollection services)
+    {
+    }
+
+    public void RegisterDependentModules(ModuleDependencyBuilder builder)
+    {
+    }
+
+    public void ConfigureHostBeforeServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+
+    public void ConfigureHostAfterServices(StartupContext context, IHostBuilder builder)
+    {
+    }
+}
+
+public sealed record GateScenario(string Name);
+
+[Command("readiness-consumer")]
+public sealed partial class ConsumerProfile(GateScenario scenario, ILogger<ConsumerProfile> logger) : AspireProfile(logger)
+{
+    public override IEnumerable<IAspireComponent> GetComponents()
+    {
+        if (scenario.Name is not ("monitoring-receipt" or "billing-tier"))
+        {
+            throw new InvalidOperationException("The per-call constructor scenario was not preserved.");
+        }
+        return [new WebComponent()];
+    }
+}
+
+public sealed class WebComponent : IAspireComponent<ExecutableResource>
+{
+    public IResourceBuilder<ExecutableResource> Generate(
+        AspireStartupContext context,
+        IDistributedApplicationBuilder appBuilder) =>
+        appBuilder.AddExecutable(
+                Program.ResourceName,
+                "dotnet",
+                AppContext.BaseDirectory,
+                typeof(Program).Assembly.Location,
+                "--health-server")
+            .WithHttpEndpoint(name: Program.EndpointName, env: "PORT")
+            .WithHttpHealthCheck(Program.ProbePath);
+}

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.4.4" />
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);ASPIREPIPELINES001;ASPIREFILESYSTEM001;ASPIREUSERSECRETS001</NoWarn>
+    <AssemblyName>EvidenceReadinessTypedConsumer</AssemblyName>
+    <RootNamespace>EvidenceReadinessTypedConsumer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ForgeTrust.AppSurface.Aspire.Testing" Version="{{PACKAGE_VERSION}}" />
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.4.4" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

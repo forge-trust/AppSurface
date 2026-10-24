@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageDescription>Bounded, opt-in HTTP readiness with safe diagnostics and no hosting dependencies.</PackageDescription>
+    <PackageTags>appsurface;evidence;http;readiness;testing</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Readiness.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Testing" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Testing.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Aspire" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
+  </ItemGroup>
+</Project>

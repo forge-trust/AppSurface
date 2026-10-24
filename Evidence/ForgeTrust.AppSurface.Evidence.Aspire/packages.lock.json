@@ -500,6 +500,9 @@
       "forgetrust.appsurface.evidence.contracts": {
         "type": "Project"
       },
+      "forgetrust.appsurface.evidence.readiness": {
+        "type": "Project"
+      },
       "KubernetesClient": {
         "type": "CentralTransitive",
         "requested": "[19.0.2, )",

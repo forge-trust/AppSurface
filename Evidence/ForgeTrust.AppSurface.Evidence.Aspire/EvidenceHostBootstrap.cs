@@ -494,7 +494,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
     }
 
-    private static bool IsNonFatalException(Exception exception) =>
+    /// <summary>Classifies failures that the host and readiness adapters may summarize or retain as secondary errors.</summary>
+    /// <param name="exception">The failure being classified.</param>
+    /// <returns>False for out-of-memory, stack-overflow, access-violation, and unloaded-domain failures; true otherwise.</returns>
+    /// <remarks>Fatal failures must propagate unchanged. Classification does not perform cleanup or handle corrupted process state.</remarks>
+    internal static bool IsNonFatalException(Exception exception) =>
         exception is not OutOfMemoryException
             and not StackOverflowException
             and not AccessViolationException
