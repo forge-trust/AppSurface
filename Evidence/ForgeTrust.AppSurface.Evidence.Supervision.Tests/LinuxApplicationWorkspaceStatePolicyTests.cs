@@ -30,6 +30,18 @@ public sealed class LinuxApplicationWorkspaceStatePolicyTests
 
     [Theory]
     [InlineData("initialized")]
+    [InlineData("sealed")]
+    [InlineData("handles")]
+    [InlineData("seal-attempted")]
+    public void BundleUseRejectsEveryOtherRequiredStateIndependently(string field)
+    {
+        var valid = ActiveFacts();
+        LinuxApplicationWorkspaceStatePolicy.RequireBundleUse(valid);
+        AssertInvalid(() => LinuxApplicationWorkspaceStatePolicy.RequireBundleUse(Change(field, valid)));
+    }
+
+    [Theory]
+    [InlineData("initialized")]
     [InlineData("quarantined")]
     [InlineData("seal-attempted")]
     [InlineData("retention")]

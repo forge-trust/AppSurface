@@ -24,6 +24,37 @@ protected Windows/macOS/native-platform acceptance.
 
 The [supervision library](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) is the sole runtime owner. The protected AppSurface executable runs `evidence supervise --request <protected-file>` as root and starts the same image as `evidence worker --control <protected-socket>` under its separate worker identity. The C# server owns authenticated protocol dispatch, process creation, application readiness, SDK/package inputs, reporter output accounting, retained artifact custody and strict cleanup. There is no Python runtime fallback.
 
+## Current correction and verification status — 2026-10-24
+
+The CLI shutdown defect reported from revision 56 was fixed in revision 57 by
+using an explicitly controlled fixture clock and the existing fatal test seam.
+The actual Linux regression rows subsequently passed together with 578 focused
+CLI tests on source `b5461cfa3b73fa00aa8d8b15e1b724f5bdb0b9ad`.
+No production deadline or stopping allowance changed.
+
+[Revision 74, run 40124730961](https://github.com/forge-trust/AppSurface/actions/runs/40124730961)
+at source `569cb730dc63035a2e0ce9f5e959169695505370` has verified all sixteen
+worker cases, both original seven-control application and packaged-producer
+consumer groups, six workspace rejections, 39 original root controls and 41
+supplementary root controls, plus genuine account creation and expected rollback.
+The packaged record binds 22 smoke/planning command intentions and current-run
+source/report lineage. Its measured worker chain and final unchanged numerical
+coverage gate were still running when this preparation was recorded.
+
+The next source makes existing [settlement](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/worker-settlement.md),
+[cleanup](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/account-cleanup-procedure.md),
+[workspace state](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/producer-workspace-state.md),
+[control state](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/control-server-state.md),
+[DCP metadata](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/dcp-cgroup-metadata.md)
+and [report custody](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/report-custody-metadata.md)
+branches directly verifiable. The focused local collector observed all 131 lines
+and 194 branches in the eleven extracted helpers, with 303/303 selected tests
+passing. This bounded helper result does not establish solution or patch coverage,
+physical Linux ownership, or accepted consumer proof. The [unchanged coverage
+command](../../scripts/coverage-solution.sh), original comparison base, thresholds,
+Codecov full-line rule, exclusions and production limits remain unchanged. Every
+new source revision still requires its own genuine Linux controls and final gate.
+
 ## Deployment and startup
 
 The [protected request](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#protected-launch-inputs) is bounded data, not authority. Before CLR startup the consumer must sanitize runtime hooks and environment, pin the actual runtime host and managed image, and arm an independently terminating systemd owner. The C# process then validates retained root-owned deployment/request handles and consumes that owner's single-use activation. Unsupported platforms, unprivileged entry, invalid metadata, stale owners and unavailable registrations reject before work starts. See [packaged consumers](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/packaging.md) for the installed tool and SDK dependencies.

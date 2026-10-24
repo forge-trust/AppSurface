@@ -793,10 +793,16 @@ internal sealed class LinuxEmptyObservationControlServer
             || !ReferenceEquals(worker, _worker)) throw Rejected();
         owner.RequireControlIdentity(token);
         lock (_executionGate)
-            if (_execution?.IsCompleted != true || Volatile.Read(ref _ioJoined) == 0
-                || Volatile.Read(ref _localOwnersClosed) == 0 || Volatile.Read(ref _connectionCloseFailed) != 0
-                || !_ledger.IsControlAdmissionClosed || _ledger.ActiveControls != 0
+        {
+            LinuxControlServerStatePolicy.RequireLocalCustody(new(
+                _execution?.IsCompleted == true,
+                Volatile.Read(ref _ioJoined) != 0,
+                Volatile.Read(ref _localOwnersClosed) != 0,
+                Volatile.Read(ref _connectionCloseFailed) == 0));
+            // Preserve the original short-circuit order of the locking ledger reads.
+            if (!_ledger.IsControlAdmissionClosed || _ledger.ActiveControls != 0
                 || !_ledger.IsWorkloadAdmissionClosed || _ledger.ActiveWorkloads != 0) throw Rejected();
+        }
         owner.RequireControlIdentity(token);
     }
 
@@ -817,9 +823,12 @@ internal sealed class LinuxEmptyObservationControlServer
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
     {
         RequireCustodyOwner(input, owner, accounts, workspace, worker, token);
-        if (Volatile.Read(ref _negativeReadyCommitted) != 1 || _workspace.DescriptorSha256 is not { } descriptor)
-            throw Rejected();
-        return descriptor;
+        var committed = Volatile.Read(ref _negativeReadyCommitted) == 1;
+        if (!committed) LinuxControlServerStatePolicy.RequireNegativeReady(new(false, false));
+        var descriptor = _workspace.DescriptorSha256;
+        LinuxControlServerStatePolicy.RequireNegativeReady(new(
+            committed, descriptor is not null));
+        return descriptor!;
     }
 
     /// <summary>Obtains the actual drained listener's original named-inode comparison data for native custody.</summary>
@@ -882,7 +891,8 @@ internal sealed class LinuxEmptyObservationControlServer
 
     private static bool Recoverable(Exception error) =>
         error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
-    private static EvidenceAdmissionException Rejected() =>
+    /// <summary>Creates the fixed control-server rejection without exposing internal failure data.</summary>
+    internal static EvidenceAdmissionException Rejected() =>
         new("ASEVD410", "The protected empty Observation control operation was rejected.");
 
     // Qualification procedures are closed implementation details, never handler/owner injection.

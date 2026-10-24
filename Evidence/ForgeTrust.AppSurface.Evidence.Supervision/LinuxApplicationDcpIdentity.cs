@@ -685,32 +685,22 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
     {
         token.ThrowIfCancellationRequested();
         if (node.Parent is not null) RequireCgroupNode(node.Parent, token);
-        if (!SameKernelNode(node.Metadata, InspectCgroupNode(node.Handle, node.Directory))) throw Rejected();
+        if (!LinuxDcpCgroupMetadataPolicy.SameNode(node.Metadata, InspectCgroupNode(node.Handle, node.Directory))) throw Rejected();
         using var named = OpenAt2(node.Parent is null ? AtFdcwd : Fd(node.Parent.Handle), node.Name,
             node.Directory ? NamedDirectoryFlags : NamedFlags, 0,
             node.Parent is null ? MountResolution : DescendantResolution);
-        if (!SameKernelNode(node.Metadata, InspectCgroupNode(named, node.Directory))) throw Rejected();
+        if (!LinuxDcpCgroupMetadataPolicy.SameNode(node.Metadata, InspectCgroupNode(named, node.Directory))) throw Rejected();
         token.ThrowIfCancellationRequested();
     }
 
-    private static KernelMetadata InspectCgroupNode(SafeFileHandle handle, bool directory)
+    private static LinuxDcpCgroupMetadata InspectCgroupNode(SafeFileHandle handle, bool directory)
     {
         RequireFileSystem(handle, Cgroup2Magic);
         var stat = StatFd(handle);
         var metadata = ToKernelMetadata(stat);
-        if (metadata.Inode == 0 || metadata.Uid != 0 || metadata.Gid != 0
-            || (metadata.Mode & 0xf000) != (directory ? DirectoryType : RegularFileType)
-            || (metadata.Mode & 0x0c12) != 0
-            || (directory ? (metadata.Mode & 0x140) != 0x140 || metadata.LinkCount < 2
-                : (metadata.Mode & 0x100) == 0 || metadata.LinkCount != 1))
-            throw Rejected();
+        LinuxDcpCgroupMetadataPolicy.Require(metadata, directory);
         return metadata;
     }
-
-    private static bool SameKernelNode(KernelMetadata left, KernelMetadata right) =>
-        left.DeviceMajor == right.DeviceMajor && left.DeviceMinor == right.DeviceMinor
-        && left.Inode == right.Inode && left.Uid == right.Uid && left.Gid == right.Gid
-        && left.Mode == right.Mode;
 
     private static byte[] ReadBounded(SafeFileHandle handle, int maximum, CancellationToken token)
     {
@@ -903,7 +893,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         new(stat.DeviceMajor, stat.DeviceMinor, stat.Inode, (ushort)(stat.Mode & 0xf000),
             stat.Uid, stat.Mode, stat.Size);
 
-    private static KernelMetadata ToKernelMetadata(Statx stat) =>
+    private static LinuxDcpCgroupMetadata ToKernelMetadata(Statx stat) =>
         new(stat.DeviceMajor, stat.DeviceMinor, stat.Inode, stat.Uid, stat.Gid,
             stat.Mode, stat.Nlink, stat.Size);
 
@@ -957,11 +947,12 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         return success;
     }
 
-    private static EvidenceAdmissionException Rejected() =>
+    /// <summary>Creates the original fixed DCP rejection without any native ownership authority.</summary>
+    internal static EvidenceAdmissionException Rejected() =>
         new("ASEVD410", "The selected application DCP identity is unavailable or changed.");
 
     private sealed record CgroupNode(SafeFileHandle Handle, CgroupNode? Parent, string Name,
-        bool Directory, KernelMetadata Metadata);
+        bool Directory, LinuxDcpCgroupMetadata Metadata);
 
     private sealed record RetainedProcCandidate(SafeFileHandle Root, SafeFileHandle Directory,
         SafeFileHandle Executable, string PidName, ProcDirectoryMetadata RootMetadata,
@@ -976,9 +967,6 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
             if (!success) throw Rejected();
         }
     }
-
-    private readonly record struct KernelMetadata(uint DeviceMajor, uint DeviceMinor, ulong Inode,
-        uint Uid, uint Gid, ushort Mode, uint LinkCount, ulong Length);
 
     private readonly record struct ProcDirectoryMetadata(uint DeviceMajor, uint DeviceMinor, ulong Inode,
         uint Uid, uint Gid, ushort Mode);

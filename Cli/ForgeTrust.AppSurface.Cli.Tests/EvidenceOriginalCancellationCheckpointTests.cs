@@ -89,6 +89,176 @@ public sealed class EvidenceOriginalCancellationCheckpointTests
         Assert.DoesNotContain("secret-canary", line);
     }
 
+    [Fact]
+    public async Task ObservationRequiresActualJoinEvenAfterTheTransferredCallbackCompletes()
+    {
+        var execution = Execution();
+        var checkpoint = new EvidenceOriginalCancellationCheckpoint();
+        await CompleteCheckpointAsync(checkpoint, execution);
+        Assert.False(execution.OwnWorkStopped);
+        AssertRejected(() => checkpoint.ObserveJoined(execution));
+
+        Assert.True(await execution.StopAndDisposeAsync());
+        var observation = checkpoint.ObserveJoined(execution);
+        Assert.True(observation.OwnWorkStopped);
+        Assert.True(observation.CallerTokenCancelled);
+        Assert.False(observation.LifecycleCallerCancelled); // Token observation does not manufacture a terminal cause.
+    }
+
+    [Fact]
+    public async Task JoinedLifecycleDoesNotReplaceAnUnclaimedCheckpointOrAFailedTransfer()
+    {
+        var execution = Execution();
+        var unclaimed = new EvidenceOriginalCancellationCheckpoint();
+        var failedTransfer = new EvidenceOriginalCancellationCheckpoint();
+        await CompleteCheckpointAsync(failedTransfer, execution, failWrite: true);
+        Assert.True(await execution.StopAndDisposeAsync());
+        Assert.True(execution.OwnWorkStopped);
+        AssertRejected(() => unclaimed.ObserveJoined(execution));
+        AssertRejected(() => failedTransfer.ObserveJoined(execution));
+        var sinkCalls = 0;
+        failedTransfer.ReportJoined(execution, _ => sinkCalls++);
+        Assert.Equal(0, sinkCalls);
+    }
+
+    [Fact]
+    public async Task CompletedWriteRemainsObservableWhenItsFlushFaultsBeforeCancellation()
+    {
+        var execution = Execution();
+        var checkpoint = new EvidenceOriginalCancellationCheckpoint();
+        await CompleteCheckpointAsync(checkpoint, execution, failFlush: true);
+        await execution.RequestTerminalStopAsync(EvidenceWorkerTerminalCode.CallerCancelled);
+        Assert.False(await execution.StopAndDisposeAsync());
+        var observation = checkpoint.ObserveJoined(execution);
+        Assert.True(observation.CallerTokenCancelled);
+        Assert.True(observation.LifecycleCallerCancelled);
+        Assert.True(observation.OwnWorkStopped);
+        Assert.Equal(EvidenceWorkerTerminalCode.CallerCancelled, execution.TerminalCode);
+    }
+
+    [Fact]
+    public async Task BestEffortSinkCannotReplaceTheActualLifecycleState()
+    {
+        var execution = Execution();
+        var checkpoint = new EvidenceOriginalCancellationCheckpoint();
+        checkpoint.ReportJoined(execution, null); // No sink means no observation of an unsettled execution.
+        await CompleteCheckpointAsync(checkpoint, execution);
+        Assert.True(await execution.StopAndDisposeAsync());
+        var expected = checkpoint.ObserveJoined(execution);
+        var calls = 0;
+        EvidenceOriginalCancellationObservation? received = null;
+        checkpoint.ReportJoined(execution, actual =>
+        {
+            calls++;
+            received = actual;
+            throw new IOException("sink-secret-canary");
+        });
+        Assert.Equal(1, calls);
+        Assert.Equal(expected, received);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.Equal(expected, checkpoint.ObserveJoined(execution));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task FatalSinkExceptionsEscapeWithoutChangingJoinedOwnership(int kind)
+    {
+        var execution = Execution();
+        var checkpoint = new EvidenceOriginalCancellationCheckpoint();
+        await CompleteCheckpointAsync(checkpoint, execution);
+        Assert.True(await execution.StopAndDisposeAsync());
+        Exception expected = kind switch
+        {
+            0 => new OutOfMemoryException(),
+            1 => new StackOverflowException(),
+            _ => new AccessViolationException(),
+        };
+        var actual = Record.Exception(() => checkpoint.ReportJoined(execution, _ => throw expected));
+        Assert.Same(expected, actual);
+        Assert.True(execution.OwnWorkStopped);
+        Assert.Equal(EvidenceWorkerTerminalCode.None, execution.TerminalCode);
+    }
+
+    [Fact]
+    public void WrongProjectionPhaseIsRejectedWithoutEchoingUntrustedText()
+    {
+        var projection = new EvidenceOriginalCancellationObservation(EvidenceOriginalCancellationCheckpoint.Case,
+            "phase-secret-canary", false, false, true);
+        AssertRejected(() => EvidenceOriginalCancellationCheckpoint.Encode(projection));
+    }
+
+    private static void AssertRejected(Action action)
+    {
+        var error = Assert.Throws<InvalidOperationException>(action);
+        Assert.Equal("cancellation-checkpoint-rejected", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    private static async Task CompleteCheckpointAsync(EvidenceOriginalCancellationCheckpoint checkpoint,
+        EvidenceWorkerExecution execution, bool failWrite = false, bool failFlush = false)
+    {
+        using var caller = new CancellationTokenSource();
+        using var stage = CancellationTokenSource.CreateLinkedTokenSource(caller.Token);
+        using var stream = new SignallingStream(failWrite, failFlush);
+        var callback = execution.TrackOwnedWork(token => checkpoint.WaitAtAsync(
+            EvidenceOriginalCancellationCheckpoint.SelectedPhase, stream, token, caller.Token), stage.Token);
+        Assert.NotNull(callback);
+        try
+        {
+            await stream.Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Assert.False(callback.IsCompleted);
+        }
+        finally
+        {
+            caller.Cancel();
+            await callback.WaitAsync(TimeSpan.FromSeconds(2));
+        }
+    }
+
+    // Detached lifecycle procedure only. Timers never advance in these ordering controls; a regression
+    // escapes through the existing fatal test seam rather than killing the test host. No native authority.
+    private static EvidenceWorkerExecution Execution() => new(new MetadataSupervisor(), new FixedClock(),
+        TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2),
+        message => new EvidenceWorkerTestInterruptionException(message));
+
+    private sealed class MetadataSupervisor : IEvidenceExecutionSupervisor
+    {
+        public bool IsArmed => true;
+        public string RunId => "metadata-only/1";
+        public void CloseAdmission() { }
+        public ValueTask RequestStopAsync(CancellationToken stoppingToken) => ValueTask.CompletedTask;
+        public ValueTask WaitForOwnedExitAsync(CancellationToken stoppingToken) => ValueTask.CompletedTask;
+    }
+
+    private sealed class FixedClock : TimeProvider
+    {
+        public override long GetTimestamp() => 0;
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch;
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) => new FixedTimer();
+        private sealed class FixedTimer : ITimer
+        {
+            public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+            public void Dispose() { }
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class SignallingStream(bool failWrite, bool failFlush) : MemoryStream
+    {
+        internal readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult();
+            return failWrite ? ValueTask.FromException(new IOException("write-secret-canary"))
+                : base.WriteAsync(buffer, cancellationToken);
+        }
+        public override Task FlushAsync(CancellationToken cancellationToken) => failFlush
+            ? Task.FromException(new IOException("flush-secret-canary")) : Task.CompletedTask;
+    }
+
     private sealed class HeldWriteStream : Stream
     {
         internal readonly TaskCompletionSource Entered = new(TaskCreationOptions.RunContinuationsAsynchronously);

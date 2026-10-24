@@ -17,7 +17,6 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
     internal const int MaximumRequestedChunkBytes = 128 * 1024;
     private const int MaximumDiscoveryNodes = 4096;
     private const uint DirectoryMode = 0x41c0; // 0700.
-    private const uint ResultsParentMode = 0x41c9; // 0711.
     private const ulong PathFlags = 0x200000 | 0x80000; // O_PATH | O_CLOEXEC.
     private const ulong DirectoryFlags = 0x10000 | 0x80000; // O_DIRECTORY | O_CLOEXEC.
     private const ulong AncestorResolution = 0x02 | 0x04 | 0x08;
@@ -139,7 +138,7 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
             {
                 CheckWork(token);
                 var current = (_reports ?? throw Invalid()).ListReports(token);
-                if (!SameInventory(current, _inventory)) throw Invalid();
+                if (!LinuxReportCustodyMetadata.SameInventory(current, _inventory)) throw Invalid();
                 CheckWork(token);
                 return _inventory;
             }
@@ -304,13 +303,8 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
             LinuxRetainedReportSet.RequireMetadata(current, true, uid, gid);
             if (!current.SameAncestorAs(expected)) throw Invalid();
         }
-        else if (!SameFileSample(current, expected)) throw Invalid();
+        else if (!LinuxReportCustodyMetadata.SameFileSample(current, expected)) throw Invalid();
     }
-
-    private static bool SameFileSample(LinuxProtectedMetadata left, LinuxProtectedMetadata right) =>
-        left.DeviceMajor == right.DeviceMajor && left.DeviceMinor == right.DeviceMinor && left.Inode == right.Inode
-        && left.Uid == right.Uid && left.Gid == right.Gid && left.Mode == right.Mode
-        && left.LinkCount == right.LinkCount && left.Length == right.Length;
 
     private void CheckWork(CancellationToken token)
     {
@@ -333,24 +327,14 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
         if (_failed) throw Invalid();
     }
 
-    private static bool SameInventory(IReadOnlyList<LinuxRetainedReportSet.ReportInfo> left,
-        IReadOnlyList<LinuxRetainedReportSet.ReportInfo> right) =>
-        left.Count == right.Count && left.SequenceEqual(right);
-
-    private static void RequireResultsParent(LinuxProtectedMetadata metadata)
-    {
-        metadata.RequireAncestor(false);
-        if (metadata.Gid != 0 || metadata.Mode != ResultsParentMode || metadata.LinkCount == 0) throw Invalid();
-    }
+    private static void RequireResultsParent(LinuxProtectedMetadata metadata) =>
+        LinuxReportCustodyMetadata.RequireResultsParent(metadata);
 
     private static void RequireSelectedRoot(LinuxProtectedMetadata metadata, LinuxProtectedMetadata expected,
-        uint uid, uint gid)
-    {
-        LinuxRetainedReportSet.RequireRootIdentity(metadata, expected, uid, gid);
-        if (metadata.Mode != DirectoryMode) throw Invalid();
-    }
+        uint uid, uint gid) => LinuxReportCustodyMetadata.RequireSelectedRoot(metadata, expected, uid, gid);
 
-    private static IOException Invalid() => new("The producer report set is unavailable or changed.");
+    /// <summary>Creates the original fixed custody failure without selecting any native object.</summary>
+    internal static IOException Invalid() => new("The producer report set is unavailable or changed.");
     private static bool Recoverable(Exception error) =>
         error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
 

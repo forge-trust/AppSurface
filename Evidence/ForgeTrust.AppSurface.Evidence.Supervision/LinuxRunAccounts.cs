@@ -578,24 +578,24 @@ internal sealed partial class LinuxRunAccounts
             RequireCustody(custody, token);
             if (_utilities.Any(static utility => !utility.PhysicallySettled)) throw Failed();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _owner.RootTeardownToken);
-            foreach (var command in _reservations.ReverseCleanup())
+            failed |= await SupervisionAccountCleanup.RunAsync(_reservations.ReverseCleanup(), async command =>
             {
-                try
-                {
-                    stage = LinuxAccountPreparationStage.CleanupNameCheck;
-                    _owner.RequireCleanup(deadline.Token);
-                    RequireCustody(custody, deadline.Token);
-                    // userdel may already remove its private group. Only actual absence allows skipping,
-                    // and an existing known identity must still match its created forward/reverse mapping.
-                    if (!await LinuxRunAccountNss.IsCleanupNameAbsentAsync(_owner, command, _identities,
-                        deadline.Token).ConfigureAwait(false))
-                        await RunUtilityAsync(command, cleanup: true, deadline.Token).ConfigureAwait(false);
-                    RequireCustody(custody, deadline.Token);
-                }
-                catch (Exception error)
-                { _failures.Capture(stage, LinuxAccountUtilityStage.Unknown, command.Operation, error); failed = true; }
+                stage = LinuxAccountPreparationStage.CleanupNameCheck;
+                _owner.RequireCleanup(deadline.Token);
+                RequireCustody(custody, deadline.Token);
+                // userdel may already remove its private group. Only actual absence allows skipping,
+                // and an existing known identity must still match its created forward/reverse mapping.
+                if (!await LinuxRunAccountNss.IsCleanupNameAbsentAsync(_owner, command, _identities,
+                    deadline.Token).ConfigureAwait(false))
+                    await RunUtilityAsync(command, cleanup: true, deadline.Token).ConfigureAwait(false);
+                RequireCustody(custody, deadline.Token);
+            },
+            () =>
+            {
                 if (_utilities.Any(static utility => !utility.PhysicallySettled)) throw Failed();
-            }
+            },
+            (command, error) => _failures.Capture(stage, LinuxAccountUtilityStage.Unknown, command.Operation, error))
+                .ConfigureAwait(false);
             stage = LinuxAccountPreparationStage.FinalNamesAbsent;
             await LinuxRunAccountNss.RequireNamesAbsentAfterCleanupAsync(_owner, deadline.Token, _includeApplication)
                 .ConfigureAwait(false);

@@ -1,5 +1,18 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Current C# runtime validation status — 2026-10-24
+
+The original revision-56 shutdown-test failure is fixed and passed its subsequent
+Linux regression checks. [Revision 74](https://github.com/forge-trust/AppSurface/actions/runs/40124730961)
+verified all sixteen worker controls, the original application and packaged
+producer consumer groups, workspace/root controls and both account transitions.
+Its measured chain and unchanged numerical gate remain pending. See the
+[current cutover record](issue779-csharp-runtime-cutover.md#current-correction-and-verification-status--2026-10-24)
+for source identities and the limits of these results. This does not close the
+remaining 57-group acceptance matrix, enroll the production catalogue or enable
+Trusted execution. Later source changes require fresh evidence.
+
+
 ## Recorded Linux validation — 2026-10-24
 
 [Linux run 40104067585](https://github.com/forge-trust/AppSurface/actions/runs/40104067585),

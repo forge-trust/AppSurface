@@ -229,8 +229,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
             RequireAccountOwner(accounts, owner);
             owner.RequireActive(default);
             accounts.RequireOwnedBy(owner, default);
-            if (_quarantined || _sealed || _sealAttempted || _producerRetentionAttempted)
-                throw LinuxProducerWorkspaceLayout.Invalid();
+            LinuxProducerWorkspaceStatePolicy.RequireRetainProducer(new(
+                _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _producerRetentionAttempted, _resultsTokenAttempted, _slash is not null, _run is not null));
             _producerRetentionAttempted = true;
             _producer = producer;
         }
@@ -242,7 +243,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(accounts, owner);
-            if (_quarantined || _sealed || _sealAttempted || _handlesClosed) throw LinuxProducerWorkspaceLayout.Invalid();
+            LinuxProducerWorkspaceStatePolicy.RequireOwnedBy(new(
+                _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _producerRetentionAttempted, _resultsTokenAttempted, _slash is not null, _run is not null));
             owner.RequireActive(token);
             accounts.RequireOwnedBy(owner, token);
             RecheckCriticalCore(token);
@@ -256,7 +259,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(accounts, owner);
-            if (_handlesClosed || _slash is null || _run is null) throw LinuxProducerWorkspaceLayout.Invalid();
+            LinuxProducerWorkspaceStatePolicy.RequireControlOwnedBy(new(
+                _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _producerRetentionAttempted, _resultsTokenAttempted, _slash is not null, _run is not null));
             owner.RequireControlIdentity(token);
             RecheckCriticalCore(token, cleanup: true);
         }
@@ -271,7 +276,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
             try
             {
                 RequireOwnedBy(_owner, _accounts, token);
-                if (_resultsTokenAttempted) throw LinuxProducerWorkspaceLayout.Invalid();
+                LinuxProducerWorkspaceStatePolicy.RequireResultsTokenPreparation(new(
+                    _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                    _producerRetentionAttempted, _resultsTokenAttempted, _slash is not null, _run is not null));
                 _resultsTokenAttempted = true;
                 _inputDeadline.Check(token);
                 if (!LinuxProducerWorkspaceLayout.IsResultsToken(resultsToken))
@@ -341,7 +348,9 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         {
             RequireAccountOwner(accounts, owner);
             owner.RequireControlIdentity(token);
-            if (!_sealed || _quarantined || _handlesClosed) throw LinuxProducerWorkspaceLayout.Invalid();
+            LinuxProducerWorkspaceStatePolicy.RequireSealedForAccountRelease(new(
+                _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _producerRetentionAttempted, _resultsTokenAttempted, _slash is not null, _run is not null));
             try
             {
                 RecheckCriticalCore(token, cleanup: true);
