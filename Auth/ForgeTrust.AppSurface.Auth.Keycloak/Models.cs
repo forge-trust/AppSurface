@@ -2,14 +2,11 @@ using System.Collections.Immutable;
 using System.Text;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak;
-
 /// <summary>Exact image identity, including the index and selected platform manifest.</summary>
 public sealed record KeycloakImageIdentity(string Index, string PlatformManifest, string Platform)
 {
     /// <summary>Creates a declaration; recipe validation checks its digest identities and platform before effects.</summary>
-    public static KeycloakImageIdentity Create(string index, string platformManifest, string platform) =>
-        new(index, platformManifest, platform);
-
+    public static KeycloakImageIdentity Create(string index, string platformManifest, string platform) => new(index, platformManifest, platform);
     /// <summary>Material ID containing the exact upstream index JSON.</summary>
     public string? IndexMaterialId { get; init; }
     /// <summary>Material ID containing the exact selected platform archive.</summary>
@@ -64,34 +61,24 @@ public sealed record RuntimePackageSpec(string Name, string Version, string Sha2
 
 /// <summary>Identity of a package that must be absent from the resulting runtime; removed bytes are not captured.</summary>
 public sealed record KeycloakRemovedPackageSpec(string Name, string Architecture, string ExpectedVersion);
-
 /// <summary>Coordinates for one Maven or package artifact.</summary>
 public sealed record ArtifactCoordinate(string Group, string Artifact, string Version, string? Classifier, string Extension);
-
 /// <summary>A content-addressed artifact and its intended image destination.</summary>
 public sealed record ArtifactReference(ArtifactCoordinate Coordinate, string Sha256, string Path, string Destination);
-
 /// <summary>One exact replacement in an alignment group.</summary>
 public sealed record ArtifactReplacement(ArtifactReference Original, ArtifactReference Replacement);
-
 /// <summary>Complete, closed replacement membership; no implicit or extra members are allowed.</summary>
-public sealed record ArtifactReplacementGroup(
-    string Id,
-    ImmutableArray<ArtifactReplacement> Replacements,
-    ImmutableArray<ArtifactCoordinate> RequiredMembers)
+public sealed record ArtifactReplacementGroup(string Id, ImmutableArray<ArtifactReplacement> Replacements, ImmutableArray<ArtifactCoordinate> RequiredMembers)
 {
     /// <summary>Copies caller collections into immutable storage.</summary>
-    public static ArtifactReplacementGroup Create(string id, IEnumerable<ArtifactReplacement> replacements, IEnumerable<ArtifactCoordinate> requiredMembers) =>
-        new(id, replacements.ToImmutableArray(), requiredMembers.ToImmutableArray());
+    public static ArtifactReplacementGroup Create(string id, IEnumerable<ArtifactReplacement> replacements, IEnumerable<ArtifactCoordinate> requiredMembers) => new(id, replacements.ToImmutableArray(), requiredMembers.ToImmutableArray());
 }
 
 /// <summary>Versioned built-in runtime profile selection.</summary>
 public sealed record RuntimeProfile(string Id, string Version, string TemplateName, ImmutableArray<string> SupportedSourceProfiles)
 {
     /// <summary>Copies source-profile identities into immutable storage.</summary>
-    public static RuntimeProfile Create(string id, string version, string templateName, IEnumerable<string> supportedSourceProfiles) =>
-        new(id, version, templateName, supportedSourceProfiles.ToImmutableArray());
-
+    public static RuntimeProfile Create(string id, string version, string templateName, IEnumerable<string> supportedSourceProfiles) => new(id, version, templateName, supportedSourceProfiles.ToImmutableArray());
     /// <summary>Exact runtime OCI identities selected by platform.</summary>
     public ImmutableArray<OciIdentity> RuntimeOciIdentities { get; init; }
     /// <summary>Signed repository snapshots used by this profile.</summary>
@@ -105,27 +92,14 @@ public sealed record RuntimeProfile(string Id, string Version, string TemplateNa
 }
 
 /// <summary>Versioned built-in embedded archive transformation selection.</summary>
-public sealed record EmbeddedArchiveReplacement(
-    string Id,
-    string Version,
-    string TemplateName,
-    ArtifactCoordinate Source,
-    ArtifactCoordinate Replacement,
-    ImmutableArray<string> ClassPrefixes,
-    ImmutableArray<string> VersionedClasses,
-    ImmutableArray<string> ServicePaths)
+public sealed record EmbeddedArchiveReplacement(string Id, string Version, string TemplateName, ArtifactCoordinate Source, ArtifactCoordinate Replacement, ImmutableArray<string> ClassPrefixes, ImmutableArray<string> VersionedClasses, ImmutableArray<string> ServicePaths)
 {
     /// <summary>Complete content-addressed source/replacement modules and image destination.</summary>
     public EmbeddedArchiveModuleSet? ModuleSet { get; init; }
 }
 
 /// <summary>Complete source and replacement archive module material and destination.</summary>
-public sealed record EmbeddedArchiveModuleSet(
-    ArtifactReference SourceArtifact,
-    ArtifactReference ReplacementArtifact,
-    string Destination,
-    ImmutableDictionary<string, string> SourceModuleSha256ByIdentity,
-    ImmutableDictionary<string, string> ReplacementModuleSha256ByIdentity)
+public sealed record EmbeddedArchiveModuleSet(ArtifactReference SourceArtifact, ArtifactReference ReplacementArtifact, string Destination, ImmutableDictionary<string, string> SourceModuleSha256ByIdentity, ImmutableDictionary<string, string> ReplacementModuleSha256ByIdentity)
 {
 }
 
@@ -160,7 +134,6 @@ public sealed record KeycloakThemeInput(string Id, string Sha256, string? ExactU
 
 /// <summary>One explicitly bound local input used only during capture, never recipe identity.</summary>
 public sealed record KeycloakLocalInputBinding(string MaterialId, string LocalPath, string Sha256, long MaxBytes);
-
 /// <summary>Host-owned capture bindings for a reviewed recipe; local paths never enter canonical recipe JSON.</summary>
 public sealed record KeycloakCaptureInputs(string ReviewedRecipeId, ImmutableArray<KeycloakLocalInputBinding> LocalInputs)
 {
@@ -170,16 +143,8 @@ public sealed record KeycloakCaptureInputs(string ReviewedRecipeId, ImmutableArr
 
 /// <summary>Reviewed upstream template baseline whose archive member and captured bytes must agree.</summary>
 public sealed record KeycloakTemplateBaseline(string ArchivePath, string ArchiveSha256, string Entry, string Sha256, string MaterialId);
-
 /// <summary>Immutable recipe declaration for a supported Keycloak transformation.</summary>
-public sealed record KeycloakSecurityRecipe(
-    int SchemaVersion,
-    KeycloakImageIdentity SourceImage,
-    ImmutableArray<OciIdentity> RuntimeFrontendOciIdentities,
-    ImmutableArray<KeycloakOperation> Operations,
-    KeycloakRecipeMode Mode,
-    ImmutableArray<KeycloakThemeInput> ThemeInputs,
-    ImmutableArray<string> CapturedHostInputs)
+public sealed record KeycloakSecurityRecipe(int SchemaVersion, KeycloakImageIdentity SourceImage, ImmutableArray<OciIdentity> RuntimeFrontendOciIdentities, ImmutableArray<KeycloakOperation> Operations, KeycloakRecipeMode Mode, ImmutableArray<KeycloakThemeInput> ThemeInputs, ImmutableArray<string> CapturedHostInputs)
 {
     /// <summary>Reviewed upstream template baseline, required when a captured theme replaces FreeMarker templates.</summary>
     public KeycloakTemplateBaseline? TemplateBaseline { get; init; }
@@ -193,39 +158,20 @@ public sealed record KeycloakSecurityRecipe(
     public ImmutableArray<string> SourceProfiles { get; init; }
     /// <summary>Finite acquisition and transformation bounds.</summary>
     public KeycloakResourceLimits ResourceLimits { get; init; } = null!;
+
     /// <summary>Creates a recipe while copying all enumerable inputs.</summary>
-    public static KeycloakSecurityRecipe Create(
-        int schemaVersion,
-        KeycloakImageIdentity sourceImage,
-        IEnumerable<OciIdentity> runtimeFrontendOciIdentities,
-        IEnumerable<KeycloakOperation> operations,
-        KeycloakRecipeMode mode,
-        IEnumerable<KeycloakThemeInput> themeInputs,
-        IEnumerable<string> capturedHostInputs) =>
-        new(schemaVersion, sourceImage, runtimeFrontendOciIdentities.ToImmutableArray(), operations.ToImmutableArray(), mode, themeInputs.ToImmutableArray(), capturedHostInputs.ToImmutableArray());
+    public static KeycloakSecurityRecipe Create(int schemaVersion, KeycloakImageIdentity sourceImage, IEnumerable<OciIdentity> runtimeFrontendOciIdentities, IEnumerable<KeycloakOperation> operations, KeycloakRecipeMode mode, IEnumerable<KeycloakThemeInput> themeInputs, IEnumerable<string> capturedHostInputs) => new(schemaVersion, sourceImage, runtimeFrontendOciIdentities.ToImmutableArray(), operations.ToImmutableArray(), mode, themeInputs.ToImmutableArray(), capturedHostInputs.ToImmutableArray());
 }
 
 /// <summary>Exact HTTPS origin authorization and material digest binding.</summary>
-public sealed record KeycloakMaterialTrustPolicy(
-    string Version,
-    string OwnerApprovalReference,
-    ImmutableArray<string> PermittedHttpsOrigins,
-    ImmutableArray<string> PermittedPathMappings,
-    ImmutableArray<string> PermittedCoordinateMappings,
-    ImmutableDictionary<string, string> MaterialSha256ByIdentity,
-    ImmutableArray<string> SigningFingerprints,
-    ImmutableArray<string> SigningAlgorithms,
-    ImmutableArray<string> WithdrawnKeys,
-    ImmutableArray<string> HistoricalExactReleaseBytes)
+public sealed record KeycloakMaterialTrustPolicy(string Version, string OwnerApprovalReference, ImmutableArray<string> PermittedHttpsOrigins, ImmutableArray<string> PermittedPathMappings, ImmutableArray<string> PermittedCoordinateMappings, ImmutableDictionary<string, string> MaterialSha256ByIdentity, ImmutableArray<string> SigningFingerprints, ImmutableArray<string> SigningAlgorithms, ImmutableArray<string> WithdrawnKeys, ImmutableArray<string> HistoricalExactReleaseBytes)
 {
     /// <summary>Creates a policy with immutable copies of all collection inputs.</summary>
-    public static KeycloakMaterialTrustPolicy Create(string version, string ownerApprovalReference, IEnumerable<string> origins, IEnumerable<string> paths, IEnumerable<string> coordinates, IEnumerable<KeyValuePair<string, string>> materialDigests, IEnumerable<string> fingerprints, IEnumerable<string> algorithms, IEnumerable<string> withdrawnKeys, IEnumerable<string> historicalExactReleaseBytes) =>
-        new(version, ownerApprovalReference, origins.ToImmutableArray(), paths.ToImmutableArray(), coordinates.ToImmutableArray(), materialDigests.ToImmutableDictionary(StringComparer.Ordinal), fingerprints.ToImmutableArray(), algorithms.ToImmutableArray(), withdrawnKeys.ToImmutableArray(), historicalExactReleaseBytes.ToImmutableArray());
+    public static KeycloakMaterialTrustPolicy Create(string version, string ownerApprovalReference, IEnumerable<string> origins, IEnumerable<string> paths, IEnumerable<string> coordinates, IEnumerable<KeyValuePair<string, string>> materialDigests, IEnumerable<string> fingerprints, IEnumerable<string> algorithms, IEnumerable<string> withdrawnKeys, IEnumerable<string> historicalExactReleaseBytes) => new(version, ownerApprovalReference, origins.ToImmutableArray(), paths.ToImmutableArray(), coordinates.ToImmutableArray(), materialDigests.ToImmutableDictionary(StringComparer.Ordinal), fingerprints.ToImmutableArray(), algorithms.ToImmutableArray(), withdrawnKeys.ToImmutableArray(), historicalExactReleaseBytes.ToImmutableArray());
 }
 
 /// <summary>Explicit finite limits that participate in recipe identity.</summary>
 public sealed record KeycloakResourceLimits(long MaxMaterialBytes, long MaxArchiveEntries, long MaxArchiveExpandedBytes, long MaxOutputBytes, int MaxOperationSeconds);
-
 /// <summary>Stable stage at which an operation stopped.</summary>
 public enum KeycloakSafePhase
 {
@@ -254,6 +200,7 @@ public enum KeycloakSafePhase
     /// <summary>Owned cleanup.</summary>
     Cleanup
 }
+
 /// <summary>Known effect state after a failed operation.</summary>
 public enum KeycloakEffectState
 {
@@ -266,6 +213,7 @@ public enum KeycloakEffectState
     /// <summary>Commit state cannot be classified.</summary>
     Unknown
 }
+
 /// <summary>Recovery class exposed to noninteractive callers.</summary>
 public enum KeycloakRecoveryClass
 {
@@ -280,6 +228,7 @@ public enum KeycloakRecoveryClass
     /// <summary>Do not retry.</summary>
     NoRetry
 }
+
 /// <summary>Stable failure categories; enum names are canonical serialized values.</summary>
 public enum KeycloakFailureCode
 {
@@ -321,15 +270,15 @@ public enum KeycloakFailureCode
 
 /// <summary>Opaque correlation identity suitable for logs and support requests.</summary>
 public sealed record KeycloakCorrelationId(string Value);
-
 /// <summary>Safe, noninteractive typed failure. Cause text and machine paths are intentionally excluded.</summary>
 public sealed class KeycloakSecurityException : Exception
 {
     private const string DiagnosticReferenceRoot = "https://github.com/forge-trust/AppSurface/blob/main/Auth/ForgeTrust.AppSurface.Auth.Keycloak/docs/diagnostics.md";
-
     /// <summary>Creates a safe diagnostic failure without retaining a raw cause.</summary>
-    public KeycloakSecurityException(KeycloakFailureCode code, KeycloakSafePhase phase, string operationId, KeycloakEffectState effect, KeycloakRecoveryClass recovery, string message, string nextAction, KeycloakCorrelationId correlationId)
-        : base(message) => (Code, Phase, OperationId, Effect, Recovery, NextAction, CorrelationId) = (code, phase, operationId, effect, recovery, nextAction, correlationId);
+    public KeycloakSecurityException(KeycloakFailureCode code, KeycloakSafePhase phase, string operationId, KeycloakEffectState effect, KeycloakRecoveryClass recovery, string message, string nextAction, KeycloakCorrelationId correlationId) : base(message)
+    {
+        (Code, Phase, OperationId, Effect, Recovery, NextAction, CorrelationId) = (code, phase, operationId, effect, recovery, nextAction, correlationId);
+    }
 
     /// <summary>Stable failure code.</summary>
     public KeycloakFailureCode Code { get; }
@@ -357,12 +306,7 @@ public sealed class KeycloakSecurityException : Exception
 public sealed record KeycloakRetryMetadata(bool AutomaticRetry, bool ExplicitFreshAttemptAllowed, int MaximumAdditionalAttempts, bool RequiresInspectionFirst)
 {
     /// <summary>Computes bounded retry guidance from the exception's stable fields.</summary>
-    public static KeycloakRetryMetadata For(KeycloakRecoveryClass recovery, KeycloakEffectState effect) =>
-        effect == KeycloakEffectState.Unknown || recovery == KeycloakRecoveryClass.InspectBeforeRetry
-            ? InspectBeforeRetry
-            : recovery == KeycloakRecoveryClass.ExplicitTransientRetryOnce && effect is KeycloakEffectState.None or KeycloakEffectState.Staged
-                ? ExplicitTransientOnce
-                : None;
+    public static KeycloakRetryMetadata For(KeycloakRecoveryClass recovery, KeycloakEffectState effect) => effect == KeycloakEffectState.Unknown || recovery == KeycloakRecoveryClass.InspectBeforeRetry ? InspectBeforeRetry : recovery == KeycloakRecoveryClass.ExplicitTransientRetryOnce && effect is KeycloakEffectState.None or KeycloakEffectState.Staged ? ExplicitTransientOnce : None;
     /// <summary>No automatic retry metadata, as required by the recipe contract.</summary>
     public static KeycloakRetryMetadata None { get; } = new(false, false, 0, false);
     /// <summary>Metadata for an eligible transient acquisition or read-only probe failure.</summary>

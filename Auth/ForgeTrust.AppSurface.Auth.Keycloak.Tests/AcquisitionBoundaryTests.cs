@@ -126,6 +126,120 @@ public sealed class AcquisitionBoundaryTests
         Assert.Empty(Directory.GetFiles(root.Path));
     }
 
+    [Theory]
+    [InlineData("default")]
+    [InlineData("zero-file")]
+    [InlineData("redirect-over")]
+    [InlineData("deadline-over")]
+    public async Task InvalidAcquisitionEnvelopeStopsBeforeAnyTransport(string shape)
+    {
+        using var root = new Root();
+        var calls = 0;
+        using var client = new HttpClient(new Handler((_, _) => { calls++; throw new InvalidOperationException(); }));
+        var material = shape == "default" ? Material() with { PermittedUris = default } : Material();
+        var limits = shape switch
+        {
+            "zero-file" => new InvocationLimits(MaxFileBytes: 0),
+            "redirect-over" => new InvocationLimits(MaxRedirects: 33),
+            _ => new InvocationLimits()
+        };
+        var deadline = shape == "deadline-over" ? TimeSpan.FromSeconds(301) : TimeSpan.FromSeconds(5);
+        var failure = await Assert.ThrowsAsync<MaterialAcquisitionException>(() => MaterialAcquisition.DownloadCoreAsync(client, material,
+            Path.Combine(root.Path, "destination"), deadline, default, limits));
+        Assert.Equal("MATERIAL_POLICY_INVALID", failure.Message);
+        Assert.Equal(0, calls);
+        Assert.Empty(Directory.GetFileSystemEntries(root.Path));
+    }
+
+    [Fact]
+    public async Task MaximumLengthCaptureCanAcceptShorterVerifiedBytesAndTightenDefaultDeadline()
+    {
+        using var root = new Root();
+        using var client = new HttpClient(new Handler((request, _) => Task.FromResult(Response(request, Bytes))));
+        var output = Path.Combine(root.Path, "destination");
+        var observed = await MaterialAcquisition.DownloadCoreAsync(client, Material() with { Length = Bytes.Length + 10, ExactLength = false },
+            output, TimeSpan.FromSeconds(5), default, new InvocationLimits(Deadline: TimeSpan.FromSeconds(6)));
+        Assert.Equal(Bytes.Length, observed.Length);
+        Assert.Equal(Bytes, File.ReadAllBytes(output));
+    }
+
+    [Theory]
+    [InlineData("short")]
+    [InlineData("large")]
+    public async Task DeclaredExactLengthMismatchCannotPublish(string shape)
+    {
+        using var root = new Root();
+        using var client = new HttpClient(new Handler((request, _) =>
+        {
+            var response = Response(request, Bytes);
+            response.Content.Headers.ContentLength = Bytes.Length + (shape == "short" ? -1 : 1);
+            return Task.FromResult(response);
+        }));
+        var failure = await Assert.ThrowsAsync<MaterialAcquisitionException>(() => MaterialAcquisition.DownloadCoreAsync(client, Material(),
+            Path.Combine(root.Path, "destination"), TimeSpan.FromSeconds(5), default));
+        Assert.Equal("MATERIAL_LENGTH_INVALID", failure.Message);
+        Assert.Empty(Directory.GetFileSystemEntries(root.Path));
+    }
+
+    [Fact]
+    public async Task ExistingOutputAndLinkedAncestorCannotBeReplaced()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var root = new Root();
+        var calls = 0;
+        using var client = new HttpClient(new Handler((_, _) => { calls++; throw new InvalidOperationException(); }));
+        var existing = Path.Combine(root.Path, "existing"); File.WriteAllText(existing, "prior");
+        var failure = await Assert.ThrowsAsync<MaterialAcquisitionException>(() => MaterialAcquisition.DownloadCoreAsync(client, Material(), existing,
+            TimeSpan.FromSeconds(5), default));
+        Assert.Equal("MATERIAL_DESTINATION_CONFLICT", failure.Message);
+        var actual = Path.Combine(root.Path, "actual"); Directory.CreateDirectory(actual);
+        var linked = Path.Combine(root.Path, "linked"); Directory.CreateSymbolicLink(linked, actual);
+        failure = await Assert.ThrowsAsync<MaterialAcquisitionException>(() => MaterialAcquisition.DownloadCoreAsync(client, Material(), Path.Combine(linked, "new"),
+            TimeSpan.FromSeconds(5), default));
+        Assert.Equal("MATERIAL_OUTPUT_LINK_REJECTED", failure.Message);
+        Assert.Equal("prior", File.ReadAllText(existing));
+        Assert.Empty(Directory.GetFileSystemEntries(actual)); Assert.Equal(0, calls);
+    }
+
+    [Fact]
+    public async Task ProductionDownloadTransportHonorsPreCancellationBeforeNetwork()
+    {
+        using var root = new Root();
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        var output = Path.Combine(root.Path, "absent");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => MaterialAcquisition.DownloadAsync(Material(), output,
+            TimeSpan.FromSeconds(5), cancellation.Token));
+        Assert.False(Path.Exists(output));
+    }
+
+    [Fact]
+    public async Task MissingResponseAuthorityCannotMintAcquisition()
+    {
+        using var root = new Root();
+        using var client = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { RequestMessage = null, Content = new ByteArrayContent(Bytes) })));
+        var failure = await Assert.ThrowsAsync<MaterialAcquisitionException>(() => MaterialAcquisition.DownloadCoreAsync(client, Material(),
+            Path.Combine(root.Path, "absent"), TimeSpan.FromSeconds(5), default));
+        Assert.Equal("MATERIAL_REDIRECT_BYPASS", failure.Message);
+        Assert.Empty(Directory.GetFileSystemEntries(root.Path));
+    }
+
+    [Theory]
+    [InlineData("relative", "MATERIAL_URI_INVALID")]
+    [InlineData("backslash", "MATERIAL_URI_INVALID")]
+    [InlineData("control", "MATERIAL_URI_INVALID")]
+    public void TransportAuthorityRejectsUnescapedOrRelativeInput(string shape, string expected)
+    {
+        var uri = shape switch
+        {
+            "relative" => new Uri("relative/material", UriKind.Relative),
+            "backslash" => new Uri("https://repo.example.test/a\\b"),
+            _ => new Uri("https://repo.example.test/a\n")
+        };
+        var failure = Assert.Throws<MaterialAcquisitionException>(() => MaterialAcquisition.CanonicalExactUri(uri));
+        Assert.Equal(expected, failure.Message);
+    }
+
     private static readonly Uri Uri = new("https://repo.example.test/pkg");
     private static readonly byte[] Bytes = Encoding.UTF8.GetBytes("approved");
     private static ApprovedMaterial Material() => new("fixture", Convert.ToHexStringLower(SHA256.HashData(Bytes)), Bytes.Length, [Uri], "fixture");
@@ -135,7 +249,11 @@ public sealed class AcquisitionBoundaryTests
     private sealed class Root : IDisposable
     {
         internal string Path { get; } = System.IO.Path.Combine(KeycloakSecurity.PrivateTemporaryRoot(), "keycloak-acquisition-boundary-" + Guid.NewGuid().ToString("N"));
-        internal Root() => Directory.CreateDirectory(Path);
+        internal Root()
+        {
+            Directory.CreateDirectory(Path);
+        }
+
         public void Dispose() => Directory.Delete(Path, true);
     }
 }

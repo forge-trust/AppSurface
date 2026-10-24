@@ -1,6 +1,6 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
-using System.Collections.Immutable;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests;
@@ -211,9 +211,222 @@ public sealed class ValidationBoundaryTests
         Assert.Throws<JsonException>(() => KeycloakCanonicalJson.ReadRecipe(Encoding.UTF8.GetBytes(malformed)));
     }
 
+
+    // protects: each remaining v30 root/resource/reference operand rejects independently.
+    // fails_when: a lower bound, missing graph association or safe baseline shape is bypassed.
+    // why_new: preserves the valid sibling operations while targeting uncovered field alternatives.
+    // seam: public Validate; no I/O or reflection. no_claim: does not verify the OCI bytes.
+    [Theory]
+    [InlineData("source index material", KeycloakFailureCode.Required)]
+    [InlineData("materials empty", KeycloakFailureCode.Required)]
+    [InlineData("two frontends", KeycloakFailureCode.Unsupported)]
+    [InlineData("material resource zero", KeycloakFailureCode.Invalid)]
+    [InlineData("entries zero", KeycloakFailureCode.Invalid)]
+    [InlineData("expanded zero", KeycloakFailureCode.Invalid)]
+    [InlineData("deadline zero", KeycloakFailureCode.Invalid)]
+    [InlineData("material oversize", KeycloakFailureCode.Invalid)]
+    [InlineData("theme binding empty", KeycloakFailureCode.Invalid)]
+    [InlineData("theme destination null", KeycloakFailureCode.Invalid)]
+    [InlineData("missing source index", KeycloakFailureCode.Conflict)]
+    [InlineData("missing frontend archive", KeycloakFailureCode.Conflict)]
+    [InlineData("baseline empty", KeycloakFailureCode.Invalid)]
+    [InlineData("baseline dot", KeycloakFailureCode.Invalid)]
+    [InlineData("baseline empty segment", KeycloakFailureCode.Invalid)]
+    [InlineData("operation control", KeycloakFailureCode.Conflict)]
+    public void RemainingRootAndAssociationGuardsRejectTheIntendedField(string mutation, KeycloakFailureCode expected)
+    {
+        var recipe = TestRecipes.Recipe();
+        var baselineRecipe = TestRecipes.RecipeWithTemplateBaseline();
+        var theme = baselineRecipe.ThemeInputs[0];
+        var changed = mutation switch
+        {
+            "source index material" => recipe with { SourceImage = recipe.SourceImage with { IndexMaterialId = string.Empty } },
+            "materials empty" => recipe with { MaterialReferences = [] },
+            "two frontends" => recipe with { RuntimeFrontendOciIdentities = [recipe.RuntimeFrontendOciIdentities[0], recipe.RuntimeFrontendOciIdentities[0] with { Id = "second" }] },
+            "material resource zero" => recipe with { ResourceLimits = recipe.ResourceLimits with { MaxMaterialBytes = 0 } },
+            "entries zero" => recipe with { ResourceLimits = recipe.ResourceLimits with { MaxArchiveEntries = 0 } },
+            "expanded zero" => recipe with { ResourceLimits = recipe.ResourceLimits with { MaxArchiveExpandedBytes = 0 } },
+            "deadline zero" => recipe with { ResourceLimits = recipe.ResourceLimits with { MaxOperationSeconds = 0 } },
+            "material oversize" => recipe with { MaterialReferences = recipe.MaterialReferences.SetItem(0, recipe.MaterialReferences[0] with { MaxBytes = (1L << 30) + 1 }) },
+            "theme binding empty" => baselineRecipe with { ThemeInputs = [theme with { LocalInputId = string.Empty }] },
+            "theme destination null" => baselineRecipe with { ThemeInputs = [theme with { DestinationPath = null }] },
+            "missing source index" => recipe with { SourceImage = recipe.SourceImage with { IndexMaterialId = "undeclared-index" } },
+            "missing frontend archive" => recipe with { RuntimeFrontendOciIdentities = [recipe.RuntimeFrontendOciIdentities[0] with { ArchiveMaterialId = "undeclared-archive" }] },
+            "baseline empty" => baselineRecipe with { TemplateBaseline = baselineRecipe.TemplateBaseline! with { Entry = string.Empty } },
+            "baseline dot" => baselineRecipe with { TemplateBaseline = baselineRecipe.TemplateBaseline! with { Entry = "theme/./login.ftl" } },
+            "baseline empty segment" => baselineRecipe with { TemplateBaseline = baselineRecipe.TemplateBaseline! with { Entry = "theme//login.ftl" } },
+            "operation control" => recipe with { Operations = recipe.Operations.SetItem(0, TestRecipes.ArtifactGroup("group\ncontrol")) },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        Assert.Same(recipe, KeycloakRecipeValidation.Validate(recipe));
+        ExpectRecipeFailure(changed, expected);
+    }
+
+    [Theory]
+    [InlineData("platform")]
+    [InlineData("digest")]
+    [InlineData("archive id")]
+    [InlineData("manifest null")]
+    [InlineData("manifest malformed")]
+    [InlineData("config malformed")]
+    [InlineData("diff default")]
+    [InlineData("diff malformed")]
+    [InlineData("index id")]
+    public void FrontendGraphFieldsCannotBeOmittedOrMalformed(string mutation)
+    {
+        var recipe = TestRecipes.Recipe();
+        var frontend = recipe.RuntimeFrontendOciIdentities[0];
+        var changed = mutation switch
+        {
+            "platform" => frontend with { Platform = "linux/riscv64" },
+            "digest" => frontend with { Digest = "sha256:bad" },
+            "archive id" => frontend with { ArchiveMaterialId = string.Empty },
+            "manifest null" => frontend with { PlatformManifestDigest = null },
+            "manifest malformed" => frontend with { PlatformManifestDigest = "sha256:bad" },
+            "config malformed" => frontend with { ConfigDigest = "sha256:bad" },
+            "diff default" => frontend with { DiffIds = default },
+            "diff malformed" => frontend with { DiffIds = ["sha256:bad"] },
+            "index id" => frontend with { IndexMaterialId = string.Empty },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        ExpectRecipeFailure(recipe with { RuntimeFrontendOciIdentities = [changed] }, KeycloakFailureCode.Invalid);
+    }
+
+    [Theory]
+    [InlineData("approval")]
+    [InlineData("origins empty")]
+    [InlineData("coordinate default")]
+    [InlineData("map null")]
+    [InlineData("algorithms default")]
+    public void RemainingPolicyInitializationAlternativesAreRequired(string mutation)
+    {
+        var policy = TestRecipes.Policy();
+        var changed = mutation switch
+        {
+            "approval" => policy with { OwnerApprovalReference = string.Empty },
+            "origins empty" => policy with { PermittedHttpsOrigins = [] },
+            "coordinate default" => policy with { PermittedCoordinateMappings = default },
+            "map null" => policy with { MaterialSha256ByIdentity = null! },
+            "algorithms default" => policy with { SigningAlgorithms = default },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(changed));
+        Assert.Equal(KeycloakFailureCode.Required, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+    }
+
+    [Theory]
+    [InlineData("https://example.test:443/material")]
+    [InlineData("https://user@example.test/material")]
+    [InlineData("https://127.0.0.1/material")]
+    [InlineData("https://[::1]/material")]
+    [InlineData("https://example.test/a?query=1")]
+    [InlineData("https://example.test/a#fragment")]
+    [InlineData("https://example.test/a\\b")]
+    [InlineData("https://example.test/a%2fb")]
+    [InlineData("https://example.test/a/../b")]
+    [InlineData("https://example.test/\u007f")]
+    public void NoncanonicalAuthorityAliasesAreRejectedBeforeIdentity(string uri)
+        => Assert.Throws<ArgumentException>(() => KeycloakCanonicalization.CanonicalizeHttpsUri(uri));
+
+    [Fact]
+    public void CanonicalNondefaultPortAndPathArePreservedExactly()
+    {
+        const string uri = "https://example.test:8443/material/a.jar";
+        Assert.Equal(uri, KeycloakCanonicalization.CanonicalizeHttpsUri(uri));
+        var recipe = TestRecipes.Recipe();
+        recipe = recipe with { MaterialReferences = recipe.MaterialReferences.SetItem(0, recipe.MaterialReferences[0] with { ExactHttpsUri = uri }) };
+        Assert.Same(recipe, KeycloakRecipeValidation.Validate(recipe));
+    }
+
+    [Theory]
+    [InlineData(KeycloakEffectState.None, false, false)]
+    [InlineData(KeycloakEffectState.None, true, true)]
+    [InlineData(KeycloakEffectState.Staged, true, true)]
+    public void ExplicitTransientRetryRequiresAnEligibleCleanEffect(KeycloakEffectState effect, bool transient, bool expected)
+    {
+        var retry = KeycloakRecipeValidation.RetryFor(effect, transient, verifiedCleanedStaging: true);
+        Assert.False(retry.AutomaticRetry);
+        Assert.Equal(expected, retry.ExplicitFreshAttemptAllowed);
+        Assert.Equal(expected ? 1 : 0, retry.MaximumAdditionalAttempts);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    public void OperationIdentityMustBePresentBeforeAnyEffects(string? id)
+    {
+        var recipe = TestRecipes.Recipe();
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(0, TestRecipes.ArtifactGroup(id!)) };
+        ExpectRecipeFailure(invalid, KeycloakFailureCode.Conflict);
+    }
+
     private static void ExpectRecipeFailure(KeycloakSecurityRecipe recipe, KeycloakFailureCode expected)
     {
         var exception = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(recipe));
         Assert.Equal(expected, exception.Code);
     }
+
+    [Theory]
+    [InlineData("empty binding identity")]
+    [InlineData("empty frontend identity")]
+    public void EmptyReferenceIdentitiesAreTypedInvalidBeforeResolution(string mutation)
+    {
+        if (mutation == "empty binding identity")
+        {
+            var inputs = KeycloakCaptureInputs.Create(new string('a', 64),
+                [new KeycloakLocalInputBinding(string.Empty, "/tmp/owned-material", new string('b', 64), 1)]);
+            var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(inputs));
+            Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+            Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        }
+        else
+        {
+            Assert.Equal("empty frontend identity", mutation);
+            var recipe = TestRecipes.Recipe();
+            ExpectRecipeFailure(recipe with { RuntimeFrontendOciIdentities = [recipe.RuntimeFrontendOciIdentities[0] with { Id = string.Empty }] }, KeycloakFailureCode.Invalid);
+        }
+    }
+
+
+    // protects: malformed authority and image path spellings fail at the typed boundary.
+    // fails_when: blank/relative/non-HTTPS input, dot segments, or empty path segments are accepted.
+    // why_new: targets remaining URI parsing and path-segment alternatives from v35.
+    // seam: public canonicalization and validation APIs; no I/O or reflection.
+    // no_claim: these are declaration checks, not acquisition or filesystem proof.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("  ")]
+    [InlineData("relative-material")]
+    [InlineData("http://example.test/material")]
+    public void MissingOrNonHttpsAuthorityCannotBecomeCanonicalIdentity(string? uri)
+    {
+        var failure = Assert.Throws<ArgumentException>(() => KeycloakCanonicalization.CanonicalizeHttpsUri(uri!));
+        Assert.Equal("value", failure.ParamName);
+    }
+
+    [Fact]
+    public void InvalidMaterialDigestIsRejectedBeforeReferenceResolution()
+    {
+        var recipe = TestRecipes.Recipe();
+        var material = recipe.MaterialReferences[0];
+        var changed = recipe with { MaterialReferences = recipe.MaterialReferences.SetItem(0, material with { Sha256 = "not-a-sha256" }) };
+        Assert.Equal(material.Id, changed.SourceImage.IndexMaterialId);
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(changed));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("material", failure.OperationId);
+    }
+
+    [Theory]
+    [InlineData("/opt/keycloak/bin/./kc.sh")]
+    [InlineData("/opt/keycloak/bin//kc.sh")]
+    public void EntrypointCannotAliasAnotherCanonicalImagePath(string entrypoint)
+    {
+        var recipe = TestRecipes.Recipe() with { EntrypointPath = entrypoint };
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(recipe));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+    }
+
 }

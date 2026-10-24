@@ -41,4 +41,22 @@ public sealed class CacheBindingTests
         Assert.Equal(KeycloakFailureCode.DigestMismatch, error.Code);
         Assert.False(Directory.Exists(destination));
     }
+    [Fact]
+    public async Task DownloadPathRequiresApprovedAuthorityBeforeStartingTransport()
+    {
+        using var fixture = SecurityRecipeFixture.Create();
+        var remote = fixture.Recipe.MaterialReferences.First(x => !x.CapturedHostInput);
+        var wrong = remote with { ExactHttpsUri = "https://unapproved.example.test/path/" };
+        var recipe = fixture.Recipe with { MaterialReferences = fixture.Recipe.MaterialReferences.Replace(remote, wrong) };
+        var bindings = fixture.Bindings with
+        {
+            ReviewedRecipeId = KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(recipe)),
+            LocalInputs = fixture.Bindings.LocalInputs.Remove(fixture.Bindings.LocalInputs.Single(x => x.MaterialId == remote.Id))
+        };
+        var destination = Path.Combine(fixture.Root, "download-authority-rejected");
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.CaptureAsync(recipe, fixture.Policy, bindings, destination));
+        Assert.Equal(KeycloakFailureCode.DigestMismatch, failure.Code);
+        Assert.False(Path.Exists(destination)); Assert.Empty(Directory.EnumerateDirectories(fixture.Root, ".capture-inputs-*"));
+    }
+
 }

@@ -8,4 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/AtomicFilePublication.cs" Link="AtomicFilePublication.cs" />
+  </ItemGroup>
 </Project>

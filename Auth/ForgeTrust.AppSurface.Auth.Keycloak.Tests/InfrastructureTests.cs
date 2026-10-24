@@ -137,7 +137,118 @@ public sealed class InfrastructureTests
     private static ApprovedMaterial Approved(Uri uri, byte[] bytes) => new("pkg", Digest(bytes), bytes.Length, [uri], "pkg");
     private static HttpResponseMessage Response(Uri uri, byte[] bytes, long declared) { var response = new HttpResponseMessage(HttpStatusCode.OK) { RequestMessage = new HttpRequestMessage(HttpMethod.Get, uri), Content = new ByteArrayContent(bytes) }; response.Content.Headers.ContentLength = declared; return response; }
     private static HttpResponseMessage ResponseWithoutLength(Uri uri, byte[] bytes) => new(HttpStatusCode.OK) { RequestMessage = new HttpRequestMessage(HttpMethod.Get, uri), Content = new UnknownLengthContent(bytes) };
+    [Theory]
+    [InlineData("arguments")]
+    [InlineData("executable")]
+    [InlineData("directory")]
+    [InlineData("output-zero")]
+    [InlineData("output-over")]
+    [InlineData("deadline-over")]
+    public async Task TextProcessRejectsEachEnvelopeBeforeStarting(string shape)
+    {
+        var limits = new InvocationLimits(Deadline: shape == "deadline-over" ? TimeSpan.FromSeconds(301) : TimeSpan.FromSeconds(5), MaxArgumentBytes: 3, MaxProcessOutputBytes: shape == "output-zero" ? 0 : shape == "output-over" ? 1024 * 1024 + 1 : 10);
+        var arguments = shape == "arguments" ? new[] { "four" } : Array.Empty<string>();
+        var executable = shape == "executable" ? "four" : "x";
+        var working = shape == "directory" ? "four" : null;
+        var deadline = shape == "deadline-over" ? TimeSpan.FromSeconds(301) : TimeSpan.FromSeconds(5);
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => BoundedProcess.RunAsync(executable, arguments, working, deadline, 10, [], default, limits));
+    }
+
+    [Fact]
+    public async Task TextProcessPreservesRedactedOutputExitCodeAndWorkingDirectory()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var root = new TempDirectory();
+        var result = await BoundedProcess.RunAsync("/bin/sh", ["-c", "printf 'secret approved'; printf 'private' >&2; exit 7"], root.Path,
+            TimeSpan.FromSeconds(5), 1024, ["secret", "private", ""], default);
+        Assert.Equal(7, result.ExitCode); Assert.Equal("<redacted> approved", result.Output); Assert.Equal("<redacted>", result.Error);
+        var start = await Assert.ThrowsAsync<BoundedProcessException>(() => BoundedProcess.RunAsync("/does-not-exist-887", [], null,
+            TimeSpan.FromSeconds(5), 1024, [], default));
+        Assert.Equal(ProcessStopReason.Start, start.Reason);
+    }
+
     private sealed class UnknownLengthContent(byte[] bytes) : HttpContent { protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new MemoryStream(bytes, writable: false)); protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes).AsTask(); protected override bool TryComputeLength(out long length) { length = 0; return false; } }
     private sealed class ScriptedHandler(Func<HttpRequestMessage, HttpResponseMessage> script) : HttpMessageHandler { internal int Calls { get; private set; } protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) { Calls++; return Task.FromResult(script(request)); } }
-    private sealed class TempDirectory : IDisposable { internal string Path { get; } = System.IO.Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : System.IO.Path.GetTempPath(), "keycloak-tests-" + Guid.NewGuid().ToString("N")); internal TempDirectory() => Directory.CreateDirectory(Path); public void Dispose() { try { Directory.Delete(Path, true); } catch { } } }
+    private sealed class TempDirectory : IDisposable { internal string Path { get; } = System.IO.Path.Combine(OperatingSystem.IsMacOS() ? "/private/tmp" : System.IO.Path.GetTempPath(), "keycloak-tests-" + Guid.NewGuid().ToString("N")); internal TempDirectory() { Directory.CreateDirectory(Path); } public void Dispose() { try { Directory.Delete(Path, true); } catch { } } }
+
+    // protects: safe punctuation in material IDs survives capture and fresh verified use.
+    // fails_when: supported ID characters are rejected, rewritten, or lost in the manifest.
+    // why_new: v44 snapshot ID coverage misses allowed punctuation alternatives.
+    // seam: intentionally exposed SnapshotStore with real one-byte input; no reflection.
+    // no_claim: this does not broaden the public recipe identity grammar.
+    [Fact]
+    public async Task SnapshotPreservesEachSupportedMaterialIdCharacterAcrossFreshUse()
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source");
+        await File.WriteAllTextAsync(source, "x", new UTF8Encoding(false));
+        const string identity = "a-_.9";
+        var destination = Path.Combine(root.Path, "snapshot");
+        using var snapshot = await SnapshotStore.CaptureAsync([new CaptureFile(identity, source, Digest(source), 1, 420)],
+            new string('a', 64), new string('b', 64), destination, default);
+        Assert.Equal(identity, Assert.Single(snapshot.Files).Id);
+        var copied = await SnapshotStore.CopyForUseAsync(snapshot, Path.Combine(root.Path, "copy"), default);
+        Assert.Equal("x", await File.ReadAllTextAsync(Path.Combine(copied, identity)));
+        Assert.Equal(Digest(source), Digest(Path.Combine(copied, identity)));
+        Assert.Equal(0, snapshot.ActiveConsumers);
+    }
+
+    // protects: digest identities reject lowercase characters beyond hexadecimal f.
+    // fails_when: a correctly sized nonhex identity reaches any snapshot write.
+    // why_new: previous uppercase/length controls do not test the upper lowercase boundary.
+    // seam: SnapshotStore input validation with all unrelated metadata valid.
+    // no_claim: declaration rejection does not prove material bytes.
+    [Fact]
+    public async Task SnapshotRejectsLowercaseNonhexDigestBeforeCreatingStaging()
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source");
+        await File.WriteAllTextAsync(source, "x", new UTF8Encoding(false));
+        var destination = Path.Combine(root.Path, "nonhex-snapshot");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => SnapshotStore.CaptureAsync(
+            [new CaptureFile("input", source, new string('g', 64), 1, 420)], new string('a', 64), new string('b', 64), destination, default));
+        Assert.Equal("Noncanonical digest.", failure.Message);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(root.Path, ".capture-*"));
+        Assert.Equal("x", await File.ReadAllTextAsync(source));
+    }
+
+    // protects: dangling links remain occupied/unsafe nodes even when their target is absent.
+    // fails_when: source verification follows a dangling link or capture replaces a destination link.
+    // why_new: existing link tests use live targets and do not cover missing-node link metadata.
+    // seam: local filesystem plus SnapshotStore; no process-global filesystem changes.
+    // no_claim: this does not establish support for exotic/network filesystem link semantics.
+    [Theory]
+    [InlineData("source")]
+    [InlineData("destination")]
+    public async Task SnapshotRejectsDanglingSourceAndDestinationLinksWithoutReplacingThem(string role)
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source");
+        await File.WriteAllTextAsync(source, "x", new UTF8Encoding(false));
+        var missing = Path.Combine(root.Path, "missing-target");
+        var link = Path.Combine(root.Path, "dangling");
+        File.CreateSymbolicLink(link, missing);
+        var destination = role == "destination" ? link : Path.Combine(root.Path, "snapshot");
+        var input = new CaptureFile("input", role == "source" ? link : source, Digest(source), 1, 420);
+        if (role == "source")
+        {
+            var failure = await Assert.ThrowsAsync<InvalidDataException>(() => SnapshotStore.CaptureAsync(
+                [input], new string('a', 64), new string('b', 64), destination, default));
+            Assert.Equal("A capture path contains a link.", failure.Message);
+            Assert.False(Path.Exists(destination));
+        }
+        else
+        {
+            Assert.Equal("destination", role);
+            var failure = await Assert.ThrowsAsync<IOException>(() => SnapshotStore.CaptureAsync(
+                [input], new string('a', 64), new string('b', 64), destination, default));
+            Assert.Equal("Capture destination must be absent.", failure.Message);
+        }
+        Assert.Equal(missing, new FileInfo(link).LinkTarget);
+        Assert.False(File.Exists(missing));
+        Assert.Equal("x", await File.ReadAllTextAsync(source));
+        Assert.Empty(Directory.EnumerateDirectories(root.Path, ".capture-*"));
+    }
+
 }

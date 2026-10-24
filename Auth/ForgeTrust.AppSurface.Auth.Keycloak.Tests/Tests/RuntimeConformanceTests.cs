@@ -97,6 +97,192 @@ public sealed class RuntimeConformanceTests
         AssertFailure(fixture with { Actual = fixture.WithLink("etc/ssl/certs/ca-certificates.crt", "etc/ssl/certs/ca-certificates.crt").Actual }, "certificate store");
     }
 
+    [Theory]
+    [InlineData("path-exclude=\n")]
+    [InlineData("path-include=bad\\path\n")]
+    public void Policy_rejects_empty_or_backslash_patterns(string policy)
+    {
+        var fixture = RuntimeFixture.Create().WithPolicy(policy);
+        Assert.Throws<InvalidDataException>(() => RuntimeConformance.ReadPolicy(fixture.Baseline, fixture.Actual));
+    }
+
+    [Fact]
+    public void Signed_payload_inventory_rejects_missing_types_ownership_and_undeclared_conffiles()
+    {
+        var fixture = RuntimeFixture.Create();
+        AssertFailure(fixture.Without("usr/bin/runtime-core"), "Signed regular payload");
+        AssertFailure(fixture.With("usr/bin/runtime-core", "directory"), "Signed regular payload");
+        AssertFailure(fixture.WithStatus(fixture.StatusActual.Replace("Package: base-files\nVersion: 1\nArchitecture: amd64\nStatus: install ok installed\n\n", "", StringComparison.Ordinal)), "Unapproved package removal");
+        AssertFailure(fixture with { RemovedPackage = fixture.RemovedPackage with { ExpectedVersion = "wrong" } }, "Removed package baseline");
+        AssertFailure(fixture with { RequiredPackage = fixture.RequiredPackage with { Conffiles = ["etc/missing.conf"] } }, "Signed conffile is absent");
+        AssertFailure(fixture with { RequiredPackage = fixture.RequiredPackage with { Conffiles = ["etc/passwd"] } }, "Conffile is not present");
+        var wrongOwner = fixture.Actual.Entries.Select(x => x.Path == "usr/bin/runtime-core" ? x with { Uid = 9 } : x).ToImmutableArray();
+        AssertFailure(fixture with { Actual = fixture.Actual with { Entries = wrongOwner } }, "ownership or mode");
+        var wrongGroup = fixture.Actual.Entries.Select(x => x.Path == "usr/bin/runtime-core" ? x with { Gid = 9 } : x).ToImmutableArray();
+        AssertFailure(fixture with { Actual = fixture.Actual with { Entries = wrongGroup } }, "ownership or mode");
+    }
+
+    [Fact]
+    public void Certificate_links_support_relative_paths_and_reject_invalid_targets()
+    {
+        var fixture = RuntimeFixture.Create().WithLink("etc/ssl/certs/ca-certificates.crt", "../../../usr/share/ca-certificates/ca.pem");
+        var result = RuntimeConformance.Verify(fixture.Baseline, fixture.Actual, [fixture.RequiredPackage], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, fixture.Actual));
+        Assert.NotEmpty(result.Files);
+        AssertFailure(fixture.WithLink("etc/ssl/certs/ca-certificates.crt", ""), "certificate store");
+        AssertFailure(fixture.WithLink("etc/ssl/certs/ca-certificates.crt", "bad\\target"), "certificate store");
+        AssertFailure(fixture.WithLink("etc/ssl/certs/ca-certificates.crt", "../../../../outside"), "Symlink escapes");
+        AssertFailure(fixture.With("etc/ssl/certs/ca-certificates.crt", "directory"), "certificate store");
+    }
+
+    [Fact]
+    public void Status_requires_payload_and_unique_complete_installed_records()
+    {
+        var fixture = RuntimeFixture.Create();
+        AssertFailure(fixture.Without("var/lib/dpkg/status"), "status payload");
+        AssertFailure(fixture.WithStatus(fixture.StatusActual + "\n" + fixture.StatusActual), "Duplicate dpkg package identity");
+        AssertFailure(fixture.WithStatus(fixture.StatusActual.Replace("Package: runtime-core", "Package: runtime-core\nPackage: duplicate", StringComparison.Ordinal)), "Duplicate dpkg status field");
+        var withContinuations = fixture.WithStatus(fixture.StatusActual.Replace("Package: runtime-core", "malformed\n Package: ignored\n\tVersion: ignored\nPackage: runtime-core", StringComparison.Ordinal));
+        AssertFailure(withContinuations with { Actual = withContinuations.Actual with { ConfigUser = "0:0" } }, "Runtime user");
+    }
+
+    [Theory]
+    [InlineData("keycloak:x:9:0::/opt/keycloak:/usr/sbin/nologin\n")]
+    [InlineData("keycloak:x:1000:9::/opt/keycloak:/usr/sbin/nologin\n")]
+    [InlineData("keycloak:x:1000:0::/wrong:/usr/sbin/nologin\n")]
+    [InlineData("keycloak:x:1000:0::/opt/keycloak:/bin/bash\n")]
+    [InlineData("malformed\n")]
+    public void EveryPasswdIdentityFieldIsRequired(string passwd)
+        => AssertFailure(RuntimeFixture.Create().WithPasswd(passwd), "Keycloak account identity");
+
+    [Theory]
+    [InlineData("type")]
+    [InlineData("uid")]
+    [InlineData("gid")]
+    public void EveryHomeIdentityFieldIsRequired(string field)
+    {
+        var fixture = RuntimeFixture.Create();
+        var entries = fixture.Actual.Entries.Select(x => x.Path != "opt/keycloak" ? x : field switch
+        {
+            "type" => x with { Type = "file" },
+            "uid" => x with { Uid = 9 },
+            _ => x with { Gid = 9 }
+        }).ToImmutableArray();
+        AssertFailure(fixture with { Actual = fixture.Actual with { Entries = entries } }, "Runtime home");
+    }
+
+    [Fact]
+    public void CapturedPolicyRequiresRegularPayloadAndOrderedDirectiveMeaning()
+    {
+        var fixture = RuntimeFixture.Create();
+        foreach (var field in new[] { "absent", "directory", "payload" })
+        {
+            var actual = fixture.Actual with
+            {
+                Entries = fixture.Actual.Entries.Where(x => field != "absent" || x.Path != "etc/dpkg/dpkg.cfg.d/excludes")
+                .Select(x => x.Path != "etc/dpkg/dpkg.cfg.d/excludes" ? x : field == "directory" ? x with { Type = "directory" } : x with { TargetedPayload = null }).ToImmutableArray()
+            };
+            Assert.Throws<InvalidDataException>(() => RuntimeConformance.ReadPolicy(fixture.Baseline, actual));
+        }
+        var comments = fixture.WithPolicy("# reviewed order\n\npath-exclude=/usr/share/doc/*\npath-include=/usr/share/doc/kept.txt\n");
+        var policy = RuntimeConformance.ReadPolicy(comments.Baseline, comments.Actual);
+        Assert.Equal(2, policy.DpkgRules.Count);
+        Assert.Equal("usr/share/doc/*", policy.DpkgRules[0].Pattern);
+        Assert.False(policy.DpkgRules[0].Include); Assert.True(policy.DpkgRules[1].Include);
+    }
+
+    [Fact]
+    public void ExcludedNewFileCannotAppearAndExcludedOldFileCannotDisappear()
+    {
+        var fixture = RuntimeFixture.Create();
+        AssertFailure(fixture.Without("usr/share/doc/excluded.txt"), "Excluded baseline file");
+        var noBaseline = fixture.Baseline with { Entries = fixture.Baseline.Entries.Where(x => x.Path != "usr/share/doc/excluded.txt").ToImmutableArray() };
+        AssertFailure(fixture with { Baseline = noBaseline }, "Excluded new file");
+        var absent = fixture.Without("usr/share/doc/excluded.txt") with { Baseline = noBaseline };
+        var result = RuntimeConformance.Verify(absent.Baseline, absent.Actual, [absent.RequiredPackage], [absent.RemovedPackage], RuntimeConformance.ReadPolicy(absent.Baseline, absent.Actual));
+        Assert.Contains(result.Payloads, x => x.Path == "usr/share/doc/excluded.txt" && x.Disposition == "excluded-by-dpkg-policy");
+    }
+
+    [Fact]
+    public void NullSignedHashCannotBeAcceptedAndDigestPrefixIsNormalized()
+    {
+        var fixture = RuntimeFixture.Create();
+        var missing = fixture.RequiredPackage with { Files = fixture.RequiredPackage.Files.Select(x => x.Path == "usr/bin/runtime-core" ? x with { Sha256 = null } : x).ToImmutableArray() };
+        AssertFailure(fixture with { RequiredPackage = missing }, "Signed regular payload");
+        var prefixed = fixture.RequiredPackage with { Files = fixture.RequiredPackage.Files.Select(x => x with { Sha256 = "sha256:" + x.Sha256 }).ToImmutableArray() };
+        var result = RuntimeConformance.Verify(fixture.Baseline, fixture.Actual, [prefixed], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, fixture.Actual));
+        Assert.Equal(4, result.Payloads.Length);
+    }
+
+    [Fact]
+    public void CertificateLinkDepthAndRelativeDotsAreBounded()
+    {
+        var fixture = RuntimeFixture.Create().WithLink("etc/ssl/certs/ca-certificates.crt", "./../../../usr/share/ca-certificates//ca.pem");
+        var result = RuntimeConformance.Verify(fixture.Baseline, fixture.Actual, [fixture.RequiredPackage], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, fixture.Actual));
+        Assert.NotEmpty(result.Files);
+        for (var i = 0; i < 34; i++) fixture = fixture.WithLink(i == 0 ? "etc/ssl/certs/ca-certificates.crt" : "chain/" + i, "/chain/" + (i + 1));
+        AssertFailure(fixture, "certificate store");
+    }
+
+    [Theory]
+    [InlineData("/absolute")]
+    [InlineData("bad\\path")]
+    [InlineData("a//item")]
+    [InlineData("a/./item")]
+    public void InvalidRuntimeCanonicalPathsCannotBecomeObservations(string path)
+    {
+        var fixture = RuntimeFixture.Create();
+        var extra = fixture.Actual.Entries[0] with { Path = path };
+        AssertFailure(fixture with { Actual = fixture.Actual with { Entries = fixture.Actual.Entries.Add(extra) } }, "Unsafe runtime path");
+    }
+
+    [Theory]
+    [InlineData("././usr/bin/runtime-core")]
+    [InlineData("usr/bin/runtime-core/")]
+    public void NonAmbiguousRuntimeRelativeSpellingsResolveToTheSameIdentity(string spelling)
+    {
+        var fixture = RuntimeFixture.Create();
+        var original = fixture.Actual.Entries.Single(x => x.Path == "usr/bin/runtime-core");
+        var actual = fixture.Actual with { Entries = fixture.Actual.Entries.Where(x => x.Path != original.Path).Append(original with { Path = spelling }).ToImmutableArray() };
+        var result = RuntimeConformance.Verify(fixture.Baseline, actual, [fixture.RequiredPackage], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, actual));
+        Assert.Contains(result.Payloads, x => x.Path == "usr/bin/runtime-core" && x.Disposition == "present");
+    }
+
+    [Fact]
+    public void ConffileHashIsCheckedEvenWhenOrdinaryPayloadPolicyExcludesIt()
+    {
+        var fixture = RuntimeFixture.Create().WithPolicy("path-exclude=etc/runtime.conf\npath-exclude=usr/share/doc/*\npath-include=usr/share/doc/kept.txt\n");
+        var changed = fixture.RequiredPackage with { Files = fixture.RequiredPackage.Files.Select(x => x.Path == "etc/runtime.conf" ? x with { Sha256 = Hash("wrong") } : x).ToImmutableArray() };
+        AssertFailure(fixture with { RequiredPackage = changed }, "Signed conffile hash mismatch");
+    }
+
+    [Fact]
+    public void EmptyRootRecordAndNullPasswdRemainUnambiguous()
+    {
+        var fixture = RuntimeFixture.Create();
+        var root = fixture.Actual.Entries[0] with { Path = "./", Type = "directory", TargetedPayload = null };
+        var withRoot = fixture.Actual with { Entries = fixture.Actual.Entries.Add(root) };
+        Assert.NotEmpty(RuntimeConformance.Verify(fixture.Baseline, withRoot, [fixture.RequiredPackage], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, withRoot)).Files);
+        var missingPayload = fixture.Actual with { Entries = fixture.Actual.Entries.Select(x => x.Path == "etc/passwd" ? x with { TargetedPayload = null } : x).ToImmutableArray() };
+        AssertFailure(fixture with { Actual = missingPayload }, "Keycloak account identity");
+    }
+
+    [Fact]
+    public void MissingCertificateTargetIsRejectedEvenWhenTheLinkIsWellFormed()
+    {
+        var fixture = RuntimeFixture.Create().WithLink("etc/ssl/certs/ca-certificates.crt", "/usr/share/ca-certificates/missing.pem");
+        AssertFailure(fixture, "certificate store");
+    }
+
+    [Fact]
+    public void SignedDirectoryCannotStandInForAConffileRecord()
+    {
+        var fixture = RuntimeFixture.Create();
+        var directory = fixture.RequiredPackage.Files[0] with { Path = "etc", Kind = "directory", Sha256 = null };
+        var package = fixture.RequiredPackage with { Files = fixture.RequiredPackage.Files.Insert(0, directory) };
+        var observed = RuntimeConformance.Verify(fixture.Baseline, fixture.Actual, [package], [fixture.RemovedPackage], RuntimeConformance.ReadPolicy(fixture.Baseline, fixture.Actual));
+        Assert.Contains(observed.Payloads, x => x.Path == "etc/runtime.conf" && x.Disposition == "present");
+    }
+
     private static void AssertFailure(RuntimeFixture fixture, string expectedMessage)
     {
         var error = Assert.Throws<InvalidDataException>(() => RuntimeConformance.Verify(

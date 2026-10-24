@@ -1,6 +1,8 @@
 # Issue 887 feasibility fixture card
 
-Status: four final-image static/OS/scan checks pass; arm64 full retained gates pass and amd64 full retained gates reach upgrade/restore but fail isolated-browser startup readiness under emulation. Updated 2026-10-24. Public API commitment remains gated on complete system feasibility.
+Current status: the [atomic file publication correction](#atomic-file-publication-correction--2026-10-24) is a newer production change awaiting final candidate verification. The [integrated qualification v3](#current-integrated-qualification-v3--2026-10-24) remains retained production/sample proof for its earlier source checkpoint. Earlier sections preserve their historical pending/failure states.
+
+Historical starting status: four final-image static/OS/scan checks pass; arm64 full retained gates pass and amd64 full retained gates reach upgrade/restore but fail isolated-browser startup readiness under emulation. Updated 2026-10-24. Public API commitment remained gated on complete system feasibility at that checkpoint.
 
 This card records the current consumer inventory for the [approved captured-plan design](issue-887-verified-keycloak-security-recipes.md) and [source case #887](https://github.com/forge-trust/AppSurface/issues/887). Prototype work does not commit public API or supported profile claims.
 
@@ -253,3 +255,44 @@ The production SDK passes capture, materialization, and exact-image inspection f
 The actual current public caller tests also pass all three operation families together against independently authored OCI, signed repository, package and archive bytes, including exact repaired CLI byte equality and provenance drift rejection. The focused pure suite passed 540 tests before removal of two redundant fixture-self assertions; measured pure-package coverage was 97.04% line and 85.13% branch. The Aspire suite passed 280 tests and the documentation policy suite passed 11 tests. The unchanged complete solution coverage gate remains in progress and is required before the draft PR.
 
 A separate compiled consumer outside this checkout restored `ForgeTrust.AppSurface.Auth.Keycloak/0.0.0-issue887-local` and its two exact declared dependencies solely from an owned local feed into an absent package cache. Restore, build, and real neutral capture/materialize/inspect all exited zero; the execution took 51.312 seconds. This is preliminary unpublished package closure only. It does not satisfy the separately authorized actual published-byte adoption gate. Current private receipts are indexed by `.gstack/tmp/issue-887/final-private-verification/current-production-proof.json`; the eventual draft must carry final solution/QA/CI results as well.
+
+
+## Current integrated qualification v3 — 2026-10-24
+
+This checkpoint supersedes earlier pending production/sample and native-amd64 feasibility statuses without discarding their failure receipts. The compiled production SDK completed capture, materialization and exact-image inspection for all four retained recipes with the integrated stage events, bounded export and invocation disk accounting. The v3 receipt is `.gstack/tmp/issue-887/final-private-verification/current-four-recipes-v3/receipt.json`; each fixture directory retains its actual plan, image, repaired archive and evidence identities.
+
+| Fixture | Automated v3 elapsed time | Passing observations |
+| --- | ---: | ---: |
+| neutral-arm64 | 32.349s | 887 |
+| skoolit-arm64 | 33.524s | 902 |
+| neutral-amd64 | 39.016s | 888 |
+| skoolit-amd64 | 41.888s | 903 |
+
+The checked-in [portable arm64 fixture](../../examples/auth-keycloak-security-recipes/fixtures/README.md#prepare-portable-bindings-without-changing-the-recipe) was prepared from the owner's exact retained digest store: all 41 bindings passed length/hash verification and the recipe bytes remained unchanged (`fixture-prepare-arm64.log`). The compiled [sample full flow](../../examples/auth-keycloak-security-recipes/README.md#run-the-checked-in-neutral-fixture) then captured those bindings, materialized, invoked the offline Docker build, resolved the resulting immutable image, inspected 887 checks and published fresh evidence (`sample-current-v3.log`). Its stage sidecar contains 16 structured start/terminal events. Its actual host receipt records Docker client/server `29.7.2` and buildx `v0.36.1-desktop.1`. The separate wrong-identity invocation printed `wrong-identity=rejected`; the forbidden passing-evidence path is absent, while its diagnostic stage sidecar is retained (`sample-current-v3-wrong-identity.log`). These private logs are retained under `.gstack/tmp/issue-887/final-private-verification/`.
+
+The [native amd64 retained full gate](#native-amd64-retained-full-gate--passed-2026-10-24), run [40079400914](https://github.com/forge-trust/skoolit/actions/runs/40079400914), remains passed on the same retained Skoolit image. The earlier local emulation failures remain historical; no retained assertion or timeout was waived.
+
+At this checkpoint the focused pure v37 suite passes **809/809**, with zero failures or skips. No v38 compilation pass is claimed. The unchanged [full solution coverage hard gate](../../scripts/coverage-solution.sh), including aggregate and patch requirements, remains pending and required before the draft PR; focused tests and actual-image proof do not replace it. Final frozen-source review and delivery checks remain separate.
+
+These are automated runs with retained materials and existing host/image caches. They establish no new profile latency, cold-cache onboarding time or human usability result. The [cold-run protocol and human novice walkthrough](../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/docs/cold-run.md) remain unexecuted; the earlier author-biased agent reading review is separately labelled. Both Keycloak packages remain publication-held. After reviewed integration, coordinated publication and the exact published-byte consumer proof still require separate release authorization. The earlier outside-checkout local-feed proof remains preliminary unpublished closure only.
+
+
+## Atomic file publication correction — 2026-10-24
+
+The v40 evidence-publication race reproduced a real contract failure: two competing writers could both report success. Unix `File.Move` can check destination existence before a later rename, allowing the concurrent winner to be replaced. The failing receipt remains `production-tests-v40.log` under `.gstack/tmp/issue-887/final-private-verification/`; it is not a passing full-suite result.
+
+The internal [AtomicFilePublication](../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/AtomicFilePublication.cs) helper now publishes complete owned staged files with the operating system's single create-if-absent `link` primitive on supported Linux/macOS hosts. Evidence writing, bounded binary export, archive output and downloaded material publication use it. Staging and destination must be on the same local filesystem with hard-link support. Unsupported filesystems and existing destination nodes reject; there is no copy/rename fallback or external executable. After commit, only the invocation's staged name is removed, and failed staging-name cleanup does not remove the winner or misreport committed publication. See the [filesystem prerequisites](../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/docs/host-prerequisites.md) for the supported boundary.
+
+The focused follow-up passes **20/20**, zero failures or skips (`atomic-publication-green.log`), including the regression's 32 concurrent publication rounds checking one complete winner, preserved existing output and rejected existing destination nodes. This is focused proof of the corrected atomic contract. It does not establish a new full-suite, cross-host or solution coverage pass.
+
+The candidate is not frozen. The v3 actual-image/sample results and v37 focused-suite result above remain earlier receipts; they do not verify this additional production change. Final candidate tests, review and the unchanged full solution aggregate/patch coverage hard gate remain required before the draft PR. Publication of both packages remains separately held, and no published-byte adoption or human novice/cold-cache result is claimed.
+
+## Current validation checkpoint v48 — 2026-10-24
+
+The focused Debug SDK suite passes **1,010/1,010** tests with zero failures or skips and no build warnings (`production-tests-v48.log`). SDK coverage is 97.65% line and 94.34% branch. A diagnostic report replacing only this package in the earlier solution report passes the unchanged aggregate/patch thresholds, with patch line 94.82% and branch 94.33%; this mixed diagnostic is **not** a fresh full-solution gate. The exact `./scripts/coverage-solution.sh` remains mandatory before the draft PR.
+
+The current v4 retained-image runs pass all three operation families for neutral arm64, Skoolit arm64, neutral amd64 and Skoolit amd64 with 887/902/888/903 actual observations. The manifest identities remain those in the earlier production qualification, including `sha256:9a35806a9098145212faaf1e4935d82076ca48033b7fcf74b4c314dc0fd568a2` from the passing native amd64 system gate. Their private receipt is `current-four-recipes-v4/verification-summary.json` under the task's final validation directory. Those runs precede the final review's metadata-bound forwarding and failed-export cleanup repairs; they are retained proof, with final frozen-candidate verification still required.
+
+Final review reproduced the same absent-destination race in the Aspire release-evidence writer: two synchronized calls both reported success. It now shares the SDK's create-if-absent implementation; the 32-round concurrent writer regression passes and preserves exactly one complete tuple. A forced invocation disk-budget failure also reproduced an export child remaining alive after return. Bounded child termination/draining now preserves the primary budget failure; both real-process regressions pass. Source manifest metadata now uses the caller's exact configured cap before allocation, as do the other metadata reads.
+
+Named approvals, exact historical policy, source-only 256 MiB and final-image 128 MiB limits remain as recorded above. No scan, browser, upgrade/restore, coverage or publishing gate is relaxed. Both packages remain publication-held; full solution validation, final delivery checks and draft CI are pending. Cold-cache and human novice measurements, coordinated authorized publication, and published-byte adoption remain separate and unexecuted.

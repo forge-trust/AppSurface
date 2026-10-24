@@ -22,6 +22,29 @@ public sealed class OciReaderTests
     }
 
     [Fact]
+    public void A_whiteout_removing_a_selected_path_fails_without_publishing_output()
+    {
+        using var fixture = OciFixture.Create();
+        var output = Path.Combine(fixture.Root, "selected");
+        Assert.Throws<InvalidDataException>(() => new OciReader().Read(fixture.Archive, fixture.Expected,
+            new OciReadSelection(new HashSet<string>(["etc/old"], StringComparer.Ordinal), output)));
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void Selection_rejects_a_linked_or_non_directory_ancestor()
+    {
+        var hash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes("payload")));
+        var observed = new Dictionary<string, ObservedFile>
+        {
+            ["etc"] = new("etc", "symlink", "", 0, 511, 0, 0, "target", 0),
+            ["etc/file"] = new("etc/file", "file", hash, 7, 420, 0, 0, null, 0)
+        };
+        Assert.Throws<InvalidDataException>((Action)(() => OciReader.ValidateExpectedFiles(observed,
+            new Dictionary<string, OciExpectedFile> { ["etc/file"] = new("etc/file", hash) })));
+    }
+
+    [Fact]
     public void Rejects_duplicate_json_diff_id_and_tar_budget_without_large_payloads()
     {
         using var fixture = OciFixture.Create(duplicateIndex: true);
@@ -44,7 +67,7 @@ public sealed class OciReaderTests
 
     private sealed class OciFixture : IDisposable
     {
-        internal string Archive { get; private init; } = ""; internal OciExpectedImage Expected { get; private init; } = null!; private string Root { get; init; } = "";
+        internal string Archive { get; private init; } = ""; internal OciExpectedImage Expected { get; private init; } = null!; internal string Root { get; init; } = "";
         internal static OciFixture Create(bool duplicateIndex = false, long layerEntryBytes = 1024 * 1024, bool badConfigType = false, bool omitSecondLayer = false, bool badSize = false)
         {
             var root = Path.Combine(Path.GetTempPath(), "oci-tests-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(root);
@@ -63,6 +86,8 @@ public sealed class OciReaderTests
         private static byte[] Tar((string Name, string Value)[] files) { using var ms = new MemoryStream(); using (var tw = new TarWriter(ms, true)) foreach (var f in files) Entry(tw, f.Name, Encoding.UTF8.GetBytes(f.Value)); ms.Write(new byte[1024]); return ms.ToArray(); }
         private static byte[] Gzip(byte[] b) { using var ms = new MemoryStream(); using (var gz = new GZipStream(ms, CompressionLevel.SmallestSize, true)) gz.Write(b); return ms.ToArray(); }
         private static byte[] UnGzip(byte[] b) { using var input = new MemoryStream(b); using var gz = new GZipStream(input, CompressionMode.Decompress); using var output = new MemoryStream(); gz.CopyTo(output); return output.ToArray(); }
-        private static string Hex(byte[] b) => Convert.ToHexString(b).ToLowerInvariant(); public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
+        private static string Digest(byte[] b) => "sha256:" + Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
+        private static string Hex(byte[] b) => Convert.ToHexString(b).ToLowerInvariant();
+        public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
     }
 }

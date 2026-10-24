@@ -644,11 +644,42 @@ public sealed class AppSurfaceKeycloakThemeOptionsTests
             IEnumerable<ForgeTrust.AppSurface.Auth.Keycloak.KeycloakObservedCheck> observations) =>
             new("plan", selected, ForgeTrust.AppSurface.Auth.Keycloak.KeycloakRecipeMode.ThemeOnly, observations);
         evidence.VerifyObservedImage(Observed(image, checks));
+        // Extra files in another theme do not change this tuple's exact theme manifest.
+        evidence.VerifyObservedImage(Observed(image, checks.Append(new("file:opt/keycloak/themes/other/login/extra.ftl", "hash", "hash"))));
+        // An additional file in this named theme must not authenticate a different packaged manifest.
+        Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image,
+            checks.Append(new($"file:opt/keycloak/themes/{contract.Registration.Name}/login/extra.ftl", "hash", "hash")))));
         Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image with { Platform = "unsupported" }, checks)));
         Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image with { ManifestDigest = "sha256:" + new string('c', 64) }, checks)));
         Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Skip(1))));
         Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Concat([checks[0]]))));
         Assert.Throws<AppSurfaceKeycloakException>(() => evidence.VerifyObservedImage(Observed(image, checks.Select(check => check with { Observed = "sha256:" + new string('0', 64) }))));
+    }
+
+    [Fact]
+    public async Task ThemeReleaseEvidence_ConcurrentWritesPreserveExactlyOneCompleteTuple()
+    {
+        using var directory = new TempDirectory();
+        var contract = AppSurfaceKeycloakThemeBuildContract.Create(CreateOptions(CreateTheme(directory.Path, "application")));
+        var first = AppSurfaceKeycloakThemeReleaseEvidence.Create(contract, $"registry.example/theme:1@sha256:{new string('b', 64)}");
+        var second = AppSurfaceKeycloakThemeReleaseEvidence.Create(contract, $"registry.example/theme:1@sha256:{new string('c', 64)}");
+        using var ready = new Barrier(2);
+        for (var round = 0; round < 32; round++)
+        {
+            var output = Path.Join(directory.Path, $"concurrent-{round}.json");
+            Task<string?> Write(AppSurfaceKeycloakThemeReleaseEvidence evidence) => Task.Run(() =>
+            {
+                AppSurfaceKeycloakThemeReleaseEvidence.BeforeMoveForTesting = _ => ready.SignalAndWait(TimeSpan.FromSeconds(10));
+                try { evidence.Write(output); return evidence.FinalImage; }
+                catch (AppSurfaceKeycloakException) { return null; }
+                finally { AppSurfaceKeycloakThemeReleaseEvidence.BeforeMoveForTesting = null; }
+            });
+            var writes = await Task.WhenAll(Write(first), Write(second));
+            var winner = Assert.Single(writes, value => value is not null);
+            using var observed = JsonDocument.Parse(File.ReadAllText(output));
+            Assert.Equal(winner, observed.RootElement.GetProperty("finalImage").GetString());
+            Assert.Empty(Directory.EnumerateFiles(directory.Path, $".concurrent-{round}.json.*.tmp"));
+        }
     }
 
     [Fact]

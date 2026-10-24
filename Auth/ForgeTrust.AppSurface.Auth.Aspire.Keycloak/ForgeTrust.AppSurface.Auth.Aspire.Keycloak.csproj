@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <Compile Remove="realm-ready/**/*.cs" />
+    <Compile Include="../ForgeTrust.AppSurface.Auth.Keycloak/AtomicFilePublication.cs" Link="AtomicFilePublication.cs" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Auth.Aspire.Keycloak.RealmReadyWorker" />
     <ProjectReference Include="../ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />

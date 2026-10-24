@@ -34,3 +34,9 @@ Current production qualification passes all four retained recipe fixtures: neutr
 - [Migration matrix and decision guide](docs/migration.md)
 - [Native CI and host prerequisites](docs/host-prerequisites.md)
 - [Example harness](../../examples/auth-keycloak-security-recipes/README.md)
+
+- [Complete neutral JSON, material receipts and acquisition](../../examples/auth-keycloak-security-recipes/fixtures/README.md)
+- [Profile ownership, reevaluation and retirement](docs/profile-lifecycle.md)
+- [Material retention and rebuild availability](docs/material-retention.md)
+- [Prepared cold-run and novice walkthrough record (unexecuted)](docs/cold-run.md)
+- [Contributing](../../CONTRIBUTING.md), [license terms](../../LICENSE), and [private security reporting](../../SECURITY.md)

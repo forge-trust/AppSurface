@@ -23,8 +23,10 @@ internal sealed class SecurityRecipeFixture : IDisposable
         KeycloakInspectionImage finalImage,
         ImmutableDictionary<string, string> materialPaths,
         string finalArchivePath)
-        => (Root, Recipe, Policy, Bindings, FinalImage, MaterialPaths, FinalArchivePath) =
-            (root, recipe, policy, bindings, finalImage, materialPaths, finalArchivePath);
+    {
+        (Root, Recipe, Policy, Bindings, FinalImage, MaterialPaths, FinalArchivePath) =
+                (root, recipe, policy, bindings, finalImage, materialPaths, finalArchivePath);
+    }
 
     internal string Root { get; }
     internal KeycloakSecurityRecipe Recipe { get; }
@@ -83,20 +85,30 @@ internal sealed class SecurityRecipeFixture : IDisposable
                     : new KeycloakMaterialReference(item.Key, string.Empty, Hex(item.Value), item.Value.LongLength) { CapturedHostInput = true }).ToImmutableArray();
             var image = KeycloakImageIdentity.Create(oci.IndexDigest, oci.ManifestDigest, "linux/amd64") with
             {
-                IndexMaterialId = "source-index", ArchiveMaterialId = "source-archive",
-                ConfigDigest = oci.ConfigDigest, DiffIds = [oci.DiffId]
+                IndexMaterialId = "source-index",
+                ArchiveMaterialId = "source-archive",
+                ConfigDigest = oci.ConfigDigest,
+                DiffIds = [oci.DiffId]
             };
             var runtime = new OciIdentity("runtime", oci.IndexDigest) with
             {
                 Id = "runtime",
-                Platform = "linux/amd64", ArchiveMaterialId = "runtime-archive", IndexMaterialId = "runtime-index",
-                PlatformManifestDigest = oci.ManifestDigest, ConfigDigest = oci.ConfigDigest, DiffIds = [oci.DiffId]
+                Platform = "linux/amd64",
+                ArchiveMaterialId = "runtime-archive",
+                IndexMaterialId = "runtime-index",
+                PlatformManifestDigest = oci.ManifestDigest,
+                ConfigDigest = oci.ConfigDigest,
+                DiffIds = [oci.DiffId]
             };
             var frontend = new OciIdentity("frontend", oci.IndexDigest) with
             {
                 Id = "frontend",
-                Platform = "linux/amd64", ArchiveMaterialId = "frontend-archive", IndexMaterialId = "frontend-index",
-                PlatformManifestDigest = oci.ManifestDigest, ConfigDigest = oci.ConfigDigest, DiffIds = [oci.DiffId]
+                Platform = "linux/amd64",
+                ArchiveMaterialId = "frontend-archive",
+                IndexMaterialId = "frontend-index",
+                PlatformManifestDigest = oci.ManifestDigest,
+                ConfigDigest = oci.ConfigDigest,
+                DiffIds = [oci.DiffId]
             };
             var profile = RuntimeProfile.Create("runtime", "1", "temurin-ubuntu", ["keycloak-26.7.2"]) with
             {
@@ -113,7 +125,9 @@ internal sealed class SecurityRecipeFixture : IDisposable
             var recipe = KeycloakSecurityRecipe.Create(1, image, [frontend],
                 [new KeycloakOperation.RuntimeProfileOperation(profile)], KeycloakRecipeMode.Security, [], materials.Select(x => x.Id)) with
             {
-                KeycloakVersion = "26.7.2", EntrypointPath = "/opt/keycloak/bin/kc.sh", SourceProfiles = ["keycloak-26.7.2"],
+                KeycloakVersion = "26.7.2",
+                EntrypointPath = "/opt/keycloak/bin/kc.sh",
+                SourceProfiles = ["keycloak-26.7.2"],
                 MaterialReferences = materials,
                 ResourceLimits = new(1L << 30, 65536, 1L << 30, 1L << 30, 300)
             };
@@ -192,7 +206,25 @@ internal sealed class SecurityRecipeFixture : IDisposable
             ["etc/passwd"] = Encoding.UTF8.GetBytes("root:x:0:0:root:/root:/bin/sh\nkeycloak:x:1000:0:Keycloak:/opt/keycloak:/usr/sbin/nologin\n"),
             ["etc/ssl/certs/ca-certificates.crt"] = Encoding.UTF8.GetBytes("fixture-certificate\n"),
             ["opt/java/openjdk/lib/security/cacerts"] = Encoding.UTF8.GetBytes("fixture-java-certificate\n"),
-            ["opt"] = [], ["opt/keycloak"] = [], ["opt/keycloak/bin"] = [], ["opt/keycloak/bin/client"] = [], ["opt/keycloak/lib"] = [], ["usr"] = [], ["usr/lib"] = [], ["opt/java"] = [], ["opt/java/openjdk"] = [], ["opt/java/openjdk/lib"] = [], ["opt/java/openjdk/lib/security"] = [], ["etc"] = [], ["etc/dpkg"] = [], ["etc/dpkg/dpkg.cfg.d"] = [], ["etc/ssl"] = [], ["etc/ssl/certs"] = [], ["var"] = [], ["var/lib"] = [], ["var/lib/dpkg"] = []
+            ["opt"] = [],
+            ["opt/keycloak"] = [],
+            ["opt/keycloak/bin"] = [],
+            ["opt/keycloak/bin/client"] = [],
+            ["opt/keycloak/lib"] = [],
+            ["usr"] = [],
+            ["usr/lib"] = [],
+            ["opt/java"] = [],
+            ["opt/java/openjdk"] = [],
+            ["opt/java/openjdk/lib"] = [],
+            ["opt/java/openjdk/lib/security"] = [],
+            ["etc"] = [],
+            ["etc/dpkg"] = [],
+            ["etc/dpkg/dpkg.cfg.d"] = [],
+            ["etc/ssl"] = [],
+            ["etc/ssl/certs"] = [],
+            ["var"] = [],
+            ["var/lib"] = [],
+            ["var/lib/dpkg"] = []
         };
         var directories = files.Where(x => x.Value.Length == 0).Select(x => x.Key).ToHashSet(StringComparer.Ordinal);
         if (extra is not null)

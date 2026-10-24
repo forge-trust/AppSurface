@@ -149,7 +149,7 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
     /// Requires actual observed image evidence for this theme release tuple.
     /// </summary>
     /// <param name="observed">Evidence returned only by the shared exact-image inspector.</param>
-    /// <remarks>Requires image/platform binding and an actual file observation for every packaged theme member.</remarks>
+    /// <remarks>Requires image/platform binding, exact theme inventory, and an actual hash observation for every packaged member.</remarks>
     /// <exception cref="AppSurfaceKeycloakException">The inspected image or platform differs from this release tuple.</exception>
     public void VerifyObservedImage(ForgeTrust.AppSurface.Auth.Keycloak.VerifiedKeycloakImageEvidence observed)
     {
@@ -161,9 +161,15 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
             throw PackagedImageInvalid("the actual inspected image or platform does not match this release tuple.");
         }
 
+        var prefix = $"file:opt/keycloak/themes/{ThemeName}/";
+        if (observed.Checks.Count(check => check.Id.StartsWith(prefix, StringComparison.Ordinal)) != _expectedThemeFiles.Count)
+        {
+            throw PackagedImageInvalid("the inspected theme inventory differs from the packaged manifest.");
+        }
+
         foreach (var file in _expectedThemeFiles)
         {
-            var path = $"file:opt/keycloak/themes/{ThemeName}/{file.RelativePath}";
+            var path = prefix + file.RelativePath;
             var expected = "sha256:" + file.Sha256;
             var matches = observed.Checks.Where(check => check.Id == path).ToArray();
             if (matches.Length != 1 || matches[0].Expected != expected || matches[0].Observed != expected)
@@ -208,7 +214,7 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(this, JsonOptions));
             BeforeMoveForTesting?.Invoke(destination);
-            File.Move(temporary, destination);
+            ForgeTrust.AppSurface.Auth.Keycloak.AtomicFilePublication.Publish(temporary, destination);
             return destination;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

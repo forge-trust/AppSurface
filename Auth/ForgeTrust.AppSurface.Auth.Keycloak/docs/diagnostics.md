@@ -27,3 +27,41 @@ SDK operations report `KeycloakSecurityException`; the strict `KeycloakCanonical
 `KeycloakEffectState.None` permits correction of the declared input. `Staged` means owned temporary data may exist and should be cleaned or inspected according to host policy. `Committed` means an accepted result exists. `Unknown` requires inspection before retry. `KeycloakRetryMetadata` never authorizes automatic retry; at most one explicit unchanged transient acquisition/probe retry may be allowed by the host policy.
 
 The sample's wrong-identity check deliberately changes only the supplied config digest to all zeroes and expects `inspectionfailed` or an earlier safe identity rejection. It does not manufacture a passing image or claim that the production fixture was inspected.
+
+
+## Four recovery walkthroughs
+
+These are recovery procedures for actual caller outcomes, not claims that every environmental failure has been executed in this checkout. Follow the actual typed code/effect when it is available; a host process failure can occur outside the SDK.
+
+| Scenario | What failed and effects | Safe identity to inspect | Next action |
+| --- | --- | --- | --- |
+| Pre-capture rejection | A duplicate `artifact-alignment` destination yields `Conflict` in Validation, effects `None`; no accepted snapshot exists. | Operation ID, duplicate image-internal destination, canonical recipe digest and independently approved policy digest. | Correct the complete declared group or obtain policy-owner approval for an actual authority change. Recompute `reviewedRecipeId`; capture into a fresh absent directory. Never retry an unchanged invalid declaration. |
+| Host-build failure | Docker cannot start or exits nonzero after context creation. The context is committed; the host must classify the image outcome, which may be absent, partial, or unknown. | Context digest and `Verify()` result; explicit local tag resolved to immutable manifest/config/platform if an image exists. | Correct Docker/store/capacity prerequisites. Inspect the local tag before deciding whether a fresh build is safe. Revalidate the same owned context immediately before building; a changed context requires rematerialization. No evidence is minted by a successful build alone. |
+| Inspection mismatch | For example, the supplied config digest is wrong: `InspectionFailed` or an earlier safe identity rejection; no passing evidence is returned. | Actual manifest/config/platform/diff IDs, plan/recipe/policy digests, and the failing file/check when reported. | Resolve the actual image again. If the image differs, correct the source/handler/composition, rebuild, and inspect that final digest. Never edit observed evidence or replace an observed hash with the expected value. |
+| Unknown commit acknowledgement | The caller loses acknowledgement around snapshot/context/evidence publication. Treat effects as `Unknown` until inspected, even if a subsequent invocation cannot see the earlier result. | Exact requested output role/path in private host logs, expected plan/context/image digests, complete committed inventory and evidence schema. | Stop retries. Inspect the actual destination: accept only a complete verified result matching the intended invocation; otherwise preserve it for diagnosis and choose a new absent destination after classifying effects. Never overwrite or delete another invocation's output to force success. |
+
+The compiled [sample entry point](../../../examples/auth-keycloak-security-recipes/Program.cs) handles safe input failures and the documented wrong-identity control. [Sample instructions](../../../examples/auth-keycloak-security-recipes/README.md) define exit codes and fresh output paths. An existing output is a conflict to preserve, not permission to overwrite it. See [material recovery](material-retention.md) for unavailable or withdrawn inputs.
+
+## Safe support reproduction
+
+The profile/security-response owner is listed in the [ownership guide](profile-lifecycle.md). For a non-sensitive defect use [GitHub issues](https://github.com/forge-trust/AppSurface/issues/new/choose) and the [contribution guide](../../../CONTRIBUTING.md). Suspected vulnerabilities, credentials, exploit details, or sensitive deployment facts belong in the [private security reporting flow](../../../SECURITY.md), not a public issue. The repository uses the [PolyForm Small Business license](../../../LICENSE); consult its actual terms and dependency notices before redistribution.
+
+Copy this template into the appropriate report and replace fields with safe observations. Omit a field if it cannot be shared safely; say `unavailable`, never invent a value.
+
+```text
+Package/coherent version or reviewed commit:
+Recipe schema / source profile / runtime and archive profile versions:
+.NET SDK/runtime / host OS+architecture / Docker version+store:
+Target image platform / inspector+transformer versions:
+Stable failure code / DiagnosticReference:
+Phase / operation ID / check ID if reported:
+Effect / recovery / RetryMetadata:
+CorrelationId (from the structured exception):
+Safe plan / recipe / policy / manifest / config digests:
+Expected vs observed safe identity (no source-machine path):
+Smallest synthetic reproduction and exact bounded action:
+Prior output preserved? Owned cleanup outcome? Attempts already made?:
+What is unavailable or unverified?:
+```
+
+Never attach credentials, realm exports, environment dumps, private material URLs, home-directory paths, raw nested exception messages, or unbounded Docker output. Keep restricted host logs private. Public reproduction inputs must be synthetic or explicitly approved for disclosure. A correlation ID routes a report; it does not grant access to private artifacts.

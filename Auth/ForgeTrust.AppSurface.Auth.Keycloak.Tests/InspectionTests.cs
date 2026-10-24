@@ -9,6 +9,21 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 public sealed class InspectionTests
 {
     [Fact]
+    public async Task PublicInspect_invalidImage_returnsTypedFailureAndRejectedCorrelation()
+    {
+        using var fixture = TinyImageFixture.Create();
+        using var plan = await KeycloakSecurity.CaptureAsync(fixture.Recipe, fixture.Policy, fixture.Bindings, Path.Combine(fixture.Root, "public-snapshot"));
+        var events = new List<KeycloakStageEvent>();
+        using var subscription = KeycloakStageEvents.Subscribe(events.Add);
+
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.InspectAsync(plan, fixture.InspectionImage with { ConfigDigest = "SHA256:" + new string('A', 64) }));
+
+        Assert.Equal(KeycloakFailureCode.InspectionFailed, failure.Code);
+        var rejected = events.Last(x => x.Phase == KeycloakStagePhase.Inspection && x.Outcome == KeycloakStageOutcome.Rejected);
+        Assert.Equal(failure.CorrelationId.Value, rejected.CorrelationId);
+    }
+
+    [Fact]
     public async Task Captured_theme_plan_inspects_exact_export_and_writes_bound_evidence()
     {
         using var fixture = TinyImageFixture.Create();
@@ -29,6 +44,16 @@ public sealed class InspectionTests
         Assert.Equal(fixture.InspectionImage.ConfigDigest, resolved.ConfigDigest);
         Assert.Equal(fixture.InspectionImage.Platform, resolved.Platform);
         Assert.Equal(fixture.InspectionImage.DiffIds.ToArray(), resolved.DiffIds.ToArray());
+    }
+
+    [Fact]
+    public async Task ThemeOnlyInspectionPreservesNonemptyOutsideFilesAndLinksExactly()
+    {
+        using var fixture = TinyImageFixture.Create(includeOutside: true);
+        using var plan = await KeycloakSecurity.CaptureAsync(fixture.Recipe, fixture.Policy, fixture.Bindings, Path.Combine(fixture.Root, "outside-snapshot"));
+        var evidence = await KeycloakSecurity.InspectCoreAsync(plan, fixture.InspectionImage, default, Command(fixture));
+        Assert.Equal(KeycloakRecipeMode.ThemeOnly, evidence.Mode);
+        Assert.Contains(evidence.Checks, x => x.Id == "scope:theme-only");
     }
 
     [Fact]
@@ -71,9 +96,23 @@ public sealed class InspectionTests
     [InlineData(InspectionImageMutation.ExtraOutsideApplicationTree)]
     [InlineData(InspectionImageMutation.ExtraInsideApplicationTree)]
     [InlineData(InspectionImageMutation.ChangedKeycloakFile)]
+    [InlineData(InspectionImageMutation.ChangedDirectoryMode)]
+    [InlineData(InspectionImageMutation.ChangedDirectoryUid)]
+    [InlineData(InspectionImageMutation.ChangedDirectoryGid)]
+    [InlineData(InspectionImageMutation.MissingDirectory)]
+    [InlineData(InspectionImageMutation.ExtraLink)]
+    [InlineData(InspectionImageMutation.ChangedConfigUser)]
+    [InlineData(InspectionImageMutation.ChangedConfigEntrypoint)]
+    [InlineData(InspectionImageMutation.ChangedConfigEnvironment)]
+    [InlineData(InspectionImageMutation.ChangedOutsideFileHash)]
+    [InlineData(InspectionImageMutation.ChangedOutsideFileMode)]
+    [InlineData(InspectionImageMutation.ChangedOutsideFileUid)]
+    [InlineData(InspectionImageMutation.ChangedOutsideFileGid)]
+    [InlineData(InspectionImageMutation.ChangedOutsideFileType)]
+    [InlineData(InspectionImageMutation.ChangedOutsideLinkTarget)]
     public async Task Mutated_oci_graphs_fail_real_inventory_comparison_before_evidence(InspectionImageMutation mutation)
     {
-        using var fixture = TinyImageFixture.Create();
+        using var fixture = TinyImageFixture.Create(includeOutside: true);
         using var image = InspectionImageMutationArchive.Create(fixture, mutation);
         using var plan = await KeycloakSecurity.CaptureAsync(fixture.Recipe, fixture.Policy, fixture.Bindings, Path.Combine(fixture.Root, "snapshot"));
 

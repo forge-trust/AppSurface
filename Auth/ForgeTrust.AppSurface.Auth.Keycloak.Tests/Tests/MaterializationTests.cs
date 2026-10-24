@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using ForgeTrust.AppSurface.Auth.Keycloak;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests;
 
@@ -62,6 +63,19 @@ public sealed class MaterializationTests
         Assert.Equal("entrypoint", await File.ReadAllTextAsync(Path.Combine(destination, "rootfs", "opt", "keycloak", "bin", "kc.sh")));
         Assert.Equal("deb", await File.ReadAllTextAsync(Path.Combine(destination, "debs", "tiny.deb")));
         Assert.Equal(1, result.FileCount);
+        Assert.Equal(destination, result.ContextPath);
+        Assert.Equal(HexFile(Path.Combine(destination, "context-manifest.json")), result.ContextDigest);
+        Assert.Equal(result.ContextDigest, result.ManifestDigest);
+        Assert.Null(result.RepairedCliSha256);
+        Assert.Equal("/opt/keycloak/bin/kc.sh", result.Entrypoint);
+        Assert.Equal(ContextPlatform.LinuxAmd64, result.Platform);
+        var graphBytes = Directory.EnumerateFiles(input.Runtime.RootPath, "*", SearchOption.AllDirectories).Sum(path => new FileInfo(path).Length)
+            + Directory.EnumerateFiles(input.Frontend.RootPath, "*", SearchOption.AllDirectories).Sum(path => new FileInfo(path).Length);
+        Assert.Equal(37 + graphBytes, result.VerifiedBytes);
+        Assert.Equal(Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Select(path => Path.GetRelativePath(destination, path).Replace('\\', '/')).Order(StringComparer.Ordinal), result.ExpectedFinalFiles.Keys.Order(StringComparer.Ordinal));
+        Assert.All(result.ExpectedFinalFiles, pair => Assert.Equal(HexFile(Path.Combine(destination, pair.Key)), pair.Value));
+        Assert.Equal(Directory.EnumerateDirectories(destination, "*", SearchOption.AllDirectories).Select(path => Path.GetRelativePath(destination, path).Replace('\\', '/')).Order(StringComparer.Ordinal), result.FinalDirectories.Select(x => x.RelativePath).Order(StringComparer.Ordinal));
+        if (!OperatingSystem.IsWindows()) foreach (var directory in result.FinalDirectories) Assert.Equal(File.GetUnixFileMode(Path.Combine(destination, directory.RelativePath)), directory.Mode);
         Assert.True(File.Exists(Path.Combine(destination, "inputs", "oci", "runtime", "index.json")));
         Assert.True(File.Exists(Path.Combine(destination, "inputs", "oci", "frontend", "index.json")));
     }
@@ -76,7 +90,7 @@ public sealed class MaterializationTests
         var context = await ContextMaterialization.MaterializeAsync(changed, Path.Combine(fixture.Root, "neutral-context"));
         var dockerfile = await File.ReadAllTextAsync(Path.Combine(context.ContextPath, "Dockerfile"));
         Assert.Contains("ENTRYPOINT " + System.Text.Json.JsonSerializer.Serialize(new[] { path }), dockerfile, StringComparison.Ordinal);
-        Assert.True(File.Exists(Path.Combine(context.ContextPath, "rootfs", path.TrimStart('/'))));
+        Assert.True(File.Exists(TestPathUtils.PathUnder(context.ContextPath, "rootfs", path.TrimStart('/'))));
         await Assert.ThrowsAsync<InvalidDataException>(() => ContextMaterialization.MaterializeAsync(input with { Entrypoint = input.Entrypoint! with { ImagePath = "/usr/bin/escape" } }, Path.Combine(fixture.Root, "invalid-entrypoint")));
     }
 
@@ -417,4 +431,289 @@ public sealed class MaterializationTests
         using (var main = new StreamWriter(zip.CreateEntry("com/example/Main.class").Open(), new UTF8Encoding(false), leaveOpen: false)) main.Write(payload);
         using (var service = new StreamWriter(zip.CreateEntry("META-INF/services/example").Open(), new UTF8Encoding(false), leaveOpen: false)) service.Write("com.example.Main\n");
     }
+
+    // protects: prevalidation rejects unsupported source/count/package shapes before staging.
+    // fails_when: an invalid field reaches copying or leaves a partial destination behind.
+    // why_new: prior controls exercised duplicate names and aggregate exhaustion after copying.
+    // seam: intentionally exposed bounded materializer with real tiny OCI graph inputs.
+    // no_claim: the synthetic deb bytes are not a package installation or security proof.
+    [Theory]
+    [InlineData("file count ceiling", "Context bounds are unsupported.")]
+    [InlineData("source root empty", "Source root is required.")]
+    [InlineData("replacement digest", "Invalid replacement.")]
+    [InlineData("deb nested name", "Invalid deb name.")]
+    public async Task MaterializerRejectsIndependentClosedShapesBeforeCreatingStage(string mutation, string expected)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "shape-input"));
+        var limits = new ContextMaterializationLimits();
+        switch (mutation)
+        {
+            case "file count ceiling": limits = limits with { MaxFiles = 65537 }; break;
+            case "source root empty": input = input with { Source = input.Source with { RootPath = string.Empty } }; break;
+            case "replacement digest": input = input with { Replacements = [input.Replacements[0] with { ReplacementSha256 = "invalid" }] }; break;
+            case "deb nested name": input = input with { CapturedDebs = [input.CapturedDebs[0] with { Name = "nested/tiny.deb" }] }; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        var destination = Path.Combine(fixture.Root, "invalid-shape-context");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ContextMaterialization.MaterializeAsync(input, destination, limits: limits));
+        Assert.Equal(expected, failure.Message);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "invalid-shape-context.owned-*"));
+    }
+
+    // protects: revalidation independently validates inventory declarations and actual modes.
+    // fails_when: a caller supplies matching manifest bytes containing aliases/duplicates or changes a directory mode.
+    // why_new: digest-tamper tests never reached these inventory and mode conditions.
+    // seam: bounded internal revalidation; the edited manifest digest is explicit test input.
+    // no_claim: accepting a new manifest hash is not authorization to replace a public build-context identity.
+    [Theory]
+    [InlineData("duplicate file", "Invalid or duplicate context file.")]
+    [InlineData("unsafe file", "Invalid or duplicate context file.")]
+    [InlineData("duplicate directory", "Invalid or duplicate context directory.")]
+    [InlineData("unsafe directory", "Invalid or duplicate context directory.")]
+    [InlineData("directory mode", "Context directory changed.")]
+    public async Task ContextRevalidationRejectsMalformedInventoryAndChangedDirectoryModes(string mutation, string expected)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "inventory-input"));
+        var result = await ContextMaterialization.MaterializeAsync(input, Path.Combine(fixture.Root, "inventory-context"));
+        Assert.Equal(result.ManifestDigest, ContextMaterialization.Revalidate(result.ContextPath, result.ManifestDigest));
+        var manifestPath = Path.Combine(result.ContextPath, "context-manifest.json");
+        var root = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllBytesAsync(manifestPath))!;
+        var files = root["files"]!.AsArray();
+        var directories = root["directories"]!.AsArray();
+        switch (mutation)
+        {
+            case "duplicate file": files.Add(files[0]!.DeepClone()); break;
+            case "unsafe file": files[0]!["path"] = "../outside"; break;
+            case "duplicate directory": directories.Add(directories[0]!.DeepClone()); break;
+            case "unsafe directory": directories[0]!["path"] = "../outside"; break;
+            case "directory mode":
+                var path = Path.Combine(result.ContextPath, directories[0]!["path"]!.GetValue<string>());
+                File.SetUnixFileMode(path, File.GetUnixFileMode(path) ^ UnixFileMode.GroupWrite);
+                break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        if (mutation != "directory mode") await File.WriteAllTextAsync(manifestPath, root.ToJsonString(), new UTF8Encoding(false));
+        var failure = Assert.Throws<InvalidDataException>(() => ContextMaterialization.Revalidate(result.ContextPath, HexFile(manifestPath)));
+        Assert.Equal(expected, failure.Message);
+    }
+
+
+    // protects: a finite caller deadline and each supported context platform remain usable.
+    // fails_when: a valid nondefault deadline rejects or context metadata loses its requested platform.
+    // why_new: prior positive materializer cases used the default deadline and amd64 selector only.
+    // seam: bounded internal context materializer and real copied OCI graph bytes; no Docker.
+    // no_claim: the tiny graph remains amd64; this verifies context selection, not arm64 runtime conformance.
+    [Theory]
+    [InlineData("arm64")]
+    [InlineData("amd64")]
+    public async Task ExplicitThirtySecondDeadlinePreservesTheSelectedContextPlatform(string architecture)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "deadline-input"));
+        var platform = architecture == "arm64" ? ContextPlatform.LinuxArm64 : ContextPlatform.LinuxAmd64;
+        var limits = new ContextMaterializationLimits(Deadline: TimeSpan.FromSeconds(30));
+        Assert.Equal(TimeSpan.FromSeconds(30), limits.EffectiveDeadline);
+        var result = await ContextMaterialization.MaterializeAsync(input with { Platform = platform },
+            Path.Combine(fixture.Root, "deadline-context"), limits: limits);
+        Assert.Equal(platform, result.Platform);
+        using var manifest = System.Text.Json.JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(result.ContextPath, "context-manifest.json")));
+        Assert.Equal(architecture == "arm64" ? "LinuxArm64" : "LinuxAmd64", manifest.RootElement.GetProperty("platform").GetString());
+        Assert.Equal("replacement", await File.ReadAllTextAsync(Path.Combine(result.ContextPath, "rootfs", "opt", "keycloak", "lib", "server.jar")));
+        Assert.Equal(result.ManifestDigest, ContextMaterialization.Revalidate(result.ContextPath, result.ManifestDigest));
+    }
+
+    // protects: both replacement hashes must be valid independently before any input is copied.
+    // fails_when: a 64-character nonhex hash bypasses either original or replacement validation.
+    // why_new: existing destination/short-hash controls did not reach each hexadecimal predicate.
+    // seam: intentionally exposed materializer with valid sibling fields and graphs preserved.
+    // no_claim: the replacement payload is synthetic data, not an installed Java library proof.
+    [Theory]
+    [InlineData("original")]
+    [InlineData("replacement")]
+    public async Task EachReplacementDigestRejectsNonhexCharactersBeforeStaging(string field)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "digest-input"));
+        var replacement = input.Replacements[0];
+        var invalid = field switch
+        {
+            "original" => replacement with { OriginalSha256 = new string('g', 64) },
+            "replacement" => replacement with { ReplacementSha256 = new string('g', 64) },
+            _ => throw new ArgumentOutOfRangeException(nameof(field))
+        };
+        Assert.Equal("/opt/keycloak/lib/server.jar", invalid.Destination);
+        Assert.Equal(field == "original" ? replacement.ReplacementSha256 : replacement.OriginalSha256,
+            field == "original" ? invalid.ReplacementSha256 : invalid.OriginalSha256);
+        var destination = Path.Combine(fixture.Root, "digest-context");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            ContextMaterialization.MaterializeAsync(input with { Replacements = [invalid] }, destination));
+        Assert.Equal("Invalid replacement.", failure.Message);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "digest-context.owned-*"));
+    }
+
+    // protects: missing rooted inputs reject while an existing relative input retains exact bytes.
+    // fails_when: path syntax alone accepts an absent file or rejects a valid caller-owned relative file.
+    // why_new: public capture always supplies absolute paths, leaving this internal copy boundary distinct.
+    // seam: real files through ContextMaterialization; process working directory is never changed.
+    // no_claim: relative paths here do not widen public capture's ownership or provenance authority.
+    [Fact]
+    public async Task MissingAbsoluteReplacementInputRejectsAndCleansPartialContext()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "missing-input"));
+        var missing = Path.Combine(fixture.Root, "absent-replacement.bin");
+        Assert.True(Path.IsPathRooted(missing));
+        Assert.False(File.Exists(missing));
+        var changed = input with { Replacements = [input.Replacements[0] with { ReplacementPrivatePath = missing }] };
+        var destination = Path.Combine(fixture.Root, "missing-context");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ContextMaterialization.MaterializeAsync(changed, destination));
+        Assert.Equal("Input file missing.", failure.Message);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "missing-context.owned-*"));
+        Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(input.Source.RootPath, "lib", "server.jar")));
+    }
+
+    [Fact]
+    public async Task ExistingRelativeReplacementInputCopiesExactBytesWithoutChangingWorkingDirectory()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "relative-input"));
+        var workingDirectory = Environment.CurrentDirectory;
+        var originalPath = input.Replacements[0].ReplacementPrivatePath;
+        var relative = Path.GetRelativePath(workingDirectory, originalPath);
+        Assert.False(Path.IsPathRooted(relative));
+        Assert.True(File.Exists(relative));
+        Assert.Equal(originalPath, Path.GetFullPath(relative));
+        var changed = input with { Replacements = [input.Replacements[0] with { ReplacementPrivatePath = relative }] };
+        var result = await ContextMaterialization.MaterializeAsync(changed, Path.Combine(fixture.Root, "relative-context"));
+        var output = Path.Combine(result.ContextPath, "rootfs", "opt", "keycloak", "lib", "server.jar");
+        Assert.Equal(await File.ReadAllBytesAsync(originalPath), await File.ReadAllBytesAsync(output));
+        Assert.Equal(Hex("replacement"), HexFile(output));
+        Assert.Equal(workingDirectory, Environment.CurrentDirectory);
+        Assert.Equal(result.ManifestDigest, ContextMaterialization.Revalidate(result.ContextPath, result.ManifestDigest));
+    }
+
+    // protects: default CLI destination publishes truthful repaired bytes with absent or exact output pins.
+    // fails_when: null destination/digest defaults skip repair, output differs, or source bytes are modified.
+    // why_new: earlier tiny-archive materialization only proved the wrong-output-hash rejection.
+    // seam: real tiny source/replacement ZIPs and OCI context files through the bounded materializer.
+    // no_claim: ZIP entry checks do not prove real Keycloak CLI execution or image conformance.
+    [Fact]
+    public async Task DefaultCliDestinationRepairsArchiveWithOptionalAndExactOutputDigest()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var root = Path.Combine(fixture.Root, "default-cli-input");
+        var input = CreateRichInput(fixture, root);
+        const string relativeCli = "bin/client/keycloak-admin-cli-26.7.2.jar";
+        var sourceJar = Path.Combine(input.Source.RootPath, relativeCli);
+        Directory.CreateDirectory(Path.GetDirectoryName(sourceJar)!);
+        var replacementJar = Path.Combine(root, "replacement.jar");
+        WriteTinyJar(sourceJar, "1", "old");
+        WriteTinyJar(replacementJar, "2", "new");
+        var originalBytes = await File.ReadAllBytesAsync(sourceJar);
+        var replacementBytes = await File.ReadAllBytesAsync(replacementJar);
+        var sourceDigest = HexFile(sourceJar);
+        var archive = new ArchiveTransformSpec(sourceJar, Path.Combine(root, "unused-output.jar"), sourceDigest,
+            [new ArchiveModuleSpec("com.example", "jackson-core", "1", "2", "com/example/", "example", HexFile(replacementJar), ReplacementPath: replacementJar)], new());
+        input = input with
+        {
+            Source = input.Source with
+            {
+                Files = [new ContextSourceFile(relativeCli, sourceDigest, originalBytes.LongLength, (UnixFileMode)420)],
+                Directories = [new ContextSourceDirectory("bin", (UnixFileMode)493), new ContextSourceDirectory("bin/client", (UnixFileMode)493)]
+            },
+            Replacements = [],
+            Archive = archive,
+            ArchiveDestination = null,
+            ExpectedRepairedCliSha256 = null
+        };
+        var first = await ContextMaterialization.MaterializeAsync(input, Path.Combine(fixture.Root, "optional-digest-context"));
+        var repairedPath = Path.Combine(first.ContextPath, "rootfs", "opt", "keycloak", relativeCli);
+        var repairedBytes = await File.ReadAllBytesAsync(repairedPath);
+        var repairedDigest = HexFile(repairedPath);
+        Assert.Equal(repairedDigest, first.RepairedCliSha256);
+        Assert.NotEqual(sourceDigest, repairedDigest);
+        using (var repaired = ZipFile.OpenRead(repairedPath))
+        {
+            Assert.Equal(["META-INF/MANIFEST.MF", "META-INF/maven/com.example/jackson-core/pom.properties", "META-INF/services/example", "com/example/Main.class"],
+                repaired.Entries.Select(entry => entry.FullName).Order(StringComparer.Ordinal).ToArray());
+            using var manifest = new StreamReader(repaired.GetEntry("META-INF/MANIFEST.MF")!.Open());
+            Assert.Equal("Manifest-Version: 1.0\r\n", await manifest.ReadToEndAsync());
+            using var pom = new StreamReader(repaired.GetEntry("META-INF/maven/com.example/jackson-core/pom.properties")!.Open());
+            Assert.Equal("groupId=com.example\nartifactId=jackson-core\nversion=2\n", await pom.ReadToEndAsync());
+            using var payload = new StreamReader(repaired.GetEntry("com/example/Main.class")!.Open());
+            Assert.Equal("new", await payload.ReadToEndAsync());
+            using var service = new StreamReader(repaired.GetEntry("META-INF/services/example")!.Open());
+            Assert.Equal("com.example.Main\n", await service.ReadToEndAsync());
+        }
+        var second = await ContextMaterialization.MaterializeAsync(input with { ExpectedRepairedCliSha256 = repairedDigest },
+            Path.Combine(fixture.Root, "exact-digest-context"));
+        Assert.Equal(repairedDigest, second.RepairedCliSha256);
+        Assert.Equal(repairedBytes, await File.ReadAllBytesAsync(Path.Combine(second.ContextPath, "rootfs", "opt", "keycloak", relativeCli)));
+        Assert.Equal(first.ContextDigest, second.ContextDigest);
+        Assert.Equal(originalBytes, await File.ReadAllBytesAsync(sourceJar));
+        Assert.Equal(replacementBytes, await File.ReadAllBytesAsync(replacementJar));
+        Assert.False(File.Exists(archive.OutputPath));
+        Assert.Equal(first.ManifestDigest, ContextMaterialization.Revalidate(first.ContextPath, first.ManifestDigest));
+        Assert.Equal(second.ManifestDigest, ContextMaterialization.Revalidate(second.ContextPath, second.ManifestDigest));
+    }
+
+
+    // protects: unsupported platforms and path roles reject before context publication.
+    // fails_when: an unknown platform, non-Keycloak replacement, or traversal deb name is accepted.
+    // why_new: v44 misses these rejecting alternatives after prior valid/short-hash controls.
+    // seam: bounded internal materializer with real graph input and valid sibling fields.
+    // no_claim: these declaration checks do not prove a runtime or install synthetic deb bytes.
+    [Theory]
+    [InlineData("platform", "Unsupported platform.")]
+    [InlineData("replacement namespace", "Invalid replacement.")]
+    [InlineData("deb traversal", "Invalid deb name.")]
+    public async Task MaterializerRejectsUnsupportedPlatformAndPathRolesBeforeStaging(string mutation, string expected)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "role-input"));
+        input = mutation switch
+        {
+            "platform" => input with { Platform = (ContextPlatform)999 },
+            "replacement namespace" => input with { Replacements = [input.Replacements[0] with { Destination = "/usr/lib/server.jar" }] },
+            "deb traversal" => input with { CapturedDebs = [input.CapturedDebs[0] with { Name = "../tiny.deb" }] },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        var destination = Path.Combine(fixture.Root, "role-context");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ContextMaterialization.MaterializeAsync(input, destination));
+        Assert.Equal(expected, failure.Message);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "role-context.owned-*"));
+    }
+
+    // protects: an absent context cannot be published through a linked parent into another directory.
+    // fails_when: prepublication path checks follow a directory link or alter its prior contents.
+    // why_new: v44 contains a remaining filesystem-link guard, distinct from inventory tampering.
+    // seam: local directory symlink and bounded materializer; no reflection or global path changes.
+    // no_claim: this does not prove behavior on unsupported filesystems.
+    [Fact]
+    public async Task MaterializerRejectsLinkedOutputParentAndPreservesItsTarget()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "linked-input"));
+        var target = Path.Combine(fixture.Root, "prior-output-parent");
+        Directory.CreateDirectory(target);
+        var sentinel = Path.Combine(target, "prior.txt");
+        await File.WriteAllTextAsync(sentinel, "preserve", new UTF8Encoding(false));
+        var linked = Path.Combine(fixture.Root, "linked-parent");
+        Directory.CreateSymbolicLink(linked, target);
+        var destination = Path.Combine(linked, "context");
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ContextMaterialization.MaterializeAsync(input, destination));
+        Assert.Equal("Context path contains a link.", failure.Message);
+        Assert.False(Path.Exists(Path.Combine(target, "context")));
+        Assert.Equal("preserve", await File.ReadAllTextAsync(sentinel));
+        Assert.Equal(sentinel, Assert.Single(Directory.EnumerateFileSystemEntries(target)));
+        Assert.Equal(target, new DirectoryInfo(linked).LinkTarget);
+    }
+
 }

@@ -1,5 +1,5 @@
-using ForgeTrust.AppSurface.Auth.Keycloak;
 using System.Collections.Immutable;
+using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests;
 
@@ -90,4 +90,124 @@ public sealed class CaptureTests
         Assert.Equal(KeycloakSafePhase.Capture, exception.Phase);
         Assert.False(Directory.Exists(destination));
     }
+
+    // protects: returned identities describe the accepted bytes and remain readable after disposal.
+    // fails_when: a handle swaps policy/platform identity or disposal deletes caller-owned evidence.
+    // why_new: capture success alone did not assert every exposed captured-plan identity.
+    // seam: public capture plus the intentionally visible accepted-policy record; no Docker/network.
+    // no_claim: identity metadata does not establish runtime conformance.
+    [Fact]
+    public async Task CapturedPlanExposesAcceptedIdentitiesWithoutOwningSnapshotLifetime()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var destination = Path.Combine(fixture.Root, "identity-snapshot");
+        using var plan = await KeycloakSecurity.CaptureAsync(fixture.Recipe, fixture.Policy, fixture.Bindings, destination);
+        var manifest = await File.ReadAllBytesAsync(Path.Combine(destination, "snapshot.json"));
+        var snapshotDigest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(manifest));
+        Assert.Equal(snapshotDigest, plan.Digest);
+        Assert.Equal(KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(fixture.Recipe)), plan.RecipeDigest);
+        Assert.Equal(KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(fixture.Policy)), plan.PolicyDigest);
+        Assert.Equal(KeycloakCanonicalJson.Write(fixture.Policy), KeycloakCanonicalJson.Write(plan.Policy));
+        Assert.Equal("linux/amd64", plan.Platform);
+        Assert.Equal(KeycloakRecipeMode.ThemeOnly, plan.Mode);
+        plan.Dispose();
+        plan.Dispose();
+        Assert.Equal(snapshotDigest, plan.Digest);
+        Assert.Equal(manifest, await File.ReadAllBytesAsync(Path.Combine(destination, "snapshot.json")));
+    }
+
+    [Theory]
+    [InlineData("missing host binding")]
+    [InlineData("recipe material ceiling")]
+    [InlineData("source config identity")]
+    public async Task CaptureRejectsIndependentAcquisitionAndGraphBoundariesAtomically(string mutation)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var recipe = fixture.Recipe;
+        var bindings = fixture.Bindings;
+        switch (mutation)
+        {
+            case "missing host binding": bindings = bindings with { LocalInputs = bindings.LocalInputs.RemoveAt(0) }; break;
+            case "recipe material ceiling": recipe = recipe with { ResourceLimits = recipe.ResourceLimits with { MaxMaterialBytes = 1 } }; break;
+            case "source config identity": recipe = recipe with { SourceImage = recipe.SourceImage with { ConfigDigest = "sha256:" + new string('0', 64) } }; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        bindings = bindings with { ReviewedRecipeId = KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(recipe)) };
+        var destination = Path.Combine(fixture.Root, "rejected-boundary");
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.CaptureAsync(recipe, fixture.Policy, bindings, destination));
+        Assert.Equal(KeycloakFailureCode.DigestMismatch, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Capture, failure.Phase);
+        Assert.Equal(KeycloakEffectState.None, failure.Effect);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, ".capture-inputs-*"));
+    }
+
+    [Fact]
+    public async Task CaptureRejects257IndividuallyValidHostMaterialsBeforePublishing()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var original = fixture.Recipe.MaterialReferences[0];
+        var extras = Enumerable.Range(0, 257 - fixture.Recipe.MaterialReferences.Length)
+            .Select(index => original with { Id = "extra-" + index }).ToImmutableArray();
+        var recipe = fixture.Recipe with
+        {
+            MaterialReferences = fixture.Recipe.MaterialReferences.AddRange(extras),
+            CapturedHostInputs = fixture.Recipe.CapturedHostInputs.AddRange(extras.Select(x => x.Id))
+        };
+        var policy = fixture.Policy with { MaterialSha256ByIdentity = fixture.Policy.MaterialSha256ByIdentity.AddRange(extras.Select(x => new KeyValuePair<string, string>(x.Id, x.Sha256))) };
+        var originalBinding = fixture.Bindings.LocalInputs.Single(x => x.MaterialId == original.Id);
+        var bindings = fixture.Bindings with
+        {
+            ReviewedRecipeId = KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(recipe)),
+            LocalInputs = fixture.Bindings.LocalInputs.AddRange(extras.Select(x => originalBinding with { MaterialId = x.Id }))
+        };
+        Assert.Equal(257, recipe.MaterialReferences.Length);
+        var destination = Path.Combine(fixture.Root, "too-many-materials");
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.CaptureAsync(recipe, policy, bindings, destination));
+        Assert.Equal(KeycloakFailureCode.DigestMismatch, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Capture, failure.Phase);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, ".capture-inputs-*"));
+    }
+
+
+    // protects: a cached downloadable input still requires an exact approved path namespace.
+    // fails_when: a sibling prefix becomes authority or an exact approved resource is rejected.
+    // why_new: v44 leaves the namespace predicate's rejecting alternative unverified.
+    // seam: public capture with real tiny OCI inputs and explicit local bindings; no transport.
+    // no_claim: this is cached-material authorization, not remote download availability.
+    [Theory]
+    [InlineData("https://materials.example.test/approved", true)]
+    [InlineData("https://materials.example.test/approved-sibling/input", false)]
+    public async Task CachedMaterialRequiresAnExactApprovedNamespaceBoundary(string materialUri, bool approved)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var material = fixture.Recipe.MaterialReferences[0] with { CapturedHostInput = false, ExactHttpsUri = materialUri };
+        var recipe = fixture.Recipe with { MaterialReferences = fixture.Recipe.MaterialReferences.SetItem(0, material) };
+        var policy = fixture.Policy with
+        {
+            PermittedHttpsOrigins = ["https://materials.example.test/"],
+            PermittedPathMappings = ["https://materials.example.test/approved"]
+        };
+        var bindings = fixture.Bindings with { ReviewedRecipeId = KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(recipe)) };
+        Assert.Contains(bindings.LocalInputs, binding => binding.MaterialId == material.Id);
+        var destination = Path.Combine(fixture.Root, "namespace-snapshot");
+        if (approved)
+        {
+            using var plan = await KeycloakSecurity.CaptureAsync(recipe, policy, bindings, destination);
+            Assert.Equal(bindings.ReviewedRecipeId, plan.RecipeDigest);
+            Assert.Equal(KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(policy)), plan.PolicyDigest);
+            Assert.Equal(await File.ReadAllBytesAsync(fixture.MaterialPaths[material.Id]), await File.ReadAllBytesAsync(Path.Combine(destination, material.Id)));
+        }
+        else
+        {
+            var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.CaptureAsync(recipe, policy, bindings, destination));
+            Assert.Equal(KeycloakFailureCode.DigestMismatch, failure.Code);
+            Assert.Equal(KeycloakSafePhase.Capture, failure.Phase);
+            Assert.Equal(KeycloakEffectState.None, failure.Effect);
+            Assert.False(Path.Exists(destination));
+        }
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, ".capture-inputs-*"));
+    }
+
 }

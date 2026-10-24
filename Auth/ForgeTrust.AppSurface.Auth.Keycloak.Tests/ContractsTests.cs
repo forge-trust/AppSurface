@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Auth.Keycloak;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
@@ -13,6 +14,21 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 // no_claim: these tests do not prove network acquisition, image assembly, or native CI.
 public sealed class ContractsTests
 {
+    [Theory]
+    [InlineData("https://example.test/%252e")]
+    [InlineData("https://example.test/%2E")]
+    [InlineData("https://example.test/a/../b")]
+    public void EncodedAndRelativeUriAliasesCannotAcquireAuthority(string value)
+        => Assert.Throws<ArgumentException>(() => KeycloakCanonicalization.CanonicalizeHttpsUri(value));
+
+    [Fact]
+    public void EmptyAlignmentGroupCannotPassAsADeclaredOperation()
+    {
+        var empty = new ArtifactReplacementGroup("empty", [], []);
+        var recipe = TestRecipes.Recipe() with { Operations = [new KeycloakOperation.ArtifactReplacementGroupOperation(empty)] };
+        TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(recipe), KeycloakFailureCode.Invalid);
+    }
+
     [Fact]
     // protects: the approved production recipe remains valid through its public contract.
     public void ValidRecipeAndThemeOnlyZeroOperationsPass()
@@ -90,10 +106,23 @@ public sealed class ContractsTests
     [InlineData("unknown", "\"schemaVersion\":1,\"unknown\":1", "unknown field")]
     [InlineData("duplicate", "\"schemaVersion\":1,\"schemaVersion\":1", "duplicate field")]
     [InlineData("ambient path", "\"path\":\"ambient.jar\",\"destination\":\"/opt/keycloak/lib/server.jar\"", "ambient path")]
-    public void CanonicalReaderRejectsInvalidFieldVectors(string _, string replacement, string description)
+    public void CanonicalReaderRejectsInvalidFieldVectors(string shape, string replacement, string description)
     {
         Assert.False(string.IsNullOrWhiteSpace(description));
-        var json = Encoding.UTF8.GetString(KeycloakCanonicalJson.Write(TestRecipes.Recipe())).Replace("\"schemaVersion\":1", replacement, StringComparison.Ordinal);
+        var canonical = KeycloakCanonicalJson.Write(TestRecipes.Recipe());
+        string json;
+        if (shape == "ambient path")
+        {
+            var root = JsonNode.Parse(canonical)!;
+            var artifact = root["operations"]![0]!["group"]!["replacements"]![0]!["original"]!;
+            artifact["path"] = "ambient.jar";
+            Assert.Equal("ambient.jar", artifact["path"]!.GetValue<string>());
+            json = root.ToJsonString();
+        }
+        else
+        {
+            json = Encoding.UTF8.GetString(canonical).Replace("\"schemaVersion\":1", replacement, StringComparison.Ordinal);
+        }
         Assert.Throws<JsonException>(() => KeycloakCanonicalJson.ReadRecipe(Encoding.UTF8.GetBytes(json)));
     }
 
@@ -120,7 +149,8 @@ public sealed class ContractsTests
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe() with { Operations = [TestRecipes.ArtifactGroup("one", "/opt/keycloak/lib/server.jar"), TestRecipes.ArtifactGroup("two", "/opt/keycloak/lib/server.jar")] }), KeycloakFailureCode.Conflict);
         var duplicateTheme = new KeycloakThemeInput("theme-two", new string('a', 64), null, null)
         {
-            LocalInputId = "theme-baseline", DestinationPath = "/opt/keycloak/themes/keycloak.v2/login/messages.properties"
+            LocalInputId = "theme-baseline",
+            DestinationPath = "/opt/keycloak/themes/keycloak.v2/login/messages.properties"
         };
         var themeRecipe = TestRecipes.Recipe() with
         {
@@ -195,7 +225,7 @@ public sealed class ContractsTests
     {
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate((KeycloakSecurityRecipe)null!), KeycloakFailureCode.Required);
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe() with { SchemaVersion = 2 }), KeycloakFailureCode.Unsupported);
-        TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe(KeycloakRecipeMode.Security, []) ), KeycloakFailureCode.Invalid);
+        TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe(KeycloakRecipeMode.Security, [])), KeycloakFailureCode.Invalid);
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe(KeycloakRecipeMode.ThemeOnly, [TestRecipes.ArtifactGroup()])), KeycloakFailureCode.Conflict);
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe() with { SourceImage = TestRecipes.Recipe().SourceImage with { Platform = "windows/amd64" } }), KeycloakFailureCode.Invalid);
         TestRecipes.ExpectFailure(() => KeycloakRecipeValidation.Validate(TestRecipes.Recipe() with { ResourceLimits = null! }), KeycloakFailureCode.Invalid);
@@ -381,4 +411,173 @@ public sealed class ContractsTests
         { writer.WriteStartObject(); foreach (var property in document.RootElement.EnumerateObject().Reverse()) { writer.WritePropertyName(property.Name); property.Value.WriteTo(writer); } writer.WriteEndObject(); }
         return stream.ToArray();
     }
+
+    // testcard protects: public readers reject malformed nested wire values before creating identity.
+    // fails_when: kind confusion, ambient paths, or mismatched operation IDs enter canonical bytes.
+    // why_new: v30 misses compatibility Read and nested parser alternatives.
+    // seam: public canonical readers and writers; no reflection or private serializer calls.
+    // no_claim: parser rejection does not establish material or runtime provenance.
+    [Fact]
+    public void CompatibilityReadPreservesTheCompleteCanonicalRecipe()
+    {
+        var bytes = KeycloakCanonicalJson.Write(TestRecipes.Recipe());
+        Assert.Equal(bytes, KeycloakCanonicalJson.Write(KeycloakCanonicalJson.Read(bytes)));
+    }
+
+    [Theory]
+    [InlineData("unknown operation")]
+    [InlineData("ambient original path")]
+    [InlineData("artifact unknown field")]
+    [InlineData("group id mismatch")]
+    [InlineData("profile id mismatch")]
+    [InlineData("archive id mismatch")]
+    [InlineData("classifier wrong kind")]
+    [InlineData("material boolean string")]
+    [InlineData("material boolean null")]
+    [InlineData("material digest number")]
+    [InlineData("module hash number")]
+    [InlineData("package index value boolean")]
+    [InlineData("operations object")]
+    [InlineData("source diff object")]
+    [InlineData("required members object")]
+    [InlineData("missing snapshot suite")]
+    [InlineData("mode numeric string")]
+    [InlineData("source profile number")]
+    public void NestedWireKindAndIdentityMutationsAreRejected(string mutation)
+    {
+        var root = JsonNode.Parse(KeycloakCanonicalJson.Write(TestRecipes.Recipe()))!;
+        var operations = root["operations"]!;
+        var original = operations[0]!["group"]!["replacements"]![0]!["original"]!;
+        switch (mutation)
+        {
+            case "unknown operation": operations[0]!["kind"] = "FutureOperation"; break;
+            case "ambient original path": original["path"] = "/private/ambient.jar"; break;
+            case "artifact unknown field": original["unknown"] = true; break;
+            case "group id mismatch": operations[0]!["group"]!["id"] = "other"; break;
+            case "profile id mismatch": operations[1]!["profile"]!["id"] = "other"; break;
+            case "archive id mismatch": operations[2]!["replacement"]!["id"] = "other"; break;
+            case "classifier wrong kind": original["coordinate"]!["classifier"] = 7; break;
+            case "material boolean string": root["materialReferences"]![0]!["capturedHostInput"] = "false"; break;
+            case "material boolean null": root["materialReferences"]![0]!["capturedHostInput"] = null; break;
+            case "material digest number": root["materialReferences"]![0]!["sha256"] = 7; break;
+            case "module hash number": operations[2]!["replacement"]!["moduleSet"]!["sourceModuleSha256ByIdentity"]!["source"] = 7; break;
+            case "package index value boolean": operations[1]!["profile"]!["repositorySnapshots"]![0]!["packageIndexMaterialIds"]!["main"] = true; break;
+            case "operations object": root["operations"] = new JsonObject(); break;
+            case "source diff object": root["sourceImage"]!["diffIds"] = new JsonObject(); break;
+            case "required members object": operations[0]!["group"]!["requiredMembers"] = new JsonObject(); break;
+            case "missing snapshot suite": operations[1]!["profile"]!["repositorySnapshots"]![0]!.AsObject().Remove("suite"); break;
+            case "mode numeric string": root["mode"] = "1"; break;
+            case "source profile number": root["sourceProfiles"]![0] = 1; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.Throws<JsonException>(() => KeycloakCanonicalJson.ReadRecipe(Encoding.UTF8.GetBytes(root.ToJsonString())));
+    }
+
+    [Theory]
+    [InlineData("digest map array")]
+    [InlineData("digest number")]
+    [InlineData("origin null")]
+    [InlineData("unknown nested property")]
+    public void PolicyWireKindsDoNotBecomeStringIdentities(string mutation)
+    {
+        var root = JsonNode.Parse(KeycloakCanonicalJson.Write(TestRecipes.Policy()))!;
+        switch (mutation)
+        {
+            case "digest map array": root["materialSha256ByIdentity"] = new JsonArray(); break;
+            case "digest number": root["materialSha256ByIdentity"]!["index"] = 7; break;
+            case "origin null": root["permittedHttpsOrigins"]![0] = null; break;
+            case "unknown nested property": root["futurePolicy"] = new JsonObject(); break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        Assert.Throws<JsonException>(() => KeycloakCanonicalJson.ReadPolicy(Encoding.UTF8.GetBytes(root.ToJsonString())));
+    }
+
+    [Fact]
+    public void OptionalNullWireFieldsCanonicalizeToTheirOmittedForm()
+    {
+        var expected = KeycloakCanonicalJson.Write(TestRecipes.Recipe());
+        var root = JsonNode.Parse(expected)!;
+        var artifact = root["operations"]![0]!["group"]!["replacements"]![0]!["original"]!;
+        artifact["path"] = null;
+        artifact["coordinate"]!["classifier"] = null;
+        Assert.Equal(expected, KeycloakCanonicalJson.Write(KeycloakCanonicalJson.ReadRecipe(Encoding.UTF8.GetBytes(root.ToJsonString()))));
+    }
+
+    [Fact]
+    public void ClassifierAndOptionalThemeAuthoritySurviveCanonicalRoundTrip()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.ArtifactReplacementGroupOperation)recipe.Operations[0];
+        var pair = operation.Group.Replacements[0];
+        var original = pair.Original with { Coordinate = pair.Original.Coordinate with { Classifier = "linux-x86_64" } };
+        var replacement = pair.Replacement with { Coordinate = pair.Replacement.Coordinate with { Classifier = "linux-x86_64" } };
+        var group = operation with { Group = operation.Group with { Replacements = [new(original, replacement)], RequiredMembers = [replacement.Coordinate] } };
+        recipe = recipe with
+        {
+            Operations = recipe.Operations.SetItem(0, group),
+            ThemeInputs = [new KeycloakThemeInput("theme", new string('a', 64), "https://snapshot.example.test/source/", "reviewed-host")
+            { LocalInputId = "theme-input", DestinationPath = "/opt/keycloak/themes/neutral/login/theme.properties" }]
+        };
+        var bytes = KeycloakCanonicalJson.Write(recipe);
+        var parsed = KeycloakCanonicalJson.ReadRecipe(bytes);
+        var parsedGroup = (KeycloakOperation.ArtifactReplacementGroupOperation)parsed.Operations[0];
+        Assert.Equal("linux-x86_64", parsedGroup.Group.RequiredMembers[0].Classifier);
+        Assert.Equal("reviewed-host", parsed.ThemeInputs[0].CapturedHostInput);
+        Assert.Equal(recipe.ThemeInputs[0].ExactUri, parsed.ThemeInputs[0].ExactUri);
+        Assert.Equal(bytes, KeycloakCanonicalJson.Write(parsed));
+    }
+
+    [Fact]
+    public void PolicyMapKeysUseOrdinalOrderAndChangedDigestChangesIdentity()
+    {
+        var map = ImmutableDictionary<string, string>.Empty
+            .Add("z", new string('a', 64)).Add("a", new string('b', 64))
+            .Add("Z", new string('c', 64)).Add("A", new string('d', 64));
+        var policy = TestRecipes.Policy() with { MaterialSha256ByIdentity = map };
+        var bytes = KeycloakCanonicalJson.Write(policy);
+        using var document = JsonDocument.Parse(bytes);
+        Assert.Equal(["A", "Z", "a", "z"], document.RootElement.GetProperty("materialSha256ByIdentity").EnumerateObject().Select(x => x.Name).ToArray());
+        var changed = KeycloakCanonicalJson.Write(policy with { MaterialSha256ByIdentity = map.SetItem("A", new string('e', 64)) });
+        Assert.NotEqual(Convert.ToHexString(SHA256.HashData(bytes)), Convert.ToHexString(SHA256.HashData(changed)));
+    }
+
+    // protects: enum spellings and numeric JSON values cannot alias supported recipe modes.
+    // fails_when: an unknown alphabetic name, wrong case, or ordinal enters recipe identity.
+    // why_new: separates lexical enum rejection from a JSON kind mismatch.
+    // seam: strict public recipe reader; no reflection or private serializer calls.
+    // no_claim: reader rejection does not prove any image or material bytes.
+    [Theory]
+    [InlineData("unknown alphabetic")]
+    [InlineData("mode case")]
+    [InlineData("numeric JSON")]
+    public void ModeWireShapesCannotAliasSupportedEnumValues(string shape)
+    {
+        var root = JsonNode.Parse(KeycloakCanonicalJson.Write(TestRecipes.Recipe()))!;
+        switch (shape)
+        {
+            case "unknown alphabetic": root["mode"] = "FutureMode"; break;
+            case "mode case": root["mode"] = "THEMEONLY"; break;
+            case "numeric JSON": root["mode"] = 0; break;
+            default: throw new ArgumentOutOfRangeException(nameof(shape));
+        }
+        var failure = Assert.Throws<JsonException>(() => KeycloakCanonicalJson.ReadRecipe(Encoding.UTF8.GetBytes(root.ToJsonString())));
+        Assert.Equal("Recipe JSON does not match the complete supported schema.", failure.Message);
+    }
+
+    // protects: optional text distinguishes omission/null from a real string without coercion.
+    // fails_when: an omitted/null field becomes text or a present value is discarded.
+    // why_new: directly verifies the intentionally visible JSON boundary helper's three outcomes.
+    // seam: internal KeycloakJsonExtensions exposed to this test assembly; no reflection.
+    // no_claim: this helper does not authorize optional input values.
+    [Theory]
+    [InlineData("{}", null)]
+    [InlineData("{\"value\":null}", null)]
+    [InlineData("{\"value\":\"reviewed\"}", "reviewed")]
+    public void NullableJsonTextPreservesMissingNullAndStringSemantics(string json, string? expected)
+    {
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(expected, KeycloakJsonExtensions.GetNullableString(document.RootElement, "value"));
+        Assert.Equal(json, document.RootElement.GetRawText());
+    }
+
 }

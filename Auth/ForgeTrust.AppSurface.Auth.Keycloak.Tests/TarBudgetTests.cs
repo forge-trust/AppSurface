@@ -43,6 +43,15 @@ public sealed class TarBudgetTests
     }
 
     [Fact]
+    public void Accepts_a_clean_two_zero_block_tar_end_without_an_extra_header()
+    {
+        using var bounded = new TarBudgetReadStream(new MemoryStream(new byte[1024]), 1024, 64, 4);
+        bounded.Finish();
+        Assert.Equal(1024, bounded.Consumed);
+        Assert.Equal(0, bounded.Read(Span<byte>.Empty));
+    }
+
+    [Fact]
     public void Rejects_budget_crossing_at_header_and_payload_boundaries()
     {
         using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 511, 64, 4))
@@ -51,8 +60,95 @@ public sealed class TarBudgetTests
             Assert.Throws<InvalidDataException>(() => new TarReader(bounded).GetNextEntry()!.DataStream!.CopyTo(Stream.Null));
     }
 
+    [Fact]
+    public void Rejects_zero_entry_budget_and_truncated_payload_without_terminator()
+    {
+        using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 4096, 64, 0))
+            Assert.Throws<InvalidDataException>(() => bounded.Finish());
+
+        var truncated = Tar("file.txt", "payload").ToArray()[..517];
+        using var input2 = new MemoryStream(truncated);
+        using var bounded2 = new TarBudgetReadStream(input2, 4096, 64, 4);
+        Assert.Throws<InvalidDataException>(() => bounded2.Finish());
+    }
+
+    [Fact]
+    public void Rejects_numeric_field_with_digits_after_padding()
+    {
+        var bytes = Tar("file.txt", "payload").ToArray();
+        bytes[124] = (byte)'7'; bytes[125] = (byte)' '; bytes[126] = (byte)'0';
+        using var bounded = new TarBudgetReadStream(new MemoryStream(bytes), 4096, 64, 4);
+        Assert.Throws<InvalidDataException>(() => bounded.Finish());
+    }
+
+    [Fact]
+    public void Rejects_base256_numeric_encoding_and_oversized_pax_metadata()
+    {
+        var base256 = Tar("file.txt", "payload").ToArray();
+        base256[124] = 0x80;
+        using (var bounded = new TarBudgetReadStream(new MemoryStream(base256), 4096, 64, 4))
+            Assert.Throws<InvalidDataException>(() => bounded.Finish());
+
+        var pax = Tar("file.txt", "payload").ToArray();
+        pax[156] = (byte)'x';
+        WriteOctal(pax.AsSpan(124, 12), 65 * 1024);
+        using var metadata = new TarBudgetReadStream(new MemoryStream(pax), 4096, 64, 4);
+        Assert.Throws<InvalidDataException>(() => metadata.Finish());
+    }
+
+    [Fact]
+    public void Supports_unseekable_inner_stream_and_rejects_unsupported_operations()
+    {
+        using var inner = new NonSeekableStream(Tar("file.txt", "payload"));
+        using var bounded = new TarBudgetReadStream(inner, 4096, 64, 4);
+        var buffer = new byte[512]; Assert.Equal(512, bounded.Read(buffer, 0, buffer.Length));
+        Assert.False(bounded.CanSeek); Assert.True(bounded.CanRead); Assert.False(bounded.CanWrite);
+        Assert.Throws<NotSupportedException>(() => _ = bounded.Length);
+        Assert.Throws<NotSupportedException>(() => _ = bounded.Position);
+        Assert.Throws<NotSupportedException>(() => bounded.Flush());
+        Assert.Throws<NotSupportedException>(() => bounded.Seek(0, SeekOrigin.Begin));
+        Assert.Throws<NotSupportedException>(() => bounded.SetLength(0));
+    }
+
+    [Fact]
+    public void AggregateSpecialMetadataAndTrailingNonzeroHeaderAreRejected()
+    {
+        var special = Tar("file.txt", "payload").ToArray(); special[156] = (byte)'x';
+        using (var stream = new TarBudgetReadStream(new MemoryStream(special), 4096, 64, 4, maximumMetadataBytes: 6))
+            Assert.Throws<InvalidDataException>(() => stream.Finish());
+        var trailing = Tar("file.txt", "payload").ToArray();
+        var member = trailing[..1024]; var zero = new byte[512];
+        using var malformed = new MemoryStream(member.Concat(zero).Concat(member).Concat(new byte[1024]).ToArray());
+        using var bounded = new TarBudgetReadStream(malformed, 8192, 64, 4);
+        Assert.Throws<InvalidDataException>(() => bounded.Finish());
+    }
+
+    [Fact]
+    public void TarHeaderRejectsPartialEndBlockAndWriteOrPositionChanges()
+    {
+        using (var truncated = new TarBudgetReadStream(new MemoryStream(new byte[513]), 4096, 64, 4))
+            Assert.Throws<InvalidDataException>(() => truncated.Finish());
+        using var input = new TarBudgetReadStream(Tar("file.txt", "payload"), 4096, 64, 4);
+        Assert.Throws<NotSupportedException>(() => input.Position = 0);
+        Assert.Throws<NotSupportedException>(() => input.Write(new byte[1], 0, 1));
+    }
+
     private static MemoryStream Tar(string name, string value)
     {
         var output = new MemoryStream(); using (var writer = new TarWriter(output, leaveOpen: true)) writer.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, name) { DataStream = new MemoryStream(Encoding.UTF8.GetBytes(value)) }); output.Write(new byte[1024]); output.Position = 0; return output;
+    }
+
+    private static void WriteOctal(Span<byte> field, long value)
+    {
+        field.Fill((byte)'0'); var text = Convert.ToString(value, 8)!; Encoding.ASCII.GetBytes(text).CopyTo(field[(field.Length - text.Length - 1)..]); field[^1] = 0;
+    }
+
+    private sealed class NonSeekableStream(Stream inner) : Stream
+    {
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException(); public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException(); public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

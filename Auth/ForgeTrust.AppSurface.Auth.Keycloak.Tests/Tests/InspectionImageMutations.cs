@@ -11,14 +11,30 @@ public enum InspectionImageMutation
 {
     ExtraOutsideApplicationTree,
     ExtraInsideApplicationTree,
-    ChangedKeycloakFile
+    ChangedKeycloakFile,
+    ChangedDirectoryMode,
+    ChangedDirectoryUid,
+    ChangedDirectoryGid,
+    MissingDirectory,
+    ExtraLink,
+    ChangedConfigUser,
+    ChangedConfigEntrypoint,
+    ChangedConfigEnvironment,
+    ChangedOutsideFileHash,
+    ChangedOutsideFileMode,
+    ChangedOutsideFileUid,
+    ChangedOutsideFileGid,
+    ChangedOutsideFileType,
+    ChangedOutsideLinkTarget
 }
 
 /// <summary>Builds disposable OCI archives whose graph and layer digests are recomputed after one deliberate mutation.</summary>
 internal sealed class InspectionImageMutationArchive : IDisposable
 {
     private InspectionImageMutationArchive(string root, KeycloakInspectionImage image, string archivePath)
-        => (Root, Image, ArchivePath) = (root, image, archivePath);
+    {
+        (Root, Image, ArchivePath) = (root, image, archivePath);
+    }
 
     internal string Root { get; }
     internal KeycloakInspectionImage Image { get; }
@@ -31,16 +47,19 @@ internal sealed class InspectionImageMutationArchive : IDisposable
         try
         {
             var source = ReadArchive(File.ReadAllBytes(fixture.ArchivePath));
-            var manifestDigest = source.Index["manifests"]![0]! ["digest"]!.GetValue<string>();
+            var manifestDigest = source.Index["manifests"]![0]!["digest"]!.GetValue<string>();
             var manifest = source.Manifest;
             var configDigest = manifest["config"]!["digest"]!.GetValue<string>();
-            var layerDigest = manifest["layers"]![0]! ["digest"]!.GetValue<string>();
+            var layerDigest = manifest["layers"]![0]!["digest"]!.GetValue<string>();
             var layer = MutateLayer(Gunzip(source.Blobs[layerDigest]), mutation);
             var layerDiffId = Sha256(layer);
             var layerGzip = Gzip(layer);
 
             var config = JsonNode.Parse(source.Blobs[configDigest])!.AsObject();
             config["rootfs"]!["diff_ids"]![0] = layerDiffId;
+            if (mutation == InspectionImageMutation.ChangedConfigUser) config["config"]!["User"] = "999:0";
+            if (mutation == InspectionImageMutation.ChangedConfigEntrypoint) config["config"]!["Entrypoint"] = new JsonArray("/bin/false");
+            if (mutation == InspectionImageMutation.ChangedConfigEnvironment) config["config"]!["Env"] = new JsonArray("UNDECLARED=true");
             var configBytes = JsonBytes(config);
             var newConfigDigest = Sha256(configBytes);
 
@@ -91,7 +110,7 @@ internal sealed class InspectionImageMutationArchive : IDisposable
         var rawBlobs = new Dictionary<string, byte[]>(StringComparer.Ordinal);
         foreach (var item in entries.Where(x => x.Key.StartsWith("blobs/sha256/", StringComparison.Ordinal)))
             rawBlobs["sha256:" + item.Key["blobs/sha256/".Length..]] = item.Value;
-        var manifestDigest = index["manifests"]![0]! ["digest"]!.GetValue<string>();
+        var manifestDigest = index["manifests"]![0]!["digest"]!.GetValue<string>();
         return new(entries["oci-layout"], index, JsonNode.Parse(rawBlobs[manifestDigest])!.AsObject(), rawBlobs);
     }
 
@@ -115,13 +134,39 @@ internal sealed class InspectionImageMutationArchive : IDisposable
             var target = entries.FindIndex(x => x.Name == "opt/keycloak/themes/keycloak.v2/login/login.ftl");
             entries[target] = entries[target] with { Data = Encoding.UTF8.GetBytes("tampered-theme\n") };
         }
-        else
+        else if (mutation is InspectionImageMutation.ChangedDirectoryMode or InspectionImageMutation.ChangedDirectoryUid or InspectionImageMutation.ChangedDirectoryGid or InspectionImageMutation.MissingDirectory)
+        {
+            var target = entries.FindIndex(x => x.Name.TrimEnd('/') == "opt/keycloak/themes/keycloak.v2/login");
+            if (mutation == InspectionImageMutation.MissingDirectory) entries.RemoveAt(target);
+            else entries[target] = mutation switch
+            {
+                InspectionImageMutation.ChangedDirectoryMode => entries[target] with { Mode = (UnixFileMode)448 },
+                InspectionImageMutation.ChangedDirectoryUid => entries[target] with { Uid = 999 },
+                _ => entries[target] with { Gid = 999 }
+            };
+        }
+        else if (mutation is InspectionImageMutation.ChangedOutsideFileHash or InspectionImageMutation.ChangedOutsideFileMode or InspectionImageMutation.ChangedOutsideFileUid or InspectionImageMutation.ChangedOutsideFileGid or InspectionImageMutation.ChangedOutsideFileType or InspectionImageMutation.ChangedOutsideLinkTarget)
+        {
+            var target = entries.FindIndex(x => x.Name == (mutation == InspectionImageMutation.ChangedOutsideLinkTarget ? "etc/reviewed-link" : "etc/reviewed.txt"));
+            entries[target] = mutation switch
+            {
+                InspectionImageMutation.ChangedOutsideFileHash => entries[target] with { Data = Encoding.UTF8.GetBytes("changed outside app") },
+                InspectionImageMutation.ChangedOutsideFileMode => entries[target] with { Mode = (UnixFileMode)448 },
+                InspectionImageMutation.ChangedOutsideFileUid => entries[target] with { Uid = 999 },
+                InspectionImageMutation.ChangedOutsideFileGid => entries[target] with { Gid = 999 },
+                InspectionImageMutation.ChangedOutsideFileType => entries[target] with { Type = TarEntryType.Directory },
+                _ => entries[target] with { LinkName = "other-reviewed.txt" }
+            };
+        }
+        else if (mutation == InspectionImageMutation.ExtraLink)
+            entries.Add(new(TarEntryType.SymbolicLink, "opt/keycloak/undeclared-link", "/etc/passwd", [], (UnixFileMode)511, 1000, 0));
+        else if (mutation is not (InspectionImageMutation.ChangedConfigUser or InspectionImageMutation.ChangedConfigEntrypoint or InspectionImageMutation.ChangedConfigEnvironment))
         {
             if (mutation == InspectionImageMutation.ExtraInsideApplicationTree)
                 entries.Add(new(TarEntryType.RegularFile, "opt/keycloak/extra.txt", null, Encoding.UTF8.GetBytes("undeclared\n"), UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead, 1000, 0));
             else
             {
-                entries.Add(new(TarEntryType.Directory, "etc", null, [], (UnixFileMode)493, 0, 0));
+                if (!entries.Any(x => x.Name.TrimEnd('/') == "etc")) entries.Add(new(TarEntryType.Directory, "etc", null, [], (UnixFileMode)493, 0, 0));
                 entries.Add(new(TarEntryType.RegularFile, "etc/undeclared", null, Encoding.UTF8.GetBytes("undeclared\n"), UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead, 0, 0));
             }
         }

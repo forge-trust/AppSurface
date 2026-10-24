@@ -5,24 +5,12 @@ using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Auth.Keycloak;
-
 /// <summary>A source binding used only at capture; its local path is excluded from canonical identity.</summary>
 internal sealed record CaptureFile(string Id, string SourcePath, string Sha256, long Length, int Mode);
-
 /// <summary>Captured relative identity and metadata, independent of the source workspace.</summary>
 internal sealed record SnapshotFile(string Id, string Sha256, long Length, int Mode);
-
 /// <summary>Optional per-invocation resource limits shared by private infrastructure operations.</summary>
-internal sealed record InvocationLimits(
-    long MaxFileBytes = 1024L * 1024 * 1024,
-    long MaxAggregateBytes = 2L * 1024 * 1024 * 1024,
-    int MaxFileCount = 65536,
-    TimeSpan? Deadline = null,
-    int MaxProcessOutputBytes = 1024 * 1024,
-    int MaxRedirects = 5,
-    int MaxArgumentCount = 256,
-    int MaxArgumentBytes = 64 * 1024,
-    TimeSpan? CleanupDeadline = null)
+internal sealed record InvocationLimits(long MaxFileBytes = 1024L * 1024 * 1024, long MaxAggregateBytes = 2L * 1024 * 1024 * 1024, int MaxFileCount = 65536, TimeSpan? Deadline = null, int MaxProcessOutputBytes = 1024 * 1024, int MaxRedirects = 5, int MaxArgumentCount = 256, int MaxArgumentBytes = 64 * 1024, TimeSpan? CleanupDeadline = null)
 {
     internal TimeSpan EffectiveDeadline => Deadline ?? TimeSpan.FromSeconds(300);
     internal TimeSpan EffectiveCleanupDeadline => CleanupDeadline ?? TimeSpan.FromSeconds(5);
@@ -59,18 +47,41 @@ internal sealed class SnapshotHandle : IDisposable
         }
     }
 
-    internal int ActiveConsumers { get { lock (sync) return active; } }
-    private void Leave() { lock (sync) active--; }
-    public void Dispose() { lock (sync) disposed = true; }
+    internal int ActiveConsumers
+    {
+        get
+        {
+            lock (sync)
+                return active;
+        }
+    }
+
+    private void Leave()
+    {
+        lock (sync)
+            active--;
+    }
+
+    public void Dispose()
+    {
+        lock (sync)
+            disposed = true;
+    }
 
     internal sealed class SnapshotLease : IDisposable
     {
         private SnapshotHandle? owner;
-        internal SnapshotLease(SnapshotHandle value) => owner = value;
+        internal SnapshotLease(SnapshotHandle value)
+        {
+            owner = value;
+        }
+
         internal void RequireOwner(SnapshotHandle value)
         {
-            if (!ReferenceEquals(owner, value)) throw new ObjectDisposedException(nameof(SnapshotLease));
+            if (!ReferenceEquals(owner, value))
+                throw new ObjectDisposedException(nameof(SnapshotLease));
         }
+
         public void Dispose() => Interlocked.Exchange(ref owner, null)?.Leave();
     }
 }
@@ -79,14 +90,7 @@ internal sealed class SnapshotHandle : IDisposable
 internal static class SnapshotStore
 {
     private const UnixFileMode PrivateDirectory = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-
-    internal static async Task<SnapshotHandle> CaptureAsync(
-        IEnumerable<CaptureFile> sourceFiles,
-        string recipeDigest,
-        string policyDigest,
-        string absentDestination,
-        CancellationToken cancellationToken,
-        InvocationLimits? limits = null)
+    internal static async Task<SnapshotHandle> CaptureAsync(IEnumerable<CaptureFile> sourceFiles, string recipeDigest, string policyDigest, string absentDestination, CancellationToken cancellationToken, InvocationLimits? limits = null)
     {
         limits ??= new InvocationLimits();
         ValidateLimits(limits);
@@ -95,7 +99,8 @@ internal static class SnapshotStore
         RequireDigest(recipeDigest);
         RequireDigest(policyDigest);
         var files = sourceFiles.ToImmutableArray();
-        if (files.Length is < 1 || files.Length > limits.MaxFileCount) throw new InvalidDataException("Invalid captured material count.");
+        if (files.Length is < 1 || files.Length > limits.MaxFileCount)
+            throw new InvalidDataException("Invalid captured material count.");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long aggregate = 0;
         foreach (var file in files)
@@ -105,8 +110,10 @@ internal static class SnapshotStore
             if (!names.Add(file.Id) || file.Length < 0 || file.Length > limits.MaxFileBytes || file.Mode is not (420 or 493))
                 throw new InvalidDataException("Invalid captured material identity or budget.");
             aggregate = checked(aggregate + file.Length);
-            if (aggregate > limits.MaxAggregateBytes) throw new InvalidDataException("Captured aggregate budget exceeded.");
+            if (aggregate > limits.MaxAggregateBytes)
+                throw new InvalidDataException("Captured aggregate budget exceeded.");
         }
+
         var destination = Path.GetFullPath(absentDestination);
         RequireAbsent(destination);
         RequireSafeAncestors(Path.GetDirectoryName(destination)!);
@@ -114,7 +121,8 @@ internal static class SnapshotStore
         Directory.CreateDirectory(parent);
         // Advisory only: concurrent exhaustion remains an I/O failure handled by owned staging cleanup.
         var drive = new DriveInfo(Path.GetPathRoot(destination)!);
-        if (drive.AvailableFreeSpace < aggregate + 1024 * 1024) throw new IOException("Insufficient capture capacity.");
+        if (drive.AvailableFreeSpace < aggregate + 1024 * 1024)
+            throw new IOException("Insufficient capture capacity.");
         var stage = Path.Combine(parent, ".capture-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(stage);
         SetMode(stage, (int)PrivateDirectory);
@@ -126,8 +134,8 @@ internal static class SnapshotStore
                 RequireSafeAncestors(Path.GetFullPath(file.SourcePath));
                 await CopyVerifiedAsync(file.SourcePath, Path.Combine(stage, file.Id), file.Sha256, file.Length, file.Mode, clock, limits, operationToken).ConfigureAwait(false);
             }
-            var inventory = files.OrderBy(f => f.Id, StringComparer.Ordinal)
-                .Select(f => new SnapshotFile(f.Id, f.Sha256, f.Length, f.Mode)).ToImmutableArray();
+
+            var inventory = files.OrderBy(f => f.Id, StringComparer.Ordinal).Select(f => new SnapshotFile(f.Id, f.Sha256, f.Length, f.Mode)).ToImmutableArray();
             var manifest = CanonicalManifest(inventory, recipeDigest, policyDigest);
             await WriteManifestAsync(stage, manifest, operationToken).ConfigureAwait(false);
             operationToken.ThrowIfCancellationRequested();
@@ -135,7 +143,10 @@ internal static class SnapshotStore
             Directory.Move(stage, destination);
             return new SnapshotHandle(destination, Hash(manifest), inventory, recipeDigest, policyDigest);
         }
-        finally { CleanupOwned(stage); }
+        finally
+        {
+            CleanupOwned(stage);
+        }
     }
 
     internal static async Task<string> CopyForUseAsync(SnapshotHandle snapshot, string absentPrivateDestination, CancellationToken cancellationToken, InvocationLimits? limits = null)
@@ -146,8 +157,7 @@ internal static class SnapshotStore
 
     // The public boundary already accepted this invocation. Disposal may prevent future consumers,
     // but cannot revoke this consumer while it obtains its verified private copies.
-    internal static async Task<string> CopyForAcceptedUseAsync(SnapshotHandle snapshot, SnapshotHandle.SnapshotLease accepted,
-        string absentPrivateDestination, CancellationToken cancellationToken, InvocationLimits? limits = null)
+    internal static async Task<string> CopyForAcceptedUseAsync(SnapshotHandle snapshot, SnapshotHandle.SnapshotLease accepted, string absentPrivateDestination, CancellationToken cancellationToken, InvocationLimits? limits = null)
     {
         accepted.RequireOwner(snapshot);
         limits ??= new InvocationLimits();
@@ -159,7 +169,8 @@ internal static class SnapshotStore
         var expectedManifest = CanonicalManifest(snapshot.Files, snapshot.RecipeDigest, snapshot.PolicyDigest);
         RequireSafeAncestors(snapshot.DirectoryPath);
         var manifestPath = Path.Combine(snapshot.DirectoryPath, "snapshot.json");
-        if (new FileInfo(manifestPath).Length != expectedManifest.Length) throw new InvalidDataException("Captured manifest changed.");
+        if (new FileInfo(manifestPath).Length != expectedManifest.Length)
+            throw new InvalidDataException("Captured manifest changed.");
         using (var opened = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
             var bytes = new byte[expectedManifest.Length];
@@ -167,14 +178,16 @@ internal static class SnapshotStore
             if (opened.ReadByte() != -1 || !bytes.AsSpan().SequenceEqual(expectedManifest) || Hash(bytes) != snapshot.Digest)
                 throw new InvalidDataException("Captured manifest changed.");
         }
-        var actual = Directory.EnumerateFileSystemEntries(snapshot.DirectoryPath).Select(Path.GetFileName)
-            .Order(StringComparer.Ordinal).ToArray();
+
+        var actual = Directory.EnumerateFileSystemEntries(snapshot.DirectoryPath).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray();
         var allowed = snapshot.Files.Select(f => f.Id).Append("snapshot.json").Order(StringComparer.Ordinal).ToArray();
-        if (!actual.SequenceEqual(allowed)) throw new InvalidDataException("Captured inventory changed.");
+        if (!actual.SequenceEqual(allowed))
+            throw new InvalidDataException("Captured inventory changed.");
         // This fresh private directory contains only opened, hash-verified copies; later snapshot path mutation cannot affect it.
         var copies = snapshot.Files.Select(f => new CaptureFile(f.Id, Path.Combine(snapshot.DirectoryPath, f.Id), f.Sha256, f.Length, f.Mode));
         var remaining = limits.EffectiveDeadline - started.Elapsed;
-        if (remaining <= TimeSpan.Zero) throw new TimeoutException("Snapshot use deadline exceeded.");
+        if (remaining <= TimeSpan.Zero)
+            throw new TimeoutException("Snapshot use deadline exceeded.");
         var copied = await CaptureAsync(copies, snapshot.RecipeDigest, snapshot.PolicyDigest, absentPrivateDestination, operationToken, limits with { Deadline = remaining }).ConfigureAwait(false);
         copied.Dispose();
         return copied.DirectoryPath;
@@ -199,16 +212,19 @@ internal static class SnapshotStore
                 writer.WriteNumber("mode", file.Mode);
                 writer.WriteEndObject();
             }
+
             writer.WriteEndArray();
             writer.WriteEndObject();
         }
+
         return stream.ToArray();
     }
 
     private static async Task CopyVerifiedAsync(string source, string destination, string digest, long length, int mode, Stopwatch clock, InvocationLimits limits, CancellationToken cancellationToken)
     {
         using var opened = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
-        if (opened.Length != length) throw new InvalidDataException("Captured material length differs.");
+        if (opened.Length != length)
+            throw new InvalidDataException("Captured material length differs.");
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536, FileOptions.Asynchronous);
         var buffer = new byte[65536];
@@ -216,14 +232,19 @@ internal static class SnapshotStore
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (clock.Elapsed > limits.EffectiveDeadline) throw new TimeoutException("Capture deadline exceeded.");
+            if (clock.Elapsed > limits.EffectiveDeadline)
+                throw new TimeoutException("Capture deadline exceeded.");
             var read = await opened.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-            if (read == 0) break;
+            if (read == 0)
+                break;
             total = checked(total + read);
-            if (total > length) throw new InvalidDataException("Captured material grew beyond its identity.");
+            if (total > length)
+                throw new InvalidDataException("Captured material grew beyond its identity.");
             hash.AppendData(buffer, 0, read);
+            TemporaryDiskBudget.Account(read);
             await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
         }
+
         if (total != length || Convert.ToHexStringLower(hash.GetHashAndReset()) != digest)
             throw new InvalidDataException("Captured material digest differs.");
         output.Flush(flushToDisk: true);
@@ -233,6 +254,7 @@ internal static class SnapshotStore
     private static async Task WriteManifestAsync(string stage, byte[] bytes, CancellationToken cancellationToken)
     {
         await using var file = new FileStream(Path.Combine(stage, "snapshot.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        TemporaryDiskBudget.Account(bytes.LongLength);
         await file.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
         file.Flush(flushToDisk: true);
         SetMode(file.Name, (int)UnixFileMode.UserRead);
@@ -244,16 +266,19 @@ internal static class SnapshotStore
         if (digest.Length != 64 || digest.Any(c => c is not (>= '0' and <= '9') and not (>= 'a' and <= 'f')))
             throw new InvalidDataException("Noncanonical digest.");
     }
+
     private static void RequireId(string id)
     {
         if (id.Length is < 1 or > 128 || id is "." or ".." || id == "snapshot.json" || id.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_' and not '.'))
             throw new InvalidDataException("Unsafe captured material ID.");
     }
+
     private static void RequireAbsent(string path)
     {
         if (Path.Exists(path) || new FileInfo(path).LinkTarget is not null || new DirectoryInfo(path).LinkTarget is not null)
             throw new IOException("Capture destination must be absent.");
     }
+
     private static void RequireSafeAncestors(string path)
     {
         var full = Path.GetFullPath(path);
@@ -266,14 +291,35 @@ internal static class SnapshotStore
                 throw new InvalidDataException("A capture path contains a link.");
         }
     }
-    private static void SetMode(string path, int mode) { if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, (UnixFileMode)mode); }
+
+    private static void SetMode(string path, int mode)
+    {
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(path, (UnixFileMode)mode);
+    }
+
     private static CancellationTokenSource CreateDeadline(CancellationToken cancellationToken, TimeSpan deadline)
-    { var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken); source.CancelAfter(deadline); return source; }
+    {
+        var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        source.CancelAfter(deadline);
+        return source;
+    }
+
     private static void ValidateLimits(InvocationLimits limits)
-    { if (limits.MaxFileBytes is <= 0 or > 1024L * 1024 * 1024 || limits.MaxAggregateBytes < limits.MaxFileBytes || limits.MaxFileCount is < 1 or > 65536 || limits.EffectiveDeadline <= TimeSpan.Zero || limits.EffectiveDeadline > TimeSpan.FromSeconds(300) || limits.MaxProcessOutputBytes is < 1 or > 1024 * 1024 || limits.MaxRedirects is < 0 or > 32 || limits.MaxArgumentCount is < 1 or > 4096 || limits.MaxArgumentBytes is < 1 or > 1024 * 1024 || limits.EffectiveCleanupDeadline <= TimeSpan.Zero || limits.EffectiveCleanupDeadline > TimeSpan.FromSeconds(30)) throw new ArgumentOutOfRangeException(nameof(limits)); }
+    {
+        if (limits.MaxFileBytes is <= 0 or > 1024L * 1024 * 1024 || limits.MaxAggregateBytes < limits.MaxFileBytes || limits.MaxFileCount is < 1 or > 65536 || limits.EffectiveDeadline <= TimeSpan.Zero || limits.EffectiveDeadline > TimeSpan.FromSeconds(300) || limits.MaxProcessOutputBytes is < 1 or > 1024 * 1024 || limits.MaxRedirects is < 0 or > 32 || limits.MaxArgumentCount is < 1 or > 4096 || limits.MaxArgumentBytes is < 1 or > 1024 * 1024 || limits.EffectiveCleanupDeadline <= TimeSpan.Zero || limits.EffectiveCleanupDeadline > TimeSpan.FromSeconds(30))
+            throw new ArgumentOutOfRangeException(nameof(limits));
+    }
+
     private static void CleanupOwned(string path)
     {
-        try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 }

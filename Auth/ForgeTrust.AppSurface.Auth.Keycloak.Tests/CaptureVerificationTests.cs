@@ -173,11 +173,29 @@ public sealed class CaptureVerificationTests
     }
 
     [Fact]
+    public void VerifyMavenIdentity_rejects_pom_metadata_over_limit()
+    {
+        var metadata = "groupId=example\nartifactId=library\nversion=1.2.3\nvalue=" + new string('x', 65536);
+        using var jar = Jar(("META-INF/maven/example/library/pom.properties", metadata));
+        AssertMavenFailure("Maven metadata exceeds profile", () => KeycloakSecurity.VerifyMavenIdentity(jar.Path,
+            Coordinate("example", "library", "1.2.3")));
+    }
+
+    [Fact]
     public void VerifyMavenIdentity_rejects_pom_mismatched_group_and_artifact()
     {
         using var jar = Jar(("META-INF/maven/example/library/pom.properties", "groupId=other\nartifactId=wrong\nversion=1.2.3\n"));
         AssertMavenFailure("identity differs", () => KeycloakSecurity.VerifyMavenIdentity(jar.Path,
             Coordinate("example", "library", "1.2.3")));
+    }
+
+    [Fact]
+    public void VerifyMavenIdentity_rejects_manifest_main_metadata_over_limit()
+    {
+        var manifest = "Manifest-Version: 1.0\nX: " + new string('x', 65520) + "\n";
+        using var jar = Jar(("META-INF/MANIFEST.MF", manifest));
+        AssertMavenFailure("main manifest metadata exceeds profile", () => KeycloakSecurity.VerifyMavenIdentity(jar.Path,
+            Coordinate("example", "manifest-only", "1.0")));
     }
 
     [Fact]

@@ -111,6 +111,23 @@ public sealed class DiagnosticsTests
     }
 
     [Fact]
+    public void KnownCorrelationAndSafeContextAreStableAcrossRepeatedMapping()
+    {
+        var known = KeycloakDiagnostics.Failure(KeycloakFailureCode.Cancelled, KeycloakSafePhase.Capture, "capture", KeycloakEffectState.None, "fresh invocation");
+        Assert.Same(known, KeycloakDiagnostics.Map(known, KeycloakSafePhase.Build, "ignored", KeycloakEffectState.Unknown));
+        Assert.Same(known, KeycloakDiagnostics.Map(known, KeycloakSafePhase.Build, "ignored", KeycloakEffectState.Unknown, known.CorrelationId.Value));
+        Assert.Equal(KeycloakRecoveryClass.NoRetry, known.Recovery);
+        var cancelled = KeycloakDiagnostics.Map(new OperationCanceledException(), KeycloakSafePhase.Capture, "capture", KeycloakEffectState.None);
+        Assert.Equal(KeycloakRecoveryClass.NoRetry, cancelled.Recovery);
+        var persistent = KeycloakDiagnostics.Map(new MaterialAcquisitionException(false, "private"), KeycloakSafePhase.Acquisition, "material", KeycloakEffectState.None);
+        Assert.Equal(KeycloakRecoveryClass.CorrectInput, persistent.Recovery);
+        var ambiguous = KeycloakDiagnostics.Map(new MaterialAcquisitionException(true, "private"), KeycloakSafePhase.Acquisition, "material", KeycloakEffectState.Staged);
+        Assert.Equal(KeycloakRecoveryClass.CorrectInput, ambiguous.Recovery);
+        var inspectionDeadline = KeycloakDiagnostics.Map(new TimeoutException(), KeycloakSafePhase.Inspection, "inspection", KeycloakEffectState.None);
+        Assert.Equal(KeycloakFailureCode.ProbeFailed, inspectionDeadline.Code);
+    }
+
+    [Fact]
     public void DiagnosticMapperCoversTransientAndProcessFailures()
     {
         var transient = KeycloakDiagnostics.Map(new MaterialAcquisitionException(true, "network"), KeycloakSafePhase.Acquisition, "material", KeycloakEffectState.None);

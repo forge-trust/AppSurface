@@ -46,11 +46,16 @@ internal static class TestRecipes
         var digest = "sha256:" + new string('a', 64);
         var image = KeycloakImageIdentity.Create(digest, digest, "linux/amd64") with
         {
-            IndexMaterialId = "index", ArchiveMaterialId = "archive-bytes", ConfigDigest = digest, DiffIds = [digest]
+            IndexMaterialId = "index",
+            ArchiveMaterialId = "archive-bytes",
+            ConfigDigest = digest,
+            DiffIds = [digest]
         };
         return KeycloakSecurityRecipe.Create(1, image, [Oci("frontend", "frontend-bytes")], operations ?? [ArtifactGroup(), Runtime(), Archive()], mode, [], []) with
         {
-            KeycloakVersion = "26.7.2", EntrypointPath = "/opt/keycloak/bin/kc.sh", SourceProfiles = ["keycloak-26.7.2"],
+            KeycloakVersion = "26.7.2",
+            EntrypointPath = "/opt/keycloak/bin/kc.sh",
+            SourceProfiles = ["keycloak-26.7.2"],
             MaterialReferences = [
                 Material("index"), Material("archive-bytes"), Material("frontend-bytes"), Material("frontend-index"),
                 Material("runtime-bytes"), Material("runtime-index"), Material("keyring"), Material("package-index"), Material("openssl"), Material("openssl-provider-legacy"), Material("libssl3t64")
@@ -86,7 +91,8 @@ internal static class TestRecipes
                 new RuntimePackageSpec("openssl-provider-legacy", "3", new string('d', 64), "amd64") { MaterialId = "openssl-provider-legacy" },
                 new RuntimePackageSpec("libssl3t64", "3", new string('e', 64), "amd64") { MaterialId = "libssl3t64" }
             ],
-            RemovedPackages = [new KeycloakRemovedPackageSpec("curl", "amd64", "7"), new KeycloakRemovedPackageSpec("libcurl4t64", "amd64", "8")], ExpectedObservations = ["nonroot"]
+            RemovedPackages = [new KeycloakRemovedPackageSpec("curl", "amd64", "7"), new KeycloakRemovedPackageSpec("libcurl4t64", "amd64", "8")],
+            ExpectedObservations = ["nonroot"]
         });
 
     internal static KeycloakOperation Archive(string id = "archive", string destination = "/opt/keycloak/lib/app.jar")

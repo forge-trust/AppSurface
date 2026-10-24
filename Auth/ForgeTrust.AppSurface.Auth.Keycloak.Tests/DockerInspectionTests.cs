@@ -87,8 +87,11 @@ public sealed class DockerInspectionTests
         Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token) { invoked = true; throw new InvalidOperationException(); }
         await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ResolveLocalAsync(reference, default, Run));
         Assert.False(invoked);
+        var events = new List<KeycloakStageEvent>();
+        using var subscription = KeycloakStageEvents.Subscribe(events.Add);
         var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.ResolveLocalImageAsync(reference));
         Assert.Equal(KeycloakFailureCode.InspectionFailed, failure.Code); Assert.Equal(KeycloakSafePhase.Inspection, failure.Phase);
+        Assert.Contains(events, x => x.Phase == KeycloakStagePhase.Inspection && x.Outcome == KeycloakStageOutcome.Rejected && x.CorrelationId == failure.CorrelationId.Value);
     }
 
     [Theory]
@@ -96,10 +99,73 @@ public sealed class DockerInspectionTests
     [InlineData("manifest")]
     [InlineData("config")]
     [InlineData("layers")]
+    [InlineData("null-image")]
+    [InlineData("default-platform")]
+    [InlineData("uppercase-config")]
+    [InlineData("nonhex-config")]
+    [InlineData("null-diffid")]
     public void Invalid_identity_is_rejected(string field)
     {
-        var image = field switch { "platform" => Image with { Platform = "windows/amd64" }, "manifest" => Image with { ManifestDigest = "sha256:bad" }, "config" => Image with { ConfigDigest = "SHA256:" + new string('B', 64) }, _ => Image with { DiffIds = [] } };
+        var image = field switch
+        {
+            "null-image" => null!,
+            "platform" => Image with { Platform = "windows/amd64" },
+            "default-platform" => Image with { Platform = "linux" },
+            "manifest" => Image with { ManifestDigest = "sha256:bad" },
+            "config" or "uppercase-config" => Image with { ConfigDigest = "SHA256:" + new string('B', 64) },
+            "nonhex-config" => Image with { ConfigDigest = "sha256:" + new string('g', 64) },
+            "null-diffid" => Image with { DiffIds = [null!] },
+            _ => Image with { DiffIds = [] }
+        };
         Assert.Throws<InvalidDataException>(() => DockerInspection.Validate(image));
+    }
+
+    [Fact]
+    public async Task Resolve_local_core_returns_fixture_identity_and_correlated_success()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var events = new List<KeycloakStageEvent>();
+        using var subscription = KeycloakStageEvents.Subscribe(events.Add);
+        Task<ProcessObservation> Command(IReadOnlyList<string> args, CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+            if (args[0] == "image" && args[1] == "save")
+                File.Copy(fixture.ArchivePath, args[3]);
+            return Task.FromResult(args[0] == "version" ? Observation("29.7.2") : Reply(args, fixture.InspectionImage, fixture.InspectionImage.ManifestDigest));
+        }
+
+        var result = await KeycloakSecurity.ResolveLocalImageCoreAsync("local:fixture", default, Command);
+
+        Assert.Equal(fixture.InspectionImage.ManifestDigest, result.ManifestDigest);
+        Assert.Equal(fixture.InspectionImage.ConfigDigest, result.ConfigDigest);
+        Assert.Equal(fixture.InspectionImage.Platform, result.Platform);
+        Assert.Equal(fixture.InspectionImage.DiffIds.ToArray(), result.DiffIds.ToArray());
+        var own = events.Where(x => x.OperationId == "local-image").ToArray();
+        Assert.Equal(2, own.Length);
+        Assert.Equal(KeycloakStageOutcome.Started, own[0].Outcome);
+        Assert.Equal(KeycloakStageOutcome.Succeeded, own[1].Outcome);
+        Assert.Equal(own[0].CorrelationId, own[1].CorrelationId);
+        Assert.Equal(fixture.InspectionImage.DiffIds.Length, own[1].CheckCount);
+    }
+
+    [Fact]
+    public async Task Resolve_local_core_preserves_cancellation_and_does_not_start_export()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var saved = false;
+        Task<ProcessObservation> Command(IReadOnlyList<string> args, CancellationToken token)
+        {
+            saved |= args[0] == "image" && args[1] == "save";
+            token.ThrowIfCancellationRequested();
+            return Task.FromResult(Observation(""));
+        }
+
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() =>
+            KeycloakSecurity.ResolveLocalImageCoreAsync("local:fixture", cancellation.Token, Command));
+
+        Assert.Equal(KeycloakFailureCode.Cancelled, failure.Code);
+        Assert.False(saved);
     }
 
     [Fact]
@@ -124,9 +190,72 @@ public sealed class DockerInspectionTests
             return Task.FromResult(Reply(args, image, image.ManifestDigest));
         }
 
+        var archive = Path.Combine(Path.GetTempPath(), "docker-export-changed-" + Guid.NewGuid().ToString("N"));
+        await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ExportAsync(image, archive, new HashSet<string>(), default, ChangedAfterExport));
+        Assert.False(File.Exists(archive));
+    }
+
+    [Fact]
+    public async Task Export_rejects_malformed_binary_archive_without_accepting_identity()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var archive = Path.Combine(fixture.Root, "malformed-export.tar");
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] == "image" && args[1] == "save") File.WriteAllBytes(args[3], [0xff, 0x00, 0x7f]);
+            return Task.FromResult(args[0] == "version" ? Observation("29.7.2") : Reply(args, fixture.InspectionImage, fixture.InspectionImage.ManifestDigest));
+        }
+
         await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ExportAsync(
-            image, Path.Combine(Path.GetTempPath(), "docker-export-changed-" + Guid.NewGuid().ToString("N")),
-            new HashSet<string>(), default, ChangedAfterExport));
+            fixture.InspectionImage, archive, new HashSet<string>(), default, Run));
+        Assert.False(File.Exists(archive));
+    }
+
+    [Fact]
+    public async Task Resolve_rejects_malformed_inspect_metadata_before_export()
+    {
+        var invoked = false;
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            invoked = true;
+            return Task.FromResult(Observation("{\"id\":null,"));
+        }
+
+        await Assert.ThrowsAnyAsync<JsonException>(() => DockerInspection.ResolveLocalAsync("local:malformed", default, Run));
+        Assert.True(invoked);
+    }
+
+    [Fact]
+    public async Task Export_rejects_existing_archive_without_deleting_or_invoking_delegate()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var archive = Path.Combine(fixture.Root, "existing.tar");
+        await File.WriteAllBytesAsync(archive, [4, 5, 6]);
+        var invoked = false;
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token) { invoked = true; throw new InvalidOperationException(); }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ExportAsync(fixture.InspectionImage, archive, new HashSet<string>(), default, Run));
+        Assert.Equal(new byte[] { 4, 5, 6 }, await File.ReadAllBytesAsync(archive));
+        Assert.False(invoked);
+    }
+
+    [Fact]
+    public async Task Export_save_failure_preserves_delegate_written_archive()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var archive = Path.Combine(fixture.Root, "partial.tar");
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] == "image" && args[1] == "save")
+            {
+                File.WriteAllBytes(args[3], [9, 8, 7]);
+                throw new IOException("save failed");
+            }
+            return Task.FromResult(args[0] == "version" ? Observation("29.7.2") : Reply(args, fixture.InspectionImage, fixture.InspectionImage.ManifestDigest));
+        }
+
+        await Assert.ThrowsAsync<IOException>(() => DockerInspection.ExportAsync(fixture.InspectionImage, archive, new HashSet<string>(), default, Run));
+        Assert.Equal(new byte[] { 9, 8, 7 }, await File.ReadAllBytesAsync(archive));
     }
 
     internal static ProcessObservation Reply(IReadOnlyList<string> args, KeycloakInspectionImage image, string engineId)

@@ -23,7 +23,9 @@ internal sealed class TinyImageFixture : IDisposable
         KeycloakCaptureInputs bindings,
         KeycloakImageIdentity image,
         ImmutableDictionary<string, string> materialPaths)
-        => (this.root, Recipe, Policy, Bindings, Image, MaterialPaths) = (root, recipe, policy, bindings, image, materialPaths);
+    {
+        (this.root, Recipe, Policy, Bindings, Image, MaterialPaths) = (root, recipe, policy, bindings, image, materialPaths);
+    }
 
     internal string Root => root;
     internal KeycloakSecurityRecipe Recipe { get; }
@@ -34,13 +36,13 @@ internal sealed class TinyImageFixture : IDisposable
     internal string ArchivePath => MaterialPaths[Image.ArchiveMaterialId!];
     internal ImmutableDictionary<string, string> MaterialPaths { get; }
 
-    internal static TinyImageFixture Create()
+    internal static TinyImageFixture Create(bool includeOutside = false)
     {
         var root = Path.Combine(KeycloakSecurity.PrivateTemporaryRoot(), "keycloak-tiny-image-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
-            var layerTar = LayerTar();
+            var layerTar = LayerTar(includeOutside);
             var layerDiffId = Sha256(layerTar);
             var layerGzip = Gzip(layerTar);
             var layerDigest = Sha256(layerGzip);
@@ -80,13 +82,20 @@ internal sealed class TinyImageFixture : IDisposable
 
             var image = KeycloakImageIdentity.Create(indexDigest, manifestDigest, "linux/amd64") with
             {
-                IndexMaterialId = "index", ArchiveMaterialId = "archive-bytes", ConfigDigest = configDigest,
+                IndexMaterialId = "index",
+                ArchiveMaterialId = "archive-bytes",
+                ConfigDigest = configDigest,
                 DiffIds = [layerDiffId]
             };
             var frontend = new OciIdentity("frontend", indexDigest) with
             {
-                Id = "frontend", Platform = "linux/amd64", ArchiveMaterialId = "frontend-bytes",
-                PlatformManifestDigest = manifestDigest, ConfigDigest = configDigest, IndexMaterialId = "frontend-index", DiffIds = [layerDiffId]
+                Id = "frontend",
+                Platform = "linux/amd64",
+                ArchiveMaterialId = "frontend-bytes",
+                PlatformManifestDigest = manifestDigest,
+                ConfigDigest = configDigest,
+                IndexMaterialId = "frontend-index",
+                DiffIds = [layerDiffId]
             };
             var baseRecipe = TestRecipes.Recipe(KeycloakRecipeMode.ThemeOnly, []) with
             {
@@ -106,7 +115,10 @@ internal sealed class TinyImageFixture : IDisposable
                 CapturedHostInputs = bytesById.Keys.ToImmutableArray(),
                 MaterialReferences = baseRecipe.MaterialReferences.Select(material => material with
                 {
-                    ExactHttpsUri = string.Empty, Sha256 = Hex(bytesById[material.Id]), MaxBytes = bytesById[material.Id].LongLength, CapturedHostInput = true
+                    ExactHttpsUri = string.Empty,
+                    Sha256 = Hex(bytesById[material.Id]),
+                    MaxBytes = bytesById[material.Id].LongLength,
+                    CapturedHostInput = true
                 }).ToImmutableArray()
             };
             var materialPaths = bytesById.ToImmutableDictionary(
@@ -127,11 +139,17 @@ internal sealed class TinyImageFixture : IDisposable
 
     public void Dispose() { try { Directory.Delete(root, true); } catch (DirectoryNotFoundException) { } }
 
-    private static byte[] LayerTar()
+    private static byte[] LayerTar(bool includeOutside)
     {
         using var output = new MemoryStream();
         using (var writer = new TarWriter(output, TarEntryFormat.Pax, leaveOpen: true))
         {
+            if (includeOutside)
+            {
+                DirectoryEntry(writer, "etc");
+                FileEntry(writer, "etc/reviewed.txt", Encoding.UTF8.GetBytes("baseline outside app\n"));
+                writer.WriteEntry(new PaxTarEntry(TarEntryType.SymbolicLink, "etc/reviewed-link") { LinkName = "reviewed.txt", Mode = (UnixFileMode)511, ModificationTime = DateTimeOffset.UnixEpoch });
+            }
             DirectoryEntry(writer, "opt"); DirectoryEntry(writer, "opt/keycloak"); DirectoryEntry(writer, "opt/keycloak/bin");
             DirectoryEntry(writer, "opt/keycloak/themes"); DirectoryEntry(writer, "opt/keycloak/themes/keycloak.v2"); DirectoryEntry(writer, "opt/keycloak/themes/keycloak.v2/login");
             FileEntry(writer, "opt/keycloak/bin/kc.sh", Encoding.UTF8.GetBytes("#!/bin/sh\n"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
@@ -158,7 +176,8 @@ internal sealed class TinyImageFixture : IDisposable
 
     private static byte[] JsonBytes(Action<Utf8JsonWriter> write)
     {
-        using var output = new MemoryStream(); using (var writer = new Utf8JsonWriter(output)) { write(writer); writer.Flush(); } return output.ToArray();
+        using var output = new MemoryStream(); using (var writer = new Utf8JsonWriter(output)) { write(writer); writer.Flush(); }
+        return output.ToArray();
     }
 
     private static void DirectoryEntry(TarWriter writer, string path)
