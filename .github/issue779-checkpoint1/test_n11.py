@@ -8,6 +8,10 @@ import copy
 import importlib.util
 import io
 import os
+import json
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 import stat
 import tarfile
@@ -54,6 +58,38 @@ def archive_data():
             node.uid = node.gid = node.mtime = 0
             archive.addfile(node, io.BytesIO(raw))
     return stream.getvalue(), members
+
+
+class NonRootPrerequisiteEnvironmentTests(unittest.TestCase):
+    def test_both_actual_prerequisites_use_the_fixed_runtime_environment(self):
+        import binding
+        root = Path(__file__).resolve().parent
+        scripts = (root / "procedures/n11/checkpoint-n11.sh",
+                   root / "procedures/n12/checkpoint-n12-data-integration.sh")
+        with tempfile.TemporaryDirectory() as directory:
+            probe = Path(directory) / "probe.py"
+            probe.write_text("import json,os,sys;print(json.dumps({'environment':dict(os.environ),'arguments':sys.argv[1:]}))")
+            for script in scripts:
+                with self.subTest(script=script.name):
+                    lines = [line for line in script.read_text().splitlines()
+                             if "strace -f" in line and '>"$log/n02.stdout"' in line]
+                    self.assertEqual(1, len(lines))
+                    self.assertIn('setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups', lines[0])
+                    invocation = lines[0].split('/usr/bin/env -i ', 1)[1].split(') >"$log/n02.stdout"', 1)[0]
+                    tokens = shlex.split(invocation)
+                    host_index = tokens.index('$host')
+                    self.assertEqual(list(binding.FIXED_ENVIRONMENT), tokens[:host_index])
+                    self.assertEqual(['$host', '$managed', 'evidence', 'supervise', '--request', '$request'], tokens[host_index:])
+                    command = ['/usr/bin/env', '-i', *tokens[:host_index], sys.executable,
+                               str(probe), *tokens[host_index + 2:-1], 'unopened-fixture-request']
+                    result = subprocess.run(command, capture_output=True, text=True, timeout=5,
+                                            env={**os.environ, 'UNSELECTED_CANARY': 'must-not-survive'})
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    value = json.loads(result.stdout)
+                    expected = dict(item.split('=', 1) for item in binding.FIXED_ENVIRONMENT)
+                    self.assertEqual(expected, {key: value['environment'].get(key) for key in expected})
+                    self.assertNotIn('UNSELECTED_CANARY', value['environment'])
+                    self.assertEqual(['evidence', 'supervise', '--request', 'unopened-fixture-request'], value['arguments'])
 
 
 class N11RetentionDataTests(unittest.TestCase):

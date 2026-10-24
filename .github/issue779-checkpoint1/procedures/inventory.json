@@ -83,7 +83,7 @@
       "historical_path": "packet/cases/N11/tooling/.github/issue779-csharp-native/checkpoint-n11.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n11/checkpoint-n11.sh",
-      "ported_sha256": "c4d3c2135fcd102bc2407f9b9dec2cabf318fa9c9cdeab51906ae09e77ba2d9d",
+      "ported_sha256": "c391fc8a0f77564aa8f1c0f9a8a5b0c47317374d61d503157f64d8dbd7c58aaf",
       "sha256": "db75777ba314dd46e8cc29a0940edd50f3b024e619eeedc5bb7c38b4d9fbc2c4"
     },
     {
@@ -91,7 +91,7 @@
       "historical_path": "packet/cases/N12/tooling/.github/issue779-csharp-native/checkpoint-n12-data-integration.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n12/checkpoint-n12-data-integration.sh",
-      "ported_sha256": "a5897ca505e49da572ed8004c956c73f07d47bd0c6f417d2d39458b17361de2c",
+      "ported_sha256": "def1da515a484cfea503eb24e56a71a616734d5cf3290880d4623f76d0d598b1",
       "sha256": "e6cfe9e717f902c3b2fe0d4a806aceb37acdcf25a0e5be70d5f8c370b5c67d2d"
     },
     {
@@ -724,7 +724,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/README.md",
-      "ported_sha256": "68648bb6d8805e405f69da3e945f449e790ab212776e3f8760cb07b54c71df5c",
+      "ported_sha256": "f3f7665d2b07fa910bb7030cf3529da8bfbce61dc1879fbb941ab27a30d4df47",
       "sha256": "1a8993be2e80929ccc3db550eb0fe824b5a4fb2e76fe6b8d1ab373e72ca78a35"
     },
     {
@@ -796,7 +796,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n11/port-manifest.json",
-      "ported_sha256": "4cf581f5af8495dd91de8c621c70146a5fa126f854c6d0571c7a8367f594e6ba",
+      "ported_sha256": "2a300349fef77270b1ce52f4d07e14e86638e8e25f3fd2d8ecf1defaec55e667",
       "sha256": "1397e14e696137fb02b54a2907ba4d27461acdf9188d99af1100efe1fe067e73"
     },
     {
@@ -841,7 +841,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n12/README.md",
-      "ported_sha256": "c3536cda2c5d6f083d7b69439c241869393f9ece8fd2fcf3aad518762230a75b",
+      "ported_sha256": "e4499ab06a124968690dde704398aa6656e3594c98c7f8dce7f83c956427933d",
       "sha256": "4a6b1f56c331cbb2976d99d35a57130ef2e369c61f1d51f303cd76efdbb72058"
     },
     {
@@ -877,7 +877,7 @@
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n12/port-manifest.json",
-      "ported_sha256": "45baf29b8881efd9f39f86cbd483786793123c03adf16b0507b369331a5c5bb5",
+      "ported_sha256": "459fe1726a72df4bd2fa0ce9944af00733629496a496091cfea82a18721ed5a3",
       "sha256": "aeba871d2f46d9fc3306f21518cb899e80b3a5d53d5691108e5b665367c57bb4"
     },
     {

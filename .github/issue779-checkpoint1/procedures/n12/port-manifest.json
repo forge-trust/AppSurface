@@ -11,16 +11,16 @@
   "entry": "procedures/n12/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 10177,
-      "sha256": "c3536cda2c5d6f083d7b69439c241869393f9ece8fd2fcf3aad518762230a75b"
+      "bytes": 11026,
+      "sha256": "e4499ab06a124968690dde704398aa6656e3594c98c7f8dce7f83c956427933d"
     },
     "adapter.py": {
       "bytes": 4422,
       "sha256": "fb0a0063db123b06f1949850ad6612a4f425efffa4d843bb37bc33090a2829f7"
     },
     "checkpoint-n12-data-integration.sh": {
-      "bytes": 102083,
-      "sha256": "a5897ca505e49da572ed8004c956c73f07d47bd0c6f417d2d39458b17361de2c"
+      "bytes": 102104,
+      "sha256": "def1da515a484cfea503eb24e56a71a616734d5cf3290880d4623f76d0d598b1"
     },
     "dispatch.sh": {
       "bytes": 2492,
@@ -209,6 +209,14 @@
       "../../test_alias_declaration_lookup.py"
     ],
     "scope": "N12 adopts exact None declaration-only cache and N06 complete physical batch audit. None/N12 left reads the same fresh uptime sample inline rather than through inner shell child; original comparisons/caps/native guard and suffix preserved."
+  },
+  "source71_fixed_n02_environment": {
+    "change": "Add fixed XDG_RUNTIME_DIR=/tmp to the existing N02 env -i, matching binding.FIXED_ENVIRONMENT and the slot prerequisites.",
+    "native_predicates_changed": false,
+    "native_result": "pending fresh Linux",
+    "outcome_and_trace_assertions_changed": false,
+    "production_limits_changed": false,
+    "regression_test": "test_n11.NonRootPrerequisiteEnvironmentTests"
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

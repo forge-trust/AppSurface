@@ -998,7 +998,7 @@ unit_absent() { local state; state=$(bounded systemctl show "$1" -p LoadState --
 absent_accounts; unit_absent "$owner"; unit_absent "$worker"
 diagnostic_stage=n02
 set +e
-(ulimit -f 262144; ulimit -c 0; try_bounded strace -f -qq -e trace=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect -o "$log/n02.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp "$host" "$managed" evidence supervise --request "$request") >"$log/n02.stdout" 2>"$log/n02.stderr"
+(ulimit -f 262144; ulimit -c 0; try_bounded strace -f -qq -e trace=openat,openat2,mkdir,mkdirat,unlink,unlinkat,rmdir,connect -o "$log/n02.trace" setpriv --reuid="$n02_uid" --regid="$n02_gid" --clear-groups /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp "$host" "$managed" evidence supervise --request "$request") >"$log/n02.stdout" 2>"$log/n02.stderr"
 n02=$?; set -e; remaining >/dev/null
 [[ $n02 == 1 && ! -s $log/n02.stdout ]] || fail N02-outcome
 bounded grep -q '^ASEVD402:' "$log/n02.stderr" || fail N02-error

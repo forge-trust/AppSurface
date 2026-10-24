@@ -11,8 +11,8 @@
   "entry": "procedures/n11/adapter.py",
   "files": {
     "README.md": {
-      "bytes": 14101,
-      "sha256": "68648bb6d8805e405f69da3e945f449e790ab212776e3f8760cb07b54c71df5c"
+      "bytes": 14950,
+      "sha256": "f3f7665d2b07fa910bb7030cf3529da8bfbce61dc1879fbb941ab27a30d4df47"
     },
     "adapter.py": {
       "bytes": 4405,
@@ -31,8 +31,8 @@
       "sha256": "acdb66d1491c01311c005a8a4e10f62e790d5cf18b5e9cc9a1adb918e5b43c79"
     },
     "checkpoint-n11.sh": {
-      "bytes": 100488,
-      "sha256": "c4d3c2135fcd102bc2407f9b9dec2cabf318fa9c9cdeab51906ae09e77ba2d9d"
+      "bytes": 100509,
+      "sha256": "c391fc8a0f77564aa8f1c0f9a8a5b0c47317374d61d503157f64d8dbd7c58aaf"
     },
     "dispatch.sh": {
       "bytes": 2458,
@@ -269,6 +269,14 @@
     ],
     "scope": "private original account_ids snapshot and strict settled-callback post-root-custody layout/NSS v2, separate unchanged uncertain quarantine v1; no production cleanup policy change",
     "source52_measured_capture_failure": "workspace"
+  },
+  "source71_fixed_n02_environment": {
+    "change": "Add fixed XDG_RUNTIME_DIR=/tmp to the existing N02 env -i, matching binding.FIXED_ENVIRONMENT and the slot prerequisites.",
+    "native_predicates_changed": false,
+    "native_result": "pending fresh Linux",
+    "outcome_and_trace_assertions_changed": false,
+    "production_limits_changed": false,
+    "regression_test": "test_n11.NonRootPrerequisiteEnvironmentTests"
   },
   "status": "SOURCE_READY_SOURCE_ONLY_NOT_NATIVE_VALIDATED",
   "tests_executed": true

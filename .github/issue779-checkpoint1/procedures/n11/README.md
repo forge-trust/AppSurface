@@ -211,3 +211,17 @@ success-path save and validation remain unchanged. The
 [portable failure-retention controls](../../test_failed_fixture_retention.py)
 exercise the actual orchestration block with ordinary owned files and detached
 command outcomes; they establish no native or protected-owner fact.
+
+
+### Runtime directory for the non-root prerequisite
+
+The fixed N02 invocation selects `XDG_RUNTIME_DIR=/tmp`, matching the other
+[original worker procedures](../../README.md). The environment remains cleared,
+with `HOME=/nonexistent`, `DOTNET_CLI_HOME=/tmp`, and `--clear-groups`. This gives
+the external standard collector's named-mutex cleanup the same runtime directory
+as those procedures; it does not grant access to the protected request or roots.
+Revision70's measured N11 prerequisite retained the expected `ASEVD402` followed
+by a collector mutex exception and an attempt to create `/nonexistent/.dotnet`.
+Its abnormal exit failed the original outcome check. The outcome, protected-I/O
+trace checks, quotas, original clocks, and all native record predicates remain
+unchanged. Fresh Linux validation must verify the corrected environment.
