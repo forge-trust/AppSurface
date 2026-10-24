@@ -10,6 +10,74 @@ public sealed class LinuxOutputPipesTests
     private static readonly TimeSpan Guard = TimeSpan.FromSeconds(10);
 
     [Fact]
+    public void PipeFactsPolicyAcceptsCopiedActualFactsButCreatesNoPipeAuthority()
+    {
+        var read = Metadata(0x1000, 91, 0, 0);
+        var write = read;
+        var facts = new LinuxOutputPipeFacts(12, 13, 0, 1, 1, 1, read, write);
+
+        LinuxOutputPipeFactsPolicy.ValidateDescriptors(facts.ReadDescriptor, facts.WriteDescriptor);
+        LinuxOutputPipeFactsPolicy.ValidateFlags(facts.ReadAccessFlags, facts.WriteAccessFlags,
+            facts.ReadDescriptorFlags, facts.WriteDescriptorFlags);
+        LinuxOutputPipeFactsPolicy.ValidateMetadata(facts.ReadMetadata, facts.WriteMetadata);
+    }
+
+    [Theory]
+    [InlineData(-1, 13)]
+    [InlineData(12, -1)]
+    [InlineData(12, 12)]
+    public void PipeFactsPolicyRejectsEachInvalidDescriptorField(int readDescriptor, int writeDescriptor)
+    {
+        AssertInvalid(() => LinuxOutputPipeFactsPolicy.ValidateDescriptors(readDescriptor, writeDescriptor));
+    }
+
+    [Theory]
+    [InlineData(-1, 1, 1, 1)]
+    [InlineData(0, -1, 1, 1)]
+    [InlineData(0, 1, -1, 1)]
+    [InlineData(0, 1, 1, -1)]
+    [InlineData(1, 1, 1, 1)]
+    [InlineData(0, 0, 1, 1)]
+    [InlineData(0, 1, 0, 1)]
+    [InlineData(0, 1, 1, 0)]
+    public void PipeFactsPolicyRejectsEachInvalidFlagField(int readAccess, int writeAccess,
+        int readDescriptor, int writeDescriptor)
+    {
+        AssertInvalid(() => LinuxOutputPipeFactsPolicy.ValidateFlags(readAccess, writeAccess,
+            readDescriptor, writeDescriptor));
+    }
+
+    [Fact]
+    public void PipeFactsPolicyRejectsEachInvalidMetadataFieldWithAdjacentValidPair()
+    {
+        var read = Metadata(0x1000, 91, 0, 0);
+        var write = read;
+        foreach (var value in new[]
+        {
+            read with { Mode = 0x8000 }, read with { Inode = 0 },
+            read with { DeviceMajor = 2 }, read with { DeviceMinor = 3 },
+            read with { Uid = 1 }, read with { Gid = 1 },
+        }) AssertInvalid(() => LinuxOutputPipeFactsPolicy.ValidateMetadata(value, write));
+        foreach (var value in new[]
+        {
+            write with { Mode = 0x8000 }, write with { Inode = 0 },
+            write with { DeviceMajor = 2 }, write with { DeviceMinor = 3 },
+            write with { Uid = 1 }, write with { Gid = 1 },
+        }) AssertInvalid(() => LinuxOutputPipeFactsPolicy.ValidateMetadata(read, value));
+        LinuxOutputPipeFactsPolicy.ValidateMetadata(read, write);
+    }
+
+    private static LinuxProtectedMetadata Metadata(ushort mode, ulong inode, uint uid, uint gid) =>
+        new(4, 5, inode, uid, gid, mode, 1, 0, 0, 0, 0, 0);
+
+    private static void AssertInvalid(Action action)
+    {
+        var error = Assert.Throws<SupervisionOutputPipeException>(action);
+        Assert.Equal(SupervisionOutputPipeFailure.InvalidPipe, error.Failure);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
     public async Task RealAnonymousPipesObserveBothEofsOnlyAfterLocalWritersClose()
     {
         var stdout = PortablePipe();

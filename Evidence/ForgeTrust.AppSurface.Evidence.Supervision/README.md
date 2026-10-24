@@ -217,6 +217,21 @@ keep workload cleanup distinct from the worker's own final exit.
 
 ## Counted output
 
+### Native output-pipe fact policy
+
+`LinuxOutputPipes.Create` keeps the existing native sequence: `pipe2(O_CLOEXEC)`, ownership transfer,
+`fcntl` access and descriptor-flag reads, then two `stat` samples. `LinuxOutputPipeFactsPolicy` is the
+single internal data policy used at those same boundaries. It rejects negative or equal descriptors,
+requires read/write access modes and `FD_CLOEXEC`, and requires both samples to be root-owned FIFOs with
+one shared device and inode. A failed descriptor or `fcntl` observation is rejected before metadata is
+read, preserving the syscall failure order and all existing close handling.
+
+The policy consumes copied observations only. It creates no descriptor, process, account, admission,
+unit, or output authority, and it is not a public pipe-construction or injection API. The native factory
+continues to own every actual descriptor and retains the existing transfer and close ordering. The focused
+policy tests use adjacent copied facts for one-field rejection cases; they do not claim native pipe creation
+or Linux acceptance. `LinuxOutputPipes` still requires real root Linux x64 and its existing lifecycle limits.
+
 `SupervisionOutputCollector.CollectAsync` owns both stdout/stderr tasks through actual settlement.
 One pair shares a received-byte limit, default 16 MiB, with at most a 1 MiB retained prefix per stream.
 Both can be lowered. All returned bytes are charged before retention, including discarded and late

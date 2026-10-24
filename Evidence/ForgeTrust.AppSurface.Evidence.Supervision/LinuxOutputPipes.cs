@@ -181,8 +181,7 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
         SafeFileHandle? write = null;
         try
         {
-            if (descriptors[0] < 0 || descriptors[1] < 0 || descriptors[0] == descriptors[1])
-                throw new SupervisionOutputPipeException(SupervisionOutputPipeFailure.InvalidPipe);
+            LinuxOutputPipeFactsPolicy.ValidateDescriptors(descriptors[0], descriptors[1]);
             read = new SafeFileHandle((nint)descriptors[0], ownsHandle: true);
             descriptors[0] = -1;
             write = new SafeFileHandle((nint)descriptors[1], ownsHandle: true);
@@ -191,16 +190,10 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
             var writeFlags = Fcntl(write, 3);
             var readDescriptorFlags = Fcntl(read, 1); // F_GETFD; -1 is failure, not a set CLOEXEC bit.
             var writeDescriptorFlags = Fcntl(write, 1);
-            if (readFlags < 0 || writeFlags < 0 || (readFlags & 3) != 0 || (writeFlags & 3) != 1
-                || readDescriptorFlags < 0 || writeDescriptorFlags < 0
-                || (readDescriptorFlags & 1) != 1 || (writeDescriptorFlags & 1) != 1)
-                throw new SupervisionOutputPipeException(SupervisionOutputPipeFailure.InvalidPipe);
+            LinuxOutputPipeFactsPolicy.ValidateFlags(readFlags, writeFlags, readDescriptorFlags, writeDescriptorFlags);
             var reader = StatFd(read);
             var writer = StatFd(write);
-            if ((reader.Mode & 0xf000) != 0x1000 || (writer.Mode & 0xf000) != 0x1000 || reader.Inode == 0
-                || reader.DeviceMajor != writer.DeviceMajor || reader.DeviceMinor != writer.DeviceMinor
-                || reader.Inode != writer.Inode || reader.Uid != 0 || reader.Gid != 0 || writer.Uid != 0 || writer.Gid != 0)
-                throw new SupervisionOutputPipeException(SupervisionOutputPipeFailure.InvalidPipe);
+            LinuxOutputPipeFactsPolicy.ValidateMetadata(reader, writer);
             return (read, write);
         }
         catch
