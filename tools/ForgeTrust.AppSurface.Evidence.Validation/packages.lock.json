@@ -466,7 +466,8 @@
         "type": "Project",
         "dependencies": {
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
-          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
@@ -477,6 +478,9 @@
         "dependencies": {
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
+      },
+      "forgetrust.appsurface.evidence.readiness": {
+        "type": "Project"
       },
       "Aspire.Hosting": {
         "type": "CentralTransitive",

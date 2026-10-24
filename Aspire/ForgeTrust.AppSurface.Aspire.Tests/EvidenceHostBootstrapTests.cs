@@ -90,13 +90,14 @@ public sealed partial class EvidenceHostBootstrapTests
             {
                 registration.AddResource(new ReadyResource("postgres"));
                 registration.AddProducer(new IgnoringCancellationProducer("coverage"));
-            });
+            }, new EvidenceHostOptions { ProducerCleanupTimeout = TimeSpan.FromMilliseconds(50) });
 
         var manifest = await host.RunAsync();
 
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
         var result = Assert.Single(manifest.ProducerResults);
         Assert.Equal(EvidenceProducerOutcome.TimedOut, result.Outcome);
+        Assert.False(manifest.Metrics.CleanupCompleted);
     }
 
     [Fact]
@@ -575,6 +576,9 @@ public sealed partial class EvidenceHostBootstrapTests
         Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
         Assert.Contains("preserved", manifest.Metrics.CleanupDiagnostic, StringComparison.Ordinal);
         producer.FinishCleanup.SetResult();
+        await producer.Stopped.Task;
+        await host.DisposeAsync();
+        Assert.True(producer.Disposed);
     }
 
     [Theory]
@@ -591,13 +595,14 @@ public sealed partial class EvidenceHostBootstrapTests
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Stopping { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource FinishCleanup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Stopped { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool Disposed { get; private set; }
 
         public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
         {
             Started.SetResult();
             try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
-            finally { Stopping.SetResult(); await FinishCleanup.Task; }
+            finally { Stopping.SetResult(); await FinishCleanup.Task; Stopped.SetResult(); }
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["coverage/assertion@1"]);
         }
 

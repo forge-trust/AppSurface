@@ -279,6 +279,20 @@ public sealed class EvidenceWorkspaceTests
         Directory.Delete(parent, recursive: true);
     }
 
+    [Fact]
+    public async Task Inventory_ShouldAcceptTheLargestDeclaredEntryBudgetWithoutOverflow()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            await using var workspace = EvidenceWorkspace.Create(parent, new EvidenceWorkspaceOptions(MinimumFreeBytes: 0, MaxEntries: int.MaxValue));
+            File.WriteAllText(workspace.GetPath("report.txt"), "evidence");
+            workspace.CheckBudget();
+            Assert.Equal("evidence", File.ReadAllText(workspace.GetPath("report.txt")));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
     private static string NewDirectory()
     {
         var path = Path.Join(Path.GetTempPath(), $"appsurface-evidence-workspace-tests-{Guid.NewGuid():N}");

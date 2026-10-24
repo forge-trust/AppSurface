@@ -273,7 +273,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         await _execution.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (State == EvidenceHostState.Disposed)
+            if (State == EvidenceHostState.Disposed && _cleaned)
             {
                 return;
             }
@@ -476,7 +476,6 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
         State = EvidenceHostState.Cleaning;
-        _cleaned = true;
         // A producer can still be stopping an owned child after its execution deadline.
         // Never delete its workspace or dependencies while that task remains active.
         var producers = Task.WhenAll(_producerExecutions);
@@ -494,6 +493,14 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         {
             // Completed cancellation or producer failure is already represented in its result.
         }
+        catch
+        {
+            // The original fatal producer failure is propagated by RunAsync. Do not
+            // replay that task's exception when the caller later disposes the host.
+            _cleaned = true;
+            throw;
+        }
+        _cleaned = true;
         Exception? failure = null;
         var owned = _registration.Producers.Values.Reverse().Cast<object>()
             .Concat(_registration.Resources.Values.Reverse().Cast<object>())

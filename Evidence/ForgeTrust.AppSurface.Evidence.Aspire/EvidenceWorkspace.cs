@@ -345,7 +345,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         {
             var (directory, depth) = pending.Pop();
             string[] paths;
-            try { paths = Directory.EnumerateFileSystemEntries(directory).Take(options.MaxEntries + 1).ToArray(); }
+            try { paths = Directory.EnumerateFileSystemEntries(directory).Take((int)Math.Min((long)options.MaxEntries + 1, int.MaxValue)).ToArray(); }
             catch (DirectoryNotFoundException) { continue; }
             foreach (var path in paths)
             {

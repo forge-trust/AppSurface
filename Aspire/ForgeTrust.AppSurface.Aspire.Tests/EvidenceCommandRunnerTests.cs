@@ -299,6 +299,28 @@ public sealed class EvidenceCommandRunnerTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    [Fact]
+    public async Task RunAsync_RefusesToCompleteWhenOutputNeverClosesAndStopsCaptureTasks()
+    {
+        var stopped = 0;
+        var runner = new EvidenceCommandRunner(_ => new HoldingCaptureStream(() => Interlocked.Increment(ref stopped)));
+
+        var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(
+            CreateShellRequest("printf done", "[Console]::Write('done')")));
+
+        Assert.Equal("drain_timeout", exception.Code);
+        Assert.Equal(2, stopped);
+    }
+
+    private sealed class HoldingCaptureStream(Action stopped) : MemoryStream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); return 0; }
+            finally { stopped(); }
+        }
+    }
+
     private static EvidencePlan CreatePlan(EvidenceProducerDeclaration producer) =>
         new("1", "test", "policy", "diff", new EvidenceProfile("test", EvidenceProfileScope.Targeted, [], [producer], []), [], [], "plan");
 }
