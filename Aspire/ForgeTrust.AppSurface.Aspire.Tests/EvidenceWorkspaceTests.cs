@@ -4,6 +4,34 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceWorkspaceTests
 {
+    [Fact]
+    public async Task CheckBudget_RejectsInPlaceMarkerTamperingAndPreservesItsBytes()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var workspace = EvidenceWorkspace.Create(parent);
+            var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
+            var created = File.GetCreationTimeUtc(marker);
+            var original = File.ReadAllBytes(marker);
+            var changed = original.Select(value => value == (byte)'a' ? (byte)'b' : (byte)'a').ToArray();
+            using (var output = new FileStream(marker, FileMode.Open, FileAccess.Write, FileShare.None))
+                output.Write(changed);
+            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
+
+            var exception = Assert.Throws<IOException>(workspace.CheckBudget);
+
+            // Filesystems without a stable file birth time detect the marker metadata change first.
+            Assert.Equal(File.GetCreationTimeUtc(marker) == created
+                ? "Evidence workspace ownership marker is invalid."
+                : "Evidence workspace root is missing or was replaced.", exception.Message);
+            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+            Assert.Equal(changed, File.ReadAllBytes(marker));
+            Assert.True(Directory.Exists(workspace.RootPath));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

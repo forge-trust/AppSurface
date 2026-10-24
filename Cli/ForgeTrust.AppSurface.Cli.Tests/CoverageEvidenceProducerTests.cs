@@ -11,6 +11,27 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageEvidenceProducerTests
 {
     [Fact]
+    public async Task RunAsync_ShouldRejectAnUnsupportedExecutionResultFormatBeforeStartingTheCore()
+    {
+        using var directory = TestDirectory.Create();
+        var output = Path.Join(directory.Path, "output");
+        var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new InvalidOperationException("core must not start")));
+        var declaration = CreateDeclaration() with
+        {
+            CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: (EvidenceCoverageTestResultFormat)123),
+        };
+
+        var result = await producer.RunAsync(declaration, Path.Join(directory.Path, "sample.slnx"), output, null,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("ArgumentOutOfRangeException", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("core must not start", result.Diagnostic, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
     public void Constructor_ShouldRejectANullExecutionWorkflow()
     {
         Assert.Throws<ArgumentNullException>(() => new CoverageEvidenceProducer(null!));

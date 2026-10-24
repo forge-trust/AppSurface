@@ -36,6 +36,25 @@ public sealed class NativeConsumerContractTests
     }
 
     [Fact]
+    public async Task DisposeAsync_IsIdempotentBeforeAWorkspaceExists()
+    {
+        var parent = Directory.CreateTempSubdirectory("native-consumer-unused-dispose-").FullName;
+        try
+        {
+            var sentinel = Path.Join(parent, "caller.txt");
+            await File.WriteAllTextAsync(sentinel, "caller bytes");
+            var producer = new InstalledConsumerProducer(Settings(TestPathUtils.FindRepoRoot(AppContext.BaseDirectory), parent));
+
+            await producer.DisposeAsync();
+            await producer.DisposeAsync();
+
+            Assert.Equal("caller bytes", await File.ReadAllTextAsync(sentinel));
+            Assert.Equal([sentinel], Directory.EnumerateFileSystemEntries(parent));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
     public async Task ExternalProfile_WithMissingSource_IsRejectedBeforeCandidateJourney()
     {
         var parent = Directory.CreateTempSubdirectory("appsurface-native-invalid-profile-").FullName;

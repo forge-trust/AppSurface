@@ -160,7 +160,7 @@ public sealed class CoverageArtifactStoreValidationTests
         var archivePath = fixture.ArchivePath(run.ManifestBase.RunId);
         var manifestPath = Path.Join(archivePath, "manifest.json");
         var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!;
-        manifest["RunId"] = Guid.NewGuid().ToString("N");
+        manifest["runId"] = Guid.NewGuid().ToString("N");
         File.WriteAllText(manifestPath, manifest.ToJsonString());
         var corruptArchive = fixture.CaptureFiles(archivePath);
 
@@ -170,6 +170,73 @@ public sealed class CoverageArtifactStoreValidationTests
         Assert.Equal(registryBefore, fixture.Read("registry.json"));
         fixture.AssertFilesEqual(archivePath, corruptArchive);
         Assert.Contains("manifest.json", corruptArchive.Keys);
+    }
+
+    [Fact]
+    public async Task PinAndUnpin_ExistingArchiveRepeatsSuccessfullyAndPreservesPayload()
+    {
+        using var fixture = new Fixture();
+        using var store = fixture.Open();
+        var run = fixture.CreateRun([1, 4, 1, 4, 2]);
+        await store.RegisterAsync(run, CancellationToken.None);
+        await store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None);
+        var archivePath = fixture.ArchivePath(run.ManifestBase.RunId);
+        var archiveBefore = fixture.CaptureFiles(archivePath);
+
+        await store.PinAsync(run.ManifestBase.RunId, pin: true, CancellationToken.None);
+        Assert.True(store.GetStatus().PinnedBytes > 0);
+        await store.PinAsync(run.ManifestBase.RunId, pin: true, CancellationToken.None);
+        Assert.True(store.GetStatus().PinnedBytes > 0);
+
+        await store.PinAsync(run.ManifestBase.RunId, pin: false, CancellationToken.None);
+        Assert.Equal(0, store.GetStatus().PinnedBytes);
+        fixture.AssertFilesEqual(archivePath, archiveBefore);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Snapshot_ExistingVerifiedArchiveCanBeReusedWithoutRewritingPayload(bool pin)
+    {
+        using var fixture = new Fixture();
+        using var store = fixture.Open();
+        var run = fixture.CreateRun([5, 9, 2, 6]);
+        await store.RegisterAsync(run, CancellationToken.None);
+        var original = await store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None);
+        var archivePath = fixture.ArchivePath(run.ManifestBase.RunId);
+        var before = fixture.CaptureFiles(archivePath);
+
+        var reused = await store.SnapshotAsync(run, pin, automatic: false, CancellationToken.None);
+
+        Assert.Equal(original.RunId, reused.RunId);
+        Assert.True(reused.Complete);
+        Assert.Equal(pin, store.GetStatus().PinnedBytes > 0);
+        Assert.Equal(0, store.GetStatus().StagingReservedBytes);
+        fixture.AssertFilesEqual(archivePath, before);
+    }
+
+    [Fact]
+    public async Task Snapshot_ExistingArchiveWithCorruptPayloadPreservesEvidenceAndRegistration()
+    {
+        using var fixture = new Fixture();
+        using var store = fixture.Open();
+        var run = fixture.CreateRun([8, 6, 7, 5, 3]);
+        await store.RegisterAsync(run, CancellationToken.None);
+        await store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None);
+
+        var archivePath = fixture.ArchivePath(run.ManifestBase.RunId);
+        var payloadPath = Directory.EnumerateFiles(archivePath, "*.gz").Single();
+        File.WriteAllBytes(payloadPath, [0xC0, 0xFF, 0xEE]);
+        var archiveBefore = fixture.CaptureFiles(archivePath);
+        var registryBefore = fixture.Read("registry.json");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.SnapshotAsync(
+            run, pin: true, automatic: false, CancellationToken.None));
+
+        Assert.Equal(registryBefore, fixture.Read("registry.json"));
+        fixture.AssertFilesEqual(archivePath, archiveBefore);
+        Assert.Equal(new byte[] { 0xC0, 0xFF, 0xEE }, File.ReadAllBytes(payloadPath));
+        Assert.Equal(1, store.GetStatus().ArchivedRuns);
     }
 
     [Fact]

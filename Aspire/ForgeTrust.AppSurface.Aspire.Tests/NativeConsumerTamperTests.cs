@@ -18,9 +18,13 @@ public sealed class NativeConsumerTamperTests
     [Theory]
     [InlineData("installed-dll", "package", "")]
     [InlineData("installed-package", "package", "")]
+    [InlineData("missing-executable", "package", "")]
     [InlineData("project-log", "coverage", "manifests")]
     [InlineData("unmanaged-coverage", "coverage", "retention")]
     [InlineData("duplicate-canonical-coverage", "coverage", "retention")]
+    [InlineData("missing-gate-markdown", "coverage", "artifacts")]
+    [InlineData("missing-project-directory", "coverage", "manifests")]
+    [InlineData("missing-project-coverage", "coverage", "manifests")]
     [InlineData("source-before-copy", "source", "")]
     [InlineData("original-source", "integrity", "retention")]
     public async Task ProduceAsync_RejectsTamperedRealJourneyAndCleansOnlyOwnedScratch(
@@ -68,6 +72,18 @@ public sealed class NativeConsumerTamperTests
                     beforeHash = Hash(changedPath);
                     File.AppendAllText(changedPath, "\n// mutated before integrity verification\n");
                     afterHash = Hash(changedPath);
+                    mutationApplied = true;
+                    return;
+                }
+                if (mutation == "missing-executable")
+                {
+                    var executable = TestPathUtils.PathUnder(workspace, "tool",
+                        OperatingSystem.IsWindows() ? "appsurface.exe" : "appsurface");
+                    if (!File.Exists(executable)) return;
+                    changedPath = executable;
+                    beforeHash = Hash(changedPath);
+                    File.Delete(changedPath);
+                    afterHash = "absent";
                     mutationApplied = true;
                     return;
                 }
@@ -124,6 +140,37 @@ public sealed class NativeConsumerTamperTests
                     }
                     if (!File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.json"))
                         || !File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.md"))) return;
+                    if (mutation == "missing-gate-markdown")
+                    {
+                        changedPath = TestPathUtils.PathUnder(coverage, "coverage-gate.md");
+                        beforeHash = Hash(changedPath);
+                        File.Delete(changedPath);
+                        afterHash = "absent";
+                        mutationApplied = true;
+                        return;
+                    }
+                    if (mutation == "missing-project-directory")
+                    {
+                        changedPath = TestPathUtils.PathUnder(coverage, "projects");
+                        if (!Directory.Exists(changedPath)) return;
+                        beforeHash = "present";
+                        Directory.Delete(changedPath, recursive: true);
+                        afterHash = "absent";
+                        mutationApplied = true;
+                        return;
+                    }
+                    if (mutation == "missing-project-coverage")
+                    {
+                        var project = Directory.EnumerateDirectories(TestPathUtils.PathUnder(coverage, "projects")).FirstOrDefault();
+                        if (project is null) return;
+                        changedPath = TestPathUtils.PathUnder(project, "coverage.cobertura.xml");
+                        if (!File.Exists(changedPath)) return;
+                        beforeHash = Hash(changedPath);
+                        File.Delete(changedPath);
+                        afterHash = "absent";
+                        mutationApplied = true;
+                        return;
+                    }
                     if (mutation == "project-log")
                     {
                         changedPath = Directory.EnumerateFiles(
@@ -168,7 +215,11 @@ public sealed class NativeConsumerTamperTests
                 Assert.True(mutationApplied, "The requested real journey mutation must occur before rejection.");
                 Assert.NotNull(changedPath);
                 Assert.NotNull(beforeHash);
-                if (mutation == "project-log") Assert.False(File.Exists(changedPath));
+                if (mutation is "project-log" or "missing-executable" or "missing-gate-markdown" or "missing-project-directory" or "missing-project-coverage")
+                {
+                    Assert.False(File.Exists(changedPath));
+                    if (mutation == "missing-project-directory") Assert.False(Directory.Exists(changedPath));
+                }
                 else Assert.NotEqual(beforeHash, afterHash);
                 Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
                 Assert.Empty(result.SatisfiedAssertionIds);

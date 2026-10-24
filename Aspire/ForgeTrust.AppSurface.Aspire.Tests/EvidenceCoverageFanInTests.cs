@@ -10,6 +10,130 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceCoverageFanInTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData(" ")]
+    public async Task VerifyAsync_requires_nonempty_workflow_identity_even_when_every_manifest_agrees(string? value)
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        foreach (var directory in fixture.Native.Prepend(fixture.Primary))
+            await fixture.MutateManifestAsync(directory, manifest => manifest["run"]!["GITHUB_RUN_ID"] = value);
+        var run = new Dictionary<string, string?>(fixture.Request.Run) { ["GITHUB_RUN_ID"] = value };
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            EvidenceCoverageFanIn.VerifyAsync(fixture.Request with { Run = run }).AsTask());
+
+        Assert.Equal("Workflow provenance is required.", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    public async Task VerifyAsync_rejects_empty_class_filenames_even_in_attested_input(string filename)
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        await fixture.MutateXmlAsync(fixture.Primary, "coverage.cobertura.xml", root =>
+            root.Descendants("class").Single().SetAttributeValue("filename", filename));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+
+        Assert.Equal("Coverage path escapes its source root.", exception.Message);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_retains_points_when_optional_package_and_class_names_are_missing()
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        var input = XDocument.Load(TestPathUtils.PathUnder(fixture.Primary, "coverage.cobertura.xml"));
+        input.Descendants("package").Single().Attribute("name")!.Remove();
+        input.Descendants("class").Single().Attribute("name")!.Remove();
+        var composed = new XDocument(input);
+        composed.Descendants("package").Single().SetAttributeValue("name", "");
+        composed.Descendants("class").Single().SetAttributeValue("name", "");
+        await fixture.WriteDocumentsAsync(input, [input, input, input], composed);
+
+        var result = await fixture.VerifyAsync();
+
+        Assert.True(result.Verified);
+        Assert.Equal(1, result.RetainedClassLines);
+        Assert.Equal(2, result.RetainedMethodLines);
+        Assert.Equal(1, result.LinesCovered);
+    }
+
+    [Theory]
+    [InlineData("line", "valid", 2, 50)]
+    [InlineData("branch", "covered", 0, 0)]
+    [InlineData("branch", "valid", 2, 50)]
+    public async Task VerifyAsync_rejects_self_consistent_gate_counts_that_disagree_with_the_xml(
+        string metric, string counter, int value, int percent)
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        await FanInFixture.MutateJsonAsync(fixture.ComposedGate, gate =>
+        {
+            gate[metric]![counter] = value;
+            gate[metric]!["percent"] = percent;
+        });
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+
+        Assert.Contains("aggregate counts", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("lines-valid", "0")]
+    [InlineData("lines-covered", "-1")]
+    [InlineData("lines-covered", "2")]
+    [InlineData("branches-covered", "-1")]
+    [InlineData("branches-covered", "2")]
+    public async Task VerifyAsync_rejects_attested_out_of_range_counters_before_composition(string counter, string value)
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        await fixture.MutateXmlAsync(fixture.Primary, "coverage.cobertura.xml", root => root.SetAttributeValue(counter, value));
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+
+        Assert.Contains("out of range", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_rejects_an_excessive_unattested_directory_inventory()
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        for (var index = 0; index < 8; index++)
+            await File.WriteAllTextAsync(TestPathUtils.PathUnder(fixture.Primary, $"unknown-{index}.txt"), "caller bytes");
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+
+        Assert.Contains("inventory mismatch", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(11, Directory.EnumerateFileSystemEntries(fixture.Primary).Count());
+    }
+
+    [Fact]
+    public async Task VerifyAsync_uses_only_normalized_test_projects_from_the_explicit_solution()
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        await File.WriteAllTextAsync(fixture.Solution, """
+            <Solution>
+              <Project />
+              <Project Path="" />
+              <Project Path="src/Library/Library.csproj" />
+              <Project Path="tests\Foo.Tests\Foo.Tests.csproj" />
+            </Solution>
+            """);
+
+        var verified = await fixture.VerifyAsync();
+
+        Assert.True(verified.Verified);
+        Assert.Equal(4, verified.InputDirectories.Count);
+    }
+
     [Fact]
     public async Task VerifyAsync_rejects_a_well_formed_document_with_the_wrong_coverage_root()
     {

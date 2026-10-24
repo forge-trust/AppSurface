@@ -232,7 +232,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         // let the consumer's ordinary restore read the existing shared cache. The
         // package identity proof is anchored to the private .store and the exact
         // local feed above; the fixture dependencies do not need to be recopied.
-        var installEnvironment = BuildEnvironment(cliHome, Path.Join(_workspace.RootPath, "nuget"), null);
+        var installEnvironment = BuildEnvironment(cliHome, Path.Join(_workspace.RootPath, "nuget"));
         var args = new List<string>
         {
             "tool", "install", PackageId, "--tool-path", toolPath,
@@ -280,7 +280,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             var candidate = string.IsNullOrWhiteSpace(userProfile) ? "" : Path.Join(userProfile, ".nuget", "packages");
             sharedNuGetCache = Directory.Exists(candidate) ? candidate : Path.Join(_workspace.RootPath, "nuget");
         }
-        var consumerEnvironment = BuildEnvironment(cliHome, sharedNuGetCache, null);
+        var consumerEnvironment = BuildEnvironment(cliHome, sharedNuGetCache);
         return new PackageSnapshot(packageHash, archiveAssemblyHash, executable, consumerEnvironment);
     }
 
@@ -402,13 +402,9 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         if (settings.MaximumScratchBytes <= 0 || settings.MinimumFreeBytes < 0) throw new ArgumentOutOfRangeException();
     }
 
-    private Dictionary<string, string> BuildEnvironment(string cliHome, string nugetRoot, IReadOnlyDictionary<string, string>? overrides)
+    private Dictionary<string, string> BuildEnvironment(string cliHome, string nugetRoot)
     {
         var environment = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (overrides is not null)
-        {
-            foreach (var pair in overrides) environment[pair.Key] = pair.Value;
-        }
         environment["DOTNET_CLI_HOME"] = cliHome;
         environment["DOTNET_NOLOGO"] = "1";
         environment["NUGET_PACKAGES"] = nugetRoot;
