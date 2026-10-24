@@ -240,30 +240,6 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
 /// </remarks>
 internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposable
 {
-    /// <summary>Maximum complete request line, including its single LF terminator.</summary>
-    internal const int MaximumRequestLineBytes = EvidenceControlProtocol.MaximumRequestBytes;
-    /// <summary>Checkpoint-one response line bound including LF; larger artifact replies are not yet supported.</summary>
-    internal const int MaximumResponseLineBytes = 64 * 1024;
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-    private readonly Stream _stream;
-    private int _readAttempt;
-    private int _writeAttempt;
-    private int _preparationPhase;
-    private int _validated;
-    private int _readyValidated;
-#if EVIDENCE_PRIVATE_ACCEPTED_WORK
-    private int _acceptedWorkValidated;
-    private int _acceptedWorkWritePhase;
-    private readonly TaskCompletionSource _acceptedWorkWriteCompleted =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-#endif
-    private int _closeStarted;
-    private int _disposeFailed;
-    private readonly TaskCompletionSource _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    /// <summary>Takes ownership of a stream for framing data controls, without credentials or admission.</summary>
-    /// <param name="stream">Actual readable/writable stream; disposed on failure, cancellation or completed response.</param>
-    internal SupervisionControlLineFraming(Stream stream) => _stream = stream ?? throw new ArgumentNullException(nameof(stream));
 
     /// <summary>Consumes at most one bounded LF request and returns detached codec data.</summary>
     /// <param name="cancellationToken">Existing owner deadline/stop token; no new timer is created.</param>
@@ -317,60 +293,7 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
         }
     }
 
-    /// <summary>Writes one fixed preparation frame as data after a validated request, preserving the original stream.</summary>
-    /// <param name="remainingJobMilliseconds">Positive original job remainder, at most 3600000 milliseconds.</param>
-    /// <param name="token">Existing owner/job token; cancellation closes and joins original I/O.</param>
-    /// <remarks>No callback, credential, deadline reset or admission capability is created by this portable framing seam.</remarks>
-    internal Task WritePreparationAsync(long remainingJobMilliseconds, CancellationToken token) =>
-        WritePhaseAsync(0, remainingJobMilliseconds, token);
 
-    /// <summary>Writes the single admission-start phase only after the original preparation frame completed.</summary>
-    /// <param name="token">Existing owner/admission token; cancellation cannot detach an original write.</param>
-    internal Task WriteAdmissionStartAsync(CancellationToken token) => WritePhaseAsync(2, null, token);
-
-#if EVIDENCE_PRIVATE_ACCEPTED_WORK
-    /// <summary>Writes the sole fixed accepted-work phase after decoding its exact operation request.</summary>
-    /// <param name="token">The original handler/run token; cancellation closes and joins the actual write.</param>
-    /// <remarks>This data-only frame preserves the stream and does not authorize any native or product work.</remarks>
-    internal async Task WriteAcceptedBlockedWorkAsync(CancellationToken token)
-    {
-        var ownsWriteAttempt = false;
-        try
-        {
-            if (Volatile.Read(ref _acceptedWorkValidated) != 1 || Volatile.Read(ref _preparationPhase) != 0)
-                throw Reject(ControlLineFailure.InvalidSequence);
-            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 1, 0) != 0)
-            {
-                if (Volatile.Read(ref _acceptedWorkWritePhase) == 1)
-                {
-                    Dispose();
-                    await _acceptedWorkWriteCompleted.Task.ConfigureAwait(false);
-                }
-                throw Reject(ControlLineFailure.InvalidSequence);
-            }
-            ownsWriteAttempt = true;
-            using var cancellation = token.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);
-            token.ThrowIfCancellationRequested(); EnsureOpen();
-            var bytes = EvidenceCanonicalJson.Serialize(new { ok = true, phase = "work-accepted", body_blocked = true });
-            var frame = new byte[bytes.Length + 1]; bytes.CopyTo(frame, 0); frame[^1] = (byte)'\n';
-            await _stream.WriteAsync(frame.AsMemory(), token).ConfigureAwait(false);
-            token.ThrowIfCancellationRequested(); EnsureOpen();
-            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 2, 1) != 1)
-                throw Reject(ControlLineFailure.InvalidSequence);
-        }
-        catch (Exception error) when (token.IsCancellationRequested && Recoverable(error))
-        {
-            Dispose(); throw new OperationCanceledException("Protected control I/O was cancelled.", token);
-        }
-        catch (ControlLineException) { Dispose(); throw; }
-        catch (Exception error) when (Recoverable(error)) { throw Reject(ControlLineFailure.IoFailed); }
-        finally
-        {
-            if (ownsWriteAttempt) _acceptedWorkWriteCompleted.TrySetResult();
-            if (Volatile.Read(ref _closeStarted) != 0) await _closeCompleted.Task.ConfigureAwait(false);
-        }
-    }
-#endif
 
     private async Task WritePhaseAsync(int expectedPhase, long? milliseconds, CancellationToken token)
     {
@@ -402,6 +325,8 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
             if (Volatile.Read(ref _closeStarted) != 0) await _closeCompleted.Task.ConfigureAwait(false);
         }
     }
+
+
 
     /// <summary>Validates, snapshots and writes one JSON object plus LF, then closes the owned stream.</summary>
     /// <param name="utf8Json">Response object data; payload must leave one byte for LF.</param>
@@ -459,6 +384,100 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
         }
     }
 
+
+
+    /// <summary>Joins actual close and rejects its failure; no cancellation can detach this join.</summary>
+    /// <remarks>This joins close only. Existing I/O tasks remain independently owned and must also settle.</remarks>
+    public async ValueTask DisposeAsync()
+    {
+        Dispose();
+        await _closeCompleted.Task.ConfigureAwait(false);
+        if (Volatile.Read(ref _disposeFailed) != 0) throw new ControlLineException(ControlLineFailure.Closed);
+    }
+
+
+
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    /// <summary>Writes the sole fixed accepted-work phase after decoding its exact operation request.</summary>
+    /// <param name="token">The original handler/run token; cancellation closes and joins the actual write.</param>
+    /// <remarks>This data-only frame preserves the stream and does not authorize any native or product work.</remarks>
+    internal async Task WriteAcceptedBlockedWorkAsync(CancellationToken token)
+    {
+        var ownsWriteAttempt = false;
+        try
+        {
+            if (Volatile.Read(ref _acceptedWorkValidated) != 1 || Volatile.Read(ref _preparationPhase) != 0)
+                throw Reject(ControlLineFailure.InvalidSequence);
+            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 1, 0) != 0)
+            {
+                if (Volatile.Read(ref _acceptedWorkWritePhase) == 1)
+                {
+                    Dispose();
+                    await _acceptedWorkWriteCompleted.Task.ConfigureAwait(false);
+                }
+                throw Reject(ControlLineFailure.InvalidSequence);
+            }
+            ownsWriteAttempt = true;
+            using var cancellation = token.Register(static state => ((SupervisionControlLineFraming)state!).Dispose(), this);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            var bytes = EvidenceCanonicalJson.Serialize(new { ok = true, phase = "work-accepted", body_blocked = true });
+            var frame = new byte[bytes.Length + 1]; bytes.CopyTo(frame, 0); frame[^1] = (byte)'\n';
+            await _stream.WriteAsync(frame.AsMemory(), token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested(); EnsureOpen();
+            if (Interlocked.CompareExchange(ref _acceptedWorkWritePhase, 2, 1) != 1)
+                throw Reject(ControlLineFailure.InvalidSequence);
+        }
+        catch (Exception error) when (token.IsCancellationRequested && Recoverable(error))
+        {
+            Dispose(); throw new OperationCanceledException("Protected control I/O was cancelled.", token);
+        }
+        catch (ControlLineException) { Dispose(); throw; }
+        catch (Exception error) when (Recoverable(error)) { throw Reject(ControlLineFailure.IoFailed); }
+        finally
+        {
+            if (ownsWriteAttempt) _acceptedWorkWriteCompleted.TrySetResult();
+            if (Volatile.Read(ref _closeStarted) != 0) await _closeCompleted.Task.ConfigureAwait(false);
+        }
+    }
+
+#endif
+
+    /// <summary>Maximum complete request line, including its single LF terminator.</summary>
+    internal const int MaximumRequestLineBytes = EvidenceControlProtocol.MaximumRequestBytes;
+    /// <summary>Checkpoint-one response line bound including LF; larger artifact replies are not yet supported.</summary>
+    internal const int MaximumResponseLineBytes = 64 * 1024;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private readonly Stream _stream;
+    private int _readAttempt;
+    private int _writeAttempt;
+    private int _preparationPhase;
+    private int _validated;
+    private int _readyValidated;
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+    private int _acceptedWorkValidated;
+    private int _acceptedWorkWritePhase;
+    private readonly TaskCompletionSource _acceptedWorkWriteCompleted =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+#endif
+    private int _closeStarted;
+    private int _disposeFailed;
+    private readonly TaskCompletionSource _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Takes ownership of a stream for framing data controls, without credentials or admission.</summary>
+    /// <param name="stream">Actual readable/writable stream; disposed on failure, cancellation or completed response.</param>
+    internal SupervisionControlLineFraming(Stream stream) => _stream = stream ?? throw new ArgumentNullException(nameof(stream));
+
+    /// <summary>Writes one fixed preparation frame as data after a validated request, preserving the original stream.</summary>
+    /// <param name="remainingJobMilliseconds">Positive original job remainder, at most 3600000 milliseconds.</param>
+    /// <param name="token">Existing owner/job token; cancellation closes and joins original I/O.</param>
+    /// <remarks>No callback, credential, deadline reset or admission capability is created by this portable framing seam.</remarks>
+    internal Task WritePreparationAsync(long remainingJobMilliseconds, CancellationToken token) =>
+        WritePhaseAsync(0, remainingJobMilliseconds, token);
+
+    /// <summary>Writes the single admission-start phase only after the original preparation frame completed.</summary>
+    /// <param name="token">Existing owner/admission token; cancellation cannot detach an original write.</param>
+    internal Task WriteAdmissionStartAsync(CancellationToken token) => WritePhaseAsync(2, null, token);
+
     /// <summary>Initiates the actual owned close exactly once; repeated callers do not establish its completion.</summary>
     /// <remarks>
     /// The first caller may block in Stream.Dispose. No lock is held. Concurrent callers must await DisposeAsync
@@ -475,15 +494,6 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
         }
         catch (Exception error) when (Recoverable(error)) { /* Preserve the closed failure flag without raw text. */ }
         finally { _closeCompleted.TrySetResult(); }
-    }
-
-    /// <summary>Joins actual close and rejects its failure; no cancellation can detach this join.</summary>
-    /// <remarks>This joins close only. Existing I/O tasks remain independently owned and must also settle.</remarks>
-    public async ValueTask DisposeAsync()
-    {
-        Dispose();
-        await _closeCompleted.Task.ConfigureAwait(false);
-        if (Volatile.Read(ref _disposeFailed) != 0) throw new ControlLineException(ControlLineFailure.Closed);
     }
 
     private void EnsureOpen()

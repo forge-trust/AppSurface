@@ -1869,6 +1869,45 @@ read emitted PE metadata and verify the common method-to-state-machine mapping f
 image; they invoke no private owner. Compiler identity consistency supplies no native authority or
 coverage by itself. Every selected image still requires its original execution and retained evidence.
 
+[`SupervisionControlLineFraming`](LinuxControlConnection.cs) follows the same ordering rule. Its always-present
+async members are declared first, in this order: `ReadRequestAsync`, `WritePhaseAsync`, `WriteResponseAsync`, and
+`DisposeAsync`. The private `WriteAcceptedBlockedWorkAsync` member follows that common region only when
+`EVIDENCE_PRIVATE_ACCEPTED_WORK` is selected; it is the fifth generated async identity in those images and is absent
+from ordinary images. The framing metadata control checks these exact identities without invoking the stream, a native
+owner, admission, or accepted work. Moving declarations changes no body, field initializer order, framing bound,
+request/write CAS, cancellation close/join, or accepted-work runtime guard.
+
+### Stable shared orchestration and private fixture hooks
+
+The common asynchronous bodies in [the control server](LinuxEmptyObservationControlServer.cs)
+and [the root execution coordinator](LinuxEmptyObservationExecution.cs) call closed private
+qualification hooks at the same points in every build. Ordinary hooks complete without fixture
+work. A selected hook retains the existing native implementation and receives only the original
+owner, accounts, workspace, task and tokens. There is no runtime hook registry, caller-supplied
+implementation, public factory, new owner or renewed timeout.
+
+[QualifiedObservation](LinuxEmptyObservationExecution.Qualification.cs) is constructed privately
+by the execution coordinator. It retains failure-only diagnostic flags for the same run, including
+partial-write latches and the account-close event. Its record callback is the coordinator's private
+first-fault projection; it cannot issue admission or start work. Failure projections remain after
+server/worker/output joins and before custody; final cleanup projections remain after custody,
+account and handle closure and the final captured monotonic check. No diagnostic can clear failure.
+
+The server's hook calls preserve accept reservation, READY phases, original cancellation signal,
+accepted-body registration, STOP/WAIT joining and reply commit order. Unknown ordinary operations
+still reject through the original closed codec/response path. The stage callback updates only the
+current handler's closed diagnostic stage at the former assignment. It is never supplied by a
+worker. The ordinary image omits native fixture bodies and accepted-work request implementations.
+
+Keep selector-only operations out of shared state-machine bodies: inserting conditional statements
+changes generated offsets for later common branches even when their source is unchanged. Keep
+always-present async declarations first and matching private async families immediately after them,
+before conditional fields. [Image metadata controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/QualificationImageBoundaryTests.cs)
+check the execution, worker, server and framing identities in each selected image. These checks are
+compiler-shape evidence only; every native control and the unchanged coverage gates remain required.
+No report partition, condition identity, hit counter, coverage exclusion or threshold is changed by
+this source organization.
+
 ## Validation-only worker measurement
 
 The [C3 measurement fixture](../../.github/issue779-checkpoint4/measurement/README.md) is compiled into private C3/C3Sdk validation images only. Its three worker-holder call sites retain an already authenticated worker's private temporary directory before descriptor publication, capture genuine pinned tracker bytes after the original normal exit, and close the extra handles after the original monitor joins. The ordinary executable contains neither those call sites nor the fixture type, verified through PE metadata. It grants no admission, process owner, artifact custody, proof or production registration. Product environment, isolation, permissions, budgets and cleanup order are unchanged. The fixture reference documents the pinned format dependency, actual helper proof, first-worker-only scope and current native integration requirement.

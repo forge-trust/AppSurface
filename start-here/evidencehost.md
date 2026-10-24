@@ -44,7 +44,7 @@ Changed paths: src/Orders/SubmitOrder.cs
 Obligations: changed-behavior-covered
 Required producers: coverage
 Required resources: none
-Admission: planning only; protected execution facts remain unverified.
+Artifacts: TestResults/evidence/evidence-plan.json, TestResults/evidence/evidence-summary.json
 ```
 
 This output tells you what policy selected. It is not evidence that a test ran or a gate passed.

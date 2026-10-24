@@ -31,7 +31,7 @@ COMMON_PATHS = ("source_capture", "build_receipt", "collector", "evidence", "pri
 BASE_FIELDS = ("schema", "source", "selector", "workflow_identity", "paths", "source_capture_sha256",
                "original_build_sha256", "original_tool", "collector_sha256", "prior_report_sha256",
                "prior_binding_sha256", "evidence_owner", "native_acceptance", "coverage_credit")
-DATA_SELECTORS = ("N04", "N07", "N16")
+DATA_SELECTORS = ("N04", "N05", "N07", "N08", "N10", "N13", "N14", "N16")
 
 
 def require(condition, category):

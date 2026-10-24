@@ -1,3 +1,4 @@
+using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -48,6 +49,29 @@ public sealed class LinuxProducerWorkspaceTests
     public void LayoutRejectsSolutionsOutsideTheExactSubjectRoot(string solution) =>
         Assert.Throws<EvidenceAdmissionException>(() => LinuxProducerWorkspaceLayout.Create(Guid.NewGuid(),
             Accounts, "/run/input", solution));
+
+    [Fact]
+    public void RelativeSolutionAcceptsThe4096ByteAbsolutePathWithEveryComponentWithinItsBound()
+    {
+        var relative = string.Join('/', Enumerable.Repeat(new string('a', 255), 15).Append(new string('b', 245)));
+        Assert.Equal(4096, Encoding.UTF8.GetByteCount("/run/input/" + relative));
+        Assert.All(relative.Split('/'), static part => Assert.InRange(part.Length, 1, 255));
+
+        Assert.Equal(relative, LinuxProducerWorkspaceLayout.RelativeSolution(
+            "/run/input", "/run/input/" + relative));
+    }
+
+    [Fact]
+    public void RelativeSolutionRejectsAnAbsolutePathOneByteBeyond4096WithValidComponents()
+    {
+        var relative = string.Join('/', Enumerable.Repeat(new string('a', 255), 15)
+            .Append(new string('b', 246)));
+        Assert.Equal(4097, Encoding.UTF8.GetByteCount("/run/input/" + relative));
+        Assert.All(relative.Split('/'), static part => Assert.InRange(part.Length, 1, 255));
+
+        Assert.Throws<EvidenceAdmissionException>(() => LinuxProducerWorkspaceLayout.RelativeSolution(
+            "/run/input", "/run/input/" + relative));
+    }
 
     [Theory]
     [InlineData("generation")]
@@ -222,6 +246,18 @@ public sealed class LinuxProducerWorkspaceTests
         Assert.DoesNotContain("canary", error.ToString(), StringComparison.Ordinal);
         Assert.Equal(LinuxProducerWorkspaceLayout.MaximumTreeBytes, budget.Bytes);
         Assert.Equal(5, budget.Nodes);
+    }
+
+    [Fact]
+    public void NegativeFileReservationRejectsWithoutChangingEitherCounter()
+    {
+        var budget = new LinuxProducerCopyBudget();
+        budget.ReserveDirectory();
+        var error = Assert.Throws<EvidenceAdmissionException>(() => budget.ReserveFile(-1));
+
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Equal(1, budget.Nodes);
+        Assert.Equal(0, budget.Bytes);
     }
 
     /// <summary>Ancestor metadata requires root UID independently of its otherwise valid root group and mode.</summary>

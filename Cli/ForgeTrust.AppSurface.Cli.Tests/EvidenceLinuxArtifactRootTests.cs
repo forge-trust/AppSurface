@@ -313,6 +313,148 @@ public sealed class EvidenceLinuxArtifactRootTests
     }
 
     [Fact]
+    public async Task Concurrent_same_slot_rejects_and_closed_slots_cannot_be_reused_with_fresh_generation()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Throws<PlatformNotSupportedException>(() => EvidenceLinuxArtifactRoot.Allocate("/tmp", default, "slot", 0, 0));
+            return;
+        }
+
+        var parent = NewPrivateDirectory();
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<(EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)>? first = null;
+        Task<(EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)>? second = null;
+        (EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)[]? attempts = null;
+        EvidenceLinuxArtifactRoot? winner = null;
+        var winnerDisposed = false;
+        var bodySucceeded = false;
+        var identity = default(EvidenceLinuxArtifactIdentity);
+
+        async Task<(EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)> AllocateAfterGate(
+            TaskCompletionSource<bool> ready)
+        {
+            ready.SetResult(true);
+            await gate.Task.ConfigureAwait(false);
+            var operation = EvidenceLinuxArtifactAllocationOperation.None;
+            try
+            {
+                return (EvidenceLinuxArtifactRoot.Allocate(parent, identity, "same-slot", identity.Uid, identity.Gid, out operation), operation, null);
+            }
+            catch (Exception error)
+            {
+                return (null, operation, error);
+            }
+        }
+
+        try
+        {
+            identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            first = Task.Run(() => AllocateAfterGate(firstReady));
+            second = Task.Run(() => AllocateAfterGate(secondReady));
+            await Task.WhenAll(firstReady.Task, secondReady.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            gate.SetResult(true);
+            attempts = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+
+            var successful = attempts.Where(attempt => attempt.Root is not null).ToArray();
+            var rejected = attempts.Where(attempt => attempt.Root is null).ToArray();
+            Assert.Single(successful);
+            Assert.Single(rejected);
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.Completed, successful[0].Operation);
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CreateSlot, rejected[0].Operation);
+            Assert.IsType<IOException>(rejected[0].Error);
+            winner = successful[0].Root;
+            Assert.NotNull(winner);
+            var winnerIdentity = winner!.Identity;
+            Assert.Equal(identity.Uid, winnerIdentity.Uid);
+            Assert.Equal(identity.Gid, winnerIdentity.Gid);
+
+            var payload = "concurrent allocator ownership payload"u8.ToArray();
+            var payloadHash = Convert.ToHexString(SHA256.HashData(payload));
+            await winner.WriteAsync("owned.bin", payload, default);
+            await winner.VerifyAsync("owned.bin", payload.Length, payloadHash, default);
+            Assert.Equal(payload, File.ReadAllBytes(Path.Combine(parent, "same-slot", "owned.bin")));
+
+            await winner.DisposeAsync();
+            winnerDisposed = true;
+            var reusedOperation = EvidenceLinuxArtifactAllocationOperation.None;
+            Assert.Throws<IOException>(() => EvidenceLinuxArtifactRoot.Allocate(
+                parent, identity, "same-slot", identity.Uid, identity.Gid, out reusedOperation));
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.CreateSlot, reusedOperation);
+            Assert.Equal(payload, File.ReadAllBytes(Path.Combine(parent, "same-slot", "owned.bin")));
+
+            await using var fresh = EvidenceLinuxArtifactRoot.Allocate(
+                parent, identity, "fresh-slot", identity.Uid, identity.Gid, out var freshOperation);
+            Assert.Equal(EvidenceLinuxArtifactAllocationOperation.Completed, freshOperation);
+            Assert.NotEqual(winnerIdentity, fresh.Identity);
+            Assert.NotEqual(winnerIdentity.Inode, fresh.Identity.Inode);
+            Assert.Equal(identity.Uid, fresh.Identity.Uid);
+            Assert.Equal(identity.Gid, fresh.Identity.Gid);
+            Assert.True(Directory.Exists(Path.Combine(parent, "same-slot")));
+            Assert.True(Directory.Exists(Path.Combine(parent, "fresh-slot")));
+            bodySucceeded = true;
+        }
+        finally
+        {
+            gate.TrySetResult(true);
+            var allAttemptsSettled = first is null && second is null;
+            if (first is not null && second is not null)
+            {
+                try
+                {
+                    attempts = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+                    allAttemptsSettled = true;
+                }
+                catch
+                {
+                    allAttemptsSettled = false;
+                }
+            }
+
+            var completedRoots = new List<EvidenceLinuxArtifactRoot>();
+            if (first?.Status == TaskStatus.RanToCompletion)
+            {
+                var firstResult = await first;
+                if (firstResult.Root is { } firstRoot)
+                    completedRoots.Add(firstRoot);
+            }
+            if (second?.Status == TaskStatus.RanToCompletion)
+            {
+                var secondResult = await second;
+                if (secondResult.Root is { } secondRoot)
+                    completedRoots.Add(secondRoot);
+            }
+
+            var allRootsDisposed = true;
+            foreach (var root in completedRoots)
+            {
+                if (ReferenceEquals(root, winner) && winnerDisposed)
+                    continue;
+
+                try
+                {
+                    await root.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch
+                {
+                    allRootsDisposed = false;
+                }
+            }
+
+            if (bodySucceeded)
+            {
+                Assert.True(allAttemptsSettled, "Allocator attempts did not both settle during bounded cleanup.");
+                Assert.True(allRootsDisposed, "A returned allocator root did not dispose during bounded cleanup.");
+            }
+
+            if (bodySucceeded && allAttemptsSettled && allRootsDisposed && Directory.Exists(parent))
+                Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Unsafe_nested_directory_mode_rejects_writes_without_leaking_a_descriptor()
     {
         if (!OperatingSystem.IsLinux())

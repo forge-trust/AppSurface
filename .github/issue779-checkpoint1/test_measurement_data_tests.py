@@ -147,6 +147,73 @@ class SdkDataDirectoryControls(unittest.TestCase):
             self.assertEqual(['evidence'], [path.name for path in root.iterdir()])
 
 
+class QualifiedSelectionControls(unittest.TestCase):
+    """Closed command/receipt binding only; these controls execute no SDK or native case."""
+
+    NEW_RECIPES = {
+        'N05': 'LinuxSlotNegativeObservationTests',
+        'N08': 'LinuxJoinedWorkerOutputDiagnosticTests',
+        'N10': 'LinuxN10PendingStartCheckpointTests',
+        'N13': 'LinuxOwnerDeathPhaseFrameTests',
+        'N14': 'LinuxOwnerDeathPhaseFrameTests',
+    }
+
+    def test_new_recipes_bind_matching_build_properties_and_exact_vstest_classes(self):
+        for selector, name in self.NEW_RECIPES.items():
+            with self.subTest(selector=selector):
+                args, original, prepared, _ = model(selector)
+                restore, build, run = subject.argv(args, original)
+                selected = '-p:EvidencePrivateQualification=' + selector
+                for command, verb in ((restore, 'restore'), (build, 'build')):
+                    self.assertEqual(['/sdk/dotnet', verb], command[:2])
+                    self.assertEqual([selected], [value for value in command
+                                                 if value.startswith('-p:EvidencePrivateQualification=')])
+                expected = subject.PREFIX + name
+                expected_classes = [expected] + ([subject.PREFIX + 'SupervisionAcceptedWorkFramingTests'] if selector == 'N13' else [])
+                self.assertEqual(expected_classes, prepared['classes'])
+                self.assertEqual(['/sdk/dotnet', 'vstest', prepared['test_binary']], run[:3])
+                self.assertEqual(['--TestCaseFilter:' + '|'.join('FullyQualifiedName~' + value for value in expected_classes)],
+                                 [value for value in run if value.startswith('--TestCaseFilter:')])
+                self.assertFalse(any(value.startswith('-p:') for value in run))
+
+    def test_new_recipes_reject_foreign_prepared_and_trx_classes(self):
+        foreign = subject.PREFIX + 'LinuxN04CheckpointOrderTests'
+        for selector, name in self.NEW_RECIPES.items():
+            with self.subTest(selector=selector):
+                args, original, prepared, raws = model(selector)
+                changed = copy.deepcopy(prepared)
+                changed['classes'] = [foreign]
+                with self.assertRaises(binding.Rejected):
+                    subject.require_prepared(args, original, changed)
+                actual = raws['data-tests/trx/data.trx']
+                replaced = actual.replace((subject.PREFIX + name).encode(), foreign.encode())
+                self.assertNotEqual(actual, replaced)
+                with self.assertRaises(binding.Rejected):
+                    subject.trx(replaced, prepared['classes'])
+
+    def test_accepted_work_framing_uses_the_real_selected_runtime_without_adding_native_cases(self):
+        args, original, prepared, raws = model('N13')
+        expected = [subject.PREFIX + name for name in
+                    ('LinuxOwnerDeathPhaseFrameTests', 'SupervisionAcceptedWorkFramingTests')]
+        self.assertEqual(expected, prepared['classes'])
+        self.assertEqual('--TestCaseFilter:' + '|'.join('FullyQualifiedName~' + name for name in expected),
+                         subject.argv(args, original)[2][3])
+        self.assertEqual(2, subject.trx(raws['data-tests/trx/data.trx'], expected)['passed'])
+        self.assertFalse(prepared['native_acceptance'])
+        self.assertFalse(prepared['coverage_credit'])
+
+    def test_other_six_selectors_return_before_paths_reads_copies_or_commands(self):
+        for selector in ('None', 'N06', 'N09', 'N11', 'N12', 'N15'):
+            args = argparse.Namespace(selector=selector)
+            with self.subTest(selector=selector), \
+                    patch.object(subject, 'paths', side_effect=AssertionError('paths')), \
+                    patch.object(subject, 'read', side_effect=AssertionError('read')), \
+                    patch.object(subject, 'replace_owned', side_effect=AssertionError('copy')), \
+                    patch.object(subject, 'command', side_effect=AssertionError('dispatch')):
+                self.assertIsNone(subject.prepare(args, {}, b'{}', deadline=0))
+                self.assertIsNone(subject.run(args, {}, {}, deadline=0))
+
+
 class DataMeasurementControls(unittest.TestCase):
     def test_each_fixed_recipe_accepts_closed_data_without_any_os_read_or_dispatch(self):
         for selector in subject.CLASSES:

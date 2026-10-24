@@ -57,13 +57,32 @@ private implementations, and their linked test-assembly copies do not establish 
 native runtime's methods. This supplemental step uses the same instrumented runtime image already
 owned by the standard collector; it neither imports a report nor writes a hit file.
 
-The fixed recipes are `N04` (`LinuxN04CheckpointOrderTests`, `LinuxNegativeKernelObservationTests`),
-`N07` (`LinuxFailedSettlementObservationTests`, `LinuxWorkerStopTimingTests`,
-`LinuxN07FailureSettlementTests`), and `N16` (`LinuxN16ProgressDiagnosticTests`,
-`LinuxNegativeKernelObservationTests`), all in the existing Supervision test namespace. `None` performs
-no supplemental I/O. All fourteen selectors run their original genuine procedure in the
-[segmented measurement chain](measurement-chain-README.md); only N04, N07 and N16
-have supplemental data tests. Each report is merged once with its immediate predecessor.
+The closed recipes are the following existing classes in the Supervision test namespace:
+
+| Selector | Existing data-test classes | Newly selected source-defined rows |
+| --- | --- | ---: |
+| `N04` | [`LinuxN04CheckpointOrderTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04CheckpointOrderTests.cs), [`LinuxNegativeKernelObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs) | Existing recipe |
+| `N05` | [`LinuxSlotNegativeObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSlotNegativeObservationTests.cs) | 23 |
+| `N07` | [`LinuxFailedSettlementObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs), [`LinuxWorkerStopTimingTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerStopTimingTests.cs), [`LinuxN07FailureSettlementTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs) | Existing recipe |
+| `N08` | [`LinuxJoinedWorkerOutputDiagnosticTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxJoinedWorkerOutputDiagnosticTests.cs) | 17 |
+| `N10` | [`LinuxN10PendingStartCheckpointTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN10PendingStartCheckpointTests.cs) | 11 |
+| `N13` | [`LinuxOwnerDeathPhaseFrameTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnerDeathPhaseFrameTests.cs) with the N13 compile-owned frame, [`SupervisionAcceptedWorkFramingTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptedWorkFramingTests.cs) | 1 frame plus existing framing controls |
+| `N14` | [`LinuxOwnerDeathPhaseFrameTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnerDeathPhaseFrameTests.cs) with the N14 compile-owned frame | 1 |
+| `N16` | [`LinuxN16ProgressDiagnosticTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN16ProgressDiagnosticTests.cs), [`LinuxNegativeKernelObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs) | Existing recipe |
+
+The newly selected rows are test definitions, not execution results or coverage credit. The N13 framing group uses actual streams and held write/close barriers to verify intermediate acceptance, replay, cancellation and original I/O joining. It creates no authenticated connection, owner or native case. N14 does not repeat that shared framing group.
+The [test-project link conditions](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj)
+omit linked test-assembly implementations for these matching runtime selectors. N10's test class
+itself requires the N10 qualification define. The fixed build property must match the instrumented
+runtime: changing only the VSTest filter cannot establish this binding. N13 and N14 retain their
+separate compile-owned frame assertions; neither test creates an accepted-work owner.
+
+`None`, `N06`, `N09`, `N11`, `N12` and `N15` perform no supplemental data I/O. The slot codec is
+selected once under N05, and the shared joined-output diagnostic once under N08. Their existing test
+bodies cover the closed data cases without duplicating these recipes under N06 or N09. Existing
+N04/N07/N16 recipes retain their class sets. All fourteen selectors run their original genuine
+procedure in the [segmented measurement chain](measurement-chain-README.md), and each report is
+merged once with its immediate predecessor. No native procedure or clock is replaced by these tests.
 
 The internal `prepare(args, original, capture_raw, deadline=...)` API runs during bind's existing
 240-second budget. It derives the SDK from the verified original build command, restores the fixed test
@@ -93,7 +112,7 @@ It checks the exact retained leaf set, original and measured image identities, f
 logs and the joined test command log, and actual TRX classes/counters/results. Failed, skipped, missing
 or unselected cases reject. `data-tests/prepared.json` and `data-tests/result.json` retain the closed
 `issue779-c1-data-prepared-v1` and `issue779-c1-data-result-v1` schemas. The final/target
-`data_tests_sha256` is the raw result hash for the three recipes and null for `None`. The current source
+`data_tests_sha256` is the raw result hash for the eight closed recipes and null for every other C1 selector. The current source
 capture pins this helper before import, and the chain rechecks every retained byte and the data receipt.
 The new [portable controls](test_measurement_data_tests.py) validate receipt grammar and real owned-file
 replacement only; their synthetic metadata fixtures are not evidence of a test process or native case.

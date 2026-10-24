@@ -64,7 +64,7 @@ segment. Earlier actual artifacts are still required at the gate.
 
 Wrapper target/final bindings retain the version 2 contract in the
 [per-selector reference](measurement-README.md#existing-private-image-data-controls).
-N04, N07 and N16 retain their fixed `data-tests/` leaves and validate the
+N04, N05, N07, N08, N10, N13, N14 and N16 retain their fixed `data-tests/` leaves and validate the
 source-bound receipt and actual TRX. These tests run after the original native
 procedure in the same collector session and add no native case IDs. Other
 selectors require a null data-receipt hash and no supplemental leaves.

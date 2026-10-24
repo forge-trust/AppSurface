@@ -54,6 +54,15 @@ public sealed class LinuxWorkspaceMetadataTests
         Assert.False(LinuxWorkspaceMetadata.MatchesApplicationFile(bad, 4, 0x124));
     }
 
+    [Fact]
+    public void ApplicationFileRejectsNegativeDeclaredLengthWithOtherwiseExactMetadata()
+    {
+        var valid = Sample(mode: 0x816d, length: 4);
+
+        Assert.True(LinuxWorkspaceMetadata.MatchesApplicationFile(valid, 4, 0x16d));
+        Assert.False(LinuxWorkspaceMetadata.MatchesApplicationFile(valid, -1, 0x16d));
+    }
+
     public static IEnumerable<object[]> MutableBoundaries()
     {
         foreach (var directory in new[] { true, false })

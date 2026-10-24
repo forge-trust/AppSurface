@@ -11,7 +11,7 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 /// Every original server, worker and account operation is joined; failed preparation preserves paths and
 /// reusable identities for quarantine when complete native root custody cannot be established.
 /// </remarks>
-internal static class LinuxEmptyObservationExecution
+internal static partial class LinuxEmptyObservationExecution
 {
     /// <summary>Runs the protected targeted empty, coverage, or compiled-application Observation and returns data only after strict final cleanup.</summary>
     /// <param name="requestPath">The protected request selected by the authenticated OS bootstrap command.</param>
@@ -67,26 +67,7 @@ internal static class LinuxEmptyObservationExecution
         }
         var failed = false;
         var cleanupFailed = false;
-#if EVIDENCE_PRIVATE_N07
-        var n07FailureProjectionWriteAttempted = false;
-#endif
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-        var cancellationProjectionWritten = false;
-        var cancellationProjectionWriteAttempted = false;
-        var cancellationProjectionStage = LinuxCancellationProjectionStage.Unknown;
-#endif
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16
-        var accountsClosedUnderCustody = false;
-#endif
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-        uint cancellationResultsGid = 0;
-#endif
-#if EVIDENCE_PRIVATE_N16
-        var acceptedWorkProjectionWritten = false;
-        var acceptedWorkProjectionWriteAttempted = false;
-        uint acceptedWorkResultsGid = 0;
-        LinuxN16ProgressDiagnostic.Snapshot? n16ProgressDiagnostic = null;
-#endif
+        var qualification = new QualifiedObservation(failures);
         var cleanupToken = CancellationToken.None;
         long finalCloseStarted = 0;
         TimeSpan finalCloseAllowance = TimeSpan.Zero;
@@ -128,12 +109,7 @@ internal static class LinuxEmptyObservationExecution
                 applicationWorkspace = LinuxApplicationWorkspace.Create(input, owner, accounts,
                     applicationSelection.Definition, applicationSelection.EntryDigest, job.Token);
             }
-#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
-            // The compile-time case seeds this exact retained worker output parent before the worker starts.
-            // Ordinary images do not compile or call the fixture setup.
-            var slotSetup = workspace.PrepareSlotNegativeFixture(owner, accounts, job.Token);
-            await WriteSlotObservationAsync([slotSetup], owner, job.Token).ConfigureAwait(false);
-#endif
+            await qualification.PrepareSlotAsync(workspace, owner, accounts, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.ListenerBind;
             listener = LinuxControlListener.Bind(owner, accounts, workspace, job.Token);
             phase = EvidenceNativeObservationPhase.WorkerCreate;
@@ -154,26 +130,12 @@ internal static class LinuxEmptyObservationExecution
             server.RequireSuccessfulCompletion(job.Token);
             phase = EvidenceNativeObservationPhase.WorkerExit;
             await worker.WaitForExitAsync().ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N12
-            if (EvidenceNativeQualification.DescendantEnabled)
-                await worker.ObserveLeaderExitWithDescendantAsync(job.Token).ConfigureAwait(false);
-#endif
+            await qualification.ObserveLeaderExitAsync(worker, job.Token).ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkerStop;
             await worker.StopAndJoinAsync().ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.WorkerCompletion;
             worker.RequireSuccessfulCompletion();
-#if EVIDENCE_PRIVATE_N12
-            if (EvidenceNativeQualification.DescendantEnabled)
-            {
-                var bytes = worker.CaptureJoinedDescendantObservation();
-                owner.RequireCleanup(default);
-                using var error = Console.OpenStandardError();
-                await error.WriteAsync(bytes, owner.RootTeardownToken).ConfigureAwait(false);
-                await error.WriteAsync(new byte[] { (byte)'\n' }, owner.RootTeardownToken).ConfigureAwait(false);
-                await error.FlushAsync(owner.RootTeardownToken).ConfigureAwait(false);
-                owner.RequireCleanup(default);
-            }
-#endif
+            await qualification.WriteJoinedDescendantAsync(worker, owner).ConfigureAwait(false);
             if (runOutput is not null && !(await runOutput.CompleteAsync().ConfigureAwait(false)).Successful) throw Rejected();
             phase = EvidenceNativeObservationPhase.BeginTeardown;
             owner.BeginRootTeardown();
@@ -241,264 +203,8 @@ internal static class LinuxEmptyObservationExecution
 
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
-            if ((failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    // The original holder checks physical group/monitor/pump and server joins before any fixture capture.
-                    var kernel = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
-                    var caseId = EvidenceNativeQualification.Current == EvidenceNativeQualificationKind.SymlinkWorkerOutputSlot ? "N06" : "N05";
-                    var joined = LinuxSlotNegativeObservation.EncodeJoinedOutput(caseId,
-                        worker.Output ?? throw Rejected());
-                    var inspection = workspace.CloseAndCaptureSlotNegativeFixture(cleanupToken);
-                    await WriteSlotObservationAsync([inspection, joined.Projection, kernel.Bytes, joined.Raw],
-                        owner, cleanupToken).ConfigureAwait(false);
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N07
-            if (EvidenceNativeQualification.ParentReplacementEnabled && failed && !cleanupFailed
-                && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    var evidence = worker.CaptureFailureSettlement(input, owner, accounts, workspace, server, cleanupToken);
-                    n07FailureProjectionWriteAttempted = true; // A partial strict write forbids a second large record.
-                    await LinuxN07FailureEmitter.WriteAsync(evidence.Settlement, evidence.ReadyDescriptorSha256,
-                        server.N07ExecutionStatus, cleanupToken).ConfigureAwait(false);
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            // Earlier failed stop/monitor joins must not suppress the separate failure-only transfer.
-            // The original-holder guard still rejects missing actual joins or committed READY.
-            if (EvidenceNativeQualification.ParentReplacementEnabled && (failed || cleanupFailed)
-                && !n07FailureProjectionWriteAttempted
-                && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    var observation = worker.CaptureN07RejectedFrameObservation(input, owner, accounts,
-                        workspace, server, cleanupToken);
-                    owner.RequireControlIdentity(cleanupToken);
-                    cleanupToken.ThrowIfCancellationRequested();
-                    n07FailureProjectionWriteAttempted = true;
-                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observation.Bytes).AsMemory(),
-                        cleanupToken).ConfigureAwait(false);
-                    await Console.Error.FlushAsync(cleanupToken).ConfigureAwait(false);
-                    owner.RequireControlIdentity(cleanupToken);
-                    cleanupToken.ThrowIfCancellationRequested();
-                }
-                catch (Exception error) when (Recoverable(error)) { } // Preserve the original first fault and sticky failure.
-#endif
-#if EVIDENCE_PRIVATE_N10
-            // Emit only after the original worker lifetime returned from its joined two-stop/finalization path.
-            // The record retains sticky cancellation and reports its physical-settlement projection verbatim.
-            if (EvidenceNativeQualification.PendingStartRaceEnabled && failed
-                && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null)
-                try
-                {
-                    var observation = worker.CaptureN10PendingStartObservation(input, owner, accounts,
-                        workspace, cleanupToken);
-                    using var stderr = Console.OpenStandardError();
-                    await stderr.WriteAsync(observation.AsMemory(), cleanupToken).ConfigureAwait(false);
-                    await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), cleanupToken).ConfigureAwait(false);
-                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                    owner.RequireControlIdentity(cleanupToken);
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N16
-            // The negative private control exports only actual past authenticated writes and
-            // original joined task/kernel data. It never replaces the worker's nonzero failure.
-            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && failed && !cleanupFailed
-                && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    var control = server.CaptureAcceptedBlockedWork(input, owner, accounts, workspace, worker, cleanupToken);
-                    var kernel = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
-                    acceptedWorkResultsGid = accounts.RequireControlOwnedBy(owner, cleanupToken).ResultsGid;
-                    cleanupToken.ThrowIfCancellationRequested();
-                    acceptedWorkProjectionWriteAttempted = true;
-                    using (var stderr = Console.OpenStandardError())
-                    {
-                        foreach (var bytes in new[] { control, kernel.Bytes })
-                        {
-                            await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        }
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                    }
-                    cleanupToken.ThrowIfCancellationRequested();
-                    owner.RequireControlIdentity(cleanupToken);
-                    acceptedWorkProjectionWritten = true;
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N16
-            // Retain one detached snapshot after the original server and worker joins. The CLI can
-            // attach it to the already-owned terminal error path without another cleanup-token write.
-            if (EvidenceNativeQualification.AcceptedBlockedWorkEnabled && !token.IsCancellationRequested
-                && (failed || cleanupFailed)
-                && !acceptedWorkProjectionWriteAttempted && server is not null && serverTask?.IsCompleted == true)
-                try
-                {
-                    n16ProgressDiagnostic = server.CaptureN16ProgressDiagnostic() with
-                    {
-                        Client = worker?.CaptureJoinedN16ClientProgress()
-                    };
-                }
-                catch (Exception error) when (Recoverable(error)) { } // Detached diagnostics never change the first fault or cleanup result.
-#endif
-#if EVIDENCE_PRIVATE_N11
-            // Private N11 failure-only data comes from the original joined holders before custody
-            // and account closure. Capture failure never clears or replaces the execution failure.
-            if (EvidenceNativeQualification.WorkerStallEnabled && (failed || cleanupFailed)
-                && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null && serverTask is not null)
-                try
-                {
-                    var observation = worker.CaptureFailedSettlementObservation(input, owner, accounts,
-                        workspace, server, cleanupToken);
-                    var bytes = observation.Bytes;
-                    if (bytes.Length is 0 or > LinuxFailedSettlementObservation.MaximumJsonBytes) throw Rejected();
-                    cleanupToken.ThrowIfCancellationRequested();
-                    using (var stderr = Console.OpenStandardError())
-                    {
-                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                    }
-                    cleanupToken.ThrowIfCancellationRequested();
-                    owner.RequireControlIdentity(cleanupToken);
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N04
-            // Fixed private N04 image: copy facts only from the original joined holders, before
-            // substituted-path custody can reject. This record cannot turn the failed run positive.
-            if (EvidenceNativeQualification.PeerReplacementEnabled && (failed || cleanupFailed) && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null && serverTask is not null)
-                try
-                {
-                    var observation = worker.CaptureNegativeObservation(input, owner, accounts, workspace, server, cleanupToken);
-                    var bytes = observation.Bytes;
-                    if (bytes.Length is 0 or > LinuxNegativeKernelObservation.MaximumJsonBytes) throw Rejected();
-                    cleanupToken.ThrowIfCancellationRequested();
-                    using (var stderr = Console.OpenStandardError())
-                    {
-                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                    }
-                    cleanupToken.ThrowIfCancellationRequested();
-                    owner.RequireControlIdentity(cleanupToken);
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N09
-            // The actual workspace holder was acquired before the original SIGINT. After
-            // server/worker joins, recheck the empty slot and close both retained descriptors
-            // before root custody can release the generated accounts.
-            if (input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    var allocation = server.CaptureAndCloseN09AllocationSlot(
-                        input, owner, accounts, workspace, worker, cleanupToken);
-                    if (allocation is not null)
-                    {
-                        cleanupToken.ThrowIfCancellationRequested();
-                        owner.RequireControlIdentity(cleanupToken);
-                        using var stderr = Console.OpenStandardError();
-                        await stderr.WriteAsync(allocation.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                        owner.RequireControlIdentity(cleanupToken);
-                    }
-                }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-#endif
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-            // Fixed private cancellation image: original holder projection after server/native/pump joins.
-            if (EvidenceNativeQualification.CancellationEnabled && failed && input is not null && owner is not null && accounts is not null
-                && workspace is not null && worker is not null && server is not null)
-                try
-                {
-                    // Teardown has closed work admission. The retained control owner still
-                    // authenticates cleanup identity without reopening account work access.
-                    cancellationResultsGid = accounts.RequireControlOwnedBy(owner, cleanupToken).ResultsGid;
-                    var observed = worker.CaptureCancellationJoinedObservation(input, owner, accounts, workspace, server,
-                        cleanupToken, ref cancellationProjectionStage);
-                    cancellationProjectionStage = LinuxCancellationProjectionStage.SignalProvenance;
-                    var signal = server.CaptureCancellationSignal(input, owner, accounts, workspace, worker, cleanupToken);
-                    // Even a faulted write may have emitted a partial line. Do not append another
-                    // potentially large projection once any original output write was attempted.
-                    cancellationProjectionWriteAttempted = true;
-                    cancellationProjectionStage = LinuxCancellationProjectionStage.SignalWrite;
-                    await Console.Error.WriteLineAsync(signal).ConfigureAwait(false);
-                    cancellationProjectionStage = LinuxCancellationProjectionStage.KernelWrite;
-                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.Kernel.Bytes)).ConfigureAwait(false);
-                    cancellationProjectionStage = LinuxCancellationProjectionStage.JoinedStreamWrite;
-                    cleanupToken.ThrowIfCancellationRequested();
-                    await Console.Error.WriteLineAsync(System.Text.Encoding.UTF8.GetString(observed.JoinedStreams).AsMemory(),
-                        cleanupToken).ConfigureAwait(false);
-                    cancellationProjectionStage = LinuxCancellationProjectionStage.FinalBound;
-                    cleanupToken.ThrowIfCancellationRequested();
-                    cancellationProjectionWritten = true;
-                }
-                catch (Exception error) when (Recoverable(error))
-                {
-                    Record(error); cleanupFailed = true;
-                    // This separate, bounded checkpoint explains a later capture failure without
-                    // replacing the earlier server failure or any original settlement predicate.
-                    try
-                    {
-                        owner.RequireControlIdentity(cleanupToken);
-                        var bytes = LinuxCancellationProjectionFailure.EncodeDetached(owner.RunId,
-                            cancellationProjectionStage, error);
-                        using var diagnostic = Console.OpenStandardError();
-                        await diagnostic.WriteAsync(bytes, cleanupToken).ConfigureAwait(false);
-                        await diagnostic.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await diagnostic.FlushAsync(cleanupToken).ConfigureAwait(false);
-                        owner.RequireControlIdentity(cleanupToken);
-                    }
-                    catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { Record(diagnosticError); }
-                    // A joined nonzero worker can lack the successful negative-kernel projection.
-                    // Retain the original post-pump unit/group and lifetime state if READY committed.
-                    // A pre-READY or otherwise unjoined failure keeps the existing pump-only fallback.
-                    // Neither diagnostic replaces the first fault or upgrades settlement/cleanup.
-                    if (!cancellationProjectionWriteAttempted) try
-                        {
-                            owner.RequireControlIdentity(cleanupToken);
-                            var diagnostic = worker.CaptureFailedSettlementObservation(input, owner, accounts,
-                                workspace, server, cleanupToken).Bytes;
-                            cancellationProjectionWriteAttempted = true; // A partial write forbids a second large record.
-                            using var stderr = Console.OpenStandardError();
-                            await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
-                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                            await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                            owner.RequireControlIdentity(cleanupToken);
-                        }
-                        catch (Exception diagnosticError) when (Recoverable(diagnosticError))
-                        {
-                            Record(diagnosticError);
-                            if (!cancellationProjectionWriteAttempted) try
-                                {
-                                    owner.RequireControlIdentity(cleanupToken);
-                                    var diagnostic = worker.CaptureJoinedOutputDiagnostic(owner.RunId);
-                                    cancellationProjectionWriteAttempted = true;
-                                    using var stderr = Console.OpenStandardError();
-                                    await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
-                                    await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
-                                    owner.RequireControlIdentity(cleanupToken);
-                                }
-                                catch (Exception outputError) when (Recoverable(outputError)) { Record(outputError); }
-                        }
-                }
-#endif
+            cleanupFailed = await qualification.CaptureFailureAsync(failed, cleanupFailed, input, owner, accounts,
+                workspace, worker, server, serverTask, cleanupToken, token, Record).ConfigureAwait(false);
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
@@ -513,9 +219,7 @@ internal static class LinuxEmptyObservationExecution
                 {
                     phase = EvidenceNativeObservationPhase.AccountsClose;
                     await custody.CloseAccountsAsync(cleanupToken).ConfigureAwait(false);
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09 || EVIDENCE_PRIVATE_N16
-                    accountsClosedUnderCustody = true;
-#endif
+                    qualification.MarkAccountsClosedUnderCustody();
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
@@ -566,52 +270,17 @@ internal static class LinuxEmptyObservationExecution
                 try { phase = EvidenceNativeObservationPhase.FinalDeadline; RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
         }
-        if (cleanupFailed)
-        {
-#if EVIDENCE_PRIVATE_N16
-            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic);
-#else
-            throw failures.Rejected();
-#endif
-        }
+        qualification.ThrowCleanupFailure(cleanupFailed);
         token.ThrowIfCancellationRequested();
         // The optional diagnostic is attached only after every original cleanup and deadline check.
         // No earlier first-fault projection can conceal a failed finalization behind this record.
-#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
-        if (failed && cancellationProjectionWritten && accountsClosedUnderCustody && owner is not null)
-            throw failures.Rejected(owner.RunId, cancellationResultsGid);
-#endif
-#if EVIDENCE_PRIVATE_N16
-        if (failed && acceptedWorkProjectionWritten && accountsClosedUnderCustody && owner is not null)
-            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic, owner.RunId, acceptedWorkResultsGid,
-                LinuxNegativeCleanupKind.AcceptedBlockedWork);
-#endif
+        qualification.ThrowFinalProjection(failed, manifest, owner);
         if (failed || manifest is null)
         {
-#if EVIDENCE_PRIVATE_N16
-            throw failures.RejectedWithN16Progress(n16ProgressDiagnostic);
-#else
             throw failures.Rejected();
-#endif
         }
         return manifest;
     }
-
-#if EVIDENCE_PRIVATE_N05 || EVIDENCE_PRIVATE_N06
-    private static async Task WriteSlotObservationAsync(byte[][] records, LinuxOwnerActivation owner, CancellationToken token)
-    {
-        owner.RequireControlIdentity(token);
-        using var stderr = Console.OpenStandardError();
-        foreach (var record in records)
-        {
-            token.ThrowIfCancellationRequested();
-            await stderr.WriteAsync(record.AsMemory(), token).ConfigureAwait(false);
-            await stderr.WriteAsync(new byte[] { (byte)'\n' }.AsMemory(), token).ConfigureAwait(false);
-        }
-        await stderr.FlushAsync(token).ConfigureAwait(false);
-        owner.RequireControlIdentity(token);
-    }
-#endif
 
     /// <summary>Encodes fixed private cancellation cleanup data; it creates no native ownership or completion capability.</summary>
     /// <param name="generation">Original generation data; native composition supplies the actual owner generation.</param>

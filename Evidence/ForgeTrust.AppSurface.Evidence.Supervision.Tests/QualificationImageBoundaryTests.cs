@@ -20,9 +20,30 @@ public sealed class QualificationImageBoundaryTests
         [
             "RunOwnedAsync", "RunCoreAsync", "HandleRegisteredAsync", "HandleAsync", "StopEmptyDescendantsAsync",
         ]);
+        RequireAsyncIdentities("LinuxEmptyObservationExecution", ["RunAsync"]);
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+        RequireAsyncIdentities("LinuxEmptyObservationControlServer",
+            ["StopAndJoinN16WorkAsync", "RunN16BlockedWorkAsync"], firstOrdinal: 5);
+#endif
+#if EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
+        RequireAsyncIdentities("LinuxEmptyObservationControlServer", ["SignalCancellationOwnedAsync"], firstOrdinal: 5);
+#endif
+        // Framing identities are common across images; accepted-work follows them only in its selected image.
+#if EVIDENCE_PRIVATE_ACCEPTED_WORK
+        RequireAsyncIdentities("SupervisionControlLineFraming",
+        [
+            "ReadRequestAsync", "WritePhaseAsync", "WriteResponseAsync", "DisposeAsync",
+            "WriteAcceptedBlockedWorkAsync",
+        ]);
+#else
+        RequireAsyncIdentities("SupervisionControlLineFraming",
+        [
+            "ReadRequestAsync", "WritePhaseAsync", "WriteResponseAsync", "DisposeAsync",
+        ]);
+#endif
     }
 
-    private static void RequireAsyncIdentities(string owner, IReadOnlyList<string> methods)
+    private static void RequireAsyncIdentities(string owner, IReadOnlyList<string> methods, int firstOrdinal = 0)
     {
         using var file = File.OpenRead(Path.Join(AppContext.BaseDirectory, "ForgeTrust.AppSurface.Evidence.Supervision.dll"));
         using var image = new PEReader(file);
@@ -39,7 +60,7 @@ public sealed class QualificationImageBoundaryTests
         for (var index = 0; index < methods.Count; index++)
         {
             var prefix = $"<{methods[index]}>d__";
-            Assert.Equal([prefix + index], names.Where(name => name.StartsWith(prefix, StringComparison.Ordinal)));
+            Assert.Equal([prefix + (firstOrdinal + index)], names.Where(name => name.StartsWith(prefix, StringComparison.Ordinal)));
         }
     }
 

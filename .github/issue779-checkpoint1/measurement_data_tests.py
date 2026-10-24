@@ -21,7 +21,12 @@ NAMES = (ASSEMBLY + '.dll', ASSEMBLY + '.pdb')
 PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.'
 CLASSES = {
     'N04': ('LinuxN04CheckpointOrderTests', 'LinuxNegativeKernelObservationTests'),
+    'N05': ('LinuxSlotNegativeObservationTests',),
     'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests'),
+    'N08': ('LinuxJoinedWorkerOutputDiagnosticTests',),
+    'N10': ('LinuxN10PendingStartCheckpointTests',),
+    'N13': ('LinuxOwnerDeathPhaseFrameTests', 'SupervisionAcceptedWorkFramingTests'),
+    'N14': ('LinuxOwnerDeathPhaseFrameTests',),
     'N16': ('LinuxN16ProgressDiagnosticTests', 'LinuxNegativeKernelObservationTests'),
 }
 LIMIT = 8 * 1024 * 1024
