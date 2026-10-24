@@ -74,6 +74,8 @@ public sealed class LinuxApplicationUnitTests
     [InlineData("HTTP/1.1 200 OK\r\nContent-Length: 17\r\nContent-Length: 17\r\n\r\nnative-http-ready")]
     [InlineData("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 17\r\n\r\nnative-http-ready")]
     [InlineData("HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\nwrong-body-canary")]
+    [InlineData("HTTP/1.1 200 OK\r\nContent-Length: 17")]
+    [InlineData("HTTP/1.1 200 OK\r\nContent-Length: canary\r\n\r\nnative-http-ready")]
     [InlineData("")]
     public void DetachedHealthBytesCannotPassMalformedOrUnhealthyResponses(string value)
     {

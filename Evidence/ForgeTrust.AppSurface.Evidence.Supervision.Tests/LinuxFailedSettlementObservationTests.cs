@@ -58,7 +58,10 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Failed or settled lifetime metadata stays literal, without creating a positive settlement.</summary>
     [Theory]
-    [InlineData(true, false)][InlineData(false, false)][InlineData(true, true)][InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
     public void ParentReplacementDoesNotInventLifetimeFlags(bool failed, bool settled)
     {
         var data = Valid();
@@ -97,9 +100,15 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Incomplete or oversized rejected streams omit both raw streams and hashes, retaining honest counters.</summary>
     [Theory]
-    [InlineData("stdout-eof")][InlineData("stderr-eof")][InlineData("read-failed")]
-    [InlineData("cancelled")][InlineData("signal-failed")][InlineData("quota")]
-    [InlineData("stdout-truncated")][InlineData("stderr-truncated")][InlineData("oversized")]
+    [InlineData("stdout-eof")]
+    [InlineData("stderr-eof")]
+    [InlineData("read-failed")]
+    [InlineData("cancelled")]
+    [InlineData("signal-failed")]
+    [InlineData("quota")]
+    [InlineData("stdout-truncated")]
+    [InlineData("stderr-truncated")]
+    [InlineData("oversized")]
     public void ParentReplacementIncompleteOrOversizedDataHasNoRawExport(string condition)
     {
         var data = Valid();
@@ -108,15 +117,24 @@ public sealed class LinuxFailedSettlementObservationTests
         {
             "stdout-eof" => output with { Stdout = output.Stdout with { EndOfStream = false } },
             "stderr-eof" => output with { Stderr = output.Stderr with { EndOfStream = false } },
-            "read-failed" => output with { Failure = SupervisionOutputFailure.ReadFailed,
-                Stderr = output.Stderr with { Failure = SupervisionOutputFailure.ReadFailed } },
+            "read-failed" => output with
+            {
+                Failure = SupervisionOutputFailure.ReadFailed,
+                Stderr = output.Stderr with { Failure = SupervisionOutputFailure.ReadFailed }
+            },
             "cancelled" => output with { Failure = SupervisionOutputFailure.Cancelled },
             "signal-failed" => output with { StopSignalFailed = true },
             "quota" => output with { QuotaExceeded = true, Failure = SupervisionOutputFailure.QuotaExceeded },
-            "stdout-truncated" => output with { Stdout = output.Stdout with { ReceivedBytes = 1 },
-                ReceivedBytes = output.ReceivedBytes + 1 },
-            "stderr-truncated" => output with { Stderr = output.Stderr with { ReceivedBytes = output.Stderr.ReceivedBytes + 1 },
-                ReceivedBytes = output.ReceivedBytes + 1 },
+            "stdout-truncated" => output with
+            {
+                Stdout = output.Stdout with { ReceivedBytes = 1 },
+                ReceivedBytes = output.ReceivedBytes + 1
+            },
+            "stderr-truncated" => output with
+            {
+                Stderr = output.Stderr with { ReceivedBytes = output.Stderr.ReceivedBytes + 1 },
+                ReceivedBytes = output.ReceivedBytes + 1
+            },
             "oversized" => output with
             {
                 Stderr = output.Stderr with
@@ -144,8 +162,12 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>The failure family still rejects every unavailable original join.</summary>
     [Theory]
-    [InlineData("startup")][InlineData("stop")][InlineData("pending-start")]
-    [InlineData("pending-stop")][InlineData("pending-open")][InlineData("pending-unreserved")]
+    [InlineData("startup")]
+    [InlineData("stop")]
+    [InlineData("pending-start")]
+    [InlineData("pending-stop")]
+    [InlineData("pending-open")]
+    [InlineData("pending-unreserved")]
     public void ParentReplacementMissingOriginalJoinsReject(string field)
     {
         var data = Valid();
@@ -171,7 +193,9 @@ public sealed class LinuxFailedSettlementObservationTests
         var data = Valid();
         using var json = JsonDocument.Parse(EncodeParentReplacement(data with
         {
-            Terminal = null, Group = null, State = data.State with { CgroupAfterPumps = false },
+            Terminal = null,
+            Group = null,
+            State = data.State with { CgroupAfterPumps = false },
         }).Bytes);
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("terminal").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("cgroup").ValueKind);
@@ -188,7 +212,9 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Adding the parent-replacement family does not open arbitrary private diagnostic selectors.</summary>
     [Theory]
-    [InlineData(-1)][InlineData(3)][InlineData(999)]
+    [InlineData(-1)]
+    [InlineData(3)]
+    [InlineData(999)]
     public void ExpandedFamilyStillRejectsEveryUnrecognizedScenario(int scenario)
     {
         var data = Valid();
@@ -202,7 +228,8 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Original N11 account numbers add exactly five fields without changing any earlier observation.</summary>
     [Theory]
-    [InlineData(false)][InlineData(true)]
+    [InlineData(false)]
+    [InlineData(true)]
     public void N11AccountIdsAddOnlyTheExactOriginalFiveNumbers(bool includeTiming)
     {
         var data = Valid();
@@ -234,7 +261,9 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Null account data preserves each old family byte-for-byte, including the existing timing append.</summary>
     [Theory]
-    [InlineData(0)][InlineData(1)][InlineData(2)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
     public void AbsentAccountIdsPreserveExistingFamilyBytes(int scenarioValue)
     {
         var scenario = (LinuxFailedSettlementScenario)scenarioValue;
@@ -262,7 +291,8 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>The N11-only account projection is rejected for both other diagnostic families.</summary>
     [Theory]
-    [InlineData(1)][InlineData(2)]
+    [InlineData(1)]
+    [InlineData(2)]
     public void ForeignFamilyAccountIdsRejectWithoutSuppliedData(int scenarioValue)
     {
         var scenario = (LinuxFailedSettlementScenario)scenarioValue;
@@ -279,14 +309,22 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>One changed account field rejects invalid numbers, worker mismatches, and within-namespace collisions.</summary>
     [Theory]
-    [InlineData("worker-uid-zero")][InlineData("worker-uid-max")]
-    [InlineData("worker-gid-zero")][InlineData("worker-gid-max")]
-    [InlineData("subject-uid-zero")][InlineData("subject-uid-max")]
-    [InlineData("subject-gid-zero")][InlineData("subject-gid-max")]
-    [InlineData("results-gid-zero")][InlineData("results-gid-max")]
-    [InlineData("worker-uid-mismatch")][InlineData("worker-gid-mismatch")]
-    [InlineData("same-uids")][InlineData("worker-subject-gids")]
-    [InlineData("worker-results-gids")][InlineData("subject-results-gids")]
+    [InlineData("worker-uid-zero")]
+    [InlineData("worker-uid-max")]
+    [InlineData("worker-gid-zero")]
+    [InlineData("worker-gid-max")]
+    [InlineData("subject-uid-zero")]
+    [InlineData("subject-uid-max")]
+    [InlineData("subject-gid-zero")]
+    [InlineData("subject-gid-max")]
+    [InlineData("results-gid-zero")]
+    [InlineData("results-gid-max")]
+    [InlineData("worker-uid-mismatch")]
+    [InlineData("worker-gid-mismatch")]
+    [InlineData("same-uids")]
+    [InlineData("worker-subject-gids")]
+    [InlineData("worker-results-gids")]
+    [InlineData("subject-results-gids")]
     public void MalformedN11AccountIdsRejectFromValidAdjacentData(string condition)
     {
         var data = Valid();
@@ -432,18 +470,28 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Incomplete or failed pump conditions retain metadata but omit every raw and digest field.</summary>
     [Theory]
-    [InlineData("no-eof")][InlineData("read-failed")][InlineData("discarded")]
-    [InlineData("cancelled")][InlineData("signal-failed")][InlineData("quota")]
+    [InlineData("no-eof")]
+    [InlineData("read-failed")]
+    [InlineData("discarded")]
+    [InlineData("cancelled")]
+    [InlineData("signal-failed")]
+    [InlineData("quota")]
     public void IncompletePumpDataCannotBecomeFullExport(string condition)
     {
         var data = Valid();
         var output = condition switch
         {
             "no-eof" => data.Output with { Stderr = data.Output.Stderr with { EndOfStream = false } },
-            "read-failed" => data.Output with { Stderr = data.Output.Stderr with { Failure = SupervisionOutputFailure.ReadFailed },
-                Failure = SupervisionOutputFailure.ReadFailed },
-            "discarded" => data.Output with { Stderr = data.Output.Stderr with { ReceivedBytes = data.Output.Stderr.ReceivedBytes + 1 },
-                ReceivedBytes = data.Output.ReceivedBytes + 1 },
+            "read-failed" => data.Output with
+            {
+                Stderr = data.Output.Stderr with { Failure = SupervisionOutputFailure.ReadFailed },
+                Failure = SupervisionOutputFailure.ReadFailed
+            },
+            "discarded" => data.Output with
+            {
+                Stderr = data.Output.Stderr with { ReceivedBytes = data.Output.Stderr.ReceivedBytes + 1 },
+                ReceivedBytes = data.Output.ReceivedBytes + 1
+            },
             "cancelled" => data.Output with { Failure = SupervisionOutputFailure.Cancelled },
             "signal-failed" => data.Output with { StopSignalFailed = true },
             "quota" => data.Output with { QuotaExceeded = true, Failure = SupervisionOutputFailure.QuotaExceeded },
@@ -460,8 +508,12 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Each omitted original join is rejected from the detached metadata seam.</summary>
     [Theory]
-    [InlineData("startup")][InlineData("stop")][InlineData("pending-start")]
-    [InlineData("pending-stop")][InlineData("pending-open")][InlineData("pending-unreserved")]
+    [InlineData("startup")]
+    [InlineData("stop")]
+    [InlineData("pending-start")]
+    [InlineData("pending-stop")]
+    [InlineData("pending-open")]
+    [InlineData("pending-unreserved")]
     public void MissingOriginalJoinsReject(string field)
     {
         var data = Valid();
@@ -505,8 +557,12 @@ public sealed class LinuxFailedSettlementObservationTests
         var data = Valid();
         var prefix = ImmutableArray.CreateRange(new byte[LinuxFailedSettlementObservation.MaximumRawBytes + 1]);
         var stderr = data.Output.Stderr with { Prefix = prefix, ReceivedBytes = prefix.Length };
-        var output = data.Output with { Stderr = stderr, ReceivedBytes = prefix.Length,
-            ReceivedByteLimit = prefix.Length };
+        var output = data.Output with
+        {
+            Stderr = stderr,
+            ReceivedBytes = prefix.Length,
+            ReceivedByteLimit = prefix.Length
+        };
         using var json = JsonDocument.Parse(Encode(data with { Output = output }).Bytes);
         var pumps = json.RootElement.GetProperty("pumps");
         Assert.False(pumps.GetProperty("export_complete").GetBoolean());
@@ -542,7 +598,9 @@ public sealed class LinuxFailedSettlementObservationTests
 
     /// <summary>Unknown closed enums never enter the private schema.</summary>
     [Theory]
-    [InlineData("monitor")][InlineData("pending")][InlineData("pump")]
+    [InlineData("monitor")]
+    [InlineData("pending")]
+    [InlineData("pump")]
     public void UnknownEnumsReject(string field)
     {
         var data = Valid();
@@ -554,5 +612,228 @@ public sealed class LinuxFailedSettlementObservationTests
             _ => throw new InvalidOperationException(),
         };
         Reject(data);
+    }
+
+    /// <summary>Digest metadata accepts only the fixed lowercase hexadecimal descriptor shape.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaag")]
+    public void MalformedDescriptorDigestRejectsFromValidNeighbor(string? digest)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        var error = Assert.Throws<InvalidOperationException>(() => LinuxFailedSettlementObservation.CreateDetached(
+            data.Generation, data.Identity, digest!, data.State, data.Pending, data.Terminal, data.Group, data.Output));
+        Assert.Equal("ASEVD410: Original failed-settlement observation data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    /// <summary>Terminal code and status boundaries remain literal data while invalid neighbors stay closed.</summary>
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(6, 255)]
+    public void TerminalBoundaryValuesRemainLiteralAndUnaccepted(int code, int status)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        data = data with { Terminal = data.Terminal! with { ExecMainCode = code, ExecMainStatus = status } };
+        using var json = JsonDocument.Parse(Encode(data).Bytes);
+        Assert.Equal(code, json.RootElement.GetProperty("terminal").GetProperty("exec_main_code").GetInt32());
+        Assert.Equal(status, json.RootElement.GetProperty("terminal").GetProperty("exec_main_status").GetInt32());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("unit")]
+    [InlineData("pid")]
+    [InlineData("code-negative")]
+    [InlineData("code-seven")]
+    [InlineData("status-negative")]
+    [InlineData("status-256")]
+    public void MalformedTerminalIdentityOrBoundsRejectFromValidNeighbor(string mutation)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        data = mutation switch
+        {
+            "unit" => data with { Terminal = data.Terminal! with { Id = "wrong-unit" } },
+            "pid" => data with { Terminal = data.Terminal! with { ExecMainPid = 124 } },
+            "code-negative" => data with { Terminal = data.Terminal! with { ExecMainCode = -1 } },
+            "code-seven" => data with { Terminal = data.Terminal! with { ExecMainCode = 7 } },
+            "status-negative" => data with { Terminal = data.Terminal! with { ExecMainStatus = -1 } },
+            "status-256" => data with { Terminal = data.Terminal! with { ExecMainStatus = 256 } },
+            _ => throw new InvalidOperationException(),
+        };
+        Reject(data);
+    }
+
+    /// <summary>An existing cgroup sample carries every nullable field, including a nonzero inode.</summary>
+    [Fact]
+    public void ExistingGroupPreservesCompleteSampleWithoutAuthority()
+    {
+        var data = Valid() with { Group = new(true, false, false, 0, 14, 32) };
+        using var json = JsonDocument.Parse(Encode(data).Bytes);
+        var group = json.RootElement.GetProperty("cgroup");
+        Assert.Equal(JsonValueKind.Object, group.ValueKind);
+        Assert.True(group.GetProperty("exists").GetBoolean());
+        Assert.Equal(32UL, group.GetProperty("inode").GetUInt64());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("populated")]
+    [InlineData("frozen")]
+    [InlineData("major")]
+    [InlineData("minor")]
+    [InlineData("inode-null")]
+    [InlineData("inode-zero")]
+    public void ExistingGroupMissingOrInvalidFieldRejects(string field)
+    {
+        var data = Valid() with { Group = new(true, false, false, 0, 14, 32) };
+        AssertDetached(data);
+        data = field switch
+        {
+            "populated" => data with { Group = data.Group! with { Populated = null } },
+            "frozen" => data with { Group = data.Group! with { Frozen = null } },
+            "major" => data with { Group = data.Group! with { DeviceMajor = null } },
+            "minor" => data with { Group = data.Group! with { DeviceMinor = null } },
+            "inode-null" => data with { Group = data.Group! with { KernelInode = null } },
+            "inode-zero" => data with { Group = data.Group! with { KernelInode = 0 } },
+            _ => throw new InvalidOperationException(),
+        };
+        Reject(data);
+    }
+
+    [Theory]
+    [InlineData("populated")]
+    [InlineData("frozen")]
+    [InlineData("major")]
+    [InlineData("minor")]
+    [InlineData("inode")]
+    public void PrunedGroupRequiresEveryFieldNull(string field)
+    {
+        var valid = Valid();
+        var data = valid with
+        {
+            Group = new(false, null, null, null, null, null),
+            State = valid.State with { CgroupAfterPumps = false }
+        };
+        AssertDetached(data);
+        data = field switch
+        {
+            "populated" => data with { Group = data.Group! with { Populated = false } },
+            "frozen" => data with { Group = data.Group! with { Frozen = false } },
+            "major" => data with { Group = data.Group! with { DeviceMajor = 0 } },
+            "minor" => data with { Group = data.Group! with { DeviceMinor = 0 } },
+            "inode" => data with { Group = data.Group! with { KernelInode = 1 } },
+            _ => throw new InvalidOperationException(),
+        };
+        Reject(data);
+    }
+
+    [Fact]
+    public void NullGroupRequiresCgroupAfterPumpsFalse()
+    {
+        var data = Valid();
+        AssertDetached(data);
+        Reject(data with { Group = null });
+    }
+
+    [Theory]
+    [InlineData("received-negative")]
+    [InlineData("received-mismatch")]
+    [InlineData("limit-zero")]
+    [InlineData("limit-over")]
+    public void InvalidOutputCountersAndLimitsRejectFromValidNeighbor(string mutation)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        var output = mutation switch
+        {
+            "received-negative" => data.Output with { ReceivedBytes = -1 },
+            "received-mismatch" => data.Output with { ReceivedBytes = data.Output.ReceivedBytes + 1 },
+            "limit-zero" => data.Output with { ReceivedByteLimit = 0 },
+            "limit-over" => data.Output with { ReceivedByteLimit = SupervisionOutputCollector.MaximumReceivedByteLimit + 1 },
+            _ => throw new InvalidOperationException(),
+        };
+        Reject(data with { Output = output });
+    }
+
+    private static void AssertDetached(Data data)
+    {
+        using var json = JsonDocument.Parse(Encode(data).Bytes);
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData('0')]
+    [InlineData('9')]
+    [InlineData('f')]
+    public void DigestEndpointsRemainLiteralWithoutAuthority(char digit)
+    {
+        var data = Valid();
+        var digest = new string(digit, 64);
+        using var json = JsonDocument.Parse(LinuxFailedSettlementObservation.CreateDetached(
+            data.Generation, data.Identity, digest, data.State, data.Pending, data.Terminal, data.Group, data.Output).Bytes);
+        Assert.Equal(digest, json.RootElement.GetProperty("ready").GetProperty("descriptor_sha256").GetString());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("generation")]
+    [InlineData("identity")]
+    [InlineData("state")]
+    [InlineData("pending")]
+    [InlineData("output")]
+    public void MissingRequiredDetachedValueRejectsBeforeProjection(string field)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        data = field switch
+        {
+            "generation" => data with { Generation = Guid.Empty },
+            "identity" => data with { Identity = null! },
+            "state" => data with { State = null! },
+            "pending" => data with { Pending = null! },
+            "output" => data with { Output = null! },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        Reject(data);
+    }
+
+    [Theory]
+    [InlineData("stdout-null")]
+    [InlineData("stderr-null")]
+    [InlineData("stdout-default")]
+    [InlineData("stderr-default")]
+    [InlineData("stdout-negative")]
+    [InlineData("stderr-missing-byte")]
+    [InlineData("stdout-failure")]
+    [InlineData("stderr-failure")]
+    public void MalformedDetachedStreamRejectsBeforeRawProjection(string field)
+    {
+        var data = Valid();
+        AssertDetached(data);
+        var output = data.Output;
+        output = field switch
+        {
+            "stdout-null" => output with { Stdout = null! },
+            "stderr-null" => output with { Stderr = null! },
+            "stdout-default" => output with { Stdout = output.Stdout with { Prefix = default } },
+            "stderr-default" => output with { Stderr = output.Stderr with { Prefix = default } },
+            "stdout-negative" => output with { Stdout = output.Stdout with { ReceivedBytes = -1 } },
+            "stderr-missing-byte" => output with { Stderr = output.Stderr with { ReceivedBytes = output.Stderr.ReceivedBytes - 1 } },
+            "stdout-failure" => output with { Stdout = output.Stdout with { Failure = (SupervisionOutputFailure)999 } },
+            "stderr-failure" => output with { Stderr = output.Stderr with { Failure = (SupervisionOutputFailure)999 } },
+            _ => throw new ArgumentOutOfRangeException(nameof(field)),
+        };
+        Reject(data with { Output = output });
     }
 }

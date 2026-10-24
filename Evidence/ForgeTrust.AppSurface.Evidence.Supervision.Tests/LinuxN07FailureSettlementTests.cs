@@ -97,9 +97,9 @@ public sealed class LinuxN07FailureSettlementTests
     {
         var data = Valid();
         Assert.Throws<InvalidOperationException>(() => Encode(data with
-            { Output = data.Output with { Stderr = data.Output.Stderr with { EndOfStream = false } } }));
+        { Output = data.Output with { Stderr = data.Output.Stderr with { EndOfStream = false } } }));
         Assert.Throws<InvalidOperationException>(() => Encode(data with
-            { Output = data.Output with { Stderr = data.Output.Stderr with { Prefix = ImmutableArray<byte>.Empty } } }));
+        { Output = data.Output with { Stderr = data.Output.Stderr with { Prefix = ImmutableArray<byte>.Empty } } }));
     }
 
     [Theory]
@@ -127,6 +127,155 @@ public sealed class LinuxN07FailureSettlementTests
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("cgroup").GetProperty("inode").ValueKind);
     }
 
+    /// <summary>A malformed sampled snapshot cannot create even a detached failure projection.</summary>
+    [Theory]
+    [InlineData("generation")]
+    [InlineData("identity-null")]
+    [InlineData("terminal-null")]
+    [InlineData("group-null")]
+    [InlineData("output-null")]
+    [InlineData("startup-join")]
+    [InlineData("pending-stop-join")]
+    [InlineData("unit-join")]
+    [InlineData("group-join")]
+    [InlineData("monitor-unknown")]
+    [InlineData("unit")]
+    [InlineData("load-state")]
+    [InlineData("main-pid")]
+    [InlineData("exec-pid")]
+    [InlineData("type")]
+    [InlineData("kill-mode")]
+    [InlineData("remain")]
+    [InlineData("user")]
+    [InlineData("group")]
+    [InlineData("control-group")]
+    [InlineData("inactive-failed")]
+    [InlineData("failed-dead")]
+    [InlineData("normal-negative")]
+    [InlineData("normal-256")]
+    [InlineData("stdout-null")]
+    [InlineData("stderr-null")]
+    [InlineData("group-populated")]
+    [InlineData("limit-zero")]
+    [InlineData("limit-over")]
+    [InlineData("stdout-default")]
+    [InlineData("stderr-default")]
+    [InlineData("stdout-negative")]
+    [InlineData("stdout-nonempty")]
+    [InlineData("output-failure")]
+    [InlineData("quota")]
+    [InlineData("stop-signal")]
+    public void MalformedDetachedSnapshotAspectRejectsWithoutPrivateText(string mutation)
+    {
+        var data = Valid();
+        using (var adjacent = JsonDocument.Parse(Encode(data).Bytes))
+        {
+            Assert.False(adjacent.RootElement.GetProperty("native_authority").GetBoolean());
+            Assert.False(adjacent.RootElement.GetProperty("native_acceptance").GetBoolean());
+        }
+        var monitor = TaskStatus.Faulted;
+        switch (mutation)
+        {
+            case "generation": data = data with { Generation = Guid.Empty }; break;
+            case "identity-null": data = data with { Identity = null! }; break;
+            case "terminal-null": data = data with { Terminal = null! }; break;
+            case "group-null": data = data with { Group = null! }; break;
+            case "output-null": data = data with { Output = null! }; break;
+            case "startup-join" or "pending-stop-join" or "unit-join" or "group-join": break;
+            case "monitor-unknown": monitor = (TaskStatus)999; break;
+            case "unit": data = data with { Terminal = data.Terminal with { Id = "private-terminal-canary.service" } }; break;
+            case "load-state": data = data with { Terminal = data.Terminal with { LoadState = "not-found" } }; break;
+            case "main-pid": data = data with { Terminal = data.Terminal with { MainPid = 123 } }; break;
+            case "exec-pid": data = data with { Terminal = data.Terminal with { ExecMainPid = 124 } }; break;
+            case "type": data = data with { Terminal = data.Terminal with { Type = "simple" } }; break;
+            case "kill-mode": data = data with { Terminal = data.Terminal with { KillMode = "process" } }; break;
+            case "remain": data = data with { Terminal = data.Terminal with { RemainAfterExit = false } }; break;
+            case "user": data = data with { Terminal = data.Terminal with { User = "0" } }; break;
+            case "group": data = data with { Terminal = data.Terminal with { Group = "0" } }; break;
+            case "control-group": data = data with { Terminal = data.Terminal with { ControlGroup = "/private-terminal-canary" } }; break;
+            case "inactive-failed": data = data with { Terminal = data.Terminal with { ActiveState = "inactive", SubState = "failed" } }; break;
+            case "failed-dead": data = data with { Terminal = data.Terminal with { ActiveState = "failed", SubState = "dead" } }; break;
+            case "normal-negative": data = data with { Terminal = data.Terminal with { ExecMainCode = 1, ExecMainStatus = -1 } }; break;
+            case "normal-256": data = data with { Terminal = data.Terminal with { ExecMainCode = 1, ExecMainStatus = 256 } }; break;
+            case "stdout-null": data = data with { Output = data.Output with { Stdout = null! } }; break;
+            case "stderr-null": data = data with { Output = data.Output with { Stderr = null! } }; break;
+            case "group-populated": data = data with { Group = data.Group with { Populated = true } }; break;
+            case "limit-zero": data = data with { Output = data.Output with { ReceivedByteLimit = 0 } }; break;
+            case "limit-over": data = data with { Output = data.Output with { ReceivedByteLimit = SupervisionOutputCollector.MaximumReceivedByteLimit + 1 } }; break;
+            case "stdout-default": data = data with { Output = data.Output with { Stdout = data.Output.Stdout with { Prefix = default } } }; break;
+            case "stderr-default": data = data with { Output = data.Output with { Stderr = data.Output.Stderr with { Prefix = default } } }; break;
+            case "stdout-negative":
+                data = data with
+                {
+                    Output = data.Output with
+                    { Stdout = data.Output.Stdout with { ReceivedBytes = -1 }, ReceivedBytes = data.Output.ReceivedBytes - 1 }
+                }; break;
+            case "stdout-nonempty":
+                data = data with
+                {
+                    Output = data.Output with
+                    {
+                        Stdout = data.Output.Stdout with { Prefix = ImmutableArray.Create((byte)1), ReceivedBytes = 1 },
+                        ReceivedBytes = data.Output.ReceivedBytes + 1
+                    }
+                }; break;
+            case "output-failure": data = data with { Output = data.Output with { Failure = SupervisionOutputFailure.ReadFailed } }; break;
+            case "quota": data = data with { Output = data.Output with { QuotaExceeded = true } }; break;
+            case "stop-signal": data = data with { Output = data.Output with { StopSignalFailed = true } }; break;
+            default: throw new ArgumentOutOfRangeException(nameof(mutation));
+        }
+        var error = Assert.Throws<InvalidOperationException>(() => LinuxN07FailureSettlement.CreateDetached(
+            data.Generation, data.Identity, data.Terminal, data.Group, data.Output, monitor,
+            mutation != "startup-join", mutation != "pending-stop-join", mutation != "unit-join",
+            mutation != "group-join", true));
+        Assert.Equal("N07 failure settlement data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-terminal-canary", error.Message);
+    }
+
+    /// <summary>Terminal range endpoints remain literal metadata, never an authenticated process exit.</summary>
+    [Theory]
+    [InlineData(1, 0)]
+    [InlineData(1, 255)]
+    [InlineData(2, 1)]
+    [InlineData(2, 64)]
+    [InlineData(3, 1)]
+    [InlineData(3, 64)]
+    public void ExactTerminalRangeEndpointsStayLiteralAndWithoutAuthority(int code, int status)
+    {
+        using var json = JsonDocument.Parse(Encode(Valid(code, status)).Bytes);
+        Assert.Equal(code, json.RootElement.GetProperty("terminal").GetProperty("exec_main_code").GetInt32());
+        Assert.Equal(status, json.RootElement.GetProperty("terminal").GetProperty("exec_main_status").GetInt32());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Fact]
+    public void PrunedInactiveTerminalRemainsDetachedAndDoesNotInventAControlGroup()
+    {
+        var data = Valid();
+        using var json = JsonDocument.Parse(Encode(data with
+        {
+            Terminal = data.Terminal with { ActiveState = "inactive", SubState = "dead", ControlGroup = string.Empty },
+            Group = new(false, null, null, null, null, null),
+        }).Bytes);
+        Assert.Equal("inactive", json.RootElement.GetProperty("terminal").GetProperty("active_state").GetString());
+        Assert.False(json.RootElement.GetProperty("cgroup").GetProperty("exists").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("cgroup").GetProperty("inode").ValueKind);
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
+    [Fact]
+    public void APrecleanupFrameWithoutItsRequiredLfRejectsBeforeProjection()
+    {
+        LinuxN07FailureSettlement.RequirePrecleanupPrefix(Encoding.UTF8.GetBytes(SupervisionN07OwnedCheckpointTests.Frame + "\n"));
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            LinuxN07FailureSettlement.RequirePrecleanupPrefix(Encoding.UTF8.GetBytes(SupervisionN07OwnedCheckpointTests.Frame)));
+        Assert.Equal("N07 failure settlement data rejected.", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
     private static Data WithFullStderr(int length, byte fill = (byte)'x')
     {
         var data = Valid();
@@ -134,8 +283,11 @@ public sealed class LinuxN07FailureSettlementTests
         var prefix = Encoding.UTF8.GetBytes(SupervisionN07OwnedCheckpointTests.Frame + "\n");
         prefix.CopyTo(bytes, 0);
         var stderr = new SupervisionOutputStreamReceipt(length, ImmutableArray.CreateRange(bytes), true, SupervisionOutputFailure.None);
-        return data with { Output = new(data.Output.Stdout, stderr, length, 128 * 1024,
-            SupervisionOutputFailure.None, false, false) };
+        return data with
+        {
+            Output = new(data.Output.Stdout, stderr, length, 128 * 1024,
+            SupervisionOutputFailure.None, false, false)
+        };
     }
 
     [Fact]
@@ -200,9 +352,12 @@ public sealed class LinuxN07FailureSettlementTests
         foreach (string value in new[] { "{}\n", SupervisionN07OwnedCheckpointTests.Frame + "\n" + SupervisionN07OwnedCheckpointTests.Frame })
         {
             var bytes = ImmutableArray.CreateRange(Encoding.UTF8.GetBytes(value));
-            Assert.Throws<InvalidOperationException>(() => Encode(data with { Output = new(data.Output.Stdout,
+            Assert.Throws<InvalidOperationException>(() => Encode(data with
+            {
+                Output = new(data.Output.Stdout,
                 new(bytes.Length, bytes, true, SupervisionOutputFailure.None), bytes.Length, 8192,
-                SupervisionOutputFailure.None, false, false) }));
+                SupervisionOutputFailure.None, false, false)
+            }));
         }
     }
 

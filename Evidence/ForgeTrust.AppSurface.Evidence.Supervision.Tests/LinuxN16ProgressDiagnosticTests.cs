@@ -134,6 +134,41 @@ public sealed class LinuxN16ProgressDiagnosticTests
         Assert.False(completeWithoutMarkers.MarkerSequenceValid);
     }
 
+    /// <summary>Every fixed client marker requires ASCII digits, separators, length and line termination.</summary>
+    [Theory]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:0a\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:a2\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:0a\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:a1\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:a1:01:00\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:1a:01:00\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:01:a1:00\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:01:1a:00\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:01:01:a0\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:01:01:0a\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16E:01;01:00\n")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:1\n")]
+    [InlineData("ASEVDN16C:01")]
+    [InlineData("ASEVDN16C:01\nASEVDN16C:02\nASEVDN16C:03\nASEVDN16C:04\nASEVDN16C:05\nASEVDN16C:06\nASEVDN16X:01\nASEVDN16C:07\n")]
+    public void FixedClientMarkerGrammarRejectsMalformedNeighbor(string trace)
+    {
+        var valid = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput("ASEVDN16C:01\n", eof: true));
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.OriginalRequestStarted, valid.LastMilestone);
+        Assert.True(valid.JoinedStreamComplete);
+        Assert.True(valid.MarkerSequenceValid);
+
+        var parsed = LinuxN16ProgressDiagnostic.ParseJoinedClientProgress(JoinedOutput(trace, eof: true));
+        Assert.Equal(LinuxN16ProgressDiagnostic.ClientMilestone.Unknown, parsed.LastMilestone);
+        Assert.True(parsed.JoinedStreamComplete);
+        Assert.False(parsed.MarkerSequenceValid);
+
+        using var json = JsonDocument.Parse(LinuxN16ProgressDiagnostic.EncodeDetached(
+            Snapshot(LinuxN16ProgressDiagnostic.Milestone.Unknown) with { Client = parsed }));
+        Assert.Equal("Unknown", json.RootElement.GetProperty("client_last_milestone").GetString());
+        Assert.False(json.RootElement.GetProperty("native_authority").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("native_acceptance").GetBoolean());
+    }
+
     /// <summary>EXIT markers identify completed client I/O barriers; a terminal failure remains data-only.</summary>
     [Fact]
     public void ClientExitFailureReportsLastCompletedBarrierWithoutChangingAuthority()
