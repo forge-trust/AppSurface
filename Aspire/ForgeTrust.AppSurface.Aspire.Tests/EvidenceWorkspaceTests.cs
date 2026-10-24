@@ -55,6 +55,14 @@ public sealed class EvidenceWorkspaceTests
             Directory.CreateDirectory(Path.GetDirectoryName(nested)!);
             File.WriteAllText(nested, "evidence");
             workspace.CheckBudget();
+            // Root entry changes may change CreationTimeUtc on Linux filesystems without stable birth times.
+            // Ordinary producer writes must preserve ownership; replacement tests below still reject a new root.
+            var direct = workspace.GetPath("direct-result.json");
+            File.WriteAllText(direct, "producer output");
+            workspace.CheckBudget();
+            File.Delete(direct);
+            workspace.CheckBudget();
+            Assert.Equal(nested, workspace.GetPath("artifacts/result.json"));
             Assert.True(Directory.Exists(root));
         }
 

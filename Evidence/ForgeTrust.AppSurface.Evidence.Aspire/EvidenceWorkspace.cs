@@ -71,8 +71,8 @@ public sealed class EvidenceWorkspaceBudgetException : IOException
 /// workspace after validating its ownership marker and retained filesystem metadata. A missing, replaced, or linked
 /// root is treated as invalid evidence. Inventory is bounded by <see cref="EvidenceWorkspaceOptions.MaxEntries"/>
 /// and <see cref="EvidenceWorkspaceOptions.MaxDepth"/> before any cleanup deletion begins. The retained metadata
-/// combines a unique marker with creation timestamps; this is a basic cross-platform identity check rather than a
-/// kernel-held file handle or native inode/file-ID comparison. Callers must treat the workspace as trusted and must
+/// combines a unique marker with retained metadata and, on Linux, a held device/inode identity because directory
+/// creation timestamps can change when children change. Callers must treat the workspace as trusted and must
 /// not concurrently replace or mutate its paths while it is in use. No portable implementation can eliminate every
 /// time-of-check/time-of-use race against a hostile concurrent process.
 /// </remarks>
@@ -81,20 +81,23 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
     private const string MarkerFileName = ".appsurface-evidence-workspace-owner";
     private readonly string _markerPath;
     private readonly string _identity;
-    private readonly DateTime _rootCreationTimeUtc;
+    private DateTime _rootCreationTimeUtc;
     private DateTime _markerCreationTimeUtc;
+    private readonly EvidenceWorkspaceLinuxIdentity? _linuxIdentity;
     private readonly EvidenceWorkspaceOptions _options;
     private readonly Func<string, long>? _logicalSize;
     private readonly Func<string, long>? _freeBytes;
     private int _disposed;
 
-    private EvidenceWorkspace(string rootPath, string identity, EvidenceWorkspaceOptions options, Func<string, long>? logicalSize, Func<string, long>? freeBytes)
+    private EvidenceWorkspace(string rootPath, string identity, EvidenceWorkspaceOptions options, Func<string, long>? logicalSize, Func<string, long>? freeBytes,
+        EvidenceWorkspaceLinuxIdentity? linuxIdentity = null)
     {
         RootPath = rootPath;
         _markerPath = Path.Join(rootPath, MarkerFileName);
         _identity = identity;
         _rootCreationTimeUtc = new DirectoryInfo(rootPath).CreationTimeUtc;
         _markerCreationTimeUtc = new FileInfo(_markerPath).CreationTimeUtc;
+        _linuxIdentity = linuxIdentity ?? (OperatingSystem.IsLinux() ? EvidenceWorkspaceLinuxIdentity.Open(rootPath) : null);
         _options = options;
         _logicalSize = logicalSize;
         _freeBytes = freeBytes;
@@ -127,18 +130,27 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
 
         var root = Path.Join(parentPath, $"evidence-workspace-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
+        var initialCreationTimeUtc = new DirectoryInfo(root).CreationTimeUtc;
         var identity = Guid.NewGuid().ToString("N");
-        var workspace = new EvidenceWorkspace(root, identity, resolvedOptions, null, null);
+        EvidenceWorkspace? workspace = null;
         try
         {
+            workspace = new EvidenceWorkspace(root, identity, resolvedOptions, null, null);
             File.WriteAllText(workspace._markerPath, identity, Encoding.UTF8);
+            // Complete the timestamp baseline after initialization. Linux uses a stable native root identity instead.
+            workspace._rootCreationTimeUtc = new DirectoryInfo(root).CreationTimeUtc;
             workspace._markerCreationTimeUtc = new FileInfo(workspace._markerPath).CreationTimeUtc;
             workspace.CheckBudget();
             return workspace;
         }
         catch
         {
-            TryDeleteOwnedRoot(workspace);
+            try
+            {
+                if (workspace is not null) TryDeleteOwnedRoot(workspace);
+                else TryDeleteEmptyRoot(root, initialCreationTimeUtc);
+            }
+            finally { workspace?._linuxIdentity?.Dispose(); }
             throw;
         }
     }
@@ -198,6 +210,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         var inventory = Inventory(RootPath, _options);
         ValidateOwnedRoot();
         DeleteOwnedTree(RootPath, inventory);
+        _linuxIdentity?.Dispose();
         Volatile.Write(ref _disposed, 1);
         return ValueTask.CompletedTask;
     }
@@ -215,7 +228,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         // Allocate with permissive physical limits; the injected counters are intentionally exercised by the caller's
         // first explicit CheckBudget invocation rather than during this factory's setup.
         var workspace = Create(parent, new EvidenceWorkspaceOptions(long.MaxValue, 0, 100_000, 64));
-        return new EvidenceWorkspace(workspace.RootPath, workspace._identity, resolvedOptions, logicalSize, freeBytes);
+        return new EvidenceWorkspace(workspace.RootPath, workspace._identity, resolvedOptions, logicalSize, freeBytes, workspace._linuxIdentity);
     }
 
     private void ValidateOwnedRoot()
@@ -228,7 +241,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         var rootInfo = new DirectoryInfo(RootPath);
         var markerInfo = new FileInfo(_markerPath);
         if (rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
-            rootInfo.CreationTimeUtc != _rootCreationTimeUtc ||
+            (_linuxIdentity is not null ? !_linuxIdentity.Matches(RootPath) : rootInfo.CreationTimeUtc != _rootCreationTimeUtc) ||
             !markerInfo.Exists ||
             markerInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
             markerInfo.CreationTimeUtc != _markerCreationTimeUtc)
@@ -296,6 +309,15 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
     {
         try
         {
+            if (!File.Exists(workspace._markerPath))
+            {
+                var root = new DirectoryInfo(workspace.RootPath);
+                if (root.Exists && !root.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                    && (workspace._linuxIdentity?.Matches(workspace.RootPath) ?? root.CreationTimeUtc == workspace._rootCreationTimeUtc)
+                    && !Directory.EnumerateFileSystemEntries(workspace.RootPath).Any())
+                    Directory.Delete(workspace.RootPath);
+                return;
+            }
             if (Directory.Exists(workspace.RootPath) && File.Exists(workspace._markerPath))
             {
                 var inventory = Inventory(workspace.RootPath, workspace._options);
@@ -307,6 +329,19 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         {
             // Preserve the creation failure; no caller-owned path is touched here.
         }
+    }
+
+    private static void TryDeleteEmptyRoot(string path, DateTime creationTimeUtc)
+    {
+        try
+        {
+            var root = new DirectoryInfo(path);
+            if (root.Exists && !root.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                && root.CreationTimeUtc == creationTimeUtc && !Directory.EnumerateFileSystemEntries(path).Any())
+                Directory.Delete(path);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
