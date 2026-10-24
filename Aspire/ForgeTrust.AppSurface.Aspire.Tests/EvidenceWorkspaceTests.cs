@@ -462,6 +462,33 @@ public sealed class EvidenceWorkspaceTests
         }
     }
 
+    [Fact]
+    public async Task WindowsJunctions_AreRejectedWithoutDeletingTheCallerTarget()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var parent = NewDirectory();
+        var target = NewDirectory();
+        try
+        {
+            var sentinel = Path.Join(target, "caller.txt");
+            File.WriteAllText(sentinel, "preserve");
+            await using var workspace = EvidenceWorkspace.Create(parent);
+            var link = Path.Join(workspace.RootPath, "linked");
+            var create = await new EvidenceCommandRunner().RunAsync(new EvidenceCommandRequest("cmd.exe",
+                ["/d", "/c", "mklink", "/J", link, target], parent, TimeSpan.FromSeconds(10)));
+            Assert.True(create.ExitCode == 0 && !create.OutputTruncated, create.StandardError);
+
+            Assert.Throws<IOException>(() => workspace.GetPath("linked/result.json"));
+            Assert.Throws<IOException>(workspace.CheckBudget);
+            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+            Assert.Equal("preserve", File.ReadAllText(sentinel));
+            Directory.Delete(link);
+            await workspace.DisposeAsync();
+            Assert.Equal("preserve", File.ReadAllText(sentinel));
+        }
+        finally { Directory.Delete(parent, recursive: true); Directory.Delete(target, recursive: true); }
+    }
+
     private static string NewDirectory()
     {
         var path = Path.Join(Path.GetTempPath(), $"appsurface-evidence-workspace-tests-{Guid.NewGuid():N}");

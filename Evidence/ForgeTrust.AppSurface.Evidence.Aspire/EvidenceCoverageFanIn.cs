@@ -196,11 +196,28 @@ public static class EvidenceCoverageFanIn
         try
         {
             using var document = JsonDocument.Parse(bytes);
+            RejectDuplicateJsonProperties(document.RootElement);
             return document.RootElement.Clone();
         }
         catch (JsonException exception)
         {
             throw Reject($"Invalid JSON: {path}", exception);
+        }
+    }
+    private static void RejectDuplicateJsonProperties(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var property in element.EnumerateObject())
+            {
+                if (!names.Add(property.Name)) throw Reject("Duplicate JSON evidence properties are forbidden.");
+                RejectDuplicateJsonProperties(property.Value);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray()) RejectDuplicateJsonProperties(item);
         }
     }
     private static async ValueTask<byte[]> ReadBytesAsync(string path, long limit, CancellationToken ct)

@@ -231,11 +231,17 @@ public sealed class EvidenceCommandRunnerTests
         var duringException = await Assert.ThrowsAsync<EvidenceCommandException>(() => new EvidenceCommandRunner().RunAsync(during));
         Assert.Equal("budget_check_failed", duringException.Code);
 
+        var capturesCompleted = 0;
+        var afterRunner = new EvidenceCommandRunner(stream => new EofObservingStream(stream,
+            () => Interlocked.Increment(ref capturesCompleted)));
         var after = CreateShellRequest("true", "[Console]::Write('done')") with
         {
-            CheckBudget = static _ => ValueTask.FromException(new InvalidOperationException("synthetic")),
+            CheckBudget = _ => Volatile.Read(ref capturesCompleted) == 2
+                ? ValueTask.FromException(new InvalidOperationException("synthetic"))
+                : ValueTask.CompletedTask,
         };
-        var afterException = await Assert.ThrowsAsync<EvidenceCommandException>(() => new EvidenceCommandRunner().RunAsync(after));
+        var afterException = await Assert.ThrowsAsync<EvidenceCommandException>(() => afterRunner.RunAsync(after));
+        Assert.Equal(2, capturesCompleted);
         Assert.Equal("budget_check_failed", afterException.Code);
     }
 
@@ -336,6 +342,77 @@ public sealed class EvidenceCommandRunnerTests
     {
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => new EvidenceCommandRunner().RunAsync(
             new EvidenceCommandRequest("evidence-must-not-start", [], Environment.CurrentDirectory, TimeSpan.MaxValue)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_StopsForegroundDescendantsOnTimeoutOrCallerCancellation(bool cancel)
+    {
+        var parent = Directory.CreateTempSubdirectory("evidence-command-descendant-").FullName;
+        var pidPath = Path.Join(parent, "child.pid");
+        try
+        {
+            var request = CreateShellRequest("sleep 30 & child=$!; printf '%s' \"$child\" > child.pid; wait \"$child\"",
+                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; [IO.File]::WriteAllText('child.pid', [string]$child.Id); $child.WaitForExit()") with
+            {
+                WorkingDirectory = parent,
+                Timeout = OperatingSystem.IsWindows() ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2),
+            };
+            using var cancellation = new CancellationTokenSource();
+            var running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
+            if (cancel)
+            {
+                var readiness = Stopwatch.StartNew();
+                while ((!File.Exists(pidPath) || !int.TryParse(await File.ReadAllTextAsync(pidPath), out _))
+                    && readiness.Elapsed < request.Timeout)
+                    await Task.Delay(10);
+                Assert.True(File.Exists(pidPath), "The foreground child must start before cancellation.");
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+            }
+            else
+            {
+                var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => running);
+                Assert.Equal("timeout", exception.Code);
+            }
+            Assert.True(File.Exists(pidPath), "The foreground descendant must be observed before its parent stops.");
+            var pid = int.Parse(await File.ReadAllTextAsync(pidPath));
+            var cleanup = Stopwatch.StartNew();
+            while (IsRunning(pid) && cleanup.Elapsed < TimeSpan.FromSeconds(2)) await Task.Delay(10);
+            Assert.False(IsRunning(pid), "The owned foreground descendant must not survive command cleanup.");
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+
+        static bool IsRunning(int pid)
+        {
+            try { using var child = Process.GetProcessById(pid); return !child.HasExited; }
+            catch (ArgumentException) { return false; }
+        }
+    }
+
+    private sealed class EofObservingStream(Stream inner, Action completed) : Stream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var count = await inner.ReadAsync(buffer, cancellationToken);
+            if (count == 0)
+            {
+                await Task.Delay(100, cancellationToken);
+                completed();
+            }
+            return count;
+        }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class HoldingCaptureStream(Action stopped) : MemoryStream

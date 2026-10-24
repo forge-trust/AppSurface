@@ -14,17 +14,17 @@ Verified cross-platform coverage remains independently bound to matching source,
 
 ## Acceptance
 
-- [ ] Reusable bounded command execution with meaningful native process tests.
-- [ ] Owned workspace and continuously enforced capacity budget, with preservation and exhaustion tests.
-- [ ] Streaming artifact writes/verification with unchanged limits and failure tests.
-- [ ] Explicit coverage execution configuration with legacy defaults and unchanged gates.
-- [ ] Repeatable packed CLI storage journey through EvidenceHost.
-- [ ] Repeatable installed-consumer journey with independent test/report/integrity assertions.
-- [ ] Native verified fan-in consumption through EvidenceHost, retaining aggregate/patch policy.
-- [ ] Reference, decision, pitfall and adoption documentation with an executable native recipe.
+- [x] Reusable bounded command execution with meaningful native process tests.
+- [x] Owned workspace and continuously enforced capacity budget, with preservation and exhaustion tests.
+- [x] Streaming artifact writes/verification with unchanged limits and failure tests.
+- [x] Explicit coverage execution configuration with legacy defaults and unchanged gates.
+- [x] Repeatable packed CLI storage journey through EvidenceHost.
+- [x] Repeatable installed-consumer journey with independent test/report/integrity assertions.
+- [x] Native verified fan-in consumption through EvidenceHost, retaining aggregate/patch policy.
+- [x] Reference, decision, pitfall and adoption documentation with an executable native recipe.
 - [ ] Formatting, relevant tests, independent review, QA and current coverage gates pass.
 - [ ] Draft follow-up PR and required CI pass; at most three CI repair rounds and 60 cumulative minutes of CI waiting.
 
 ## Execution record
 
-Base: `b5618531` on `codex/native-evidence-validation`, following the validated storage implementation. Existing draft #889 is preserved. Source scope and 95/85 coverage thresholds, including the repository's existing tolerance, remain unchanged. Local disk capacity was approximately 21 GiB at startup, so avoid duplicate consumer clones and unbounded acceptance output. Local validation orchestration for this work uses native tools rather than new Python harnesses.
+Implementation base: `b5618531`; audit comparison base: `c579bc7920e35c8c883891400ea3065319bf769e` on `codex/native-evidence-validation`, following the validated storage implementation. Existing draft #889 is preserved. Source scope and 95/85 coverage thresholds, including the repository's existing tolerance, remain unchanged. Local disk capacity was approximately 21 GiB at startup, so avoid duplicate consumer clones and unbounded acceptance output. Local validation orchestration for this work uses native tools rather than new Python harnesses.

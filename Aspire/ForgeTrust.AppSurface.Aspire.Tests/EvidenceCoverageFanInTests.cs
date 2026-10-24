@@ -135,6 +135,58 @@ public sealed class EvidenceCoverageFanInTests
     }
 
     [Fact]
+    // Value: protects=Manifest policies cannot replace required keys with duplicate names;
+    // fails_when=Object equality accepts repeated keys because only raw property counts match;
+    // why_new=JsonObject policy mutations cannot represent duplicate property names;
+    // seam=none;
+    // no_claim=This synthetic bundle verifies policy rejection, not input attestation.
+    public async Task VerifyAsync_rejects_duplicate_policy_keys_even_when_the_raw_property_count_matches()
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        Assert.True((await fixture.VerifyAsync()).Verified);
+
+        var manifestPath = Path.Combine(fixture.Primary, "manifest.json");
+        var originalManifest = await File.ReadAllTextAsync(manifestPath);
+        using var original = JsonDocument.Parse(originalManifest);
+        var originalPolicy = original.RootElement.GetProperty("policy");
+        const string duplicatePolicy = """
+            {
+              "driver": "collector",
+              "driver": "collector",
+              "driver": "collector",
+              "driver": "collector",
+              "driver": "collector"
+            }
+            """;
+        var mutatedManifest = originalManifest.Replace(
+            originalPolicy.GetRawText(), duplicatePolicy, StringComparison.Ordinal);
+        Assert.NotEqual(originalManifest, mutatedManifest);
+
+        using var mutated = JsonDocument.Parse(mutatedManifest);
+        var policy = mutated.RootElement.GetProperty("policy");
+        Assert.Equal(5, originalPolicy.EnumerateObject().Count());
+        Assert.Equal(5, policy.EnumerateObject().Count());
+        Assert.All(policy.EnumerateObject(), property =>
+        {
+            Assert.Equal("driver", property.Name);
+            Assert.Equal("collector", property.Value.GetString());
+        });
+        foreach (var required in new[] { "format", "exclude", "include", "normalization" })
+        {
+            Assert.False(policy.TryGetProperty(required, out _));
+        }
+
+        await File.WriteAllTextAsync(manifestPath, mutatedManifest);
+        var manifestHash = Convert.ToHexString(
+            SHA256.HashData(await File.ReadAllBytesAsync(manifestPath))).ToLowerInvariant();
+        await FanInFixture.MutateJsonAsync(fixture.Receipt, receipt =>
+            receipt["inputs"]![0]!["manifestSha256"] = manifestHash);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+    }
+
+    [Fact]
     public async Task VerifyAsync_uses_receipt_manifest_order_and_requires_primary_first()
     {
         using var fixture = new FanInFixture();
