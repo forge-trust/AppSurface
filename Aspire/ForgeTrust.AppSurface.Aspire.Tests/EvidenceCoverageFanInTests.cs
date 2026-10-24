@@ -11,6 +11,39 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class EvidenceCoverageFanInTests
 {
     [Fact]
+    public async Task VerifyAsync_rejects_a_well_formed_document_with_the_wrong_coverage_root()
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        await fixture.MutateXmlAsync(fixture.Primary, "coverage.cobertura.xml", root => root.Name = "report");
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => fixture.VerifyAsync().AsTask());
+
+        Assert.Contains("Cobertura coverage root", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("package")]
+    [InlineData("class")]
+    public async Task VerifyAsync_retains_points_when_optional_display_names_are_absent(string element)
+    {
+        using var fixture = new FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        var primary = XDocument.Load(Path.Combine(fixture.Primary, "coverage.cobertura.xml"));
+        primary.Descendants(element).Single().Attribute("name")!.Remove();
+        var composed = new XDocument(primary);
+        composed.Descendants(element).Single().SetAttributeValue("name", "");
+        await fixture.WriteDocumentsAsync(primary, [primary, primary, primary], composed);
+
+        var verified = await fixture.VerifyAsync();
+
+        Assert.True(verified.Verified);
+        Assert.Equal(1, verified.RetainedClassLines);
+        Assert.Equal(2, verified.RetainedMethodLines);
+        Assert.Equal(1, verified.LinesCovered);
+    }
+
+    [Fact]
     public async Task VerifyAsync_requires_explicit_trusted_identity_and_inventory()
     {
         var exception = await Assert.ThrowsAsync<ArgumentException>(() => EvidenceCoverageFanIn.VerifyAsync(new EvidenceCoverageFanInRequest(

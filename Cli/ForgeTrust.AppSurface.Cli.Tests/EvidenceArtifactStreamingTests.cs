@@ -6,6 +6,64 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidenceArtifactStreamingTests
 {
     [Fact]
+    public async Task StreamWrite_UndeclaredSlotCannotCreateOutputOrConsumeTheValidReservation()
+    {
+        using var directory = TempDirectory.Create();
+        var writer = CreateWriter(directory.Path, 128);
+        using var contents = new MemoryStream([1, 2, 3]);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            writer.WriteAsync("undeclared", "coverage/report.txt", contents).AsTask());
+
+        Assert.Contains("not declared", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, contents.Position);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
+        var accepted = await writer.WriteAsync("report", "coverage/report.txt", contents);
+        Assert.Equal(3, accepted.LengthBytes);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamWrite_CleanupFailurePreservesReplacementAndDoesNotMaskTheReadFailure(bool replaceParent)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var directory = TempDirectory.Create();
+        var writer = CreateWriter(directory.Path, 128);
+        var prefix = Path.Join(directory.Path, "coverage");
+        var destination = Path.Join(prefix, "report.txt");
+        var failure = new IOException("original read failure");
+        using var contents = new ActionReadStream(() =>
+        {
+            File.Delete(destination);
+            if (replaceParent)
+            {
+                Directory.Delete(prefix);
+                File.WriteAllText(prefix, "replacement bytes");
+            }
+            else
+            {
+                Directory.CreateDirectory(destination);
+                File.WriteAllText(Path.Join(destination, "caller.txt"), "replacement bytes");
+            }
+            throw failure;
+        });
+
+        var observed = await Assert.ThrowsAsync<IOException>(() => writer.WriteAsync("report", "coverage/report.txt", contents).AsTask());
+
+        Assert.Same(failure, observed);
+        Assert.Empty(writer.WrittenArtifacts);
+        Assert.Equal("replacement bytes", File.ReadAllText(replaceParent ? prefix : Path.Join(destination, "caller.txt")));
+        if (replaceParent) File.Delete(prefix);
+        else Directory.Delete(destination, recursive: true);
+        var retry = await writer.WriteAsync("report", "coverage/retry.txt", new MemoryStream([42]));
+        Assert.Equal(1, retry.LengthBytes);
+        Assert.True(await writer.VerifyWrittenArtifactsAsync());
+    }
+
+    [Fact]
     public async Task WriteAsync_Stream_ShouldSupportNonSeekableInputAndVerifyIncrementally()
     {
         using var directory = TempDirectory.Create();
@@ -195,6 +253,15 @@ public sealed class EvidenceArtifactStreamingTests
         {
             cancellation.Cancel();
             return base.ReadAsync(buffer, cancellationToken);
+        }
+    }
+
+    private sealed class ActionReadStream(Action read) : MemoryStream
+    {
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            read();
+            return ValueTask.FromResult(0);
         }
     }
 }

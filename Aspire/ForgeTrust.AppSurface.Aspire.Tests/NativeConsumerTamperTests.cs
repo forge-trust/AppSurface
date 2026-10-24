@@ -17,7 +17,11 @@ public sealed class NativeConsumerTamperTests
     // no_claim=These negative fixtures do not establish downstream consumer acceptance or native Windows execution.
     [Theory]
     [InlineData("installed-dll", "package", "")]
+    [InlineData("installed-package", "package", "")]
     [InlineData("project-log", "coverage", "manifests")]
+    [InlineData("unmanaged-coverage", "coverage", "retention")]
+    [InlineData("duplicate-canonical-coverage", "coverage", "retention")]
+    [InlineData("source-before-copy", "source", "")]
     [InlineData("original-source", "integrity", "retention")]
     public async Task ProduceAsync_RejectsTamperedRealJourneyAndCleansOnlyOwnedScratch(
         string mutation, string expectedStage, string expectedDetail)
@@ -55,6 +59,18 @@ public sealed class NativeConsumerTamperTests
                 if (mutationApplied) return;
                 var workspace = Directory.EnumerateDirectories(scratch, "evidence-workspace-*").SingleOrDefault();
                 if (workspace is null) return;
+                var copiedConsumer = TestPathUtils.PathUnder(workspace, "consumer");
+                if (mutation == "source-before-copy"
+                    && File.Exists(TestPathUtils.PathUnder(copiedConsumer, "Consumer.slnx"))
+                    && !File.Exists(TestPathUtils.PathUnder(workspace, "coverage", "coverage-gate.json")))
+                {
+                    changedPath = TestPathUtils.PathUnder(copiedConsumer, "Consumer.Alpha", "AlphaDecision.cs");
+                    beforeHash = Hash(changedPath);
+                    File.AppendAllText(changedPath, "\n// mutated before integrity verification\n");
+                    afterHash = Hash(changedPath);
+                    mutationApplied = true;
+                    return;
+                }
                 if (mutation == "installed-dll")
                 {
                     var store = TestPathUtils.PathUnder(workspace, "tool", ".store");
@@ -67,9 +83,45 @@ public sealed class NativeConsumerTamperTests
                         output.WriteByte(42);
                     afterHash = Hash(changedPath);
                 }
+                else if (mutation == "installed-package")
+                {
+                    var store = TestPathUtils.PathUnder(workspace, "tool", ".store");
+                    if (!Directory.Exists(store)) return;
+                    var storedPackage = Directory.EnumerateFiles(
+                        store, "*.nupkg", SearchOption.AllDirectories)
+                        .SingleOrDefault(path => string.Equals(
+                            Path.GetFileName(path), $"{PackageId(candidate.Version)}.nupkg", StringComparison.OrdinalIgnoreCase));
+                    if (storedPackage is null) return;
+                    changedPath = storedPackage;
+                    beforeHash = Hash(changedPath);
+                    File.AppendAllText(changedPath, "tampered package bytes");
+                    afterHash = Hash(changedPath);
+                }
                 else
                 {
                     var coverage = TestPathUtils.PathUnder(workspace, "coverage");
+                    if (mutation == "unmanaged-coverage")
+                    {
+                        if (!File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.json"))) return;
+                        changedPath = TestPathUtils.PathUnder(coverage, "coverage-extra.xml");
+                        beforeHash = "absent";
+                        File.WriteAllText(changedPath, "<coverage />");
+                        afterHash = Hash(changedPath);
+                        mutationApplied = true;
+                        return;
+                    }
+                    if (mutation == "duplicate-canonical-coverage")
+                    {
+                        if (!File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.json"))) return;
+                        var duplicate = TestPathUtils.PathUnder(coverage, "retention-extra", "coverage.cobertura.xml");
+                        Directory.CreateDirectory(Path.GetDirectoryName(duplicate)!);
+                        changedPath = duplicate;
+                        beforeHash = "absent";
+                        File.WriteAllText(changedPath, "<coverage />");
+                        afterHash = Hash(changedPath);
+                        mutationApplied = true;
+                        return;
+                    }
                     if (!File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.json"))
                         || !File.Exists(TestPathUtils.PathUnder(coverage, "coverage-gate.md"))) return;
                     if (mutation == "project-log")
@@ -107,7 +159,8 @@ public sealed class NativeConsumerTamperTests
             var settings = new ValidationSettings(repository, candidate.Path, candidate.Version, candidate.Commit,
                 dotnet, scratch, artifacts, MinimumFreeBytes: 0,
                 Consumer: new ConsumerValidationOptions(source, sourceCommit, "Consumer.slnx",
-                    ExpectedRequiredTestFragments: ["AlphaDecisionTests", "BetaDecisionTests"]));
+                    ExpectedRequiredTestFragments: ["AlphaDecisionTests", "BetaDecisionTests"],
+                    Environment: new Dictionary<string, string> { ["NATIVE_CONSUMER_TEST"] = "tamper" }));
             EvidenceProducerResult result;
             await using (var producer = new InstalledConsumerProducer(settings, runner))
             {
@@ -133,6 +186,206 @@ public sealed class NativeConsumerTamperTests
             Assert.True(File.Exists(TestPathUtils.PathUnder(source, "Consumer.slnx")));
             if (mutation == "original-source") Assert.NotEqual(sourceHash, Hash(sourceFile));
             else Assert.Equal(sourceHash, Hash(sourceFile));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task ProduceAsync_WhenArtifactWriterIsMissing_ReportsFailureAfterRealConsumerJourney()
+    {
+        var repository = Environment.GetEnvironmentVariable("APPSURFACE_TAMPER_TEST_REPOSITORY")
+            ?? TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("native-consumer-no-artifacts-").FullName;
+        try
+        {
+            var dotnet = ResolveDotnetHost();
+            var candidate = await PrepareCandidateAsync(repository, parent, dotnet);
+            var scratch = TestPathUtils.PathUnder(parent, "scratch");
+            Directory.CreateDirectory(scratch);
+            var sentinel = TestPathUtils.PathUnder(parent, "caller.txt");
+            await File.WriteAllTextAsync(sentinel, "preserve caller bytes");
+            var declaration = new EvidenceProducerDeclaration("installed-consumer", "native-validation", "1", [],
+                ["consumer/package-identity@1", "consumer/executed-tests@1", "consumer/coverage-gate@1", "consumer/source-integrity@1"],
+                [], 1800);
+            var plan = new EvidencePlan("1", "negative-fixture", "policy", "diff",
+                new("negative-fixture", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "fixture");
+            var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System);
+            var settings = new ValidationSettings(repository, candidate.Path, candidate.Version, candidate.Commit,
+                dotnet, scratch, TestPathUtils.PathUnder(parent, "evidence"), MinimumFreeBytes: 0);
+
+            await using (var producer = new InstalledConsumerProducer(settings))
+            {
+                var result = await producer.ProduceAsync(context, CancellationToken.None);
+
+                Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+                Assert.Contains("no artifact writer", result.Diagnostic, StringComparison.Ordinal);
+                Assert.Empty(result.SatisfiedAssertionIds);
+            }
+
+            Assert.Empty(Directory.EnumerateDirectories(scratch));
+            Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task ProduceAsync_WhenSourceIdentityCommandsCannotBeCaptured_UsesSafeMissingIdentityPath()
+    {
+        var repository = Environment.GetEnvironmentVariable("APPSURFACE_TAMPER_TEST_REPOSITORY")
+            ?? TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("native-consumer-source-command-failure-").FullName;
+        try
+        {
+            var source = TestPathUtils.PathUnder(parent, "consumer");
+            CopyFixture(repository, source);
+            await GitAsync(source, "init", "--quiet");
+            await GitAsync(source, "config", "user.name", "Native source command test");
+            await GitAsync(source, "config", "user.email", "native-source@example.invalid");
+            await GitAsync(source, "add", ".");
+            await GitAsync(source, "commit", "--quiet", "-m", "Consumer fixture");
+            var commit = await GitAsync(source, "rev-parse", "HEAD");
+            var scratch = TestPathUtils.PathUnder(parent, "scratch");
+            Directory.CreateDirectory(scratch);
+            var sentinel = TestPathUtils.PathUnder(parent, "caller.txt");
+            await File.WriteAllTextAsync(sentinel, "preserve caller bytes");
+            var artifacts = TestPathUtils.PathUnder(parent, "evidence");
+            var declaration = new EvidenceProducerDeclaration("installed-consumer", "native-validation", "1", [],
+                ["consumer/package-identity@1"], [new("result", "proof", "application/json", true, 1024 * 1024)], 1800);
+            var plan = new EvidencePlan("1", "negative-fixture", "policy", "diff",
+                new("negative-fixture", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "fixture");
+            var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System,
+                new EvidenceArtifactWriter(declaration, artifacts));
+            var settings = new ValidationSettings(repository, TestPathUtils.PathUnder(parent, "missing.nupkg"), "1", commit,
+                ResolveDotnetHost(), scratch, artifacts, MinimumFreeBytes: 0,
+                Consumer: new ConsumerValidationOptions(source, commit, "Consumer.slnx"));
+            var captureAttempts = 0;
+            var runner = new EvidenceCommandRunner(stream =>
+            {
+                if (Interlocked.Increment(ref captureAttempts) == 1) throw new IOException("capture setup failure");
+                return stream;
+            });
+
+            await using (var producer = new InstalledConsumerProducer(settings, runner))
+            {
+                var result = await producer.ProduceAsync(context, CancellationToken.None);
+
+                Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+                Assert.Empty(result.SatisfiedAssertionIds);
+                Assert.Contains("validation contract", result.Diagnostic, StringComparison.Ordinal);
+                using var failure = System.Text.Json.JsonDocument.Parse(
+                    await File.ReadAllTextAsync(TestPathUtils.PathUnder(artifacts, "proof", "result.json")));
+                Assert.Equal("package", failure.RootElement.GetProperty("stage").GetString());
+            }
+
+            Assert.Empty(Directory.EnumerateDirectories(scratch));
+            Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public async Task ProduceAsync_WhenExplicitConsumerProjectIsMissing_StopsBeforePackageInstallation()
+    {
+        var repository = Environment.GetEnvironmentVariable("APPSURFACE_TAMPER_TEST_REPOSITORY")
+            ?? TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("native-consumer-missing-project-").FullName;
+        try
+        {
+            var source = TestPathUtils.PathUnder(parent, "consumer");
+            CopyFixture(repository, source);
+            await GitAsync(source, "init", "--quiet");
+            await GitAsync(source, "config", "user.name", "Native project inventory test");
+            await GitAsync(source, "config", "user.email", "native-project@example.invalid");
+            await GitAsync(source, "add", ".");
+            await GitAsync(source, "commit", "--quiet", "-m", "Consumer fixture");
+            var commit = await GitAsync(source, "rev-parse", "HEAD");
+            var scratch = TestPathUtils.PathUnder(parent, "scratch");
+            Directory.CreateDirectory(scratch);
+            var artifacts = TestPathUtils.PathUnder(parent, "evidence");
+            var declaration = new EvidenceProducerDeclaration("installed-consumer", "native-validation", "1", [],
+                ["consumer/package-identity@1"], [new("result", "proof", "application/json", true, 1024 * 1024)], 1800);
+            var plan = new EvidencePlan("1", "negative-fixture", "policy", "diff",
+                new("negative-fixture", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "fixture");
+            var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System,
+                new EvidenceArtifactWriter(declaration, artifacts));
+            var settings = new ValidationSettings(repository, TestPathUtils.PathUnder(parent, "missing.nupkg"), "1", commit,
+                ResolveDotnetHost(), scratch, artifacts, MinimumFreeBytes: 0,
+                Consumer: new ConsumerValidationOptions(source, commit, "Consumer.slnx", ["missing-tests/Consumer.Tests.csproj"]));
+
+            await using (var producer = new InstalledConsumerProducer(settings))
+            {
+                var result = await producer.ProduceAsync(context, CancellationToken.None);
+
+                Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+                Assert.Empty(result.SatisfiedAssertionIds);
+                using var failure = System.Text.Json.JsonDocument.Parse(
+                    await File.ReadAllTextAsync(TestPathUtils.PathUnder(artifacts, "proof", "result.json")));
+                Assert.Equal("source", failure.RootElement.GetProperty("stage").GetString());
+            }
+
+            Assert.Empty(Directory.EnumerateDirectories(scratch));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProduceAsync_WhenCommandJourneyCannotContinue_FailsWithoutAssertionsAndCleansOwnedScratch(bool cancel)
+    {
+        var repository = Environment.GetEnvironmentVariable("APPSURFACE_TAMPER_TEST_REPOSITORY")
+            ?? TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("native-consumer-command-failure-").FullName;
+        try
+        {
+            var dotnet = ResolveDotnetHost();
+            var candidate = await PrepareCandidateAsync(repository, parent, dotnet);
+            var scratch = TestPathUtils.PathUnder(parent, "scratch");
+            Directory.CreateDirectory(scratch);
+            var sentinel = TestPathUtils.PathUnder(parent, "caller.txt");
+            await File.WriteAllTextAsync(sentinel, "preserve caller bytes");
+            var declaration = new EvidenceProducerDeclaration("installed-consumer", "native-validation", "1", [],
+                ["consumer/package-identity@1"], [], 1800);
+            var plan = new EvidencePlan("1", "negative-fixture", "policy", "diff",
+                new("negative-fixture", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "fixture");
+            var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System);
+            var settings = new ValidationSettings(repository, candidate.Path, candidate.Version, candidate.Commit,
+                dotnet, scratch,
+                TestPathUtils.PathUnder(parent, "evidence"), MinimumFreeBytes: 0);
+            if (cancel)
+            {
+                using var cancellation = new CancellationTokenSource();
+                cancellation.Cancel();
+                await using (var producer = new InstalledConsumerProducer(settings))
+                {
+                    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => producer.ProduceAsync(context, cancellation.Token).AsTask());
+                }
+            }
+            else
+            {
+                var captureFailed = false;
+                var runner = new EvidenceCommandRunner(stream =>
+                {
+                    if (Directory.EnumerateDirectories(scratch, "evidence-workspace-*").Any(workspace =>
+                        Directory.Exists(TestPathUtils.PathUnder(workspace, "tool"))))
+                    {
+                        captureFailed = true;
+                        throw new IOException("synthetic installed command capture failure");
+                    }
+                    return stream;
+                });
+                await using (var producer = new InstalledConsumerProducer(settings, runner))
+                {
+                    var result = await producer.ProduceAsync(context, CancellationToken.None);
+                    Assert.True(captureFailed, "The tool installation must reach the real command capture boundary.");
+                    Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+                    Assert.Empty(result.SatisfiedAssertionIds);
+                    Assert.Contains("command journey did not complete/capture_failed", result.Diagnostic, StringComparison.Ordinal);
+                }
+            }
+
+            Assert.Empty(Directory.EnumerateDirectories(scratch));
+            Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
         }
         finally { Directory.Delete(parent, recursive: true); }
     }
@@ -201,6 +454,8 @@ public sealed class NativeConsumerTamperTests
         using var input = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant();
     }
+
+    private static string PackageId(string version) => "forgetrust.appsurface.cli." + version;
 
     private sealed record Candidate(string Path, string Version, string Commit);
 

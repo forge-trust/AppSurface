@@ -344,6 +344,119 @@ public sealed class EvidenceCommandRunnerTests
             new EvidenceCommandRequest("evidence-must-not-start", [], Environment.CurrentDirectory, TimeSpan.MaxValue)));
     }
 
+    [Fact]
+    public async Task RunAsync_CancellationDuringAdmissionRemainsCallerCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var request = new EvidenceCommandRequest("evidence-must-not-start", [], Environment.CurrentDirectory, TimeSpan.FromSeconds(1))
+        {
+            CheckBudget = token =>
+            {
+                cancellation.Cancel();
+                token.ThrowIfCancellationRequested();
+                return ValueTask.CompletedTask;
+            },
+        };
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            new EvidenceCommandRunner().RunAsync(request, cancellation.Token));
+
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task RunAsync_CancellationDuringDrainStopsBothCaptureTasks()
+    {
+        var started = 0;
+        var stopped = 0;
+        var capturesStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cancellation = new CancellationTokenSource();
+        var runner = new EvidenceCommandRunner(_ =>
+        {
+            if (Interlocked.Increment(ref started) == 2) capturesStarted.TrySetResult();
+            return new HoldingCaptureStream(() => Interlocked.Increment(ref stopped));
+        });
+        var running = runner.RunAsync(CreateShellRequest("printf done", "[Console]::Write('done')"), cancellation.Token);
+        await capturesStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+
+        Assert.Equal(2, stopped);
+    }
+
+    [Fact]
+    public async Task RunAsync_CancellationAtTheFinalBudgetCheckCannotPublishSuccess()
+    {
+        var capturesCompleted = 0;
+        using var cancellation = new CancellationTokenSource();
+        var runner = new EvidenceCommandRunner(stream => new EofObservingStream(stream,
+            () => Interlocked.Increment(ref capturesCompleted)));
+        var request = CreateShellRequest("printf done", "[Console]::Write('done')") with
+        {
+            CheckBudget = token =>
+            {
+                if (Volatile.Read(ref capturesCompleted) == 2)
+                {
+                    cancellation.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                return ValueTask.CompletedTask;
+            },
+        };
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runner.RunAsync(request, cancellation.Token));
+
+        Assert.Equal(2, capturesCompleted);
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_ObservesCaptureCloseFailuresDuringTimeoutCleanup(bool disposed)
+    {
+        var capturesStopped = 0;
+        var runner = new EvidenceCommandRunner(_ => new CloseFailingCaptureStream(disposed,
+            () => Interlocked.Increment(ref capturesStopped)));
+        var request = CreateShellRequest("sleep 30", "Start-Sleep -Seconds 30") with
+        {
+            Timeout = TimeSpan.FromMilliseconds(100),
+        };
+
+        var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(request));
+
+        Assert.Equal("timeout", exception.Code);
+        Assert.Equal(2, capturesStopped);
+    }
+
+    [Fact]
+    public async Task RunAsync_NoncooperativeCaptureCannotPassCleanupAndCanBeReleasedByItsOwner()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completed = 0;
+        var runner = new EvidenceCommandRunner(_ => new NoncooperativeCaptureStream(release.Task, () =>
+        {
+            if (Interlocked.Increment(ref completed) == 2) stopped.TrySetResult();
+        }));
+        try
+        {
+            var exception = await Assert.ThrowsAsync<EvidenceCommandException>(() => runner.RunAsync(
+                CreateShellRequest("sleep 30", "Start-Sleep -Seconds 30") with { Timeout = TimeSpan.FromMilliseconds(100) }));
+
+            Assert.Equal("cleanup_failed", exception.Code);
+            Assert.Contains("capture", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(stopped.Task.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await stopped.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Equal(2, completed);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -420,6 +533,30 @@ public sealed class EvidenceCommandRunnerTests
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); return 0; }
+            finally { stopped(); }
+        }
+    }
+
+    private sealed class CloseFailingCaptureStream(bool disposed, Action stopped) : MemoryStream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            catch (OperationCanceledException)
+            {
+                if (disposed) throw new ObjectDisposedException("synthetic capture");
+                throw new IOException("synthetic capture close");
+            }
+            finally { stopped(); }
+            return 0;
+        }
+    }
+
+    private sealed class NoncooperativeCaptureStream(Task release, Action stopped) : MemoryStream
+    {
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            try { await release; return 0; }
             finally { stopped(); }
         }
     }

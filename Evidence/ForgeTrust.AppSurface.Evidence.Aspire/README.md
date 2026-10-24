@@ -122,4 +122,6 @@ The same nested-aggregate classification applies when a per-wait client is dispo
 
 The internal `EvidenceBoundedReadStream` shares cumulative read-size and cancellation enforcement between fan-in JSON and XML readers. It owns and disposes its input, supports synchronous and asynchronous reads, and rejects seeking or writing. File-size preflight alone is insufficient because a file may grow after inspection; each read rechecks the same limit. This helper is an internal verification seam, not an additional public API.
 
+Workspace admission tests use the internal `EvidenceWorkspace.CreateWithAdmissionHooksForTests` factory to inject a failure after fresh-root allocation or after retaining its identity, before marker creation. It executes the same creation and rollback path as `Create`; its callbacks never replace filesystem observations or cleanup decisions. Use this seam only in friend-assembly tests that verify the original exception, owned-empty-root cleanup, and preservation of unknown entries or partial markers. Application code uses `Create` and supplies no hooks.
+
 Fan-in JSON rejects duplicate property names at every object depth, including objects nested in arrays. Ambiguous policy, identity, receipt or gate fields cannot be accepted by choosing one occurrence. This applies to all untrusted JSON evidence parsed by the verifier.

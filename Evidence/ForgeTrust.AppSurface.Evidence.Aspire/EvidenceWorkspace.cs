@@ -112,7 +112,24 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
     /// <param name="parent">An existing caller-owned directory. It is never deleted by this type.</param>
     /// <param name="options">Optional scratch and free-space limits.</param>
     /// <returns>An owned workspace lease.</returns>
-    public static EvidenceWorkspace Create(string parent, EvidenceWorkspaceOptions? options = null)
+    public static EvidenceWorkspace Create(string parent, EvidenceWorkspaceOptions? options = null) =>
+        CreateCore(parent, options, null, null);
+
+    /// <summary>Exercises admission rollback with faults at the two ownership boundaries.</summary>
+    /// <param name="parent">The existing caller-owned parent used by the production creation path.</param>
+    /// <param name="beforeIdentity">Runs after fresh-root allocation, before retaining its identity.</param>
+    /// <param name="beforeMarker">Runs after identity retention, before writing the ownership marker.</param>
+    /// <returns>The production workspace when neither hook fails.</returns>
+    /// <remarks>
+    /// Hooks are restricted to friend-assembly failure tests. They do not replace filesystem observations or
+    /// cleanup. Any hook failure must preserve its original exception and the ordinary preservation rules.
+    /// </remarks>
+    internal static EvidenceWorkspace CreateWithAdmissionHooksForTests(
+        string parent, Action<string>? beforeIdentity, Action<string>? beforeMarker) =>
+        CreateCore(parent, null, beforeIdentity, beforeMarker);
+
+    private static EvidenceWorkspace CreateCore(string parent, EvidenceWorkspaceOptions? options,
+        Action<string>? beforeIdentity, Action<string>? beforeMarker)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parent);
         var resolvedOptions = options ?? new EvidenceWorkspaceOptions();
@@ -135,7 +152,9 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         EvidenceWorkspace? workspace = null;
         try
         {
+            beforeIdentity?.Invoke(root);
             workspace = new EvidenceWorkspace(root, identity, resolvedOptions, null, null);
+            beforeMarker?.Invoke(root);
             File.WriteAllText(workspace._markerPath, identity, Encoding.UTF8);
             // Complete the timestamp baseline after initialization. Linux uses a stable native root identity instead.
             workspace._rootCreationTimeUtc = new DirectoryInfo(root).CreationTimeUtc;

@@ -41,11 +41,20 @@ public sealed class NativeValidationJsonTests
         using var directory = new TemporaryDirectory();
         var gatePath = System.IO.Path.Join(directory.Root, "gate.json");
         var manifestPath = System.IO.Path.Join(directory.Root, "manifest.json");
-        File.WriteAllBytes(gatePath, new byte[(1 * 1024 * 1024) + 1]);
-        File.WriteAllBytes(manifestPath, new byte[(16 * 1024 * 1024) + 1]);
+        foreach (var (path, maximum) in new[] { (gatePath, 1 * 1024 * 1024), (manifestPath, 16 * 1024 * 1024) })
+        {
+            var exact = "{}" + new string(' ', maximum - 2);
+            File.WriteAllText(path, exact, new UTF8Encoding(false));
+            using (var accepted = ValidationProof.ReadJsonFile(path, maximum, CancellationToken.None))
+                Assert.Equal(System.Text.Json.JsonValueKind.Object, accepted.RootElement.ValueKind);
+            File.AppendAllText(path, " ", new UTF8Encoding(false));
+            Assert.Equal(maximum + 1, new FileInfo(path).Length);
 
-        Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(gatePath, 1 * 1024 * 1024, CancellationToken.None));
-        Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(manifestPath, 16 * 1024 * 1024, CancellationToken.None));
+            var exception = Assert.Throws<InvalidDataException>(() => ValidationProof.ReadJsonFile(path, maximum, CancellationToken.None));
+
+            Assert.Contains("size limit", exception.Message, StringComparison.Ordinal);
+            Assert.Equal(exact + " ", File.ReadAllText(path));
+        }
     }
 
     [Fact]
@@ -82,10 +91,17 @@ public sealed class NativeValidationJsonTests
     {
         using var directory = new TemporaryDirectory();
         var path = System.IO.Path.Join(directory.Root, "coverage-gate.json");
-        using (var stream = File.Create(path)) stream.SetLength(1024 * 1024 + 1);
+        const string validGate = """
+            {"passed":true,"tolerancePercent":0,"thresholds":{"line":95,"branch":85},"effectiveThresholds":{"line":95,"branch":85}}
+            """;
+        var exact = validGate + new string(' ', 1024 * 1024 - validGate.Length);
+        File.WriteAllText(path, exact, new UTF8Encoding(false));
+        InstalledConsumerProducer.ValidateGateReportForTests(directory.Root, hasPatch: false);
+        File.AppendAllText(path, " ", new UTF8Encoding(false));
 
-        Assert.Throws<InvalidDataException>(() =>
+        var exception = Assert.Throws<InvalidDataException>(() =>
             InstalledConsumerProducer.ValidateGateReportForTests(directory.Root, hasPatch: false));
+        Assert.Contains("size limit", exception.Message, StringComparison.Ordinal);
         Assert.Equal(1024 * 1024 + 1, new FileInfo(path).Length);
     }
 

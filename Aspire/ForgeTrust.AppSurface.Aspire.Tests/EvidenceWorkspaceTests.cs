@@ -4,6 +4,104 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 public sealed class EvidenceWorkspaceTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AdmissionFailure_RemovesOnlyTheVerifiedEmptyRootAndPreservesTheOriginalException(bool identityRetained)
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var sentinel = Path.Join(parent, "caller.txt");
+            File.WriteAllText(sentinel, "caller bytes");
+            var failure = new IOException("admission failure");
+            string? allocatedRoot = null;
+            void Fail(string root) { allocatedRoot = root; throw failure; }
+
+            var observed = Assert.Throws<IOException>(() => EvidenceWorkspace.CreateWithAdmissionHooksForTests(
+                parent, identityRetained ? null : Fail, identityRetained ? Fail : null));
+
+            Assert.Same(failure, observed);
+            Assert.NotNull(allocatedRoot);
+            Assert.False(Directory.Exists(allocatedRoot));
+            Assert.Equal("caller bytes", File.ReadAllText(sentinel));
+            Assert.Equal([sentinel], Directory.EnumerateFileSystemEntries(parent));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AdmissionFailure_PreservesUnknownRootEntriesRatherThanDeletingThem(bool identityRetained)
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var failure = new IOException("admission failure");
+            string? allocatedRoot = null;
+            string? unknownFile = null;
+            void Fail(string root)
+            {
+                allocatedRoot = root;
+                unknownFile = Path.Join(root, "unknown.txt");
+                File.WriteAllText(unknownFile, "unknown bytes");
+                throw failure;
+            }
+
+            var observed = Assert.Throws<IOException>(() => EvidenceWorkspace.CreateWithAdmissionHooksForTests(
+                parent, identityRetained ? null : Fail, identityRetained ? Fail : null));
+
+            Assert.Same(failure, observed);
+            Assert.NotNull(allocatedRoot);
+            Assert.NotNull(unknownFile);
+            Assert.True(Directory.Exists(allocatedRoot));
+            Assert.Equal("unknown bytes", File.ReadAllText(unknownFile));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public void AdmissionFailure_PreservesAnAmbiguousPartialMarker()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var failure = new IOException("marker write failed");
+            string? marker = null;
+            var observed = Assert.Throws<IOException>(() => EvidenceWorkspace.CreateWithAdmissionHooksForTests(parent, null, root =>
+            {
+                marker = Path.Join(root, ".appsurface-evidence-workspace-owner");
+                File.WriteAllText(marker, "partial marker");
+                throw failure;
+            }));
+
+            Assert.Same(failure, observed);
+            Assert.NotNull(marker);
+            Assert.Equal("partial marker", File.ReadAllText(marker));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
+    public void LinuxIdentity_RejectsNonDirectoriesAndCannotMatchAfterItsHandleIsReleased()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var parent = NewDirectory();
+        try
+        {
+            var file = Path.Join(parent, "caller.txt");
+            File.WriteAllText(file, "caller bytes");
+            Assert.Throws<IOException>(() => EvidenceWorkspaceLinuxIdentity.Open(file));
+            using var identity = EvidenceWorkspaceLinuxIdentity.Open(parent);
+            Assert.True(identity.Matches(parent));
+            identity.Dispose();
+            Assert.False(identity.Matches(parent));
+            Assert.Equal("caller bytes", File.ReadAllText(file));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
     [Fact]
     public void Create_RejectsInvalidOptionsAndParents()
     {
@@ -92,6 +190,43 @@ public sealed class EvidenceWorkspaceTests
     }
 
     [Fact]
+    public async Task CreateForTests_DefersInjectedMeasurementsUntilAnExplicitBudgetCheck()
+    {
+        var parent = NewDirectory();
+        var logicalChecks = 0;
+        var freeChecks = 0;
+
+        try
+        {
+            await using var workspace = EvidenceWorkspace.CreateForTests(
+                parent,
+                new EvidenceWorkspaceOptions(MaximumBytes: 10, MinimumFreeBytes: 20),
+                _ =>
+                {
+                    logicalChecks++;
+                    return 1;
+                },
+                _ =>
+                {
+                    freeChecks++;
+                    return 20;
+                });
+
+            Assert.Equal(0, logicalChecks);
+            Assert.Equal(0, freeChecks);
+
+            workspace.CheckBudget();
+
+            Assert.Equal(1, logicalChecks);
+            Assert.Equal(1, freeChecks);
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetPath_RejectsEscapingAndDisposedWorkspace()
     {
         var parent = NewDirectory();
@@ -101,6 +236,24 @@ public sealed class EvidenceWorkspaceTests
         await workspace.DisposeAsync();
         Assert.Throws<ObjectDisposedException>(() => workspace.GetPath("artifact.txt"));
         Directory.Delete(parent, recursive: true);
+    }
+
+    [Fact]
+    public async Task CheckBudget_RejectsUseAfterSuccessfulDispose()
+    {
+        var parent = NewDirectory();
+        try
+        {
+            var workspace = EvidenceWorkspace.Create(parent);
+            await workspace.DisposeAsync();
+
+            Assert.Throws<ObjectDisposedException>(workspace.CheckBudget);
+            Assert.False(Directory.Exists(workspace.RootPath));
+        }
+        finally
+        {
+            Directory.Delete(parent, recursive: true);
+        }
     }
 
     [Fact]
@@ -457,11 +610,14 @@ public sealed class EvidenceWorkspaceTests
             Directory.CreateDirectory(nested);
             var targetFile = Path.Join(external, "keep.txt");
             File.WriteAllText(targetFile, "keep");
-            Directory.CreateSymbolicLink(Path.Join(nested, "linked"), external);
+            var link = Path.Join(nested, "linked");
+            Directory.CreateSymbolicLink(link, external);
 
             Assert.Throws<IOException>(() => workspace.GetPath("nested/linked/result.json"));
             Assert.Equal("keep", File.ReadAllText(targetFile));
-            Directory.Delete(workspace.RootPath, recursive: true);
+            Directory.Delete(link);
+            await workspace.DisposeAsync();
+            Assert.False(Directory.Exists(workspace.RootPath));
         }
         finally
         {

@@ -123,6 +123,77 @@ public sealed class CoverageArtifactStoreValidationTests
         Assert.Equal(before, fixture.Read("registry.json"));
     }
 
+    [Fact]
+    public async Task Restore_UnknownRegistrationFailsClosedAndLeavesArchiveAndDestinationUntouched()
+    {
+        using var fixture = new Fixture();
+        var run = fixture.CreateRun([4, 8, 15, 16, 23, 42]);
+        using var store = fixture.Open();
+        await store.RegisterAsync(run, CancellationToken.None);
+        await store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None);
+
+        var archiveBefore = fixture.CaptureFiles(fixture.ArchivePath(run.ManifestBase.RunId));
+        var registry = JsonNode.Parse(Encoding.UTF8.GetString(fixture.Read("registry.json")))!;
+        registry["Registrations"] = new JsonArray();
+        fixture.Write("registry.json", registry.ToJsonString());
+        var registryBefore = fixture.Read("registry.json");
+        var destinationParent = fixture.CreateDirectory("restore-parent");
+        var destination = Path.Join(destinationParent, "restored");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            store.RestoreAsync(run.ManifestBase.RunId, destination, CancellationToken.None));
+
+        Assert.Equal(registryBefore, fixture.Read("registry.json"));
+        fixture.AssertFilesEqual(fixture.ArchivePath(run.ManifestBase.RunId), archiveBefore);
+        Assert.False(Directory.Exists(destination));
+    }
+
+    [Fact]
+    public async Task Snapshot_ArchivedArchiveWithMismatchedManifestFailsClosedAndPreservesRegistrationAndPayload()
+    {
+        using var fixture = new Fixture();
+        var run = fixture.CreateRun([3, 1, 4, 1, 5]);
+        using var store = fixture.Open();
+        await store.RegisterAsync(run, CancellationToken.None);
+        await store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None);
+        var registryBefore = fixture.Read("registry.json");
+        var archivePath = fixture.ArchivePath(run.ManifestBase.RunId);
+        var manifestPath = Path.Join(archivePath, "manifest.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!;
+        manifest["RunId"] = Guid.NewGuid().ToString("N");
+        File.WriteAllText(manifestPath, manifest.ToJsonString());
+        var corruptArchive = fixture.CaptureFiles(archivePath);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            store.SnapshotAsync(run, pin: true, automatic: false, CancellationToken.None));
+
+        Assert.Equal(registryBefore, fixture.Read("registry.json"));
+        fixture.AssertFilesEqual(archivePath, corruptArchive);
+        Assert.Contains("manifest.json", corruptArchive.Keys);
+    }
+
+    [Fact]
+    public async Task DisposedStore_RejectsReadsAndWritesWithoutChangingRegistry()
+    {
+        using var fixture = new Fixture();
+        var run = fixture.CreateRun([7, 7, 7]);
+        var store = fixture.Open();
+        await store.RegisterAsync(run, CancellationToken.None);
+        var registryBefore = fixture.Read("registry.json");
+        store.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => store.GetStatus());
+        Assert.Throws<ObjectDisposedException>(() => store.GetCurrentRun(run.OutputPath));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            store.RegisterAsync(run, CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            store.SnapshotAsync(run, pin: false, automatic: false, CancellationToken.None));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+            store.PinAsync(run.ManifestBase.RunId, pin: true, CancellationToken.None));
+
+        Assert.Equal(registryBefore, fixture.Read("registry.json"));
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly TestDirectory _temp = TestDirectory.Create();
@@ -144,6 +215,19 @@ public sealed class CoverageArtifactStoreValidationTests
         internal CoverageArtifactStore Open() => CoverageArtifactStore.Open(Root);
         internal CoverageArtifactStore OpenReadOnly() => CoverageArtifactStore.OpenReadOnly(Root);
         internal byte[] Read(string name) => File.ReadAllBytes(StoreFilePath(name));
+        internal string CreateDirectory(string name) => _temp.CreateDirectory(name);
+
+        internal Dictionary<string, byte[]> CaptureFiles(string directory)
+            => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+                .ToDictionary(path => Path.GetRelativePath(directory, path), File.ReadAllBytes);
+
+        internal void AssertFilesEqual(string directory, IReadOnlyDictionary<string, byte[]> expected)
+        {
+            var actual = CaptureFiles(directory);
+            Assert.Equal(expected.Keys.Order(), actual.Keys.Order());
+            foreach (var (relativePath, bytes) in expected)
+                Assert.Equal(bytes, actual[relativePath]);
+        }
 
         internal void Write(string name, string json)
         {
