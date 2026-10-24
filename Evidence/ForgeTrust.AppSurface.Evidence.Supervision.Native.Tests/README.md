@@ -229,6 +229,15 @@ stage's source-bound current-method witness. Its eleven byte inputs are bounded 
 160 MiB in total. The two account reports are connected through standard collector
 merges, but their successful local data tests do not establish a native merged run.
 
+The reviewed compiler-witness map pins both the private account partial and
+`LinuxRunAccounts.cs`. The [ordinary checkout regression](AccountMeasurementTests.cs)
+hashes those actual files before native input is needed, so an unchanged generated
+method name cannot hide a stale partial fingerprint. After a deliberate source edit,
+review the current method mapping and retained collector report before refreshing
+that fingerprint. The merged packet must still match both current fingerprints;
+rebinding its outer digests cannot substitute the historical partial. This is a
+source-map consistency check, not new native execution or account authority.
+
 The [detached controls](AccountMeasurementTests.cs) cover valid boundary neighbors
 and malformed observations without creating accounts or physical-success evidence.
 The [actual account driver](../../.github/issue779-checkpoint4/run-accounts.py) owns

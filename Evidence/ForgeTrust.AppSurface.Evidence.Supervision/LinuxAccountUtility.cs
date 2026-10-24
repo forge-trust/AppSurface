@@ -122,75 +122,79 @@ internal sealed class LinuxAccountUtility
                 }
             }
             catch (Exception error) { Capture(error); failure = true; }
-            // This timer is bounded by the original run plus its protected cleanup reserve. It does not
-            // reopen new work or replace either actual start/pump task with a timed-out wait wrapper.
-            try
-            {
-                stage = LinuxAccountUtilityStage.Stop;
-                using var stopDeadline = cleanup || failure || token.IsCancellationRequested
-                    ? CancellationTokenSource.CreateLinkedTokenSource(owner.RootTeardownToken)
-                    : new CancellationTokenSource();
-                stopDeadline.CancelAfter(owner.CleanupAllowance);
-                if (started)
+            // This helper receives only the original private callbacks. The first callback retains the
+            // compound stop/group catch; all later callbacks retain their independent catch boundaries.
+            await SupervisionAccountUtilityCleanup.RunAsync(new(
+                async () =>
                 {
-                    await pending.StopAsync(async ct =>
+                    // This timer is bounded by the original run plus its protected cleanup reserve. It does not
+                    // reopen new work or replace either actual start/pump task with a timed-out wait wrapper.
+                    stage = LinuxAccountUtilityStage.Stop;
+                    using var stopDeadline = cleanup || failure || token.IsCancellationRequested
+                        ? CancellationTokenSource.CreateLinkedTokenSource(owner.RootTeardownToken)
+                        : new CancellationTokenSource();
+                    stopDeadline.CancelAfter(owner.CleanupAllowance);
+                    if (started)
                     {
-                        owner.RequireCleanup(ct);
-                        using var stop = await LinuxSystemdBackend.ConnectAsync(ct).ConfigureAwait(false);
-                        await stop.StopUnitAsync(pending.Unit, ct).ConfigureAwait(false);
-                        owner.RequireCleanup(ct);
-                    }, stopDeadline.Token).ConfigureAwait(false);
-                }
-                stage = LinuxAccountUtilityStage.CloseWrites;
-                if (pipes is not null) pipes.CloseWriteCopies();
-                if (started)
-                {
-                    while (true)
-                    {
-                        stage = LinuxAccountUtilityStage.GroupRead;
-                        owner.RequireCleanup(stopDeadline.Token);
-                        if (GroupEmpty(LinuxCgroupProbe.Read(pending.Unit, stopDeadline.Token))) break;
-                        await Task.Delay(TimeSpan.FromMilliseconds(25), stopDeadline.Token).ConfigureAwait(false);
+                        await pending.StopAsync(async ct =>
+                        {
+                            owner.RequireCleanup(ct);
+                            using var stop = await LinuxSystemdBackend.ConnectAsync(ct).ConfigureAwait(false);
+                            await stop.StopUnitAsync(pending.Unit, ct).ConfigureAwait(false);
+                            owner.RequireCleanup(ct);
+                        }, stopDeadline.Token).ConfigureAwait(false);
                     }
-                }
-            }
-            catch (Exception error) { Capture(error); failure = true; }
-
-            // A failed stop must not detach pumps or convert closing a reader into EOF. If an external
-            // writer survives, the independent owner deadline terminates this blocked physical join.
-            if (pipes is not null)
-            {
-                stage = LinuxAccountUtilityStage.CloseWrites;
-                try { pipes.CloseWriteCopies(); }
-                catch (Exception error) { Capture(error); failure = true; }
-                try
+                    stage = LinuxAccountUtilityStage.CloseWrites;
+                    if (pipes is not null) pipes.CloseWriteCopies();
+                    if (started)
+                    {
+                        while (true)
+                        {
+                            stage = LinuxAccountUtilityStage.GroupRead;
+                            owner.RequireCleanup(stopDeadline.Token);
+                            if (GroupEmpty(LinuxCgroupProbe.Read(pending.Unit, stopDeadline.Token))) break;
+                            await Task.Delay(TimeSpan.FromMilliseconds(25), stopDeadline.Token).ConfigureAwait(false);
+                        }
+                    }
+                },
+                pipes is null ? null : new(
+                    () =>
+                    {
+                        stage = LinuxAccountUtilityStage.CloseWrites;
+                        pipes.CloseWriteCopies();
+                    },
+                    async () =>
+                    {
+                        stage = LinuxAccountUtilityStage.OutputJoin;
+                        var output = await pipes.JoinAsync().ConfigureAwait(false);
+                        if (!output.Successful) { Capture(LinuxSystemdBackend.InvalidControl()); failure = true; }
+                        stage = LinuxAccountUtilityStage.GroupRead;
+                        nativeJoined = (!started || pending.Snapshot is { StartJoined: true, StopJoined: true })
+                            && (!started || GroupEmpty(LinuxCgroupProbe.Read(pending.Unit, default)));
+                        if (!nativeJoined) { Capture(LinuxSystemdBackend.InvalidControl()); failure = true; }
+                        owner.RequireCleanup(default);
+                    },
+                    async () =>
+                    {
+                        stage = LinuxAccountUtilityStage.PipeDispose;
+                        await pipes.DisposeAsync().ConfigureAwait(false);
+                        pipesClosed = true;
+                    }),
+                !started ? () => { nativeJoined = true; pipesClosed = true; } : null,
+                () =>
                 {
-                    stage = LinuxAccountUtilityStage.OutputJoin;
-                    var output = await pipes.JoinAsync().ConfigureAwait(false);
-                    if (!output.Successful) { Capture(LinuxSystemdBackend.InvalidControl()); failure = true; }
-                    stage = LinuxAccountUtilityStage.GroupRead;
-                    nativeJoined = (!started || pending.Snapshot is { StartJoined: true, StopJoined: true })
-                        && (!started || GroupEmpty(LinuxCgroupProbe.Read(pending.Unit, default)));
-                    if (!nativeJoined) { Capture(LinuxSystemdBackend.InvalidControl()); failure = true; }
+                    stage = LinuxAccountUtilityStage.BackendDispose;
+                    try { backend?.Dispose(); }
+                    catch { nativeJoined = false; throw; }
+                },
+                () => nativeJoined && pipesClosed,
+                () =>
+                {
+                    stage = LinuxAccountUtilityStage.PhysicalSettlement;
                     owner.RequireCleanup(default);
-                }
-                catch (Exception error) { Capture(error); failure = true; }
-                stage = LinuxAccountUtilityStage.PipeDispose;
-                try { await pipes.DisposeAsync().ConfigureAwait(false); pipesClosed = true; }
-                catch (Exception error) { Capture(error); failure = true; }
-            }
-            else if (!started) { nativeJoined = true; pipesClosed = true; }
-            stage = LinuxAccountUtilityStage.BackendDispose;
-            try { backend?.Dispose(); }
-            catch (Exception error) { Capture(error); failure = true; nativeJoined = false; }
-            // Publish only from this actual executor, after every real task/FD join. If custody is
-            // uncertain, the account owner must quarantine rather than delete or reuse identities.
-            if (nativeJoined && pipesClosed)
-            {
-                stage = LinuxAccountUtilityStage.PhysicalSettlement;
-                try { owner.RequireCleanup(default); Interlocked.Exchange(ref _physicallySettled, 1); }
-                catch (Exception error) { Capture(error); failure = true; }
-            }
+                    Interlocked.Exchange(ref _physicallySettled, 1);
+                }),
+                error => { Capture(error); failure = true; }).ConfigureAwait(false);
         }
         stage = LinuxAccountUtilityStage.FinalOwnerCheck;
         if (cancelled) throw new OperationCanceledException(token);

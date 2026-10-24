@@ -128,6 +128,42 @@ public sealed class LinuxApplicationDcpIdentityTests
         Assert.DoesNotContain("CANARY", System.Text.Encoding.UTF8.GetString(bytes));
     }
 
+    [Theory]
+    [InlineData("stage")]
+    [InlineData("observed-negative")]
+    [InlineData("observed-over-limit")]
+    [InlineData("matching-negative")]
+    [InlineData("matching-over-limit")]
+    public void ClosedCaptureDiagnosticRejectsUnknownStageAndImpossibleCounts(string mutation)
+    {
+        var cause = new IOException("private-dcp-diagnostic-canary", new Win32Exception(13));
+        var maximum = LinuxApplicationDcpIdentity.MaximumProcesses;
+        var valid = LinuxApplicationDcpIdentity.CaptureFailure(LinuxDcpCaptureStage.CandidateExecutable,
+            cause, maximum, maximum);
+        Assert.Equal(maximum, valid.ObservedProcesses);
+        Assert.Equal(maximum, valid.MatchingExecutables);
+        Assert.Equal(13, valid.NativeErrno);
+
+        var stage = mutation == "stage" ? (LinuxDcpCaptureStage)int.MaxValue : LinuxDcpCaptureStage.CandidateExecutable;
+        var observed = mutation switch
+        {
+            "observed-negative" => -1,
+            "observed-over-limit" => maximum + 1,
+            _ => maximum,
+        };
+        var matching = mutation switch
+        {
+            "matching-negative" => -1,
+            "matching-over-limit" => maximum + 1,
+            _ => maximum,
+        };
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxApplicationDcpIdentity.CaptureFailure(stage, cause, observed, matching));
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("private-dcp-diagnostic-canary", error.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PreCanceledCapturePropagatesCancellationWithOnlyClosedSelectionDiagnostics()
     {

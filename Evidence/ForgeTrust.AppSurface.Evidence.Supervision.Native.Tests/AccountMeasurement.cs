@@ -20,7 +20,7 @@ internal static class AccountMeasurement
     private const int MaximumBytes = 8 * 1024 * 1024;
     internal const string WitnessSource = ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs";
     internal const string WitnessSourceSha256 = "6810182cb7a93c8928f7aca9a8e55d575b7d4e2ebc0a85f3d0cb64c4ed4135fa";
-    internal const string PartialSourceSha256 = "25270ce8685d934fc35c65de82118354acabe4d65861355e9b9727d5512fc2b6";
+    internal const string PartialSourceSha256 = "3629b2c09d59d63d5f31df6d207b53806646110b422ac6bffca8121b0153afb3";
     private const string AccountsSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs";
     private const string OwnerSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",

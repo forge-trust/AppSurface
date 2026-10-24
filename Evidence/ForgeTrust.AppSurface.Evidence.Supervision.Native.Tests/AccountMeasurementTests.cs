@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 
@@ -8,6 +9,34 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 public sealed class AccountMeasurementTests
 {
     private const string Head = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    /// <summary>The explicit compiler-witness mapping must match its real source checkout before native work runs.</summary>
+    [Fact]
+    public void ReviewedWitnessSourcePinsMatchTheCurrentCheckout()
+    {
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var witness = File.ReadAllBytes(TestPathUtils.PathUnder(root, AccountMeasurement.WitnessSource));
+        var accounts = File.ReadAllBytes(TestPathUtils.PathUnder(root,
+            "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs"));
+
+        Assert.Equal(AccountMeasurement.WitnessSourceSha256, Convert.ToHexStringLower(SHA256.HashData(witness)));
+        Assert.Equal(AccountMeasurement.PartialSourceSha256, Convert.ToHexStringLower(SHA256.HashData(accounts)));
+    }
+
+    /// <summary>Rebinding outer packet digests cannot restore a historical compiler-witness partial.</summary>
+    [Theory]
+    [InlineData("C4Accounts")]
+    [InlineData("C4AccountRollback")]
+    public void HistoricalPartialFingerprintCannotReplaceTheCurrentWitness(string variant)
+    {
+        var fixture = new Fixture(variant);
+        fixture.ConfigureMerged();
+        fixture.ValidateMerged();
+        const string historical = "25270ce8685d934fc35c65de82118354acabe4d65861355e9b9727d5512fc2b6";
+        fixture.Source["files"]![Fixture.AccountPath]!["sha256"] = historical;
+        fixture.Binding["current_witness"]!["partial_source_sha256"] = historical;
+        Assert.ThrowsAny<Exception>(() => fixture.ValidateMerged());
+    }
 
     /// <summary>Both variants accept their valid count boundaries, including permitted cross-domain numeric equality.</summary>
     [Theory]

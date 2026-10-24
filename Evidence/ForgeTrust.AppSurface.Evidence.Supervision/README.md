@@ -15,6 +15,12 @@ retains its original metadata/name checks, deadline and buffer policy.
 
 The [producer settlement policy](producer-settlement.md) keeps report readiness separate from physical cleanup. Its copied-data controls cannot authenticate a producer; the native process still checks its original owner, accounts, workspace, quota and original task joins.
 
+The [account utility cleanup procedure](account-utility-cleanup.md) orders one retained utility's original
+stop, output, backend and physical-settlement callbacks. It carries no owner, deadline, token, cgroup,
+pipe, backend or settlement fact; the private account caller retains those native operations and final
+projections. Its first stop/group callback preserves the original compound catch, so a failure skips the
+rest of that phase while later pipe and backend cleanup still runs.
+
 The [workspace owner data policy](workspace-policy.md) enforces the existing captured UID/GID and generated-root comparisons after each wrapper’s original reference checks. It cannot construct or authenticate an owner or workspace.
 
 After `BeginRootTeardown`, new work admission is closed. The private N08/N09 cancellation
