@@ -26,4 +26,3 @@ public sealed class CoverageUnixTheoryAttribute : TheoryAttribute
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) Skip = "Requires native Linux or macOS filesystem APIs.";
     }
 }
-
