@@ -473,10 +473,10 @@ internal static class CoverageRunArtifactReader
     private static int UnixOpenCloseOnExec => OperatingSystem.IsMacOS() ? 0x01000000 : 0x00080000;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixOpenDirectory => OperatingSystem.IsMacOS() ? 0x00100000 : 0x00010000;
+    private static int UnixOpenDirectory => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).Directory;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixOpenNoFollow => OperatingSystem.IsMacOS() ? 0x00000100 : 0x00020000;
+    private static int UnixOpenNoFollow => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).NoFollow;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixOpenNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;

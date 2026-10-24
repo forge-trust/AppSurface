@@ -123,7 +123,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` local threshold enforcement, and [`appsurface coverage storage`](./guides/coverage-storage.md) history, warning, pin, restore, and cleanup controls.
 
 ### [EvidenceHost](./start-here/evidencehost.md)
 
@@ -228,6 +228,10 @@ Matching local and hosted patch results also requires the same coverage artifact
 inventory. If the results disagree, compare the commit and base, source paths, and measurable
 changed-line counts. A file can have coverage in a hosted report while contributing no diff lines;
 a passing local gate does not establish that the hosted patch status passed.
+
+For repository-native code that needs platform-specific execution, the [verified cross-platform coverage
+fan-in guide](./guides/coverage-fan-in.md) documents the matching-source and SDK manifest checks that
+extend the existing aggregate and patch gates without changing their thresholds or scope.
 
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check

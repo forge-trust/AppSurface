@@ -76,6 +76,7 @@ internal sealed partial class CoverageCleanCommand(
                 throw new CommandException("--output cannot be used with --all. Omit --output to scan TestResults directories below --root.");
             }
 
+            await console.Error.WriteLineAsync("Coverage clean --all is an explicit broad worktree sweep. Older or nonparticipating writers are outside cooperative coverage leases; finish them before applying cleanup. Pinned history archives remain outside this sweep.");
             await _testResultsWorkflow.CleanAsync(
                 new TestResultsCleanupRequest(RootDirectory, Apply),
                 console,
@@ -91,6 +92,21 @@ internal sealed partial class CoverageCleanCommand(
         try
         {
             var outputDirectory = OutputDirectory ?? Path.Join(_getCurrentDirectory(), DefaultOutputDirectory);
+            if (Directory.Exists(outputDirectory))
+            {
+                try
+                {
+                    using var store = CoverageArtifactStore.OpenReadOnly();
+                    var archived = await store.HasVerifiedArchiveAsync(outputDirectory, cancellationToken);
+                    await console.Output.WriteLineAsync(archived
+                        ? "A verified historical archive already exists for the registered current run."
+                        : "No verified historical archive was established for this output; cleanup creates no history backup.");
+                }
+                catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
+                {
+                    await console.Output.WriteLineAsync("Historical archive state is unknown; cleanup creates no history backup.");
+                }
+            }
             var result = CoverageRunOutputGuard.CleanExistingOwnedOutput(outputDirectory, Apply);
             await WriteOwnedCoverageResultAsync(console, result, cancellationToken);
         }

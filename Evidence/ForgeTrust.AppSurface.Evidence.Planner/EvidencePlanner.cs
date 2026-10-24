@@ -183,6 +183,11 @@ public sealed class EvidencePlanner
         {
             RequireIdentifier(producer.Id, "producer id");
             RequireIdentifier(producer.Kind, "producer kind");
+            if (string.Equals(producer.Kind, "coverage", StringComparison.Ordinal)
+                && producer.CoverageArtifactRetention is not ("managed" or "full"))
+            {
+                throw new EvidencePlanningException("ASEVD127", $"Coverage producer '{producer.Id}' has invalid coverageArtifactRetention.", "Use managed (the default) or full without changing coverage gate requirements.");
+            }
             if (producer.TimeoutSeconds <= 0)
             {
                 throw new EvidencePlanningException("ASEVD110", $"Producer '{producer.Id}' has a non-positive timeout.", "Set timeoutSeconds to a positive value.");

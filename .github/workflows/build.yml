@@ -3,6 +3,9 @@ name: build.yml
 permissions:
   contents: read
 
+env:
+  COVERAGE_SDK_VERSION: 10.0.402
+
 on:
   push:
     branches: [ main ]
@@ -62,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 
@@ -75,11 +78,17 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
           cache-dependency-path: |
             Cli/ForgeTrust.AppSurface.Cli.Tests/packages.lock.json
+
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = "disable" } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
 
       - name: Restore coverage security tests (locked)
         run: dotnet restore Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj --locked-mode
@@ -97,11 +106,41 @@ jobs:
           --configuration Release
           --no-restore
           /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests"
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
           --logger "console;verbosity=detailed"
           --blame-hang
           --blame-hang-timeout 2m
           --blame-hang-dump-type mini
+
+      - name: Collect native Release coverage evidence
+        run: >-
+          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+          --configuration Release
+          --no-restore
+          /p:TailwindEnabled=false
+          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
+          --logger "console;verbosity=minimal"
+          --results-directory "${{ runner.temp }}/coverage-native-results"
+          --collect:"XPlat Code Coverage"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+          DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
+
+      - name: Attest successful native coverage evidence
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem -Path "${{ runner.temp }}/coverage-native-results" -Recurse -Filter coverage.cobertura.xml)
+          if ($reports.Count -ne 1) { throw "Expected exactly one fresh native coverage report" }
+          dotnet run --project Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --configuration Release --no-build --no-restore -- coverage merge --source "${{ runner.temp }}/coverage-native-results" --output "${{ runner.temp }}/coverage-native-canonical"
+          if ($LASTEXITCODE -ne 0) { throw "Native coverage normalization failed" }
+          python scripts/coverage_fanin.py capture --configuration Release --scope native --raw-report $reports[0].FullName --report "${{ runner.temp }}/coverage-native-canonical/coverage.cobertura.xml" --output "${{ runner.temp }}/coverage-native"
+
+      - name: Upload attested native coverage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-native-${{ matrix.os }}
+          path: ${{ runner.temp }}/coverage-native
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload coverage security diagnostics
         if: ${{ always() }}
@@ -387,6 +426,7 @@ jobs:
         run: ./examples/durable-postgresql/run-local-proof.sh
 
   build:
+    needs: coverage-security-platform
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -398,18 +438,24 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 1 }}
+          fetch-depth: 0
 
       - name: Setup .NET SDK
         id: setup-dotnet
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: |
-            10.0.x
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
           cache: true
           cache-dependency-path: |
             **/packages.lock.json
             **/packages.*.lock.json
+
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = "disable" } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
 
       - name: Restore .NET packages (locked, cache-aware)
         run: |
@@ -476,12 +522,22 @@ jobs:
       - name: Verify the Durable doctor report consumer
         run: python3 -m unittest discover -s examples/durable-external-activation -p 'test_*.py'
 
+      - name: Verify coverage fan-in contracts
+        run: python3 -m unittest discover -s scripts/tests -p 'test_coverage_fanin.py'
+
+      - name: Download same-run native coverage evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: coverage-native-*
+          path: ${{ runner.temp }}/coverage-native-inputs
+
       - name: Run solution coverage and gate
         env:
           BUILD_CONFIGURATION: Release
           BUILD_NO_RESTORE: true
           COVERAGE_PARALLELISM: 2
-          COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+          COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}
+          COVERAGE_FANIN_NATIVE: ${{ runner.temp }}/coverage-native-inputs
           APP_SURFACE_TEST_ARTIFACTS_DIR: ${{ runner.temp }}/docs-outline-layout-evidence
         run: |
           ./scripts/coverage-solution.sh
@@ -514,6 +570,9 @@ jobs:
         with:
           name: coverage-gate-reports
           path: |
+            TestResults/coverage-merged/fanin-primary/**
+            TestResults/coverage-fanin/**
+            TestResults/coverage-merged/aggregate-gate/**
             TestResults/coverage-merged/coverage-gate.json
             TestResults/coverage-merged/coverage-gate.md
             TestResults/coverage-merged/coverage-patch-targets.json

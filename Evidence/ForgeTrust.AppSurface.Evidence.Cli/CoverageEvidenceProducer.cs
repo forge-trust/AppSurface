@@ -92,6 +92,11 @@ internal sealed class CoverageEvidenceProducer
             return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Invalid, [], "Coverage producer declarations must include explicit coverageGate requirements before they can close a coverage assertion.");
         }
 
+        if (producer.CoverageArtifactRetention is not ("managed" or "full"))
+        {
+            return new EvidenceProducerResult(producer.Id, EvidenceProducerOutcome.Invalid, [], "ASCOV208 coverageArtifactRetention must be managed or full before execution starts.");
+        }
+
         if ((producer.CoverageGate.MinPatchLinePercent.HasValue || producer.CoverageGate.MinPatchBranchPercent.HasValue)
             && diffSnapshot is null)
         {
@@ -107,7 +112,7 @@ internal sealed class CoverageEvidenceProducer
                 TimeSpan.FromSeconds(producer.TimeoutSeconds));
             deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
             var result = await _executionWorkflow.RunAndGateAsync(
-                CreateRunRequest(solutionPath, outputDirectory) with { ProducerDeadline = producerDeadline },
+                CreateRunRequest(solutionPath, outputDirectory) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
                 deadline.Token).ConfigureAwait(false);

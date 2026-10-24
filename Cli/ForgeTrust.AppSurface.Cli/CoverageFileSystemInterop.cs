@@ -18,6 +18,23 @@ namespace ForgeTrust.AppSurface.CoverageArtifacts;
 /// </remarks>
 internal static partial class CoverageFileSystemInterop
 {
+    /// <summary>Selects no-follow directory and file flags for Darwin or a supported Linux architecture.</summary>
+    /// <param name="macos">Whether Darwin constants apply.</param>
+    /// <param name="architecture">Native process architecture; Linux x64 and ARM64 use distinct directory and no-follow flags.</param>
+    /// <returns>The native directory-only and no-follow flags, respectively.</returns>
+    /// <exception cref="PlatformNotSupportedException">The Linux architecture has no verified flag mapping.</exception>
+    /// <remarks>This selects native constants only. Callers still retain and verify the opened object and its ancestors.</remarks>
+    internal static (int Directory, int NoFollow) UnixTraversalFlags(bool macos, Architecture architecture)
+    {
+        if (macos) return (0x00100000, 0x00000100);
+        return architecture switch
+        {
+            Architecture.X64 => (0x00010000, 0x00020000),
+            Architecture.Arm64 => (0x00004000, 0x00008000),
+            _ => throw new PlatformNotSupportedException("Secure Unix traversal supports Darwin and Linux x64 or ARM64.")
+        };
+    }
+
     /// <summary>
     /// Opens a Unix path with the supplied native flags.
     /// </summary>
@@ -106,6 +123,23 @@ internal static partial class CoverageFileSystemInterop
         uint bufferSize);
 
     /// <summary>
+    /// Reads basic timestamps and attributes for an open Windows file handle.
+    /// </summary>
+    /// <param name="handle">The open file-system handle.</param>
+    /// <param name="fileInformationClass">The native information-class identifier.</param>
+    /// <param name="fileInformation">Receives the basic timestamps and attributes.</param>
+    /// <param name="bufferSize">The size of <paramref name="fileInformation"/> in bytes.</param>
+    /// <returns><see langword="true"/> on success; otherwise <see langword="false"/>.</returns>
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool WindowsGetFileBasicInformationByHandleEx(
+        SafeFileHandle handle,
+        int fileInformationClass,
+        out WindowsFileBasicInformation fileInformation,
+        uint bufferSize);
+
+    /// <summary>
     /// Reads stable file-system identity metadata for an open Windows handle.
     /// </summary>
     /// <param name="handle">The open handle to inspect.</param>
@@ -172,6 +206,26 @@ internal static partial class CoverageFileSystemInterop
         /// Gets or sets the native reparse tag.
         /// </summary>
         internal uint ReparseTag;
+    }
+
+    /// <summary>Contains native Windows basic timestamps and attributes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WindowsFileBasicInformation
+    {
+        /// <summary>Gets or sets the creation time in 100-nanosecond intervals.</summary>
+        internal long CreationTime;
+
+        /// <summary>Gets or sets the last-access time in 100-nanosecond intervals.</summary>
+        internal long LastAccessTime;
+
+        /// <summary>Gets or sets the last-write time in 100-nanosecond intervals.</summary>
+        internal long LastWriteTime;
+
+        /// <summary>Gets or sets the change time in 100-nanosecond intervals.</summary>
+        internal long ChangeTime;
+
+        /// <summary>Gets or sets the native file-attribute bit field.</summary>
+        internal uint FileAttributes;
     }
 
     /// <summary>

@@ -1,5 +1,9 @@
 # Deferred work
 
+## Coverage storage: remote/team retention follow-up
+
+- **What:** Evaluate an optional remote archive/export integration only after an adopter needs evidence beyond the user-local managed history. **Why:** Local byte/age retention cannot promise durable team access. **Pros:** Could preserve selected release or investigation evidence across machines. **Cons:** Adds credentials, transfer cost, remote retention and deletion ownership. **Context:** The [coverage storage design](docs/designs/coverage-artifact-storage.md) keeps ordinary upgrades local, preserves current reports and exposes explicit pin/restore; existing uploads remain available. **Effort:** L human / M agent, estimated. **Priority:** P3. **Depends on:** Shipped local lifecycle plus an identified adopter/owner and concrete remote retention requirement. Deferred in CEO C6; no remote service is part of this delivery.
+
 ## DevAuth persona fixture activation (#772)
 
 ### Host-owned durable or multi-process reference example

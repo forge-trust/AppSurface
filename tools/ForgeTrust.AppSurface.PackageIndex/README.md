@@ -5,6 +5,8 @@ the generated `## Release Guidance` region in public package READMEs. Start with
 [package chooser](../../packages/README.md) when deciding which package a consumer should install; use this guide when
 you are changing the repository's package-story policy rather than one package's authored technical documentation.
 
+For the in-progress coverage artifact retention feature, use the canonical [coverage storage guide](../../guides/coverage-storage.md). Its managed default, full-retention choice, and `--no-clean` interaction are repository source behavior under development; package installation proof and storage measurements are not yet established.
+
 ## Release guidance
 
 Every managed package README declares one `release_guidance_variant` in

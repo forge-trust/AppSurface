@@ -209,7 +209,16 @@ public sealed record EvidenceProducerDeclaration(
     IReadOnlyList<string> AssertionIds,
     IReadOnlyList<EvidenceArtifactSlot> ArtifactSlots,
     int TimeoutSeconds,
-    EvidenceCoverageGateRequirements? CoverageGate = null);
+    EvidenceCoverageGateRequirements? CoverageGate = null)
+{
+    /// <summary>Gets the optional coverage artifact retention mode, managed by default or full to retain raw duplicate XML.</summary>
+    /// <remarks>
+    /// Only coverage producers interpret this value. Exactly <c>managed</c> and <c>full</c> are supported;
+    /// neither changes collection or coverage gates. The existing positional constructor remains unchanged.
+    /// See the <c>coverageArtifactRetention</c> reference in the coverage storage guide.
+    /// </remarks>
+    public string CoverageArtifactRetention { get; init; } = "managed";
+}
 
 /// <summary>
 /// Declares an evidence resource required by a profile.

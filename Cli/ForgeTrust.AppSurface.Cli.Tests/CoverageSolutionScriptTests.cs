@@ -10,7 +10,7 @@ public sealed class CoverageSolutionScriptTests
     [Fact]
     public void Script_ShouldDelegateDefaultLaneToSourceCliWithManagedEvidence()
     {
-        var script = ReadScript();
+        var script = string.Concat(ReadScript(), "\n", ReadRepositoryFile("scripts", "coverage-gate-fanin.sh"));
 
         Assert.Contains("CLI_PROJECT=\"$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj\"", script, StringComparison.Ordinal);
         Assert.Contains("coverage", script, StringComparison.Ordinal);
@@ -28,7 +28,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
         Assert.DoesNotContain("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE", script, StringComparison.Ordinal);
-        Assert.Contains("coverage\n  gate", script, StringComparison.Ordinal);
+        Assert.Contains("-- coverage gate", script, StringComparison.Ordinal);
         Assert.Contains("--min-line 95", script, StringComparison.Ordinal);
         Assert.Contains("--min-branch 85", script, StringComparison.Ordinal);
         Assert.Contains("--diff-base \"$COVERAGE_GATE_DIFF_BASE\"", script, StringComparison.Ordinal);
@@ -72,7 +72,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
         Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);
@@ -113,6 +113,23 @@ public sealed class CoverageSolutionScriptTests
                       --blame-hang-timeout 2m
                       --blame-hang-dump-type mini
 
+                  - name: Collect native Release coverage evidence
+                    run: >-
+                      dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
+                      --configuration Release
+                      --no-restore
+                      /p:TailwindEnabled=false
+                      --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
+                      --logger "console;verbosity=minimal"
+                      --results-directory "${{ runner.temp }}/coverage-native-results"
+                      --collect:"XPlat Code Coverage"
+                      -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+                      DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
+            """,
+            workflow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            """
                   - name: Upload coverage security diagnostics
                     if: ${{ always() }}
                     uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -945,6 +962,12 @@ public sealed class CoverageSolutionScriptTests
         Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)!);
         Directory.CreateDirectory(binDirectory);
         await File.WriteAllTextAsync(scriptPath, ReadScript());
+        var gateScriptPath = Path.Join(workspace.Path, "scripts", "coverage-gate-fanin.sh");
+        await File.WriteAllTextAsync(gateScriptPath, ReadRepositoryFile("scripts", "coverage-gate-fanin.sh"));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(gateScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
         await File.WriteAllTextAsync(
             dotnetStub,
             "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> \"$DOTNET_INVOCATION_MARKER\"\nexit \"$DOTNET_STUB_EXIT_CODE\"\n");
@@ -976,6 +999,8 @@ public sealed class CoverageSolutionScriptTests
         }
 
         startInfo.Environment.Remove("COVERAGE_GATE_DIFF_BASE");
+        startInfo.Environment.Remove("COVERAGE_FANIN_NATIVE");
+        startInfo.Environment.Remove("COVERAGE_DIRECTORY");
 
         startInfo.Environment["DOTNET_INVOCATION_MARKER"] = dotnetInvocationMarker;
         startInfo.Environment["DOTNET_STUB_EXIT_CODE"] = dotnetExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
