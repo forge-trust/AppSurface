@@ -21,7 +21,7 @@ Verified cross-platform coverage remains independently bound to matching source,
 - [ ] Repeatable packed CLI storage journey through EvidenceHost.
 - [ ] Repeatable installed-consumer journey with independent test/report/integrity assertions.
 - [ ] Native verified fan-in consumption through EvidenceHost, retaining aggregate/patch policy.
-- [ ] Reference, decision, pitfall and adoption documentation with a runnable native recipe.
+- [ ] Reference, decision, pitfall and adoption documentation with an executable native recipe.
 - [ ] Formatting, relevant tests, independent review, QA and current coverage gates pass.
 - [ ] Draft follow-up PR and required CI pass; at most three CI repair rounds and 60 cumulative minutes of CI waiting.
 

@@ -298,18 +298,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         await RunCheckedAsync(package.Executable, gateArgs, source.Root, MergeEnvironment(package.Environment, options.Environment), budget, cancellationToken).ConfigureAwait(false);
 
         _stageDetail = "junit";
-        var reportFiles = Directory.EnumerateFiles(output, "*.xml", SearchOption.AllDirectories).Where(path => !path.EndsWith("coverage.cobertura.xml", StringComparison.OrdinalIgnoreCase)).ToArray();
-        var testCases = new List<XElement>();
-        foreach (var report in reportFiles)
-        {
-            using var reportStream = File.OpenRead(report);
-            using var reportReader = System.Xml.XmlReader.Create(reportStream, new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Prohibit, XmlResolver = null });
-            var document = XDocument.Load(reportReader, LoadOptions.None);
-            if (document.Root?.Name.LocalName is not ("testsuite" or "testsuites")) continue;
-            var reportCases = document.Descendants().Where(node => node.Name.LocalName == "testcase").ToArray();
-            ValidateJUnitCounts(document.Root, reportCases);
-            testCases.AddRange(reportCases);
-        }
+        var testCases = ReadJUnitReports(output, source.ExpectedProjectCount, cancellationToken);
 
         if (testCases.Count == 0 || testCases.Any(test => HasFailure(test) || !IsPermittedSkip(test, options.PermittedSkipPatterns))) throw new InvalidDataException();
         ValidateRequiredTestFragments(source.RequiredTestFragments, testCases);
@@ -392,6 +381,10 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
 
     /// <summary>Validates independent JUnit suite counters against testcase elements.</summary>
     internal static void ValidateJUnitCountsForTests(XElement root, IReadOnlyList<XElement> testCases) => ValidateJUnitCounts(root, testCases);
+
+    /// <summary>Reads only the declared JUnit inventory with report, aggregate and testcase bounds.</summary>
+    internal static IReadOnlyList<XElement> ReadJUnitReportsForTests(string output, int expectedProjectCount, CancellationToken cancellationToken = default) =>
+        ReadJUnitReports(output, expectedProjectCount, cancellationToken);
 
     /// <summary>Checks whether a skipped testcase is explicitly permitted with a rationale.</summary>
     internal static bool IsPermittedSkipForTests(XElement testCase, IReadOnlyDictionary<string, string>? permittedPatterns) => IsPermittedSkip(testCase, permittedPatterns);
@@ -670,6 +663,45 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             var matches = testCases.Where(test => test.Attributes().Any(attribute => attribute.Value.Contains(fragment, StringComparison.Ordinal))).ToArray();
             if (matches.Length == 0 || matches.Any(test => HasFailure(test) || HasSkip(test))) throw new InvalidDataException();
         }
+    }
+
+    private static IReadOnlyList<XElement> ReadJUnitReports(string output, int expectedProjectCount, CancellationToken cancellationToken)
+    {
+        const long maximumReportBytes = 16L * 1024 * 1024;
+        const long maximumTotalBytes = 64L * 1024 * 1024;
+        const int maximumTestCases = 100_000;
+        if (expectedProjectCount <= 0 || expectedProjectCount > maximumTestCases) throw new InvalidDataException("Invalid JUnit project inventory.");
+        var reports = Directory.EnumerateFiles(output, "junit-*.xml", SearchOption.TopDirectoryOnly).Take(expectedProjectCount + 1).ToArray();
+        if (reports.Length != expectedProjectCount) throw new InvalidDataException("JUnit project inventory differs from the declared scope.");
+        var cases = new List<XElement>();
+        var totalBytes = 0L;
+        foreach (var report in reports)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var stream = new FileStream(report, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (stream.Length == 0 || stream.Length > maximumReportBytes || (totalBytes += stream.Length) > maximumTotalBytes)
+                throw new InvalidDataException("JUnit evidence exceeds the report or aggregate byte limit.");
+            using var reader = System.Xml.XmlReader.Create(stream, new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersInDocument = maximumReportBytes,
+            });
+            var document = XDocument.Load(reader, LoadOptions.None);
+            if (document.Root?.Name.LocalName is not ("testsuite" or "testsuites")) throw new InvalidDataException("Invalid JUnit report root.");
+            var reportCases = document.Descendants().Where(node => node.Name.LocalName == "testcase").Take(maximumTestCases - cases.Count + 1).ToArray();
+            if (reportCases.Length > maximumTestCases - cases.Count) throw new InvalidDataException("JUnit evidence exceeds the testcase limit.");
+            ValidateJUnitCounts(document.Root, reportCases);
+            foreach (var testCase in reportCases)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Retain assertion inputs only; testcase output and parent links must not retain every document.
+                cases.Add(new XElement("testcase", testCase.Attributes(),
+                    testCase.Elements().Where(child => child.Name.LocalName is "failure" or "error" or "skipped")
+                        .Select(child => new XElement(child.Name.LocalName))));
+            }
+        }
+        return cases;
     }
 
     private static void ValidateJUnitCounts(XElement root, IReadOnlyList<XElement> testCases)
