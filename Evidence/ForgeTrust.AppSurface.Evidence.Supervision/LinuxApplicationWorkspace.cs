@@ -438,9 +438,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     /// <summary>Checks exact owner references without reading account properties, for account-holder reservation.</summary>
     internal void RequireAccountOwner(LinuxRunAccounts accounts, LinuxOwnerActivation owner)
     {
-        if (!ReferenceEquals(_accounts, accounts) || !ReferenceEquals(_owner, owner)
-            || _layout.RunId == Guid.Empty || _layout.RootName != "appsurface-app-" + owner.RunId.ToString("N"))
+        if (!ReferenceEquals(_accounts, accounts) || !ReferenceEquals(_owner, owner))
             throw LinuxApplicationWorkspaceLayout.Invalid();
+        LinuxWorkspaceOwnerPolicy.RequireApplicationData(_layout.RunId, _layout.RootName, owner.RunId);
     }
 
     /// <summary>Retains the one authentic application process before its start, stop, or pipe work can dispatch.</summary>

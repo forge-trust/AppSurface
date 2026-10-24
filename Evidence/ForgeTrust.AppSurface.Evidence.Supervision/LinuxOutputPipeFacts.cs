@@ -1,23 +1,12 @@
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Copied observations from one actual native pipe pair; this value creates no handle or authority.</summary>
-/// <remarks>
-/// Production code supplies these fields only after pipe2, fcntl and stat acquisition. The policy is split at
-/// those acquisition boundaries so a failed descriptor or flag syscall is reported before any metadata is read.
-/// Tests may copy observations into this value to exercise rejection rules, but cannot create a LinuxOutputPipes
-/// instance or authenticate a process, account, admission, unit or output transport.
-/// </remarks>
-internal readonly record struct LinuxOutputPipeFacts(
-    int ReadDescriptor,
-    int WriteDescriptor,
-    int ReadAccessFlags,
-    int WriteAccessFlags,
-    int ReadDescriptorFlags,
-    int WriteDescriptorFlags,
-    LinuxProtectedMetadata ReadMetadata,
-    LinuxProtectedMetadata WriteMetadata);
-
 /// <summary>Data-only policy for observations obtained by LinuxOutputPipes.CreatePair.</summary>
+/// <remarks>
+/// Production supplies these observations only after pipe2, fcntl and stat acquisition. Validation stays
+/// split at those boundaries so invalid descriptors or flags reject before metadata acquisition. This
+/// policy performs no syscall and creates no handle, LinuxOutputPipes instance or native authority.
+/// Copied observations in portable tests cannot authenticate a process, account, admission, unit or pipe.
+/// </remarks>
 internal static class LinuxOutputPipeFactsPolicy
 {
     private const int ReadOnly = 0;

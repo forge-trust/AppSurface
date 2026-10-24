@@ -13,6 +13,22 @@ public sealed class LinuxApplicationWorkspaceTests
         8, 256 * 1024, 30, 5);
 
     [Fact]
+    public void WorkspaceOwnerPolicyAcceptsApplicationGenerationAndRejectsRootOrEmptyGeneration()
+    {
+        var rootName = "appsurface-app-" + RunId.ToString("N");
+        LinuxWorkspaceOwnerPolicy.RequireApplicationData(RunId, rootName, RunId);
+
+        var rootError = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxWorkspaceOwnerPolicy.RequireApplicationData(RunId, "appsurface-app-other", RunId));
+        Assert.Equal("ASEVD410", rootError.Code);
+        Assert.Null(rootError.InnerException);
+        var emptyError = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxWorkspaceOwnerPolicy.RequireApplicationData(Guid.Empty, rootName, RunId));
+        Assert.Equal("ASEVD410", emptyError.Code);
+        Assert.Null(emptyError.InnerException);
+    }
+
+    [Fact]
     public void LayoutCopiesSelectedRowsAndProjectsBundleOutsideTheDeniedToolRoot()
     {
         var source = Files(includeExtension: true);

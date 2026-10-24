@@ -14,12 +14,9 @@ public sealed class LinuxOutputPipesTests
     {
         var read = Metadata(0x1000, 91, 0, 0);
         var write = read;
-        var facts = new LinuxOutputPipeFacts(12, 13, 0, 1, 1, 1, read, write);
-
-        LinuxOutputPipeFactsPolicy.ValidateDescriptors(facts.ReadDescriptor, facts.WriteDescriptor);
-        LinuxOutputPipeFactsPolicy.ValidateFlags(facts.ReadAccessFlags, facts.WriteAccessFlags,
-            facts.ReadDescriptorFlags, facts.WriteDescriptorFlags);
-        LinuxOutputPipeFactsPolicy.ValidateMetadata(facts.ReadMetadata, facts.WriteMetadata);
+        LinuxOutputPipeFactsPolicy.ValidateDescriptors(12, 13);
+        LinuxOutputPipeFactsPolicy.ValidateFlags(0, 1, 1, 1);
+        LinuxOutputPipeFactsPolicy.ValidateMetadata(read, write);
     }
 
     [Theory]

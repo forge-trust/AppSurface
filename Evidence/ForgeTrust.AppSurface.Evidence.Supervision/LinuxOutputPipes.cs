@@ -193,7 +193,7 @@ internal sealed partial class LinuxOutputPipes : IAsyncDisposable
             LinuxOutputPipeFactsPolicy.ValidateFlags(readFlags, writeFlags, readDescriptorFlags, writeDescriptorFlags);
             var reader = StatFd(read);
             var writer = StatFd(write);
-            LinuxOutputPipeFactsPolicy.ValidateMetadata(reader, writer);
+            LinuxOutputPipeFactsPolicy.ValidateMetadata(LinuxProtectedMetadata.From(reader), LinuxProtectedMetadata.From(writer));
             return (read, write);
         }
         catch

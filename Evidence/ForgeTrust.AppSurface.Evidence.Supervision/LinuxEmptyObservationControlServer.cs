@@ -135,59 +135,32 @@ internal sealed class LinuxEmptyObservationControlServer
             }
             finally
             {
-                var ioJoined = true;
                 var exitIntent = _exitIntent.Task.IsCompleted;
-                Task? failedDrain = null;
-                if (!exitIntent)
-                {
-                    // A workload handler can await a descendant that only containment can release.
-                    // Start the original cleanup clock and stop before joining any such handler.
-                    stage = LinuxControlFailureStage.DescendantsStop;
-                    try { failedDrain = _sequence.BeginFailedDrain(CleanupToken()); }
-                    catch (Exception error) when (Recoverable(error))
-                    { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
-                }
-                // Cancel and join this original added task under the same requests/root deadline.
-                try { cancellationLifetime.Cancel(); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-                try { await _cancellationSignal.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (cancellationLifetime.IsCancellationRequested) { }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-                stage = LinuxControlFailureStage.AcceptCancel;
-                try { accepts.Cancel(); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
-                // Interrupt and join original root-rendezvous I/O before joining its parent handlers.
-                ioJoined = await CloseQualificationCheckpointsAsync(ioJoined).ConfigureAwait(false);
-                // Valid EXIT intent retains live handlers through their writes. Failure without EXIT still
-                // closes all results first to interrupt their original I/O, as before.
-                stage = LinuxControlFailureStage.ListenerClose;
-                try
-                {
-                    if (exitIntent) await _listener.CloseAcceptAdmissionAsync().ConfigureAwait(false);
-                    else await _listener.DisposeAsync().ConfigureAwait(false);
-                }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
-                if (pending is not null)
-                {
-                    stage = LinuxControlFailureStage.PendingAcceptJoin;
-                    try { await pending.ConfigureAwait(false); }
-                    catch (Exception error) when (Recoverable(error)) { /* Listener drain independently latches unexpected failure; pending accept cancellation is expected. */ }
-                }
-                stage = LinuxControlFailureStage.HandlersJoin;
-                try { await Task.WhenAll(handlers).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
-                if (exitIntent)
-                {
-                    stage = LinuxControlFailureStage.ListenerClose;
-                    try { await _listener.DisposeAsync().ConfigureAwait(false); }
-                    catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error, _listener.FirstFailure); ioJoined = false; _sequence.RecordFailure(); }
-                }
-                stage = LinuxControlFailureStage.DescendantsStop;
-                try { await (failedDrain ?? _sequence.StopAsync(CleanupToken())).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); _sequence.RecordFailure(); }
+                var actions = new SupervisionControlDrainActions(
+                    BeginFailedDrain: () => _sequence.BeginFailedDrain(CleanupToken()),
+                    CancelSignal: cancellationLifetime.Cancel,
+                    Signal: _cancellationSignal!,
+                    SignalLifetime: cancellationLifetime.Token,
+                    CancelAccept: accepts.Cancel,
+                    CloseCheckpoints: joined =>
+                    {
+                        stage = LinuxControlFailureStage.AcceptCancel;
+                        return CloseQualificationCheckpointsAsync(joined);
+                    },
+                    CloseAcceptAdmission: () => _listener.CloseAcceptAdmissionAsync(),
+                    CloseListener: () => _listener.DisposeAsync().AsTask(),
+                    StopDescendants: () => _sequence.StopAsync(CleanupToken()),
+                    JoinControls: async () => { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); },
+                    ExitSignalStage: stage);
+                var ioJoined = await SupervisionControlDrain.RunAsync(exitIntent, pending, handlers, actions,
+                    (failureStage, error) =>
+                    {
+                        stage = failureStage;
+                        _failures.Capture(failureStage, null, error,
+                            failureStage == LinuxControlFailureStage.ListenerClose ? _listener.FirstFailure : null);
+                        _sequence.RecordFailure();
+                    }).ConfigureAwait(false);
                 stage = LinuxControlFailureStage.ControlsJoin;
-                try { await _ledger.CloseAndJoinControlsAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { _failures.Capture(stage, null, error); ioJoined = false; _sequence.RecordFailure(); }
                 RecordQualificationOriginalJoins(pending, handlers);
                 if (ioJoined && Volatile.Read(ref _connectionCloseFailed) == 0)
                     Interlocked.Exchange(ref _ioJoined, 1);

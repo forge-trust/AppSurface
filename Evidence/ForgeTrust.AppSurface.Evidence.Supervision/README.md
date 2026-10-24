@@ -7,6 +7,10 @@ The [restricted application owner](application-execution.md) extends the same C#
 
 ## Account identity during teardown
 
+The [producer settlement policy](producer-settlement.md) keeps report readiness separate from physical cleanup. Its copied-data controls cannot authenticate a producer; the native process still checks its original owner, accounts, workspace, quota and original task joins.
+
+The [workspace owner data policy](workspace-policy.md) enforces the existing captured UID/GID and generated-root comparisons after each wrapper’s original reference checks. It cannot construct or authenticate an owner or workspace.
+
 After `BeginRootTeardown`, new work admission is closed. The private N08/N09 cancellation
 projection therefore reads the original results GID through
 [`LinuxRunAccounts.RequireControlOwnedBy`](LinuxRunAccounts.cs), using the reference-equal
@@ -21,6 +25,8 @@ check still applies. The native N09 cancellation fixture must independently veri
 facts; successful metadata encoding or local tests alone do not complete that control.
 
 ## Control transport and artifact directory failures
+
+The [control drain procedure](control-drain.md) joins the server’s original signal, accept, handler and stop tasks in the failure-preserving order required by native shutdown. Portable task/barrier controls verify that bookkeeping; the native server retains authentication and physical settlement.
 
 [`LinuxRunWorkspace.RequireControlOwnedBy`](LinuxRunWorkspace.cs) rechecks the retained `/`, `/run`,
 generation, worker-control and broker directories, plus the sealed descriptor. The exact policy selection

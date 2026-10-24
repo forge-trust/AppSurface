@@ -9,6 +9,41 @@ public sealed class LinuxProducerWorkspaceTests
     private static readonly LinuxRunAccountSnapshot Accounts = new(21001, 21002, 21003, 21004, 21005);
 
     [Fact]
+    public void WorkspaceOwnerPolicyAcceptsValidNeighborsAndRejectsEachProducerDataBoundary()
+    {
+        var ownerRunId = Guid.Parse("c98ae387-23dc-4d04-9c3d-6a08f79c3712");
+        var rootName = "appsurface-evidence-producer-data-" + ownerRunId.ToString("N");
+        LinuxWorkspaceOwnerPolicy.RequireProducerData(Accounts, rootName, ownerRunId);
+        LinuxWorkspaceOwnerPolicy.RequireProducerData(new LinuxRunAccountSnapshot(1, 2, 3, 4, 5),
+            rootName, ownerRunId);
+        LinuxWorkspaceOwnerPolicy.RequireProducerData(new LinuxRunAccountSnapshot(uint.MaxValue - 4,
+            uint.MaxValue - 3, uint.MaxValue - 2, uint.MaxValue - 1, uint.MaxValue - 5), rootName, ownerRunId);
+
+        var invalid = new[]
+        {
+            Accounts with { WorkerUid = 0 }, Accounts with { WorkerUid = uint.MaxValue },
+            Accounts with { SubjectUid = 0 }, Accounts with { SubjectUid = uint.MaxValue },
+            Accounts with { WorkerGid = 0 }, Accounts with { WorkerGid = uint.MaxValue },
+            Accounts with { SubjectGid = 0 }, Accounts with { SubjectGid = uint.MaxValue },
+            Accounts with { ResultsGid = 0 }, Accounts with { ResultsGid = uint.MaxValue },
+            Accounts with { SubjectUid = Accounts.WorkerUid }, Accounts with { SubjectGid = Accounts.WorkerGid },
+            Accounts with { ResultsGid = Accounts.WorkerGid }, Accounts with { ResultsGid = Accounts.SubjectGid },
+        };
+
+        Assert.All(invalid, identity =>
+        {
+            var error = Assert.Throws<EvidenceAdmissionException>(() =>
+                LinuxWorkspaceOwnerPolicy.RequireProducerData(identity, rootName, ownerRunId));
+            Assert.Equal("ASEVD402", error.Code);
+            Assert.Null(error.InnerException);
+        });
+        var rootError = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxWorkspaceOwnerPolicy.RequireProducerData(Accounts, "other", ownerRunId));
+        Assert.Equal("ASEVD402", rootError.Code);
+        Assert.Null(rootError.InnerException);
+    }
+
+    [Fact]
     public void CombinedCopyReservationsRejectBeforeTheNextTreeCanWriteBeyondItsBudget()
     {
         var budget = new LinuxProducerCopyBudget();

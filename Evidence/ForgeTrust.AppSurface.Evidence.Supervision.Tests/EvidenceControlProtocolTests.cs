@@ -210,6 +210,36 @@ public sealed class EvidenceControlProtocolTests
     }
 
     [Fact]
+    public void NamesAcceptAllowedPunctuationBeforeRejectingAColon()
+    {
+        var accepted = Assert.IsType<EvidenceArtifactsControlRequest>(Parse(JsonSerializer.Serialize(new
+        {
+            op = "artifacts", relative_root = "a.b_c-d",
+        })));
+        Assert.Equal("a.b_c-d", accepted.RelativeRoot);
+        Reject(JsonSerializer.Serialize(new { op = "artifacts", relative_root = "a:b" }));
+    }
+
+    [Fact]
+    public void HexFieldsAcceptNumericAndLowercaseValuesBeforeRejectingUppercase()
+    {
+        var application = Assert.IsType<EvidenceApplicationStartControlRequest>(Parse(JsonSerializer.Serialize(new
+        {
+            op = "application-start", application_id = "app", entry_digest = new string('0', 64),
+        })));
+        Assert.Equal(new string('0', 64), application.EntryDigest);
+        var resource = Assert.IsType<EvidenceResourceWaitControlRequest>(Parse(JsonSerializer.Serialize(new
+        {
+            op = "resource-wait", lease_id = new string('9', 32), resource_id = "http-1",
+        })));
+        Assert.Equal(new string('9', 32), resource.LeaseId);
+        Reject(JsonSerializer.Serialize(new
+        {
+            op = "application-start", application_id = "app", entry_digest = new string('A', 64),
+        }));
+    }
+
+    [Fact]
     public void DecodedUtf8TokenLimitCountsBytesInsteadOfCharactersOrJsonEscapes()
     {
         var maximum = string.Concat(Enumerable.Repeat("😀", 1024));

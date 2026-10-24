@@ -217,15 +217,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     {
         if (!ReferenceEquals(accounts, _accounts) || !ReferenceEquals(owner, _owner))
             throw LinuxProducerWorkspaceLayout.Invalid();
-        var identity = _layout.Accounts;
-        if (identity.WorkerUid is 0 or uint.MaxValue || identity.SubjectUid is 0 or uint.MaxValue
-            || identity.WorkerUid == identity.SubjectUid || identity.WorkerGid is 0 or uint.MaxValue
-            || identity.SubjectGid is 0 or uint.MaxValue || identity.ResultsGid is 0 or uint.MaxValue
-            || identity.WorkerGid == identity.SubjectGid || identity.WorkerGid == identity.ResultsGid
-            || identity.SubjectGid == identity.ResultsGid
-            || !StringComparer.Ordinal.Equals(_layout.RootName,
-                "appsurface-evidence-producer-data-" + owner.RunId.ToString("N")))
-            throw LinuxProducerWorkspaceLayout.Invalid();
+        LinuxWorkspaceOwnerPolicy.RequireProducerData(_layout.Accounts, _layout.RootName, owner.RunId);
     }
 
     /// <summary>Retains the exact producer before any unit-start I/O can be dispatched.</summary>

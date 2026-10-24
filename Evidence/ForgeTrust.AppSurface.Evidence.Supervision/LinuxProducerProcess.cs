@@ -155,12 +155,13 @@ internal sealed class LinuxProducerProcess
         owner.RequireLaunchInput(_input, token);
         accounts.RequireOwnedBy(owner, token);
         workspace.RequireOwnedBy(owner, accounts, token);
-        if (_run is not { IsCompletedSuccessfully: true } || !PhysicallySettled
-            || _normalTerminal is null || _stoppedTerminal is null || _output is not { Successful: true }
-            || _output.DiscardedBytes != 0 || _outputBudget.QuotaExceeded
-            || Volatile.Read(ref _failed) != 0 || Volatile.Read(ref _cleanupFailed) != 0
-            || Volatile.Read(ref _groupEmptyTwice) == 0 || Volatile.Read(ref _pumpJoined) == 0)
-            throw LinuxSystemdBackend.InvalidControl();
+        LinuxProducerSettlementPolicy.RequireReportPrefix(
+            _run is { IsCompletedSuccessfully: true }, PhysicallySettled,
+            _normalTerminal is not null, _stoppedTerminal is not null, _output);
+        if (_outputBudget.QuotaExceeded) throw LinuxSystemdBackend.InvalidControl();
+        LinuxProducerSettlementPolicy.RequireReportLatches(
+            Volatile.Read(ref _failed) != 0, Volatile.Read(ref _cleanupFailed) != 0,
+            Volatile.Read(ref _groupEmptyTwice) != 0, Volatile.Read(ref _pumpJoined) != 0);
     }
 
     /// <summary>Requires retained original references and successful native cleanup joins, but not zero test exit.</summary>
@@ -172,15 +173,16 @@ internal sealed class LinuxProducerProcess
         owner.RequireControlIdentity(token);
         accounts.RequireControlOwnedBy(owner, token);
         workspace.RequireControlOwnedBy(owner, accounts, token);
-        var pending = _pending.Snapshot;
-        var startJoined = !pending.StartReserved || pending.StartJoined;
-        var noProcessAcquired = Volatile.Read(ref _dispatchAttempted) == 0;
-        if (!PhysicallySettled || !pending.Closed || !pending.StopJoined || pending.FirstFailure is SupervisionPendingStartFailure.StopFailed or SupervisionPendingStartFailure.StopCancelled
-            || !startJoined || Volatile.Read(ref _cleanupFailed) != 0
-            || !noProcessAcquired && (_stoppedTerminal is null || Volatile.Read(ref _groupEmptyTwice) == 0
-                || Volatile.Read(ref _pumpJoined) == 0 || _output is not { Drained: true }
-                || _collect is { IsCompleted: false }))
-            throw LinuxSystemdBackend.InvalidControl();
+        LinuxProducerSettlementPolicy.RequirePhysicalSettlement(new(
+            Pending: _pending.Snapshot,
+            DispatchAttempted: Volatile.Read(ref _dispatchAttempted) != 0,
+            PhysicallySettled: PhysicallySettled,
+            CleanupFailed: Volatile.Read(ref _cleanupFailed) != 0,
+            StoppedTerminalObserved: _stoppedTerminal is not null,
+            GroupEmptyTwice: Volatile.Read(ref _groupEmptyTwice) != 0,
+            PumpJoined: Volatile.Read(ref _pumpJoined) != 0,
+            OutputDrained: _output is { Drained: true },
+            CollectionPending: _collect is { IsCompleted: false }));
     }
 
     private async Task<EvidenceRestrictedProcessResult> RunOwnedAsync(string resultsToken,

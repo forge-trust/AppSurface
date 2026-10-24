@@ -1,31 +1,26 @@
 # EvidenceHost C# runtime cutover
 
-## Verified runtime status — 2026-10-24
+## Recorded Linux validation — 2026-10-24
 
-[Linux run 40089303831](https://github.com/forge-trust/AppSurface/actions/runs/40089303831),
-at source `dfd5887261f86ef2ba56b0ccb897704e1eb778e8`, has independently verified
-all sixteen worker controls without skips, all thirteen application/workspace
-controls, the original 39 and supplementary 41 root controls, account creation
-and expected rollback, and all seven packaged producer/artifact controls. Both
-CLI metadata-shutdown regression rows passed in the retained Linux TRX.
-The source capture binds 3,497 files, bytes and modes; its SHA-256 is
-`43d373197812a40f397c1e4dae18be96c2c41ddec3c2ce48181d738f6b569555`.
+[Linux run 40104067585](https://github.com/forge-trust/AppSurface/actions/runs/40104067585),
+at source `b5461cfa3b73fa00aa8d8b15e1b724f5bdb0b9ad`, independently verified all
+sixteen C1 worker controls, seven C3 application controls, six workspace controls,
+39 original root controls, 41 supplementary root controls, account creation and
+expected rollback, and seven packaged C2 producer/artifact controls. Both Linux
+shutdown regression rows passed, the corrected doc-clock check passed, and the
+packaged smoke completed 22 commands with six expected rejection results. The
+source capture binds 3,498 files, bytes and modes; its SHA-256 is
+`d72894c34ab245be825f7cfa4e971dd0ed0bf840173115e507ef956bf67ba465`.
 
-The same run completed all fourteen worker measurement segments, but the
-[solution command](issue779-coverage-gate.md) stopped with `ASCOV120`: the installed
-Durable Doctor test's D04 row expected a current heartbeat after a separate
-process and database read could cross its 15-second boundary. The CLI project
-recorded 3,203 passed and one failed test. No numerical gate result was produced.
-The follow-up keeps the production threshold and timeouts unchanged, pins the
-seeded heartbeat and derives its expected D04/D05 result from the captured database
-timestamp. Its six focused boundary controls, the existing 28-row classifier
-matrix and the real installed-package PostgreSQL matrix passed locally. Fresh
-Linux validation and a numerical gate pass remain required. These observations exercise the C# runtime and its
-private qualification images; they do not populate the production Trusted
-catalogue or accepted-proof registry, prove protected Windows/macOS execution, or close
-every row of the [approved acceptance matrix](../plans/issue-779-evidencehost-test-plan.md).
-The dated records below describe their stated sources and retain their original
-limits. The sections below explain the C# runtime and the role of Python test preparation.
+The same run completed the full solution test set and reached the unchanged
+[solution coverage gate](issue779-coverage-gate.md). Aggregate coverage passed at
+95.9057% lines and 87.0851% branches against 94.5% and 84.5% thresholds. Patch
+coverage failed `ASCOV020` at 86.9492% lines and 79.9151% branches; the current
+denominator requires 1,337 additional fully covered lines and 1,394 conditions.
+The coverage and [acceptance status](issue779-acceptance-status.md) retain the
+original thresholds, comparison base and exclusions. Further source edits require their own source-bound Linux and coverage verification. These observations do not close all 57 groups,
+populate the production Trusted catalogue or accepted-proof registry, or establish
+protected Windows/macOS/native-platform acceptance.
 
 The [supervision library](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md) is the sole runtime owner. The protected AppSurface executable runs `evidence supervise --request <protected-file>` as root and starts the same image as `evidence worker --control <protected-socket>` under its separate worker identity. The C# server owns authenticated protocol dispatch, process creation, application readiness, SDK/package inputs, reporter output accounting, retained artifact custody and strict cleanup. There is no Python runtime fallback.
 

@@ -120,6 +120,16 @@ public sealed class EvidenceWorkerDescriptorDataTests
     }
 
     [Fact]
+    public void NumericLowercaseDigestBoundariesRemainAcceptedBeforeInvalidUppercaseData()
+    {
+        var data = Make(entry: new string('0', 64), policy: new string('9', 64));
+        using var document = JsonDocument.Parse(data.DescriptorBytes);
+        Assert.Equal(new string('0', 64), document.RootElement.GetProperty("entry_sha256").GetString());
+        Assert.Equal(new string('9', 64), document.RootElement.GetProperty("policy_sha256").GetString());
+        Reject(() => Make(entry: new string('A', 64)));
+    }
+
+    [Fact]
     public void NullInputsAndEmptyGenerationRejectBeforeSerialization()
     {
         var request = Parse(Valid());
