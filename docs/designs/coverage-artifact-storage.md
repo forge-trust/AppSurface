@@ -979,7 +979,7 @@ REALITY: obligation-tiers pass accepted defaults/lifecycle/docs/tests must ship;
 - Outside: Claude Code unavailable (resolver null), no outside completion credit.
 - Parallelization: docs/core overlap after baseline; shared CLI integration sequential; Evidence then final proof, one PR.
 - Lake Score: N/A, no scored coverage alternative question.
-- QA artifact: saved and byte-readback verified at /Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261020-210000.md (16 edge cases, 16 critical paths).
+- QA artifact: saved and byte-readback verified at the private QA plan (andrew-main-eng-review-test-plan-20261020-210000.md) (16 edge cases, 16 critical paths).
 - Suppressed findings: none promoted below confidence 7; no claim about a runtime regression from absent future code.
 
 Timing receipt: native review duration is estimated at 411 seconds from bounded waits, not exact provider telemetry; whole-phase elapsed is recorded by the timing helper.
@@ -1028,7 +1028,7 @@ Synthesized from the findings above. Estimates include native/fault verification
 - Nine tasks aggregated from latest branch/recent-commit phase artifacts (2 CEO, 4 engineering, 3 DX); none are exact duplicates. Files listed as unknown remain unknown. Design emitted no task artifact because it was skipped.
 - No urgent out-of-plan issue identified. No runtime coverage run or feature implementation occurred. Only the design and the scoped remote-retention TODO are repository changes.
 - Pending gate revision 1: d1 resource envelope, d2 maintenance preview, d3 policy editing, p1 amended-plan approval. No User Challenge overrides the user's accepted premises.
-- Full review: .gstack/tmp/autoplan/review-record.md; owner summary: .gstack/tmp/autoplan/summary.md; QA plan: /Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261020-210000.md.
+- Full review: .gstack/tmp/autoplan/review-record.md; owner summary: .gstack/tmp/autoplan/summary.md; QA plan: the private QA plan (andrew-main-eng-review-test-plan-20261020-210000.md).
 - Approved tool upgrade completed: global Codex gstack v1.91.170.0 -> v1.91.173.0; existing unrelated checkout changes preserved. Claude-owned older install was outside this Codex update.
 
 ### Final approval — 2026-10-20

@@ -52,7 +52,10 @@ public sealed class CoverageArtifactOperationLeaseProcessTests
 
     private sealed class LeaseTree : IDisposable
     {
-        private LeaseTree(string root) => Root = root;
+        private LeaseTree(string root)
+        {
+            Root = root;
+        }
 
         internal string Root { get; }
         internal string Output => Path.Join(Root, "output");

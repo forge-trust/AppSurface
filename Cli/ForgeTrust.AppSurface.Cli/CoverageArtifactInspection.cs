@@ -1,5 +1,5 @@
-using System.Xml;
 using System.Runtime.InteropServices;
+using System.Xml;
 using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;

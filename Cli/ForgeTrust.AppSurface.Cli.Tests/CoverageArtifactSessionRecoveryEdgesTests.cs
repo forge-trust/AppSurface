@@ -1,5 +1,5 @@
-using System.Text.Json.Nodes;
 using System.Security.Cryptography;
+using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;

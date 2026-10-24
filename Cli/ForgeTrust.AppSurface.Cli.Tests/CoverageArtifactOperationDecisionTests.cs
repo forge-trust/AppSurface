@@ -1,7 +1,7 @@
-using ForgeTrust.AppSurface.Testing;
 using System.ComponentModel;
-using Microsoft.Win32.SafeHandles;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -220,7 +220,10 @@ public sealed class CoverageArtifactOperationDecisionTests
 
     private sealed class LeaseDirectory : IDisposable
     {
-        private LeaseDirectory(string path) => Path = path;
+        private LeaseDirectory(string path)
+        {
+            Path = path;
+        }
 
         internal string Path { get; }
 

@@ -1,7 +1,7 @@
-using CliFx.Infrastructure;
-using ForgeTrust.AppSurface.Evidence.Coverage;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CliFx.Infrastructure;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -78,7 +78,11 @@ public sealed class CoverageStoragePresentationTests
     private sealed class Domain : IDisposable
     {
         private readonly string? _previous = Environment.GetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME");
-        internal Domain(string root) => Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", root);
+        internal Domain(string root)
+        {
+            Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", root);
+        }
+
         public void Dispose() => Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", _previous);
     }
 }

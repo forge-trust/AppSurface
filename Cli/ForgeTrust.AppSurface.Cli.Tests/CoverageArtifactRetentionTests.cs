@@ -1,7 +1,7 @@
 using System.Text.Json;
-using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -135,7 +135,11 @@ public sealed class CoverageArtifactRetentionTests
 
     private sealed class TestTempDirectory : IDisposable
     {
-        public TestTempDirectory() => Path = System.IO.Path.Join(System.IO.Path.GetTempPath(), "coverage-retention-" + Guid.NewGuid().ToString("N"));
+        public TestTempDirectory()
+        {
+            Path = System.IO.Path.Join(System.IO.Path.GetTempPath(), "coverage-retention-" + Guid.NewGuid().ToString("N"));
+        }
+
         public string Path { get; }
         public void Dispose()
         {

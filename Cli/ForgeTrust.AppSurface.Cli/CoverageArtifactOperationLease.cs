@@ -1,8 +1,8 @@
-using System.ComponentModel;
 using System.Buffers.Binary;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;

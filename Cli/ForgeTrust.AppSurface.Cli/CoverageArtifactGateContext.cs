@@ -7,7 +7,10 @@ internal sealed class CoverageArtifactGateContext : IDisposable
     private readonly TextWriter _errors;
     private CoverageArtifactOperationLease? _outputLease;
 
-    private CoverageArtifactGateContext(TextWriter errors) => _errors = errors;
+    private CoverageArtifactGateContext(TextWriter errors)
+    {
+        _errors = errors;
+    }
 
     /// <summary>Acquires strongest modes in deterministic physical-object order, reusing an explicit nested session.</summary>
     /// <param name="request">Numeric gate request with owned input/report roots.</param>

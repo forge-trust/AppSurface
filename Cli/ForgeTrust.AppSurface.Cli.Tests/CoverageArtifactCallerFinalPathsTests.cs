@@ -184,7 +184,11 @@ public sealed class CoverageArtifactCallerFinalPathsTests
     private sealed class StoreEnvironment : IDisposable
     {
         private readonly string? _previous = Environment.GetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME");
-        internal StoreEnvironment(string domain) => Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", domain);
+        internal StoreEnvironment(string domain)
+        {
+            Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", domain);
+        }
+
         public void Dispose() => Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", _previous);
     }
 }

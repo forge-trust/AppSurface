@@ -1,8 +1,8 @@
-using System.Security.Cryptography;
-using System.Text.Json;
-using System.IO.Compression;
 using System.Globalization;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.Evidence.Coverage;
 

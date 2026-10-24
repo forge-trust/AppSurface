@@ -18,7 +18,9 @@ internal sealed class CoverageArtifactProvenanceReader
     /// <summary>Creates a reader with a bounded command seam used for cancellation and fault verification.</summary>
     /// <param name="run">A command runner that observes the supplied total deadline token and returns bounded output.</param>
     internal CoverageArtifactProvenanceReader(Func<string, string[], TimeSpan, CancellationToken, Task<string?>> run)
-        => _run = run ?? throw new ArgumentNullException(nameof(run));
+    {
+        _run = run ?? throw new ArgumentNullException(nameof(run));
+    }
 
     /// <summary>Combines caller policy metadata with repository HEAD and working-tree state fingerprints.</summary>
     /// <param name="repository">Repository root supplied by the coverage invocation.</param>

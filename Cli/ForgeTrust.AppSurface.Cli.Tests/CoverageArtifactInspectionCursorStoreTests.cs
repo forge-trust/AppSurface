@@ -174,7 +174,11 @@ public sealed class CoverageArtifactInspectionCursorStoreTests
 
     private sealed class TempDirectory : IDisposable
     {
-        private TempDirectory(string path) => Path = path;
+        private TempDirectory(string path)
+        {
+            Path = path;
+        }
+
         internal string Path { get; }
         internal static TempDirectory Create()
         {

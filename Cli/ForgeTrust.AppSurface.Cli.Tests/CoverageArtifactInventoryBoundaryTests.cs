@@ -1,5 +1,5 @@
-using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.AppSurface.Evidence.Coverage;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
