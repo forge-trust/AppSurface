@@ -7,6 +7,8 @@ The [restricted application owner](application-execution.md) extends the same C#
 
 ## Account identity during teardown
 
+The internal [producer cleanup procedure](producer-cleanup.md) preserves pending-stop, stopped observation, pump joins and local closes in their original failure-preserving order. It creates no native owner or settlement fact.
+
 The [producer settlement policy](producer-settlement.md) keeps report readiness separate from physical cleanup. Its copied-data controls cannot authenticate a producer; the native process still checks its original owner, accounts, workspace, quota and original task joins.
 
 The [workspace owner data policy](workspace-policy.md) enforces the existing captured UID/GID and generated-root comparisons after each wrapper’s original reference checks. It cannot construct or authenticate an owner or workspace.

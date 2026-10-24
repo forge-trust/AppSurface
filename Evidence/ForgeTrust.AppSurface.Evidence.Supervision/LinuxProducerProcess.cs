@@ -264,37 +264,22 @@ internal sealed class LinuxProducerProcess
         cleanup.CancelAfter(TimeSpan.FromTicks(Math.Min(_owner.CleanupRemaining.Ticks,
             TimeSpan.FromSeconds(_input.Request.CleanupSeconds).Ticks)));
         var cleanupToken = cleanup.Token;
-        try
-        {
-            await _pending.StopAsync(StopSelectedUnitAsync, cleanupToken).ConfigureAwait(false);
-        }
-        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-
-        if (Volatile.Read(ref _dispatchAttempted) != 0)
-        {
-            try { await ObserveStoppedAndEmptyTwiceAsync(cleanupToken).ConfigureAwait(false); }
-            catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-        }
-
-        if (_pipes is not null)
-        {
-            try { _pipes.CloseWriteCopies(); }
-            catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-            if (_collect is not null)
+        await SupervisionProducerCleanup.RunAsync(new(
+            StopPending: () => _pending.StopAsync(StopSelectedUnitAsync, cleanupToken),
+            DispatchAttempted: () => Volatile.Read(ref _dispatchAttempted) != 0,
+            ObserveStopped: () => ObserveStoppedAndEmptyTwiceAsync(cleanupToken),
+            Pipes: _pipes is null ? null : new(
+            CloseWriteCopies: () => _pipes.CloseWriteCopies(),
+            JoinPumps: _collect is null ? null : async () =>
             {
-                try
-                {
-                    _output = await _pipes.JoinAsync().ConfigureAwait(false);
-                    Interlocked.Exchange(ref _pumpJoined, 1);
-                    if (!_output.Successful || _outputBudget.QuotaExceeded) Interlocked.Exchange(ref _failed, 1);
-                }
-                catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-            }
-            try { await _pipes.DisposeAsync().ConfigureAwait(false); }
-            catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-        }
-
-        SupervisionCloseSequence.CloseAll([_process, _observations, _backend, outputDeadline], ref _cleanupFailed);
+                _output = await _pipes.JoinAsync().ConfigureAwait(false);
+                Interlocked.Exchange(ref _pumpJoined, 1);
+                if (!_output.Successful || _outputBudget.QuotaExceeded) Interlocked.Exchange(ref _failed, 1);
+            },
+            DisposeAsync: () => _pipes.DisposeAsync()),
+            CloseRetainedOwners: () => SupervisionCloseSequence.CloseAll(
+                [_process, _observations, _backend, outputDeadline], ref _cleanupFailed)),
+        _ => Interlocked.Exchange(ref _cleanupFailed, 1)).ConfigureAwait(false);
 
         var pending = _pending.Snapshot;
         if (pending.FirstFailure is SupervisionPendingStartFailure.StopFailed or SupervisionPendingStartFailure.StopCancelled || !pending.StopJoined || (pending.StartReserved && !pending.StartJoined))
