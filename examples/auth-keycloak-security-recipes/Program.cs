@@ -80,11 +80,11 @@ try
         catch (ObjectDisposedException) { }
     });
     stageProgressPath = evidencePath + ".stages.json";
-    var recipeBytes = await File.ReadAllBytesAsync(recipePath);
-    var policyBytes = await File.ReadAllBytesAsync(policyPath);
+    var recipeBytes = await ReadControlDocumentAsync(recipePath, token);
+    var policyBytes = await ReadControlDocumentAsync(policyPath, token);
     var recipe = KeycloakCanonicalJson.ReadRecipe(recipeBytes);
     var policy = KeycloakCanonicalJson.ReadPolicy(policyBytes);
-    var bindings = ReadBindings(bindingsPath);
+    var bindings = ReadBindings(bindingsPath, await ReadControlDocumentAsync(bindingsPath, token));
     Console.WriteLine($"recipeSHA256={Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(KeycloakCanonicalJson.Write(recipe)))}");
     Console.WriteLine($"policySHA256={Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(KeycloakCanonicalJson.Write(policy)))}");
 
@@ -202,10 +202,22 @@ finally
     stageSubscription?.Dispose();
 }
 
-static KeycloakCaptureInputs ReadBindings(string path)
+static async Task<byte[]> ReadControlDocumentAsync(string path, CancellationToken token)
+{
+    await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+    if (file.Length > 1024 * 1024)
+        throw new JsonException("Control JSON exceeds the 1 MiB supported profile.");
+    var bytes = new byte[checked((int)file.Length)];
+    await file.ReadExactlyAsync(bytes, token);
+    if (file.ReadByte() != -1)
+        throw new JsonException("Control JSON changed while it was read.");
+    return bytes;
+}
+
+static KeycloakCaptureInputs ReadBindings(string path, ReadOnlyMemory<byte> bytes)
 {
     var bindingsDirectory = Path.GetDirectoryName(Path.GetFullPath(path))!;
-    using var document = JsonDocument.Parse(File.ReadAllBytes(path));
+    using var document = JsonDocument.Parse(bytes);
     var root = document.RootElement;
     var inputs = root.GetProperty("localInputs").EnumerateArray().Select(item => new KeycloakLocalInputBinding(
         item.GetProperty("materialId").GetString()!,

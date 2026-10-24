@@ -210,4 +210,38 @@ public sealed class CaptureTests
         Assert.Empty(Directory.EnumerateDirectories(fixture.Root, ".capture-inputs-*"));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NewPolicySelectionCannotMutateAnAcceptedInvocationInEitherOrder(bool restrictFirst)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var acceptedPolicy = fixture.Policy;
+        var firstMaterial = fixture.Recipe.MaterialReferences[0];
+        var restrictivePolicy = acceptedPolicy with { MaterialSha256ByIdentity = acceptedPolicy.MaterialSha256ByIdentity.SetItem(firstMaterial.Id, new string('0', 64)) };
+        var selectedPolicy = acceptedPolicy;
+        using var subscription = KeycloakStageEvents.Subscribe(observed =>
+        {
+            if (observed.Phase == KeycloakStagePhase.Capture && observed.Outcome == KeycloakStageOutcome.Started)
+                selectedPolicy = restrictivePolicy;
+        });
+        var rejected = Path.Combine(fixture.Root, "new-policy-rejected");
+        async Task RejectFreshPolicy()
+        {
+            var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => KeycloakSecurity.CaptureAsync(fixture.Recipe, restrictivePolicy, fixture.Bindings, rejected));
+            Assert.Equal(KeycloakFailureCode.DigestMismatch, failure.Code);
+            Assert.False(Directory.Exists(rejected));
+        }
+        if (restrictFirst) await RejectFreshPolicy();
+        selectedPolicy = acceptedPolicy;
+        using var plan = await KeycloakSecurity.CaptureAsync(fixture.Recipe, selectedPolicy, fixture.Bindings, Path.Combine(fixture.Root, "old-policy-accepted"));
+        Assert.Same(restrictivePolicy, selectedPolicy);
+        Assert.Equal(KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(acceptedPolicy)), plan.PolicyDigest);
+        Assert.Equal(KeycloakCanonicalJson.Write(acceptedPolicy), KeycloakCanonicalJson.Write(plan.Policy));
+        if (!restrictFirst) await RejectFreshPolicy();
+        var context = await KeycloakSecurity.MaterializeAsync(plan, Path.Combine(fixture.Root, "accepted-policy-context"));
+        Assert.Equal(plan.Digest, context.PlanDigest);
+        context.Verify();
+    }
+
 }

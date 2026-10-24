@@ -93,6 +93,41 @@ public sealed class EvidenceTests
         Assert.True(Directory.Exists(node)); Assert.Equal("complete", File.ReadAllText(staged));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationBeforeAndAfterCommitHasAnExplicitLinearizationPoint(bool cancelAfterCommit)
+    {
+        using var root = new Root(); using var cancellation = new CancellationTokenSource();
+        var path = Path.Combine(root.Path, "controlled-commit.json");
+        var events = new List<KeycloakStageEvent>();
+        using var subscription = KeycloakStageEvents.Subscribe(observed =>
+        {
+            if (observed.Phase != KeycloakStagePhase.Evidence) return;
+            events.Add(observed);
+            if (observed.Outcome == (cancelAfterCommit ? KeycloakStageOutcome.Succeeded : KeycloakStageOutcome.Started))
+                cancellation.Cancel();
+        });
+        if (cancelAfterCommit)
+        {
+            Assert.Equal(path, await Evidence(KeycloakRecipeMode.ThemeOnly).WriteAsync(path, cancellation.Token));
+            using var json = System.Text.Json.JsonDocument.Parse(await File.ReadAllBytesAsync(path));
+            Assert.Equal("plan", json.RootElement.GetProperty("planDigest").GetString());
+            Assert.Equal(KeycloakEffectState.Committed, events.Last().Effect);
+            Assert.Equal(KeycloakStageOutcome.Succeeded, events.Last().Outcome);
+        }
+        else
+        {
+            var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => Evidence(KeycloakRecipeMode.ThemeOnly).WriteAsync(path, cancellation.Token));
+            Assert.Equal(KeycloakFailureCode.Cancelled, failure.Code);
+            Assert.False(File.Exists(path));
+            Assert.Equal(KeycloakStageOutcome.Rejected, events.Last().Outcome);
+        }
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Empty(Directory.GetFiles(root.Path, ".evidence-*"));
+        Assert.Equal(2, events.Count);
+    }
+
     private static VerifiedKeycloakImageEvidence Evidence(KeycloakRecipeMode mode) => new("plan", new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "linux/amd64", ["sha256:" + new string('c', 64)]), mode, [new("file:opt/keycloak/example", "sha256:known", "sha256:known")]);
     private sealed class Root : IDisposable
     {

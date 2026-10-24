@@ -21,6 +21,32 @@ public sealed class ContractsTests
     public void EncodedAndRelativeUriAliasesCannotAcquireAuthority(string value)
         => Assert.Throws<ArgumentException>(() => KeycloakCanonicalization.CanonicalizeHttpsUri(value));
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ControlJsonRejectsOneByteAboveTheFixedCeilingBeforeParsing(bool policy)
+    {
+        var oversized = new byte[1024 * 1024 + 1];
+        var failure = Assert.Throws<System.Text.Json.JsonException>(() =>
+        {
+            if (policy) _ = KeycloakCanonicalJson.ReadPolicy(oversized);
+            else _ = KeycloakCanonicalJson.ReadRecipe(oversized);
+        });
+        Assert.Contains("1 MiB", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ControlJsonAcceptsTheExactCeilingWithoutChangingCanonicalIdentity(bool policy)
+    {
+        var canonical = policy ? KeycloakCanonicalJson.Write(TestRecipes.Policy()) : KeycloakCanonicalJson.Write(TestRecipes.Recipe());
+        var padded = Enumerable.Repeat((byte)' ', 1024 * 1024).ToArray();
+        canonical.CopyTo(padded, 0);
+        var restored = policy ? KeycloakCanonicalJson.Write(KeycloakCanonicalJson.ReadPolicy(padded)) : KeycloakCanonicalJson.Write(KeycloakCanonicalJson.ReadRecipe(padded));
+        Assert.Equal(canonical, restored);
+    }
+
     [Fact]
     public void EmptyAlignmentGroupCannotPassAsADeclaredOperation()
     {

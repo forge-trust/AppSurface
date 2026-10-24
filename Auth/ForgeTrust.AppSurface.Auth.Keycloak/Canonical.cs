@@ -97,6 +97,7 @@ public static class KeycloakCanonicalJson
     /// <summary>Strictly deserializes a complete recipe and all nested operations.</summary>
     public static KeycloakSecurityRecipe ReadRecipe(ReadOnlySpan<byte> utf8Json)
     {
+        RequireBoundedJson(utf8Json);
         try
         {
             return ReadRecipeCore(utf8Json);
@@ -134,6 +135,7 @@ public static class KeycloakCanonicalJson
     /// <summary>Strictly deserializes every trust-policy field.</summary>
     public static KeycloakMaterialTrustPolicy ReadPolicy(ReadOnlySpan<byte> utf8Json)
     {
+        RequireBoundedJson(utf8Json);
         try
         {
             return ReadPolicyCore(utf8Json);
@@ -586,6 +588,12 @@ public static class KeycloakCanonicalJson
         foreach (var value in values)
             w.WriteStringValue(value);
         w.WriteEndArray();
+    }
+
+    private static void RequireBoundedJson(ReadOnlySpan<byte> value)
+    {
+        if (value.Length > 1024 * 1024)
+            throw new JsonException("Control JSON exceeds the 1 MiB supported profile.");
     }
 
     private static JsonDocument Parse(ReadOnlySpan<byte> value) => JsonDocument.Parse(value.ToArray(), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false, MaxDepth = 64 });
