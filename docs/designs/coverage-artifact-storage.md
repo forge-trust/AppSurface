@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/Projects/forge-trust/runnable__jupiter/.gstack/tmp/autoplan/main-autoplan-restore-20261020-210000.md" -->
+<!-- /autoplan restore point: ".gstack/tmp/autoplan/main-autoplan-restore-20261020-210000.md" -->
 ## Implementation plan
 # Design: Predictable storage for agentic coverage workflows
 
@@ -667,7 +667,7 @@ Pass 5, Upgrade: 7 -> 8. Coordinated package release and old/new installed-tool 
 
 Pass 6, Environment: 7 -> 8. CLI commands must work without a terminal, account or background daemon; JSON and fixed exits allow CI/agents to consume results. Native filesystem contract lanes, not a mocked cross-platform label, decide supported management capability. APPSURFACE_ARTIFACT_HOME is optional for ephemeral CI and creates its own budget domain. Existing .NET tooling, source-linked engine and test seams are reused; TypeScript language support, editor extensions and hot reload do not apply to this feature. Unsupported optional storage degrades visibly while required coverage retains its own filesystem constraints.
 
-Pass 7, Community: 7 -> 7. The repository already exposes GitHub issues, source, contribution guidance and an explicit license; the plan adds runnable adoption examples and versioned documentation through those channels. There is no evidence that a new community service or extension ecosystem would fix the local storage problem, so none is added. Preserve truthful licensing and avoid claiming community responsiveness or real-adopter satisfaction from repository links. Independent downstream adoption evidence remains a meaningful gap after the framework fixture.
+Pass 7, Community: 7 -> 7. The repository already exposes GitHub issues, source, contribution guidance and an explicit license; the plan adds executable adoption examples and versioned documentation through those channels. There is no evidence that a new community service or extension ecosystem would fix the local storage problem, so none is added. Preserve truthful licensing and avoid claiming community responsiveness or real-adopter satisfaction from repository links. Independent downstream adoption evidence remains a meaningful gap after the framework fixture.
 
 Pass 8, Measurement: 6 -> 8. Record documented start state, human understanding/time, cold/warm command time and complete coverage runtime separately. The existing acceptance already requires storage, memory, write-volume and latency measurements; add a manual prepared-repo quickstart walk-through and safe diagnostic recovery transcript to make this review replayable. No outbound telemetry, scheduled recurring review or new user tracking is authorized. Champion remains a target, not a measured rank; post-implementation DX verification must report missed targets instead of adjusting the clock.
 
