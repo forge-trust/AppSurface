@@ -335,8 +335,7 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
 
     /// <summary>Creates the original fixed custody failure without selecting any native object.</summary>
     internal static IOException Invalid() => new("The producer report set is unavailable or changed.");
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
     private sealed class SelectedResultsRoot : IDisposable
     {

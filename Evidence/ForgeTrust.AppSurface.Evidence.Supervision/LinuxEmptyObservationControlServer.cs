@@ -889,8 +889,7 @@ internal sealed class LinuxEmptyObservationControlServer
         token.ThrowIfCancellationRequested();
     }
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
     /// <summary>Creates the fixed control-server rejection without exposing internal failure data.</summary>
     internal static EvidenceAdmissionException Rejected() =>
         new("ASEVD410", "The protected empty Observation control operation was rejected.");

@@ -597,8 +597,7 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
         }
         return success;
     }
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
     private sealed class DirectoryNode(SafeFileHandle handle, DirectoryNode? parent, string name,
         LinuxWorkspaceDirectoryPolicy? policy)
     {

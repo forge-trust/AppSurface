@@ -528,8 +528,7 @@ internal sealed class LinuxProcessIdentity : IDisposable
         return success;
     }
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
     /// <summary>Creates a fixed rejection without comm, proc bytes, native details or inner exception.</summary>
     internal static EvidenceAdmissionException Rejected() =>

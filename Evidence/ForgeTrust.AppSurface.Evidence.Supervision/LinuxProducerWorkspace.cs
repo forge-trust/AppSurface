@@ -817,9 +817,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         foreach (var handle in handles) handle.Dispose();
     }
 
-    private static bool Recoverable(Exception error) => error is IOException or UnauthorizedAccessException
-        or PlatformNotSupportedException or ArgumentException or EvidenceAdmissionException
-        or ObjectDisposedException or InvalidOperationException or OverflowException;
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsProducerWorkspaceRecoverable(error);
 
     private sealed class DirectoryNode(SafeFileHandle handle, DirectoryNode? parent, string name,
         uint uid, uint gid, ushort permissions, bool ancestor = false)

@@ -343,8 +343,7 @@ internal static partial class LinuxEmptyObservationExecution
         token.ThrowIfCancellationRequested();
     }
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
     private static EvidenceAdmissionException Rejected() =>
         new("ASEVD410", "The protected empty Observation execution or final cleanup could not be established.");
 }

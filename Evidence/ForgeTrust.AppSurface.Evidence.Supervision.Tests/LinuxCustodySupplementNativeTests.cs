@@ -34,6 +34,22 @@ public sealed class LinuxCustodySupplementNativeTests
         Assert.Throws<IOException>(() => reports.ReadChunk(name!, 0, 1));
         Assert.Throws<IOException>(() => reports.ReadChunk("report.xml", 0, 1));
         Assert.Throws<IOException>(() => reports.ListReports());
+
+        using (var invalidZero = fixture.Open(["report.xml"]))
+        {
+            Assert.Throws<IOException>(() => invalidZero.ReadChunk("report.xml", 0, 0));
+            Assert.Throws<IOException>(() => invalidZero.ReadChunk("report.xml", 0, 1));
+        }
+        using (var invalidLarge = fixture.Open(["report.xml"]))
+        {
+            Assert.Throws<IOException>(() => invalidLarge.ReadChunk("report.xml", 0, 65_537));
+            Assert.Throws<IOException>(() => invalidLarge.ReadChunk("report.xml", 0, 1));
+        }
+        using (var invalidOffset = fixture.Open(["report.xml"]))
+        {
+            Assert.Throws<IOException>(() => invalidOffset.ReadChunk("report.xml", 1, 1));
+            Assert.Throws<IOException>(() => invalidOffset.ReadChunk("report.xml", 0, 1));
+        }
     }
 
     [RootCustodyTheory]
@@ -83,6 +99,14 @@ public sealed class LinuxCustodySupplementNativeTests
     {
         using var fixture = new Fixture();
         fixture.File("report.xml", [1, 2]);
+
+        using var openingCancellation = new CancellationTokenSource();
+        openingCancellation.Cancel();
+        var openingError = Assert.Throws<OperationCanceledException>(() =>
+            fixture.Open(["report.xml"], token: openingCancellation.Token));
+        Assert.Equal(openingCancellation.Token, openingError.CancellationToken);
+        Assert.Equal(new byte[] { 1, 2 }, File.ReadAllBytes(fixture.Results + "/report.xml"));
+
         using var reports = fixture.Open(["report.xml"]);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
@@ -129,9 +153,10 @@ public sealed class LinuxCustodySupplementNativeTests
             return new(value.DeviceMajor, value.DeviceMinor, value.Inode, value.Uid, value.Gid, value.Mode,
                 value.Nlink, value.Size, value.ChangeSeconds, value.ChangeNanoseconds, value.ModifySeconds, value.ModifyNanoseconds);
         }
-        internal LinuxRetainedReportSet Open(string[] paths, LinuxProtectedMetadata? expected = null) =>
+        internal LinuxRetainedReportSet Open(string[] paths, LinuxProtectedMetadata? expected = null,
+            CancellationToken token = default) =>
             LinuxRetainedReportSet.OpenActual(Results, expected ?? Metadata(), paths, Uid, Gid,
-                new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)));
+                new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30)), token);
         public void Dispose() => Directory.Delete(Root, recursive: true);
     }
 

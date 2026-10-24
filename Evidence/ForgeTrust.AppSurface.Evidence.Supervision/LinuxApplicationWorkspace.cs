@@ -1271,9 +1271,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         }
     }
 
-    private static bool Recoverable(Exception error) => error is IOException or UnauthorizedAccessException
-        or PlatformNotSupportedException or ArgumentException or EvidenceAdmissionException
-        or ObjectDisposedException or InvalidOperationException or OverflowException or System.ComponentModel.Win32Exception;
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsApplicationWorkspaceRecoverable(error);
 
     private sealed class WorkspaceNode(SafeFileHandle handle, WorkspaceNode? parent, string name,
         uint uid, uint gid, bool directory, ushort mode, bool ancestor = false, bool allowMount = false)

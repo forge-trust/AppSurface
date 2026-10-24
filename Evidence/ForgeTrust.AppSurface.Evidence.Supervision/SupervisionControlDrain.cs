@@ -83,8 +83,7 @@ internal static class SupervisionControlDrain
         }
     }
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 }
 
 /// <summary>Fixed operation bindings borrowed for one server drain; no operation grants native authority.</summary>

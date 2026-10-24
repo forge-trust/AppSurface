@@ -190,6 +190,5 @@ internal sealed class SupervisionTeardownDeadline : IDisposable
         if (value <= TimeSpan.Zero || value > maximum) throw new ArgumentOutOfRangeException(name);
     }
     private static InvalidOperationException Unavailable() => new("The teardown schedule is unavailable.");
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 }

@@ -372,8 +372,7 @@ internal sealed class SupervisionOutputPipeOwnership : IAsyncDisposable
     }
 
     /// <summary>Identifies failures that may be sanitized after all owned operations have settled.</summary>
-    internal static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    internal static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
     private static SupervisionOutputPipeException Rejected(SupervisionOutputPipeFailure failure) => new(failure);
 }

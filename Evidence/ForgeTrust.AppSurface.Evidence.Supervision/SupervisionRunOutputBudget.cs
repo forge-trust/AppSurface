@@ -263,5 +263,5 @@ internal sealed class SupervisionRunOutputBudget : IDisposable
         }
     }
 
-    private static bool Recoverable(Exception error) => error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 }

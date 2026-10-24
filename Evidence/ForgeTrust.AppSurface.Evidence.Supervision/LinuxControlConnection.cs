@@ -166,8 +166,7 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
     private static EvidenceAdmissionException PeerRejected() =>
         new("ASEVD402", "The protected control peer could not be authenticated.");
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PeerCredentials
@@ -506,6 +505,5 @@ internal sealed class SupervisionControlLineFraming : IDisposable, IAsyncDisposa
         Dispose();
         return new(failure);
     }
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 }

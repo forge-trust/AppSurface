@@ -2033,3 +2033,7 @@ The [account cleanup procedure](account-cleanup-procedure.md) preserves reverse 
 The [report custody metadata comparisons](report-custody-metadata.md) verify selected-root modes, stable file samples and exact repeated inventories without granting filesystem custody.
 
 The [control server state guards](control-server-state.md) and [producer workspace state guards](producer-workspace-state.md) verify the existing joined, sealed and one-attempt transitions. Their detached flags do not establish native ownership.
+
+The [exception policy](exception-policy.md) records the existing broad fatal exclusions and the two narrower workspace exception families. Catch bodies, failure latches and native cleanup stay with their original owners.
+
+The existing [root custody supplement](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) also exercises cancellation before opening a selected tree and rejects zero/oversized chunk bounds and a nonzero initial offset through genuine retained report sets. Each failed read poisons only its own set. These Linux root checks retain the original nine test rows and require fresh native execution; local compilation on other platforms is not native evidence.

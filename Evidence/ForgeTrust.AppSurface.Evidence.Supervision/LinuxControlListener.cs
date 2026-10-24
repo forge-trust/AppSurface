@@ -484,8 +484,7 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
         if (LinuxProtectedMetadata.From(StatFd(named)) != expected) throw LinuxControlListenerPolicy.Invalid();
     }
 
-    private static bool Recoverable(Exception error) =>
-        error is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+    private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
     [DllImport("libc", EntryPoint = "fchownat", SetLastError = true)]
     private static extern int FchownAt(SafeFileHandle directory, [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
