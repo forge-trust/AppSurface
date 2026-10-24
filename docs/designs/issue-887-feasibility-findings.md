@@ -1,11 +1,11 @@
 # Issue 887: observed fixture mismatch
 
 
-> Current disposition (2026-10-24): the owner accepted the exact historical policy and 256 MiB source-only OCI member limit. Both source graphs and all four final images pass retained static/OS/scan proof; the complete retained system gate passes on arm64 and native amd64 CI. The [fixture card](issue-887-feasibility-card.md#native-amd64-retained-full-gate--passed-2026-10-24) contains the final run. Earlier failures and pending decisions below are chronological evidence and have been superseded where that card records a passing result. Public implementation and validation are in progress; published-byte adoption remains a separate authorized release gate.
+> Current disposition (2026-10-24): the owner accepted the exact historical policy and 256 MiB source-only OCI member limit. Both source graphs and all four final images pass retained static/OS/scan proof; the complete retained system gate passes on arm64 and native amd64 CI. The [fixture card](issue-887-feasibility-card.md#native-amd64-retained-full-gate--passed-2026-10-24) contains the final run. Earlier failures and pending decisions below are chronological evidence and have been superseded where that card records a passing result. The production SDK now passes all four retained recipe workflows and the preliminary local-package consumer proof; final solution coverage and draft CI are still pending. Published-byte adoption remains a separate authorized release gate.
 
-Status: owner approved the explicit Micrometer inventory correction on2026-10-23; full recipe proof remains in progress. The failed unchanged-fixture observations below are retained as history.
+Status: owner approved the explicit Micrometer inventory correction on2026-10-23; current production qualification now passes all four retained recipes. The failed unchanged-fixture observations below are retained as history.
 
-The [approved plan](issue-887-verified-keycloak-security-recipes.md) requires original identity/path verification and forbids silently accepting unexpected originals. This check failed for the Micrometer group in the current [fixture card](issue-887-feasibility-card.md). No passing recipe evidence or public API commitment is made.
+The [approved plan](issue-887-verified-keycloak-security-recipes.md) requires original identity/path verification and forbids silently accepting unexpected originals. The original check failed for the Micrometer group documented below; the owner-approved correction and later passing production qualification are recorded in the [fixture card](issue-887-feasibility-card.md). This historical section does not supersede that result.
 
 ## Immutable source and observations
 
