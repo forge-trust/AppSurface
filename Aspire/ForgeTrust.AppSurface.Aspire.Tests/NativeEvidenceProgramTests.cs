@@ -1,12 +1,57 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Validation;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
 [Collection("Native evidence program")]
 public sealed class NativeEvidenceProgramTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FanInFailure_RedactsPhysicalInputPathsAndBoundsRetainedDiagnostics(bool longPath)
+    {
+        using var fixture = new EvidenceCoverageFanInTests.FanInFixture();
+        await fixture.WriteMinimalBundleAsync();
+        var relative = longPath ? string.Join('/', Enumerable.Repeat(new string('x', 120), 10)) + "/missing.json" : "missing.json";
+        var missing = TestPathUtils.PathUnder(fixture.Repository, relative);
+        var request = fixture.Request with { PrimaryGateJson = missing };
+        var expected = "Invalid or oversized evidence: " + missing.Replace(fixture.Repository, "<input>", StringComparison.Ordinal);
+        if (longPath) Assert.True(expected.Length > 1024);
+        var root = Directory.CreateTempSubdirectory("appsurface-native-program-diagnostic-").FullName;
+        try
+        {
+            var package = Path.Join(root, "candidate.nupkg");
+            await File.WriteAllBytesAsync(package, []);
+            var requestPath = Path.Join(root, "fan-in.json");
+            await File.WriteAllTextAsync(requestPath, JsonSerializer.Serialize(request, Program.JsonOptions));
+            var output = Path.Join(root, "evidence");
+
+            var result = await InvokeAsync(["--package", package, "--version", "1.0.0", "--source-commit", "source",
+                "--dotnet", ResolveDotnetHost(), "--output", output, "--mode", "storage", "--scratch-parent", root,
+                "--fan-in-request", requestPath]);
+
+            Assert.Equal(1, result.ExitCode);
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
+            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
+            Assert.Equal(EvidenceClaimKind.None, manifest.ClaimKind);
+            var producer = Assert.Single(manifest.ProducerResults, item => item.ProducerId == "native-fan-in");
+            Assert.Equal(EvidenceProducerOutcome.Failed, producer.Outcome);
+            Assert.Empty(producer.SatisfiedAssertionIds);
+            using var artifact = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/native-fan-in/proof/result.json")));
+            Assert.False(artifact.RootElement.GetProperty("verified").GetBoolean());
+            var diagnostic = artifact.RootElement.GetProperty("diagnostic").GetString()!;
+            Assert.Equal(longPath ? expected[..1024] : expected, diagnostic);
+            Assert.DoesNotContain(fixture.Repository, diagnostic, StringComparison.Ordinal);
+            Assert.Equal("Native coverage fan-in verification failed: " + diagnostic, producer.Diagnostic);
+            Assert.True(manifest.Metrics.CleanupCompleted);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public async Task EmptyArguments_ReturnTwoAndPrintsUsage()
     {
@@ -30,6 +75,7 @@ public sealed class NativeEvidenceProgramTests
     [InlineData("unknown", "--unknown value")]
     [InlineData("missing", "--package candidate.nupkg")]
     [InlineData("duplicate", "--package first.nupkg --package second.nupkg")]
+    [InlineData("odd", "--package")]
     public async Task InvalidArguments_ReturnOneAndLeaveFilesystemUntouched(string _, string commandLine)
     {
         var result = await InvokeAsync(commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries));
@@ -145,6 +191,7 @@ public sealed class NativeEvidenceProgramTests
 
     [Theory]
     [InlineData("--mode", "unknown")]
+    [InlineData("--version", " ")]
     [InlineData("--dotnet", "missing-dotnet")]
     [InlineData("--consumer-profile", "null")]
     [InlineData("--fan-in-request", "null")]
@@ -163,6 +210,7 @@ public sealed class NativeEvidenceProgramTests
                 args.AddRange([option, json]);
             }
             else if (option == "--dotnet") args[args.IndexOf(option) + 1] = Path.Join(root, value);
+            else if (option == "--version") args[args.IndexOf(option) + 1] = value;
             else args.AddRange([option, value]);
 
             var result = await InvokeAsync(args.ToArray());
