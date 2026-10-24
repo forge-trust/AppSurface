@@ -292,10 +292,9 @@ internal sealed partial class LinuxApplicationProcess
                 if (!_recipe.IsStopped(first) || !LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
                 await Task.Delay(25, token).ConfigureAwait(false);
                 var second = await _backend.ReadUnitAsync(Unit, token).ConfigureAwait(false);
-                if (!_recipe.IsStopped(second) || first.ExecMainPid != second.ExecMainPid
-                    || first.ExecMainCode != second.ExecMainCode || first.ExecMainStatus != second.ExecMainStatus
-                    || _appHost is not null && second.ExecMainPid != _appHost.Pid
-                    || !LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
+                if (!_recipe.IsStopped(second)) throw Rejected();
+                LinuxApplicationTerminalPolicy.RequireStableMain(first, second, _appHost?.Pid);
+                if (!LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
                 _stoppedTerminal = second;
                 // Nonzero/signal execution remains an unsuccessful procedure even when root containment
                 // safely joined. Do not conflate workload outcome with permission to secure its files.
@@ -458,5 +457,7 @@ internal sealed partial class LinuxApplicationProcess
     }
     [LibraryImport("libc", EntryPoint = "getsockopt", SetLastError = true)]
     private static partial int GetPeer(SafeSocketHandle socket, int level, int option, out Credentials value, ref uint length);
-    private static EvidenceAdmissionException Rejected() => new("ASEVD410", "Restricted application ownership or independent resource readiness was not confirmed.");
+    /// <summary>Creates the existing fixed rejection diagnostic without exposing ownership authority.</summary>
+    /// <returns>A sanitized <see cref="EvidenceAdmissionException"/> with no inner exception or caller data.</returns>
+    internal static EvidenceAdmissionException Rejected() => new("ASEVD410", "Restricted application ownership or independent resource readiness was not confirmed.");
 }

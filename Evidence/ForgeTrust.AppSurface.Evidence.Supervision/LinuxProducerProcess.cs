@@ -294,14 +294,7 @@ internal sealed class LinuxProducerProcess
             catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
         }
 
-        try { _process?.Dispose(); }
-        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-        try { _observations?.Dispose(); }
-        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-        try { _backend?.Dispose(); }
-        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
-        try { outputDeadline?.Dispose(); }
-        catch { Interlocked.Exchange(ref _cleanupFailed, 1); }
+        SupervisionCloseSequence.CloseAll([_process, _observations, _backend, outputDeadline], ref _cleanupFailed);
 
         var pending = _pending.Snapshot;
         if (pending.FirstFailure is SupervisionPendingStartFailure.StopFailed or SupervisionPendingStartFailure.StopCancelled || !pending.StopJoined || (pending.StartReserved && !pending.StartJoined))

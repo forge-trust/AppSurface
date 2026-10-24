@@ -573,11 +573,13 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         server.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
         owner.RequireControlIdentity(token);
         var pending = _pending.Snapshot;
+        LinuxWorkerSettlementPolicy.RequirePrefix(
+            _lifetime.StopJoined, PhysicallySettled, pending.StopJoined, pending.IsFailed,
+            !pending.StartReserved || pending.StartJoined, _exit?.IsCompleted == true);
+        LinuxWorkerSettlementPolicy.RequireOutputDrain(OutputDrainedForCleanup());
+        if (_runOutput is { Drained: false }) throw LinuxSystemdBackend.InvalidControl();
         LinuxCgroupSample? group = null;
-        if (!_lifetime.StopJoined || !PhysicallySettled || !pending.StopJoined || pending.IsFailed
-            || (pending.StartReserved && !pending.StartJoined) || _exit?.IsCompleted != true
-            || !OutputDrainedForCleanup() || _runOutput is { Drained: false }
-            || !LinuxAccountUtility.GroupEmpty(group = LinuxCgroupProbe.Read(Unit, token)))
+        if (!LinuxAccountUtility.GroupEmpty(group = LinuxCgroupProbe.Read(Unit, token)))
             throw LinuxSystemdBackend.InvalidControl();
         owner.RequireControlIdentity(token);
         input.Recheck(token);

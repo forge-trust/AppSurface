@@ -176,28 +176,8 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
                 if (offset > report.Length || offset == report.Length && report.Length != 0) throw Invalid();
 
                 var reports = _reports ?? throw Invalid();
-                if (report.Length == 0)
-                {
-                    var empty = reports.ReadChunk(relativePath, 0,
-                        Math.Min(maximumBytes, LinuxRetainedReportSet.MaximumChunkBytes), token);
-                    CheckWork(token);
-                    return empty;
-                }
-
-                var length = checked((int)Math.Min(maximumBytes, report.Length - offset));
-                var result = new byte[length];
-                var copied = 0;
-                while (copied < result.Length)
-                {
-                    CheckWork(token);
-                    var requested = Math.Min(LinuxRetainedReportSet.MaximumChunkBytes, result.Length - copied);
-                    var piece = reports.ReadChunk(relativePath, offset + copied, requested, token);
-                    if (piece.Length != requested) throw Invalid();
-                    piece.CopyTo(result, copied);
-                    copied += piece.Length;
-                }
-                CheckWork(token);
-                return result;
+                return SupervisionReportChunkTransfer.ReadValidated(report.Length, offset, maximumBytes,
+                    () => CheckWork(token), (position, count) => reports.ReadChunk(relativePath, position, count, token));
             }
             catch { _failed = true; throw; }
         }

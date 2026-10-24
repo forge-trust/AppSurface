@@ -385,7 +385,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(_accounts, _owner);
-            if (!_initialized || _quarantined || _sealed || _handlesClosed || _sealAttempted) throw LinuxApplicationWorkspaceLayout.Invalid();
+            LinuxApplicationWorkspaceStatePolicy.RequireBundleUse(new(
+                _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
             _owner.RequireActive(token);
             _accounts.RequireOwnedBy(_owner, token);
             RecheckBundleCore(token);
@@ -450,8 +452,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(_accounts, _owner);
-            if (!_initialized || _quarantined || _sealAttempted || _applicationRetentionAttempted)
-                throw LinuxApplicationWorkspaceLayout.Invalid();
+            LinuxApplicationWorkspaceStatePolicy.RequireRetainApplication(new(
+                _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
             _owner.RequireActive(default);
             _accounts.RequireOwnedBy(_owner, default);
             _applicationRetentionAttempted = true;
@@ -465,8 +468,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(accounts, owner);
-            if (!_initialized || _quarantined || _sealed || _sealAttempted || _handlesClosed)
-                throw LinuxApplicationWorkspaceLayout.Invalid();
+            LinuxApplicationWorkspaceStatePolicy.RequireBundleUse(new(
+                _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
             _owner.RequireActive(token);
             _accounts.RequireOwnedBy(owner, token);
             RecheckWorkspaceCore(token);
@@ -480,7 +484,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         lock (_gate)
         {
             RequireAccountOwner(accounts, owner);
-            if (!_initialized || _quarantined || _sealed || _handlesClosed) throw LinuxApplicationWorkspaceLayout.Invalid();
+            LinuxApplicationWorkspaceStatePolicy.RequireControlOwnedBy(new(
+                _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
             _owner.RequireControlIdentity(token);
             _accounts.RequireControlOwnedBy(owner, token);
             RecheckWorkspaceCore(token);
@@ -555,7 +561,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         {
             RequireAccountOwner(accounts, owner);
             _owner.RequireControlIdentity(token);
-            if (!_sealed || _quarantined || _handlesClosed || _scratchMounted) throw LinuxApplicationWorkspaceLayout.Invalid();
+            LinuxApplicationWorkspaceStatePolicy.RequireSealedForRelease(new(
+                _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
             try
             {
                 RecheckSealedCore(token);
@@ -712,7 +720,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         application.RequirePhysicalSettlement(owner, accounts, this, token);
         RequireAccountOwner(accounts, owner);
         _owner.RequireControlIdentity(token);
-        if (!_initialized || _quarantined || _handlesClosed || !_scratchMounted) throw LinuxApplicationWorkspaceLayout.Invalid();
+        LinuxApplicationWorkspaceStatePolicy.RequireSealCore(new(
+            _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+            _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
         RecheckWorkspaceCore(token);
         RequireNoOutputProbe(token);
 
@@ -764,7 +774,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     private void RequireActiveCore(CancellationToken token)
     {
         RequireAccountOwner(_accounts, _owner);
-        if (_quarantined || _sealAttempted || _sealed || _handlesClosed) throw LinuxApplicationWorkspaceLayout.Invalid();
+        LinuxApplicationWorkspaceStatePolicy.RequireActive(new(
+            _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+            _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
         _owner.RequireActive(token);
         _accounts.RequireOwnedBy(_owner, token);
         _deadline.Check(token);
@@ -1234,7 +1246,9 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
             if (_handlesClosed) return;
             try
             {
-                if (!_sealed || _quarantined || !_releaseGuardPassed) throw LinuxApplicationWorkspaceLayout.Invalid();
+                LinuxApplicationWorkspaceStatePolicy.RequireDispose(new(
+                    _initialized, _quarantined, _sealed, _handlesClosed, _sealAttempted,
+                    _applicationRetentionAttempted, _scratchMounted, _releaseGuardPassed));
                 RequireSealedForAccountRelease(_accounts, _owner, default);
                 _owner.RequireControlIdentity(default);
                 var failed = false;

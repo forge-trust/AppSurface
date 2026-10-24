@@ -2019,3 +2019,9 @@ admit a process, create an owner, add a timeout, change account or root custody,
 or publish a completion result. `QualificationImageBoundaryTests` checks the
 emitted common async identities and selected private method presence from the
 built image; it does not invoke private members or fabricate native capability.
+
+### Final settlement and local owner closure
+
+The [local close sequence](local-close-sequence.md) attempts every original producer owner even when an earlier close fails, and immediately retains the original failure latch. The [worker settlement policy](worker-settlement.md) checks original custody and output predicates before native observations. The [application terminal policy](application-terminal-policy.md) compares the two actual terminal samples before the final cgroup check. These internal procedures retain the existing deadlines and native checks; their portable controls cannot establish process exit, custody, or admission.
+
+The [application workspace state policy](application-workspace-state.md) preserves the native holder’s operation-specific quarantine, seal and release checks. [NSS buffer decoding](account-nss-buffer-data.md) bounds caller-owned pointer data without performing a lookup. The [selected report byte transfer](report-chunk-transfer.md) retains the native holder’s original read and work checks while joining bounded pieces. These APIs create no native ownership or accepted proof.

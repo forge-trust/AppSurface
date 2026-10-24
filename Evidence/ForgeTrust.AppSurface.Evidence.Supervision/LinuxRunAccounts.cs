@@ -675,7 +675,6 @@ internal static partial class LinuxRunAccountNss
 {
     private const int MaximumBufferBytes = 65_536;
     private const int MaximumSupplementaryGroups = 64;
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     /// <summary>Reads the selected generated accounts, their reverse numeric mappings and actual group lists.</summary>
     /// <returns>Copied consistent data only; no created account owner or admission.</returns>
@@ -867,8 +866,8 @@ internal static partial class LinuxRunAccountNss
                 if (code == 34) continue; // Linux ERANGE; do not invent an absent record on failure.
                 if (code != 0) throw NssFailed();
                 if (result == 0) return null;
-                return LinuxRunAccountUser.Parse(Text(entry.Name, bufferPointer, size, 32), entry.Uid, entry.Gid,
-                    Text(entry.Directory, bufferPointer, size, 4096), Text(entry.Shell, bufferPointer, size, 128));
+                return LinuxRunAccountUser.Parse(LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, size, 32), entry.Uid, entry.Gid,
+                    LinuxAccountNssBufferData.ReadString(entry.Directory, (nint)bufferPointer, size, 4096), LinuxAccountNssBufferData.ReadString(entry.Shell, (nint)bufferPointer, size, 128));
             }
         }
         throw NssFailed();
@@ -892,9 +891,9 @@ internal static partial class LinuxRunAccountNss
                 if (code != 0) throw NssFailed();
                 if (result == 0) return null;
                 // These are new private groups; even a single registered supplementary member rejects.
-                if (entry.Members == 0 || !Contains(entry.Members, sizeof(nint), bufferPointer, size)
+                if (entry.Members == 0 || !LinuxAccountNssBufferData.Contains(entry.Members, sizeof(nint), (nint)bufferPointer, size)
                     || *(nint*)entry.Members != 0) throw Mismatch();
-                return LinuxRunAccountGroup.Parse(Text(entry.Name, bufferPointer, size, 32), entry.Gid, []);
+                return LinuxRunAccountGroup.Parse(LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, size, 32), entry.Gid, []);
             }
         }
         throw NssFailed();
@@ -918,20 +917,6 @@ internal static partial class LinuxRunAccountNss
         if (!LinuxRunAccountNames.IsGenerated(name)) throw LinuxRunAccountNames.Invalid();
         return Encoding.ASCII.GetBytes(name + "\0");
     }
-
-    private static unsafe string Text(nint address, byte* buffer, int size, int maximum)
-    {
-        if (!Contains(address, 1, buffer, size)) throw NssFailed();
-        var available = (int)((nuint)buffer + (nuint)size - (nuint)address);
-        var bytes = new ReadOnlySpan<byte>((void*)address, Math.Min(available, maximum + 1));
-        var length = bytes.IndexOf((byte)0);
-        if (length < 0 || length > maximum) throw NssFailed();
-        try { return StrictUtf8.GetString(bytes[..length]); }
-        catch (DecoderFallbackException) { throw NssFailed(); }
-    }
-
-    private static unsafe bool Contains(nint address, int length, byte* buffer, int size) =>
-        (nuint)address >= (nuint)buffer && (nuint)address <= (nuint)buffer + (nuint)size - (nuint)length;
 
     private static void RequirePlatform()
     {
