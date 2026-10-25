@@ -33,7 +33,8 @@ public sealed class ExecutionCompatibilityManifestTests
         Assert.False(manifest.RootElement.GetProperty("tool").GetProperty("formatterReplay").GetProperty("networkRead").GetBoolean());
         var counterReplay = manifest.RootElement.GetProperty("tool").GetProperty("formatterReplay").GetProperty("counterDefaultReplay");
         Assert.True(counterReplay.GetProperty("equal").GetBoolean());
-        Assert.Equal(5, counterReplay.GetProperty("scope").GetArrayLength());
+        Assert.Equal(4, counterReplay.GetProperty("scope").GetArrayLength());
+        Assert.Contains("generated Go v1 int64 omitempty", counterReplay.GetProperty("retriedCount").GetString());
     }
 
     [Fact]

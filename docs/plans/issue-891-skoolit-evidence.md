@@ -1,5 +1,7 @@
 # Issue 891: recovered execution evidence
 
+> **Historical report.** The original capture-recovery assessment below predates the owner-authorized execution amendment and is retained as provenance. The current technical mapping and offline acceptance are recorded in [the provider mapping worksheet](issue-891-provider-mapping.md) and [the approved design amendment](../designs/issue-891-cloud-run-execution-observation.md). “Named maintainer acceptance” below describes the superseded planning gate; it is not a current requirement for the owner-authorized fixture reconciliation. Provider certification and live-cloud attestation remain pending.
+
 Status: historical recovery assessment. The owner subsequently authorized the [execution amendment](../designs/issue-891-cloud-run-execution-observation.md#execution-amendment-authorized-on-2026-10-24), which reconciles numeric identity and implicit v1 SQL projection without reducing full configuration parity. Current offline mapping, fixtures and exact SDK evidence are recorded in the [mapping assessment](issue-891-provider-mapping.md); current validation is in the [progress record](issue-891-execution-progress.md). This report preserves what the source search itself established.
 
 This supersedes the missing-capture premise in the [initial feasibility assessment](issue-891-gcloud-feasibility.md). The user explicitly requested a read-only search of Skoolit worktrees and history. No provider request, deployment, submission or mutation was made.

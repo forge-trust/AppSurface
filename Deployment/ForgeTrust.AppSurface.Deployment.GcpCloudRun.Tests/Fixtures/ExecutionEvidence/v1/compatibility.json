@@ -22,7 +22,10 @@
     ],
     "commandSourceSha256": {
       "describe.py": "0db5a2ed09465e1f5bdfa980c2ffc6665f9c0001cfadbafc40b4f9130495477a",
-      "run_v2_messages.py": "42411b8a13b572a7b7fec700eec2118c3fc82f5d83585532385cf5dc39ea4cfb"
+      "run_v1_messages.py": "be8c87ce5b75d88512fbe8202baf5df4c179c1b63c76e1a272d22f6eff817ddf",
+      "execution.py": "d5497ce2d172445b195aedacab40a9d7c1c642c7ac0c8c52fd609cf046d7d91f",
+      "job_printer.py": "e6bef9753a672c9c240324d6deaef5caf61108e26ff9f62cfee1606f3b6d8fdd",
+      "resource_printer.py": "bd9c31aa8e626b68918cec22d9a03f74178c3ea78f53148eaf7a8451989af89b"
     },
     "providerReadRan": false,
     "replay": "offline fixture inspection only",
@@ -64,10 +67,9 @@
           "runningCount",
           "succeededCount",
           "failedCount",
-          "cancelledCount",
-          "retriedCount"
+          "cancelledCount"
         ],
-        "retriedCount": "generated integer default; not human-rendered",
+        "retriedCount": "covered by generated Go v1 int64 omitempty source contract; not human-rendered",
         "noNetwork": true
       }
     },
@@ -125,6 +127,7 @@
   "review": {
     "owner": "unassigned",
     "acceptingMaintainer": "unassigned",
-    "status": "pending-maintainer-acceptance"
-  }
+    "status": "owner-authorized-technical-evidence-provider-certification-pending"
+  },
+  "technicalAcceptance": "owner-authorized reviewed mapping plus executable fixture/hash/replay checks; this is not provider certification"
 }
