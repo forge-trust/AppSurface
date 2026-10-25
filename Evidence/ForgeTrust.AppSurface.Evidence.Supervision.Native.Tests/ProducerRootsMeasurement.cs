@@ -23,7 +23,7 @@ internal static class ProducerRootsMeasurement
     private const string MutationDocument = "Evidence/" + Supervision + "/LinuxRetainedReportSet.cs";
     private const string QuotaDocument = "Evidence/" + Supervision + "/SupervisionRunOutputBudget.cs";
     private const string MutationHash = "95ca9977655b70408a238336390438d6db0fce4ae504bf95c2f006535a6105d4";
-    private const string QuotaHash = "1603bed8d52f248cbca947dbe5f97827b2df6857727ecebc2482b1f5c6825f7d";
+    private const string QuotaHash = "dff0c2e2fbf8f35ffc20aaf9327c154faad32d005f89dccafa7fd5368d4de81b";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
         "ForgeTrust.AppSurface.Evidence.Aspire", Supervision, "ForgeTrust.AppSurface.Evidence.Cli"];

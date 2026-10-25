@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 
@@ -14,9 +15,42 @@ public sealed class ProducerRootsMeasurementTests
     private const string MutationDocument = "Evidence/" + Supervision + "/LinuxRetainedReportSet.cs";
     private const string QuotaDocument = "Evidence/" + Supervision + "/SupervisionRunOutputBudget.cs";
     private const string MutationHash = "95ca9977655b70408a238336390438d6db0fce4ae504bf95c2f006535a6105d4";
-    private const string QuotaHash = "1603bed8d52f248cbca947dbe5f97827b2df6857727ecebc2482b1f5c6825f7d";
+    private const string QuotaHash = "dff0c2e2fbf8f35ffc20aaf9327c154faad32d005f89dccafa7fd5368d4de81b";
     private static readonly string[] Cases = ["normal", "test-failure", "cancel", "quota", "ignored-cancel",
         "artifact-mutation", "cleanup-failure"];
+
+    /// <summary>The reviewed witness hashes and line spans must agree with the actual source before a native gate runs.</summary>
+    [Fact]
+    public void ReviewedProducerWitnessMappingsMatchTheCurrentCheckout()
+    {
+        new Fixture().Packets().Validate();
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var mutation = TestPathUtils.PathUnder(root, MutationDocument);
+        var quota = TestPathUtils.PathUnder(root, QuotaDocument);
+        Assert.Equal(MutationHash, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(mutation))));
+        Assert.Equal(QuotaHash, Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(quota))));
+        var mutationLines = File.ReadAllLines(mutation);
+        Assert.Equal("internal byte[] MutateRetainedReportForC2(CancellationToken token)", mutationLines[147].Trim());
+        Assert.Equal("#endif", mutationLines[198]);
+        Assert.Equal("Fail(SupervisionRunOutputFailure.QuotaExceeded);", File.ReadAllLines(quota)[172].Trim());
+    }
+
+    /// <summary>Even consistently rebound outer digests cannot restore the historical quota source mapping.</summary>
+    [Theory]
+    [InlineData("witness")]
+    [InlineData("capture")]
+    [InlineData("both")]
+    public void HistoricalQuotaFingerprintCannotReplaceTheCurrentWitness(string mutation)
+    {
+        var fixture = new Fixture();
+        fixture.Packets().Validate();
+        const string historical = "1603bed8d52f248cbca947dbe5f97827b2df6857727ecebc2482b1f5c6825f7d";
+        if (mutation is "witness" or "both")
+            fixture.Binding["current_witness"]!["None"]!["source_sha256"] = historical;
+        if (mutation is "capture" or "both")
+            fixture.Source["files"]![QuotaDocument]!["sha256"] = historical;
+        Assert.ThrowsAny<Exception>(() => fixture.Packets().Validate());
+    }
 
     /// <summary>The model is internally consistent; successful comparison grants no native acceptance.</summary>
     [Fact]

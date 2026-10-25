@@ -72,6 +72,29 @@ ordinary images continue to require the helper's absence.
 
 ## Prepared inputs and merge settings
 
+### Reviewed producer-root witness mappings
+
+The [producer-root validator](ProducerRootsMeasurement.cs) pins each witness to a
+reviewed document, type, method, source hash and exact line span. The quota witness
+uses the overflow statement at line 173 in
+[SupervisionRunOutputBudget.cs](../ForgeTrust.AppSurface.Evidence.Supervision/SupervisionRunOutputBudget.cs),
+whose reviewed SHA-256 is
+`dff0c2e2fbf8f35ffc20aaf9327c154faad32d005f89dccafa7fd5368d4de81b`.
+The retained-report mutation witness keeps its separate reviewed mapping.
+
+The [mapping regression controls](ProducerRootsMeasurementTests.cs) compare both
+pins and spans with the actual checkout before a native gate runs. Any source edit,
+including an exception-filter refactor outside the witness method, requires an
+explicit mapping review and pin refresh. A stale hash must fail; deriving an
+expected hash from the supplied packet would remove this independent check.
+Consistently rebinding packet digests cannot restore the historical quota pin.
+
+These controls validate measurement data only. They do not create native execution,
+process ownership, admission or accepted-proof authority. The
+[producer-root lineage contract](../../.github/issue779-checkpoint4/measurement/producer-roots-README.md),
+positive witness hits, original source capture, predecessor bytes and numerical
+coverage thresholds remain independently required.
+
 ### Supplementary root marker and subtree controls
 
 The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) runs a
