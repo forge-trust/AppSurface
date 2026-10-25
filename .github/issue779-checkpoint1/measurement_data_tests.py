@@ -22,7 +22,7 @@ PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.'
 CLASSES = {
     'N04': ('LinuxN04CheckpointOrderTests', 'LinuxNegativeKernelObservationTests', 'LinuxCheckpointMetadataPolicyTests'),
     'N05': ('LinuxSlotNegativeObservationTests',),
-    'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests', 'LinuxCheckpointMetadataPolicyTests'),
+    'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests', 'LinuxCheckpointMetadataPolicyTests', 'SupervisionN07OwnedCheckpointTests'),
     'N08': ('LinuxJoinedWorkerOutputDiagnosticTests',),
     'N10': ('LinuxN10PendingStartCheckpointTests',),
     'N12': ('LinuxN12DescendantTests',),
