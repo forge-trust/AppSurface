@@ -295,13 +295,13 @@ internal sealed partial class LinuxRunWorkspace
         {
             var failed = false;
             At(LinuxCustodyOperation.OriginalOwnerClose, null);
-            try { await _worker.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception error) when (Recoverable(error))
-            { Capture(SupervisionCustodyFailure.LocalCloseFailed, error); failed = true; }
+            await SupervisionCleanupAttempt.RunAsync(
+                async () => await _worker.DisposeAsync().ConfigureAwait(false),
+                error => { Capture(SupervisionCustodyFailure.LocalCloseFailed, error); failed = true; }).ConfigureAwait(false);
             At(LinuxCustodyOperation.OriginalOwnerClose, null);
-            try { _workspace.CloseOriginalForCustody(this); }
-            catch (Exception error) when (Recoverable(error))
-            { Capture(SupervisionCustodyFailure.LocalCloseFailed, error); failed = true; }
+            SupervisionCleanupAttempt.Run(
+                () => _workspace.CloseOriginalForCustody(this),
+                error => { Capture(SupervisionCustodyFailure.LocalCloseFailed, error); failed = true; });
             if (failed) throw LinuxWorkspaceLayout.Invalid();
         }
 

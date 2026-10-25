@@ -765,10 +765,8 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private static void RequireSameNamed(SafeFileHandle? parent, string name, LinuxProtectedMetadata expected,
         bool allowMount = false)
     {
-        using var named = OpenAt2(parent is null ? -100 : Fd(parent), name, PathFlags, 0,
-            parent is null ? 0 : allowMount ? ParentResolution : ChildResolution);
-        var actual = LinuxProtectedMetadata.From(StatFd(named));
-        if (!LinuxNamedMetadataComparison.Matches(actual, expected))
+        if (!LinuxNamedEntry.Matches(parent is null ? -100 : Fd(parent), name, expected,
+            parent is null ? 0 : allowMount ? ParentResolution : ChildResolution))
             throw LinuxProducerWorkspaceLayout.Invalid();
     }
 

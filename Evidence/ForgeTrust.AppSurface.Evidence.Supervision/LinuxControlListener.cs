@@ -428,15 +428,15 @@ internal sealed partial class LinuxControlListener : IAsyncDisposable
     private async Task DisposeActualAsync(ValueTask drain, TaskCompletionSource completion)
     {
         var failed = false;
-        try { await drain.ConfigureAwait(false); }
-        catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(LinuxControlFailureStage.ListenerAdmissionDrain, null, error); failed = true; }
-        try { _namedSocket.Dispose(); }
-        catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(LinuxControlFailureStage.ListenerNamedSocketClose, null, error); failed = true; }
-        try { _parent.Dispose(); }
-        catch (Exception error) when (Recoverable(error))
-        { _failures.Capture(LinuxControlFailureStage.ListenerParentClose, null, error); failed = true; }
+        await SupervisionCleanupAttempt.RunAsync(
+            async () => await drain.ConfigureAwait(false),
+            error => { _failures.Capture(LinuxControlFailureStage.ListenerAdmissionDrain, null, error); failed = true; }).ConfigureAwait(false);
+        SupervisionCleanupAttempt.Run(
+            () => _namedSocket.Dispose(),
+            error => { _failures.Capture(LinuxControlFailureStage.ListenerNamedSocketClose, null, error); failed = true; });
+        SupervisionCleanupAttempt.Run(
+            () => _parent.Dispose(),
+            error => { _failures.Capture(LinuxControlFailureStage.ListenerParentClose, null, error); failed = true; });
         lock (_gate) failed |= _failed || _accepts.Failed;
         if (failed)
         {

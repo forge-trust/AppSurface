@@ -539,9 +539,8 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
     private static void RequireSameNamed(SafeFileHandle parent, string name,
         LinuxProtectedMetadata expected, bool allowMount = false)
     {
-        using var named = OpenAt2(Fd(parent), name, PathFlags, 0, allowMount ? ParentResolution : ChildResolution);
-        var current = LinuxProtectedMetadata.From(StatFd(named));
-        if (!LinuxNamedMetadataComparison.Matches(current, expected)) throw LinuxWorkspaceLayout.Invalid();
+        if (!LinuxNamedEntry.Matches(Fd(parent), name, expected, allowMount ? ParentResolution : ChildResolution))
+            throw LinuxWorkspaceLayout.Invalid();
     }
 
     private string HashDescriptor(SafeFileHandle file, LinuxProtectedMetadata expected, CancellationToken token,
@@ -582,10 +581,7 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
     {
         var success = true;
         foreach (var handle in handles.Reverse())
-        {
-            try { handle.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { success = false; }
-        }
+            SupervisionCleanupAttempt.Run(() => handle.Dispose(), _ => success = false);
         return success;
     }
     private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);

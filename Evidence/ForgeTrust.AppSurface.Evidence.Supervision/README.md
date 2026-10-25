@@ -2131,3 +2131,16 @@ The monitor is sampled **after** lifetime join: startup may publish it while sto
 barriers and operation failures; they provide no native owner or physical-exit authority. The private
 [application holder](LinuxApplicationProcess.cs) keeps terminal and cgroup observations, pump joins,
 resource disposal, original deadlines and settlement publication.
+
+
+### Actual named-entry comparisons
+
+[`LinuxNamedEntry.Matches`](LinuxNamedEntry.cs) shares the existing openat2/statx procedure used by the [worker workspace](LinuxRunWorkspace.cs), [producer workspace](LinuxProducerWorkspace.cs) and [application workspace](LinuxApplicationWorkspace.cs). Each caller borrows its retained parent descriptor, supplies the same selected name and resolution flags, and retains its own fixed rejection when the comparison fails. The helper opens O_PATH|O_CLOEXEC, reads actual metadata and closes only that temporary handle. Native and unsupported-openat2 exceptions propagate unchanged; there is no fallback, new deadline or owner construction.
+
+The [metadata comparison](LinuxNamedMetadataComparison.cs) allows unrelated directory child-list churn while preserving device, inode, UID, GID and mode. Files require the complete original sampled metadata. Constructed metadata alone cannot establish custody. The [Linux named-entry tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNamedEntryNativeTests.cs) exercise real names, retained parent handles, file/directory replacement, access-policy change, symlink and parent escape rejection and the original caller resolution modes without creating a protected worker or admission. They require actual Linux x64 openat2/statx; a skip on another platform is not native evidence.
+
+
+The [root custody transfer](LinuxRunWorkspace.Custody.cs) also uses [SupervisionCleanupAttempt](SupervisionCleanupAttempt.cs) for its two existing local-owner closes. Worker disposal is awaited first; a recoverable failure is captured as LocalCloseFailed before the original workspace close is attempted. Either failure prevents transfer success. Fatal errors and failure-recorder exceptions retain their original propagation. Operation labels, final native recheck, retained handles, account-release prerequisites and the original cleanup clock remain with the actual custody owner. The existing [cleanup-attempt controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionCleanupAttemptTests.cs) verify only this callback/catch procedure and do not construct custody authority.
+
+
+The same [cleanup-attempt procedure](SupervisionCleanupAttempt.cs) is reused by the [control server](LinuxEmptyObservationControlServer.cs) for its existing optional coverage/checkpoint closes and reply-gate disposal, by the [listener](LinuxControlListener.cs) for its ordered admission-drain and local handle closes, and by the [run workspace](LinuxRunWorkspace.cs) for its original reverse handle cleanup. Each call retains its original null condition, stage label, failure recorder and final settlement check. These shared catches exclude the same three fatal exception classes; they do not broaden the narrower workspace translation policies, suppress recorder failures, add waits or grant completion authority.

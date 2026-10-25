@@ -1181,9 +1181,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     private static void RequireSameNamed(SafeFileHandle parent, string name, LinuxProtectedMetadata expected,
         bool allowMount = false)
     {
-        using var named = OpenAt2(Fd(parent), name, PathFlags, 0, allowMount ? ParentResolution : ChildResolution);
-        var actual = LinuxProtectedMetadata.From(StatFd(named));
-        if (!LinuxNamedMetadataComparison.Matches(actual, expected))
+        if (!LinuxNamedEntry.Matches(Fd(parent), name, expected, allowMount ? ParentResolution : ChildResolution))
             throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 

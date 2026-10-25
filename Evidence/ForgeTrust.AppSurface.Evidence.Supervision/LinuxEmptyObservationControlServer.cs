@@ -38,13 +38,11 @@ internal sealed class LinuxEmptyObservationControlServer
             var closed = true;
             closed = await CloseQualificationCheckpointsAsync(closed).ConfigureAwait(false);
             if (_coverage is not null)
-                try { _coverage.Dispose(); }
-                catch (Exception error) when (Recoverable(error))
-                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+                SupervisionCleanupAttempt.Run(_coverage.Dispose,
+                    error => { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); });
             RecordQualificationLocalClose();
-            try { _replyOrder.Dispose(); }
-            catch (Exception error) when (Recoverable(error))
-            { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); }
+            SupervisionCleanupAttempt.Run(_replyOrder.Dispose,
+                error => { _failures.Capture(LinuxControlFailureStage.ReplyGateClose, null, error); closed = false; _sequence.RecordFailure(); });
             if (!closed) throw Rejected();
             Interlocked.Exchange(ref _localOwnersClosed, 1);
         }
@@ -925,15 +923,13 @@ internal sealed class LinuxEmptyObservationControlServer
     {
 #if EVIDENCE_PRIVATE_N04
             if (_n04 is not null)
-                try { await _n04.CloseAndJoinAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error))
-                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+                await SupervisionCleanupAttempt.RunAsync(() => _n04.CloseAndJoinAsync(),
+                    error => { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }).ConfigureAwait(false);
 #endif
 #if EVIDENCE_PRIVATE_N07
             if (_n07 is not null)
-                try { await _n07.CloseAndJoinAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error))
-                { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }
+                await SupervisionCleanupAttempt.RunAsync(() => _n07.CloseAndJoinAsync(),
+                    error => { _failures.Capture(LinuxControlFailureStage.HandlerJoin, null, error); closed = false; _sequence.RecordFailure(); }).ConfigureAwait(false);
 #endif
         return closed;
     }
