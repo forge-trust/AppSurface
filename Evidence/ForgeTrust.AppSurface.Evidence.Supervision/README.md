@@ -2219,3 +2219,9 @@ when checking its sealed bundle inventory. It still opens and authenticates its 
 descriptor, retains the original node ceiling and cancellation checks, and compares the returned names
 with the compiled inventory. The procedure only reads the borrowed descriptor; it cannot establish
 application ownership, bundle custody or readiness.
+
+The cgroup event reader also uses the [bounded descriptor reader](SupervisionBoundedFileRead.cs).
+Its original 1 KiB event ceiling leaves a 1,025-byte buffer, so the shared reader's 4 KiB per-read
+ceiling does not alter its native read sizes. The same original token is checked before and after
+every read, including EOF. Retained cgroup filesystem, inode/name and event-schema checks remain
+with the caller; returned bytes cannot establish an empty group or process settlement.

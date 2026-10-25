@@ -259,21 +259,8 @@ internal static class LinuxCgroupProbe
         throw Rejected();
     }
 
-    private static byte[] ReadEvents(SafeFileHandle handle, CancellationToken token)
-    {
-        var bytes = new byte[MaximumEventsBytes + 1];
-        var length = 0;
-        while (length < bytes.Length)
-        {
-            token.ThrowIfCancellationRequested();
-            var count = RandomAccess.Read(handle, bytes.AsSpan(length), length);
-            token.ThrowIfCancellationRequested();
-            if (count == 0) return bytes[..length];
-            length += count;
-            if (length > MaximumEventsBytes) throw Rejected();
-        }
-        throw Rejected();
-    }
+    private static byte[] ReadEvents(SafeFileHandle handle, CancellationToken token) =>
+        SupervisionBoundedFileRead.Read(handle, MaximumEventsBytes, token, Rejected);
 
     private static void RequirePlatform()
     {
