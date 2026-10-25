@@ -1,4 +1,4 @@
-<!-- /autoplan restore point: "/Users/andrew/.codex/worktrees/ea75/runnable__jupiter/.gstack/tmp/autoplan/main-autoplan-restore-20261024-135210.md" -->
+<!-- /autoplan restore point: ".gstack/tmp/autoplan/main-autoplan-restore-20261024-135210.md" -->
 ## URGENT, outside this plan
 
 None.
@@ -248,7 +248,7 @@ Use two synthetic consumers such as `schema-preparation` and `catalog-refresh`, 
 
 Before push, run formatting, relevant builds/analyzers/XML-documentation checks, focused GCP/CLI/process tests, unchanged render/config-verification regressions, and packed library/tool consumer checks. Run [solution coverage](../../scripts/coverage-solution.sh) when practical; preserve existing gates and target nearly complete branch verification in changed critical paths. Do not run the package artifact verifier concurrently with solution coverage in one checkout: shared build outputs can invalidate evidence. Report actual commands, revisions, exits, counts, failures and skips. Separate implementation/test line additions and removals; individually justify test, validator, timeout, threshold, snapshot, CI or suppression changes. No performance or net-deletion claim follows from this design.
 
-Document public and internal contract shape, defaults, constraints, state table, diagnostics, cancellation, limits, compatibility and ownership in XML/reference content. Update the package README, [deployment overview](../../Deployment/README.md), [reference](../../Deployment/reference.md), adoption guidance, [CLI guide](../../Cli/ForgeTrust.AppSurface.Cli/README.md), package chooser/discoverability where affected, and two runnable neutral examples. Explain configuration parity versus execution completion versus application acceptance, latest-secret limits, caller-selected execution identity, zero mutation and recovery choices. Preserve existing render and VerifyAsync behavior through regression tests.
+Document public and internal contract shape, defaults, constraints, state table, diagnostics, cancellation, limits, compatibility and ownership in XML/reference content. Update the package README, [deployment overview](../../Deployment/README.md), [reference](../../Deployment/reference.md), adoption guidance, [CLI guide](../../Cli/ForgeTrust.AppSurface.Cli/README.md), package chooser/discoverability where affected, and two executable neutral examples. Explain configuration parity versus execution completion versus application acceptance, latest-secret limits, caller-selected execution identity, zero mutation and recovery choices. Preserve existing render and VerifyAsync behavior through regression tests.
 
 Ship through the existing coordinated NuGet library and `appsurface` dotnet-tool release pipeline. Extend package metadata/closure and packed-consumer proof; merging this design does not publish a release. Verify actual published-package adoption after a separately authorized release if making a released-adoption claim. No new package or deployment service is required. Reverting observer adoption restores application observation without persisted state or cloud changes.
 
@@ -403,7 +403,7 @@ Mode provenance: /autoplan explicitly overrides mode to SELECTIVE EXPANSION. Pri
 | C4 / CEO | Exact-version compatibility must be visible | Manifest and reference already required | Separate support certificate/dashboard | declined | P4 duplicates manifest, adds unconsumed process artifact |
 | C5 / CEO | Resume after a CI process restart | Stateless observation | Persist observations and resume/watch command | declined | P5 new state/command lifecycle, no demonstrated need; no TODO because rejected rather than deferred |
 
-Five adjacent delight candidates were evaluated individually above; C1/C2 accepted, C3–C5 skipped. Options differ in kind, no completeness score. For C1, keep ambiguity vs specify bounded best effort: choose explicit failure behavior; for C2, bare table vs runnable recipe: choose the recipe; for C3/C4 choose reuse over duplicate infrastructure; for C5 retain statelessness over persistence. Accepted additions work without any pending user change. No taste or user challenge has been identified at Step 0. No new TODO is required.
+Five adjacent delight candidates were evaluated individually above; C1/C2 accepted, C3–C5 skipped. Options differ in kind, no completeness score. For C1, keep ambiguity vs specify bounded best effort: choose explicit failure behavior; for C2, bare table vs executable recipe: choose the recipe; for C3/C4 choose reuse over duplicate infrastructure; for C5 retain statelessness over persistence. Accepted additions work without any pending user change. No taste or user challenge has been identified at Step 0. No new TODO is required.
 
 The evidence worksheets have an actual consumer: the implementing owner and accepting maintainer use them to decide format certification and reject unavailable R facts. They are the smallest per-field provenance record for two required consumers, retained alongside fixtures while that compatibility version is supported; replacement fixtures retire old versions through the same acceptance process. This does not add another report or runtime consumer.
 
@@ -728,7 +728,7 @@ All work is future implementation and follows the feasibility gate. Estimates re
   - Surfaced by: C1 and Sections 2/4/6; command does not yet exist.
   - Files: `Cli/ForgeTrust.AppSurface.Cli/AppSurfaceCliApp.cs`, CLI project, future command and tests.
   - Verify: installed help/registration, invalid argv safety, all exits and C1 broken-stream/cancellation cases.
-- [ ] **T5 (P2, human ~2–3h / agent ~1h)** — docs/examples — Publish full reference/runbook and two runnable neutral consumers with C2 recipe.
+- [ ] **T5 (P2, human ~2–3h / agent ~1h)** — docs/examples — Publish full reference/runbook and two executable neutral consumers with C2 recipe.
   - Surfaced by: C2/C7, Sections 6/8/10.
   - Files: GCP README, Deployment README/reference, CLI README, package chooser and future neutral examples.
   - Verify: every API/default/limit/diagnostic/state/ownership link, recipe status preservation, swapped evidence; no real-adoption claim.
@@ -865,7 +865,7 @@ DX DUAL VOICES — CONSENSUS TABLE:
 
 The existing package README and CLI guide expose no execution observer because it is new. A newcomer must not read the full evidence matrix to try the approved workflow. DX1 chooses one golden path in the existing CLI guide, directly linked from package/overview/chooser, rather than a hosted playground or extra public command. The Pass 1 reference was read at Step 0D; its useful pattern is one visible result with prerequisites disclosed, not an unrelated account-free cloud promise.
 
-The planned prepared-machine quickstart has three actions: inspect the supported version/OS/prerequisite box and choose the coordinated tool version; run the complete observe-execution command with the caller's trusted bundle/logical ID/canonical execution; read the JSON example and branch on its exit using C2. Budget allocation is estimated: read/prerequisite check about 1–2 minutes, invocation up to its 60-second default, interpretation about 1 minute, excluding a long-running workload from a promised success endpoint. A separately labeled offline example runs through the bounded fake seam in the neutral sample project and proves parser/caller behavior only. Complete concrete commands and expected fixture output become implementation deliverables once files exist; the review does not invent a currently runnable command or provider success.
+The planned prepared-machine quickstart has three actions: inspect the supported version/OS/prerequisite box and choose the coordinated tool version; run the complete observe-execution command with the caller's trusted bundle/logical ID/canonical execution; read the JSON example and branch on its exit using C2. Budget allocation is estimated: read/prerequisite check about 1–2 minutes, invocation up to its 60-second default, interpretation about 1 minute, excluding a long-running workload from a promised success endpoint. A separately labeled offline example runs through the bounded fake seam in the neutral sample project and proves parser/caller behavior only. Complete concrete commands and expected fixture output become implementation deliverables once files exist; the review does not invent a currently executable command or provider success.
 
 Ten would require an observed first-use session at the accepted clock and actual compatible provider evidence. Retain score 8 because both are future proof; no extra installation abstraction is justified.
 
@@ -935,7 +935,7 @@ Existing TimeProvider and intentional bounded seams allow deterministic local te
 
 ### DX Pass 7: Community and ecosystem — 6 -> 7/10
 
-The repository is public and has existing package/release discovery, issues, contribution guidance and licensing; the feature should point to those paths. Two runnable neutral examples make the boundary inspectable without private application names. Report failures with a diagnostic code, supported version/OS and a sanitized fixture, never a secret-bearing provider dump. There is no new plugin ecosystem or support promise to build here.
+The repository is public and has existing package/release discovery, issues, contribution guidance and licensing; the feature should point to those paths. Two executable neutral examples make the boundary inspectable without private application names. Report failures with a diagnostic code, supported version/OS and a sanitized fixture, never a secret-bearing provider dump. There is no new plugin ecosystem or support promise to build here.
 
 No new community channel, pricing plan or response-time SLA is justified by the issue. Actual maintainer response and adoption sentiment are unmeasured, so the score remains 7 rather than inventing desirability or an active monitored channel. The Pass 7 reference informs the ecosystem lens only; its numeric claims are not evidence for this package. Existing GitHub issue reporting is the lowest-cost feedback vehicle.
 
@@ -1170,7 +1170,7 @@ E9 [P1] (confidence 8/10) design:186's cleanup and C1's one-result behavior need
 
 E10 [P2] (confidence 8/10) diagnostic and format manifest are future public contracts with no existing tests. EC6/EC7 add scoped manifest/code/anchor validation, and CP14 extends packed library/tool proof. No test is obsolete; no threshold/snapshot/timeout/CI/suppression relaxation is authorized. Formatting, focused tests/build/analyzers/doc checks, unchanged render/Verify and practical solution coverage are mandatory implementation work. Run package verification sequentially with solution coverage. Dispositions: E8–E10 accepted as required contract proof under P1, no separate runtime change.
 
-Test Plan saved: `/Users/andrew/.gstack/projects/forge-trust-Runnable/andrew-main-eng-review-test-plan-20261024-issue891.md`. Includes fourteen critical path groups, eight edge groups, value cards, no tests to retire and T1/T2 pending choices. This is future QA input, not completed validation.
+Test Plan saved in the engineering review's historical local artifact bucket (`andrew-main-eng-review-test-plan-20261024-issue891.md`). Includes fourteen critical path groups, eight edge groups, value cards, no tests to retire and T1/T2 pending choices. This is future QA input, not completed validation.
 
 ### Engineering Section 4: Performance
 

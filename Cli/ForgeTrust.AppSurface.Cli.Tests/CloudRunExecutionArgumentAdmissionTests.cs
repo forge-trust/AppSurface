@@ -7,6 +7,7 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
     [InlineData("projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", true)]
     [InlineData("projects/1234567890123456789/locations/us-central1/jobs/job-1/executions/execution-1", true)]
     [InlineData("projects/12345678901234567890/locations/us-central1/jobs/job-1/executions/execution-1", false)]
+    [InlineData("projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1\n", false)]
     [InlineData("projects/p/locations/r/jobs/j", false)]
     [InlineData("projects/p/locations/r/jobs/j/executions/e/extra", false)]
     [InlineData("projects/p/locations/r/jobs/j/executions/e\n", false)]
@@ -17,6 +18,8 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
     [Theory]
     [InlineData("60s", true)]
     [InlineData("2s", true)]
+    [InlineData("1m", true)]
+    [InlineData("1d", true)]
     [InlineData("0s", false)]
     [InlineData("-1s", false)]
     [InlineData("60", false)]
@@ -36,6 +39,26 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
         => Assert.Equal(expected, CloudRunExecutionArgumentAdmission.TryDuration(value, out _));
 
     [Fact]
+    public void DurationAdmission_RejectsMissingAndUnrepresentableTickValues()
+    {
+        // protects=duration parser boundary for absent and sub-tick precision; fails_when=null, whitespace, or fractional ticks are admitted; no_claim=timer accuracy
+        Assert.False(CloudRunExecutionArgumentAdmission.TryDuration(null, out _));
+        Assert.False(CloudRunExecutionArgumentAdmission.TryDuration("   ", out _));
+        Assert.False(CloudRunExecutionArgumentAdmission.TryDuration("0.00001ms", out _));
+        Assert.False(CloudRunExecutionArgumentAdmission.TryDuration("0.00011ms", out _));
+    }
+
+    [Fact]
+    public void LogicalIdMustConsumeEntireInput()
+    {
+        // protects=complete logical binding grammar; fails_when=a final newline passes local CLI admission;
+        // no_claim=the valid logical ID is declared in a deployment bundle.
+        Assert.False(CloudRunExecutionArgumentAdmission.TryValidate("bundle", "schema-preparation\n",
+            "projects/demo-project/locations/us-central1/jobs/schema-preparation/executions/schema-preparation-run",
+            "60s", "2s", out _, out _));
+    }
+
+    [Fact]
     public void RawAdmission_RejectsUnknownDuplicateMissingAndJoinedOptions()
     // protects=pre-CliFx safe admission; fails_when=raw malformed tokens reach generic parser; no_claim=CliFx help rendering
     {
@@ -43,12 +66,29 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
         Assert.True(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["deployment", "gcp-cloud-run", "observe-execution", "--job"]));
         Assert.True(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["deployment", "gcp-cloud-run", "observe-execution", "--job", "one", "--job", "two"]));
         Assert.False(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=bundle", "--job=one", "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json"]));
+
+        // protects=json switch syntax and uniqueness; fails_when=value-attached or repeated json flag reaches binding; no_claim=JSON payload validity
+        Assert.True(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=bundle", "--job=one", "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json=true"]));
+        Assert.True(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=bundle", "--job=one", "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json", "--json"]));
     }
 
     [Fact]
     public void RawAdmission_IgnoresOtherCommands()
-        // protects=unrelated command compatibility; fails_when=observe admission intercepts another command; no_claim=other command validation
-        => Assert.False(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["docs", "--bogus"]));
+    // protects=unrelated command compatibility; fails_when=observe admission intercepts another command; no_claim=other command validation
+    {
+        Assert.False(CloudRunExecutionArgumentAdmission.IsMalformedRaw(["docs", "--bogus"]));
+        Assert.Null(CloudRunExecutionArgumentAdmission.Parse(["docs", "--bogus"]));
+    }
+
+    [Fact]
+    public void Parse_ConsumesRecognizedJsonSwitch()
+    {
+        var parsed = CloudRunExecutionArgumentAdmission.Parse(["deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=bundle", "--job=job", "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json"]);
+
+        // protects=the valueless JSON switch parses as a boolean option; fails_when=valid switch is rejected or altered; no_claim=command output serialization
+        Assert.NotNull(parsed);
+        Assert.Equal("true", parsed["--json"]);
+    }
 
     [Theory]
     [InlineData("--bundle-dir", "bundle")]
@@ -70,6 +110,8 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
     // protects=bundle path boundary; fails_when=reparse-point path is read; no_claim=adversarial filesystem replacement race
     {
         var root = TestPathUtils.PathUnder(Environment.CurrentDirectory, ".appsurface-cli-admission-" + Guid.NewGuid().ToString("N"));
+        var target = TestPathUtils.PathUnder(root, "target.txt");
+        var fileLink = TestPathUtils.PathUnder(root, "file-link.txt");
         Directory.CreateDirectory(root);
         try
         {
@@ -85,9 +127,27 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
             {
                 if (Directory.Exists(link)) Directory.Delete(link);
             }
+            File.WriteAllText(target, "target");
+            Assert.True(CloudRunExecutionArgumentAdmission.IsPathSafe(target));
+            Assert.True(CloudRunExecutionArgumentAdmission.IsPathSafe(TestPathUtils.PathUnder(root, "not-created", "child")));
+            try
+            {
+                try
+                {
+                    File.CreateSymbolicLink(fileLink, target);
+                    // protects=file-component reparse-point rejection; fails_when=path through a file symlink is admitted; no_claim=filesystem race after admission
+                    Assert.False(CloudRunExecutionArgumentAdmission.IsPathSafe(fileLink));
+                }
+                catch (PlatformNotSupportedException) { }
+            }
+            finally
+            {
+                if (File.Exists(fileLink)) File.Delete(fileLink);
+            }
         }
         finally
         {
+            if (File.Exists(target)) File.Delete(target);
             Directory.Delete(root);
         }
     }

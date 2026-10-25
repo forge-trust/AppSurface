@@ -10,6 +10,13 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CloudRunExecutionCommandCoverageTests
 {
     [Fact]
+    public void Constructor_RejectsNullWorkflow()
+    {
+        // protects=command dependency invariant; fails_when=command can be created without its workflow; no_claim=workflow behavior
+        Assert.Throws<ArgumentNullException>(() => new CloudRunExecutionCommand(null!));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_SuccessDeliversJsonAndSetsProcessExitCode()
     {
         var original = Environment.ExitCode;

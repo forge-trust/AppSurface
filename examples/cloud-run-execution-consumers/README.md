@@ -1,6 +1,6 @@
 # Cloud Run execution observation consumers
 
-This runnable example exercises the public `ForgeTrust.AppSurface.Deployment.GcpCloudRun` observer from two neutral migration-job consumers: `schema-preparation` and `catalog-refresh`. Each mode renders its own three-artifact bundle, selects its own canonical execution resource, and supplies an independently authored fixture through the public bounded-reader seam.
+This executable example exercises the public `ForgeTrust.AppSurface.Deployment.GcpCloudRun` observer from two neutral migration-job consumers: `schema-preparation` and `catalog-refresh`. Each mode renders its own three-artifact bundle, selects its own canonical execution resource, and supplies an independently authored fixture through the public bounded-reader seam.
 
 The fixture reader is intentionally offline. The sample does not invoke `gcloud`, submit or cancel an execution, resolve a secret, or mutate a cloud resource. The `--swapped` mode supplies the other execution's evidence and must return `Unknown` with a nonzero exit code.
 

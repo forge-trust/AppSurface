@@ -4959,6 +4959,74 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         Assert.Contains(report.Artifacts, artifact => artifact.Description == "nonpatch gate removes patch-target Markdown" && artifact.Exists);
     }
 
+    [Theory]
+    [InlineData("help-exit", "appsurface deployment gcp-cloud-run observe-execution --help", "", "", "Expected exit code 0")]
+    [InlineData("help-bundle-option", "", "USAGE --execution <resource> --poll-interval <duration>", "", "describe bundle, execution, and polling options")]
+    [InlineData("help-execution-option", "", "USAGE --bundle-dir <directory> --poll-interval <duration>", "", "describe bundle, execution, and polling options")]
+    [InlineData("help-poll-option", "", "USAGE --bundle-dir <directory> --execution <resource>", "", "describe bundle, execution, and polling options")]
+    [InlineData("consumer-restore", "dotnet restore Cloud Run API consumer", "", "", "Expected exit code 0")]
+    [InlineData("consumer-build", "dotnet build Cloud Run API consumer", "", "", "Expected exit code 0")]
+    [InlineData("consumer-run", "dotnet run Cloud Run API consumer", "", "", "Expected exit code 0")]
+    [InlineData("consumer-output", "", "", "unexpected consumer output", "instantiate the public observer and bounded-reader contracts")]
+    public async Task CoverageCliConsumerProofWorkflow_StopsWhenCloudRunConsumerHelpOrExecutionProofFails(
+        string scenario,
+        string failOperationName,
+        string executionHelpOutput,
+        string consumerRunOutput,
+        string expectedFailure)
+    {
+        var artifactDirectory = CombineSafeChildPath(_repositoryRoot, "artifacts");
+        Directory.CreateDirectory(artifactDirectory);
+        var cliArtifactPath = CombineSafeChildPath(artifactDirectory, CreatePackageFileName("ForgeTrust.AppSurface.Cli"));
+        await File.WriteAllTextAsync(cliArtifactPath, "cli package", Encoding.UTF8);
+        var commandRunner = new CoverageProofRecordingCommandRunner(
+            PackageVersion,
+            createFailingGateReports: true,
+            failOperationName: string.IsNullOrEmpty(failOperationName) ? null : failOperationName,
+            executionHelpOutput: string.IsNullOrEmpty(executionHelpOutput) ? null : executionHelpOutput,
+            consumerRunOutput: string.IsNullOrEmpty(consumerRunOutput) ? null : consumerRunOutput);
+        var workflow = new CoverageCliConsumerProofWorkflow(commandRunner);
+
+        var report = await workflow.RunAsync(
+            new CoverageCliConsumerProofRequest(
+                _repositoryRoot,
+                artifactDirectory,
+                PackageVersion,
+                CombineSafeChildPath(artifactDirectory, "coverage-proof"),
+                "https://api.nuget.org/v3/index.json"),
+            CreateCliProofValidationReport(cliArtifactPath),
+            CancellationToken.None);
+
+        Assert.False(report.Succeeded, scenario);
+        Assert.Contains(expectedFailure, report.FirstFailure, StringComparison.Ordinal);
+        var failedCommand = report.Commands[^1];
+        Assert.False(failedCommand.Succeeded);
+        if (scenario.StartsWith("help-", StringComparison.Ordinal) && scenario != "help-exit")
+        {
+            Assert.Equal("appsurface deployment gcp-cloud-run observe-execution --help", failedCommand.OperationName);
+            Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "dotnet restore Cloud Run API consumer");
+        }
+        else if (scenario == "help-exit")
+        {
+            Assert.Equal("appsurface deployment gcp-cloud-run observe-execution --help", failedCommand.OperationName);
+            Assert.Equal(2, failedCommand.ExitCode);
+            Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "dotnet restore Cloud Run API consumer");
+        }
+        else
+        {
+            Assert.Contains(commandRunner.Requests, request => request.OperationName == "appsurface deployment gcp-cloud-run observe-execution --help");
+            var expectedLastOperation = scenario switch
+            {
+                "consumer-restore" => "dotnet restore Cloud Run API consumer",
+                "consumer-build" => "dotnet build Cloud Run API consumer",
+                "consumer-run" or "consumer-output" => "dotnet run Cloud Run API consumer",
+                _ => throw new InvalidOperationException($"Unexpected scenario '{scenario}'.")
+            };
+            Assert.Equal(expectedLastOperation, failedCommand.OperationName);
+            Assert.DoesNotContain(commandRunner.Requests, request => request.OperationName == "appsurface release compose preview");
+        }
+    }
+
     [Fact]
     public async Task CoverageCliConsumerProofWorkflow_ReportsMissingReleaseComposeOutput()
     {
@@ -10341,6 +10409,8 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
         private readonly bool _createPassingGateReports;
         private readonly string? _failOperationName;
         private readonly string? _failTimeoutDescriptionContains;
+        private readonly string _executionHelpOutput;
+        private readonly string _consumerRunOutput;
         private readonly bool _intentionallyFailingGateExitsNonZero;
         private readonly bool _emitCoverageRunExclusionEvidence;
         private readonly bool _createExcludedProjectArtifacts;
@@ -10392,7 +10462,9 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
             bool createMergedCoverageLoss = false,
             bool createMissingSelectedRawCoverage = false,
             bool createShardDirectoryFile = false,
-            bool createReleaseOutput = true)
+            bool createReleaseOutput = true,
+            string? executionHelpOutput = null,
+            string? consumerRunOutput = null)
         {
             _packageVersion = packageVersion;
             _createFailingGateReports = createFailingGateReports;
@@ -10402,6 +10474,8 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
             _createPassingGateReports = createPassingGateReports;
             _failOperationName = failOperationName;
             _failTimeoutDescriptionContains = failTimeoutDescriptionContains;
+            _executionHelpOutput = executionHelpOutput ?? "USAGE --bundle-dir <directory> --execution <resource> --poll-interval <duration>";
+            _consumerRunOutput = consumerRunOutput ?? "GcpCloudRunExecutionObserver:ConsumerReader";
             _intentionallyFailingGateExitsNonZero = intentionallyFailingGateExitsNonZero;
             _emitCoverageRunExclusionEvidence = emitCoverageRunExclusionEvidence;
             _createExcludedProjectArtifacts = createExcludedProjectArtifacts;
@@ -10446,12 +10520,12 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
 
             if (request.OperationName == "appsurface deployment gcp-cloud-run observe-execution --help")
             {
-                return Task.FromResult(new ExternalCommandResult(0, "USAGE --bundle-dir <directory> --execution <resource> --poll-interval <duration>", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, _executionHelpOutput, string.Empty));
             }
 
             if (request.OperationName == "dotnet run Cloud Run API consumer")
             {
-                return Task.FromResult(new ExternalCommandResult(0, "GcpCloudRunExecutionObserver:ConsumerReader", string.Empty));
+                return Task.FromResult(new ExternalCommandResult(0, _consumerRunOutput, string.Empty));
             }
 
             if (request.OperationName == "appsurface release compose preview")

@@ -4,8 +4,42 @@ using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 public sealed class BoundedGcloudExecutionReaderTests
 {
     [Fact]
+    public void ExplicitReaderDependenciesRejectMissingLauncherAndClock()
+    {
+        // protects=bounded-reader construction invariants; fails_when=missing dependencies reach process setup;
+        // no_claim=an installed launcher exists or has provider access.
+        Assert.Throws<ArgumentNullException>(() => new BoundedGcloudExecutionReader(null!, TimeProvider.System));
+        Assert.Throws<ArgumentException>(() => new BoundedGcloudExecutionReader(" ", TimeProvider.System));
+        Assert.Throws<ArgumentNullException>(() => new BoundedGcloudExecutionReader("gcloud", null!));
+    }
+
+    [Fact]
+    public async Task NativeExpiredCleanupBudgetCannotPublishCapturedOutput()
+    {
+        // protects=cleanup cannot renew an exhausted original allowance; fails_when=expired cleanup becomes Complete or Deadline;
+        // no_claim=the OS can preempt a process start or tree kill at an exact wall-clock instant.
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        using var slow = NativeFixture.Create("exec sleep 5");
+        var clock = new CleanupExpiryClock();
+        var result = await new BoundedGcloudExecutionReader(slow.Path, clock)
+            .ReadAsync(Resource(), TimeSpan.FromMilliseconds(100));
+        Assert.Equal(BoundedGcloudExecutionReadOutcome.CleanupUnconfirmed, result.Outcome);
+        Assert.Null(result.ExitCode);
+        Assert.Empty(result.StandardOutput);
+    }
+
+    private sealed class CleanupExpiryClock : TimeProvider
+    {
+        private int _calls;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        // Entry and launch see the original allowance; cleanup sees that allowance consumed.
+        public override long GetTimestamp() => Interlocked.Increment(ref _calls) <= 2 ? 0 : TimeSpan.TicksPerSecond;
+    }
+
+    [Fact]
     public async Task ReadAsyncRejectsNonCanonicalResourceWithoutLaunching()
     {
+        // protects=canonical execution admission before process launch; fails_when=an incomplete resource reaches launch or returns Complete; no_claim=the remote resource exists.
         var reader = new BoundedGcloudExecutionReader("missing-gcloud", TimeProvider.System);
 
         var result = await reader.ReadAsync("projects/p/locations/r/jobs/j", TimeSpan.FromSeconds(1));
@@ -18,6 +52,7 @@ public sealed class BoundedGcloudExecutionReaderTests
     [Fact]
     public void ResultDefensivelyCopiesOutputBytes()
     {
+        // protects=immutable captured stdout at both input and getter boundaries; fails_when=caller mutation changes the stored result; no_claim=provider bytes are semantically valid.
         var bytes = new byte[] { (byte)'{' };
         var result = new BoundedGcloudExecutionReadResult(BoundedGcloudExecutionReadOutcome.Complete, 0, bytes);
 
@@ -31,6 +66,7 @@ public sealed class BoundedGcloudExecutionReaderTests
     [Fact]
     public void CreateStartInfoUsesFixedExactDescribeArguments()
     {
+        // protects=read-only exact gcloud invocation and redirected streams; fails_when=mutation or shell execution tokens enter argv; no_claim=the gcloud process ran.
         var reader = new BoundedGcloudExecutionReader("gcloud", TimeProvider.System);
 
         Assert.True(ExecutionResource.TryParse("projects/myproj/locations/us-central1/jobs/job/executions/execution", out var resource));
@@ -70,6 +106,7 @@ public sealed class BoundedGcloudExecutionReaderTests
     [Fact]
     public async Task ReadAsyncRejectsInvalidTimeoutBeforeProviderAccess()
     {
+        // protects=positive finite timeout admission; fails_when=zero budget reaches process setup; no_claim=provider availability.
         var reader = new BoundedGcloudExecutionReader("missing-gcloud", TimeProvider.System);
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => reader.ReadAsync(

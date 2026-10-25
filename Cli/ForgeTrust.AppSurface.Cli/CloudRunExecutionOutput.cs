@@ -53,7 +53,7 @@ internal sealed class CloudRunExecutionOutput(
 
     private static string Serialize(CloudRunExecutionEnvelope value) => JsonSerializer.Serialize(value);
     private static bool IsLogicalId(string value) => value is { Length: > 0 and <= 63 }
-        && System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        && System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static string RenderText(CloudRunExecutionEnvelope value)
     {

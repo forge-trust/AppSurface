@@ -11,10 +11,10 @@ internal static class GcpCloudRunBundleValidator
 {
     private const int MaxArtifactBytes = 4 * 1024 * 1024;
     private const int MaxJsonDepth = 64;
-    private static readonly Regex ImmutableImage = new("^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant);
-    private static readonly Regex ProjectId = new("^[a-z][a-z0-9-]{4,28}[a-z0-9]$", RegexOptions.CultureInvariant);
-    private static readonly Regex Region = new("^[a-z]+(?:-[a-z0-9]+)+[0-9]$", RegexOptions.CultureInvariant);
-    private static readonly Regex JobName = new("^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$", RegexOptions.CultureInvariant);
+    private static readonly Regex ImmutableImage = new("^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}\\z", RegexOptions.CultureInvariant);
+    private static readonly Regex ProjectId = new("^[a-z][a-z0-9-]{4,28}[a-z0-9]\\z", RegexOptions.CultureInvariant);
+    private static readonly Regex Region = new("^[a-z]+(?:-[a-z0-9]+)+[0-9]\\z", RegexOptions.CultureInvariant);
+    private static readonly Regex JobName = new("^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\\z", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> IntentProperties = new(StringComparer.Ordinal)
     {
         "$schema", "schemaVersion", "environment", "sourceRevision", "migrationJobs", "value", "id", "phase", "image", "command", "arguments", "execution", "tasks", "parallelism", "retries", "timeout", "connectionSecret", "parameter", "environmentVariable", "delivery", "database", "configurationKey", "requireUnixSocket", "migrationOwner", "serviceIdentity", "requiredCapabilities", "requirePrivateNetwork", "environment",
@@ -27,9 +27,6 @@ internal static class GcpCloudRunBundleValidator
     {
         "$schema", "schemaVersion", "target", "environment", "project", "region", "generatorVersion", "sourceRevision", "projectNumber", "intentSha256", "terraformSha256", "resourceAddresses", "requiredCapabilities", "expected", "logicalId", "physicalJobName", "image", "command", "commandElements", "arguments", "environment", "tasks", "parallelism", "retries", "timeout", "network", "subnetwork", "egress", "cloudSqlInstanceConnectionName", "secretEnvironmentVariable", "secretEnvironments", "secretId", "secretVersion", "serviceAccount", "environmentLabel", "sourceRevisionLabel",
     };
-
-    /// <summary>Snapshots and strictly validates a bundle before any provider command is allowed.</summary>
-    internal static GcpCloudRunDeploymentPlan Validate(DeploymentRenderResult renderResult) => ValidateForObservation(renderResult);
 
     /// <summary>Validates the observation-specific finite input and closed JSON admission rules.</summary>
     internal static GcpCloudRunDeploymentPlan ValidateForObservation(DeploymentRenderResult renderResult)
@@ -369,7 +366,7 @@ internal static class GcpCloudRunBundleValidator
     }
 
     private static bool IsCanonicalProjectNumber(string value) =>
-        Regex.IsMatch(value, "^[1-9][0-9]*$", RegexOptions.CultureInvariant) &&
+        Regex.IsMatch(value, "^[1-9][0-9]*\\z", RegexOptions.CultureInvariant) &&
         long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0;
 
     private static DeploymentValidationException Failure(string code, string problem, string cause, string fix) =>

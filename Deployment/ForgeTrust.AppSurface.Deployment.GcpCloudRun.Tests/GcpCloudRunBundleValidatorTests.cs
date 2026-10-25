@@ -124,6 +124,65 @@ public sealed partial class GcpCloudRunBundleValidatorTests
         Assert.Equal("ASDEPLOY171", error.Diagnostic.Code);
     }
 
+    [Theory]
+    [InlineData("schema")]
+    [InlineData("schema-version")]
+    [InlineData("target")]
+    [InlineData("intent-hash")]
+    [InlineData("terraform-hash")]
+    [InlineData("empty-project")]
+    [InlineData("empty-region")]
+    [InlineData("resource-addresses-null")]
+    [InlineData("capabilities-null")]
+    [InlineData("expected-null")]
+    [InlineData("expected-empty")]
+    [InlineData("expected-null-entry")]
+    [InlineData("expected-empty-logical-id")]
+    [InlineData("expected-empty-job-name")]
+    [InlineData("duplicate-logical-id")]
+    [InlineData("duplicate-physical-name")]
+    public async Task LegacyBundleGuardRejectsPlanIdentityAndInventoryMutations(string mutation)
+    {
+        // protects=legacy plan identity, cross-artifact references, and job inventory; fails_when=incomplete or ambiguous plan reaches parity comparison; no_claim=plan hash is a signature.
+        using var fixture = new ProfileFixture(null);
+        var rendered = await new GcpCloudRunDeploymentTarget().RenderAsync(fixture.Request());
+        var artifact = rendered.Artifacts.Single(item => item.FileName == "gcp-cloud-run-migration.plan.json");
+        var root = System.Text.Json.Nodes.JsonNode.Parse(artifact.Content)!.AsObject();
+        var expected = root["expected"]!.AsArray();
+        switch (mutation)
+        {
+            case "schema": root["$schema"] = "https://example.invalid/schema"; break;
+            case "schema-version": root["schemaVersion"] = "2.0"; break;
+            case "target": root["target"] = "other-target"; break;
+            case "intent-hash": root["intentSha256"] = new string('0', 64); break;
+            case "terraform-hash": root["terraformSha256"] = new string('0', 64); break;
+            case "empty-project": root["project"] = " "; break;
+            case "empty-region": root["region"] = ""; break;
+            case "resource-addresses-null": root["resourceAddresses"] = null; break;
+            case "capabilities-null": root["requiredCapabilities"] = null; break;
+            case "expected-null": root["expected"] = null; break;
+            case "expected-empty": root["expected"] = new System.Text.Json.Nodes.JsonArray(); break;
+            case "expected-null-entry": expected[0] = null; break;
+            case "expected-empty-logical-id": expected[0]!["logicalId"] = " "; break;
+            case "expected-empty-job-name": expected[0]!["physicalJobName"] = ""; break;
+            case "duplicate-logical-id":
+                expected.Add(System.Text.Json.Nodes.JsonNode.Parse(expected[0]!.ToJsonString()));
+                break;
+            case "duplicate-physical-name":
+                var duplicate = System.Text.Json.Nodes.JsonNode.Parse(expected[0]!.ToJsonString())!;
+                duplicate["logicalId"] = "second-job";
+                expected.Add(duplicate);
+                break;
+            default: throw new InvalidOperationException();
+        }
+        var changedPlan = DeploymentArtifact.Create(artifact.FileName, Encoding.UTF8.GetBytes(root.ToJsonString()));
+        var artifacts = rendered.Artifacts.Select(item => item.FileName == artifact.FileName ? changedPlan : item).ToArray();
+
+        var error = Assert.Throws<DeploymentValidationException>(() => GcpCloudRunDeploymentTarget.ValidateBundleLegacy(new DeploymentRenderResult(rendered.Target, artifacts)));
+
+        Assert.Equal("ASDEPLOY152", error.Diagnostic.Code);
+    }
+
     [Fact]
     public void FiniteJsonAdmissionAcceptsInclusiveCollectionBoundary()
     {

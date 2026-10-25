@@ -121,7 +121,7 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
     private static void CheckConfiguration(JsonElement spec, JsonElement task, JsonElement container, JsonElement annotations, bool v1, GcpCloudRunDeploymentPlan plan, GcpCloudRunMigrationParity expected)
     {
         var image = Text(container, "image");
-        if (!Regex.IsMatch(image, "^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)) throw Bad("ASDEPLOY174");
+        if (!Regex.IsMatch(image, "^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}\\z", RegexOptions.CultureInvariant)) throw Bad("ASDEPLOY174");
         Match(image == expected.Image);
         Match(Strings(container, "command", optional: false).SequenceEqual([expected.Command], StringComparer.Ordinal));
         Match(Strings(container, "args", optional: expected.Arguments.Count == 0).SequenceEqual(expected.Arguments, StringComparer.Ordinal));
@@ -221,7 +221,7 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
     private static string NetworkReference(string observed, GcpCloudRunDeploymentPlan plan, string expected, bool regional)
     {
         if (observed.StartsWith("projects/", StringComparison.Ordinal)) return CanonicalProjectPrefix(observed, plan);
-        if (!Regex.IsMatch(observed, "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$", RegexOptions.CultureInvariant)) throw Bad("ASDEPLOY174");
+        if (!Regex.IsMatch(observed, "^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\\z", RegexOptions.CultureInvariant)) throw Bad("ASDEPLOY174");
         var prefix = regional ? $"projects/{plan.Project}/regions/{plan.Region}/subnetworks/" : $"projects/{plan.Project}/global/networks/";
         // A bare name cannot identify a Shared VPC or another region/project.
         if (!expected.StartsWith(prefix, StringComparison.Ordinal) || plan.ProjectNumber is null) throw Bad("ASDEPLOY175");
@@ -309,7 +309,7 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
     private static long Counter(JsonElement parent, string name, bool allowOmitted) => parent.TryGetProperty(name, out _) ? Number(parent, name) : allowOmitted ? 0 : throw Bad("ASDEPLOY175");
 
     private static bool ValidTimestamp(string value) => Regex.IsMatch(value,
-        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})$", RegexOptions.CultureInvariant)
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{1,9})?(?:Z|[+-][0-9]{2}:[0-9]{2})\\z", RegexOptions.CultureInvariant)
         && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _);
 
     private static long Number(JsonElement parent, string name, bool positive = false, long maximum = int.MaxValue)

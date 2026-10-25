@@ -165,7 +165,7 @@ public sealed class GcpCloudRunExecutionObserver : IGcpCloudRunExecutionObserver
 /// <summary>Canonical selected identity shared by admission and classification; no alias lookup occurs.</summary>
 internal sealed record ExecutionResource(string Name, string Project, string Region, string Job, string Execution)
 {
-    private static readonly Regex Pattern = new("^projects/(?<p>[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{0,18})/locations/(?<r>[a-z]+(?:-[a-z0-9]+)+[0-9])/jobs/(?<j>[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)/executions/(?<e>[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)$", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    private static readonly Regex Pattern = new("^projects/(?<p>[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{0,18})/locations/(?<r>[a-z]+(?:-[a-z0-9]+)+[0-9])/jobs/(?<j>[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)/executions/(?<e>[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?)\\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
     /// <summary>Parses only canonical full selected resources.</summary>
     internal static bool TryParse(string? value, out ExecutionResource? resource)
@@ -185,7 +185,7 @@ internal sealed record ExecutionResource(string Name, string Project, string Reg
         (Project == plan.Project || Project == plan.ProjectNumber) && Region == plan.Region && Job == expected.PhysicalJobName;
 
     /// <summary>Admits safe logical IDs without echoing invalid input.</summary>
-    internal static bool IsLogicalId(string? value) => value is { Length: > 0 and <= 63 } && Regex.IsMatch(value, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant);
+    internal static bool IsLogicalId(string? value) => value is { Length: > 0 and <= 63 } && Regex.IsMatch(value, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\\z", RegexOptions.CultureInvariant);
 
     /// <summary>Checks finite positive TimeProvider timer allowances without rounding tiny budgets up.</summary>
     internal static bool ValidDurations(TimeSpan timeout, TimeSpan interval) => timeout > TimeSpan.Zero && interval > TimeSpan.Zero && interval <= timeout && timeout.TotalMilliseconds <= 4_294_967_294d;

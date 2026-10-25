@@ -43,7 +43,7 @@ internal static partial class CloudRunExecutionArgumentAdmission
         timeoutValue = default;
         pollValue = default;
         if (string.IsNullOrWhiteSpace(bundleDirectory) || logicalJobId is not { Length: > 0 and <= 63 }
-            || !Regex.IsMatch(logicalJobId, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", RegexOptions.CultureInvariant)
+            || !Regex.IsMatch(logicalJobId, "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*\\z", RegexOptions.CultureInvariant)
             || !IsCanonicalExecution(execution) || !TryDuration(timeout, out timeoutValue)
             || !TryDuration(pollInterval, out pollValue) || pollValue > timeoutValue)
         {
@@ -100,6 +100,6 @@ internal static partial class CloudRunExecutionArgumentAdmission
         return true;
     }
 
-    [GeneratedRegex(@"^projects/(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{0,18})/locations/[a-z]+(?:-[a-z0-9]+)+[0-9]/jobs/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/executions/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^projects/(?:[a-z][a-z0-9-]{4,28}[a-z0-9]|[1-9][0-9]{0,18})/locations/[a-z]+(?:-[a-z0-9]+)+[0-9]/jobs/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/executions/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?\z", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalExecutionRegex();
 }

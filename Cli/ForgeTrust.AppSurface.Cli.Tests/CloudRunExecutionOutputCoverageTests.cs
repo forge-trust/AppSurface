@@ -69,6 +69,62 @@ public sealed class CloudRunExecutionOutputCoverageTests
         Assert.Contains("\"configurationMatched\":false", output.Text, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(CloudRunExecutionState.Succeeded, "ASDEPLOY183", 0)]
+    [InlineData(CloudRunExecutionState.Running, "ASDEPLOY182", 3)]
+    public async Task DeliverAsync_TextSuccessAndRunningAreWrittenToStandardOutput(CloudRunExecutionState state, string code, int exitCode)
+    {
+        var output = new CaptureWriter();
+        var error = new CaptureWriter();
+        var observation = new CloudRunExecutionObservation("job", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", state, true, DateTimeOffset.UnixEpoch, code);
+        var result = await new CloudRunExecutionOutput(output, error, false).DeliverAsync(new(observation, code), CancellationToken.None);
+
+        // protects=text-mode stdout routing for successful and still-running matched observations; fails_when=these states are sent to stderr; no_claim=completion beyond this observation
+        Assert.Equal(exitCode, result);
+        Assert.Contains($"{code}: {state}; configurationMatched=true.", output.Text, StringComparison.Ordinal);
+        Assert.Contains("Recovery: caller-owned; no remote mutation.", output.Text, StringComparison.Ordinal);
+        Assert.Empty(error.Text);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    public async Task DeliverAsync_InvalidLogicalIdIsRedacted(string logicalJobId)
+    {
+        var output = new CaptureWriter();
+        var observation = new CloudRunExecutionObservation(logicalJobId, "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", CloudRunExecutionState.Succeeded, true, DateTimeOffset.UnixEpoch, "ASDEPLOY183");
+        await new CloudRunExecutionOutput(output, new CaptureWriter(), true).DeliverAsync(new(observation, "ASDEPLOY183"), CancellationToken.None);
+
+        // protects=safe envelope logical ID bound; fails_when=empty or overlong ID is serialized; no_claim=bundle identity match
+        Assert.Contains("\"logicalJobId\":\"\"", output.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DeliverAsync_CancellationDuringSerializationReplacesUncommittedResult()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var output = new CaptureWriter();
+        var observation = new CloudRunExecutionObservation("job", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", CloudRunExecutionState.Succeeded, true, DateTimeOffset.UnixEpoch, "ASDEPLOY183");
+        var serializations = 0;
+        string Serialize(CloudRunExecutionEnvelope envelope)
+        {
+            serializations++;
+            cancellation.Cancel();
+            return System.Text.Json.JsonSerializer.Serialize(envelope);
+        }
+
+        var result = await new CloudRunExecutionOutput(output, new CaptureWriter(), true, Serialize)
+            .DeliverAsync(new(observation, "ASDEPLOY183"), cancellation.Token);
+
+        // protects=late cancellation before first write replaces the uncommitted success envelope; fails_when=success bytes are committed after cancellation; no_claim=remote execution cancellation
+        Assert.Equal(130, result);
+        Assert.Equal(2, serializations);
+        Assert.Contains("\"diagnosticCode\":\"ASDEPLOY186\"", output.Text, StringComparison.Ordinal);
+        Assert.Contains("\"state\":\"Unknown\"", output.Text, StringComparison.Ordinal);
+        Assert.Contains("\"configurationMatched\":false", output.Text, StringComparison.Ordinal);
+        Assert.Contains("\"logicalJobId\":\"\"", output.Text, StringComparison.Ordinal);
+    }
+
     private sealed class CaptureWriter : StringWriter
     {
         public string Text => ToString();

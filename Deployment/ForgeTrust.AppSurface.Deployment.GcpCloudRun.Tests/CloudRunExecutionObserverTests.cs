@@ -602,30 +602,43 @@ public sealed partial class CloudRunExecutionObserverTests
         private readonly string _root;
         private readonly string _profile;
         private readonly IReadOnlyDictionary<string, string>? _environment;
+        private readonly bool _includeProjectNumber;
+        private readonly bool _emptyArguments;
+        private readonly string _egress;
         public string ProjectName => Project;
         public string RegionName => Region;
         public string JobName => Job;
         public string ExecutionName => Execution;
 
-        public ObserverFixture(IReadOnlyDictionary<string, string>? environment = null)
+        public ObserverFixture(IReadOnlyDictionary<string, string>? environment = null, bool includeProjectNumber = true, bool emptyArguments = false, string egress = "ALL_TRAFFIC")
         {
             _environment = environment;
+            _includeProjectNumber = includeProjectNumber;
+            _emptyArguments = emptyArguments;
+            _egress = egress;
             _root = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-observer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_root);
             _profile = TestPathUtils.PathUnder(_root, "profile.json");
-            File.WriteAllText(_profile, JsonSerializer.Serialize(new
+            var profileJson = JsonSerializer.Serialize(new
             {
                 schemaVersion = "1.0",
                 environment = "Staging",
                 project = Project,
-                projectNumber = Number,
+                projectNumber = includeProjectNumber ? Number : (string?)null,
                 region = Region,
                 jobs = new Dictionary<string, string> { ["schema-preparation"] = Job },
                 cloudSqlInstanceConnectionName = $"{Project}:{Region}:primary",
-                network = new { network = $"projects/{Project}/global/networks/main", subnetwork = $"projects/{Project}/regions/{Region}/subnetworks/main", egress = "ALL_TRAFFIC" },
+                network = new { network = $"projects/{Project}/global/networks/main", subnetwork = $"projects/{Project}/regions/{Region}/subnetworks/main", egress = _egress },
                 serviceAccounts = new Dictionary<string, string> { ["migration-runtime"] = $"migration@{Project}.iam.gserviceaccount.com" },
                 secrets = new Dictionary<string, object> { ["database"] = new { secretId = "database", versionMode = "latest" } }
-            }));
+            });
+            if (!includeProjectNumber)
+            {
+                var profile = JsonNode.Parse(profileJson)!.AsObject();
+                profile.Remove("projectNumber");
+                profileJson = profile.ToJsonString();
+            }
+            File.WriteAllText(_profile, profileJson);
         }
 
         public DeploymentRenderRequest RenderRequest() => new(Intent(), _profile, _root, "test");
@@ -640,8 +653,8 @@ public sealed partial class CloudRunExecutionObserverTests
         {
             apiVersion = "run.googleapis.com/v1",
             kind = "Execution",
-            metadata = new { name = Execution, @namespace = Number, uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation = "7", labels = new Dictionary<string, string> { ["cloud.googleapis.com/location"] = Region, ["run.googleapis.com/job"] = Job }, annotations = new Dictionary<string, string> { ["run.googleapis.com/cloudsql-instances"] = $"{Project}:{Region}:primary", ["run.googleapis.com/network-interfaces"] = JsonSerializer.Serialize(new[] { new { network = $"projects/{Project}/global/networks/main", subnetwork = $"projects/{Project}/regions/{Region}/subnetworks/main" } }), ["run.googleapis.com/vpc-access-egress"] = "all-traffic", ["run.googleapis.com/execution-environment"] = "gen2" } },
-            spec = new { taskCount = 1, parallelism = 1, template = new { spec = new { containers = new[] { new { image = Image, command = new[] { "dotnet" }, args = new[] { "migrate" }, env = new[] { new { name = "ConnectionStrings__database", valueFrom = new { secretKeyRef = new { name = "database", key = "latest" } } } } } }, serviceAccountName = $"migration@{Project}.iam.gserviceaccount.com", maxRetries = 3, timeoutSeconds = 600 } } },
+            metadata = new { name = Execution, @namespace = _includeProjectNumber ? Number : Project, uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", generation = "7", labels = new Dictionary<string, string> { ["cloud.googleapis.com/location"] = Region, ["run.googleapis.com/job"] = Job }, annotations = new Dictionary<string, string> { ["run.googleapis.com/cloudsql-instances"] = $"{Project}:{Region}:primary", ["run.googleapis.com/network-interfaces"] = JsonSerializer.Serialize(new[] { new { network = $"projects/{Project}/global/networks/main", subnetwork = $"projects/{Project}/regions/{Region}/subnetworks/main" } }), ["run.googleapis.com/vpc-access-egress"] = _egress == "PRIVATE_RANGES_ONLY" ? "private-ranges-only" : "all-traffic", ["run.googleapis.com/execution-environment"] = "gen2" } },
+            spec = new { taskCount = 1, parallelism = 1, template = new { spec = new { containers = new[] { new { image = Image, command = new[] { "dotnet" }, args = _emptyArguments ? Array.Empty<string>() : new[] { "migrate" }, env = new[] { new { name = "ConnectionStrings__database", valueFrom = new { secretKeyRef = new { name = "database", key = "latest" } } } } } }, serviceAccountName = $"migration@{Project}.iam.gserviceaccount.com", maxRetries = 3, timeoutSeconds = 600 } } },
             status = new { observedGeneration = "7", conditions = new[] { new { type = "Completed", status = "True", reason = "Completed" } }, completionTime = "2026-10-24T12:00:00Z", succeededCount = 1, runningCount = 0, failedCount = 0, cancelledCount = 0, retriedCount = 0 }
         });
 
@@ -678,7 +691,7 @@ public sealed partial class CloudRunExecutionObserverTests
             env.Remove("valueFrom"); env["valueSource"] = new JsonObject { ["secretKeyRef"] = new JsonObject { ["secret"] = $"projects/{Project}/secrets/database", ["version"] = "latest" } };
             oldTask.Remove("serviceAccountName"); oldTask["serviceAccount"] = $"migration@{Project}.iam.gserviceaccount.com";
             oldTask.Remove("timeoutSeconds"); oldTask["timeout"] = "600s"; oldTask["executionEnvironment"] = "EXECUTION_ENVIRONMENT_GEN2";
-            oldTask["vpcAccess"] = new JsonObject { ["networkInterfaces"] = new JsonArray { new JsonObject { ["network"] = $"projects/{Project}/global/networks/main", ["subnetwork"] = $"projects/{Project}/regions/{Region}/subnetworks/main" } }, ["egress"] = "ALL_TRAFFIC" };
+            oldTask["vpcAccess"] = new JsonObject { ["networkInterfaces"] = new JsonArray { new JsonObject { ["network"] = $"projects/{Project}/global/networks/main", ["subnetwork"] = $"projects/{Project}/regions/{Region}/subnetworks/main" } }, ["egress"] = _egress };
             oldTask["volumes"] = new JsonArray { new JsonObject { ["name"] = "cloudsql", ["cloudSqlInstance"] = new JsonObject { ["instances"] = new JsonArray($"{Project}:{Region}:primary") } } };
             container["volumeMounts"] = new JsonArray { new JsonObject { ["name"] = "cloudsql", ["mountPath"] = "/cloudsql" } };
             var task = oldTask; spec.Remove("template"); root["template"] = task;
@@ -687,7 +700,7 @@ public sealed partial class CloudRunExecutionObserverTests
             return root.ToJsonString();
         }
 
-        private DeploymentIntent Intent() => new("Staging", new SourceRevision(new string('a', 40)), [new MigrationJobIntent(new DeploymentLogicalId("schema-preparation"), DeploymentPhase.CandidatePreparation, new ImmutableImageReference(Image), "dotnet", ["migrate"], new DeploymentExecutionPolicy(1, 1, 3, TimeSpan.FromMinutes(10)), new SecretBinding(new DeploymentLogicalId("database"), new DeploymentLogicalId("database-parameter"), "ConnectionStrings__database"), new DatabaseBinding(new DeploymentLogicalId("database"), "ConnectionStrings:database", new DeploymentLogicalId("database")), new DeploymentLogicalId("migration-runtime"), environment: _environment)]);
+        private DeploymentIntent Intent() => new("Staging", new SourceRevision(new string('a', 40)), [new MigrationJobIntent(new DeploymentLogicalId("schema-preparation"), DeploymentPhase.CandidatePreparation, new ImmutableImageReference(Image), "dotnet", _emptyArguments ? Array.Empty<string>() : new[] { "migrate" }, new DeploymentExecutionPolicy(1, 1, 3, TimeSpan.FromMinutes(10)), new SecretBinding(new DeploymentLogicalId("database"), new DeploymentLogicalId("database-parameter"), "ConnectionStrings__database"), new DatabaseBinding(new DeploymentLogicalId("database"), "ConnectionStrings:database", new DeploymentLogicalId("database")), new DeploymentLogicalId("migration-runtime"), environment: _environment)]);
         public void Dispose() => Directory.Delete(_root, recursive: true);
     }
 }

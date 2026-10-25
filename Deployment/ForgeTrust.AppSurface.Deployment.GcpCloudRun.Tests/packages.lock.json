@@ -119,6 +119,9 @@
         "dependencies": {
           "ForgeTrust.AppSurface.Deployment": "[0.1.0, )"
         }
+      },
+      "forgetrust.appsurface.testing": {
+        "type": "Project"
       }
     }
   }
