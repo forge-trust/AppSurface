@@ -340,23 +340,11 @@ internal sealed class LinuxRetainedReportSet : IDisposable
         RecheckChain(node, token);
         using var fresh = OpenAt2(Fd(node.Handle), ".", DirectoryFlags, 0, ChildResolution);
         if (LinuxProtectedMetadata.From(StatFd(fresh)) != node.Expected) throw Invalid();
-        var names = new HashSet<string>(StringComparer.Ordinal);
         var buffer = new byte[32 * 1024];
-        var blocks = 0;
-        while (true)
-        {
-            Check(token);
-            if (++blocks > MaximumNodes) throw Invalid();
-            var count = ReadDirectory(fresh, buffer);
-            Check(token);
-            if (count == 0) break;
-            foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-            {
-                if (names.Count >= expected.Length || !names.Add(name)
-                    || !expected.Contains(name, StringComparer.Ordinal)) throw Invalid();
-            }
-        }
-        if (names.Count != expected.Length) throw Invalid();
+        var names = SupervisionDirectoryRead.ReadActual(fresh, buffer,
+            () => Check(token), () => Check(token), expected.Length, MaximumNodes,
+            name => expected.Contains(name, StringComparer.Ordinal), Invalid);
+        if (names.Length != expected.Length) throw Invalid();
         RecheckChain(node, token);
     }
 

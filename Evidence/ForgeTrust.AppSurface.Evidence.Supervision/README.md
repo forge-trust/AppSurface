@@ -2144,3 +2144,32 @@ The [root custody transfer](LinuxRunWorkspace.Custody.cs) also uses [Supervision
 
 
 The same [cleanup-attempt procedure](SupervisionCleanupAttempt.cs) is reused by the [control server](LinuxEmptyObservationControlServer.cs) for its existing optional coverage/checkpoint closes and reply-gate disposal, by the [listener](LinuxControlListener.cs) for its ordered admission-drain and local handle closes, and by the [run workspace](LinuxRunWorkspace.cs) for its original reverse handle cleanup. Each call retains its original null condition, stage label, failure recorder and final settlement check. These shared catches exclude the same three fatal exception classes; they do not broaden the narrower workspace translation policies, suppress recorder failures, add waits or grant completion authority.
+
+### Bounded directory scans
+
+[`SupervisionDirectoryRead`](SupervisionDirectoryRead.cs) shares the original block-reading and unique-name
+collection used by [report discovery](LinuxProducerArtifactCustody.cs) and the
+[retained report inventory](LinuxRetainedReportSet.cs). Each caller still opens its own fresh directory
+description, checks its actual metadata, and performs its original final identity and name rechecks.
+The internal `ReadActual` entry borrows that descriptor and its existing buffer. It neither opens nor
+closes a handle, and it advances the supplied description's directory position; reuse a separately
+opened description for a new complete scan.
+
+The shared procedure invokes the original pre-read check, consumes one read-attempt reservation,
+performs the actual getdents read, then invokes the original post-read check before interpreting EOF
+or decoding names with the strict [directory-block grammar](LinuxProtectedDeployment.cs). Both
+discovery and retention preserve their existing read-attempt limit, including the EOF attempt.
+Unique-name bounds apply across all blocks. Retention also supplies its original exact-inventory
+predicate, checked immediately after each unique name is reserved. Unknown or duplicate names reject
+before any next read. Empty expected inventories still require actual EOF.
+
+The callback-based `Read` overload exposes this synchronous procedure for focused tests and fixed
+native bindings only. It selects no path and grants no workspace, report custody, runtime admission or
+authority. Read, check, and parser exceptions propagate unchanged; only the original name/budget
+violations use the caller's fixed exception factory. No partial inventory is returned, and no retry,
+new token, cancellation proxy or timer is introduced. The
+[procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDirectoryReadTests.cs)
+use detached blocks to verify cross-block duplication, exact membership, callback ordering, EOF and
+failure preservation. The separate [native controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDirectoryReadNativeTests.cs)
+use actual unprivileged Linux descriptors, including an ordinary-file ENOTDIR rejection; they establish
+filesystem behavior only and do not replace the genuine protected consumer controls.

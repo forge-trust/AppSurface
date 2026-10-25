@@ -274,21 +274,12 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
         using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
         var opened = LinuxProtectedMetadata.From(StatFd(fresh));
         if (!opened.SameAncestorAs(expected)) throw Invalid();
-        var names = new HashSet<string>(StringComparer.Ordinal);
         var buffer = new byte[32 * 1024];
-        var blocks = 0;
-        while (true)
-        {
-            deadline.Check(token);
-            if (++blocks > MaximumDiscoveryNodes) throw Invalid();
-            var count = ReadDirectory(fresh, buffer);
-            deadline.Check(token);
-            if (count == 0) break;
-            foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-                if (names.Count >= MaximumDiscoveryNodes || !names.Add(name)) throw Invalid();
-        }
+        var names = SupervisionDirectoryRead.ReadActual(fresh, buffer,
+            () => deadline.Check(token), () => deadline.Check(token),
+            MaximumDiscoveryNodes, MaximumDiscoveryNodes, null, Invalid);
         deadline.Check(token);
-        return names.Order(StringComparer.Ordinal).ToArray();
+        return names;
     }
 
     private static void RequireNamed(SafeFileHandle parent, string name, LinuxProtectedMetadata expected,
