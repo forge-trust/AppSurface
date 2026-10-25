@@ -272,9 +272,7 @@ internal static partial class LinuxEmptyObservationExecution
                         var bytes = LinuxCancellationProjectionFailure.EncodeDetached(owner.RunId,
                             _cancellationProjectionStage, error);
                         using var diagnostic = Console.OpenStandardError();
-                        await diagnostic.WriteAsync(bytes, cleanupToken).ConfigureAwait(false);
-                        await diagnostic.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await diagnostic.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        await SupervisionRecordWrite.WriteLinesAsync(diagnostic, [bytes], cleanupToken).ConfigureAwait(false);
                         owner.RequireControlIdentity(cleanupToken);
                     }
                     catch (Exception diagnosticError) when (Recoverable(diagnosticError)) { record(diagnosticError); }
@@ -285,9 +283,7 @@ internal static partial class LinuxEmptyObservationExecution
                                 workspace, server, cleanupToken).Bytes;
                             _cancellationProjectionWriteAttempted = true;
                             using var stderr = Console.OpenStandardError();
-                            await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
-                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                            await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                            await SupervisionRecordWrite.WriteLinesAsync(stderr, [diagnostic], cleanupToken).ConfigureAwait(false);
                             owner.RequireControlIdentity(cleanupToken);
                         }
                         catch (Exception diagnosticError) when (Recoverable(diagnosticError))
@@ -299,9 +295,7 @@ internal static partial class LinuxEmptyObservationExecution
                                     var diagnostic = worker.CaptureJoinedOutputDiagnostic(owner.RunId);
                                     _cancellationProjectionWriteAttempted = true;
                                     using var stderr = Console.OpenStandardError();
-                                    await stderr.WriteAsync(diagnostic, cleanupToken).ConfigureAwait(false);
-                                    await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                                    await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                                    await SupervisionRecordWrite.WriteLinesAsync(stderr, [diagnostic], cleanupToken).ConfigureAwait(false);
                                     owner.RequireControlIdentity(cleanupToken);
                                 }
                                 catch (Exception outputError) when (Recoverable(outputError)) { record(outputError); }

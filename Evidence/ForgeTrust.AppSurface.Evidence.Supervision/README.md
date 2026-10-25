@@ -2197,7 +2197,8 @@ root admission and do not replace the [genuine consumer controls](../../tests/ev
 ### Ordered diagnostic record writes
 
 [`SupervisionRecordWrite`](SupervisionRecordWrite.cs) shares the literal record/LF/flush sequence used by
-the private N04, N09, N11 and N16 failure projections in
+the private N04, N09, N11 and N16 failure projections and three N08/N09 cancellation fallback
+diagnostic writes in
 [the qualified observation owner](LinuxEmptyObservationExecution.Qualification.cs). The owner still
 constructs and bounds the records, opens and closes its original stderr stream, and runs every original
 identity, cancellation and deadline check at the same position around the I/O. Attempt flags, exception
