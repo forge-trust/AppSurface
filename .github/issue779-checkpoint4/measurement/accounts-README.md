@@ -185,7 +185,7 @@ This is an isolated source proposal at baseline
 control, report arithmetic or coverage gain has been verified by this preparation.
 Adoption requires parent review, actual current-source account receipts and the
 parent-owned C# account lineage validator. No native test or runtime source is
-changed here. The existing C3 seven cases, six workspace controls, 39 root tests,
+changed here. The existing C3 seven cases, six workspace controls, 41 root tests,
 original clocks, source base and coverage command/policy remain unchanged.
 
 The [runtime workflow](../../workflows/evidencehost-runtime-proof.yml) proposes this
@@ -280,7 +280,7 @@ capture. It calls `AccountMeasurement.ValidateMerged` for each v2 packet and
 with the original capture, C3 binding/report/native receipt/root TRX, then creation
 and rollback binding/report/native bytes. The eleven-argument data API checks both
 immediate predecessors, their shared C3 ancestor, exact run/attempt artifact names,
-39 passing root tests, and each current variant's source-bound method witness.
+41 passing root tests, and each current variant's source-bound method witness.
 Only reports allow 32 MiB; other inputs allow 8 MiB, with 160 MiB total and the
 existing 1 MiB root-TRX bound. It constructs no account, owner, admission or proof.
 A failed consistency test fails the solution run; the coverage gate is unchanged.
@@ -304,3 +304,12 @@ positive predecessor hits, and actual file/link/FIFO/size retention boundaries.
 These constructed inputs establish data checks only. The earlier standalone v1
 creation and rollback controls passed genuine Linux execution; this new merged v2
 chain still requires a fresh successful C3 → creation → rollback → full gate run.
+
+The fixed original root-test inventory now contains 41 passing tests: the prior
+39 controls plus the two retained-node type/read-bound rejection controls in
+[`LinuxProtectedNodeNativeTests`](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs).
+Account lineage continues to require exact counters, hash-bound TRX bytes and
+only passing results. A self-consistent obsolete 39-test packet, a missing test,
+or an extra-count packet is rejected; this is an inventory update, not a relaxed
+acceptance or coverage rule. The separate 41-test supplementary root report
+retains its own filename and predecessor bindings.

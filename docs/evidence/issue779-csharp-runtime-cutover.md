@@ -5,7 +5,7 @@
 [Linux run 40104067585](https://github.com/forge-trust/AppSurface/actions/runs/40104067585),
 at source `b5461cfa3b73fa00aa8d8b15e1b724f5bdb0b9ad`, independently verified all
 sixteen C1 worker controls, seven C3 application controls, six workspace controls,
-39 original root controls, 41 supplementary root controls, account creation and
+41 original root controls, 41 supplementary root controls, account creation and
 expected rollback, and seven packaged C2 producer/artifact controls. Both Linux
 shutdown regression rows passed, the corrected doc-clock check passed, and the
 packaged smoke completed 22 commands with six expected rejection results. The
@@ -35,7 +35,7 @@ No production deadline or stopping allowance changed.
 [Revision 74, run 40124730961](https://github.com/forge-trust/AppSurface/actions/runs/40124730961)
 at source `569cb730dc63035a2e0ce9f5e959169695505370` has verified all sixteen
 worker cases, both original seven-control application and packaged-producer
-consumer groups, six workspace rejections, 39 original root controls and 41
+consumer groups, six workspace rejections, 41 original root controls and 41
 supplementary root controls, plus genuine account creation and expected rollback.
 The packaged record binds 22 smoke/planning command intentions and current-run
 source/report lineage. Its measured worker chain and final unchanged numerical

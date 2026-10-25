@@ -291,15 +291,15 @@ def prior_binding(args):
         root_trx_sha = digest(trx)
         root_tests = value['root_file_tests']
         require(root_tests['trx_sha256'] == root_trx_sha and type(root_tests['executed']) is int
-                and root_tests['executed'] == 39 and type(root_tests['passed']) is int
-                and root_tests['passed'] == 39 and root_tests['native_acceptance'] is False, 'prior-root')
+                and root_tests['executed'] == 41 and type(root_tests['passed']) is int
+                and root_tests['passed'] == 41 and root_tests['native_acceptance'] is False, 'prior-root')
         ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
         document = ElementTree.fromstring(trx)
         counters = document.find('.//' + ns + 'Counters')
         rows = document.findall('.//' + ns + 'UnitTestResult')
-        require(counters is not None and all(counters.get(key) == '39' for key in ('total', 'executed', 'passed'))
+        require(counters is not None and all(counters.get(key) == '41' for key in ('total', 'executed', 'passed'))
                 and all(counters.get(key, '0') == '0' for key in ('failed', 'error', 'notExecuted', 'warning'))
-                and len(rows) == 39 and all(row.get('outcome') == 'Passed' for row in rows), 'prior-root')
+                and len(rows) == 41 and all(row.get('outcome') == 'Passed' for row in rows), 'prior-root')
         prior_variant = 'C3'
     else:
         require(args.merge_root_trx is None and value['schema'] == LINEAGE_SCHEMA

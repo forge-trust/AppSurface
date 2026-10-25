@@ -77,8 +77,8 @@ internal static class AccountMeasurementLineage
         Cases(native.GetProperty("cases"), ["normal", "sdk-normal", "readiness", "factory-stall", "cancel", "stuck-descendant", "disposal-failure"]);
         Cases(native.GetProperty("workspace_guards"), ["bundle-extra-directory", "bundle-input-bytes", "bundle-input-mode", "scratch-fifo", "scratch-hardlink", "scratch-oversize"]);
         var rootTests = binding.GetProperty("root_file_tests");
-        Assert.Equal(39, rootTests.GetProperty("executed").GetInt32());
-        Assert.Equal(39, rootTests.GetProperty("passed").GetInt32());
+        Assert.Equal(41, rootTests.GetProperty("executed").GetInt32());
+        Assert.Equal(41, rootTests.GetProperty("passed").GetInt32());
         RootFilesystemMeasurement.Validate(rootTests, c3RootTrxBytes);
         var first = creation.RootElement;
         var second = rollback.RootElement;

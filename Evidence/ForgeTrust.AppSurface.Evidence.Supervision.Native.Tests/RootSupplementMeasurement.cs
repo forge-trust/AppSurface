@@ -11,7 +11,7 @@ internal static class RootSupplementMeasurement
     private static readonly XNamespace Trx = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
 
     /// <summary>Requires all 41 actual result rows, the three fixed test classes, and their original bound bytes.</summary>
-    /// <remarks>The original 39-case root measurement and its predecessor hashes remain separate.</remarks>
+    /// <remarks>The original 41-case root measurement and its predecessor hashes remain separate.</remarks>
     internal static void Validate(JsonElement binding, byte[] bytes)
     {
         Assert.InRange(bytes.Length, 1, 1024 * 1024);

@@ -100,6 +100,17 @@ public sealed class AccountMeasurementLineageTests
         Assert.ThrowsAny<Exception>(() => fixture.Validate());
     }
 
+    /// <summary>The current fixed root inventory cannot accept a self-consistent obsolete or different count.</summary>
+    [Theory]
+    [InlineData(39)]
+    [InlineData(40)]
+    [InlineData(42)]
+    public void ObsoleteOrDifferentRootInventoryCannotEnrollTheAccountChain(int count)
+    {
+        var fixture = new Fixture(count);
+        Assert.ThrowsAny<Exception>(() => fixture.Validate());
+    }
+
     private sealed class Fixture
     {
         internal AccountMeasurementTests.Fixture Creation { get; } = new("C4Accounts");
@@ -110,7 +121,7 @@ public sealed class AccountMeasurementLineageTests
         private readonly JsonObject _c3Report;
         private readonly byte[] _trx;
 
-        internal Fixture()
+        internal Fixture(int rootCount = 41)
         {
             Creation.ConfigureMerged(); Rollback.ConfigureMerged();
             _c3Report = Creation.Report.DeepClone().AsObject();
@@ -130,14 +141,14 @@ public sealed class AccountMeasurementLineageTests
             var classes = new[] { "LinuxProtectedNodeNativeTests", "LinuxRetainedReportNativeTests", "LinuxKernelIdentityNativeTests", "LinuxDcpIdentityNativeTests" };
             var document = new XDocument(new XElement(ns + "TestRun",
                 new XElement(ns + "ResultSummary", new XElement(ns + "Counters",
-                    new XAttribute("total", 39), new XAttribute("executed", 39), new XAttribute("passed", 39),
+                    new XAttribute("total", rootCount), new XAttribute("executed", rootCount), new XAttribute("passed", rootCount),
                     new XAttribute("failed", 0), new XAttribute("error", 0), new XAttribute("notExecuted", 0), new XAttribute("warning", 0))),
-                new XElement(ns + "Results", Enumerable.Range(0, 39).Select(index => new XElement(ns + "UnitTestResult",
+                new XElement(ns + "Results", Enumerable.Range(0, rootCount).Select(index => new XElement(ns + "UnitTestResult",
                     new XAttribute("outcome", "Passed"), new XAttribute("testName", "ForgeTrust.AppSurface.Evidence.Supervision.Tests."
                         + classes[index % classes.Length] + ".DetachedMetadata" + index))))));
             _trx = Encoding.UTF8.GetBytes(document.ToString(SaveOptions.DisableFormatting));
             C3Binding["root_file_tests"] = new JsonObject { ["trx_sha256"] = Digest(_trx),
-                ["executed"] = 39, ["passed"] = 39, ["native_acceptance"] = false };
+                ["executed"] = rootCount, ["passed"] = rootCount, ["native_acceptance"] = false };
             Creation.Binding["prior_kind"] = "c3"; Creation.Binding["prior_variant"] = "C3";
             Creation.Binding["prior_artifact_name"] = "issue779-checkpoint3-application-99-1";
             Rollback.Binding["prior_kind"] = "accounts"; Rollback.Binding["prior_variant"] = "C4Accounts";

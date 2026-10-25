@@ -109,7 +109,7 @@ accepted consumer proof or production registration.
 The supplementary [producer file-copy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerFileTreeNativeTests.cs) add 13 actual root cases against [the retained deployment copy API](../ForgeTrust.AppSurface.Evidence.Supervision/LinuxProducerFileTree.cs). They check exclusive destination rejection, audited-source changes, cancellation, expired deadlines and use after close, with real file descriptors and separate valid copies. Their numeric ownership is fixture metadata, not an account reservation, authenticated workspace or producer lease.
 
 The supplemental `root-supplement.trx` and `root_supplement_tests` binding are
-separate from the original 39-case `root-files.trx` consumed by the account lineage.
+separate from the original 41-case `root-files.trx` consumed by the account lineage.
 The binding requires exact SHA-256, 41 executed/passed rows with no skips or failures,
 and exactly the three fixed classes. The same already verified C3 dependency image
 is measured, its DLL/PDB bytes are rechecked after collector restoration, and its
@@ -306,3 +306,18 @@ and 57 existing account/lineage cases, with zero failures, skips or compiler dia
 lines. Exact-file formatting completed without changing source bytes. The integrated
 Python predecessor suite passed all 30 data controls. These local checks verify the
 consistency APIs and ordering; they supply no native execution or coverage-gate pass.
+
+### Reviewed witness source refresh
+
+The [account validator](AccountMeasurement.cs) pins the current
+[`LinuxRunAccounts.cs`](../ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs)
+partial at SHA256 `1535f37daa077b917d589a9b725e018c1dba3c404cd92fc966e20d1e8066d700`.
+The separate account measurement witness source remains unchanged. The
+[producer-root validator](ProducerRootsMeasurement.cs) pins
+[`LinuxRetainedReportSet.cs`](../ForgeTrust.AppSurface.Evidence.Supervision/LinuxRetainedReportSet.cs)
+at `d36eaf096f79997d3911b07afb657f76d751b4a2c8ff947ad023e15a7fcd8337`;
+its actual `MutateRetainedReportForC2` body and reviewed lines 148–199 are unchanged.
+The refresh binds the previously reviewed NSS and directory-reader refactors
+outside those witnesses. Checkout fingerprint tests, exact method/span matching,
+original image hashes and positive current-source hit requirements remain in force.
+A source fingerprint alone cannot establish native execution or coverage hits.

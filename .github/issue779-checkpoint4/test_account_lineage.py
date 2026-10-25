@@ -76,8 +76,8 @@ class LineageDataTests(unittest.TestCase):
         native_body = subject.canonical(native)
         (self.prior / 'native-receipt.json').write_bytes(native_body)
         ns = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
-        trx = ('<TestRun xmlns="' + ns + '"><ResultSummary><Counters total="39" executed="39" passed="39" failed="0" /></ResultSummary><Results>'
-               + '<UnitTestResult outcome="Passed" />' * 39 + '</Results></TestRun>').encode()
+        trx = ('<TestRun xmlns="' + ns + '"><ResultSummary><Counters total="41" executed="41" passed="41" failed="0" /></ResultSummary><Results>'
+               + '<UnitTestResult outcome="Passed" />' * 41 + '</Results></TestRun>').encode()
         (self.prior / 'root-files.trx').write_bytes(trx)
         original = {name: 'a' * 64 for name in subject.NAMES}
         instrumented = {name: ('b' if name.endswith('.dll') else 'a') * 64 for name in subject.NAMES}
@@ -85,7 +85,7 @@ class LineageDataTests(unittest.TestCase):
                         'collector': 'coverlet.console/10.0.1', 'source_capture_sha256': sha(body),
                         'coverage_sha256': sha(report), 'native_receipt_sha256': sha(native_body),
                         'original': original, 'instrumented': instrumented,
-                        'root_file_tests': {'trx_sha256': sha(trx), 'executed': 39, 'passed': 39, 'native_acceptance': False}}
+                        'root_file_tests': {'trx_sha256': sha(trx), 'executed': 41, 'passed': 41, 'native_acceptance': False}}
         self.save_binding()
         self.args = SimpleNamespace(variant='C4Accounts', prior_kind='c3', source=self.source,
                     prior_artifact_name='issue779-checkpoint3-application-123-1', evidence=self.evidence,
@@ -95,6 +95,17 @@ class LineageDataTests(unittest.TestCase):
 
     def save_binding(self):
         (self.prior / 'measurement-binding.json').write_bytes(subject.canonical(self.binding))
+
+    def test_obsolete_or_other_consistent_root_counts_reject(self):
+        for count in (39, 40, 42):
+            ns = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
+            body = (f'<TestRun xmlns="{ns}"><ResultSummary><Counters total="{count}" executed="{count}" passed="{count}" failed="0" /></ResultSummary><Results>'
+                    + '<UnitTestResult outcome="Passed" />' * count + '</Results></TestRun>').encode()
+            self.args.merge_root_trx.write_bytes(body)
+            self.binding['root_file_tests'].update(trx_sha256=sha(body), executed=count, passed=count)
+            self.save_binding()
+            with self.subTest(count=count), self.assertRaisesRegex(RuntimeError, 'account-control-prior-root'):
+                subject.prior_binding(self.args)
 
     def test_valid_c3_neighbor_records_all_exact_input_digests(self):
         value = subject.prior_binding(self.args)

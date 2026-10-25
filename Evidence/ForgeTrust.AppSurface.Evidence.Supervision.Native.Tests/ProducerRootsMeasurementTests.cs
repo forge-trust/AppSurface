@@ -14,7 +14,7 @@ public sealed class ProducerRootsMeasurementTests
     private const string Supervision = "ForgeTrust.AppSurface.Evidence.Supervision";
     private const string MutationDocument = "Evidence/" + Supervision + "/LinuxRetainedReportSet.cs";
     private const string QuotaDocument = "Evidence/" + Supervision + "/SupervisionRunOutputBudget.cs";
-    private const string MutationHash = "95ca9977655b70408a238336390438d6db0fce4ae504bf95c2f006535a6105d4";
+    private const string MutationHash = "d36eaf096f79997d3911b07afb657f76d751b4a2c8ff947ad023e15a7fcd8337";
     private const string QuotaHash = "dff0c2e2fbf8f35ffc20aaf9327c154faad32d005f89dccafa7fd5368d4de81b";
     private static readonly string[] Cases = ["normal", "test-failure", "cancel", "quota", "ignored-cancel",
         "artifact-mutation", "cleanup-failure"];
