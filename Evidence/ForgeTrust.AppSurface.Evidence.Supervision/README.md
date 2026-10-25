@@ -2261,3 +2261,11 @@ state and live identity gates before and after that comparison. The existing
 [genuine owner reference-denial controls](#private-native-owner-reference-denial-checks) reject missing
 references through these same native holders; detached matching data cannot adopt another holder or
 establish readiness, custody or successful cleanup.
+
+The [DCP identity holder](LinuxApplicationDcpIdentity.cs) shares one bounded native parent-walk loop
+between initial nearest-ancestor selection and repeated validation against its retained selected DCP.
+Validation keeps the original empty walk when the peer is that same DCP process; otherwise its target
+set contains only the retained DCP PID. Both callers preserve the 16-link ceiling, original token,
+procfs identity and executable checks, cycle rejection, and immediate retention of each acquired proc
+candidate and parent identity. Their existing final sampling and reverse cleanup stay with the caller.
+An observed parent PID or a returned walk cannot construct a process identity or establish readiness.

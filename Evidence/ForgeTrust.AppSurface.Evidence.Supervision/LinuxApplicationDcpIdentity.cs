@@ -792,29 +792,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         List<LinuxProcessIdentity> owned, List<RetainedProcCandidate> candidates, CancellationToken token)
     {
         if (resource.Pid == _process.Pid) return [];
-        var facts = new List<LinuxApplicationParentFact>();
-        var visited = new HashSet<uint> { resource.Pid };
-        var current = resource;
-        for (var depth = 0; depth < MaximumResourceParentDepth; depth++)
-        {
-            token.ThrowIfCancellationRequested();
-            current.Recheck(token);
-            var proc = OpenProcCandidate(current.Pid, token);
-            candidates.Add(proc);
-            using var stat = OpenAt2(Fd(proc.Directory), "stat", ReadFlags, 0, DescendantResolution);
-            RequireProcRegularFile(stat);
-            var link = ParseParentLink(ReadBounded(stat, LinuxProcessData.MaximumStatBytes, token));
-            if (link.Pid != current.Pid || link.StartTimeTicks != current.StartTimeTicks) throw Rejected();
-            RequireProcCandidate(proc, token);
-            current.Recheck(token);
-            facts.Add(new(link.Pid, link.ParentPid, current.SampledFacts));
-            if (link.ParentPid == _process.Pid) return facts;
-            if (link.ParentPid is 0 or > int.MaxValue || !visited.Add(link.ParentPid)) throw Rejected();
-            current = LinuxProcessIdentity.CaptureApplication(link.ParentPid, resource.Uid, resource.Gid,
-                resource.Unit, token);
-            owned.Add(current);
-        }
-        throw Rejected();
+        return CaptureNearestParentWalk(resource, new HashSet<uint> { _process.Pid }, owned, candidates, token);
     }
 
     private static List<LinuxApplicationParentFact> CaptureNearestParentWalk(LinuxProcessIdentity resource,
