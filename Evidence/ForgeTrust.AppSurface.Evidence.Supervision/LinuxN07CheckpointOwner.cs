@@ -394,9 +394,9 @@ internal sealed class LinuxN07CheckpointOwner
     private void RequirePeer(Socket peer)
     {
         uint size = 12;
-        if (GetPeer(peer.SafeHandle, 1, 17, out var credentials, ref size) != 0 || size != 12
-            || credentials.Pid <= 0 || credentials.Pid == Environment.ProcessId || credentials.Uid != 0 || credentials.Gid != 0
-            || (_peerPid != 0 && _peerPid != credentials.Pid)) throw LinuxN07CheckpointOrder.Rejected();
+        if (GetPeer(peer.SafeHandle, 1, 17, out var credentials, ref size) != 0
+            || !LinuxCheckpointMetadataPolicy.ValidPeer(size, credentials.Pid, credentials.Uid, credentials.Gid,
+                Environment.ProcessId, _peerPid)) throw LinuxN07CheckpointOrder.Rejected();
         _peerPid = credentials.Pid;
     }
 
@@ -410,11 +410,7 @@ internal sealed class LinuxN07CheckpointOwner
 
     private static void RequirePrivate(LinuxProtectedMetadata metadata, bool directory, bool sealedSocket = true)
     {
-        if (metadata.Uid != 0 || metadata.Gid != 0 || metadata.Inode == 0
-            || (directory ? metadata.Mode != 0x41c0 : (metadata.Mode & 0xf000) != 0xc000)
-            || (!directory && (metadata.LinkCount != 1 || metadata.Length != 0
-                || (sealedSocket ? metadata.Mode != 0xc180 : (metadata.Mode & 0x0c12) != 0))))
-            throw LinuxN07CheckpointOrder.Rejected();
+        if (!LinuxCheckpointMetadataPolicy.IsPrivate(metadata, directory, sealedSocket)) throw LinuxN07CheckpointOrder.Rejected();
     }
 
     [StructLayout(LayoutKind.Sequential)]

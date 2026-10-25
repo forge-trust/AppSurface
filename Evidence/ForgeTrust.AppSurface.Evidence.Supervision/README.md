@@ -2291,3 +2291,15 @@ cross-block duplicate rejection and ordinal ordering are shared with the other
 retained-directory readers. The procedure creates no directory or custody
 holder and supplies no account-release or admission authority. Do not move the
 holder's final metadata/name checks into a detached data callback.
+
+### N04/N07 checkpoint metadata predicates
+
+[`LinuxCheckpointMetadataPolicy`](LinuxCheckpointMetadataPolicy.cs) centralizes only the detached
+root-owned directory/socket metadata predicate and copied peer-credential comparisons used by the
+fixed [N04](LinuxN04CheckpointOwner.cs) and [N07](LinuxN07CheckpointOwner.cs) owners. The callers
+still perform `getsockopt` first, retain the original peer PID pin, and throw their own fixed
+checkpoint rejection. Native descriptor operations, ordering, locks and lifecycle remain in each
+owner. Directory length and link count are intentionally ignored; socket metadata keeps the original
+single-link, empty-object, exact sealed mode or unsealed forbidden-bit mask. The
+[policy tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCheckpointMetadataPolicyTests.cs)
+use detached values only; passing them does not prove a native peer, filesystem object, or owner.

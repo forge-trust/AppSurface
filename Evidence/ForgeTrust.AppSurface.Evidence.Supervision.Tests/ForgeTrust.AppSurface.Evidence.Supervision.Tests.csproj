@@ -38,6 +38,7 @@
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07FailureEmitter.cs" Link="QualificationData/LinuxN07FailureEmitter.cs" Condition="'$(EvidencePrivateQualification)' != 'N07'" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN04CheckpointOwner.cs" Link="QualificationData/LinuxN04CheckpointOwner.cs" Condition="'$(EvidencePrivateQualification)' != 'N04'" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxN07CheckpointOwner.cs" Link="QualificationData/LinuxN07CheckpointOwner.cs" Condition="'$(EvidencePrivateQualification)' != 'N07'" />
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxCheckpointMetadataPolicy.cs" Link="QualificationData/LinuxCheckpointMetadataPolicy.cs" Condition="'$(EvidencePrivateQualification)' != 'N04' and '$(EvidencePrivateQualification)' != 'N07'" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxJoinedWorkerOutputDiagnostic.cs" Link="QualificationData/LinuxJoinedWorkerOutputDiagnostic.cs" Condition="'$(EvidencePrivateQualification)' != 'N08' and '$(EvidencePrivateQualification)' != 'N09'" />
     <Compile Include="../ForgeTrust.AppSurface.Evidence.Supervision/LinuxSlotNegativeObservation.cs" Link="QualificationData/LinuxSlotNegativeObservation.cs" Condition="'$(EvidencePrivateQualification)' != 'N05' and '$(EvidencePrivateQualification)' != 'N06'" />
   </ItemGroup>
