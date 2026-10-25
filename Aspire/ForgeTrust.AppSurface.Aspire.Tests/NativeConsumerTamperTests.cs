@@ -238,7 +238,7 @@ public sealed class NativeConsumerTamperTests
             if (mutation == "original-source") Assert.NotEqual(sourceHash, Hash(sourceFile));
             else Assert.Equal(sourceHash, Hash(sourceFile));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { DeleteFixture(parent); }
     }
 
     [Fact]
@@ -269,14 +269,14 @@ public sealed class NativeConsumerTamperTests
                 var result = await producer.ProduceAsync(context, CancellationToken.None);
 
                 Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
-                Assert.Contains("no artifact writer", result.Diagnostic, StringComparison.Ordinal);
+                Assert.True(result.Diagnostic?.Contains("no artifact writer", StringComparison.Ordinal) == true, result.Diagnostic);
                 Assert.Empty(result.SatisfiedAssertionIds);
             }
 
             Assert.Empty(Directory.EnumerateDirectories(scratch));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { DeleteFixture(parent); }
     }
 
     [Fact]
@@ -331,7 +331,7 @@ public sealed class NativeConsumerTamperTests
             Assert.Empty(Directory.EnumerateDirectories(scratch));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { DeleteFixture(parent); }
     }
 
     [Fact]
@@ -376,7 +376,7 @@ public sealed class NativeConsumerTamperTests
 
             Assert.Empty(Directory.EnumerateDirectories(scratch));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { DeleteFixture(parent); }
     }
 
     [Theory]
@@ -438,7 +438,20 @@ public sealed class NativeConsumerTamperTests
             Assert.Empty(Directory.EnumerateDirectories(scratch));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally { DeleteFixture(parent); }
+    }
+
+    private static void DeleteFixture(string parent)
+    {
+        // Only this test's fresh root is eligible; Git marks its object files
+        // read-only on Windows, which otherwise masks the journey assertions.
+        foreach (var path in Directory.EnumerateFiles(parent, "*", SearchOption.AllDirectories))
+        {
+            var attributes = File.GetAttributes(path);
+            if (attributes.HasFlag(FileAttributes.ReadOnly))
+                File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        }
+        Directory.Delete(parent, recursive: true);
     }
 
     private static async Task<Candidate> PrepareCandidateAsync(string repository, string parent, string dotnet)

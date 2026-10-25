@@ -307,6 +307,10 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
                 throw new IOException("Evidence workspace cleanup encountered a symbolic link or reparse point.");
             }
 
+            // Git objects and installed packages can be read-only on Windows. The
+            // owned-root and non-link checks above still govern every deletion.
+            if (info.Attributes.HasFlag(FileAttributes.ReadOnly))
+                info.Attributes &= ~FileAttributes.ReadOnly;
             File.Delete(entry.Path);
         }
 

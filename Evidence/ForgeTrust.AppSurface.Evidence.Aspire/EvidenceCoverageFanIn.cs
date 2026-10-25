@@ -387,7 +387,7 @@ public static class EvidenceCoverageFanIn
         // Match PurePosixPath in the original producer, including redundant separators and dot segments.
         return string.Join('/', value.Split('/').Where(part => part.Length > 0 && part != "."));
     }
-    private static bool IsAbsoluteSourceRoot(string value) => Path.IsPathRooted(value) || value.Length >= 3 && char.IsLetter(value[0]) && value[1] == ':' && (value[2] == '\\' || value[2] == '/');
+    private static bool IsAbsoluteSourceRoot(string value) => value.StartsWith('/') || Path.IsPathFullyQualified(value) || value.Length >= 3 && char.IsLetter(value[0]) && value[1] == ':' && (value[2] == '\\' || value[2] == '/');
 
     private static Composition Compose(IReadOnlyList<Loaded> inputs)
     {

@@ -5,6 +5,33 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class EvidenceWorkspaceTests
 {
     [Fact]
+    public async Task DisposeAsync_RemovesReadOnlyOwnedFilesAndPreservesReadOnlyCallerFiles()
+    {
+        var parent = NewDirectory();
+        var sentinel = Path.Join(parent, "caller.txt");
+        try
+        {
+            File.WriteAllText(sentinel, "caller bytes");
+            File.SetAttributes(sentinel, File.GetAttributes(sentinel) | FileAttributes.ReadOnly);
+            var workspace = EvidenceWorkspace.Create(parent);
+            var owned = workspace.GetPath("object.dat");
+            File.WriteAllText(owned, "owned bytes");
+            File.SetAttributes(owned, File.GetAttributes(owned) | FileAttributes.ReadOnly);
+
+            await workspace.DisposeAsync();
+
+            Assert.False(Directory.Exists(workspace.RootPath));
+            Assert.Equal("caller bytes", File.ReadAllText(sentinel));
+            Assert.True(File.GetAttributes(sentinel).HasFlag(FileAttributes.ReadOnly));
+        }
+        finally
+        {
+            if (File.Exists(sentinel)) File.SetAttributes(sentinel, File.GetAttributes(sentinel) & ~FileAttributes.ReadOnly);
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckBudget_RejectsInPlaceMarkerTamperingAndPreservesItsBytes()
     {
         var parent = NewDirectory();

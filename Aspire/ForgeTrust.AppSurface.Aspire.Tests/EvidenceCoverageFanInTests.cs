@@ -1414,6 +1414,7 @@ public sealed class EvidenceCoverageFanInTests
     [InlineData("zero-line", "Invalid coverage line")]
     [InlineData("negative-hits", "Invalid coverage line")]
     [InlineData("drive-relative-root", "identity or policy")]
+    [InlineData("current-drive-relative-root", "identity or policy")]
     [InlineData("empty-primary-records", "no measurable class lines")]
     public async Task VerifyAsync_checks_collector_observations_and_primary_measurement_before_accepting_outputs(
         string mutation, string expectedReason)
@@ -1422,6 +1423,8 @@ public sealed class EvidenceCoverageFanInTests
         await fixture.WriteMinimalBundleAsync();
         if (mutation == "drive-relative-root")
             await fixture.MutateManifestAsync(fixture.Native[0], manifest => manifest["sourceRoot"] = "C:relative");
+        else if (mutation == "current-drive-relative-root")
+            await fixture.MutateManifestAsync(fixture.Native[0], manifest => manifest["sourceRoot"] = "\\relative");
         else
         {
             var directory = mutation == "empty-primary-records" ? fixture.Primary : fixture.Native[0];
