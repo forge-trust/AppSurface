@@ -2245,3 +2245,10 @@ the owner. It checks the original input token and deadline before every native r
 and again before the final recheck. This caller has no post-read callback or read-attempt ceiling;
 using the shared procedure adds neither. No descriptor is acquired, released or authenticated by
 the procedure, and returned names cannot establish deployment custody.
+
+The [root node controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProtectedNodeNativeTests.cs)
+exercise type-sensitive operations through actual retained native file and directory nodes: a file
+cannot enumerate names, a directory cannot supply payload bytes or copy into a caller-owned
+file, and invalid counted-read limits reject while the retained file remains readable and unchanged.
+The failed directory copy leaves the actual destination empty and open for its caller. These tests
+require Linux x64 root; other-platform skips establish no native filesystem or consumer acceptance.

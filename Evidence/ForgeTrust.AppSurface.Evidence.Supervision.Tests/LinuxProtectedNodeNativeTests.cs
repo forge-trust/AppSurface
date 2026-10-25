@@ -92,6 +92,74 @@ public sealed class LinuxProtectedNodeNativeTests
     }
 
     [LinuxRootX64Fact]
+    public void FileNodeCannotEnumerateAndDirectoryNodeCannotReadOrCopyPayloadBytes()
+    {
+        using var fixture = RootFixture.Create();
+        var payload = "actual protected input"u8.ToArray();
+        fixture.WriteFile("payload.bin", payload, ReadOnlyFile);
+        var owned = new List<LinuxProtectedNode>();
+        LinuxProtectedNode? file = null;
+        try
+        {
+            var directory = LinuxProtectedNode.OpenAbsolute(fixture.Root, directory: true,
+                sharedRead: false, 0, owned, CancellationToken.None);
+            file = directory.OpenChild("payload.bin", directory: false, CancellationToken.None);
+            Assert.Equal(["payload.bin"], directory.ReadNames(CancellationToken.None));
+            Assert.Equal(payload, file.ReadBounded(payload.Length, CancellationToken.None));
+            RequireRejected(() => file.ReadNames(CancellationToken.None));
+            RequireRejected(() => directory.ReadBounded(1, CancellationToken.None));
+            var deadline = new LinuxInputDeadline(TimeProvider.System.GetTimestamp(), TimeSpan.FromSeconds(30));
+            RequireRejected(() => directory.ReadManagedProbeBytes(CancellationToken.None, deadline));
+            using (var destination = File.OpenHandle(fixture.PathFor("destination.bin"), FileMode.CreateNew, FileAccess.Write))
+            {
+                RequireRejected(() => directory.CopyTo(destination, CancellationToken.None, deadline));
+                Assert.False(destination.IsClosed);
+            }
+            Assert.Empty(File.ReadAllBytes(fixture.PathFor("destination.bin")));
+            Assert.Equal(payload, file.ReadBounded(payload.Length, CancellationToken.None));
+        }
+        finally
+        {
+            file?.Close();
+            LinuxProtectedDeployment.Close(owned);
+        }
+
+        static void RequireRejected(Action action)
+        {
+            var error = Assert.Throws<EvidenceAdmissionException>(action);
+            Assert.Equal("ASEVD402", error.Code);
+            Assert.Null(error.InnerException);
+        }
+    }
+
+    [LinuxRootX64Fact]
+    public void ActualRetainedFileRejectsInvalidReadBoundsWithoutChangingTheFileOrItsHandle()
+    {
+        using var fixture = RootFixture.Create();
+        var payload = "unchanged retained bytes"u8.ToArray();
+        fixture.WriteFile("payload.bin", payload, ReadOnlyFile);
+        var owned = new List<LinuxProtectedNode>();
+        try
+        {
+            var file = LinuxProtectedNode.OpenAbsolute(fixture.PathFor("payload.bin"), directory: false,
+                sharedRead: false, SmallFileLimit, owned, CancellationToken.None);
+            foreach (var maximum in new long[] { -1, 0, payload.Length - 1, EvidenceCanonicalJson.MaximumInputBytes + 1L })
+            {
+                var error = Assert.Throws<EvidenceAdmissionException>(() => file.ReadBounded(maximum, CancellationToken.None));
+                Assert.Equal("ASEVD402", error.Code);
+                Assert.Null(error.InnerException);
+                Assert.Equal(payload, file.ReadBounded(payload.Length, CancellationToken.None));
+                file.Recheck();
+            }
+            Assert.Equal(payload, File.ReadAllBytes(fixture.PathFor("payload.bin")));
+        }
+        finally
+        {
+            LinuxProtectedDeployment.Close(owned);
+        }
+    }
+
+    [LinuxRootX64Fact]
     public void OpenChildRejectsSymlinkHardLinkFifoEmptyAndWritableFilesWithoutChangingSentinel()
     {
         using var fixture = RootFixture.Create();
