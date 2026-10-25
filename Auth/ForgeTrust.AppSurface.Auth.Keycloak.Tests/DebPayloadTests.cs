@@ -9,6 +9,41 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 /// <summary>Protects Debian ar framing, compression boundaries, tar identity, names, hashes, and cancellation; fails on malformed or trailing package content; claims exact package inventory or typed rejection.</summary>
 public sealed class DebPayloadTests
 {
+    // protects: even digest-approved truncated framing cannot become an accepted package.
+    // fails_when: the reader accepts EOF before the complete ar magic or loses a zero-length slice boundary.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    [InlineData(7)]
+    public void DigestApprovedTruncatedMagicFailsAtTheFramingBoundary(int length)
+    {
+        using var input = new MemoryStream(Encoding.ASCII.GetBytes("!<arch>\n")[..length]);
+        Assert.Throws<EndOfStreamException>(() => Read(input));
+    }
+
+    [Fact]
+    public void ExhaustedSpanSliceNeverReadsTheFollowingMember()
+    {
+        using var inner = new MemoryStream([1, 2]);
+        using var slice = new DebPayloadReader.Slice(inner, 1);
+        Span<byte> buffer = stackalloc byte[1];
+        Assert.Equal(1, slice.Read(buffer));
+        Assert.Equal(1, buffer[0]);
+        Assert.Equal(0, slice.Read(buffer));
+        Assert.Equal(1, inner.Position);
+        Assert.Equal(2, inner.ReadByte());
+    }
+
+    [Fact]
+    public void ExplicitTarRootDirectoryHasOneCanonicalInventoryIdentity()
+    {
+        using var deb = BuildDebWithDataTar(TarEntries((TarEntryType.Directory, "./", null, null, null)));
+        var result = Read(deb);
+        var root = Assert.Single(result.Files);
+        Assert.Equal(".", root.Path);
+        Assert.Equal("directory", root.Kind);
+    }
+
     [Fact]
     public void Reads_valid_gzip_and_zstd_packages_with_exact_inventory()
     {

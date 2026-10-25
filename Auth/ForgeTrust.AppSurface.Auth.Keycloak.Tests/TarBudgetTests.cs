@@ -133,6 +133,55 @@ public sealed class TarBudgetTests
         Assert.Throws<NotSupportedException>(() => input.Write(new byte[1], 0, 1));
     }
 
+    // protects: every supported tar metadata header is charged against its separate byte ceiling.
+    // fails_when: GNU long-name/link or global PAX metadata bypasses the metadata bound.
+    // seam: intentionally exposed streaming transport with independently authored raw header bytes.
+    // no_claim: transport accounting does not authorize the metadata's archive semantics.
+    [Theory]
+    [InlineData('x')]
+    [InlineData('g')]
+    [InlineData('L')]
+    [InlineData('K')]
+    public void EverySpecialHeaderEnforcesExactAndOneOverMetadataBudgets(char type)
+    {
+        var bytes = Tar("metadata", "payload").ToArray();
+        bytes[156] = (byte)type;
+        using (var exact = new TarBudgetReadStream(new MemoryStream(bytes), bytes.Length, 64, 4, 7, 7))
+        {
+            exact.Finish();
+            Assert.Equal(bytes.Length, exact.Consumed);
+            Assert.Equal(0, exact.Read(new byte[1], 0, 1));
+        }
+        using var rejected = new TarBudgetReadStream(new MemoryStream(bytes), bytes.Length, 64, 4, 7, 6);
+        var failure = Assert.Throws<InvalidDataException>(() => rejected.Finish());
+        Assert.Contains("member exceeds", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(512, rejected.Consumed);
+    }
+
+    [Fact]
+    public void FragmentedHeaderAndPayloadReadsPreserveExactBytesAcrossBoundaries()
+    {
+        var bytes = Tar("fragmented", "payload").ToArray();
+        using var stream = new TarBudgetReadStream(new MemoryStream(bytes), bytes.Length, 64, 4);
+        using var actual = new MemoryStream();
+        var single = new byte[1];
+        while (stream.Read(single, 0, 1) != 0) actual.WriteByte(single[0]);
+        Assert.Equal(bytes, actual.ToArray());
+        Assert.Equal(bytes.Length, stream.Consumed);
+    }
+
+    [Theory]
+    [InlineData('/')]
+    [InlineData('8')]
+    public void NumericHeaderRejectsDigitsOutsideTheOctalAlphabet(char value)
+    {
+        var bytes = Tar("invalid-number", "payload").ToArray();
+        bytes[124] = (byte)value;
+        using var stream = new TarBudgetReadStream(new MemoryStream(bytes), bytes.Length, 64, 4);
+        Assert.Throws<InvalidDataException>(() => stream.Finish());
+        Assert.Equal(512, stream.Consumed);
+    }
+
     private static MemoryStream Tar(string name, string value)
     {
         var output = new MemoryStream(); using (var writer = new TarWriter(output, leaveOpen: true)) writer.WriteEntry(new UstarTarEntry(TarEntryType.RegularFile, name) { DataStream = new MemoryStream(Encoding.UTF8.GetBytes(value)) }); output.Write(new byte[1024]); output.Position = 0; return output;

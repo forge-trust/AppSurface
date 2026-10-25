@@ -418,6 +418,163 @@ public sealed class ValidationBoundaryTests
         Assert.Equal("material", failure.OperationId);
     }
 
+    [Fact]
+    public void DuplicateTopLevelFrontendIdentityReturnsItsConflictDiagnostic()
+    {
+        var recipe = TestRecipes.Recipe();
+        var frontend = recipe.RuntimeFrontendOciIdentities[0];
+        var invalid = recipe with { RuntimeFrontendOciIdentities = [frontend, frontend] };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Conflict, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("runtimeFrontendOciIdentities", failure.OperationId);
+    }
+
+    [Fact]
+    public void ArchiveReplacementWithoutModuleSetReturnsRequiredDiagnostic()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.EmbeddedArchiveReplacementOperation)recipe.Operations[2];
+        var invalidOperation = operation with { Replacement = operation.Replacement with { ModuleSet = null } };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(2, invalidOperation) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Required, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("archive", failure.OperationId);
+    }
+
+    [Theory]
+    [InlineData("replacements default")]
+    [InlineData("replacements empty")]
+    [InlineData("required members default")]
+    [InlineData("required members empty")]
+    public void ArtifactReplacementGroupMustInitializeBothMembershipCollections(string mutation)
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.ArtifactReplacementGroupOperation)recipe.Operations[0];
+        var group = mutation switch
+        {
+            "replacements default" => operation.Group with { Replacements = default },
+            "replacements empty" => operation.Group with { Replacements = [] },
+            "required members default" => operation.Group with { RequiredMembers = default },
+            "required members empty" => operation.Group with { RequiredMembers = [] },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(0, operation with { Group = group }) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("artifacts", failure.OperationId);
+    }
+
+    [Theory]
+    [InlineData("empty identity", KeycloakFailureCode.Conflict, "materialReferences")]
+    [InlineData("oversized", KeycloakFailureCode.Invalid, "material")]
+    public void MaterialMetadataMustHaveAnIdentityAndStayWithinItsCeiling(string mutation, KeycloakFailureCode expectedCode, string expectedOperation)
+    {
+        var recipe = TestRecipes.Recipe();
+        var material = recipe.MaterialReferences[0];
+        var invalidMaterial = mutation switch
+        {
+            "empty identity" => material with { Id = string.Empty },
+            "oversized" => material with { MaxBytes = (1L << 30) + 1 },
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation))
+        };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(
+            recipe with { MaterialReferences = recipe.MaterialReferences.SetItem(0, invalidMaterial) }));
+        Assert.Equal(expectedCode, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal(expectedOperation, failure.OperationId);
+    }
+
+    [Fact]
+    public void MissingTemplateBaselineMaterialIsRejectedAsInvalid()
+    {
+        var recipe = TestRecipes.RecipeWithTemplateBaseline();
+        var invalid = recipe with { TemplateBaseline = recipe.TemplateBaseline! with { MaterialId = "undeclared-baseline" } };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("templateBaseline", failure.OperationId);
+    }
+
+    [Fact]
+    public void UndeclaredPackageIndexMaterialReturnsReferenceConflict()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.RuntimeProfileOperation)recipe.Operations[1];
+        var snapshot = operation.Profile.RepositorySnapshots[0];
+        var changedSnapshot = snapshot with
+        {
+            PackageIndexMaterialIds = snapshot.PackageIndexMaterialIds!.SetItem("main", "undeclared-package-index")
+        };
+        var changedProfile = operation.Profile with { RepositorySnapshots = [changedSnapshot] };
+        var changedOperation = operation with { Profile = changedProfile };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(1, changedOperation) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Conflict, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("materialReferences", failure.OperationId);
+    }
+
+    [Fact]
+    public void DuplicateRepositorySnapshotIdsReturnTheirConflictDiagnostic()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.RuntimeProfileOperation)recipe.Operations[1];
+        var snapshot = operation.Profile.RepositorySnapshots[0];
+        var profile = operation.Profile with { RepositorySnapshots = [snapshot, snapshot] };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(1, operation with { Profile = profile }) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Conflict, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("runtime.repositorySnapshots", failure.OperationId);
+    }
+
+    [Fact]
+    public void RequiredPackageArchitectureMustMatchTheRuntimeOci()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.RuntimeProfileOperation)recipe.Operations[1];
+        var package = operation.Profile.RequiredPackages[0] with { Architecture = "arm64" };
+        var profile = operation.Profile with { RequiredPackages = operation.Profile.RequiredPackages.SetItem(0, package) };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(1, operation with { Profile = profile }) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("runtime", failure.OperationId);
+    }
+
+    [Fact]
+    public void RemovedPackageMustDeclareAValidArchitecture()
+    {
+        var recipe = TestRecipes.Recipe();
+        var operation = (KeycloakOperation.RuntimeProfileOperation)recipe.Operations[1];
+        var package = operation.Profile.RemovedPackages[0] with { Architecture = "arm64" };
+        var profile = operation.Profile with { RemovedPackages = operation.Profile.RemovedPackages.SetItem(0, package) };
+        var invalid = recipe with { Operations = recipe.Operations.SetItem(1, operation with { Profile = profile }) };
+
+        var failure = Assert.Throws<KeycloakSecurityException>(() => KeycloakRecipeValidation.Validate(invalid));
+        Assert.Equal(KeycloakFailureCode.Invalid, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Validation, failure.Phase);
+        Assert.Equal("runtime", failure.OperationId);
+    }
+
+    [Fact]
+    public void CanonicalUriWithNoAuthorityIsRejectedWithValueParameter()
+    {
+        var failure = Assert.Throws<ArgumentException>(() => KeycloakCanonicalization.CanonicalizeHttpsUri("https:///material"));
+        Assert.Equal("value", failure.ParamName);
+    }
+
     [Theory]
     [InlineData("/opt/keycloak/bin/./kc.sh")]
     [InlineData("/opt/keycloak/bin//kc.sh")]

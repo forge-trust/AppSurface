@@ -55,6 +55,109 @@ public sealed class OciLayoutTests
         Assert.Throws<InvalidDataException>(() => OciLayout.CopyVerifiedGraph(archive, "sha256:" + new string('b', 64), configDigest, Path.Combine(root.Path, "bad"), default));
     }
 
+    [Fact]
+    public void Rejects_duplicate_manifest_graph_identity()
+    {
+        using var root = new TempDirectory();
+        var config = Encoding.UTF8.GetBytes("{}");
+        var configDigest = Digest(config);
+        var manifest = Encoding.UTF8.GetBytes($"{{\"config\":{{\"digest\":\"{configDigest}\",\"size\":{config.Length}}},\"layers\":[{{\"digest\":\"{configDigest}\",\"size\":{config.Length}}}]}}");
+        var manifestDigest = Digest(manifest);
+        var archive = WriteGraphArchive(root.Path, manifestDigest, manifest, configDigest, config);
+
+        AssertGraphRejected(root.Path, archive, manifestDigest, configDigest, "Repeated layer identity unsupported.");
+    }
+
+    [Fact]
+    public void Rejects_ambiguous_repeated_manifest_archive_member()
+    {
+        using var root = new TempDirectory();
+        var config = Encoding.UTF8.GetBytes("{}");
+        var configDigest = Digest(config);
+        var manifest = Encoding.UTF8.GetBytes($"{{\"config\":{{\"digest\":\"{configDigest}\",\"size\":{config.Length}}},\"layers\":[]}}");
+        var manifestDigest = Digest(manifest);
+        var archive = WriteGraphArchive(root.Path, manifestDigest, manifest, configDigest, config, duplicateManifest: true);
+
+        AssertGraphRejected(root.Path, archive, manifestDigest, configDigest, "Manifest is oversized or ambiguous.");
+    }
+
+    [Theory]
+    [InlineData(false, false, "Graph member is missing, repeated, or oversized.")]
+    [InlineData(true, false, "Graph member is missing, repeated, or oversized.")]
+    [InlineData(false, true, "Graph member digest differs.")]
+    [InlineData(false, false, "Graph closure is incomplete.")]
+    public void Rejects_invalid_graph_members_and_incomplete_closure(bool duplicateConfig, bool corruptConfig, string expectedMessage)
+    {
+        using var root = new TempDirectory();
+        var config = Encoding.UTF8.GetBytes("{}");
+        var layer = Encoding.UTF8.GetBytes("layer");
+        var configDigest = Digest(config);
+        var layerDigest = Digest(layer);
+        var includeLayer = expectedMessage != "Graph closure is incomplete.";
+        var claimedConfigSize = expectedMessage == "Graph member is missing, repeated, or oversized." && !duplicateConfig ? config.Length + 1 : config.Length;
+        var manifest = Encoding.UTF8.GetBytes($"{{\"config\":{{\"digest\":\"{configDigest}\",\"size\":{claimedConfigSize}}},\"layers\":[{{\"digest\":\"{layerDigest}\",\"size\":{layer.Length}}}]}}");
+        var manifestDigest = Digest(manifest);
+        var archivedConfig = corruptConfig ? Encoding.UTF8.GetBytes("xx") : config;
+        var archive = WriteGraphArchive(root.Path, manifestDigest, manifest, configDigest, archivedConfig, duplicateConfig, includeLayer ? layerDigest : null, layer);
+
+        AssertGraphRejected(root.Path, archive, manifestDigest, configDigest, expectedMessage);
+    }
+
+    [Fact]
+    public void Rejects_noncanonical_uppercase_graph_digest()
+    {
+        using var root = new TempDirectory();
+        var config = Encoding.UTF8.GetBytes("{}");
+        var canonicalDigest = Digest(config);
+        var uppercaseDigest = "sha256:" + canonicalDigest[7..].ToUpperInvariant();
+        var manifest = Encoding.UTF8.GetBytes($"{{\"config\":{{\"digest\":\"{uppercaseDigest}\",\"size\":{config.Length}}},\"layers\":[]}}");
+        var manifestDigest = Digest(manifest);
+        var archive = WriteGraphArchive(root.Path, manifestDigest, manifest, uppercaseDigest, config);
+
+        AssertGraphRejected(root.Path, archive, manifestDigest, uppercaseDigest, "Noncanonical graph digest.");
+    }
+
+    [Fact]
+    public void ManifestMemberCannotBeALinkEvenWithTheSelectedDigestName()
+    {
+        using var root = new TempDirectory();
+        var manifestDigest = "sha256:" + new string('a', 64);
+        var archive = Path.Combine(root.Path, "linked-manifest.tar");
+        using (var file = File.Create(archive))
+        using (var writer = new TarWriter(file))
+            writer.WriteEntry(new UstarTarEntry(TarEntryType.SymbolicLink, "blobs/sha256/" + manifestDigest[7..]) { LinkName = "elsewhere" });
+        AssertGraphRejected(root.Path, archive, manifestDigest, "sha256:" + new string('b', 64), "Manifest is oversized or ambiguous.");
+    }
+
+    private static string WriteGraphArchive(string directory, string manifestDigest, byte[] manifest, string configDigest, byte[] config, bool duplicateConfig = false, string? layerDigest = null, byte[]? layer = null, bool duplicateManifest = false)
+    {
+        var archive = Path.Combine(directory, "graph-" + Guid.NewGuid().ToString("N") + ".tar");
+        using (var file = File.Create(archive))
+        {
+            using (var writer = new TarWriter(file, leaveOpen: true))
+            {
+                Entry(writer, "blobs/sha256/" + manifestDigest[7..], manifest);
+                if (duplicateManifest)
+                    Entry(writer, "blobs/sha256/" + manifestDigest[7..], manifest);
+                Entry(writer, "blobs/sha256/" + configDigest[7..], config);
+                if (duplicateConfig)
+                    Entry(writer, "blobs/sha256/" + configDigest[7..], config);
+                if (layerDigest is not null)
+                    Entry(writer, "blobs/sha256/" + layerDigest[7..], layer!);
+            }
+            file.Write(new byte[1024]);
+        }
+        return archive;
+    }
+
+    private static void AssertGraphRejected(string directory, string archive, string manifestDigest, string configDigest, string expectedMessage)
+    {
+        var output = Path.Combine(directory, "rejected-" + Guid.NewGuid().ToString("N"));
+        var exception = Assert.Throws<InvalidDataException>(() => OciLayout.CopyVerifiedGraph(archive, manifestDigest, configDigest, output, default));
+        Assert.Equal(expectedMessage, exception.Message);
+        Assert.False(Directory.Exists(output));
+    }
+
     private static void GraphEntry(TarWriter writer, string name, byte[] data, bool v7)
     {
         TarEntry entry = v7 ? new V7TarEntry(TarEntryType.V7RegularFile, name) : new UstarTarEntry(TarEntryType.RegularFile, name);

@@ -9,6 +9,34 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 // no_claim: this does not validate external logging sinks or deployment behavior.
 public sealed class DiagnosticsTests
 {
+    // protects: transient transport failures never authorize retry after an output was committed.
+    // fails_when: staged or committed effects are collapsed into a clean transient outcome.
+    [Theory]
+    [InlineData(KeycloakEffectState.None, KeycloakRecoveryClass.ExplicitTransientRetryOnce)]
+    [InlineData(KeycloakEffectState.Staged, KeycloakRecoveryClass.CorrectInput)]
+    [InlineData(KeycloakEffectState.Committed, KeycloakRecoveryClass.CorrectInput)]
+    public void TransientCauseRetainsTheObservedEffectBoundary(KeycloakEffectState effect, KeycloakRecoveryClass recovery)
+    {
+        var result = KeycloakDiagnostics.Failure(KeycloakFailureCode.MaterialUnavailable, KeycloakSafePhase.Acquisition,
+            "fixture-material", effect, "Inspect the retained input.", new MaterialAcquisitionException(true, "private cause"));
+        Assert.Equal(effect, result.Effect);
+        Assert.Equal(recovery, result.Recovery);
+        Assert.False(result.RetryMetadata.AutomaticRetry);
+        Assert.DoesNotContain("private cause", result.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(KeycloakRecoveryClass.ExplicitTransientRetryOnce, KeycloakEffectState.Staged, 1, false)]
+    [InlineData(KeycloakRecoveryClass.ExplicitTransientRetryOnce, KeycloakEffectState.Committed, 0, false)]
+    [InlineData(KeycloakRecoveryClass.InspectBeforeRetry, KeycloakEffectState.None, 0, true)]
+    public void RetryMetadataKeepsEveryRecoveryAndEffectCombinationBounded(KeycloakRecoveryClass recovery, KeycloakEffectState effect, int attempts, bool inspect)
+    {
+        var result = KeycloakRetryMetadata.For(recovery, effect);
+        Assert.False(result.AutomaticRetry);
+        Assert.Equal(attempts, result.MaximumAdditionalAttempts);
+        Assert.Equal(inspect, result.RequiresInspectionFirst);
+    }
+
     [Fact]
     // protects: diagnostics expose stable references and redact unsafe operation context.
     public void FailureHasStableSafeReferenceFields()

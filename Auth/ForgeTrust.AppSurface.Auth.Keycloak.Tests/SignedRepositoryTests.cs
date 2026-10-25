@@ -466,6 +466,37 @@ public sealed class SignedRepositoryTests
             SignedRepository.VerificationPolicy.Exact("resolute-updates", ["main"], ["amd64"])));
     }
 
+    // protects: signed metadata paths and syntax remain closed even when their bytes are validly signed.
+    // fails_when: path traversal or a tab continuation is treated as a new authority.
+    // seam: public verification with ephemeral signatures; no live repository approval is claimed.
+    [Theory]
+    [InlineData("relative/../Packages.gz")]
+    [InlineData("../Packages.gz")]
+    public void SignedIndexRejectsParentSegmentsInsideOtherwiseValidPath(string path)
+    {
+        AssertInvalidRelease("malformed", (release, fixture) => release.Replace(fixture.IndexPath, path, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TabContinuationAndLeadingBlankParagraphKeepTheSignedDependencyFacts()
+    {
+        var text = "\n\n" + SignedRepositoryFixture.PackageParagraph.Replace(
+            "Depends: libc6 (>= 2.0)\n", "Depends: libc6\n\t(>= 2.0)\n", StringComparison.Ordinal);
+        var fixture = SignedRepositoryFixture.Create(packageIndexText: text);
+        var result = Verify(fixture, fixture.ReleaseSha256, fixture.Fingerprint, fixture.Policy(Clock, true));
+        Assert.Single(result.Packages);
+        Assert.Equal("libc6\n(>= 2.0)", Assert.Single(result.DependencyFacts.Single().Dependencies));
+    }
+
+    [Theory]
+    [InlineData("Size: 4", "Size: invalid", "incomplete")]
+    [InlineData("SHA256: 1111111111111111111111111111111111111111111111111111111111111111", "SHA256: g111111111111111111111111111111111111111111111111111111111111111", "incomplete")]
+    public void SignedPackageRejectsNonNumericSizeAndNonHexDigest(string original, string replacement, string expected)
+    {
+        var fixture = SignedRepositoryFixture.Create(packageIndexText: SignedRepositoryFixture.PackageParagraph.Replace(original, replacement, StringComparison.Ordinal));
+        AssertInvalidMessage(expected, () => Verify(fixture, fixture.ReleaseSha256, fixture.Fingerprint, fixture.Policy(Clock, true)));
+    }
+
     private static SignedRepository.VerificationResult Verify(SignedRepositoryFixture fixture, string releaseSha, string fingerprint, SignedRepository.VerificationPolicy policy)
     {
         using var release = fixture.Release(); using var keyring = fixture.Keyring();

@@ -219,6 +219,24 @@ public sealed class StageEventsTests
         Assert.DoesNotContain("observer detail", own[1].ToString(), StringComparison.Ordinal);
     }
 
+    // protects: progress identifiers preserve only the declared public ASCII alphabet.
+    // fails_when: an allowed separator is lost or an unsafe character reaches a terminal event.
+    // seam: public stage events; no listener reflection or private normalization calls.
+    [Theory]
+    [InlineData("profile-A_1.2:3", "REASON-A_1", "REASON-A_1", false)]
+    [InlineData("profile/secret", "reason/path", "REASON_PATH", true)]
+    public void ProfileAndFailureCodeUseTheirSeparateDocumentedAlphabets(string profile, string code, string expectedCode, bool truncated)
+    {
+        var events = new List<KeycloakStageEvent>();
+        using var subscription = KeycloakStageEvents.Subscribe(events.Add);
+        using var scope = KeycloakStageEvents.Begin(KeycloakStagePhase.Build, profile: profile);
+        scope.Reject(code, KeycloakEffectState.None);
+        var terminal = Assert.Single(events, value => value.CorrelationId == scope.CorrelationId && value.Outcome == KeycloakStageOutcome.Rejected);
+        Assert.Equal(profile.Replace('/', '_'), terminal.Profile);
+        Assert.Equal(expectedCode, terminal.SafeCode);
+        Assert.Equal(truncated, terminal.Truncated);
+    }
+
     [Fact]
     public void InvalidCountersAndDuplicateTerminalAreRejectedWithoutSecondEvent()
     {
