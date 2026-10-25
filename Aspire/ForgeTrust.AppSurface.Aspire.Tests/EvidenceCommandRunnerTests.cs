@@ -464,16 +464,20 @@ public sealed class EvidenceCommandRunnerTests
     {
         var parent = Directory.CreateTempSubdirectory("evidence-command-descendant-").FullName;
         var pidPath = Path.Join(parent, "child.pid");
+        using var cancellation = new CancellationTokenSource();
+        Task<EvidenceCommandResult>? running = null;
         try
         {
+            // An absolute marker avoids PowerShell's separate provider location;
+            // -NoNewWindow keeps the child in the foreground process tree under test.
             var request = CreateShellRequest("sleep 30 & child=$!; printf '%s' \"$child\" > child.pid; wait \"$child\"",
-                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; [IO.File]::WriteAllText('child.pid', [string]$child.Id); $child.WaitForExit()") with
+                "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -NoNewWindow -PassThru; [IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH, [string]$child.Id); $child.WaitForExit()") with
             {
                 WorkingDirectory = parent,
                 Timeout = OperatingSystem.IsWindows() ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2),
+                Environment = new Dictionary<string, string> { ["EVIDENCE_CHILD_PID_PATH"] = pidPath },
             };
-            using var cancellation = new CancellationTokenSource();
-            var running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
+            running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
             if (cancel)
             {
                 var readiness = Stopwatch.StartNew();
@@ -495,7 +499,19 @@ public sealed class EvidenceCommandRunnerTests
             while (IsRunning(pid) && cleanup.Elapsed < TimeSpan.FromSeconds(2)) await Task.Delay(10);
             Assert.False(IsRunning(pid), "The owned foreground descendant must not survive command cleanup.");
         }
-        finally { Directory.Delete(parent, recursive: true); }
+        finally
+        {
+            // Readiness can fail before the caller-cancellation assertion. Stop and
+            // observe the command before removing its working directory in that case.
+            cancellation.Cancel();
+            if (running is not null)
+            {
+                try { await running; }
+                catch (OperationCanceledException) { }
+                catch (EvidenceCommandException) { }
+            }
+            Directory.Delete(parent, recursive: true);
+        }
 
         static bool IsRunning(int pid)
         {

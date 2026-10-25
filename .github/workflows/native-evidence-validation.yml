@@ -39,16 +39,12 @@ jobs:
           $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) 'global.json')
           if ((dotnet --version) -ne '10.0.402') { throw 'Native validation SDK selection failed' }
       - name: Restore and build native validation
+        id: build
         shell: pwsh
         run: |
           dotnet restore tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --locked-mode
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj --configuration Release --no-restore
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Test native lifecycle contracts
-        shell: pwsh
-        run: |
-          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Pack candidate and execute native journeys
         shell: pwsh
@@ -61,6 +57,14 @@ jobs:
           $package = Join-Path $feed "ForgeTrust.AppSurface.Cli.$version.nupkg"
           $hostPath = (Get-Command dotnet).Source
           dotnet tools/ForgeTrust.AppSurface.Evidence.Validation/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Validation.dll --package $package --version $version --source-commit '${{ github.sha }}' --dotnet $hostPath --output $proof --scratch-parent $env:RUNNER_TEMP
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      # Retain the native fixture's failure proof before negative tests can fail.
+      # Both acceptance layers remain required; a failed journey cannot skip tests.
+      - name: Test native lifecycle contracts
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          dotnet test Aspire/ForgeTrust.AppSurface.Aspire.Tests/ForgeTrust.AppSurface.Aspire.Tests.csproj --configuration Release --filter 'FullyQualifiedName~EvidenceCommand|FullyQualifiedName~EvidenceWorkspaceTests|FullyQualifiedName~EvidenceCoverageFanInTests|FullyQualifiedName~NativeConsumerTamperTests|FullyQualifiedName~NativeValidationJsonTests'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Preserve native EvidenceHost artifacts
         if: ${{ always() }}

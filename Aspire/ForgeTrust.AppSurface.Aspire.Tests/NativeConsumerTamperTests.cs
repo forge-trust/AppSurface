@@ -191,10 +191,12 @@ public sealed class NativeConsumerTamperTests
 
             var captureIndex = 0;
             EofBoundary? boundary = null;
+            var diagnostics = new CommandTailCapture();
             var runner = new EvidenceCommandRunner(stream =>
             {
-                if (captureIndex++ % 2 == 0) boundary = new EofBoundary(MutateAtCommandEof);
-                return new EofStream(stream, boundary!);
+                var isStdout = captureIndex++ % 2 == 0;
+                if (isStdout) boundary = new EofBoundary(MutateAtCommandEof);
+                return new EofStream(diagnostics.Adapt(stream, isStdout), boundary!);
             });
             var declaration = new EvidenceProducerDeclaration("installed-consumer", "native-validation", "1", [],
                 ["consumer/package-identity@1", "consumer/executed-tests@1", "consumer/coverage-gate@1", "consumer/source-integrity@1"],
@@ -212,7 +214,7 @@ public sealed class NativeConsumerTamperTests
             await using (var producer = new InstalledConsumerProducer(settings, runner))
             {
                 result = await producer.ProduceAsync(context, CancellationToken.None);
-                Assert.True(mutationApplied, "The requested real journey mutation must occur before rejection.");
+                Assert.True(mutationApplied, "The requested real journey mutation must occur before rejection. Last command output (bounded test diagnostic): " + diagnostics.Describe());
                 Assert.NotNull(changedPath);
                 Assert.NotNull(beforeHash);
                 if (mutation is "project-log" or "missing-executable" or "missing-gate-markdown" or "missing-project-directory" or "missing-project-coverage")
@@ -263,13 +265,17 @@ public sealed class NativeConsumerTamperTests
             var context = new EvidenceProducerContext(plan, declaration, TimeProvider.System);
             var settings = new ValidationSettings(repository, candidate.Path, candidate.Version, candidate.Commit,
                 dotnet, scratch, TestPathUtils.PathUnder(parent, "evidence"), MinimumFreeBytes: 0);
+            var diagnostics = new CommandTailCapture();
+            var captureIndex = 0;
+            var runner = new EvidenceCommandRunner(stream => diagnostics.Adapt(stream, captureIndex++ % 2 == 0));
 
-            await using (var producer = new InstalledConsumerProducer(settings))
+            await using (var producer = new InstalledConsumerProducer(settings, runner))
             {
                 var result = await producer.ProduceAsync(context, CancellationToken.None);
 
                 Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
-                Assert.True(result.Diagnostic?.Contains("no artifact writer", StringComparison.Ordinal) == true, result.Diagnostic);
+                Assert.True(result.Diagnostic?.Contains("no artifact writer", StringComparison.Ordinal) == true,
+                    result.Diagnostic + " Last command output (bounded test diagnostic): " + diagnostics.Describe());
                 Assert.Empty(result.SatisfiedAssertionIds);
             }
 
@@ -529,6 +535,72 @@ public sealed class NativeConsumerTamperTests
         public void Complete()
         {
             if (Interlocked.Increment(ref _completed) == 2) mutate();
+        }
+    }
+
+    /// <summary>Test-only rolling command tail for diagnosing fixture failures; stdout and stderr share a 32 KiB total cap. It observes bytes only and leaves EOF mutation pairing intact.</summary>
+    private sealed class CommandTailCapture
+    {
+        private const int TotalLimit = 32 * 1024;
+        private const int PerStreamLimit = TotalLimit / 2;
+        private readonly object _gate = new();
+        private MemoryStream _stdout = new();
+        private MemoryStream _stderr = new();
+
+        public Stream Adapt(Stream stream, bool isStdout)
+        {
+            lock (_gate)
+            {
+                if (isStdout)
+                {
+                    _stdout = new MemoryStream();
+                    _stderr = new MemoryStream();
+                }
+            }
+            return new DiagnosticStream(stream, this, isStdout);
+        }
+
+        public string Describe()
+        {
+            lock (_gate)
+                return $"stdout=[{Decode(_stdout)}] stderr=[{Decode(_stderr)}]";
+        }
+
+        private void Append(bool isStdout, ReadOnlySpan<byte> bytes)
+        {
+            lock (_gate)
+            {
+                var target = isStdout ? _stdout : _stderr;
+                var existing = target.ToArray();
+                var retainIncoming = Math.Min(bytes.Length, PerStreamLimit);
+                var incoming = bytes[^retainIncoming..];
+                var retainExisting = Math.Min(existing.Length, PerStreamLimit - retainIncoming);
+                target.SetLength(0);
+                if (retainExisting > 0) target.Write(existing.AsSpan(existing.Length - retainExisting));
+                if (retainIncoming > 0) target.Write(incoming);
+            }
+        }
+
+        private static string Decode(MemoryStream stream) => System.Text.Encoding.UTF8.GetString(stream.ToArray());
+
+        private sealed class DiagnosticStream(Stream inner, CommandTailCapture owner, bool isStdout) : Stream
+        {
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                var read = await inner.ReadAsync(buffer, cancellationToken);
+                if (read > 0) owner.Append(isStdout, buffer.Span[..read]);
+                return read;
+            }
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() => throw new NotSupportedException();
+            public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
     }
 
