@@ -1,3 +1,4 @@
+using ForgeTrust.AppSurface.Testing;
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class CloudRunExecutionArgumentAdmissionTests
@@ -68,7 +69,7 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
     public void PathAdmission_RejectsReparsePointWhenSupported()
     // protects=bundle path boundary; fails_when=reparse-point path is read; no_claim=adversarial filesystem replacement race
     {
-        var root = Path.Combine(Environment.CurrentDirectory, ".appsurface-cli-admission-" + Guid.NewGuid().ToString("N"));
+        var root = TestPathUtils.PathUnder(Environment.CurrentDirectory, ".appsurface-cli-admission-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
@@ -77,7 +78,7 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
             try
             {
                 Directory.CreateSymbolicLink(link, root);
-                Assert.False(CloudRunExecutionArgumentAdmission.IsPathSafe(Path.Combine(link, "child")));
+                Assert.False(CloudRunExecutionArgumentAdmission.IsPathSafe(TestPathUtils.PathUnder(link, "child")));
             }
             catch (PlatformNotSupportedException) { }
             finally

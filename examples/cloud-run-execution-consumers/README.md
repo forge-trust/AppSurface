@@ -4,7 +4,7 @@ This runnable example exercises the public `ForgeTrust.AppSurface.Deployment.Gcp
 
 The fixture reader is intentionally offline. The sample does not invoke `gcloud`, submit or cancel an execution, resolve a secret, or mutate a cloud resource. The `--swapped` mode supplies the other execution's evidence and must return `Unknown` with a nonzero exit code.
 
-The v1 fixture uses the command's lowercase `all-traffic` egress annotation representation required by the observer; the rendered bundle retains the public profile's `ALL_TRAFFIC` value. These example fixtures explicitly include zero counters to exercise the parser's positive terminal-counter path. The separate evidence worksheets intentionally preserve omitted counters as unavailable proof and must not be read as provider-attested payloads.
+The v1 fixture uses the command's lowercase `all-traffic` egress annotation representation required by the observer; the rendered bundle retains the public profile's `ALL_TRAFFIC` value. These example fixtures explicitly include zero counters to exercise the parser's positive terminal-counter path. For v1 only, omitted zero counters may be admitted when the exact bounded SDK/CLI replay mapping documents that omission; the separate evidence worksheets preserve other unavailable-proof fields and must not be read as provider-attested payloads.
 
 ```bash
 dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation

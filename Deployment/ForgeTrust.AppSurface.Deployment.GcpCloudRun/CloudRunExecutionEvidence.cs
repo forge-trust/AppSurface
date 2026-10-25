@@ -23,6 +23,7 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
         {
             using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 64 });
             var root = document.RootElement;
+            GcpCloudRunJsonAdmission.ValidateFiniteCollections(root);
             Unique(root);
             var v1 = root.TryGetProperty("metadata", out var metadata);
             if (v1 && root.TryGetProperty("name", out _)) throw Bad("ASDEPLOY174");
@@ -107,8 +108,9 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
                     if (annotation.Name is not ("run.googleapis.com/client-name" or "run.googleapis.com/client-version" or "run.googleapis.com/creator" or "run.googleapis.com/lastModifier" or "run.googleapis.com/operation-id")
                         || annotation.Value.ValueKind != JsonValueKind.String) throw Bad("ASDEPLOY175");
             if (root.TryGetProperty("deleteTime", out _)) throw Bad("ASDEPLOY176");
-            if (root.TryGetProperty("labels", out var labels) && labels.ValueKind == JsonValueKind.Object)
+            if (root.TryGetProperty("labels", out var labels))
             {
+                if (labels.ValueKind != JsonValueKind.Object) throw Bad("ASDEPLOY174");
                 if (labels.TryGetProperty("cloud.googleapis.com/location", out var location) && location.GetString() != selected.Region) throw Bad("ASDEPLOY172");
                 if (labels.TryGetProperty("run.googleapis.com/job", out var job) && job.GetString() != selected.Job) throw Bad("ASDEPLOY172");
             }
@@ -139,6 +141,7 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
             var egress = Text(annotations, "run.googleapis.com/vpc-access-egress");
             Match(egress == (expected.Egress == "ALL_TRAFFIC" ? "all-traffic" : "private-ranges-only"));
             using var interfaces = JsonDocument.Parse(Text(annotations, "run.googleapis.com/network-interfaces"), new JsonDocumentOptions { MaxDepth = 8 });
+            GcpCloudRunJsonAdmission.ValidateFiniteCollections(interfaces.RootElement);
             Unique(interfaces.RootElement);
             CheckNetwork(interfaces.RootElement, plan, expected);
         }
@@ -267,7 +270,16 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
         if (running + succeeded + failed + cancelled > count || retried > count) throw Bad("ASDEPLOY174");
         var terminal = state is "True" or "False" or "CONDITION_SUCCEEDED" or "CONDITION_FAILED";
         var hasCompletion = status.TryGetProperty("completionTime", out var completion);
-        var reason = overall.TryGetProperty(v1 ? "reason" : "executionReason", out var r) ? r.GetString() : null;
+        string? reason = null;
+        string? reasonField = null;
+        foreach (var field in v1 ? new[] { "reason" } : new[] { "reason", "executionReason", "revisionReason", "instanceReason" })
+        {
+            if (!overall.TryGetProperty(field, out _)) continue;
+            if (reasonField is not null) throw Bad("ASDEPLOY174");
+            reasonField = field;
+            reason = Text(overall, field);
+        }
+        if (!v1 && reasonField is "revisionReason" or "instanceReason") throw Bad("ASDEPLOY175");
         var reconciling = !v1 && status.TryGetProperty("reconciling", out var rec) && rec.ValueKind == JsonValueKind.True;
         if (!v1 && (!status.TryGetProperty("reconciling", out rec) || rec.ValueKind is not (JsonValueKind.False or JsonValueKind.True))) throw Bad("ASDEPLOY175");
         if (terminal)
@@ -275,19 +287,22 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
             if (!hasCompletion || completion.ValueKind != JsonValueKind.String || !ValidTimestamp(completion.GetString()!) || reconciling || running != 0 || succeeded + failed + cancelled != count) throw Bad("ASDEPLOY174");
             if (state is "True" or "CONDITION_SUCCEEDED")
             {
-                if (succeeded != count || failed != 0 || cancelled != 0 || reason is "Cancelled" or "CANCELLED" or "CANCELLING") throw Bad("ASDEPLOY174");
+                if (succeeded != count || failed != 0 || cancelled != 0) throw Bad("ASDEPLOY174");
+                if (reason is not null && (!v1 || reason != "Completed")) throw Bad("ASDEPLOY175");
                 return CloudRunExecutionState.Succeeded;
             }
-            if (reason is "Cancelled" or "ExecutionCancelled" or "CANCELLED")
+            if (v1 ? reason is "Cancelled" or "ExecutionCancelled" or "CANCELLED" : reasonField == "executionReason" && reason == "CANCELLED")
             {
                 if (cancelled == 0) throw Bad("ASDEPLOY174");
                 return CloudRunExecutionState.Cancelled;
             }
-            if (failed > 0 && cancelled == 0 && reason is null or "NonZeroExitCode" or "NON_ZERO_EXIT_CODE") return CloudRunExecutionState.Failed;
+            if (failed > 0 && cancelled == 0 && (v1 ? reason is "NonZeroExitCode" or "NON_ZERO_EXIT_CODE" : reasonField == "executionReason" && reason == "NON_ZERO_EXIT_CODE")) return CloudRunExecutionState.Failed;
             throw Bad("ASDEPLOY175");
         }
         if (hasCompletion || succeeded == count || reason is "Cancelled" or "CANCELLED" or "DELETED" or "JOB_STATUS_SERVICE_POLLING_ERROR") throw Bad("ASDEPLOY174");
         if (v1 && reason is not ("Running" or "Pending" or "ResourcesAvailable" or "Retrying" or "CANCELLING" or "CANCELLED" or "Starting")) throw Bad("ASDEPLOY175");
+        if (!v1 && reasonField is not null && !(reasonField == "executionReason" && reason is "CANCELLING" or "DELAYED_START_PENDING")
+            && !(reasonField == "reason" && reason is "WAITING_FOR_OPERATION" or "IMMEDIATE_RETRY" or "POSTPONED_RETRY")) throw Bad("ASDEPLOY175");
         return CloudRunExecutionState.Running;
     }
 

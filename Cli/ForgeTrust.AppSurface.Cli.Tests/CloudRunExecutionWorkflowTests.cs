@@ -1,5 +1,6 @@
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
+using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
@@ -44,7 +45,7 @@ public sealed class CloudRunExecutionWorkflowTests
     public async Task RunAsync_RejectsUnexpectedEntryWithoutCallingObserver()
     {
         using var bundle = BundleDirectory.Create(includeMarker: true);
-        File.WriteAllText(Path.Combine(bundle.Path, "unexpected.txt"), "x");
+        File.WriteAllText(TestPathUtils.PathUnder(bundle.Path, "unexpected.txt"), "x");
         var observer = new RecordingObserver();
         var workflow = new CloudRunExecutionWorkflow(observer, TimeProvider.System);
 
@@ -59,7 +60,7 @@ public sealed class CloudRunExecutionWorkflowTests
     public async Task RunAsync_RejectsOversizedArtifactBeforeObserver()
     {
         using var bundle = BundleDirectory.Create(includeMarker: true);
-        using (var stream = File.OpenWrite(Path.Combine(bundle.Path, "deployment-intent.v1.json")))
+        using (var stream = File.OpenWrite(TestPathUtils.PathUnder(bundle.Path, "deployment-intent.v1.json")))
             stream.SetLength(4 * 1024 * 1024 + 1);
         var observer = new RecordingObserver();
         var workflow = new CloudRunExecutionWorkflow(observer, TimeProvider.System);
@@ -75,7 +76,7 @@ public sealed class CloudRunExecutionWorkflowTests
     public async Task RunAsync_RejectsMissingArtifactBeforeObserver()
     {
         using var bundle = BundleDirectory.Create(includeMarker: true);
-        File.Delete(Path.Combine(bundle.Path, "gcp-cloud-run-migration.plan.json"));
+        File.Delete(TestPathUtils.PathUnder(bundle.Path, "gcp-cloud-run-migration.plan.json"));
         var observer = new RecordingObserver();
         var workflow = new CloudRunExecutionWorkflow(observer, TimeProvider.System);
 
@@ -135,8 +136,8 @@ public sealed class CloudRunExecutionWorkflowTests
     public async Task RunAsync_SymlinkedArtifactAndDirectoryAreRejected()
     {
         using var bundle = BundleDirectory.Create(includeMarker: true);
-        var link = Path.Combine(bundle.Path, "deployment-intent.v1.json");
-        var source = Path.Combine(bundle.Path, "source.json");
+        var link = TestPathUtils.PathUnder(bundle.Path, "deployment-intent.v1.json");
+        var source = TestPathUtils.PathUnder(bundle.Path, "source.json");
         File.WriteAllText(source, "{}");
         File.Delete(link);
         Directory.CreateSymbolicLink(link, source);
@@ -195,11 +196,11 @@ public sealed class CloudRunExecutionWorkflowTests
         public string Path { get; }
         public static BundleDirectory Create(bool includeMarker, string marker = "gcp-cloud-run", int artifactBytes = 2)
         {
-            var path = System.IO.Path.Combine(Environment.CurrentDirectory, ".appsurface-execution-" + Guid.NewGuid().ToString("N"));
+            var path = TestPathUtils.PathUnder(Environment.CurrentDirectory, ".appsurface-execution-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(path);
             foreach (var name in new[] { "deployment-intent.v1.json", "gcp-cloud-run-migration.tf.json", "gcp-cloud-run-migration.plan.json" })
-                File.WriteAllBytes(System.IO.Path.Combine(path, name), new byte[artifactBytes]);
-            if (includeMarker) File.WriteAllText(System.IO.Path.Combine(path, DeploymentArtifactBundleWriter.OwnershipMarkerFileName), marker + "\n");
+                File.WriteAllBytes(TestPathUtils.PathUnder(path, name), new byte[artifactBytes]);
+            if (includeMarker) File.WriteAllText(TestPathUtils.PathUnder(path, DeploymentArtifactBundleWriter.OwnershipMarkerFileName), marker + "\n");
             return new BundleDirectory(path);
         }
         public void Dispose() => Directory.Delete(Path, true);

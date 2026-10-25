@@ -1474,7 +1474,67 @@ appsurface deployment gcp-cloud-run observe-execution \
 
 `--bundle-dir`, `--job`, and `--execution` are required. The execution must be the complete canonical resource `projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`. The project is matched against the configured project ID or explicitly configured project number; no ID/number inference or alias lookup occurs. `--timeout` defaults to `60s`; `--poll-interval` defaults to `2s`. The API contract itself has no duration defaults.
 
+The library path receives an existing `DeploymentRenderResult` from the target's `RenderAsync` call. It does not expose a public bundle loader. A trusted published directory can be reconstructed into that same immutable shape with the bounded three-file read below; the exact filenames and `DeploymentArtifact.Create` admission are part of the contract:
+
+```csharp
+using ForgeTrust.AppSurface.Deployment;
+using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
+
+static async Task<CloudRunExecutionObservation> ObserveAsync(
+    DeploymentRenderResult rendered,
+    string logicalJobId,
+    string executionResourceName,
+    CancellationToken cancellationToken)
+{
+    var observer = GcpCloudRunExecutionObserver.Create();
+    return await observer.ObserveAsync(
+        new CloudRunExecutionObservationRequest(
+            rendered, logicalJobId, executionResourceName,
+            TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(2)),
+        cancellationToken);
+}
+
+static async Task<DeploymentRenderResult> ReadPublishedBundleAsync(
+    string directory,
+    CancellationToken cancellationToken)
+{
+    string[] names =
+    [
+        "deployment-intent.v1.json",
+        "gcp-cloud-run-migration.tf.json",
+        "gcp-cloud-run-migration.plan.json",
+    ];
+    var artifacts = new List<DeploymentArtifact>(names.Length);
+    foreach (var name in names)
+    {
+        var path = Path.Combine(directory, name);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        using var bytes = new MemoryStream(capacity: 4 * 1024 * 1024);
+        var buffer = new byte[64 * 1024];
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = await stream.ReadAsync(buffer, cancellationToken);
+            if (count == 0) break;
+            if (bytes.Length + count > 4 * 1024 * 1024) throw new InvalidDataException();
+            bytes.Write(buffer, 0, count);
+        }
+        artifacts.Add(DeploymentArtifact.Create(name, bytes.ToArray()));
+    }
+    return new DeploymentRenderResult("gcp-cloud-run", artifacts.AsReadOnly());
+}
+```
+
+The production construction is `GcpCloudRunExecutionObserver.Create()`. Tests inject `new GcpCloudRunExecutionObserver(reader, timeProvider)` with `IBoundedGcloudExecutionReader`; there is no arbitrary executable or unbounded-runner API. The published directory must already be trusted and complete; callers must also apply the CLI's strict reparse-free path admission and ownership checks rather than treating this compact reconstruction as a replacement for the full CLI loader.
+
 With `--json`, stdout receives exactly one versioned object containing only `schemaVersion: "1.0"`, `logicalJobId`, `executionResourceName`, `state`, `configurationMatched`, RFC 3339 UTC `observedAt`, and `diagnosticCode`. It has no raw provider JSON, stderr, command arguments, secret/environment values, credentials, provider messages, or exception text. On caller cancellation the command attempts one safe `Unknown`/false envelope only before any output failure; after the first stdout write/flush failure it suppresses further writes and returns 130 even when the envelope cannot be delivered. Ordinary output failure is `ASDEPLOY188` and returns 2; unexpected internal failure is `ASDEPLOY189` and returns safe `Unknown`. Text-mode failures write only fixed safe problem/cause/fix/recovery guidance and the canonical reference link to stderr.
+
+Captured CLI output from a synthetic response (the timestamp is the local receipt time of this offline probe; no live provider read or certification is claimed):
+
+```json
+{"schemaVersion":"1.0","logicalJobId":"schema-preparation","executionResourceName":"projects/demo-project/locations/us-central1/jobs/schema-preparation/executions/schema-preparation-run","state":"Succeeded","configurationMatched":true,"observedAt":"2026-10-25T01:25:10.9564400+00:00","diagnosticCode":"ASDEPLOY183"}
+```
 
 | Exit | Meaning | Caller action |
 | ---: | --- | --- |
@@ -1484,9 +1544,15 @@ With `--json`, stdout receives exactly one versioned object containing only `sch
 | 3 | Last matching `Running` evidence at a clean deadline. | Decide whether to issue a new observation. |
 | 130 | Caller cancellation. | Resume only under caller control. |
 
-For an offline quickstart, use the neutral `schema-preparation` and `catalog-refresh` fixtures to exercise identity, configuration, state, and swapped-execution rejection. A separately authorized provider read, if performed, uses the caller's existing `gcloud`, credentials, and `PATH`; this guide makes no live-read or compatibility claim. CI may pass environment variable names through its own secret mechanism, but values must not be placed in the bundle or output. The v1 shape proves gen2 configuration and implicit Cloud SQL socket annotation; v2 proves typed Cloud SQL volume attachment and the `/cloudsql` mount. Neither proves filesystem permissions, IAM effectiveness, database reachability, or application acceptance. See the [Cloud Run package reference](../../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md#exact-cloud-run-execution-observation) and [adoption recipe](../../Deployment/adoption.md#observe-an-existing-execution).
+For an offline quickstart, use the neutral `schema-preparation` and `catalog-refresh` fixtures to exercise identity, configuration, state, and swapped-execution rejection. The repository's local evidence was produced with .NET 10 and `gcloud` 576.0.0 on Darwin arm64; that is a reproducibility note, not a live-read or compatibility claim. A separately authorized provider read, if performed, uses the caller's existing `gcloud`, credentials, and inherited `PATH`; values must not be placed in the bundle or output. The v1 shape proves gen2 configuration and implicit Cloud SQL socket annotation; v2 proves typed Cloud SQL volume attachment and the `/cloudsql` mount. Neither proves filesystem permissions, IAM effectiveness, database reachability, or application acceptance. See the [Cloud Run package reference](../../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md#exact-cloud-run-execution-observation) and [adoption recipe](../../Deployment/adoption.md#observe-an-existing-execution).
 
 See the [two neutral execution consumers example](../../examples/cloud-run-execution-consumers/README.md) for an offline contract walkthrough.
+
+The JSON envelope above was captured from the built CLI with an owned synthetic read response. The [neutral consumer sample](../../examples/cloud-run-execution-consumers/README.md) uses the library directly and prints its PascalCase record fields; it exercises the same observer but has its own sample output format:
+
+```sh
+dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation
+```
 
 POSIX CI can capture and branch on all five exits without automatic retry, submission, or cancellation:
 

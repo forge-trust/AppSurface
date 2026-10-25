@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.RegularExpressions;
 using ForgeTrust.AppSurface.Deployment;
 
@@ -63,7 +62,6 @@ public interface IGcpCloudRunExecutionObserver
 /// <remarks>Only the injected bounded-reader contract is used. There is no legacy unbounded-runner adapter, cache, retry policy or current-Job fallback.</remarks>
 public sealed class GcpCloudRunExecutionObserver : IGcpCloudRunExecutionObserver
 {
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly IBoundedGcloudExecutionReader _reader;
     private readonly TimeProvider _timeProvider;
 
@@ -135,9 +133,8 @@ public sealed class GcpCloudRunExecutionObserver : IGcpCloudRunExecutionObserver
             if (read.Outcome != BoundedGcloudExecutionReadOutcome.Complete || read.ExitCode != 0)
                 return Failure(ReadFailureCode(read.Outcome));
             var bytes = read.StandardOutput;
-            if (bytes.Length > 1_048_576) return Failure("ASDEPLOY180");
-            try { _ = StrictUtf8.GetCharCount(bytes); }
-            catch (DecoderFallbackException) { return Failure("ASDEPLOY180"); }
+            // The sealed result constructor enforces the inclusive byte cap and strict UTF-8 before
+            // this immutable copy can exist, including for injected readers.
             var received = _timeProvider.GetUtcNow();
             var evidence = CloudRunExecutionEvidence.Classify(bytes, plan, expected, identity);
             cancellationToken.ThrowIfCancellationRequested();

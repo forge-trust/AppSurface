@@ -3,7 +3,7 @@ using System.Text.Json;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 
-public sealed class GcpCloudRunBundleValidatorTests
+public sealed partial class GcpCloudRunBundleValidatorTests
 {
     [Fact]
     public async Task RenderWithoutProjectNumber_PreservesLegacyConstructorAndOmitsIdentityBytes()
@@ -125,6 +125,42 @@ public sealed class GcpCloudRunBundleValidatorTests
     }
 
     [Fact]
+    public void FiniteJsonAdmissionAcceptsInclusiveCollectionBoundary()
+    {
+        // protects=observer finite collection admission; fails_when=the documented inclusive 4096-entry boundary rejects valid evidence; no_claim=the bound is a provider semantic limit.
+        using var document = JsonDocument.Parse("{" + string.Join(',', Enumerable.Range(0, GcpCloudRunJsonAdmission.MaxCollectionEntries).Select(index => $"\"k{index}\":0")) + "}");
+
+        GcpCloudRunJsonAdmission.ValidateFiniteCollections(document.RootElement);
+    }
+
+    [Fact]
+    public void FiniteJsonAdmissionRejectsCollectionBoundaryPlusOne()
+    {
+        // protects=observer finite collection admission; fails_when=4097 direct entries can amplify parser memory; no_claim=the bound changes legacy Verify behavior.
+        using var document = JsonDocument.Parse("{" + string.Join(',', Enumerable.Range(0, GcpCloudRunJsonAdmission.MaxCollectionEntries + 1).Select(index => $"\"k{index}\":0")) + "}");
+
+        Assert.Throws<JsonException>(() => GcpCloudRunJsonAdmission.ValidateFiniteCollections(document.RootElement));
+    }
+
+    [Fact]
+    public void FiniteJsonAdmissionAcceptsInclusiveArrayBoundary()
+    {
+        // protects=inclusive array admission; fails_when=4096 items are incorrectly rejected;
+        // no_claim=bounded JSON alone proves configuration parity.
+        using var document = JsonDocument.Parse("[" + string.Join(',', Enumerable.Repeat("0", GcpCloudRunJsonAdmission.MaxCollectionEntries)) + "]");
+        GcpCloudRunJsonAdmission.ValidateFiniteCollections(document.RootElement);
+    }
+
+    [Fact]
+    public void FiniteJsonAdmissionRejectsArrayBoundaryPlusOne()
+    {
+        // protects=array-side finite admission; fails_when=4097 array items are accepted; no_claim=provider output is semantically valid merely because it is bounded.
+        using var document = JsonDocument.Parse("[" + string.Join(',', Enumerable.Repeat("0", GcpCloudRunJsonAdmission.MaxCollectionEntries + 1)) + "]");
+
+        Assert.Throws<JsonException>(() => GcpCloudRunJsonAdmission.ValidateFiniteCollections(document.RootElement));
+    }
+
+    [Fact]
     public async Task ValidatorRejectsMalformedUtf8()
     {
         // protects=UTF-8 JSON admission; fails_when=invalid bytes reach provider parsing; no_claim=provider output encoding is proven.
@@ -239,9 +275,9 @@ public sealed class GcpCloudRunBundleValidatorTests
     {
         public ProfileFixture(string? projectNumber)
         {
-            Root = Path.Combine(Path.GetTempPath(), "appsurface-profile-" + Guid.NewGuid().ToString("N"));
+            Root = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-profile-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(Root);
-            ProfilePath = Path.Combine(Root, "profile.json");
+            ProfilePath = TestPathUtils.PathUnder(Root, "profile.json");
             var profile = new Dictionary<string, object?>
             {
                 ["schemaVersion"] = "1.0",

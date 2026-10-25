@@ -57,6 +57,8 @@ Owned parity additionally requires canonical environment and source-revision lab
 
 The GCP execution observer consumes the same immutable `DeploymentRenderResult` produced by the three-artifact render contract. Callers construct artifacts with `DeploymentArtifact.Create(fileName, bytes)` and pass the complete result to `CloudRunExecutionObservationRequest`; the package intentionally does not add a public bundle loader. The CLI is the trusted-bundle loader: it admits exactly the three canonical files and optional ownership marker, rejects symlinks/reparse points and unexpected entries, and enforces a 4 MiB limit per artifact.
 
+Observation JSON is limited to depth 64 and 4096 direct entries per object or array, inclusive, within the artifact and provider byte caps. These are local admission bounds; exceeding them returns safe Unknown and does not reduce configuration requirements. Legacy configuration verification retains its existing admission behavior.
+
 Use `GcpCloudRunExecutionObserver.Create()` for production. Tests and hosts that need deterministic time inject `IBoundedGcloudExecutionReader` and `TimeProvider` through `new GcpCloudRunExecutionObserver(reader, timeProvider)`. The bounded reader exposes complete output, nonzero exit, tool unavailable, output limit, invalid encoding, deadline, read failure, and cleanup-unconfirmed outcomes. No unbounded runner fallback exists.
 
 The request requires a logical Job id, a canonical full execution resource (`projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`), and finite positive timeout/interval values with interval no greater than timeout. The observer matches a project ID or explicitly configured project number literally; it never resolves aliases or infers equivalence. It never selects latest, lists executions, uses a name prefix, reads today's Job to fill gaps, submits/cancels/retries work, or changes cloud state. The request's timeout is one monotonic budget covering validation, reads, polling, and cleanup. The caller owns submission correlation, acceptance, recovery, and any later retry.
@@ -77,11 +79,25 @@ The v1 admitted evidence is one gen2 container with the execution identity, UID,
 
 The v2 admitted evidence has typed Cloud SQL volume `cloudSqlInstance.instances` and a matching container mount at `/cloudsql`. It proves the typed attachment and socket projection. Both shapes compare immutable digest image, command, ordered arguments, complete environment and secret reference/version, task count, parallelism, retries, timeout, service identity, network/subnetwork/egress, execution UID, same-execution generation, overall condition, completion marker, and counters. Missing R facts, unproven D defaults, contradictory fields, stale generation, changed UID, or unexplained execution-affecting additions return `Unknown`.
 
-v1/v2 are candidate shapes until the exact gcloud version, OS/launcher, argument vector, output identifier, fixture paths/hashes, and maintainer acceptance appear in `Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1/compatibility.json`. Documentation fixtures prove parser behavior only and must not be relabeled live-provider evidence.
+The [reviewed mapping](../docs/plans/issue-891-provider-mapping.md) and [exact-version manifest](ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1/compatibility.json) record owner-authorized offline technical acceptance for the recovered v1 representation and gcloud 576.0.0 formatter replay on Darwin arm64. V2 typed normalization is verified separately with synthetic tests. Neither source is live provider certification or a supported version range; synthetic fixtures are never relabeled provider-observed.
 
 For v1, omitted zero counters may be treated as zero only when the exact source shape and SDK/CLI replay document that omission; every positive task count, running/succeeded/failed/cancelled/retried counter, UID, generation, completion marker, and identity fact otherwise requires explicit evidence. The v1 replay source must be bounded and sanitized. For v2, `egress`, `reconciling`, `executionEnvironment`, and all execution counters are explicit required evidence; no omitted provider default is inferred. No global v1/v2 compatibility claim is made.
 
 The CLI bundle path is strict: the directory and every path component must be free of symlinks/reparse points. Callers on macOS must provide the physical `/private/var`, `/private/tmp`, or `/private/etc` path when applicable; the CLI does not accept `/var`, `/tmp`, or `/etc` aliases.
+
+### Supported completion reasons
+
+These rules apply only after exact identity, configuration, UID and current-generation checks pass. Terminal outcomes additionally require a valid RFC3339 completion timestamp, no running tasks and consistent task totals. V2 requires explicit `reconciling`; a terminal response cannot be reconciling.
+
+| Overall condition | v1 reason | v2 reason union | Result with consistent counters |
+| --- | --- | --- | --- |
+| Success | Absent or `Completed` | All reason fields absent | Succeeded, all tasks succeeded |
+| Failure | `NonZeroExitCode` or `NON_ZERO_EXIT_CODE` | `executionReason: NON_ZERO_EXIT_CODE` | Failed, failed tasks and no cancelled tasks |
+| Failure | `Cancelled`, `ExecutionCancelled` or `CANCELLED` | `executionReason: CANCELLED` | Cancelled, at least one cancelled task |
+| Nonterminal | `Running`, `Pending`, `ResourcesAvailable`, `Retrying`, `CANCELLING` or `Starting` | Absent, `executionReason: CANCELLING` or `DELAYED_START_PENDING`, or common `reason: WAITING_FOR_OPERATION`, `IMMEDIATE_RETRY` or `POSTPONED_RETRY` | Running, no completion marker or all-tasks-success contradiction |
+| Other or contradictory | Unsupported, missing required, malformed or conflicting | Multiple union members, unsupported members/enums, deleted or provider polling-error evidence | Unknown |
+
+V2 reason values must occur in the correct union member; an arbitrary reason cannot promote success, workload failure or Running. This follows Google's [condition and reason schema](https://docs.cloud.google.com/run/docs/reference/rest/v2/Condition). `CANCELLING` is nonterminal and differs from caller cancellation. A failure without recognized workload-failure evidence stays Unknown.
 
 ### Diagnostic anchors
 

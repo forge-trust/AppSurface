@@ -41,13 +41,15 @@ The v1 admitted shape is a single-container gen2 execution. Its `run.googleapis.
 
 The v2 admitted shape uses typed `template.volumes[].cloudSqlInstance.instances` and a matching container `volumeMounts` entry at `/cloudsql`. It therefore proves the typed Cloud SQL attachment and socket projection. Network interfaces, egress, service account, command, ordered arguments, immutable digest image, complete environment inventory, task bounds, retries, timeout, UID, execution generation, conditions, completion time, and counters are compared exactly. Missing required facts, stale generation, changed UID, conflicting fields, unsupported defaults, or unexplained execution-affecting additions produce `Unknown`.
 
-The v1 and v2 shapes are candidate provider shapes until an exact gcloud version, OS/launcher, command arguments, sanitized fixtures, hashes, and named maintainer acceptance are recorded in `Fixtures/ExecutionEvidence/v1/compatibility.json`. Documentation-shaped JSON is parser evidence only; it is not a live-provider compatibility claim.
+The [reviewed offline mapping](https://github.com/forge-trust/AppSurface/blob/main/docs/plans/issue-891-provider-mapping.md) records exact gcloud 576.0.0 source/formatter replay on Darwin arm64, fixed command arguments, neutral fixtures and hashes in the [compatibility manifest](https://github.com/forge-trust/AppSurface/blob/main/Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1/compatibility.json). The owner authorized technical acceptance of this mapping and its executable checks. The v2 typed parser has separate synthetic tests. These are scoped offline proofs; no live provider certification or version range is claimed.
 
 For v1, omitted zero counters are admissible only when the exact source shape and bounded SDK/CLI replay document that omission; positive task count, all counters, UID, generation, completion marker, and identity facts otherwise require explicit evidence. For v2, `egress`, `reconciling`, `executionEnvironment`, and all execution counters are explicit required evidence. No global v1/v2 compatibility claim is made. The CLI path admission rejects symlinks/reparse points in the directory and every component; on macOS callers must provide physical `/private/var`, `/private/tmp`, or `/private/etc` paths rather than aliases.
 
 ### CLI and offline quickstart
 
 The CLI reads one trusted published bundle directory containing `deployment-intent.v1.json`, `gcp-cloud-run-migration.tf.json`, and `gcp-cloud-run-migration.plan.json` plus the optional ownership marker. It rejects symlinks/reparse points, unexpected entries, incomplete bundles, and artifacts over 4 MiB. It validates with `DeploymentArtifact.Create` and uses the same observer as library callers; it does not evaluate an AppHost.
+
+Observation JSON is limited to depth 64 and 4096 direct entries per object or array, inclusive, within the artifact and provider byte caps. These are local admission bounds; exceeding them returns safe Unknown and does not reduce configuration requirements. Legacy configuration verification retains its existing admission behavior.
 
 ```sh
 appsurface deployment gcp-cloud-run observe-execution \
@@ -74,3 +76,5 @@ Every code has a stable problem, cause, fix, recovery limit, and documentation a
 See the [deployment reference](https://github.com/forge-trust/AppSurface/blob/main/Deployment/reference.md#exact-cloud-run-execution-observation), [adoption guide](https://github.com/forge-trust/AppSurface/blob/main/Deployment/adoption.md#observe-an-existing-execution), and [CLI command reference](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) for the complete contract and POSIX CI recipe.
 
 The two neutral consumer workflows are documented in the [Cloud Run execution consumers example](https://github.com/forge-trust/AppSurface/blob/main/examples/cloud-run-execution-consumers/README.md).
+
+For the shortest offline walkthrough, use the [CLI quickstart](https://github.com/forge-trust/AppSurface/blob/main/Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution), which includes the bounded published-bundle reconstruction and the captured neutral fixture result.

@@ -16,7 +16,8 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
-  <ItemGroup><Using Include="Xunit" /></ItemGroup>
-  <ItemGroup><ProjectReference Include="../ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" /></ItemGroup>
+  <ItemGroup><Using Include="Xunit" /><Using Include="ForgeTrust.AppSurface.Testing" /></ItemGroup>
+  <ItemGroup><ProjectReference Include="../ForgeTrust.AppSurface.Deployment.GcpCloudRun/ForgeTrust.AppSurface.Deployment.GcpCloudRun.csproj" />
+    <ProjectReference Include="../../tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" /></ItemGroup>
 
 </Project>

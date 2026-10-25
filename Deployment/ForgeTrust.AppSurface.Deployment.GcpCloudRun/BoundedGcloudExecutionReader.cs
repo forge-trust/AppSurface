@@ -15,7 +15,7 @@ public enum BoundedGcloudExecutionReadOutcome
     ToolUnavailable,
     /// <summary>A stream exceeded its inclusive byte limit.</summary>
     OutputLimit,
-    /// <summary>Standard output was not valid UTF-8.</summary>
+    /// <summary>Standard output or standard error was not valid UTF-8.</summary>
     InvalidEncoding,
     /// <summary>The total read budget expired.</summary>
     Deadline,
@@ -31,7 +31,12 @@ public sealed class BoundedGcloudExecutionReadResult
 {
     private readonly byte[] _standardOutput;
 
-    /// <summary>Creates a result. The output is defensively copied.</summary>
+    /// <summary>Creates a safe classified result and defensively copies the supplied standard-output bytes.</summary>
+    /// <param name="outcome">Classification of process start, exit, output, and cleanup.</param>
+    /// <param name="exitCode">Process exit code when known; a <see langword="null"/> value means no exit code is available.</param>
+    /// <param name="standardOutput">Captured standard-output bytes. Standard error is never accepted or exposed by this result type.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The standard-output payload exceeds 1 MiB.</exception>
+    /// <exception cref="ArgumentException"><paramref name="outcome"/> is <see cref="BoundedGcloudExecutionReadOutcome.Complete"/> with a nonzero exit code, or the supplied bytes are not valid UTF-8.</exception>
     public BoundedGcloudExecutionReadResult(BoundedGcloudExecutionReadOutcome outcome, int? exitCode, ReadOnlySpan<byte> standardOutput = default)
     {
         if (standardOutput.Length > 1_048_576) throw new ArgumentOutOfRangeException(nameof(standardOutput));
@@ -48,7 +53,7 @@ public sealed class BoundedGcloudExecutionReadResult
     /// <summary>Gets the process exit code when the process reached an exit state.</summary>
     public int? ExitCode { get; }
 
-    /// <summary>Gets a defensive copy of complete standard-output bytes.</summary>
+    /// <summary>Gets a defensive copy of the captured standard-output bytes; the array is empty when no bytes were retained.</summary>
     public byte[] StandardOutput => (byte[])_standardOutput.Clone();
 
     private static bool IsUtf8(ReadOnlySpan<byte> bytes)
@@ -62,6 +67,13 @@ public sealed class BoundedGcloudExecutionReadResult
 public interface IBoundedGcloudExecutionReader
 {
     /// <summary>Reads the selected canonical execution within the supplied total budget.</summary>
+    /// <param name="executionResourceName">Canonical Cloud Run execution resource name, including project, location, Job, and execution segments.</param>
+    /// <param name="timeout">Finite positive total read budget. The default implementation reserves part of this budget for process cleanup.</param>
+    /// <param name="cancellationToken">Caller cancellation. Cancellation is propagated; a timeout is returned as a <see cref="BoundedGcloudExecutionReadOutcome.Deadline"/> result.</param>
+    /// <returns>A safe classification and, only for complete valid output, captured standard-output bytes. Standard error is never returned.</returns>
+    /// <exception cref="ArgumentException"><paramref name="executionResourceName"/> is null, empty, or whitespace.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is nonpositive, infinite, or outside the supported timer range.</exception>
+    /// <exception cref="OperationCanceledException">The caller requested cancellation.</exception>
     Task<BoundedGcloudExecutionReadResult> ReadAsync(string executionResourceName, TimeSpan timeout, CancellationToken cancellationToken = default);
 }
 
@@ -74,6 +86,7 @@ public sealed class BoundedGcloudExecutionReader : IBoundedGcloudExecutionReader
     private readonly TimeProvider _timeProvider;
 
     /// <summary>Creates a reader using the platform gcloud launcher.</summary>
+    /// <remarks>On Windows the launcher is <c>gcloud.cmd</c>; on other platforms it is <c>gcloud</c>. This constructor uses the system clock for read deadlines.</remarks>
     public BoundedGcloudExecutionReader()
         : this(OperatingSystem.IsWindows() ? "gcloud.cmd" : "gcloud", TimeProvider.System)
     {
@@ -176,10 +189,13 @@ public sealed class BoundedGcloudExecutionReader : IBoundedGcloudExecutionReader
         }
     }
 
-    internal ProcessStartInfo CreateStartInfo(ExecutionResource resource)
+    internal ProcessStartInfo CreateStartInfo(ExecutionResource resource) => CreateStartInfo(resource, OperatingSystem.IsWindows());
+
+    /// <summary>Builds the fixed launcher tokens; the platform seam permits testing cmd admission without starting cmd.</summary>
+    internal ProcessStartInfo CreateStartInfo(ExecutionResource resource, bool windows)
     {
         var info = new ProcessStartInfo { FileName = _executable, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        if (OperatingSystem.IsWindows() && _executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+        if (windows && _executable.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
         {
             info.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
             info.ArgumentList.Add("/d");
@@ -214,11 +230,6 @@ public sealed class BoundedGcloudExecutionReader : IBoundedGcloudExecutionReader
         {
             cancellationToken.ThrowIfCancellationRequested();
             var allowance = Math.Min(buffer.Length, limit - bytes.Count + 1);
-            if (allowance <= 0)
-            {
-                overflow.TrySetResult(true);
-                return (bytes.ToArray(), true);
-            }
             var count = stream.Read(buffer, 0, allowance);
             if (count == 0) return (bytes.ToArray(), false);
             if (bytes.Count + count > limit)

@@ -46,6 +46,28 @@ public sealed class BoundedGcloudExecutionReaderTests
     }
 
     [Fact]
+    public void WindowsLauncherContainsOnlyValidatedFixedTokens()
+    {
+        // protects=cmd launcher argument admission; fails_when=selected identity or flags become shell fragments;
+        // no_claim=Windows native process cleanup was exercised on this host.
+        Assert.True(ExecutionResource.TryParse(Resource(), out var resource));
+        var start = new BoundedGcloudExecutionReader("gcloud.cmd", TimeProvider.System).CreateStartInfo(resource!, windows: true);
+        Assert.Equal(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", start.FileName);
+        Assert.Equal(new[] { "/d", "/c", "gcloud.cmd run jobs executions describe " + Resource() + " --project myproj --region us-central1 --format=json --quiet" }, start.ArgumentList);
+        Assert.False(start.UseShellExecute);
+        Assert.True(start.RedirectStandardOutput && start.RedirectStandardError);
+    }
+
+    [Fact]
+    public void ProductionConstructionKeepsTheBoundedPublicContractsAvailable()
+    {
+        // protects=default consumer construction; fails_when=production factories cannot be instantiated without cloud access;
+        // no_claim=the tool is installed or provider credentials work.
+        Assert.IsAssignableFrom<IBoundedGcloudExecutionReader>(new BoundedGcloudExecutionReader());
+        Assert.IsAssignableFrom<IGcpCloudRunExecutionObserver>(GcpCloudRunExecutionObserver.Create());
+    }
+
+    [Fact]
     public async Task ReadAsyncRejectsInvalidTimeoutBeforeProviderAccess()
     {
         var reader = new BoundedGcloudExecutionReader("missing-gcloud", TimeProvider.System);
@@ -76,7 +98,7 @@ public sealed class BoundedGcloudExecutionReaderTests
     [Fact]
     public async Task ReadAsyncMissingToolReturnsSafeUnavailableOutcome()
     {
-        var reader = new BoundedGcloudExecutionReader(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-gcloud"), TimeProvider.System);
+        var reader = new BoundedGcloudExecutionReader(TestPathUtils.PathUnder(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "missing-gcloud"), TimeProvider.System);
 
         var result = await reader.ReadAsync(Resource(), TimeSpan.FromSeconds(2));
 
@@ -203,7 +225,7 @@ public sealed class BoundedGcloudExecutionReaderTests
 
         public static NativeFixture Create(string body)
         {
-            var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "appsurface-gcloud-" + Guid.NewGuid().ToString("N"));
+            var path = TestPathUtils.PathUnder(System.IO.Path.GetTempPath(), "appsurface-gcloud-" + Guid.NewGuid().ToString("N"));
             File.WriteAllText(path, "#!/bin/sh\n" + body + "\n", new UTF8Encoding(false));
             SetExecutableOnSupportedUnix(path);
             return new NativeFixture(path);

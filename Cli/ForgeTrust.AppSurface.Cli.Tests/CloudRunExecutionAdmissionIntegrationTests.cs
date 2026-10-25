@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
 
+// The real command pipeline temporarily owns a process-wide service provider and exit code.
+[Collection(ProgramEntryPointCollection.Name)]
 public sealed class CloudRunExecutionAdmissionIntegrationTests
 {
     [Theory]

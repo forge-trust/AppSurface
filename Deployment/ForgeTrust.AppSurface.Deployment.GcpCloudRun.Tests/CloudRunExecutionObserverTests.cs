@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 
-public sealed class CloudRunExecutionObserverTests
+public sealed partial class CloudRunExecutionObserverTests
 {
     [Fact]
     public async Task CleanIdleDeadlineRetainsLastRunningReceiptAndDoesNotReadAgain()
@@ -310,6 +310,227 @@ public sealed class CloudRunExecutionObserverTests
         Assert.Equal(mode == "failed" ? CloudRunExecutionState.Failed : CloudRunExecutionState.Cancelled, result.State);
     }
 
+    [Theory]
+    [InlineData("runningCount")]
+    [InlineData("succeededCount")]
+    [InlineData("failedCount")]
+    [InlineData("cancelledCount")]
+    [InlineData("retriedCount")]
+    public async Task V1OmittedZeroCountersMatchExplicitZero(string counter)
+    {
+        // protects=approved v1 omitted-zero semantics; fails_when=omission changes classification; no_claim=provider defaults are universally valid.
+        using var fixture = new ObserverFixture();
+        var baseline = counter == "succeededCount" ? fixture.StateJson("failed", "NonZeroExitCode", "False") : fixture.ExecutionJson();
+        var omitted = RemoveStatusProperty(baseline, counter);
+        var explicitResult = await new GcpCloudRunExecutionObserver(new StubReader(baseline), TimeProvider.System).ObserveAsync(fixture.Request());
+        var omittedResult = await new GcpCloudRunExecutionObserver(new StubReader(omitted), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(explicitResult.State, omittedResult.State);
+        Assert.Equal(explicitResult.DiagnosticCode, omittedResult.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("runningCount")]
+    [InlineData("succeededCount")]
+    [InlineData("failedCount")]
+    [InlineData("cancelledCount")]
+    [InlineData("retriedCount")]
+    public async Task V2MissingCountersAreInsufficientEvidence(string counter)
+    {
+        // protects=v2 required counter evidence; fails_when=missing fields are fabricated as zero; no_claim=omitted counters are provider defaults.
+        using var fixture = new ObserverFixture();
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(RemoveRootProperty(fixture.V2ExecutionJson(), counter)), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY175", result.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("MysteryState", "ASDEPLOY175")]
+    [InlineData("CANCELLING", "ASDEPLOY182")]
+    public async Task V1ReasonBoundaryKeepsUnknownReasonsOutOfRunning(string reason, string code)
+    {
+        // protects=recognized nonterminal reason table; fails_when=arbitrary provider text becomes Running; no_claim=reason proves workload health.
+        using var fixture = new ObserverFixture();
+        var json = fixture.RunningJson().Replace("\"reason\":\"Running\"", $"\"reason\":\"{reason}\"", StringComparison.Ordinal);
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json), new DelayCompletingClock()).ObserveAsync(
+            fixture.Request(timeout: TimeSpan.FromSeconds(1), interval: TimeSpan.FromSeconds(1)));
+        Assert.Equal(reason == "CANCELLING" ? CloudRunExecutionState.Running : CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal(code, result.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("2026-10-24T12:00:00", "ASDEPLOY174")]
+    [InlineData("2026-02-30T12:00:00Z", "ASDEPLOY174")]
+    [InlineData("2026-10-24T12:00:00.1234567890Z", "ASDEPLOY174")]
+    public async Task InvalidCompletionTimestampsAreRejected(string timestamp, string code)
+    {
+        // protects=strict RFC3339 terminal evidence; fails_when=ambiguous timestamps pass; no_claim=local clock receipt is provider completion time.
+        using var fixture = new ObserverFixture();
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(fixture.ExecutionJson().Replace("2026-10-24T12:00:00Z", timestamp, StringComparison.Ordinal)), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal(code, result.DiagnosticCode);
+    }
+
+    [Fact]
+    public async Task V1FailedWithoutNonZeroReasonIsUnknown()
+    {
+        // protects=workload-failure proof; fails_when=failed counters alone become Failed; no_claim=logs establish root cause.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.StateJson("failed", "NonZeroExitCode", "False"))!;
+        json["status"]!["conditions"]![0]!.AsObject().Remove("reason");
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY175", result.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("CANCELLING")]
+    [InlineData("DELAYED_START_PENDING")]
+    public async Task V2RecognizedNonterminalReasonsRemainRunning(string reason)
+    {
+        // protects=v2 transient reason table; fails_when=recognized nonterminal evidence becomes Unknown; no_claim=completion or acceptance.
+        using var fixture = new ObserverFixture();
+        var json = fixture.V2ExecutionJson().Replace("\"state\":\"CONDITION_SUCCEEDED\"", "\"state\":\"CONDITION_PENDING\",\"executionReason\":\"" + reason + "\"", StringComparison.Ordinal).Replace("\"completionTime\":\"2026-10-24T12:00:00Z\",", "", StringComparison.Ordinal).Replace("\"succeededCount\":1", "\"succeededCount\":0", StringComparison.Ordinal).Replace("\"runningCount\":0", "\"runningCount\":1", StringComparison.Ordinal);
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json), new DelayCompletingClock()).ObserveAsync(fixture.Request(timeout: TimeSpan.FromSeconds(1), interval: TimeSpan.FromSeconds(1)));
+        Assert.Equal(CloudRunExecutionState.Running, result.State);
+    }
+
+    [Theory]
+    [InlineData("\"succeededCount\":1", "\"succeededCount\":null")]
+    [InlineData("\"succeededCount\":1", "\"succeededCount\":-1")]
+    [InlineData("\"succeededCount\":1", "\"succeededCount\":2147483648")]
+    public async Task InvalidV1CounterValuesAreRejected(string original, string replacement)
+    {
+        // protects=counter type/range validation; fails_when=null, negative, or overflow counters pass; no_claim=provider task state is recovered.
+        using var fixture = new ObserverFixture();
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(fixture.ExecutionJson().Replace(original, replacement, StringComparison.Ordinal)), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY174", result.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("42")]
+    [InlineData("\"invalid\"")]
+    public async Task PresentMalformedV2LabelsCannotBeIgnored(string labels)
+    {
+        // protects=independent returned identity carriers; fails_when=malformed labels are treated as absent;
+        // no_claim=well-formed labels authenticate provider identity.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        json["labels"] = JsonNode.Parse(labels);
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY174", result.DiagnosticCode);
+        Assert.False(result.ConfigurationMatched);
+    }
+
+    [Fact]
+    public async Task V2Int64GenerationCanBeMatched()
+    {
+        // protects=wide v2 generation comparison; fails_when=valid Int64 generations overflow an Int32 parser; no_claim=generation attests execution provenance.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        json["generation"] = 2147483648L;
+        json["observedGeneration"] = 2147483648L;
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Succeeded, result.State);
+    }
+
+    [Theory]
+    [InlineData("executionReason", "NON_ZERO_EXIT_CODE", CloudRunExecutionState.Failed)]
+    [InlineData("executionReason", "CANCELLED", CloudRunExecutionState.Cancelled)]
+    [InlineData(null, null, CloudRunExecutionState.Unknown)]
+    [InlineData("reason", "NON_ZERO_EXIT_CODE", CloudRunExecutionState.Unknown)]
+    [InlineData("executionReason", "JOB_STATUS_SERVICE_POLLING_ERROR", CloudRunExecutionState.Unknown)]
+    [InlineData("executionReason", "MysteryState", CloudRunExecutionState.Unknown)]
+    public async Task V2FailureRequiresRecognizedExecutionReason(string? field, string? reason, CloudRunExecutionState expected)
+    {
+        // protects=workload versus provider failure classification; fails_when=counts alone or a different reason union promotes failure;
+        // no_claim=the selected execution belongs to a particular submission.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        var condition = json["conditions"]![0]!.AsObject();
+        condition["state"] = "CONDITION_FAILED";
+        if (field is not null) condition[field] = reason;
+        json["succeededCount"] = 0;
+        json["failedCount"] = expected == CloudRunExecutionState.Cancelled ? 0 : 1;
+        json["cancelledCount"] = expected == CloudRunExecutionState.Cancelled ? 1 : 0;
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(expected, result.State);
+        Assert.Equal(expected != CloudRunExecutionState.Unknown, result.ConfigurationMatched);
+    }
+
+    [Theory]
+    [InlineData("executionReason", "EXECUTION_SUCCEEDED")]
+    [InlineData("executionReason", "MysteryState")]
+    [InlineData("reason", "WAITING_FOR_OPERATION")]
+    [InlineData("revisionReason", "PENDING")]
+    [InlineData("instanceReason", "INSTANCE_DELETED")]
+    public async Task V2SucceededConditionCannotHaveReason(string field, string reason)
+    {
+        // protects=successful condition's absent-reason contract; fails_when=unsupported or contradictory reason is ignored;
+        // no_claim=synthetic v2 success establishes installed-gcloud compatibility.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        json["conditions"]![0]![field] = reason;
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY175", result.DiagnosticCode);
+    }
+
+    [Theory]
+    [InlineData(null, null, CloudRunExecutionState.Running)]
+    [InlineData("reason", "WAITING_FOR_OPERATION", CloudRunExecutionState.Running)]
+    [InlineData("reason", "IMMEDIATE_RETRY", CloudRunExecutionState.Running)]
+    [InlineData("reason", "POSTPONED_RETRY", CloudRunExecutionState.Running)]
+    [InlineData("executionReason", "MysteryState", CloudRunExecutionState.Unknown)]
+    [InlineData("executionReason", "DELETED", CloudRunExecutionState.Unknown)]
+    [InlineData("executionReason", "JOB_STATUS_SERVICE_POLLING_ERROR", CloudRunExecutionState.Unknown)]
+    [InlineData("executionReason", "WAITING_FOR_OPERATION", CloudRunExecutionState.Unknown)]
+    [InlineData("reason", "SECRETS_ACCESS_CHECK_FAILED", CloudRunExecutionState.Unknown)]
+    public async Task V2PendingReasonUnionRequiresSupportedTransientEvidence(string? field, string? reason, CloudRunExecutionState expected)
+    {
+        // protects=positive nonterminal evidence and reason-field identity; fails_when=provider faults or unknown enums become Running;
+        // no_claim=the remote workload remains running at the local deadline.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        json["conditions"]![0]!["state"] = "CONDITION_PENDING";
+        if (field is not null) json["conditions"]![0]![field] = reason;
+        json.Remove("completionTime");
+        json["succeededCount"] = 0;
+        json["runningCount"] = 1;
+        json["reconciling"] = true;
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), new DelayCompletingClock()).ObserveAsync(
+            fixture.Request(timeout: TimeSpan.FromSeconds(1), interval: TimeSpan.FromSeconds(1)));
+        Assert.Equal(expected, result.State);
+        Assert.Equal(expected == CloudRunExecutionState.Running, result.ConfigurationMatched);
+    }
+
+    [Fact]
+    public async Task V2ReasonUnionCannotContainTwoFields()
+    {
+        // protects=unambiguous provider condition union; fails_when=one contradictory reason is silently preferred;
+        // no_claim=recognized reason fields prove terminal success.
+        using var fixture = new ObserverFixture();
+        var json = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
+        json["conditions"]![0]!["reason"] = "WAITING_FOR_OPERATION";
+        json["conditions"]![0]!["executionReason"] = "CANCELLING";
+        var result = await new GcpCloudRunExecutionObserver(new StubReader(json.ToJsonString()), TimeProvider.System).ObserveAsync(fixture.Request());
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal("ASDEPLOY174", result.DiagnosticCode);
+    }
+
+    private static string RemoveStatusProperty(string json, string property) => RemoveProperty(json, "status", property);
+    private static string RemoveRootProperty(string json, string property) => RemoveProperty(json, null, property);
+    private static string RemoveProperty(string json, string? parent, string property)
+    {
+        var root = JsonNode.Parse(json)!.AsObject();
+        var node = parent is null ? root : root[parent]!.AsObject();
+        node.Remove(property);
+        return root.ToJsonString();
+    }
+
     private sealed class StubReader(params string[] responses) : IBoundedGcloudExecutionReader
     {
         private readonly Queue<string> _responses = new(responses);
@@ -380,16 +601,18 @@ public sealed class CloudRunExecutionObserverTests
         private const string Image = "us-docker.pkg.dev/demo-project/jobs/migrations@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         private readonly string _root;
         private readonly string _profile;
+        private readonly IReadOnlyDictionary<string, string>? _environment;
         public string ProjectName => Project;
         public string RegionName => Region;
         public string JobName => Job;
         public string ExecutionName => Execution;
 
-        public ObserverFixture()
+        public ObserverFixture(IReadOnlyDictionary<string, string>? environment = null)
         {
-            _root = Path.Combine(Path.GetTempPath(), "appsurface-observer-" + Guid.NewGuid().ToString("N"));
+            _environment = environment;
+            _root = TestPathUtils.PathUnder(Path.GetTempPath(), "appsurface-observer-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_root);
-            _profile = Path.Combine(_root, "profile.json");
+            _profile = TestPathUtils.PathUnder(_root, "profile.json");
             File.WriteAllText(_profile, JsonSerializer.Serialize(new
             {
                 schemaVersion = "1.0",
@@ -459,12 +682,12 @@ public sealed class CloudRunExecutionObserverTests
             oldTask["volumes"] = new JsonArray { new JsonObject { ["name"] = "cloudsql", ["cloudSqlInstance"] = new JsonObject { ["instances"] = new JsonArray($"{Project}:{Region}:primary") } } };
             container["volumeMounts"] = new JsonArray { new JsonObject { ["name"] = "cloudsql", ["mountPath"] = "/cloudsql" } };
             var task = oldTask; spec.Remove("template"); root["template"] = task;
-            root.Remove("spec"); root["conditions"] = new JsonArray { new JsonObject { ["type"] = "Completed", ["state"] = "CONDITION_SUCCEEDED", ["executionReason"] = "EXECUTION_SUCCEEDED" } };
+            root.Remove("spec"); root["conditions"] = new JsonArray { new JsonObject { ["type"] = "Completed", ["state"] = "CONDITION_SUCCEEDED" } };
             root["reconciling"] = false;
             return root.ToJsonString();
         }
 
-        private static DeploymentIntent Intent() => new("Staging", new SourceRevision(new string('a', 40)), [new MigrationJobIntent(new DeploymentLogicalId("schema-preparation"), DeploymentPhase.CandidatePreparation, new ImmutableImageReference(Image), "dotnet", ["migrate"], new DeploymentExecutionPolicy(1, 1, 3, TimeSpan.FromMinutes(10)), new SecretBinding(new DeploymentLogicalId("database"), new DeploymentLogicalId("database-parameter"), "ConnectionStrings__database"), new DatabaseBinding(new DeploymentLogicalId("database"), "ConnectionStrings:database", new DeploymentLogicalId("database")), new DeploymentLogicalId("migration-runtime"))]);
+        private DeploymentIntent Intent() => new("Staging", new SourceRevision(new string('a', 40)), [new MigrationJobIntent(new DeploymentLogicalId("schema-preparation"), DeploymentPhase.CandidatePreparation, new ImmutableImageReference(Image), "dotnet", ["migrate"], new DeploymentExecutionPolicy(1, 1, 3, TimeSpan.FromMinutes(10)), new SecretBinding(new DeploymentLogicalId("database"), new DeploymentLogicalId("database-parameter"), "ConnectionStrings__database"), new DatabaseBinding(new DeploymentLogicalId("database"), "ConnectionStrings:database", new DeploymentLogicalId("database")), new DeploymentLogicalId("migration-runtime"), environment: _environment)]);
         public void Dispose() => Directory.Delete(_root, recursive: true);
     }
 }

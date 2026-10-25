@@ -310,6 +310,7 @@ internal static class GcpCloudRunBundleValidator
         try
         {
             using var document = JsonDocument.Parse(content, new JsonDocumentOptions { MaxDepth = MaxJsonDepth, CommentHandling = JsonCommentHandling.Disallow, AllowTrailingCommas = false });
+            GcpCloudRunJsonAdmission.ValidateFiniteCollections(document.RootElement);
             ValidateDuplicates(document.RootElement, fileName);
             var allowed = fileName switch
             {
