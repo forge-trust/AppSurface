@@ -352,8 +352,8 @@ public class AppSurfaceConfigModuleTests
         services.AddSingleton(A.Fake<IEnvironmentProvider>());
         using (var provider = services.AddLogging().BuildServiceProvider())
         {
-            Assert.IsAssignableFrom<IEnvironmentConfigProvider>(provider.GetRequiredService<IEnvironmentConfigProvider>());
-            Assert.IsAssignableFrom<IEnvironmentConfigCandidateInspector>(provider.GetRequiredService<IEnvironmentConfigCandidateInspector>());
+            Assert.IsType<EnvironmentConfigProvider>(provider.GetRequiredService<IEnvironmentConfigProvider>());
+            Assert.IsType<EnvironmentConfigCandidateInspector>(provider.GetRequiredService<IEnvironmentConfigCandidateInspector>());
             var concrete = provider.GetRequiredService<FileBasedConfigProvider>();
             Assert.Same(
                 concrete,
