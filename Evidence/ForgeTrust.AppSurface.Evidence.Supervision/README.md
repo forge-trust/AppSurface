@@ -2269,3 +2269,11 @@ set contains only the retained DCP PID. Both callers preserve the 16-link ceilin
 procfs identity and executable checks, cycle rejection, and immediate retention of each acquired proc
 candidate and parent identity. Their existing final sampling and reverse cleanup stay with the caller.
 An observed parent PID or a returned walk cannot construct a process identity or establish readiness.
+
+The [NSS buffer procedure](LinuxNssBufferProcedure.cs) owns only the fixed 1 KiB through 64 KiB
+doubling sequence for one synchronous lookup. Its callback still performs the actual libc call and
+parses only a successful non-null result while the exact buffer is pinned. Only Linux `ERANGE`
+(`34`) retries; other codes retain the existing fixed NSS failure, and code-zero/null remains absence.
+The user/group callers retain generated-name encoding, native user/group selection, member checks,
+and original parse order. This helper owns no account, platform check, cancellation token or authority;
+its tests use ordinary byte arrays and cannot establish an NSS lookup or account identity.

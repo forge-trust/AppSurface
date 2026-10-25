@@ -673,7 +673,6 @@ internal sealed partial class LinuxRunAccounts
 /// </remarks>
 internal static partial class LinuxRunAccountNss
 {
-    private const int MaximumBufferBytes = 65_536;
     private const int MaximumSupplementaryGroups = 64;
 
     /// <summary>Reads the selected generated accounts, their reverse numeric mappings and actual group lists.</summary>
@@ -852,51 +851,46 @@ internal static partial class LinuxRunAccountNss
     private static unsafe LinuxRunAccountUser? User(string name, uint? number)
     {
         var encoded = NameBytes(name);
-        for (var size = 1024; size <= MaximumBufferBytes; size *= 2)
+        return LinuxNssBufferProcedure.Execute<LinuxRunAccountUser>(buffer =>
         {
-            var buffer = new byte[size];
             fixed (byte* namePointer = encoded)
             fixed (byte* bufferPointer = buffer)
             {
                 NativePasswd entry;
                 nint result;
                 var code = number.HasValue
-                    ? GetPwUid(number.Value, out entry, bufferPointer, (nuint)size, out result)
-                    : GetPwName(namePointer, out entry, bufferPointer, (nuint)size, out result);
-                if (code == 34) continue; // Linux ERANGE; do not invent an absent record on failure.
-                if (code != 0) throw NssFailed();
-                if (result == 0) return null;
-                return LinuxRunAccountUser.Parse(LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, size, 32), entry.Uid, entry.Gid,
-                    LinuxAccountNssBufferData.ReadString(entry.Directory, (nint)bufferPointer, size, 4096), LinuxAccountNssBufferData.ReadString(entry.Shell, (nint)bufferPointer, size, 128));
+                    ? GetPwUid(number.Value, out entry, bufferPointer, (nuint)buffer.Length, out result)
+                    : GetPwName(namePointer, out entry, bufferPointer, (nuint)buffer.Length, out result);
+                if (code != 0 || result == 0) return (code, (LinuxRunAccountUser?)null);
+                return (code, LinuxRunAccountUser.Parse(
+                    LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, buffer.Length, 32), entry.Uid, entry.Gid,
+                    LinuxAccountNssBufferData.ReadString(entry.Directory, (nint)bufferPointer, buffer.Length, 4096),
+                    LinuxAccountNssBufferData.ReadString(entry.Shell, (nint)bufferPointer, buffer.Length, 128)));
             }
-        }
-        throw NssFailed();
+        }, NssFailed);
     }
 
     private static unsafe LinuxRunAccountGroup? Group(string name, uint? number)
     {
         var encoded = NameBytes(name);
-        for (var size = 1024; size <= MaximumBufferBytes; size *= 2)
+        return LinuxNssBufferProcedure.Execute<LinuxRunAccountGroup>(buffer =>
         {
-            var buffer = new byte[size];
             fixed (byte* namePointer = encoded)
             fixed (byte* bufferPointer = buffer)
             {
                 NativeGroup entry;
                 nint result;
                 var code = number.HasValue
-                    ? GetGrGid(number.Value, out entry, bufferPointer, (nuint)size, out result)
-                    : GetGrName(namePointer, out entry, bufferPointer, (nuint)size, out result);
-                if (code == 34) continue;
-                if (code != 0) throw NssFailed();
-                if (result == 0) return null;
+                    ? GetGrGid(number.Value, out entry, bufferPointer, (nuint)buffer.Length, out result)
+                    : GetGrName(namePointer, out entry, bufferPointer, (nuint)buffer.Length, out result);
+                if (code != 0 || result == 0) return (code, (LinuxRunAccountGroup?)null);
                 // These are new private groups; even a single registered supplementary member rejects.
-                if (entry.Members == 0 || !LinuxAccountNssBufferData.Contains(entry.Members, sizeof(nint), (nint)bufferPointer, size)
+                if (entry.Members == 0 || !LinuxAccountNssBufferData.Contains(entry.Members, sizeof(nint), (nint)bufferPointer, buffer.Length)
                     || *(nint*)entry.Members != 0) throw Mismatch();
-                return LinuxRunAccountGroup.Parse(LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, size, 32), entry.Gid, []);
+                return (code, LinuxRunAccountGroup.Parse(
+                    LinuxAccountNssBufferData.ReadString(entry.Name, (nint)bufferPointer, buffer.Length, 32), entry.Gid, []));
             }
-        }
-        throw NssFailed();
+        }, NssFailed);
     }
 
     private static unsafe void RequirePrimaryOnly(LinuxRunAccountUser user)
