@@ -1164,18 +1164,11 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     {
         token.ThrowIfCancellationRequested();
         using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        var buffer = new byte[32 * 1024];
-        while (true)
-        {
-            token.ThrowIfCancellationRequested();
-            var count = ReadDirectory(fresh, buffer);
-            if (count == 0) break;
-            foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-                if (names.Count >= LinuxProtectedDeployment.MaximumNodes || !names.Add(name)) throw LinuxApplicationWorkspaceLayout.Invalid();
-        }
+        var names = SupervisionDirectoryRead.ReadActual(fresh, new byte[32 * 1024],
+            token.ThrowIfCancellationRequested, static () => { }, LinuxProtectedDeployment.MaximumNodes,
+            maximumBlocks: null, acceptName: null, LinuxApplicationWorkspaceLayout.Invalid);
         token.ThrowIfCancellationRequested();
-        return Array.AsReadOnly(names.Order(StringComparer.Ordinal).ToArray());
+        return Array.AsReadOnly(names);
     }
 
     private static void RequireSameNamed(SafeFileHandle parent, string name, LinuxProtectedMetadata expected,
