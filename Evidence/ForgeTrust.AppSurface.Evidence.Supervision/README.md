@@ -2193,3 +2193,23 @@ reject before I/O. Callers keep their existing fixed maximums and rejection fact
 verify exact boundaries across read blocks, binary bytes, repeatable positional reads, excess-byte
 rejection, cancellation before I/O and handle ownership. Those file tests grant no protected runtime or
 root admission and do not replace the [genuine consumer controls](../../tests/evidencehost-consumer/README.md).
+
+### Ordered diagnostic record writes
+
+[`SupervisionRecordWrite`](SupervisionRecordWrite.cs) shares the literal record/LF/flush sequence used by
+the private N04, N09, N11 and N16 failure projections in
+[the qualified observation owner](LinuxEmptyObservationExecution.Qualification.cs). The owner still
+constructs and bounds the records, opens and closes its original stderr stream, and runs every original
+identity, cancellation and deadline check at the same position around the I/O. Attempt flags, exception
+filters and failure recording stay in the owner. The procedure accepts a borrowed stream and already
+bounded byte memories, writes each record followed by one LF, then flushes once. The original token is
+passed unchanged to every operation; no additional cancellation check or successful-evidence claim is
+introduced. In particular, a stream that ignores cancellation stays owned until its actual write joins.
+The stream remains open for its caller, and an I/O failure stops all later writes and flushes.
+
+[Procedure tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionRecordWriteTests.cs)
+use an actual temporary file and controlled streams to verify binary framing, ordering, token identity,
+all write/flush failure positions and ignored-cancellation joins. These are stream procedure controls;
+they neither issue native identities nor qualify any diagnostic bytes as protected evidence. The
+[original worker controls](../../.github/issue779-checkpoint1/README.md) still require their genuine
+Linux execution, retained artifacts and unchanged source-owned validators.

@@ -165,12 +165,7 @@ internal static partial class LinuxEmptyObservationExecution
                     _acceptedWorkProjectionWriteAttempted = true;
                     using (var stderr = Console.OpenStandardError())
                     {
-                        foreach (var bytes in new[] { control, kernel.Bytes })
-                        {
-                            await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                            await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        }
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        await SupervisionRecordWrite.WriteLinesAsync(stderr, [control, kernel.Bytes], cleanupToken).ConfigureAwait(false);
                     }
                     cleanupToken.ThrowIfCancellationRequested();
                     owner.RequireControlIdentity(cleanupToken);
@@ -202,9 +197,7 @@ internal static partial class LinuxEmptyObservationExecution
                     cleanupToken.ThrowIfCancellationRequested();
                     using (var stderr = Console.OpenStandardError())
                     {
-                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        await SupervisionRecordWrite.WriteLinesAsync(stderr, [bytes], cleanupToken).ConfigureAwait(false);
                     }
                     cleanupToken.ThrowIfCancellationRequested();
                     owner.RequireControlIdentity(cleanupToken);
@@ -222,9 +215,7 @@ internal static partial class LinuxEmptyObservationExecution
                     cleanupToken.ThrowIfCancellationRequested();
                     using (var stderr = Console.OpenStandardError())
                     {
-                        await stderr.WriteAsync(bytes.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        await SupervisionRecordWrite.WriteLinesAsync(stderr, [bytes], cleanupToken).ConfigureAwait(false);
                     }
                     cleanupToken.ThrowIfCancellationRequested();
                     owner.RequireControlIdentity(cleanupToken);
@@ -243,9 +234,7 @@ internal static partial class LinuxEmptyObservationExecution
                         cleanupToken.ThrowIfCancellationRequested();
                         owner.RequireControlIdentity(cleanupToken);
                         using var stderr = Console.OpenStandardError();
-                        await stderr.WriteAsync(allocation.AsMemory(), cleanupToken).ConfigureAwait(false);
-                        await stderr.WriteAsync(new byte[] { (byte)'\n' }, cleanupToken).ConfigureAwait(false);
-                        await stderr.FlushAsync(cleanupToken).ConfigureAwait(false);
+                        await SupervisionRecordWrite.WriteLinesAsync(stderr, [allocation], cleanupToken).ConfigureAwait(false);
                         owner.RequireControlIdentity(cleanupToken);
                     }
                 }
