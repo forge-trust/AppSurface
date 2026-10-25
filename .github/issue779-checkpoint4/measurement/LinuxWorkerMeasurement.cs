@@ -259,13 +259,15 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
             return new(System.IO.Path.GetFileName(module), path, count, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         }
     }
-    /// <summary>Verifies fixed null-reference denials on the original live native objects before server dispatch.</summary>
+    /// <summary>Verifies fixed reference denials and workspace control checks before server dispatch.</summary>
     /// <remarks>
-    /// The C3 caller has already authenticated and started the genuine same-image worker. Each fixed call
-    /// changes one reference only and must reject before its method reaches native work or mutable state.
+    /// The C3 caller has already authenticated and started the genuine same-image worker. Each reference-denial
+    /// call changes one reference only and must reject before its method reaches native work or mutable state.
+    /// A cancelled workspace control check must reject before I/O, then its live original-token neighbor
+    /// must recheck the authentic retained workspace without changing its lifecycle state.
     /// No listener failure path, reservation, replay, stop, custody transition or metadata substitute is
     /// invoked. The unchanged consumer procedure afterward must still establish physical completion.
-    /// These are reference-denial controls only, never successful custody or accepted-proof assertions.
+    /// These are guard controls only, never successful custody or accepted-proof assertions.
     /// </remarks>
     internal static void CheckOwnerReferenceGuards(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxProducerWorkspace? producerWorkspace,
@@ -302,6 +304,16 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
         Account("accounts-control-owner", () => { _ = accounts.RequireControlOwnedBy(null!, token); });
         Admission("owner-active-input", "ASEVD402", () => owner.RequireLaunchInput(null!, token));
         Admission("owner-control-input", "ASEVD402", () => owner.RequireCleanupLaunchInput(null!, token));
+        // The cancelled check must return before any native recheck. It cannot poison the authentic
+        // workspace: the adjacent live check still traverses its retained names, bundle and tmpfs.
+        // This is a guard invocation, not a cleanup transition or a replacement deadline.
+        var cancelledControlToken = new CancellationToken(canceled: true);
+        var cancelledControlRejected = false;
+        try { applicationWorkspace.RequireControlOwnedBy(owner, accounts, cancelledControlToken); }
+        catch (OperationCanceledException error) when (error.CancellationToken == cancelledControlToken)
+        { cancelledControlRejected = true; }
+        if (!cancelledControlRejected) throw LinuxSystemdBackend.InvalidControl();
+        applicationWorkspace.RequireControlOwnedBy(owner, accounts, token);
         token.ThrowIfCancellationRequested();
         owner.RequireActive(token);
         if (rejected.Count != 26) throw LinuxSystemdBackend.InvalidControl();
