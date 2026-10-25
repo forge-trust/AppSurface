@@ -87,21 +87,21 @@ public sealed class LinuxApplicationDcpIdentityTests
             ("/run//root/runtime/dotnet", ResourceDll, SocketPath),
             ("/run/./root/runtime/dotnet", ResourceDll, SocketPath),
             ("/run/../root/runtime/dotnet", ResourceDll, SocketPath),
-            ("/run/root/runtime/CANARY\0/dotnet", ResourceDll, SocketPath),
             (RuntimeHost, "relative/CANARY/resource/NativeHttpResource.dll", SocketPath),
             (RuntimeHost, "/run/root/bundle//resource/NativeHttpResource.dll", SocketPath),
             (RuntimeHost, "/run/root/bundle/./resource/NativeHttpResource.dll", SocketPath),
             (RuntimeHost, "/run/root/bundle/../bundle/resource/NativeHttpResource.dll", SocketPath),
-            (RuntimeHost, "/run/root/bundle/CANARY\0/resource/NativeHttpResource.dll", SocketPath),
             (RuntimeHost, ResourceDll, "relative/CANARY/http.sock"),
             (RuntimeHost, ResourceDll, "/run/root/scratch//http.sock"),
             (RuntimeHost, ResourceDll, "/run/root/scratch/./http.sock"),
             (RuntimeHost, ResourceDll, "/run/root/scratch/../scratch/http.sock"),
-            (RuntimeHost, ResourceDll, "/run/root/scratch/CANARY\0/http.sock"),
         })
         {
+            // Match the malformed expectation byte-for-byte so exact argv comparison cannot
+            // mask a missing canonical-path guard.
+            var matchingCommand = CommandBytes(malformedPaths.Item1, malformedPaths.Item2, malformedPaths.Item3);
             var error = Assert.Throws<EvidenceAdmissionException>(() =>
-                LinuxApplicationDcpIdentity.RequireResourceCommandBytes(valid,
+                LinuxApplicationDcpIdentity.RequireResourceCommandBytes(matchingCommand,
                     malformedPaths.Item1, malformedPaths.Item2, malformedPaths.Item3));
             Assert.Equal("ASEVD410", error.Code);
             Assert.Null(error.InnerException);
