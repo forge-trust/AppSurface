@@ -51,6 +51,22 @@ public sealed class LinuxNssBufferProcedureTests
     }
 
     [Fact]
+    public void NonRangeErrorDiscardsCallbackValueAndFailsWithoutRetry()
+    {
+        var calls = 0;
+        var error = Assert.Throws<InvalidOperationException>(() => LinuxNssBufferProcedure.Execute<string>(buffer =>
+        {
+            calls++;
+            Assert.Equal(1024, buffer.Length);
+            return (2, "must be discarded");
+        }, Failure));
+
+        Assert.Equal(1, calls);
+        Assert.Equal("fixed NSS failure", error.Message);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
     public void SuccessfulNullResultReturnsAbsenceWithoutRetry()
     {
         var calls = 0;

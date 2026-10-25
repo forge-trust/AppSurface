@@ -50,11 +50,16 @@ public sealed class SupervisionProducerRuntimeAllowanceTests
     public void EachLargerOriginalReservationReducesRuntimeInsteadOfRenewingTheRemainder(
         int stoppingSeconds, int cleanupSeconds, int collectionSeconds, int expectedRuntimeSeconds)
     {
+        var baseline = SupervisionProducerRuntimeAllowance.Calculate(TimeSpan.FromSeconds(120),
+            Stopping, Cleanup, Collection);
+        Assert.Equal(TimeSpan.FromSeconds(110), baseline);
+
         var runtime = SupervisionProducerRuntimeAllowance.Calculate(TimeSpan.FromSeconds(120),
             TimeSpan.FromSeconds(stoppingSeconds), TimeSpan.FromSeconds(cleanupSeconds),
             TimeSpan.FromSeconds(collectionSeconds));
 
         Assert.Equal(TimeSpan.FromSeconds(expectedRuntimeSeconds), runtime);
+        Assert.Equal(baseline - TimeSpan.FromSeconds(1), runtime);
         Assert.Equal(TimeSpan.FromSeconds(120), runtime + TimeSpan.FromSeconds(stoppingSeconds
             + cleanupSeconds + collectionSeconds));
     }
