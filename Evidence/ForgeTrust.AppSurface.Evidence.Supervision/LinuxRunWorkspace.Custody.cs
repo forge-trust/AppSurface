@@ -546,23 +546,19 @@ internal sealed partial class LinuxRunWorkspace
             At(LinuxCustodyOperation.Open, node.Kind);
             using var directory = OpenAt2(Fd(node.Handle), ".", DirectoryFlags, 0, ChildResolution);
             if (LinuxProtectedMetadata.From(Inspect(directory, node.Kind)) != (node.Terminal ?? node.Original)) throw LinuxWorkspaceLayout.Invalid();
-            var names = new HashSet<string>(StringComparer.Ordinal);
             var buffer = new byte[4096];
-            while (true)
+            var names = SupervisionDirectoryRead.Read(buffer, block =>
             {
-                Check(token);
-                At(LinuxCustodyOperation.InventoryRead, node.Kind);
-                var count = ReadDirectory(directory, buffer);
-                if (count == 0) break;
-                At(LinuxCustodyOperation.InventoryDecode, node.Kind);
-                foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, count)))
-                    if (names.Count >= 4 || !names.Add(name)) throw LinuxWorkspaceLayout.Invalid();
-            }
+                var count = ReadDirectory(directory, block);
+                if (count != 0) At(LinuxCustodyOperation.InventoryDecode, node.Kind);
+                return count;
+            }, () => { Check(token); At(LinuxCustodyOperation.InventoryRead, node.Kind); },
+                static () => { }, 4, null, null, LinuxWorkspaceLayout.Invalid);
             var expected = node.Terminal ?? node.Original;
             if (LinuxProtectedMetadata.From(Inspect(directory, node.Kind)) != expected) throw LinuxWorkspaceLayout.Invalid();
             RequireNamed(node, expected);
             Check(token);
-            return names.Order(StringComparer.Ordinal).ToArray();
+            return names;
         }
 
         private string Hash(CustodyNode node, CancellationToken token)

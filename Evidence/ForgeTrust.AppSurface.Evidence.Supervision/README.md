@@ -2277,3 +2277,17 @@ parses only a successful non-null result while the exact buffer is pinned. Only 
 The user/group callers retain generated-name encoding, native user/group selection, member checks,
 and original parse order. This helper owns no account, platform check, cancellation token or authority;
 its tests use ordinary byte arrays and cannot establish an NSS lookup or account identity.
+
+### Root-custody directory inventory
+
+The privately issued `LinuxRunWorkspace.RootCustody` holder reuses
+[`SupervisionDirectoryRead`](SupervisionDirectoryRead.cs) for its bounded native
+inventory procedure. The holder still opens a fresh file description for every
+pass and retains the original metadata, name, owner and cancellation checks.
+Its original 4 KiB buffer and four-name ceiling remain fixed. Inventory-read
+classification runs before every syscall, including EOF; inventory-decode
+classification runs only after a nonempty native block. Strict decoding,
+cross-block duplicate rejection and ordinal ordering are shared with the other
+retained-directory readers. The procedure creates no directory or custody
+holder and supplies no account-release or admission authority. Do not move the
+holder's final metadata/name checks into a detached data callback.
