@@ -145,6 +145,10 @@ internal sealed class PackageArtifactValidator
         }
 
         ValidateStableDocsDependencies(inspected, packageVersion);
+        if (string.Equals(expected.PackageId, DurableTemplateArtifactContract.PackageId, StringComparison.Ordinal))
+        {
+            DurableTemplateArtifactContract.ValidateArchive(inspected.PackagePath, packageVersion);
+        }
 
         RequireMetadata(expected.PackageId, "authors", inspected.Authors);
         RequireMetadata(expected.PackageId, "description", inspected.Description);

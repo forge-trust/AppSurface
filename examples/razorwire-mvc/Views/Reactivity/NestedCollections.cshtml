@@ -1,0 +1,26 @@
+@model RazorWireWebExample.Models.NestedCollectionsSampleModel
+@using RazorWireWebExample.Models
+@{
+    ViewData["Title"] = "Nested model-bound collections";
+    ViewData["RemoveMode"] = Model.RemoveMode;
+}
+<h1 class="text-3xl font-bold">Nested model-bound collections</h1>
+<p class="my-4">Each action owns its dates. The server retains sparse keys and invalid attempted values.</p>
+<form method="post" action="/Reactivity/NestedCollections" data-turbo="false" data-nested-proof class="card-premium p-6 space-y-4">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="RemoveMode" value="@Model.RemoveMode" />
+    @Html.ValidationSummary(false)
+    @if (Model.Result is not null) { <p data-nested-result role="status">@Model.Result</p> }
+    <section rw-form-collection="Actions" rw-form-collection-label="action" rw-form-collection-remove-mode="@Model.RemoveMode" class="space-y-4">
+        @foreach (var action in Model.Actions) { @await Html.PartialAsync("~/Views/Reactivity/_NestedAction.cshtml", action, ViewData) }
+        <template rw-form-collection-template>
+            @await Html.PartialAsync("~/Views/Reactivity/_NestedAction.cshtml", new NestedActionModel { ClientIndex = "__index__" }, ViewData)
+        </template>
+        <button rw-form-collection-add class="nested-command">Add action</button>
+        <span data-rw-form-collection-status role="status" aria-live="polite"></span>
+    </section>
+    <button type="submit" class="nested-command">Save actions</button>
+    <noscript><button type="submit" name="addAction" value="true" class="nested-command" formnovalidate>Add action on server</button></noscript>
+</form>
+<link rel="stylesheet" href="~/css/nested-collections.css" asp-append-version="true" />
+@section Scripts { <script src="~/js/nested-collections-policy.js" asp-append-version="true"></script> }

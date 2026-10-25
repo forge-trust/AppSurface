@@ -1,0 +1,214 @@
+using System.IO.Compression;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Xml.Linq;
+using ForgeTrust.AppSurface.Evidence.Readiness;
+
+internal static class Program
+{
+    private const string PackageId = "ForgeTrust.AppSurface.Evidence.Readiness";
+
+    public static async Task<int> Main(string[] args)
+    {
+        var packageVersion = RequiredArgument(args, "--package-version");
+        var sourceCommit = RequiredArgument(args, "--source-commit");
+        var sourceTreeStatus = RequiredArgument(args, "--source-tree-status");
+        var packagePath = RequiredArgument(args, "--package-file");
+        var packageCache = RequiredArgument(args, "--package-cache");
+        var localFeed = RequiredArgument(args, "--local-feed");
+
+        AssertNeutralPackageClosure(packageVersion, sourceCommit, packagePath, packageCache, localFeed);
+        var retryHandler = new StatusSequenceHandler(HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK);
+        using (var client = new HttpClient(retryHandler))
+        {
+            await HttpReadinessProbe.WaitAsync(
+                client,
+                new Uri("https://readiness.invalid/"),
+                "/healthz",
+                TimeSpan.FromSeconds(5),
+                new HttpReadinessOptions
+                {
+                    RetryDelay = TimeSpan.FromMilliseconds(1),
+                    MaxAttempts = 2,
+                });
+        }
+
+        if (retryHandler.Attempts != 2 || retryHandler.LastPath != "/healthz")
+        {
+            throw new InvalidOperationException("The packed neutral probe did not retry the declared path exactly once.");
+        }
+
+        var cappedHandler = new StatusSequenceHandler(HttpStatusCode.ServiceUnavailable);
+        using (var client = new HttpClient(cappedHandler))
+        {
+            var failure = await CaptureAsync(() => HttpReadinessProbe.WaitAsync(
+                client,
+                new Uri("https://readiness.invalid/"),
+                "/healthz",
+                TimeSpan.FromSeconds(5),
+                new HttpReadinessOptions
+                {
+                    RetryDelay = TimeSpan.FromMilliseconds(1),
+                    MaxAttempts = 1,
+                }));
+
+            if (failure.Category != ReadinessFailureCategory.AttemptLimit ||
+                failure.LastCause != ReadinessFailureCategory.StatusRejected ||
+                failure.LastStatusCode != HttpStatusCode.ServiceUnavailable ||
+                failure.Attempts != 1 || cappedHandler.Attempts != 1)
+            {
+                throw new InvalidOperationException("The packed neutral probe did not preserve its capped failure evidence.");
+            }
+        }
+
+        Console.WriteLine(
+            $"READINESS_PACKED_CONSUMER_OK proof=neutral-controlled-transport packageId={PackageId} " +
+            $"packageVersion={packageVersion} sourceCommit={sourceCommit} assetsClosure={PackageId} " +
+            $"sourceTree={sourceTreeStatus} nuspecDependencies=0 retryAttempts=2 attemptLimitAttempts=1 timing=unmeasured");
+        return 0;
+    }
+
+    private static async Task<ReadinessException> CaptureAsync(Func<Task> action)
+    {
+        try
+        {
+            await action().ConfigureAwait(false);
+        }
+        catch (ReadinessException failure)
+        {
+            return failure;
+        }
+
+        throw new InvalidOperationException("The packed neutral probe unexpectedly accepted a rejected response.");
+    }
+
+    private static void AssertNeutralPackageClosure(
+        string packageVersion,
+        string sourceCommit,
+        string packagePath,
+        string packageCache,
+        string localFeed)
+    {
+        var assetsPath = Path.GetFullPath(Path.Join(Environment.CurrentDirectory, "obj", "project.assets.json"));
+        using var assetsDocument = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        var assets = assetsDocument.RootElement;
+        var packageFolder = assets.GetProperty("packageFolders").EnumerateObject().Single();
+        if (!SamePath(packageFolder.Name, packageCache))
+        {
+            throw new InvalidOperationException("Restore did not use the isolated NuGet package cache.");
+        }
+
+        var restoreSources = assets.GetProperty("project").GetProperty("restore").GetProperty("sources");
+        if (restoreSources.EnumerateObject().Count() != 1 ||
+            !SamePath(restoreSources.EnumerateObject().Single().Name, localFeed))
+        {
+            throw new InvalidOperationException("Neutral restore used a source other than its isolated local package feed.");
+        }
+
+        var libraries = assets.GetProperty("libraries").EnumerateObject().ToArray();
+        if (libraries.Length != 1 ||
+            !libraries[0].Name.Equals($"{PackageId}/{packageVersion}", StringComparison.OrdinalIgnoreCase) ||
+            !libraries[0].Value.GetProperty("type").GetString()!.Equals("package", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Neutral project.assets.json must contain exactly the one packed neutral package and no project assets.");
+        }
+
+        var directDependencies = assets.GetProperty("project")
+            .GetProperty("frameworks")
+            .GetProperty("net10.0")
+            .GetProperty("dependencies");
+        if (directDependencies.EnumerateObject().Count() != 1 ||
+            !directDependencies.EnumerateObject().Single().Name.Equals(PackageId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("The neutral consumer must directly reference only the neutral package.");
+        }
+
+        var packageHash = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(packagePath)));
+        if (!string.Equals(packageHash, libraries[0].Value.GetProperty("sha512").GetString(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The restored neutral package bytes do not match the local nupkg.");
+        }
+
+        var cachedHashPath = Path.Join(
+            packageCache,
+            PackageId.ToLowerInvariant(),
+            packageVersion,
+            $"{PackageId.ToLowerInvariant()}.{packageVersion}.nupkg.sha512");
+        if (!string.Equals(packageHash, File.ReadAllText(cachedHashPath).Trim(), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The isolated NuGet cache hash does not match the packed package.");
+        }
+
+        using var archive = ZipFile.OpenRead(packagePath);
+        var nuspecEntry = archive.Entries.Single(entry => entry.FullName.EndsWith(".nuspec", StringComparison.Ordinal));
+        using var nuspecStream = nuspecEntry.Open();
+        var nuspec = XDocument.Load(nuspecStream);
+        var metadata = nuspec.Descendants().Single(element => element.Name.LocalName == "metadata");
+        var nuspecId = metadata.Elements().Single(element => element.Name.LocalName == "id").Value;
+        var nuspecVersion = metadata.Elements().Single(element => element.Name.LocalName == "version").Value;
+        var repository = metadata.Elements().Single(element => element.Name.LocalName == "repository");
+        var dependencies = metadata.Descendants().Where(element => element.Name.LocalName == "dependency").ToArray();
+
+        if (!nuspecId.Equals(PackageId, StringComparison.Ordinal) ||
+            nuspecVersion != packageVersion ||
+            repository.Attribute("commit")?.Value != sourceCommit ||
+            dependencies.Length != 0)
+        {
+            throw new InvalidOperationException("The packed neutral nuspec identity or dependency closure is incorrect.");
+        }
+
+        var forbiddenDependencyFragments = new[] { "Aspire", "Hosting", "Planner", "Producer", "EvidenceHost" };
+        if (libraries.Any(library => forbiddenDependencyFragments.Any(fragment =>
+                library.Name.Contains(fragment, StringComparison.OrdinalIgnoreCase))) ||
+            dependencies.Any(dependency => forbiddenDependencyFragments.Any(fragment =>
+                (dependency.Attribute("id")?.Value ?? string.Empty).Contains(fragment, StringComparison.OrdinalIgnoreCase))))
+        {
+            throw new InvalidOperationException("Neutral package closure contains a forbidden hosting or producer dependency.");
+        }
+    }
+
+    private static bool SamePath(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private static string RequiredArgument(string[] args, string name)
+    {
+        var index = Array.IndexOf(args, name);
+        if (index < 0 || index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]))
+        {
+            throw new ArgumentException($"Expected {name} followed by a value.", nameof(args));
+        }
+
+        return args[index + 1];
+    }
+
+    private sealed class StatusSequenceHandler(params HttpStatusCode[] statuses) : HttpMessageHandler
+    {
+        private int _attempts;
+
+        internal int Attempts => Volatile.Read(ref _attempts);
+
+        internal string? LastPath { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (request.Method != HttpMethod.Get || request.RequestUri?.AbsolutePath != "/healthz")
+            {
+                throw new InvalidOperationException("The neutral consumer sent a request outside its declared GET path.");
+            }
+
+            LastPath = request.RequestUri.AbsolutePath;
+            var index = Interlocked.Increment(ref _attempts) - 1;
+            if (index >= statuses.Length)
+            {
+                throw new InvalidOperationException("The neutral consumer exceeded the controlled status sequence.");
+            }
+
+            return Task.FromResult(new HttpResponseMessage(statuses[index]));
+        }
+    }
+}

@@ -422,6 +422,14 @@ internal sealed class DurableDoctorFixture : IAsyncDisposable
         $$;
         """, cancellationToken);
 
+    /// <summary>Reads the PostgreSQL clock to bracket a child doctor's observation independently of the host clock.</summary>
+    internal async Task<DateTimeOffset> ReadDatabaseTimeAsync(CancellationToken cancellationToken = default)
+    {
+        await using var command = _administrativeDataSource.CreateCommand("SELECT pg_catalog.clock_timestamp()");
+        return new DateTimeOffset((DateTime)(await command.ExecuteScalarAsync(cancellationToken)
+            ?? throw new InvalidDataException("The PostgreSQL clock observation was missing.")));
+    }
+
     /// <summary>Returns the selected worker row as bounded facts for captured-clock assertions.</summary>
     internal async Task<DurableDoctorHeartbeat?> ReadHeartbeatAsync(
         string workerId = RuntimeWorkerId,

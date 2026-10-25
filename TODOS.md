@@ -104,7 +104,7 @@
 
 **Cons:** New signing identity, storage lifecycle, authorization, and remote-package semantics.
 
-**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host.
+**Context:** Start from the [#798 implementation plan](docs/plans/issue-798-tailwind-artifact-provenance.md) and the existing producer/host/aggregate binding. Built-in GitHub attestations can carry provenance, but do not replace proving the restored payload used by each host. The [#806 template design](docs/designs/issue-806-durable-worker-template.md) reuses this trusted Actions boundary and keeps portable signing/storage here; a local template receipt alone does not authenticate an outside observer.
 
 **Effort:** L human / M agent
 **Priority:** P3
@@ -147,6 +147,26 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 ## Documentation alias publication preflight (#176 follow-up)
 
 - **What:** Consider a publish-time catalog validation command only when an adopter needs to reject an invalid alias before deploying. **Why:** #176 validates once in the host; a release pipeline may eventually need earlier feedback. **Pros:** Could reduce deploy-time configuration mistakes. **Cons:** Adds a public CLI contract and risks parser/verification drift. **Context:** Reuse the [#176 alias design](docs/designs/issue-176-version-aliases.md) and [implementation plan](docs/plans/issue-176-version-aliases.md), with the same normalization, duplicate, visibility and verified-target rules; do not build another parser. **Effort:** M human (1 day) / S agent (2–3 hours). **Priority:** P3. **Depends on / blocked by:** #176 runtime adoption and a concrete publication workflow requiring offline feedback. Deferred by autoplan CEO C5; no command implementation in #176.
+
+## Evidence readiness (#867)
+
+### Multi-resource readiness composition
+
+**What:** Consider multi-resource dependency graphs or arbitrary asynchronous readiness predicates only after a concrete adopter demonstrates that the one-resource API cannot serve its test/evidence flow.
+
+**Why:** Avoid each adopter rebuilding needed coordination while keeping the first [Evidence readiness design](docs/designs/issue-867-evidence-readiness.md) small.
+
+**Pros:** A proven second use case could establish reusable ordering and failure semantics.
+
+**Cons:** Adds cancellation, concurrency, ownership and public API commitments that the current single-resource case does not justify.
+
+**Context:** #867 places a BCL-only HTTP probe beneath existing Aspire testing and EvidenceHost adapters. Its C6 expansion is deliberately deferred; start with an adopter's concrete unsatisfied flow and the existing native health APIs. This item adds no wait graph, hosted metrics or bootstrap relocation to #867.
+
+**Effort:** L human team / M with agent assistance.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** #867 adoption evidence and a concrete multi-resource requirement, with separately reviewed ownership/cancellation semantics.
 
 ## Handoff consumer feasibility (#869 follow-up)
 

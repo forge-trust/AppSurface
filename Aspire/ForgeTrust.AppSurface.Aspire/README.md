@@ -18,6 +18,8 @@ It also does not configure application-side OpenTelemetry exporters. Use [`Forge
 
 For deterministic tests of profile-based AppHosts, use [`ForgeTrust.AppSurface.Aspire.Testing`](../ForgeTrust.AppSurface.Aspire.Testing/README.md). Its [configured graph-only proof](../ForgeTrust.AppSurface.Aspire.Testing/README.md#configured-graph-only-proof) shows how to inject per-call constructor inputs before profile activation and inspect annotations without starting resources. Native AppHosts that build directly from [`DistributedApplication.CreateBuilder(args)`](https://learn.microsoft.com/dotnet/api/aspire.hosting.distributedapplication.createbuilder) should continue using [Aspire's native testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
 
+The packed `ForgeTrust.AppSurface.Aspire.Testing` dependency graph promotes `MessagePack` to a minimum of **2.5.303** to avoid [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h). Consumer central package overrides must preserve this floor; keep NuGet audit enabled for ongoing checks of the resolved graph.
+
 For files stored in the source repository, see [Repository-relative assets](#repository-relative-assets) for the root-selection contract and a component example.
 
 <!-- appsurface-release-guidance: begin -->
@@ -181,6 +183,10 @@ public sealed class WebAppEnvironmentComponent : IAspireComponent<ProjectResourc
             .WithEnvironment("APPSURFACE_ASPIRE_EXAMPLE", "local");
 }
 ```
+
+## Dependency Security
+
+The repository [centrally pins MessagePack](../../Directory.Packages.props) to **2.5.303** for Aspire's transitive [StreamJsonRpc](https://www.nuget.org/packages/StreamJsonRpc) dependency. This is the patched 2.x release for [GHSA-qhrr-8q5h-9q3h](https://github.com/MessagePack-CSharp/MessagePack-CSharp/security/advisories/GHSA-qhrr-8q5h-9q3h), which prevents nested containers from reusing trailing bytes to justify excessive allocations. Keep this security floor when updating Aspire; an Aspire update alone does not guarantee a patched MessagePack resolution. A future move to MessagePack 3.x requires **3.1.9** or later for the same fix. Regenerate the affected NuGet lock files, including the `linux-x64` and `osx-arm64` AppHost variants, after changing the pin.
 
 ## AppHost Project References
 

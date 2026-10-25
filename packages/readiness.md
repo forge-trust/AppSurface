@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 60
-- Evidence status: manifest evidence complete: 41; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 10
-- Product families: AppSurface: 39; Forge Trust: 2; Internal support: 16; RazorWire: 3
+- Packages: 64
+- Evidence status: manifest evidence complete: 43; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 12
+- Product families: AppSurface: 41; Forge Trust: 2; Internal support: 18; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -42,16 +42,20 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | Internal support | `ForgeTrust.AppSurface.Durable.PostgreSql.V2WorkHarness` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | [README](../Durable/ForgeTrust.AppSurface.Durable.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable.Templates` | public | publish | manifest evidence complete | None | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Dependency.Autofac` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Core` | `ForgeTrust.AppSurface.Core` | [README](../Dependency/ForgeTrust.AppSurface.Dependency.Autofac/README.md) | [notes](../releases/current.md) |
+| Internal support | `AppSurfaceDurableWorker` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| Internal support | `ForgeTrust.AppSurface.Durable.Templates.VerificationHost` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment` | public | publish | manifest evidence complete | None | None | None | [README](../Deployment/ForgeTrust.AppSurface.Deployment/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Deployment.GcpCloudRun` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Deployment` | `ForgeTrust.AppSurface.Deployment` | [README](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Evidence.Readiness` | public | publish | manifest evidence complete | None | None | None | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Contracts` | public | publish | manifest evidence complete | None | None | None | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Planner` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts` | `ForgeTrust.AppSurface.Evidence.Contracts` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.Evidence.Coverage` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | AppSurface | `ForgeTrust.AppSurface.Evidence.Cli` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Planner` | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Coverage`<br />`ForgeTrust.AppSurface.Evidence.Planner` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md) | [notes](../releases/current.md) |
-| AppSurface | `ForgeTrust.AppSurface.Evidence.Aspire` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts` | `ForgeTrust.AppSurface.Evidence.Contracts` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Evidence.Aspire` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Readiness` | `ForgeTrust.AppSurface.Evidence.Contracts`<br />`ForgeTrust.AppSurface.Evidence.Readiness` | [README](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Aspire` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Console`<br />`ForgeTrust.AppSurface.Deployment` | [README](../Aspire/ForgeTrust.AppSurface.Aspire/README.md) | [notes](../releases/current.md) |
-| AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Aspire` | `ForgeTrust.AppSurface.Aspire` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/current.md) |
+| AppSurface | `ForgeTrust.AppSurface.Aspire.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Aspire`<br />`ForgeTrust.AppSurface.Evidence.Readiness` | `ForgeTrust.AppSurface.Aspire`<br />`ForgeTrust.AppSurface.Evidence.Readiness` | [README](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Config`<br />`ForgeTrust.AppSurface.Core`<br />`ForgeTrust.AppSurface.Theming` | [README](../Web/ForgeTrust.AppSurface.Web/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.Push` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.Push/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Web.OpenApi` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Web` | `ForgeTrust.AppSurface.Web` | [README](../Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) | [notes](../releases/current.md) |

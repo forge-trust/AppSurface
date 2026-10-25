@@ -29,6 +29,7 @@
   <ItemGroup>
     <ProjectReference Include="../aspire-apphost/AspireAppHostExample.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="../../Aspire/ForgeTrust.AppSurface.Aspire.Testing/ForgeTrust.AppSurface.Aspire.Testing.csproj" />
+    <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
   </ItemGroup>
 
 </Project>
