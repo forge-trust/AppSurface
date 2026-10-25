@@ -321,7 +321,13 @@ public class AppSurfaceConfigModuleTests
         Assert.Contains(
             services,
             d => d.ServiceType == typeof(IEnvironmentConfigProvider)
-                 && d.ImplementationType == typeof(EnvironmentConfigProvider));
+                 && d.ImplementationFactory is not null
+                 && d.Lifetime == ServiceLifetime.Singleton);
+        Assert.Contains(
+            services,
+            d => d.ServiceType == typeof(IEnvironmentConfigCandidateInspector)
+                 && d.ImplementationFactory is not null
+                 && d.Lifetime == ServiceLifetime.Singleton);
         Assert.Contains(
             services,
             d => d.ServiceType == typeof(IConfigFileLocationProvider)
@@ -346,6 +352,8 @@ public class AppSurfaceConfigModuleTests
         services.AddSingleton(A.Fake<IEnvironmentProvider>());
         using (var provider = services.AddLogging().BuildServiceProvider())
         {
+            Assert.IsAssignableFrom<IEnvironmentConfigProvider>(provider.GetRequiredService<IEnvironmentConfigProvider>());
+            Assert.IsAssignableFrom<IEnvironmentConfigCandidateInspector>(provider.GetRequiredService<IEnvironmentConfigCandidateInspector>());
             var concrete = provider.GetRequiredService<FileBasedConfigProvider>();
             Assert.Same(
                 concrete,

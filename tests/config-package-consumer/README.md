@@ -142,6 +142,11 @@ stage exits nonzero and preserves its log. On macOS the verifier enables polling
 file watching for its subprocesses to avoid sandboxed native-watcher stalls; it
 does not change application configuration registration.
 
+The [.NET build workflow](../../.github/workflows/build.yml) invokes this proof on
+Linux and Windows. The separate [previous-package compatibility fixture](../config-key-compatibility/README.md)
+checks coordinated binary-break diagnostics and mixed package families. Neither
+verifier publishes packages or changes a remote repository.
+
 ### Optional human onboarding check (estimated 2–5 minutes)
 
 This is a later, lightweight docs assessment, not a measured result or a release
@@ -163,3 +168,30 @@ The [.NET build workflow](../../.github/workflows/build.yml) invokes this proof 
 Linux and Windows. The separate [previous-package compatibility fixture](../config-key-compatibility/README.md)
 checks coordinated binary-break diagnostics and mixed package families. Neither
 verifier publishes packages or changes a remote repository.
+
+
+### Environment candidate inspection proof
+
+Candidate mode also calls the public `IEnvironmentConfigCandidateInspector` through
+the normal `StartupContext` and `AppSurfaceConfigModule.ConfigureServices` route, then
+applies `CustomRegistrations` and resolves it from the final host. The isolated fixture
+configures one explicit native mapping before build and asserts the complete ordered
+typed, strict-string, and direct composition candidate lists, including scope and
+producer flags. It checks constructor list copying, `with` assignment copying, plain
+record copying, and generated deconstruction through the packed public assembly.
+
+The helper's guarded environment, file-location, secret-provider, and ordinary-provider
+factories stay unactivated across inspection; its separate environment read counter is
+also zero. A fake approved provider is registered in a separate counter and its
+`Resolve` remains unused, so the proof exercises planning rather than ownership. The
+file policy projects `Feature:Endpoint` into an environment-name inventory and rejects
+the plan when a forbidden override candidate is present; the provider policy applies
+the same rejection rule to `Service:ApiKey`. Both use actual `HashSet<string>` membership
+with explicit comparer choices: ordinal matching misses a lowercased spelling, while
+ordinal-ignore-case matching finds it and rejects the override. A mapped `Service`
+ancestor uses `Root_Config`; inspecting only its child misses that forbidden mapped
+root, then inspecting the ancestor detects and rejects it. Names alone cannot certify
+inventory accuracy, actual source presence, provider acceptance, ownership, or complete
+aggregate policy. The helper is compiled with the packed candidate consumer and invoked
+only in candidate mode; the verifier requires its uniquely prefixed evidence and
+validates each result rather than accepting a missing or malformed proof.

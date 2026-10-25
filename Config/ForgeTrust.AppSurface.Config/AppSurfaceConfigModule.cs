@@ -12,7 +12,9 @@ namespace ForgeTrust.AppSurface.Config;
 /// </summary>
 /// <remarks>
 /// <see cref="AppSurfaceConfigModule"/> registers core configuration services immediately, including audit reporting,
-/// diagnostics, sanitized diff comparison, diff rendering, and command-runner helpers, then defers typed
+/// diagnostics, sanitized diff comparison, diff rendering, and command-runner helpers. It also registers
+/// <see cref="IEnvironmentConfigCandidateInspector"/> for metadata-only name planning, sharing the first-resolution
+/// frozen mapping options with the built-in environment provider. It then defers typed
 /// <see cref="IConfig"/> discovery through <see cref="StartupContext.CustomRegistrations"/> so all module
 /// dependencies are known first. The deferred scan inspects dependency module assemblies, the entry assembly, and the
 /// root module assembly. Discovery records lazy singletons without activating wrappers. Register singleton-safe
@@ -60,6 +62,10 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
             }, "Configuration resource limits must be positive.")
             .ValidateOnStart();
         services.AddOptions<AppSurfaceEnvironmentConfigOptions>();
+        services.AddSingleton(sp => new EnvironmentConfigMappingSnapshot(
+            sp.GetRequiredService<IOptions<AppSurfaceEnvironmentConfigOptions>>().Value));
+        services.AddSingleton<IEnvironmentConfigCandidateInspector>(sp => new EnvironmentConfigCandidateInspector(
+            sp.GetRequiredService<EnvironmentConfigMappingSnapshot>()));
         services.AddOptions<ConfigEnvironmentStartupOptions>()
             .Validate<IEnvironmentConfigProvider>((_, _) => true,
                 "Environment configuration mappings must have unambiguous native identities.")
@@ -72,7 +78,11 @@ public class AppSurfaceConfigModule : IAppSurfaceModule
         services.AddSingleton<ConfigAuditTextRenderer>();
         services.AddSingleton<ConfigAuditReportDiffer>();
         services.AddSingleton<ConfigAuditDiffTextRenderer>();
-        services.AddSingleton<IEnvironmentConfigProvider, EnvironmentConfigProvider>();
+        services.AddSingleton<IEnvironmentConfigProvider>(sp => new EnvironmentConfigProvider(
+            sp.GetRequiredService<IEnvironmentProvider>(),
+            sp.GetRequiredService<EnvironmentConfigMappingSnapshot>(),
+            sp.GetService<IOptions<ConfigResourceOptions>>(),
+            sp.GetService<ConfigDeclarationRegistry>()));
         services.AddSingleton<IConfigFileLocationProvider, DefaultConfigFileLocationProvider>();
         services.AddSingleton<FileBasedConfigProvider>();
         services.AddSingleton<IConfigProvider>(sp => sp.GetRequiredService<FileBasedConfigProvider>());

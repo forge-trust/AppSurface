@@ -34,6 +34,17 @@ public class ConfigEnvironmentCandidatesTests
     }
 
     [Theory]
+    [InlineData("A.B", "A_B", "A__B")]
+    [InlineData("A-B", "A_B", "A__B")]
+    [InlineData("A:B", "A_B", "A__B")]
+    public void CompositionPathLiteralSeparatorsRetainLegacyProjectionAndFirstProducer(string literal, string flat, string hierarchical)
+    {
+        var pathSegments = literal == "A:B" ? new[] { "A", "B" } : new[] { literal };
+        var candidates = ConfigEnvironmentCandidates.GetPathCandidates("Production", pathSegments);
+        Assert.Equal(new[] { $"PRODUCTION_{flat}", flat, $"PRODUCTION__{hierarchical}", hierarchical }, candidates);
+    }
+
+    [Theory]
     [InlineData("production.api-key", "PRODUCTION_API_KEY")]
     [InlineData(" Prod-Us ", " PROD_US ")]
     public void NormalizeSegment_UppercasesAndFlattensLegacySeparators(string value, string expected)

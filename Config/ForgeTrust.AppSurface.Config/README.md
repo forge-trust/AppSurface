@@ -48,6 +48,13 @@ for current release risk, migration guidance, and readiness.
 <!-- appsurface-release-guidance: end -->
 ## Logical key quickstart
 
+For names-only environment planning, use the canonical [environment candidate
+inspection quickstart](../../guides/config-logical-keys.md#environment-candidate-inspection).
+It documents the typed, strict-string, and direct composition entry points, snapshot
+lifecycle, error fields, and caller-owned policy boundary. The
+[packed consumer proof](../../tests/config-package-consumer/README.md) exercises the
+normal module registration route and synthetic source policies.
+
 Declare `Payments:ApiKey` once for every provider. Key identity is ordinal ignore-case;
 only `:` separates hierarchy. Dots and hyphens remain literal segment content.
 The [logical-key reference](../../guides/config-logical-keys.md) defines grammar,
