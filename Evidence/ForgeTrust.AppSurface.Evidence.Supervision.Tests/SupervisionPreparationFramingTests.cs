@@ -94,6 +94,23 @@ public sealed class SupervisionPreparationFramingTests
         Assert.True(stream.Finished.Task.IsCompletedSuccessfully);
     }
 
+    [Fact]
+    public async Task PreCancelledAdmissionStartAfterPreparationWritesNoStartFrame()
+    {
+        var stream = Stream(); await using var framing = new SupervisionControlLineFraming(stream);
+        Assert.IsType<EvidenceReadyControlRequest>(await framing.ReadRequestAsync(default));
+        await framing.WritePreparationAsync(120000, default);
+        var before = stream.ToArray();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            framing.WriteAdmissionStartAsync(cancellation.Token));
+
+        Assert.Equal(before, stream.ToArray());
+        Assert.False(stream.CanWrite);
+    }
+
     private sealed class HeldWriteStream : MemoryStream
     {
         internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

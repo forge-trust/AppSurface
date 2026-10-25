@@ -421,6 +421,41 @@ public sealed class LinuxControlConnectionTests
         }
     }
 
+    [Fact]
+    public async Task PreCancelledPreparationAfterReadyDoesNotWriteAndClosesFraming()
+    {
+        using var stream = new ScriptedStream(Ready);
+        using var framing = new SupervisionControlLineFraming(stream);
+        Assert.IsType<EvidenceReadyControlRequest>(await framing.ReadRequestAsync(default));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            framing.WritePreparationAsync(120000, cancellation.Token));
+
+        Assert.Equal(0, stream.WriteCalls);
+        Assert.Equal(1, stream.DisposeCount);
+    }
+
+    [Fact]
+    public async Task ResponseRejectsRawCarriageReturnButAcceptsEscapedCarriageReturn()
+    {
+        using var rawStream = new ScriptedStream(Ready);
+        using var rawFraming = new SupervisionControlLineFraming(rawStream);
+        Assert.IsType<EvidenceReadyControlRequest>(await rawFraming.ReadRequestAsync(default));
+        var rawError = await Assert.ThrowsAsync<ControlLineException>(() =>
+            rawFraming.WriteResponseAsync(Encoding.UTF8.GetBytes("{\"ok\":\"left\rright\"}"), default));
+        Assert.Equal(ControlLineFailure.InvalidFrame, rawError.Failure);
+        Assert.Equal(0, rawStream.WriteCalls);
+
+        using var escapedStream = new ScriptedStream(Ready);
+        using var escapedFraming = new SupervisionControlLineFraming(escapedStream);
+        Assert.IsType<EvidenceReadyControlRequest>(await escapedFraming.ReadRequestAsync(default));
+        await escapedFraming.WriteResponseAsync(Encoding.UTF8.GetBytes("{\"ok\":\"left\\rright\"}"), default);
+        Assert.Equal("{\"ok\":\"left\\rright\"}\n", Encoding.UTF8.GetString(escapedStream.Written.ToArray()));
+        Assert.Equal(1, escapedStream.WriteCalls);
+    }
+
     private sealed class CloseBarrierStream(bool gateRead = false, bool failClose = true) : Stream
     {
         private readonly MemoryStream _input = new(Ready, writable: false);
