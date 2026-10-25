@@ -14,6 +14,36 @@ public sealed class NativeMeasurementTests
         "ForgeTrust.AppSurface.Evidence.Coverage.dll", "ForgeTrust.AppSurface.Evidence.Aspire.dll", Module, "ForgeTrust.AppSurface.Evidence.Cli.dll"];
     private static readonly string[] Cases = ["normal", "sdk-normal", "readiness", "factory-stall", "cancel", "stuck-descendant", "disposal-failure"];
 
+    private static readonly string[] OwnerReferenceGuards =
+    [
+        "workspace-accounts",
+        "workspace-owner",
+        "producer-workspace-accounts",
+        "producer-workspace-owner",
+        "application-workspace-accounts",
+        "application-workspace-owner",
+        "worker-accounts",
+        "worker-owner",
+        "worker-server-input",
+        "worker-server-owner",
+        "worker-server-accounts",
+        "worker-server-workspace",
+        "worker-server-listener",
+        "worker-custody-input",
+        "worker-custody-owner",
+        "worker-custody-accounts",
+        "worker-custody-workspace",
+        "server-custody-input",
+        "server-custody-owner",
+        "server-custody-accounts",
+        "server-custody-workspace",
+        "server-custody-worker",
+        "accounts-active-owner",
+        "accounts-control-owner",
+        "owner-active-input",
+        "owner-control-input",
+    ];
+
     [LinuxMeasurementFact]
     public async Task LinuxNativeMeasurementsMatchTheCurrentSourceAndAllSevenPhysicalControls()
     {
@@ -131,6 +161,14 @@ public sealed class NativeMeasurementTests
             Assert.True(row.GetProperty("passed").GetBoolean());
             Assert.True(row.GetProperty("groups_empty").GetBoolean());
             Assert.True(row.GetProperty("final_groups_empty").GetBoolean());
+            var guards = row.GetProperty("owner_reference_guards");
+            Assert.Equal(new[] { "generation", "native_acceptance", "rejected", "schema" },
+                guards.EnumerateObject().Select(static property => property.Name).Order(StringComparer.Ordinal));
+            Assert.Equal("evidence-native-owner-reference-guards-v1", guards.GetProperty("schema").GetString());
+            Assert.Equal(row.GetProperty("generation").GetString(), guards.GetProperty("generation").GetString());
+            Assert.Equal(OwnerReferenceGuards, guards.GetProperty("rejected").EnumerateArray()
+                .Select(static value => value.GetString()));
+            Assert.False(guards.GetProperty("native_acceptance").GetBoolean());
             var settled = Assert.Single(row.GetProperty("application_observations").EnumerateArray(),
                 static value => value.GetProperty("phase").GetString() == "settled");
             foreach (var key in new[] { "group_empty_twice", "pumps_joined", "pending_start_joined" })

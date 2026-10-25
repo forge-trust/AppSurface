@@ -334,5 +334,40 @@ class MatrixPartitionOrderingTests(unittest.TestCase):
                 data.monotonic.assert_called_once_with()
 
 
+class OwnerReferenceGuardEventTests(unittest.TestCase):
+    """Closed event-data checks only; these do not construct an owner or execute native denials."""
+
+    def event(self):
+        return {"schema": "evidence-native-owner-reference-guards-v1", "generation": "a" * 32,
+                "rejected": list(runner.OWNER_REFERENCE_GUARDS), "native_acceptance": False}
+
+    def inspect(self, rows, generation="a" * 32):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "stderr"
+            path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            return runner.owner_reference_guards(path, generation)
+
+    def test_exact_event_requires_all_fixed_denials_without_claiming_native_acceptance(self):
+        event = self.event()
+        self.assertEqual(26, len(set(runner.OWNER_REFERENCE_GUARDS)))
+        self.assertEqual(event, self.inspect([event]))
+
+    def test_missing_duplicate_or_nonclosed_event_cannot_substitute_for_actual_denials(self):
+        event = self.event()
+        for rows in ([], [event, event], [dict(event, extra="raw-canary")],
+                     [dict(event, generation="b" * 32)], [dict(event, native_acceptance=True)],
+                     [dict(event, native_acceptance=0)], [dict(event, rejected=event["rejected"][:-1])],
+                     [dict(event, rejected=[*event["rejected"][:-1], event["rejected"][0]])],
+                     [dict(event, rejected=list(reversed(event["rejected"])))],
+                     [dict(event, rejected="raw-canary")]):
+            with self.subTest(rows=rows), self.assertRaises(RuntimeError):
+                self.inspect(rows)
+
+    def test_generation_must_be_the_original_fixed_run_identity(self):
+        for generation in (None, 7, "", "A" * 32, "a" * 31, "a" * 33):
+            with self.subTest(generation=generation), self.assertRaises(RuntimeError):
+                self.inspect([self.event()], generation)
+
+
 if __name__ == "__main__":
     unittest.main()

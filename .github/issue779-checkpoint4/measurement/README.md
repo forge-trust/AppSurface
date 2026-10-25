@@ -179,3 +179,23 @@ A later `origin/main` update cannot replace this original gate comparison. The
 canonical script, Codecov full-condition rule, thresholds, tolerance and exclusions
 are unchanged. Native fixture request base `416b30919e6c4d03b634d9d3fe558884b02f0b91`
 is separate input data and must not replace the gate's comparison commit.
+
+## Genuine owner reference-denial controls
+
+The private C3/C3Sdk [`LinuxWorkerMeasurement.CheckOwnerReferenceGuards`](LinuxWorkerMeasurement.cs)
+fixture runs after the authentic same-image worker starts and before server dispatch. It uses the
+original protected input, root activation, created accounts, retained workspaces, worker and server.
+Twenty-six fixed calls replace one reference with null and require the existing closed failure code;
+no owner, admission, lease, token, process identity or custody is fabricated. Only non-latching early
+reference checks are called. Listener claims, failure-latching listener checks, stop and custody
+transitions are excluded. A successful guard call or unexpected exception fails the native procedure.
+
+The root emits one closed `evidence-native-owner-reference-guards-v1` event with `generation`, the
+ordered 26 `rejected` labels and `native_acceptance: false`. The original [C3 runner](../../issue779-checkpoint3/run-native.py)
+requires exactly one event for the current generation. The [native measurement gate](../../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/NativeMeasurementTests.cs)
+requires the same labels for every original application case, alongside all original process,
+settlement, report and cleanup checks. Missing, duplicate or altered events fail verification. Portable
+parser tests establish only this data grammar; they do not execute native ownership checks. The
+subsequent unchanged consumer procedure supplies the adjacent valid ownership path, and still must
+prove physical completion. Ordinary product images contain neither the fixture implementation nor
+an injectable callback. These denials grant no native acceptance, proof or production registration.

@@ -121,6 +121,8 @@ internal static partial class LinuxEmptyObservationExecution
                 producerWorkspace, runOutput, applicationWorkspace, applicationSelection);
             phase = EvidenceNativeObservationPhase.WorkerStart;
             await worker.StartAsync(job.Token).ConfigureAwait(false);
+            qualification.CheckOwnerReferenceGuards(input, owner, accounts, workspace, producerWorkspace,
+                applicationWorkspace, worker, server, listener, job.Token);
             phase = EvidenceNativeObservationPhase.ServerLifetime;
             serverLifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Token);
             phase = EvidenceNativeObservationPhase.ServerRun;

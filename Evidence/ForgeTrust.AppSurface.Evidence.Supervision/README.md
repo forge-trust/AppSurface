@@ -2225,3 +2225,14 @@ Its original 1 KiB event ceiling leaves a 1,025-byte buffer, so the shared reade
 ceiling does not alter its native read sizes. The same original token is checked before and after
 every read, including EOF. Retained cgroup filesystem, inode/name and event-schema checks remain
 with the caller; returned bytes cannot establish an empty group or process settlement.
+
+### Private native owner reference-denial checks
+
+The [C3 owner guard fixture](../../.github/issue779-checkpoint4/measurement/README.md#genuine-owner-reference-denial-controls)
+uses the genuine live run holders after worker startup to reject 26 fixed missing-reference calls.
+Each selected method rejects before mutable state or native work. The normal consumer then continues
+through its unchanged server, process, artifact and cleanup checks. This provides an adjacent valid
+path without manufacturing a native capability. The closed diagnostic event is mandatory for the
+current source's native measurement; portable parser checks and compile-boundary tests cannot stand
+in for that Linux execution. No listener failure latch, custody claim, production budget, registration
+or accepted proof is changed. The private implementation is absent from ordinary images.

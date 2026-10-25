@@ -259,6 +259,77 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
             return new(System.IO.Path.GetFileName(module), path, count, Convert.ToHexStringLower(SHA256.HashData(bytes)));
         }
     }
+    /// <summary>Verifies fixed null-reference denials on the original live native objects before server dispatch.</summary>
+    /// <remarks>
+    /// The C3 caller has already authenticated and started the genuine same-image worker. Each fixed call
+    /// changes one reference only and must reject before its method reaches native work or mutable state.
+    /// No listener failure path, reservation, replay, stop, custody transition or metadata substitute is
+    /// invoked. The unchanged consumer procedure afterward must still establish physical completion.
+    /// These are reference-denial controls only, never successful custody or accepted-proof assertions.
+    /// </remarks>
+    internal static void CheckOwnerReferenceGuards(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxProducerWorkspace? producerWorkspace,
+        LinuxApplicationWorkspace? applicationWorkspace, LinuxWorkerProcess worker,
+        LinuxEmptyObservationControlServer server, LinuxControlListener listener, CancellationToken token)
+    {
+        ArgumentNullException.ThrowIfNull(producerWorkspace);
+        ArgumentNullException.ThrowIfNull(applicationWorkspace);
+        owner.RequireActive(token);
+        var rejected = new List<string>(26);
+        Admission("workspace-accounts", "ASEVD402", () => workspace.RequireAccountOwner(null!, owner));
+        Admission("workspace-owner", "ASEVD402", () => workspace.RequireAccountOwner(accounts, null!));
+        Admission("producer-workspace-accounts", "ASEVD402", () => producerWorkspace.RequireAccountOwner(null!, owner));
+        Admission("producer-workspace-owner", "ASEVD402", () => producerWorkspace.RequireAccountOwner(accounts, null!));
+        Admission("application-workspace-accounts", "ASEVD410", () => applicationWorkspace.RequireAccountOwner(null!, owner));
+        Admission("application-workspace-owner", "ASEVD410", () => applicationWorkspace.RequireAccountOwner(accounts, null!));
+        Admission("worker-accounts", "ASEVD410", () => worker.RequireAccountOwner(null!, owner));
+        Admission("worker-owner", "ASEVD410", () => worker.RequireAccountOwner(accounts, null!));
+        Admission("worker-server-input", "ASEVD410", () => worker.RequireServerOwner(null!, owner, accounts, workspace, listener, token));
+        Admission("worker-server-owner", "ASEVD410", () => worker.RequireServerOwner(input, null!, accounts, workspace, listener, token));
+        Admission("worker-server-accounts", "ASEVD410", () => worker.RequireServerOwner(input, owner, null!, workspace, listener, token));
+        Admission("worker-server-workspace", "ASEVD410", () => worker.RequireServerOwner(input, owner, accounts, null!, listener, token));
+        Admission("worker-server-listener", "ASEVD410", () => worker.RequireServerOwner(input, owner, accounts, workspace, null!, token));
+        Admission("worker-custody-input", "ASEVD410", () => worker.RequireCustodyOwner(null!, owner, accounts, workspace, server, token));
+        Admission("worker-custody-owner", "ASEVD410", () => worker.RequireCustodyOwner(input, null!, accounts, workspace, server, token));
+        Admission("worker-custody-accounts", "ASEVD410", () => worker.RequireCustodyOwner(input, owner, null!, workspace, server, token));
+        Admission("worker-custody-workspace", "ASEVD410", () => worker.RequireCustodyOwner(input, owner, accounts, null!, server, token));
+        Admission("server-custody-input", "ASEVD410", () => server.RequireCustodyOwner(null!, owner, accounts, workspace, worker, token));
+        Admission("server-custody-owner", "ASEVD410", () => server.RequireCustodyOwner(input, null!, accounts, workspace, worker, token));
+        Admission("server-custody-accounts", "ASEVD410", () => server.RequireCustodyOwner(input, owner, null!, workspace, worker, token));
+        Admission("server-custody-workspace", "ASEVD410", () => server.RequireCustodyOwner(input, owner, accounts, null!, worker, token));
+        Admission("server-custody-worker", "ASEVD410", () => server.RequireCustodyOwner(input, owner, accounts, workspace, null!, token));
+        Account("accounts-active-owner", () => accounts.RequireOwnedBy(null!, token));
+        Account("accounts-control-owner", () => { _ = accounts.RequireControlOwnedBy(null!, token); });
+        Admission("owner-active-input", "ASEVD402", () => owner.RequireLaunchInput(null!, token));
+        Admission("owner-control-input", "ASEVD402", () => owner.RequireCleanupLaunchInput(null!, token));
+        token.ThrowIfCancellationRequested();
+        owner.RequireActive(token);
+        if (rejected.Count != 26) throw LinuxSystemdBackend.InvalidControl();
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            schema = "evidence-native-owner-reference-guards-v1", generation = owner.RunId.ToString("N"),
+            rejected = rejected.ToArray(), native_acceptance = false
+        }));
+
+        void Admission(string name, string code, Action operation)
+        {
+            token.ThrowIfCancellationRequested();
+            try { operation(); }
+            catch (EvidenceAdmissionException error) when (error.Code == code && error.InnerException is null)
+            { rejected.Add(name); return; }
+            throw LinuxSystemdBackend.InvalidControl();
+        }
+        void Account(string name, Action operation)
+        {
+            token.ThrowIfCancellationRequested();
+            try { operation(); }
+            catch (LinuxRunAccountException error) when (error.Failure == LinuxRunAccountFailure.OperationFailed
+                && error.FirstFailure is null && error.InnerException is null)
+            { rejected.Add(name); return; }
+            throw LinuxSystemdBackend.InvalidControl();
+        }
+    }
+
 }
 
 /// <summary>Closed milestone labels for the private original worker-start procedure.</summary>

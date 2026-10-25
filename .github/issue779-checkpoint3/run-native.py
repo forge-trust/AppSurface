@@ -9,6 +9,34 @@ c2=importlib.util.module_from_spec(spec);spec.loader.exec_module(c2)
 require=c2.require;write=c2.write;canonical=c2.canonical;command=c2.command;sha=c2.sha
 MAX_LOG=8*1024*1024
 CASES=('normal','sdk-normal','readiness','factory-stall','cancel','stuck-descendant','disposal-failure')
+OWNER_REFERENCE_GUARDS=(
+ 'workspace-accounts',
+ 'workspace-owner',
+ 'producer-workspace-accounts',
+ 'producer-workspace-owner',
+ 'application-workspace-accounts',
+ 'application-workspace-owner',
+ 'worker-accounts',
+ 'worker-owner',
+ 'worker-server-input',
+ 'worker-server-owner',
+ 'worker-server-accounts',
+ 'worker-server-workspace',
+ 'worker-server-listener',
+ 'worker-custody-input',
+ 'worker-custody-owner',
+ 'worker-custody-accounts',
+ 'worker-custody-workspace',
+ 'server-custody-input',
+ 'server-custody-owner',
+ 'server-custody-accounts',
+ 'server-custody-workspace',
+ 'server-custody-worker',
+ 'accounts-active-owner',
+ 'accounts-control-owner',
+ 'owner-active-input',
+ 'owner-control-input',
+)
 
 def events(path,schema):
  if not path.is_file():return []
@@ -19,6 +47,18 @@ def events(path,schema):
   except (ValueError,UnicodeError):continue
   if type(value) is dict and value.get('schema')==schema:result.append(value)
  return result
+
+def owner_reference_guards(path,generation):
+ """Require the fixed data event from actual C3 holders; the event grants no ownership or acceptance."""
+ values=events(path,'evidence-native-owner-reference-guards-v1')
+ require(len(values)==1,'owner-reference-guard-event-count')
+ value=values[0]
+ require(set(value)=={'schema','generation','rejected','native_acceptance'},'owner-reference-guard-event-shape')
+ require(type(generation) is str and len(generation)==32 and all(c in '0123456789abcdef' for c in generation)
+         and value['generation']==generation,'owner-reference-guard-generation')
+ require(type(value['rejected']) is list and value['rejected']==list(OWNER_REFERENCE_GUARDS)
+         and value['native_acceptance'] is False,'owner-reference-guard-denials')
+ return value
 
 def sealed_descriptor(path):
  """Share the same sealed-publication observer as C2, selecting only the v2 data schema."""
@@ -293,6 +333,7 @@ def execute(args,case,tools,runtime,end):
   require(c2.groups_empty(units),'original-all-groups-empty');result['groups_empty']=True
   observed=events(stderr,'evidence-application-native-v1');result['application_observations']=observed
   result['worker_measurements']=events(stderr,'evidence-worker-measurement-v3' if case=='sdk-test-failure' else 'evidence-worker-measurement-v1')
+  result['owner_reference_guards']=owner_reference_guards(stderr,generation)
   settled=[e for e in observed if e['phase']=='settled'];require(len(settled)==1 and settled[0]['group_empty_twice'] and settled[0]['pumps_joined'] and settled[0]['pending_start_joined'],'actual-application-settlement')
   if case in ('normal','sdk-normal'):
    require(code==0,'positive-root-exit');summary=json.loads(stdout.read_bytes());require(summary.get('ExecutionVerdict')=='Passed' and summary.get('CleanupCompleted') is True and summary.get('ClaimKind')=='ObservationOnly','actual-root-result')

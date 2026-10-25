@@ -367,5 +367,18 @@ internal static partial class LinuxEmptyObservationExecution
         }
 #endif
 
+        /// <summary>Runs fixed reference-denial controls only in the authentic private C3 owner graph.</summary>
+        /// <remarks>Ordinary images have no probe or callback; no owner is fabricated or accepted from metadata.</remarks>
+        internal void CheckOwnerReferenceGuards(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+            LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxProducerWorkspace? producerWorkspace,
+            LinuxApplicationWorkspace? applicationWorkspace, LinuxWorkerProcess worker,
+            LinuxEmptyObservationControlServer server, LinuxControlListener listener, CancellationToken token)
+        {
+#if EVIDENCE_PRIVATE_C3
+            LinuxWorkerMeasurement.CheckOwnerReferenceGuards(input, owner, accounts, workspace,
+                producerWorkspace, applicationWorkspace, worker, server, listener, token);
+#endif
+        }
+
     }
 }
