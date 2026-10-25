@@ -4,6 +4,24 @@
 
 The [unit recipe](LinuxProducerUnit.cs) generates `appsurface-evidence-producer-<generation>.service`, using the actual subject UID and GID, no supplementary groups, no capabilities, `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=yes`, private temporary storage, `RestrictSUIDSGID=yes`, 64 tasks and 1 GiB memory. A single-use guarded root owner remains its `BindsTo` dependency. Only the copied source, fresh selected results-token directory and private scratch are writable. Protected tooling, original subject, worker control, original raw results and worker output are inaccessible. The separate audited SDK is read-only. The working directory is the copied source; fixed `env -i` arguments select only that SDK and the existing Debug/XPlat/serial test command.
 
+## Original runtime reservation arithmetic
+
+[`SupervisionProducerRuntimeAllowance.Calculate(originalRemaining, stopping, cleanup, collection)`](SupervisionProducerRuntimeAllowance.cs)
+contains the arithmetic used by the actual producer immediately before pipe and native start acquisition.
+It subtracts the request's stopping and collection reserves and the owner's existing cleanup reserve
+from one sample of the owner's original job remainder. Positive available runtime is capped at the
+unchanged [producer maximum](LinuxProducerUnit.cs) of 1800 seconds. No positive remainder after those
+reservations rejects with fixed ASEVD410; zero cannot become a one-tick or minimum-runtime fallback.
+
+The caller still authenticates the owner, input and workspaces and supplies their validated reserves.
+This helper accepts time data only, creates no clock or cancellation source, and cannot authorize an
+execution. Passing a fresh full job duration would renew the budget incorrectly. The original native
+recipe, start token, cleanup and final owner checks remain mandatory. The [arithmetic controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionProducerRuntimeAllowanceTests.cs)
+check one tick around both zero runtime and the cap, separate reserve consumption, and the original
+one-hour request boundary. These tests are not native process or consumer acceptance evidence.
+
+## Process completion and report eligibility
+
 `LinuxProcessIdentity.CaptureProducer` captures actual proc descriptors and requires the producer role, nonroot complete UID/GID tuples, PID/start-time continuity and the exact generated cgroup. It cannot authenticate a root producer or select the worker role. Unit state metadata alone is insufficient. Normal completion compares the retained positive execution PID and actual normal exit code; a nonzero normal test exit remains failure data. Unit stop, two physical empty-group observations, original pending-start join and both output-pump joins precede any result or report-read permission.
 
 `RequireReportsReady(owner, accounts, workspace, token)` requires normal original task completion with healthy complete output. It does not imply zero test exit or accepted coverage. `RequirePhysicalSettlement` is a separate cleanup guard and supports unsuccessful operations only when real physical settlement is established. STOP closes further starts and joins the original task. An uncertain/cancelled start remains owned through the original before-and-after stop sequence. Cleanup borrows the original owner cancellation and a bounded local portion of its existing cleanup reserve; it never starts root teardown during a successful producer run, which would close subsequent report collection.

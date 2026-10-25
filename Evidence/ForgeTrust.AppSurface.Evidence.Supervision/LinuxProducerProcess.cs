@@ -206,10 +206,8 @@ internal sealed class LinuxProducerProcess
             var stop = TimeSpan.FromSeconds(_input.Request.StoppingSeconds);
             var cleanupReserve = _owner.CleanupAllowance;
             var collection = TimeSpan.FromSeconds(_input.Request.CollectionSeconds);
-            var availableRuntime = _owner.Remaining - stop - cleanupReserve - collection;
-            var runtime = availableRuntime > TimeSpan.FromSeconds(LinuxProducerUnit.MaximumRuntimeSeconds)
-                ? TimeSpan.FromSeconds(LinuxProducerUnit.MaximumRuntimeSeconds) : availableRuntime;
-            if (runtime <= TimeSpan.Zero) throw LinuxSystemdBackend.InvalidControl();
+            var runtime = SupervisionProducerRuntimeAllowance.Calculate(
+                _owner.Remaining, stop, cleanupReserve, collection);
             var unitAllowance = runtime + stop;
 
             diagnosticStage = "pipes";

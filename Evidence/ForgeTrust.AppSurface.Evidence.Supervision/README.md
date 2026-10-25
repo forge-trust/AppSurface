@@ -306,6 +306,10 @@ capability and renew no deadline. See [producer execution](producer-execution.md
 
 ## Retained producer reports
 
+The [producer runtime reservation reference](producer-execution.md#original-runtime-reservation-arithmetic)
+explains how the original job remainder covers stopping, collection and cleanup before the capped
+runtime can reach native dispatch. Its pure arithmetic controls do not grant process authority.
+
 [`LinuxRetainedReportSet`](LinuxRetainedReportSet.cs) supplies the first internal report-file
 primitive for checkpoint two. The [report reader reference](report-custody.md) describes its
 root-selection metadata, mandatory descriptor-relative Linux opens, exact inventory, ownership
