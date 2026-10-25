@@ -2252,3 +2252,12 @@ cannot enumerate names, a directory cannot supply payload bytes or copy into a c
 file, and invalid counted-read limits reject while the retained file remains readable and unchanged.
 The failed directory copy leaves the actual destination empty and open for its caller. These tests
 require Linux x64 root; other-platform skips establish no native filesystem or consumer acceptance.
+
+The [worker holder](LinuxWorkerProcess.cs) and [control server](LinuxEmptyObservationControlServer.cs)
+use private `MatchesOriginalReferences` predicates for their repeated retained-reference comparisons.
+Each predicate performs the same ordered reference-equality checks, with no native work, ownership
+construction, exception translation or mutable state. Callers keep their original qualification, token,
+state and live identity gates before and after that comparison. The existing
+[genuine owner reference-denial controls](#private-native-owner-reference-denial-checks) reject missing
+references through these same native holders; detached matching data cannot adopt another holder or
+establish readiness, custody or successful cleanup.

@@ -424,8 +424,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
     internal Task<byte[]> N07Precleanup(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace)
     {
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace)
             || !_lifetime.StartJoined || _pipes is null) throw LinuxSystemdBackend.InvalidControl();
         return _pipes.N07Precleanup;
     }
@@ -437,8 +436,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace)
             || !_lifetime.StopJoined || _pipes?.N07ObservationFailed != false)
             throw LinuxSystemdBackend.InvalidControl();
         owner.RequireCleanupLaunchInput(input, token);
@@ -474,8 +472,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
     {
         token.ThrowIfCancellationRequested();
         if (!EvidenceNativeQualification.ParentReplacementEnabled
-            || !ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+            || !MatchesOriginalReferences(input, owner, accounts, workspace)
             || token != owner.RootTeardownToken)
             throw LinuxSystemdBackend.InvalidControl();
         var descriptor = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
@@ -495,6 +492,15 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         return observation;
     }
 #endif
+
+    /// <summary>Compares the exact originally retained references without native work or state changes.</summary>
+    /// <remarks>Callers retain their original qualification, state, token and identity checks in order.</remarks>
+    private bool MatchesOriginalReferences(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace) =>
+        ReferenceEquals(input, _input)
+        && ReferenceEquals(owner, _owner)
+        && ReferenceEquals(accounts, _accounts)
+        && ReferenceEquals(workspace, _workspace);
 
     /// <summary>Claims a single holder using actual retained native owners, before startup or acquisition.</summary>
     internal static LinuxWorkerProcess Create(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
@@ -530,8 +536,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
     internal void RequireServerOwner(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxControlListener listener, CancellationToken token)
     {
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace)
             || !ReferenceEquals(listener, _listener)) throw LinuxSystemdBackend.InvalidControl();
         owner.RequireLaunchInput(input, token);
         accounts.RequireOwnedBy(owner, token);
@@ -566,8 +571,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxEmptyObservationControlServer server,
         CancellationToken token)
     {
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace))
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace))
             throw LinuxSystemdBackend.InvalidControl();
         server.RequireCustodyOwner(input, owner, accounts, workspace, this, token);
         owner.RequireControlIdentity(token);
@@ -682,8 +686,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         LinuxEmptyObservationControlServer server, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace)
             || token != owner.RootTeardownToken)
             throw LinuxSystemdBackend.InvalidControl();
         var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
@@ -725,9 +728,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         LinuxOwnerActivation owner, LinuxRunAccounts accounts, LinuxRunWorkspace workspace, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!EvidenceNativeQualification.PendingStartRaceEnabled || !ReferenceEquals(input, _input)
-            || !ReferenceEquals(owner, _owner) || !ReferenceEquals(accounts, _accounts)
-            || !ReferenceEquals(workspace, _workspace) || token != owner.RootTeardownToken
+        if (!EvidenceNativeQualification.PendingStartRaceEnabled || !MatchesOriginalReferences(input, owner, accounts, workspace) || token != owner.RootTeardownToken
             || !_lifetime.StartJoined || !_lifetime.StopJoined || Volatile.Read(ref _dispatchAttempted) != 1
             || _failedSettlementUnit is null || _failedSettlementGroup is null || !_failedSettlementGroupAfterPumps
             || _output is null || _recipe is null)

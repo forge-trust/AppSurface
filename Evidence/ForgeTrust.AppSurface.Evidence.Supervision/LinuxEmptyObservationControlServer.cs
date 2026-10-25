@@ -786,9 +786,7 @@ internal sealed class LinuxEmptyObservationControlServer
     internal void RequireCustodyOwner(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
     {
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
-            || !ReferenceEquals(worker, _worker)) throw Rejected();
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace, worker)) throw Rejected();
         owner.RequireControlIdentity(token);
         lock (_executionGate)
         {
@@ -842,9 +840,7 @@ internal sealed class LinuxEmptyObservationControlServer
         LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (!ReferenceEquals(input, _input) || !ReferenceEquals(owner, _owner)
-            || !ReferenceEquals(accounts, _accounts) || !ReferenceEquals(workspace, _workspace)
-            || !ReferenceEquals(worker, _worker)) throw Rejected();
+        if (!MatchesOriginalReferences(input, owner, accounts, workspace, worker)) throw Rejected();
         owner.RequireCleanupLaunchInput(input, token);
         lock (_executionGate)
             if (_execution?.IsCompleted != true || Volatile.Read(ref _n07OriginalTasksCompleted) != 1
@@ -886,6 +882,16 @@ internal sealed class LinuxEmptyObservationControlServer
         _owner.RequireControlIdentity(default);
         token.ThrowIfCancellationRequested();
     }
+
+    /// <summary>Compares the exact originally retained references without native work or state changes.</summary>
+    /// <remarks>Callers retain their original qualification, state, token and identity checks in order.</remarks>
+    private bool MatchesOriginalReferences(EvidenceProtectedLaunchInput input, LinuxOwnerActivation owner,
+        LinuxRunAccounts accounts, LinuxRunWorkspace workspace, LinuxWorkerProcess worker) =>
+        ReferenceEquals(input, _input)
+        && ReferenceEquals(owner, _owner)
+        && ReferenceEquals(accounts, _accounts)
+        && ReferenceEquals(workspace, _workspace)
+        && ReferenceEquals(worker, _worker);
 
     private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
     /// <summary>Creates the fixed control-server rejection without exposing internal failure data.</summary>
