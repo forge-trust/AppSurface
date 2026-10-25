@@ -30,6 +30,37 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
         finally { Environment.ExitCode = original; }
     }
 
+    [Theory]
+    [MemberData(nameof(MixedCaseMalformedArguments))]
+    public async Task RunAsync_MixedCaseMalformedAdmissionUsesSafeJsonBeforeCliFx(string[] args)
+    {
+        var console = new FakeInMemoryConsole();
+        var original = Environment.ExitCode;
+        try
+        {
+            Environment.ExitCode = 0;
+            await AppSurfaceCliApp.RunAsync(args, options => options.CustomRegistrations.Add(services => services.AddSingleton<IConsole>(console)));
+
+            // protects=case-insensitive command recognition still uses safe raw-argument admission; fails_when=unknown option value reaches CliFx output; no_claim=provider invocation
+            var stdout = console.ReadOutputString();
+            Assert.Equal(2, Environment.ExitCode);
+            Assert.Single(stdout.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+            Assert.Contains("\"schemaVersion\":\"1.0\"", stdout);
+            Assert.Contains("\"diagnosticCode\":\"ASDEPLOY170\"", stdout);
+            Assert.DoesNotContain("SYNTHETIC_PRIVATE_SENTINEL", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("SYNTHETIC_PRIVATE_SENTINEL", console.ReadErrorString(), StringComparison.Ordinal);
+        }
+        finally { Environment.ExitCode = original; }
+    }
+
+    public static IEnumerable<object[]> MixedCaseMalformedArguments =>
+    [
+        [new[] { "Deployment", "gcp-cloud-run", "observe-execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
+        [new[] { "deployment", "Gcp-Cloud-Run", "observe-execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
+        [new[] { "deployment", "gcp-cloud-run", "Observe-Execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
+        [new[] { "Deployment", "Gcp-Cloud-Run", "Observe-Execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
+    ];
+
     public static IEnumerable<object[]> MalformedArguments =>
     [
         [new[] { "deployment", "gcp-cloud-run", "observe-execution", "--bogus" }],

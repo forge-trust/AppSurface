@@ -54,7 +54,9 @@ internal static partial class CloudRunExecutionArgumentAdmission
     }
 
     internal static bool IsObserveExecution(string[] args)
-        => args.Length >= 3 && args[0] == "deployment" && args[1] == "gcp-cloud-run" && args[2] == "observe-execution";
+        => args.Length >= 3 && string.Equals(args[0], "deployment", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(args[1], "gcp-cloud-run", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(args[2], "observe-execution", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsHelp(string[] args) => args.Skip(3).Any(static value => value is "--help" or "-h");
 
