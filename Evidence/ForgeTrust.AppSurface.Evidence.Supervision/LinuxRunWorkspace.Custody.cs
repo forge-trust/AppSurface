@@ -419,17 +419,11 @@ internal sealed partial class LinuxRunWorkspace
                     if (expected.Length == 0 || expected.Length > (ulong)maximum) throw LinuxWorkspaceLayout.Invalid();
                     var bytes = new byte[checked((int)expected.Length)];
                     var offset = 0;
-                    while (offset < bytes.Length)
-                    {
-                        Check(token);
-                        At(LinuxCustodyOperation.FileRead, kind);
-                        var count = RandomAccess.Read(node.Handle, bytes.AsSpan(offset, Math.Min(4096, bytes.Length - offset)), offset);
-                        if (count == 0) throw LinuxWorkspaceLayout.Invalid();
-                        offset += count;
-                    }
-                    At(LinuxCustodyOperation.HashEof, kind);
-                    if (RandomAccess.Read(node.Handle, new byte[1], offset) != 0
-                        || Convert.ToHexStringLower(SHA256.HashData(bytes)) != node.Hash) throw LinuxWorkspaceLayout.Invalid();
+                    SupervisionDeclaredFileRead.Read(node.Handle, expected.Length, new byte[4096],
+                        () => { Check(token); At(LinuxCustodyOperation.FileRead, kind); },
+                        block => { block.Span.CopyTo(bytes.AsSpan(offset)); offset += block.Length; },
+                        () => At(LinuxCustodyOperation.HashEof, kind), LinuxWorkspaceLayout.Invalid);
+                    if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != node.Hash) throw LinuxWorkspaceLayout.Invalid();
                     RecheckTree(terminal: true, token);
                     return bytes;
                 }

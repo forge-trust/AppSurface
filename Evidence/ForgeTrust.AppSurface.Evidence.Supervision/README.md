@@ -2303,3 +2303,12 @@ owner. Directory length and link count are intentionally ignored; socket metadat
 single-link, empty-object, exact sealed mode or unsealed forbidden-bit mask. The
 [policy tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCheckpointMetadataPolicyTests.cs)
 use detached values only; passing them does not prove a native peer, filesystem object, or owner.
+
+Root-custody canonical-file reads also use
+[`SupervisionDeclaredFileRead`](SupervisionDeclaredFileRead.cs). The holder
+retains its original length bound, 4 KiB reads, per-read owner/cancellation
+checks, declared-end byte probe, whole-byte SHA256 comparison and final tree
+recheck. A 4 KiB scratch buffer copies each actual segment into the bounded
+result array; partial data never escapes if reading, hashing or rechecking
+fails. This procedure borrows the original descriptor and cannot acquire or
+release custody.
