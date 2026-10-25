@@ -218,3 +218,28 @@ No unresolved findings.
 ## Autoplan approval
 
 The owner approved all recommendations on 2026-10-25, including proceeding with synthetic public-package acceptance without requiring a named adopter first. CEO, DX, and engineering planning reviews completed; design review was not applicable because this API has no UI. Outside-provider review was unavailable. The local review record preserves the full rationale and historical receipts; this document retains the complete approved implementation requirements. Runtime verification is reported separately in the implementation pull request.
+
+The owner deferred the human prepared-host onboarding rehearsal on 2026-10-25. Automated package proof and quickstart execution remain required; they do not provide a human time-to-first-use or understanding observation.
+
+## Approved B1–B16 verification matrix
+
+This matrix retains the detailed engineering obligations referenced above. It is a verification contract; executed results belong in the implementation PR.
+
+| ID | Concrete assertions / expected failure rejected | Existing coverage and why new proof | Type / destination |
+|---|---|---|---|
+| B1 | mutate ctor list and with-list; retained/deconstructed plans unchanged; null Key/Path/list/entry reject; empty list valid; plain with safe | record contracts are new | unit inspector tests + packed constructor assertions |
+| B2 | provenance-bearing strict/translated key passed typed emits only canonical/mapped sequence | internal codec origin tests do not force public overload origin | unit inspector tests |
+| B3 | null env/strictInput names; A::B/empty/control/edge whitespace fail before output; manager translation option does not change strict names | parser exists, public overload does not | parameterized inspector tests |
+| B4 | Production Service:Api-Key names exactly source example; exact Root_Config casing and both mapping flags; mapped ancestor does not rewrite descendant | codec names tested, flags/public boundaries new | codec table extensions + inspector tests |
+| B5 | strict alias full table, duplicate A aliases retain canonical flags; old translated bridge exact prior results | AliasTablesAreExactAndDeduplicateNativeNames exists; public aliases/metadata new | extend existing table + public parity |
+| B6 | scoped-flat, unscoped-flat, scoped-hierarchical, unscoped-hierarchical; Service leaves first flat duplicate unchanged | old strings only tests | extend candidate tables + inspector |
+| B7 | A.B literal, A-B literal and A:B produce same composition A_B/A__B lists; native remains distinct; A/B and A_B keep source rules | existing tests cover one multi-segment case only | parameterized composition/public cases |
+| B8 | all known failures retain type/HResult/cause/origin frame and exact null param, all required string fields/links safe; unexpected host exception unchanged | parser text/options classes exist; enrichment is new | helper contract + public tests, no reflection |
+| B9 | every existing invalid options branch still throws before inspector source factories; Configure then PostConfigure governs frozen data | OptionsFreezeAndValidateDuplicateAndCanonicalClaims covers validation, not shared constructor | extend options/lifecycle tests |
+| B10 | both DI construction orders, mutate between, same frozen mapping/capacity; direct seam and second host isolated; failed initial snapshot publishes no usable result | startup tests freeze one provider only | lifecycle unit/integration + packed public behavior |
+| B11 | simultaneous DI resolutions/post-freeze calls return exact arrays with no extra source calls | current concurrent tests concern native claims, not inspector | controlled integration |
+| B12 | environment capture/point read, file/ordinary/secret factories and reads stay zero on construction and valid/rejected calls | existing resolution intentionally reads values | separate inspector purity phase controls |
+| B13 | capacity=1: repeated inspections then first A claim missing/succeeds identically; B reaches same original limit; no poisoning | ClaimCapacityAndHostIsolationDoNotPoisonExistingKeys is baseline control | add inspector-before-control integration |
+| B14 | copied public helper must run and emit separate evidence; absence/wrong expected list/extra I/O fails verifier; no project refs | fixed copy list cannot discover a new helper itself | package system proof, explicit copy/invoke/validate |
+| B15 | both policies reject forbidden names; no-match and incomplete paths/comparer only clear supplied-name check; corrected input rejects | these two inspector examples are new | package system proof with independent arrays |
+| B16 | unchanged exact alias-state/case/claim/capture/startup/composition outcomes under new adapters/factory | strong existing tests already cover this; do not duplicate or weaken them | rerun existing Config regressions |

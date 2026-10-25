@@ -298,6 +298,15 @@ public sealed class EnvironmentConfigCandidateLifecycleTests
         Assert.Equal(ConfigProviderValueStatus.Missing, shared.Resolve<int>(new ConfigProviderRequest("Prod", key)).Status);
     }
 
+    [Fact]
+    // protects=both provider construction seams preserve null dependency guards; fails_when=validation order or argument identity changes; no_claim=inspector diagnostic metadata.
+    public void ProviderConstructorsRetainEnvironmentDependencyNullGuard()
+    {
+        var snapshot = new EnvironmentConfigMappingSnapshot(new AppSurfaceEnvironmentConfigOptions());
+        Assert.Equal("environmentProvider", Assert.Throws<ArgumentNullException>(() => new EnvironmentConfigProvider(null!)).ParamName);
+        Assert.Equal("environmentProvider", Assert.Throws<ArgumentNullException>(() => new EnvironmentConfigProvider(null!, snapshot)).ParamName);
+    }
+
     private static ServiceProvider Build(string mappedName)
     {
         var services = new ServiceCollection();

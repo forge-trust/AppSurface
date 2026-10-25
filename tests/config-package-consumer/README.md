@@ -142,11 +142,6 @@ stage exits nonzero and preserves its log. On macOS the verifier enables polling
 file watching for its subprocesses to avoid sandboxed native-watcher stalls; it
 does not change application configuration registration.
 
-The [.NET build workflow](../../.github/workflows/build.yml) invokes this proof on
-Linux and Windows. The separate [previous-package compatibility fixture](../config-key-compatibility/README.md)
-checks coordinated binary-break diagnostics and mixed package families. Neither
-verifier publishes packages or changes a remote repository.
-
 ### Optional human onboarding check (estimated 2–5 minutes)
 
 This is a later, lightweight docs assessment, not a measured result or a release

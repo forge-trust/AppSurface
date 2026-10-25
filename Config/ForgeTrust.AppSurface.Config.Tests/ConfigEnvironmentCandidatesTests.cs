@@ -60,4 +60,18 @@ public class ConfigEnvironmentCandidatesTests
     {
         Assert.Equal(expected, ConfigEnvironmentCandidates.NormalizeHierarchicalKey(value));
     }
+    [Fact]
+    // protects=compatibility adapter names and first producer flags; fails_when=adapter diverges or duplicate changes provenance; no_claim=source presence.
+    public void BuildDirectAdapterAndMetadataRetainIndependentFirstProducerTable()
+    {
+        Assert.Equal(new[] { "PROD_SERVICE", "SERVICE", "PROD__SERVICE" },
+            ConfigEnvironmentCandidates.BuildDirectCandidates("PROD", "SERVICE", "SERVICE"));
+        Assert.Equal(new[]
+        {
+            new EnvironmentCompositionPathCandidate("PROD_SERVICE", EnvironmentCandidateScope.Scoped, false),
+            new EnvironmentCompositionPathCandidate("SERVICE", EnvironmentCandidateScope.Unscoped, false),
+            new EnvironmentCompositionPathCandidate("PROD__SERVICE", EnvironmentCandidateScope.Scoped, true),
+        }, ConfigEnvironmentCandidates.BuildMetadataCandidates("PROD", "SERVICE", "SERVICE"));
+    }
+
 }
