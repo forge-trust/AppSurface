@@ -1,5 +1,6 @@
-using ForgeTrust.AppSurface.Evidence.Contracts;
+using System.IO.Pipes;
 using Microsoft.Win32.SafeHandles;
+using ForgeTrust.AppSurface.Evidence.Contracts;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
@@ -69,6 +70,76 @@ public sealed class LinuxApplicationUnitTests
     }
 
     [Theory]
+    [InlineData("stdout", false)]
+    [InlineData("stdout", true)]
+    [InlineData("stderr", false)]
+    [InlineData("stderr", true)]
+    public void RecipeRejectsInvalidOrClosedBorrowedOutputHandleBesideRealPipeHandles(string output, bool closed)
+    {
+        using var stdoutPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stderrPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stdout = new SafeFileHandle(stdoutPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        using var stderr = new SafeFileHandle(stderrPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        using var invalid = new SafeFileHandle(closed ? stdoutPipe.SafePipeHandle.DangerousGetHandle() : (nint)(-1), ownsHandle: false);
+        if (closed) invalid.Dispose();
+        Assert.True(closed ? invalid.IsClosed : invalid.IsInvalid);
+
+        var error = Assert.Throws<EvidenceAdmissionException>(() => Recipe(
+            output == "stdout" ? invalid : stdout,
+            output == "stderr" ? invalid : stderr));
+
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.False(stdoutPipe.SafePipeHandle.IsClosed);
+        Assert.False(stderrPipe.SafePipeHandle.IsClosed);
+    }
+
+    [Fact]
+    public void RunningAndStoppedPredicatesRejectMissingForeignAndUnloadedPolicySamples()
+    {
+        using var stdoutPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stderrPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stdout = new SafeFileHandle(stdoutPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        using var stderr = new SafeFileHandle(stderrPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        var recipe = Recipe(stdout, stderr);
+        var facts = SampleFacts(recipe);
+        LinuxUnitProperties?[] invalidSamples = [null, facts with { Id = "foreign.service" }, facts with { LoadState = "not-loaded" }];
+
+        foreach (var sample in invalidSamples)
+        {
+            AssertFixedRejection(() => recipe.IsRunning(sample!));
+            AssertFixedRejection(() => recipe.IsStopped(sample!));
+        }
+    }
+
+    [Theory]
+    [InlineData("failed", "failed", 0, true)]
+    [InlineData("inactive", "failed", 0, false)]
+    [InlineData("failed", "inactive", 0, false)]
+    [InlineData("inactive", "running", 0, false)]
+    [InlineData("failed", "dead", 0, false)]
+    [InlineData("inactive", "dead", 42, false)]
+    [InlineData("failed", "failed", 42, false)]
+    public void StoppedPredicateUsesOnlyExactTerminalStatePairsWithZeroMainPid(
+        string activeState, string subState, uint mainPid, bool expected)
+    {
+        using var stdoutPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stderrPipe = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.None);
+        using var stdout = new SafeFileHandle(stdoutPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        using var stderr = new SafeFileHandle(stderrPipe.SafePipeHandle.DangerousGetHandle(), ownsHandle: false);
+        var recipe = Recipe(stdout, stderr);
+        var facts = SampleFacts(recipe) with
+        {
+            ActiveState = activeState,
+            SubState = subState,
+            ControlGroup = string.Empty,
+            MainPid = mainPid,
+        };
+
+        Assert.Equal(expected, recipe.IsStopped(facts));
+    }
+
+    [Theory]
     [InlineData("HTTP/1.1 503 Unhealthy\r\nContent-Length: 17\r\n\r\nnative-http-ready")]
     [InlineData("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\nnative-http-ready")]
     [InlineData("HTTP/1.1 200 OK\r\nContent-Length: 17\r\nContent-Length: 17\r\n\r\nnative-http-ready")]
@@ -92,6 +163,18 @@ public sealed class LinuxApplicationUnitTests
     }
 
     private static LinuxApplicationLimits Capabilities() => new(1L << 28, 1L << 30, 128, 1048576, 120, 5);
+    private static LinuxUnitProperties SampleFacts(LinuxApplicationUnit recipe) => new(recipe.Unit.Value,
+        "loaded", "active", "running", "/system.slice/" + recipe.Unit.Value, 42, 42, 0, 0, "65014", "65015",
+        "exec", "control-group", true, recipe.Properties["RuntimeMaxUSec"].GetUInt64(),
+        recipe.Properties["TimeoutStopUSec"].GetUInt64());
+
+    private static void AssertFixedRejection(Action action)
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(action);
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
     private static LinuxApplicationUnit Recipe(SafeFileHandle stdout, SafeFileHandle stderr,
         LinuxApplicationLimits? capabilities = null)
     {
