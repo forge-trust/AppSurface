@@ -94,9 +94,33 @@ internal static partial class CoverageFileSystemInterop
     /// <param name="flagsAndAttributes">The native file flags and attributes.</param>
     /// <param name="templateFile">An optional template-file handle.</param>
     /// <returns>A handle that is invalid when the native open fails.</returns>
+    internal static SafeFileHandle WindowsCreateFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        nint securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        nint templateFile)
+        => WindowsCreateFileNative(WindowsExtendedPath(Path.GetFullPath(fileName)), desiredAccess,
+            shareMode, securityAttributes, creationDisposition, flagsAndAttributes, templateFile);
+
+    /// <summary>Formats an already absolute Windows path for native Unicode file APIs without the legacy MAX_PATH limit.</summary>
+    /// <param name="absolutePath">Absolute drive, UNC, or already extended path; callers normalize navigation before this boundary.</param>
+    /// <returns>The extended drive or UNC spelling, preserving an existing extended prefix.</returns>
+    /// <remarks>This changes only native path spelling. Callers still validate containment, reparse points, identity and access rights.</remarks>
+    internal static string WindowsExtendedPath(string absolutePath)
+    {
+        var path = absolutePath.Replace('/', '\\');
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+        return path.StartsWith(@"\\", StringComparison.Ordinal)
+            ? @"\\?\UNC\" + path[2..]
+            : @"\\?\" + path;
+    }
+
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("kernel32.dll", EntryPoint = "CreateFileW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    internal static partial SafeFileHandle WindowsCreateFile(
+    private static partial SafeFileHandle WindowsCreateFileNative(
         string fileName,
         uint desiredAccess,
         uint shareMode,

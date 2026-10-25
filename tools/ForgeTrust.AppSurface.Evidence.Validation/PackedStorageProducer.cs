@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Aspire;
@@ -119,6 +121,16 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
             var policy = Path.Join(domain, "policy.json");
             await File.WriteAllTextAsync(policy, "{\"schemaVersion\":1,\"historyMaxBytes\":0}", cancellationToken);
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(policy, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            else
+            {
+                // Keep this fixture policy private so Windows ACL validation exercises its intended owner-only contract.
+                var owner = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
+                var security = new FileSecurity();
+                security.SetOwner(owner);
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                security.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl, AccessControlType.Allow));
+                new FileInfo(policy).SetAccessControl(security);
+            }
             var preview = ValidationProof.Data(await Run(0, "coverage", "storage", "maintain", "--json"));
             ValidationProof.Require(preview.GetProperty("candidateRunIds").EnumerateArray().Any(value => value.GetString() == runId), "expired archive preview");
             var applied = ValidationProof.Data(await Run(0, "coverage", "storage", "maintain", "--apply", "--json"));
