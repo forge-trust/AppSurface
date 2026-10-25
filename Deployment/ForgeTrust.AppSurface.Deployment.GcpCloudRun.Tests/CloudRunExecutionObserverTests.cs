@@ -684,6 +684,7 @@ public sealed partial class CloudRunExecutionObserverTests
             root["name"] = $"projects/{Project}/locations/{Region}/jobs/{Job}/executions/{Execution}";
             root["uid"] = metadata["uid"]!.GetValue<string>(); root["generation"] = 7; root["observedGeneration"] = 7;
             root["job"] = $"projects/{Project}/locations/{Region}/jobs/{Job}";
+            root["labels"] = metadata["labels"]!.DeepClone();
             var spec = root["spec"]!.AsObject(); var oldTask = spec["template"]!["spec"]!.DeepClone()!.AsObject();
             root["taskCount"] = spec["taskCount"]!.DeepClone(); root["parallelism"] = spec["parallelism"]!.DeepClone();
             var container = oldTask["containers"]![0]!.AsObject();

@@ -108,12 +108,8 @@ internal sealed record CloudRunExecutionEvidence(CloudRunExecutionState State, s
                     if (annotation.Name is not ("run.googleapis.com/client-name" or "run.googleapis.com/client-version" or "run.googleapis.com/creator" or "run.googleapis.com/lastModifier" or "run.googleapis.com/operation-id")
                         || annotation.Value.ValueKind != JsonValueKind.String) throw Bad("ASDEPLOY175");
             if (root.TryGetProperty("deleteTime", out _)) throw Bad("ASDEPLOY176");
-            if (root.TryGetProperty("labels", out var labels))
-            {
-                if (labels.ValueKind != JsonValueKind.Object) throw Bad("ASDEPLOY174");
-                if (labels.TryGetProperty("cloud.googleapis.com/location", out var location) && location.GetString() != selected.Region) throw Bad("ASDEPLOY172");
-                if (labels.TryGetProperty("run.googleapis.com/job", out var job) && job.GetString() != selected.Job) throw Bad("ASDEPLOY172");
-            }
+            var labels = Object(root, "labels");
+            if (Text(labels, "cloud.googleapis.com/location") != selected.Region || Text(labels, "run.googleapis.com/job") != selected.Job) throw Bad("ASDEPLOY172");
         }
         if (identity.TryGetProperty("deletionTimestamp", out _)) throw Bad("ASDEPLOY176");
     }

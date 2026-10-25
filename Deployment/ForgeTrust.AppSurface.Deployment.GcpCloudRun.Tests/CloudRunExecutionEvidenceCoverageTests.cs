@@ -103,13 +103,16 @@ public sealed partial class CloudRunExecutionObserverTests
     }
 
     [Theory]
-    [InlineData("job-only", "Succeeded")]
-    [InlineData("location-only", "Succeeded")]
-    [InlineData("wrong-location", "Unknown")]
-    public async Task V2SparseOptionalLabelsDoNotOverrideOtherExecutionIdentity(string labels, string expected)
+    [InlineData("absent")]
+    [InlineData("empty")]
+    [InlineData("job-only")]
+    [InlineData("location-only")]
+    [InlineData("wrong-location")]
+    [InlineData("wrong-job")]
+    public async Task V2RequiresBothMatchingReturnedIdentityLabels(string labels)
     {
-        // protects=optional v2 labels as independent location/job cross-checks;
-        // fails_when=a contradictory supplied label is ignored or an absent optional label is required;
+        // protects=required independent v2 location and parent-Job labels;
+        // fails_when=missing, incomplete or contradictory labels permit a matched execution;
         // no_claim=labels prove execution submission provenance.
         using var fixture = new ObserverFixture();
         var root = JsonNode.Parse(fixture.V2ExecutionJson())!.AsObject();
@@ -117,10 +120,14 @@ public sealed partial class CloudRunExecutionObserverTests
         {
             "job-only" => new JsonObject { ["run.googleapis.com/job"] = fixture.JobName },
             "location-only" => new JsonObject { ["cloud.googleapis.com/location"] = fixture.RegionName },
-            _ => new JsonObject { ["cloud.googleapis.com/location"] = "europe-west1" }
+            "wrong-location" => new JsonObject { ["cloud.googleapis.com/location"] = "europe-west1", ["run.googleapis.com/job"] = fixture.JobName },
+            "wrong-job" => new JsonObject { ["cloud.googleapis.com/location"] = fixture.RegionName, ["run.googleapis.com/job"] = "other-job" },
+            _ => new JsonObject()
         };
+        if (labels == "absent") root.Remove("labels");
         var result = await Observe(fixture, root.ToJsonString());
-        Assert.Equal(expected == "Succeeded" ? CloudRunExecutionState.Succeeded : CloudRunExecutionState.Unknown, result.State);
+        Assert.Equal(CloudRunExecutionState.Unknown, result.State);
+        Assert.False(result.ConfigurationMatched);
     }
 
     [Theory]
