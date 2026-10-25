@@ -477,21 +477,8 @@ internal sealed class LinuxProcessIdentity : IDisposable
         return new(last, ids.Uids, ids.Gids, group);
     }
 
-    private static byte[] ReadBounded(SafeFileHandle handle, int maximum, CancellationToken token)
-    {
-        var bytes = new byte[maximum + 1];
-        var offset = 0;
-        while (offset < bytes.Length)
-        {
-            token.ThrowIfCancellationRequested();
-            var count = RandomAccess.Read(handle, bytes.AsSpan(offset, Math.Min(4096, bytes.Length - offset)), offset);
-            token.ThrowIfCancellationRequested();
-            if (count == 0) return bytes[..offset];
-            offset += count;
-            if (offset > maximum) throw Rejected();
-        }
-        throw Rejected();
-    }
+    private static byte[] ReadBounded(SafeFileHandle handle, int maximum, CancellationToken token) =>
+        SupervisionBoundedFileRead.Read(handle, maximum, token, Rejected);
 
     private static ProcNodeMetadata InspectRetainedProcess(SafeFileHandle handle, ref LinuxControlFailureStage stage)
     {

@@ -2173,3 +2173,23 @@ use detached blocks to verify cross-block duplication, exact membership, callbac
 failure preservation. The separate [native controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionDirectoryReadNativeTests.cs)
 use actual unprivileged Linux descriptors, including an ordinary-file ENOTDIR rejection; they establish
 filesystem behavior only and do not replace the genuine protected consumer controls.
+
+### Bounded descriptor reads
+
+[`SupervisionBoundedFileRead`](SupervisionBoundedFileRead.cs) shares the identical byte-reading loop from
+[process sampling](LinuxProcessIdentity.cs) and [audited DCP inspection](LinuxApplicationDcpIdentity.cs).
+Each native owner still opens and authenticates its own procfs/cgroup descriptor and performs the same
+before/after identity and metadata checks. The internal procedure borrows an already-open descriptor,
+reads positionally from offset zero in at most 4096-byte chunks, and returns only after actual EOF. It
+allocates the original maximum plus one byte so a file exactly at the ceiling succeeds only after the
+extra-byte probe returns EOF; one excess byte uses the caller's original fixed exception. An empty file
+still requires a checked read. No pathname is chosen, descriptor acquired or closed, stream position
+changed, retry added, or process identity established by the returned data.
+
+The original cancellation token is checked immediately before and after every read, including EOF;
+native I/O and cancellation exceptions retain their types. Missing arguments and an invalid maximum
+reject before I/O. Callers keep their existing fixed maximums and rejection factories. The
+[owned-file procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionBoundedFileReadTests.cs)
+verify exact boundaries across read blocks, binary bytes, repeatable positional reads, excess-byte
+rejection, cancellation before I/O and handle ownership. Those file tests grant no protected runtime or
+root admission and do not replace the [genuine consumer controls](../../tests/evidencehost-consumer/README.md).
