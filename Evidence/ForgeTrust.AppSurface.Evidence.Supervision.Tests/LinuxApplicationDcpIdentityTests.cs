@@ -81,6 +81,32 @@ public sealed class LinuxApplicationDcpIdentityTests
     {
         var valid = CommandBytes(RuntimeHost, ResourceDll, SocketPath);
         LinuxApplicationDcpIdentity.RequireResourceCommandBytes(valid, RuntimeHost, ResourceDll, SocketPath);
+        foreach (var malformedPaths in new[]
+        {
+            ("relative/CANARY-runtime", ResourceDll, SocketPath),
+            ("/run//root/runtime/dotnet", ResourceDll, SocketPath),
+            ("/run/./root/runtime/dotnet", ResourceDll, SocketPath),
+            ("/run/../root/runtime/dotnet", ResourceDll, SocketPath),
+            ("/run/root/runtime/CANARY\0/dotnet", ResourceDll, SocketPath),
+            (RuntimeHost, "relative/CANARY/resource/NativeHttpResource.dll", SocketPath),
+            (RuntimeHost, "/run/root/bundle//resource/NativeHttpResource.dll", SocketPath),
+            (RuntimeHost, "/run/root/bundle/./resource/NativeHttpResource.dll", SocketPath),
+            (RuntimeHost, "/run/root/bundle/../bundle/resource/NativeHttpResource.dll", SocketPath),
+            (RuntimeHost, "/run/root/bundle/CANARY\0/resource/NativeHttpResource.dll", SocketPath),
+            (RuntimeHost, ResourceDll, "relative/CANARY/http.sock"),
+            (RuntimeHost, ResourceDll, "/run/root/scratch//http.sock"),
+            (RuntimeHost, ResourceDll, "/run/root/scratch/./http.sock"),
+            (RuntimeHost, ResourceDll, "/run/root/scratch/../scratch/http.sock"),
+            (RuntimeHost, ResourceDll, "/run/root/scratch/CANARY\0/http.sock"),
+        })
+        {
+            var error = Assert.Throws<EvidenceAdmissionException>(() =>
+                LinuxApplicationDcpIdentity.RequireResourceCommandBytes(valid,
+                    malformedPaths.Item1, malformedPaths.Item2, malformedPaths.Item3));
+            Assert.Equal("ASEVD410", error.Code);
+            Assert.Null(error.InnerException);
+            Assert.DoesNotContain("CANARY", error.Message, StringComparison.Ordinal);
+        }
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
             CommandBytes("/run/other/runtime/dotnet", ResourceDll, SocketPath), RuntimeHost, ResourceDll, SocketPath));
         Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommandBytes(
@@ -204,6 +230,9 @@ public sealed class LinuxApplicationDcpIdentityTests
         Assert.True(LinuxApplicationDcpIdentity.SameExecutable(expected, expected));
         Assert.False(LinuxApplicationDcpIdentity.SameExecutable(expected with { DeviceMajor = 9 }, expected));
         Assert.False(LinuxApplicationDcpIdentity.SameExecutable(expected with { Inode = 43 }, expected));
+        foreach (var specialBit in new[] { 0x0800, 0x0400, 0x0200 })
+            Reject(() => LinuxApplicationDcpIdentity.RequireAuditedRuntimeHost(
+                expected with { Mode = (ushort)(expected.Mode | specialBit) }));
         foreach (var invalid in new[]
         {
             expected with { Inode = 0 }, expected with { Type = 0x4000 },

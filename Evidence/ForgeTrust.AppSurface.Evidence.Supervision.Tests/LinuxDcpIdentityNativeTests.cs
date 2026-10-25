@@ -270,6 +270,77 @@ public sealed class LinuxDcpIdentityNativeTests
             if (helper is not null) await helper.DisposeAsync();
             Directory.Delete(directory, recursive: true);
         }
+        await RequireActualTwoHopResourceAncestryAsync();
+    }
+
+    // The distinct intermediate executable forces both native walks past the resource's immediate
+    // parent. All three PIDs, credentials, parent links and executable identities come from this unit.
+    private static async Task RequireActualTwoHopResourceAncestryAsync()
+    {
+        var directory = "/run/issue779-dcp-tree-native-" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(directory);
+        LinuxKernelIdentityNativeTests.TestUnit? helper = null;
+        try
+        {
+            var executableMode = UnixFileMode.UserRead | UnixFileMode.UserExecute
+                | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+            File.SetUnixFileMode(directory, executableMode | UnixFileMode.UserWrite);
+            var executable = Path.Join(directory, "dcp");
+            var bridge = Path.Join(directory, "bridge");
+            var runtime = Path.Join(directory, "runtime");
+            File.Copy("/usr/bin/dash", executable);
+            File.SetUnixFileMode(executable, executableMode);
+            File.Copy("/usr/bin/bash", bridge);
+            File.SetUnixFileMode(bridge, executableMode);
+            CopyExecutable(runtime);
+            helper = LinuxKernelIdentityNativeTests.TestUnit.ForApplicationGrandchildTree(executable, bridge, runtime);
+            var rootPid = await helper.StartAsync();
+            using var original = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            uint intermediatePid;
+            uint resourcePid;
+            while (true)
+            {
+                original.Token.ThrowIfCancellationRequested();
+                var pids = LinuxApplicationDcpIdentity.ParseProcessIds(File.ReadAllBytes(
+                    "/sys/fs/cgroup" + helper.GeneratedControlGroupPath + "/cgroup.procs"));
+                Assert.Contains(rootPid, pids);
+                Assert.InRange(pids.Length, 1, 3);
+                if (pids.Length == 3)
+                {
+                    var links = pids.Where(pid => pid != rootPid).Select(pid =>
+                        LinuxApplicationDcpIdentity.ParseParentLink(File.ReadAllBytes($"/proc/{pid}/stat"))).ToArray();
+                    var intermediate = Assert.Single(links, link => link.ParentPid == rootPid);
+                    var resource = Assert.Single(links, link => link.ParentPid == intermediate.Pid);
+                    intermediatePid = intermediate.Pid;
+                    resourcePid = resource.Pid;
+                    Assert.NotEqual(rootPid, resourcePid);
+                    Assert.NotEqual(intermediatePid, resourcePid);
+                    break;
+                }
+                await Task.Delay(20, original.Token);
+            }
+            using var intermediateIdentity = LinuxProcessIdentity.CaptureApplication(intermediatePid,
+                65534, 65534, helper.Unit, original.Token);
+            using var resourceIdentity = LinuxProcessIdentity.CaptureApplication(resourcePid,
+                65534, 65534, helper.Unit, original.Token);
+            using var identity = LinuxApplicationDcpIdentity.CaptureForResource(helper.Unit, 65534, 65534,
+                executable, resourceIdentity, original.Token, out var diagnostic);
+            Assert.Null(diagnostic);
+            Assert.Equal(rootPid, identity.Pid);
+            Assert.NotEqual(intermediateIdentity.Pid, identity.Pid);
+            identity.RequireResourcePeer(resourceIdentity, runtime, original.Token);
+            identity.Recheck(original.Token);
+            intermediateIdentity.Recheck(original.Token);
+            resourceIdentity.Recheck(original.Token);
+            await helper.StopKillAndJoinAsync();
+            Reject(() => identity.Recheck(original.Token));
+            Assert.True(LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(helper.Unit, default)));
+        }
+        finally
+        {
+            if (helper is not null) await helper.DisposeAsync();
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     private static void CopyExecutable(string path)

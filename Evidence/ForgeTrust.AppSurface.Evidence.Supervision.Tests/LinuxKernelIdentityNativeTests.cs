@@ -198,6 +198,21 @@ public sealed class LinuxKernelIdentityNativeTests
             return new(LinuxUnitRole.Application, executable, ["-c", runtime + " 30 & wait"]);
         }
 
+        /// <summary>Starts a fixed shell, distinct intermediate shell and sleep leaf for a genuine two-hop parent walk.</summary>
+        /// <remarks>Fresh fixture paths are checked before forming this test-only command. The original helper
+        /// unit policy and clocks are retained; the shell command is never a product execution input.</remarks>
+        internal static TestUnit ForApplicationGrandchildTree(string executable, string bridge, string runtime)
+        {
+            var parent = Path.GetDirectoryName(executable);
+            if (parent is null || !System.Text.RegularExpressions.Regex.IsMatch(parent,
+                    "^/run/issue779-dcp-tree-native-[0-9a-f]{32}$")
+                || executable != parent + "/dcp" || bridge != parent + "/bridge" || runtime != parent + "/runtime"
+                || !File.Exists(executable) || !File.Exists(bridge) || !File.Exists(runtime))
+                throw new ArgumentException("Existing fixed-name test-owned executables are required.");
+            return new(LinuxUnitRole.Application, executable,
+                ["-c", bridge + " -c '" + runtime + " 30 & wait' & wait"]);
+        }
+
         internal LinuxUnitName Unit { get; }
         internal string GeneratedControlGroupPath => "/system.slice/" + Unit.Value;
 
