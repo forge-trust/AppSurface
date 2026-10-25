@@ -64,6 +64,55 @@ public sealed class LinuxSlotNegativeObservationTests
     }
 
     [Theory]
+    [InlineData("1", 1)]
+    [InlineData("4095", 4095)]
+    public void JoinedOutputAcceptsDocumentedNativeErrnoBounds(string errno, int expected)
+    {
+        var allocation = Allocation.Replace("\"nativeErrno\":17", $"\"nativeErrno\":{errno}", StringComparison.Ordinal);
+        var result = LinuxSlotNegativeObservation.EncodeJoinedOutput("N05", Output(allocation + "\n" + LinuxSlotNegativeObservation.WorkerTerminal));
+        using var projection = JsonDocument.Parse(result.Projection);
+        Assert.Equal(expected, projection.RootElement.GetProperty("allocation").GetProperty("nativeErrno").GetInt32());
+    }
+
+    [Fact]
+    public void JoinedOutputAcceptsNullNativeErrnoAndRejectsOneFieldInvalidNeighbors()
+    {
+        var nullErrno = Allocation.Replace("\"nativeErrno\":17", "\"nativeErrno\":null", StringComparison.Ordinal);
+        var result = LinuxSlotNegativeObservation.EncodeJoinedOutput("N06", Output(nullErrno + "\n" + LinuxSlotNegativeObservation.WorkerTerminal));
+        using (var projection = JsonDocument.Parse(result.Projection))
+            Assert.Equal(JsonValueKind.Null, projection.RootElement.GetProperty("allocation").GetProperty("nativeErrno").ValueKind);
+
+        foreach (var invalid in new[] { "17.5", "4096", "\"17\"", "true", "[]" })
+        {
+            var allocation = Allocation.Replace("\"nativeErrno\":17", $"\"nativeErrno\":{invalid}", StringComparison.Ordinal);
+            var error = Assert.Throws<InvalidOperationException>(() => LinuxSlotNegativeObservation.EncodeJoinedOutput(
+                "N06", Output(allocation + "\n" + LinuxSlotNegativeObservation.WorkerTerminal)));
+            Assert.Null(error.InnerException);
+            Assert.DoesNotContain("nativeErrno", error.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void JoinedOutputEnforcesExactAllocationFirstLineBoundary()
+    {
+        var validLine = new string(' ', 1023 - Allocation.Length) + Allocation;
+        Assert.Equal(1023, Encoding.UTF8.GetByteCount(validLine));
+        var result = LinuxSlotNegativeObservation.EncodeJoinedOutput(
+            "N05", Output(validLine + "\n" + LinuxSlotNegativeObservation.WorkerTerminal));
+        using (var raw = JsonDocument.Parse(result.Raw))
+        {
+            var stderr = Convert.FromBase64String(raw.RootElement.GetProperty("stderr_base64").GetString()!);
+            Assert.Equal(Encoding.UTF8.GetBytes(validLine + "\n" + LinuxSlotNegativeObservation.WorkerTerminal), stderr);
+        }
+
+        var invalidLine = new string(' ', 1024 - Allocation.Length) + Allocation;
+        Assert.Equal(1024, Encoding.UTF8.GetByteCount(invalidLine));
+        var error = Assert.Throws<InvalidOperationException>(() => LinuxSlotNegativeObservation.EncodeJoinedOutput(
+            "N05", Output(invalidLine + "\n" + LinuxSlotNegativeObservation.WorkerTerminal)));
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
     [InlineData("missing-eof")]
     [InlineData("pump-error")]
     [InlineData("count-mismatch")]
