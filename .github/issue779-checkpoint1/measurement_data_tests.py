@@ -20,9 +20,9 @@ ASSEMBLY = 'ForgeTrust.AppSurface.Evidence.Supervision'
 NAMES = (ASSEMBLY + '.dll', ASSEMBLY + '.pdb')
 PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.'
 CLASSES = {
-    'N04': ('LinuxN04CheckpointOrderTests', 'LinuxNegativeKernelObservationTests'),
+    'N04': ('LinuxN04CheckpointOrderTests', 'LinuxNegativeKernelObservationTests', 'LinuxCheckpointMetadataPolicyTests'),
     'N05': ('LinuxSlotNegativeObservationTests',),
-    'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests'),
+    'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests', 'LinuxCheckpointMetadataPolicyTests'),
     'N08': ('LinuxJoinedWorkerOutputDiagnosticTests',),
     'N10': ('LinuxN10PendingStartCheckpointTests',),
     'N12': ('LinuxN12DescendantTests',),
