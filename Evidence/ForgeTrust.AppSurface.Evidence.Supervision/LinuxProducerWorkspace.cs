@@ -768,8 +768,7 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         using var named = OpenAt2(parent is null ? -100 : Fd(parent), name, PathFlags, 0,
             parent is null ? 0 : allowMount ? ParentResolution : ChildResolution);
         var actual = LinuxProtectedMetadata.From(StatFd(named));
-        if ((expected.Mode & 0xf000) == 0x4000
-            ? !actual.SameAncestorAs(expected) : actual != expected)
+        if (!LinuxNamedMetadataComparison.Matches(actual, expected))
             throw LinuxProducerWorkspaceLayout.Invalid();
     }
 

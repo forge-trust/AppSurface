@@ -306,7 +306,7 @@ class SupplementalDataSourceControls(unittest.TestCase):
     """Helper-source and no-op controls only; no native record or test execution is synthesized."""
 
     def test_new_selected_images_require_supplemental_evidence_before_receipt_validation(self):
-        for selector in ('N05', 'N08', 'N10', 'N13', 'N14'):
+        for selector in ('N05', 'N08', 'N10', 'N12', 'N13', 'N14'):
             args = argparse.Namespace(selector=selector, evidence=Path('/unopened-evidence'))
             with self.subTest(selector=selector), \
                     patch.object(subject, 'canonical_path', side_effect=RuntimeError('supplemental-evidence-required')), \
@@ -315,8 +315,8 @@ class SupplementalDataSourceControls(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, '^supplemental-evidence-required$'):
                     subject.data_tests_fact(args, {}, b'{}', time.monotonic() + 5)
 
-    def test_other_six_images_still_require_no_supplemental_evidence_or_helper(self):
-        for selector in ('None', 'N06', 'N09', 'N11', 'N12', 'N15'):
+    def test_other_five_images_still_require_no_supplemental_evidence_or_helper(self):
+        for selector in ('None', 'N06', 'N09', 'N11', 'N15'):
             args = argparse.Namespace(selector=selector)
             with self.subTest(selector=selector), \
                     patch.object(subject, 'canonical_path', side_effect=AssertionError('paths')), \

@@ -290,7 +290,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         try { await monitor.ConfigureAwait(false); return true; }
         catch (OperationCanceledException) when (monitor.IsCanceled && originalJobToken.IsCancellationRequested)
         { return true; }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         { return false; }
     }
 
@@ -856,7 +856,7 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
     internal void RequireSuccessfulCompletion()
     {
         if (!_lifetime.StopJoined || _lifetime.Failed || !PhysicallySettled || Volatile.Read(ref _failed) != 0
-            || _naturalTerminal is not { ExecMainCode: 1, ExecMainStatus: 0 } || _output is not { Successful: true })
+            || !LinuxWorkerSettlementPolicy.HasSuccessfulTerminalAndOutput(new(_naturalTerminal, _output)))
             throw LinuxSystemdBackend.InvalidControl();
         _owner.RequireCleanup(default);
     }

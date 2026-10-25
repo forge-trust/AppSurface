@@ -141,7 +141,7 @@ internal sealed class LinuxCoverageControlOperations : IDisposable
                     _c2ReadRejectionWritten = true;
                     try { _owner.RequireActive(token); EmitC2(EvidenceCanonicalJson.Serialize(new
                         { schema = "evidence-c2-artifact-mutation-v1", phase = "read-rejected", returned_bytes = 0 })); }
-                    catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
+                    catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error)) { }
                 }
 #else
                 _ = failure;

@@ -541,8 +541,7 @@ internal sealed partial class LinuxRunWorkspace : IDisposable
     {
         using var named = OpenAt2(Fd(parent), name, PathFlags, 0, allowMount ? ParentResolution : ChildResolution);
         var current = LinuxProtectedMetadata.From(StatFd(named));
-        if ((expected.Mode & 0xf000) == 0x4000
-            ? !current.SameAncestorAs(expected) : current != expected) throw LinuxWorkspaceLayout.Invalid();
+        if (!LinuxNamedMetadataComparison.Matches(current, expected)) throw LinuxWorkspaceLayout.Invalid();
     }
 
     private string HashDescriptor(SafeFileHandle file, LinuxProtectedMetadata expected, CancellationToken token,

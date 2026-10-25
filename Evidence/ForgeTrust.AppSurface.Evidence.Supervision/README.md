@@ -178,6 +178,14 @@ nonempty regular file and 1 GiB total file bytes. Request bytes remain bounded t
 entry hint. Descendants cannot cross mounts. Absolute ancestors may cross root-selected filesystem mounts,
 while their root ownership and name binding remain checked. Ancestor-only comparisons ignore unrelated child-list changes; inventoried directories retain complete change metadata and are rechecked after the final file hashing pass. No managed pathname fallback is used.
 
+After each workspace opens a child relative to its retained parent and samples that opened descriptor with
+`statx`, [LinuxNamedMetadataComparison](LinuxNamedMetadataComparison.cs) applies the shared data-only
+name-binding rule: directories compare device/inode/owner/group/mode while ignoring child-list churn, and
+non-directories require exact sampled metadata. Keep `openat2`, descriptor ownership and sampling at the native
+caller; this helper cannot validate a pathname, authenticate a sample or establish workspace custody. Its
+[focused data-only controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNamedMetadataComparisonTests.cs)
+check adjacent accepted directory metadata and single-field rejection, not native filesystem behavior.
+
 The factory binds the actual executing runtime host and managed entry and measures entry/policy/diff
 bytes from the retained inventory. It freezes the protected UTC deadline once against the system
 monotonic clock, counts opening/auditing time, latches expiry, and checks the original remainder before/after each native inventory/read operation and after final hashing. `LinuxInputDeadline` is monotonic deadline data, never admission; it carries the original timestamp and allowance into those loops without resetting either. `Recheck` verifies all retained names/metadata and hashes before use. Callers join readers
@@ -2088,3 +2096,38 @@ use real ordinary file descriptors and deterministic local mutations. They do no
 [genuine Linux retained-file controls](../ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md).
 Returning bytes from this primitive alone establishes neither stable metadata nor custody; accepting a
 digest still requires every original native caller check.
+
+### Original cleanup attempts
+
+[SupervisionCleanupAttempt](SupervisionCleanupAttempt.cs) shares the root owner's existing
+recoverable-exception handling for individual close and join operations. The caller supplies its
+original operation and failure recorder; it keeps operation order, captured resources, deadlines,
+phase updates and sticky failure state. Synchronous throws and task faults reach that recorder by
+identity. Fatal runtime exceptions and recorder failures propagate. No cancellation proxy, retry,
+background task or replacement time allowance is introduced.
+
+[Cleanup-attempt controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionCleanupAttemptTests.cs)
+use actual tasks and explicit barriers to verify joining, ordering and failure propagation. These
+procedure tests establish no native owner, account deletion, physical exit or accepted-proof authority;
+the caller's existing kernel observations and final custody checks remain independently required.
+
+### Worker terminal and output comparison
+
+`LinuxWorkerSettlementPolicy.HasSuccessfulTerminalAndOutput` checks only the original natural terminal's
+exit code/status and the joined output receipt's success bit. `LinuxWorkerProcess.RequireSuccessfulCompletion`
+continues to require its retained worker lifecycle, physical settlement and sticky-failure state before this
+data comparison, then performs the original owner cleanup check. The detached
+[`LinuxWorkerCompletionFacts`](LinuxWorkerSettlementPolicy.cs) value and its
+[focused policy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerSettlementPolicyTests.cs)
+cannot establish task joins, process exit, custody or authorization on their own.
+
+
+### Application cleanup procedure
+
+[SupervisionApplicationCleanup](SupervisionApplicationCleanup.cs) preserves the private application's
+monitor cancellation, original lifetime join, current monitor join and final work-registration order.
+The monitor is sampled **after** lifetime join: startup may publish it while stop is waiting. The
+[procedure controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/README.md) use explicit task
+barriers and operation failures; they provide no native owner or physical-exit authority. The private
+[application holder](LinuxApplicationProcess.cs) keeps terminal and cgroup observations, pump joins,
+resource disposal, original deadlines and settlement publication.

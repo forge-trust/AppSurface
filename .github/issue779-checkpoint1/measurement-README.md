@@ -66,6 +66,7 @@ The closed recipes are the following existing classes in the Supervision test na
 | `N07` | [`LinuxFailedSettlementObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxFailedSettlementObservationTests.cs), [`LinuxWorkerStopTimingTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerStopTimingTests.cs), [`LinuxN07FailureSettlementTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN07FailureSettlementTests.cs) | Existing recipe |
 | `N08` | [`LinuxJoinedWorkerOutputDiagnosticTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxJoinedWorkerOutputDiagnosticTests.cs) | 17 |
 | `N10` | [`LinuxN10PendingStartCheckpointTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN10PendingStartCheckpointTests.cs) | 11 |
+| `N12` | [`LinuxN12DescendantTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN12DescendantTests.cs) | Existing portable protocol controls |
 | `N13` | [`LinuxOwnerDeathPhaseFrameTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnerDeathPhaseFrameTests.cs) with the N13 compile-owned frame, [`SupervisionAcceptedWorkFramingTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/SupervisionAcceptedWorkFramingTests.cs) | 1 frame plus existing framing controls |
 | `N14` | [`LinuxOwnerDeathPhaseFrameTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxOwnerDeathPhaseFrameTests.cs) with the N14 compile-owned frame | 1 |
 | `N16` | [`LinuxN16ProgressDiagnosticTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN16ProgressDiagnosticTests.cs), [`LinuxNegativeKernelObservationTests`](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxNegativeKernelObservationTests.cs) | Existing recipe |
@@ -77,12 +78,14 @@ itself requires the N10 qualification define. The fixed build property must matc
 runtime: changing only the VSTest filter cannot establish this binding. N13 and N14 retain their
 separate compile-owned frame assertions; neither test creates an accepted-work owner.
 
-`None`, `N06`, `N09`, `N11`, `N12` and `N15` perform no supplemental data I/O. The slot codec is
+`None`, `N06`, `N09`, `N11` and `N15` perform no supplemental data I/O. The slot codec is
 selected once under N05, and the shared joined-output diagnostic once under N08. Their existing test
 bodies cover the closed data cases without duplicating these recipes under N06 or N09. Existing
-N04/N07/N16 recipes retain their class sets. All fourteen selectors run their original genuine
-procedure in the [segmented measurement chain](measurement-chain-README.md), and each report is
-merged once with its immediate predecessor. No native procedure or clock is replaced by these tests.
+N04/N07/N16 recipes retain their class sets. N12's selected tests exercise only portable PID, launch-info,
+acknowledgement and descendant-frame data controls; they do not invoke the native child-start/hold path
+or establish hits for `StartAfterWorkerAsync`/`StartCoreAsync`, native execution, or coverage credit. All fourteen
+selectors still run their original genuine procedure in the [segmented measurement chain](measurement-chain-README.md),
+and each report is merged once with its immediate predecessor. No native procedure or clock is replaced by these tests.
 
 The internal `prepare(args, original, capture_raw, deadline=...)` API runs during bind's existing
 240-second budget. It derives the SDK from the verified original build command, restores the fixed test

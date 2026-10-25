@@ -810,7 +810,7 @@ internal sealed class EvidenceNativeObservationFailureLatch
         {
             return new(failure, progress, completedCancellationGeneration, completedResultsGid, cleanupKind);
         }
-        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         {
             return new(failure, completedCancellationGeneration, completedResultsGid, cleanupKind);
         }

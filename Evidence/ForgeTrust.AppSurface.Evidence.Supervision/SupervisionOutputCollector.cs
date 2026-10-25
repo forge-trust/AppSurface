@@ -217,7 +217,7 @@ internal sealed class SupervisionOutputCollector
             failure = SupervisionOutputFailure.Cancelled;
             state.Stop(failure);
         }
-        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         {
             failure = SupervisionOutputFailure.ReadFailed;
             state.Stop(failure);
@@ -273,7 +273,7 @@ internal sealed class SupervisionOutputCollector
             {
                 stop.Cancel();
             }
-            catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+            catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
             {
                 Volatile.Write(ref _stopSignalFailed, 1);
             }

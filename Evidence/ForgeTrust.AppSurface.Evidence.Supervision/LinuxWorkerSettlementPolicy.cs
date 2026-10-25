@@ -1,8 +1,19 @@
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
+/// <summary>Detached natural-terminal and joined-output data for the original worker completion guard.</summary>
+/// <remarks>This snapshot contains no worker, owner, lifecycle, or native completion authority.</remarks>
+internal readonly record struct LinuxWorkerCompletionFacts(
+    LinuxUnitProperties? NaturalTerminal,
+    SupervisionOutputReceipt? Output);
+
 /// <summary>Data-only worker settlement predicates; no owner, lifecycle or native authority is created.</summary>
 internal static class LinuxWorkerSettlementPolicy
 {
+    /// <summary>Matches the original successful natural terminal and successful joined output receipts.</summary>
+    internal static bool HasSuccessfulTerminalAndOutput(LinuxWorkerCompletionFacts facts) =>
+        facts.NaturalTerminal is { ExecMainCode: 1, ExecMainStatus: 0 }
+        && facts.Output is { Successful: true };
+
     /// <summary>Requires the original worker custody prefix before output or native group observations.</summary>
     internal static void RequirePrefix(bool stopJoined, bool physicallySettled, bool pendingStopJoined,
         bool pendingFailed, bool startReservationJoined, bool exitCompleted)

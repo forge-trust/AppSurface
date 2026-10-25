@@ -567,7 +567,7 @@ internal sealed class LinuxApplicationDcpIdentity : IDisposable
         LinuxProcessSample resource, IReadOnlyList<LinuxProcessSample> candidates, uint uid, uint gid, LinuxUnitName unit)
     {
         try { return FindNearestDcpAncestorCore(chain, resource, candidates, uid, gid, unit); }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         { throw Rejected(); }
     }
 

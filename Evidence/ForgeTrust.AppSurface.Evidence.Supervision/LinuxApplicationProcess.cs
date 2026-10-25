@@ -271,74 +271,69 @@ internal sealed partial class LinuxApplicationProcess
     }
     private async Task StopCoreAsync(CancellationToken token)
     {
-        var failed = false;
-        _monitorState.BeginStop();
-        try { _monitorStop.Cancel(); } catch { failed = true; }
-        try { await _lifetime.StopAndJoinAsync(StopUnitAsync, token).ConfigureAwait(false); }
-        catch { failed = true; }
-        try
-        {
-            if (_monitor is not null)
-            {
-                try { await _monitor.ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_monitorStop.IsCancellationRequested) { }
-                catch { _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed); }
-            }
-            _owner.RequireCleanup(token);
-            if (Volatile.Read(ref _dispatchAttempted) != 0)
-            {
-                if (_backend is null || _recipe is null) throw Rejected();
-                var first = await _backend.ReadUnitAsync(Unit, token).ConfigureAwait(false);
-                if (!_recipe.IsStopped(first) || !LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
-                await Task.Delay(25, token).ConfigureAwait(false);
-                var second = await _backend.ReadUnitAsync(Unit, token).ConfigureAwait(false);
-                if (!_recipe.IsStopped(second)) throw Rejected();
-                LinuxApplicationTerminalPolicy.RequireStableMain(first, second, _appHost?.Pid);
-                if (!LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
-                _stoppedTerminal = second;
-                // Nonzero/signal execution remains an unsuccessful procedure even when root containment
-                // safely joined. Do not conflate workload outcome with permission to secure its files.
-                if (second.ExecMainCode != 1 || second.ExecMainStatus != 0)
-                    _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
-            }
-            _pipes?.CloseWriteCopies();
-            if (_collect is not null)
-            {
-                _output = await _pipes!.JoinAsync().ConfigureAwait(false);
-                try { _workspace.RetainPrivateOutput(_output, token); }
-                catch (Exception diagnostic) when (diagnostic is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
-                if (!_output.Drained) throw Rejected();
-            }
-            if (_pipes is not null) await _pipes.DisposeAsync().ConfigureAwait(false);
-            _appHost?.Dispose(); _resource?.Dispose(); _dcp?.Dispose(); _monitorBackend?.Dispose(); _backend?.Dispose(); _outputDeadline?.Dispose(); _monitorStop.Dispose();
-            _owner.RequireCleanup(token);
-            if (_pending.Snapshot is not { Closed: true, StopJoined: true } || failed) throw Rejected();
-            Interlocked.Exchange(ref _settled, 1);
-            Emit(new
-            {
-                schema = "evidence-application-native-v1",
-                phase = "settled",
-                lease_id = _owner.RunId.ToString("N"),
-                unit = Unit.Value,
-                group_empty_twice = true,
-                pumps_joined = _output is null || _output.Drained,
-                received_bytes = _output?.ReceivedBytes ?? 0,
-                ledger_failure = _ledger.FirstFailure.ToString(),
-                monitor_failed = _monitorState.Failed,
-                main_code = _stoppedTerminal?.ExecMainCode,
-                main_status = _stoppedTerminal?.ExecMainStatus,
-                pending_start_joined = !_pending.Snapshot.StartReserved || _pending.Snapshot.StartJoined
-            });
-        }
-        catch { failed = true; }
-        finally
-        {
-            if (_activeUnit is not null && !_activeUnit.Complete()) failed = true;
-            if (failed) { Interlocked.Exchange(ref _failed, 1); _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed); }
-        }
-        if (failed) throw Rejected();
+        var failed = await SupervisionApplicationCleanup.RunAsync(new SupervisionApplicationCleanupActions(
+            _monitorState.BeginStop,
+            () => _monitorStop.Cancel(),
+            () => _lifetime.StopAndJoinAsync(StopUnitAsync, token),
+            () => _monitor,
+            () => _monitorStop.IsCancellationRequested,
+            () => _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed),
+            failed => StopBodyAsync(token, failed),
+            () => _activeUnit is null || _activeUnit.Complete())).ConfigureAwait(false);
+        if (!failed) return;
+        Interlocked.Exchange(ref _failed, 1);
+        _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
+        throw Rejected();
     }
 
+    private async Task StopBodyAsync(CancellationToken token, bool failed)
+    {
+        _owner.RequireCleanup(token);
+        if (Volatile.Read(ref _dispatchAttempted) != 0)
+        {
+            if (_backend is null || _recipe is null) throw Rejected();
+            var first = await _backend.ReadUnitAsync(Unit, token).ConfigureAwait(false);
+            if (!_recipe.IsStopped(first) || !LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
+            await Task.Delay(25, token).ConfigureAwait(false);
+            var second = await _backend.ReadUnitAsync(Unit, token).ConfigureAwait(false);
+            if (!_recipe.IsStopped(second)) throw Rejected();
+            LinuxApplicationTerminalPolicy.RequireStableMain(first, second, _appHost?.Pid);
+            if (!LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, token))) throw Rejected();
+            _stoppedTerminal = second;
+            // Nonzero/signal execution remains an unsuccessful procedure even when root containment
+            // safely joined. Do not conflate workload outcome with permission to secure its files.
+            if (second.ExecMainCode != 1 || second.ExecMainStatus != 0)
+                _ledger.RecordFailure(SupervisionWorkFailure.WorkloadFailed);
+        }
+        _pipes?.CloseWriteCopies();
+        if (_collect is not null)
+        {
+            _output = await _pipes!.JoinAsync().ConfigureAwait(false);
+            try { _workspace.RetainPrivateOutput(_output, token); }
+            catch (Exception diagnostic) when (SupervisionExceptionPolicy.IsRecoverable(diagnostic)) { }
+            if (!_output.Drained) throw Rejected();
+        }
+        if (_pipes is not null) await _pipes.DisposeAsync().ConfigureAwait(false);
+        _appHost?.Dispose(); _resource?.Dispose(); _dcp?.Dispose(); _monitorBackend?.Dispose(); _backend?.Dispose(); _outputDeadline?.Dispose(); _monitorStop.Dispose();
+        _owner.RequireCleanup(token);
+        if (_pending.Snapshot is not { Closed: true, StopJoined: true } || failed) throw Rejected();
+        Interlocked.Exchange(ref _settled, 1);
+        Emit(new
+        {
+            schema = "evidence-application-native-v1",
+            phase = "settled",
+            lease_id = _owner.RunId.ToString("N"),
+            unit = Unit.Value,
+            group_empty_twice = true,
+            pumps_joined = _output is null || _output.Drained,
+            received_bytes = _output?.ReceivedBytes ?? 0,
+            ledger_failure = _ledger.FirstFailure.ToString(),
+            monitor_failed = _monitorState.Failed,
+            main_code = _stoppedTerminal?.ExecMainCode,
+            main_status = _stoppedTerminal?.ExecMainStatus,
+            pending_start_joined = !_pending.Snapshot.StartReserved || _pending.Snapshot.StartJoined
+        });
+    }
     private async Task MonitorAsync()
     {
         try
@@ -359,7 +354,7 @@ internal sealed partial class LinuxApplicationProcess
             }
         }
         catch (OperationCanceledException) when (_monitorStop.IsCancellationRequested) { }
-        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         {
             if (_monitorState.RecordObservationFailure())
             {
@@ -372,7 +367,7 @@ internal sealed partial class LinuxApplicationProcess
     private static void EmitReadiness<T>(T value)
     {
         try { Emit(value); }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error)) { }
     }
 
     private static void Emit<T>(T value)
@@ -414,7 +409,7 @@ internal sealed partial class LinuxApplicationProcess
                 }
                 catch (OperationCanceledException) when (grace.IsCancellationRequested && !ct.IsCancellationRequested) { }
                 catch (Exception error) when (!ct.IsCancellationRequested
-                    && error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+                    && SupervisionExceptionPolicy.IsRecoverable(error))
                 {
                     // An unconfirmed grace observation cannot bypass physical containment. The fresh
                     // authenticated connection below must still stop/KILL and prove the final unit/group.

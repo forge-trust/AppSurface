@@ -154,6 +154,7 @@ class QualifiedSelectionControls(unittest.TestCase):
         'N05': 'LinuxSlotNegativeObservationTests',
         'N08': 'LinuxJoinedWorkerOutputDiagnosticTests',
         'N10': 'LinuxN10PendingStartCheckpointTests',
+        'N12': 'LinuxN12DescendantTests',
         'N13': 'LinuxOwnerDeathPhaseFrameTests',
         'N14': 'LinuxOwnerDeathPhaseFrameTests',
     }
@@ -202,8 +203,8 @@ class QualifiedSelectionControls(unittest.TestCase):
         self.assertFalse(prepared['native_acceptance'])
         self.assertFalse(prepared['coverage_credit'])
 
-    def test_other_six_selectors_return_before_paths_reads_copies_or_commands(self):
-        for selector in ('None', 'N06', 'N09', 'N11', 'N12', 'N15'):
+    def test_other_five_selectors_return_before_paths_reads_copies_or_commands(self):
+        for selector in ('None', 'N06', 'N09', 'N11', 'N15'):
             args = argparse.Namespace(selector=selector)
             with self.subTest(selector=selector), \
                     patch.object(subject, 'paths', side_effect=AssertionError('paths')), \

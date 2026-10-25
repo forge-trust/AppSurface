@@ -157,27 +157,20 @@ internal static partial class LinuxEmptyObservationExecution
         {
             if (owner is not null)
             {
-                try { phase = EvidenceNativeObservationPhase.CleanupBegin; owner.BeginRootTeardown(); cleanupToken = owner.RootTeardownToken; }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.CleanupBegin; owner.BeginRootTeardown(); cleanupToken = owner.RootTeardownToken; }, error => { Record(error); cleanupFailed = true; });
             }
             // Interrupt actual I/O before joining original tasks. This code runs outside every handler.
-            try { phase = EvidenceNativeObservationPhase.ServerCancel; serverLifetime?.Cancel(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.ServerCancel; serverLifetime?.Cancel(); }, error => { Record(error); cleanupFailed = true; });
             if (listener is not null)
-                try { phase = EvidenceNativeObservationPhase.ListenerClose; await listener.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.ListenerClose; await listener.DisposeAsync().ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
             if (serverTask is not null)
-                try { phase = EvidenceNativeObservationPhase.ServerJoin; await serverTask.ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); failed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.ServerJoin; await serverTask.ConfigureAwait(false); }, error => { Record(error); failed = true; }).ConfigureAwait(false);
             if (worker is not null)
-                try { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.WorkerJoin; await worker.StopAndJoinAsync().ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
             if (applicationWorkspace is not null && owner is not null && accounts is not null)
-                try { await applicationWorkspace.SealForCleanupAsync(owner, accounts, cleanupToken).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { await applicationWorkspace.SealForCleanupAsync(owner, accounts, cleanupToken).ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
             if (producerWorkspace is not null && owner is not null && accounts is not null)
-                try { await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { await producerWorkspace.SealForCleanup(owner, accounts, cleanupToken).ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
             if ((failed || cleanupFailed) && producerWorkspace is not null && input is not null && owner is not null && worker is not null)
                 try
                 {
@@ -223,25 +216,17 @@ internal static partial class LinuxEmptyObservationExecution
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
-                try { phase = EvidenceNativeObservationPhase.AccountsClose; await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.AccountsClose; await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
             // Transfer already closes original owners. Rejoining their same tasks is harmless and ensures
             // earlier setup failures also attempt every local close, without bypassing account custody.
             if (worker is not null)
-                try { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { applicationWorkspace?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { producerWorkspace?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { outputStop.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { runOutput?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { applicationWorkspace?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { producerWorkspace?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { outputStop.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { runOutput?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.WorkspaceClose; workspace?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             if (owner is not null)
                 try
                 {
@@ -252,23 +237,17 @@ internal static partial class LinuxEmptyObservationExecution
                     finalCloseAllowance = owner.CleanupRemaining;
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.ServerLifetimeClose; serverLifetime?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.JobClose; job?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.OwnerClose; owner?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.InputClose; input?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
-            try { phase = EvidenceNativeObservationPhase.BackendClose; backend?.Dispose(); }
-            catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.ServerLifetimeClose; serverLifetime?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.JobClose; job?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.OwnerClose; owner?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.InputClose; input?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.BackendClose; backend?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             // Native owners are now closed, so bind the final publication check to the remaining
             // monotonic interval captured immediately before their closes; no new allowance is created.
             // Disposing the owner deliberately cancels borrowers; that expected cancellation is not
             // evidence of expiry. Check only the independent captured interval after those closes.
             if (owner is not null)
-                try { phase = EvidenceNativeObservationPhase.FinalDeadline; RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }
-                catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+                SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.FinalDeadline; RequireFinalClose(TimeProvider.System, finalCloseStarted, finalCloseAllowance); }, error => { Record(error); cleanupFailed = true; });
         }
         qualification.ThrowCleanupFailure(cleanupFailed);
         token.ThrowIfCancellationRequested();

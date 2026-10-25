@@ -299,8 +299,7 @@ internal sealed class LinuxProducerProcess
                 groupEmptyTwice: Volatile.Read(ref _groupEmptyTwice) != 0,
                 pumpJoined: Volatile.Read(ref _pumpJoined) != 0,
                 capturedPid: _process?.Pid, lastStop: _lastStopObservation); }
-            catch (Exception diagnosticError) when (diagnosticError is not OutOfMemoryException
-                and not StackOverflowException and not AccessViolationException) { }
+            catch (Exception diagnosticError) when (SupervisionExceptionPolicy.IsRecoverable(diagnosticError)) { }
         }
         if (failed)
         {

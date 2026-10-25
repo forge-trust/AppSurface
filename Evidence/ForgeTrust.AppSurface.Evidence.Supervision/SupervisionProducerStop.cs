@@ -41,7 +41,7 @@ internal static class SupervisionProducerStop
                 cooperative = true;
             }
             catch (Exception error) when (!token.IsCancellationRequested
-                && error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+                && SupervisionExceptionPolicy.IsRecoverable(error))
             {
                 // A missing/error/canceled observation cannot establish a cooperative stop. The
                 // original force operation must join; any force failure remains a failure.

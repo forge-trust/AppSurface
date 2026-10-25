@@ -126,7 +126,7 @@ internal sealed class SupervisionControlSequence
         Task stop;
         lock (_gate) stop = _stop ?? throw Rejected();
         try { await stop.ConfigureAwait(false); }
-        catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         {
             // The actual task has settled. Observe its failure without turning it into a positive
             // join assertion, and retain cleanup's existing negative WAIT response path.

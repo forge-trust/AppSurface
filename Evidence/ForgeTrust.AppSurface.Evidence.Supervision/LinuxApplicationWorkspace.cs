@@ -758,7 +758,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
                 using var stream = Console.OpenStandardError();
                 stream.Write(bytes); stream.Write("\n"u8); stream.Flush();
             }
-            catch (Exception diagnostic) when (diagnostic is not OutOfMemoryException and not StackOverflowException and not AccessViolationException) { }
+            catch (Exception diagnostic) when (SupervisionExceptionPolicy.IsRecoverable(diagnostic)) { }
             throw LinuxApplicationWorkspaceLayout.Invalid();
         }
         _scratchMounted = false;
@@ -974,7 +974,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
             if (!reader.HasMetadata || reader.PEHeaders.CorHeader is null) throw LinuxApplicationWorkspaceLayout.Invalid();
             _ = reader.GetMetadata().GetContent();
         }
-        catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
+        catch (Exception error) when (SupervisionExceptionPolicy.IsRecoverable(error))
         { throw LinuxApplicationWorkspaceLayout.Invalid(); }
     }
 
@@ -1183,7 +1183,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     {
         using var named = OpenAt2(Fd(parent), name, PathFlags, 0, allowMount ? ParentResolution : ChildResolution);
         var actual = LinuxProtectedMetadata.From(StatFd(named));
-        if ((expected.Mode & 0xf000) == 0x4000 ? !actual.SameAncestorAs(expected) : actual != expected)
+        if (!LinuxNamedMetadataComparison.Matches(actual, expected))
             throw LinuxApplicationWorkspaceLayout.Invalid();
     }
 

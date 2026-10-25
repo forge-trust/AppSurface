@@ -25,6 +25,7 @@ CLASSES = {
     'N07': ('LinuxFailedSettlementObservationTests', 'LinuxWorkerStopTimingTests', 'LinuxN07FailureSettlementTests'),
     'N08': ('LinuxJoinedWorkerOutputDiagnosticTests',),
     'N10': ('LinuxN10PendingStartCheckpointTests',),
+    'N12': ('LinuxN12DescendantTests',),
     'N13': ('LinuxOwnerDeathPhaseFrameTests', 'SupervisionAcceptedWorkFramingTests'),
     'N14': ('LinuxOwnerDeathPhaseFrameTests',),
     'N16': ('LinuxN16ProgressDiagnosticTests', 'LinuxNegativeKernelObservationTests'),
