@@ -817,6 +817,163 @@ public sealed class SupervisionApplicationLifetimeTests
         Assert.True(lifetime.Failed);
     }
 
+    [Fact]
+    public void NullSharedLedgerIsRejectedBeforeCoordinatorCreation()
+    {
+        Assert.Throws<ArgumentNullException>(() => new SupervisionApplicationLifetime(null!));
+    }
+
+    [Fact]
+    public async Task StartProcedureRejectsReentrantLifecycleCallsBeforeNestedReservation()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        var nestedStartCalls = 0;
+        var nestedReadinessCalls = 0;
+        var nestedStopCalls = 0;
+        var nestedDisposerCalls = 0;
+
+        await lifetime.StartAsync(startToken =>
+        {
+            Assert.Equal(1, ledger.ActiveWorkloads);
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.StartAsync(__ =>
+                {
+                    nestedStartCalls++;
+                    return Task.FromResult(true);
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.WaitResourceAsync("nested-start", __ =>
+                {
+                    nestedReadinessCalls++;
+                    return Task.FromResult(true);
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.StopAndJoinAsync(__ =>
+                {
+                    nestedStopCalls++;
+                    return Task.CompletedTask;
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() => lifetime.RegisterDisposer(__ =>
+            {
+                nestedDisposerCalls++;
+                return Task.CompletedTask;
+            }));
+            Assert.Equal(1, ledger.ActiveWorkloads);
+            return Task.FromResult("started");
+        }, default).WaitAsync(Guard);
+
+        Assert.Equal(0, nestedStartCalls + nestedReadinessCalls + nestedStopCalls + nestedDisposerCalls);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Joined);
+        Assert.False(lifetime.Failed);
+    }
+
+    [Fact]
+    public async Task ReadinessProcedureRejectsReentrantLifecycleCallsBeforeNestedReservation()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        var nestedStartCalls = 0;
+        var nestedReadinessCalls = 0;
+        var nestedStopCalls = 0;
+        var nestedDisposerCalls = 0;
+
+        await lifetime.WaitResourceAsync("ready", readinessToken =>
+        {
+            Assert.Equal(1, ledger.ActiveWorkloads);
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.StartAsync(__ =>
+                {
+                    nestedStartCalls++;
+                    return Task.FromResult(true);
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.WaitResourceAsync("nested-ready", __ =>
+                {
+                    nestedReadinessCalls++;
+                    return Task.FromResult(true);
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() =>
+            {
+                _ = lifetime.StopAndJoinAsync(__ =>
+                {
+                    nestedStopCalls++;
+                    return Task.CompletedTask;
+                }, default);
+            });
+            Assert.Throws<EvidenceAdmissionException>(() => lifetime.RegisterDisposer(__ =>
+            {
+                nestedDisposerCalls++;
+                return Task.CompletedTask;
+            }));
+            Assert.Equal(1, ledger.ActiveWorkloads);
+            return Task.FromResult(true);
+        }, default).WaitAsync(Guard);
+
+        Assert.Equal(0, nestedStartCalls + nestedReadinessCalls + nestedStopCalls + nestedDisposerCalls);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Joined);
+        Assert.False(lifetime.Failed);
+    }
+
+    [Fact]
+    public async Task NullReadinessDelegateReleasesItsRealRegistryReservationAndLatchesOperationFailure()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+
+        var readiness = lifetime.WaitResourceAsync<bool>("missing-callback", null!, default);
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() => readiness.WaitAsync(Guard));
+
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.True(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+        await lifetime.StopAndJoinAsync(_ => Task.CompletedTask, default).WaitAsync(Guard);
+        Assert.True(lifetime.Joined);
+        Assert.True(lifetime.Failed);
+    }
+
+    [Fact]
+    public async Task NullDisposerDelegateIsRejectedWithoutRegistrationOrCleanupFailure()
+    {
+        var ledger = new SupervisionWorkRegistry();
+        var lifetime = new SupervisionApplicationLifetime(ledger);
+        Assert.Throws<ArgumentNullException>(() => lifetime.RegisterDisposer(null!));
+
+        await lifetime.StartAsync(_ => Task.FromResult("started"), default).WaitAsync(Guard);
+        var stopCalls = 0;
+        await lifetime.StopAndJoinAsync(_ =>
+        {
+            stopCalls++;
+            return Task.CompletedTask;
+        }, default).WaitAsync(Guard);
+
+        Assert.Equal(1, stopCalls);
+        Assert.True(lifetime.Joined);
+        Assert.False(lifetime.Failed);
+        Assert.Equal(0, ledger.ActiveWorkloads);
+        Assert.Equal(SupervisionWorkFailure.None, ledger.FirstFailure);
+    }
+
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static async Task IgnoreCleanupFailure(Task task)
