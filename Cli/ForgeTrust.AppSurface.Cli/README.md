@@ -1460,6 +1460,51 @@ Migration map for repo-owned AppSurface Docs export:
 | `AppSurfaceDocs__Routing__PublicOrigin=https://docs.example.com` | `--public-origin https://docs.example.com` |
 | `--project`, `--dll`, `--url`, `--app-args`, `--no-build`, `--framework` | use `appsurface export` for arbitrary app export |
 
+### `appsurface deployment gcp-cloud-run observe-execution`
+
+Use this command to inspect one caller-selected Cloud Run Job execution against a published AppSurface bundle. It is read-only and never submits, cancels, retries, or mutates a Job. The bundle directory contains exactly `deployment-intent.v1.json`, `gcp-cloud-run-migration.tf.json`, and `gcp-cloud-run-migration.plan.json`, plus the optional ownership marker. Each artifact is bounded to 4 MiB and validated before `gcloud` starts.
+
+```sh
+appsurface deployment gcp-cloud-run observe-execution \
+  --bundle-dir ./artifacts/schema-preparation \
+  --job schema-preparation \
+  --execution projects/my-project/locations/us-central1/jobs/schema-preparation/executions/exec-20261024 \
+  --timeout 60s --poll-interval 2s --json
+```
+
+`--bundle-dir`, `--job`, and `--execution` are required. The execution must be the complete canonical resource `projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`. The project is matched against the configured project ID or explicitly configured project number; no ID/number inference or alias lookup occurs. `--timeout` defaults to `60s`; `--poll-interval` defaults to `2s`. The API contract itself has no duration defaults.
+
+With `--json`, stdout receives exactly one versioned object containing only `schemaVersion: "1.0"`, `logicalJobId`, `executionResourceName`, `state`, `configurationMatched`, RFC 3339 UTC `observedAt`, and `diagnosticCode`. It has no raw provider JSON, stderr, command arguments, secret/environment values, credentials, provider messages, or exception text. On caller cancellation the command attempts one safe `Unknown`/false envelope only before any output failure; after the first stdout write/flush failure it suppresses further writes and returns 130 even when the envelope cannot be delivered. Ordinary output failure is `ASDEPLOY188` and returns 2; unexpected internal failure is `ASDEPLOY189` and returns safe `Unknown`. Text-mode failures write only fixed safe problem/cause/fix/recovery guidance and the canonical reference link to stderr.
+
+| Exit | Meaning | Caller action |
+| ---: | --- | --- |
+| 0 | Matching configuration and terminal success. | Continue caller-owned acceptance. |
+| 1 | Matching configuration with workload failure or remote cancellation. | Apply caller-owned recovery; no automatic retry. |
+| 2 | Invalid input, unknown evidence, mismatch, provider/read/output/cleanup failure. | Correct or investigate; no stale-state promotion. |
+| 3 | Last matching `Running` evidence at a clean deadline. | Decide whether to issue a new observation. |
+| 130 | Caller cancellation. | Resume only under caller control. |
+
+For an offline quickstart, use the neutral `schema-preparation` and `catalog-refresh` fixtures to exercise identity, configuration, state, and swapped-execution rejection. A separately authorized provider read, if performed, uses the caller's existing `gcloud`, credentials, and `PATH`; this guide makes no live-read or compatibility claim. CI may pass environment variable names through its own secret mechanism, but values must not be placed in the bundle or output. The v1 shape proves gen2 configuration and implicit Cloud SQL socket annotation; v2 proves typed Cloud SQL volume attachment and the `/cloudsql` mount. Neither proves filesystem permissions, IAM effectiveness, database reachability, or application acceptance. See the [Cloud Run package reference](../../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md#exact-cloud-run-execution-observation) and [adoption recipe](../../Deployment/adoption.md#observe-an-existing-execution).
+
+See the [two neutral execution consumers example](../../examples/cloud-run-execution-consumers/README.md) for an offline contract walkthrough.
+
+POSIX CI can capture and branch on all five exits without automatic retry, submission, or cancellation:
+
+```sh
+set +e
+appsurface deployment gcp-cloud-run observe-execution --bundle-dir "$BUNDLE_DIR" --job "$JOB_ID" --execution "$EXECUTION_RESOURCE" --timeout 60s --poll-interval 2s --json
+status=$?
+set -e
+case "$status" in
+  0) echo "execution matched and succeeded" ;;
+  1) echo "execution matched but failed or was remotely cancelled"; exit 1 ;;
+  2) echo "observation was unknown or invalid"; exit 2 ;;
+  3) echo "execution is still running at the observation deadline"; exit 3 ;;
+  130) echo "observation was cancelled by the caller"; exit 130 ;;
+  *) echo "unexpected observation exit"; exit 2 ;;
+esac
+```
+
 ## Development
 
 Run the tool from source while developing:

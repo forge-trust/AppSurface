@@ -4867,6 +4867,10 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
                 "dotnet new tool-manifest",
                 "dotnet tool install",
                 "appsurface --version",
+                "appsurface deployment gcp-cloud-run observe-execution --help",
+                "dotnet restore Cloud Run API consumer",
+                "dotnet build Cloud Run API consumer",
+                "dotnet run Cloud Run API consumer",
                 "appsurface release compose preview",
                 "appsurface release compose apply",
                 "appsurface canary poll --help",
@@ -4881,7 +4885,7 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
                 "appsurface coverage gate"
             ],
             commandRunner.Requests
-                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface release compose preview" or "appsurface release compose apply" or "appsurface canary poll --help" or "appsurface canary poll pass" or "appsurface canary poll non-pass" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate" or "appsurface coverage gate patch targets" or "appsurface coverage gate patch-target cleanup")
+                .Where(request => request.OperationName is "dotnet new tool-manifest" or "dotnet tool install" or "appsurface --version" or "appsurface deployment gcp-cloud-run observe-execution --help" or "dotnet restore Cloud Run API consumer" or "dotnet build Cloud Run API consumer" or "dotnet run Cloud Run API consumer" or "appsurface release compose preview" or "appsurface release compose apply" or "appsurface canary poll --help" or "appsurface canary poll pass" or "appsurface canary poll non-pass" or "appsurface coverage run" or "appsurface coverage run msbuild" or "appsurface coverage merge" or "appsurface coverage gate" or "appsurface coverage gate patch targets" or "appsurface coverage gate patch-target cleanup")
                 .Select(request => request.OperationName)
                 .ToArray());
         var coverageRunRequest = Assert.Single(commandRunner.Requests, request => request.OperationName == "appsurface coverage run");
@@ -10438,6 +10442,16 @@ public sealed partial class PackageArtifactValidationTests : IDisposable
             if (request.OperationName == "appsurface --version")
             {
                 return Task.FromResult(new ExternalCommandResult(0, _reportedPackageVersion, string.Empty));
+            }
+
+            if (request.OperationName == "appsurface deployment gcp-cloud-run observe-execution --help")
+            {
+                return Task.FromResult(new ExternalCommandResult(0, "USAGE --bundle-dir <directory> --execution <resource> --poll-interval <duration>", string.Empty));
+            }
+
+            if (request.OperationName == "dotnet run Cloud Run API consumer")
+            {
+                return Task.FromResult(new ExternalCommandResult(0, "GcpCloudRunExecutionObserver:ConsumerReader", string.Empty));
             }
 
             if (request.OperationName == "appsurface release compose preview")

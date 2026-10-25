@@ -1,0 +1,178 @@
+{
+  "schemaVersion": "cloud-run-execution-worksheet/1",
+  "logicalJobId": "catalog-refresh",
+  "expectedBundle": {
+    "projectId": "demo-project",
+    "projectNumber": "123456789012",
+    "region": "us-central1",
+    "physicalJobId": "catalog-refresh",
+    "executionId": "catalog-refresh-run",
+    "image": "us-docker.pkg.dev/demo-project/migrations/catalog-refresh@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "command": [
+      "dotnet"
+    ],
+    "args": [
+      "migrate"
+    ],
+    "env": [
+      {
+        "name": "MODE",
+        "value": "safe"
+      },
+      {
+        "name": "CONNECTIONSTRINGS_DATABASE",
+        "secret": "db-connection/latest"
+      }
+    ],
+    "serviceAccount": "migration@demo-project.iam.gserviceaccount.com",
+    "network": "projects/demo-project/global/networks/private",
+    "subnetwork": "projects/demo-project/regions/us-central1/subnetworks/private",
+    "egress": "all-traffic",
+    "cloudSql": "demo-project:us-central1:database",
+    "executionEnvironment": "gen2",
+    "taskCount": 1,
+    "parallelism": 1,
+    "maxRetries": 0,
+    "timeoutSeconds": 60,
+    "artifactHashes": {
+      "deployment-intent.v1.json": "ae65a7c2e412ebde8f52353cab5fdef2d17034ae103336cca686a1709ecc7450",
+      "gcp-cloud-run-migration.plan.json": "3b029d1157c1a20e99a6b64ee708f47756f86bbff2826d5a523c63483fcffd43",
+      "gcp-cloud-run-migration.tf.json": "2b9d17d038560ca1f5daaab0a976a96f1347746e9089d159526420b07643d997"
+    }
+  },
+  "tool": {
+    "name": "gcloud",
+    "version": "576.0.0",
+    "os": "Darwin",
+    "launcher": "/opt/homebrew/bin/gcloud",
+    "argv": [
+      "gcloud",
+      "run",
+      "jobs",
+      "executions",
+      "describe",
+      "projects/demo-project/locations/us-central1/jobs/catalog-refresh/executions/catalog-refresh-run",
+      "--project",
+      "demo-project",
+      "--region",
+      "us-central1",
+      "--format=json",
+      "--quiet"
+    ],
+    "outputShape": "v1 Execution JSON; offline fixture replay; no provider read"
+  },
+  "provenance": {
+    "documentSources": [
+      "https://docs.cloud.google.com/run/docs/reference/rest/v1/namespaces.executions",
+      "https://docs.cloud.google.com/sql/docs/postgres/connect-run#connect_with_unix_sockets"
+    ],
+    "fixtureKind": "independently-authored-neutral-synthetic",
+    "sanitization": "All identifiers, hashes, timestamps and UUIDs are synthetic; values are documentation-derived or transformed neutral expectations.",
+    "providerReadRan": false,
+    "recoveredShape": "Numeric namespace, location/job labels, gen2 and Cloud SQL/network annotations, one container, no explicit volumes or mounts, explicit retry/timeout/service-account fields.",
+    "docsDerived": [
+      "v1 Cloud SQL annotation supplies the documented single-container /cloudsql projection; no explicit v1 CloudSQL volume is claimed.",
+      "For this fixed v1 adapter, all five nonnullable ExecutionStatus counters admit omitted-as-zero: the official generated Go v1 client declares each as int64 with omitempty, and the gcloud SDK treats absent integer status values as zero. This is adapter-scoped and does not apply to null, negative, overflow, or unknown shapes."
+    ]
+  },
+  "positiveFixture": {
+    "path": "execution.json",
+    "sha256": "791deef5e6cd0fd87e52fb762ffb00008a4efc320024aa6b2610bb918bb08069",
+    "expectedClassification": "configuration-match-succeeded"
+  },
+  "negativeFixture": {
+    "path": "../negative/catalog-refresh-swapped-execution.json",
+    "sha256": "4ae5b8af5d02937401c090bb4108d7fb1f3a811715163c2da968377dece57a78",
+    "expectedClassification": "Unknown"
+  },
+  "fields": [
+    {
+      "pointer": "/metadata/namespace",
+      "fact": "123456789012",
+      "rule": "R",
+      "citation": "declared project number"
+    },
+    {
+      "pointer": "/metadata/labels/cloud.googleapis.com~1location",
+      "fact": "us-central1",
+      "rule": "R",
+      "citation": "identity amendment"
+    },
+    {
+      "pointer": "/metadata/labels/run.googleapis.com~1job",
+      "fact": "catalog-refresh",
+      "rule": "R",
+      "citation": "identity amendment"
+    },
+    {
+      "pointer": "/metadata/uid",
+      "fact": "present; synthetic",
+      "rule": "R",
+      "citation": "v1 Execution metadata"
+    },
+    {
+      "pointer": "/metadata/generation and /status/observedGeneration",
+      "fact": "9 == 9",
+      "rule": "R",
+      "citation": "current-generation requirement"
+    },
+    {
+      "pointer": "/metadata/annotations",
+      "fact": "Cloud SQL, network, subnet, all-traffic, gen2",
+      "rule": "R",
+      "citation": "v1 execution annotations"
+    },
+    {
+      "pointer": "/spec/template/spec/containers/0",
+      "fact": "single container; no volumes or mounts",
+      "rule": "R",
+      "citation": "implicit v1 Cloud SQL representation"
+    },
+    {
+      "pointer": "/spec/template/spec/containers/0/env",
+      "fact": "MODE plus db-connection/latest secret",
+      "rule": "R",
+      "citation": "complete environment inventory"
+    },
+    {
+      "pointer": "/spec/taskCount and /spec/parallelism",
+      "fact": "1 and 1",
+      "rule": "R",
+      "citation": "v1 Execution spec"
+    },
+    {
+      "pointer": "/spec/template/spec/maxRetries and /timeoutSeconds",
+      "fact": "0 and 60",
+      "rule": "R",
+      "citation": "explicit operational settings"
+    },
+    {
+      "pointer": "/status/conditions and /completionTime",
+      "fact": "Completed=True; present",
+      "rule": "R",
+      "citation": "terminal state"
+    },
+    {
+      "pointer": "/status/succeededCount",
+      "fact": "1",
+      "rule": "R",
+      "citation": "v1 ExecutionStatus succeededCount"
+    },
+    {
+      "pointer": "/status/failedCount, /status/runningCount, /status/cancelledCount, /status/retriedCount",
+      "fact": "all five counters omitted; SDK/provider default interpretation is zero for this fixed v1 adapter",
+      "rule": "D",
+      "citation": "Google generated Go v1 ExecutionStatus int64 fields with omitempty; installed gcloud counter handling; exact v1 adapter contract"
+    }
+  ],
+  "review": {
+    "implementingOwner": "unassigned",
+    "acceptingMaintainer": "unassigned",
+    "date": "2026-10-24",
+    "disposition": "pending-maintainer-acceptance",
+    "unresolvedFacts": [
+      "No provider read; gcloud version is local candidate only.",
+      "v1 implicit socket projection is docs-derived, not a socket-connectivity claim."
+    ]
+  }
+}

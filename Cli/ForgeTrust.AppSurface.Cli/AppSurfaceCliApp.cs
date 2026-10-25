@@ -6,6 +6,7 @@ using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Config.GoogleSecretManager;
 using ForgeTrust.AppSurface.Console;
 using ForgeTrust.AppSurface.Core;
+using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 using ForgeTrust.AppSurface.Evidence.Cli;
 using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Evidence.Planner;
@@ -73,6 +74,12 @@ internal static class AppSurfaceCliApp
             return;
         }
 
+        if (CloudRunExecutionArgumentAdmission.IsMalformedRaw(args))
+        {
+            await WriteCloudRunAdmissionFailureAsync(options, args.Contains("--json", StringComparer.Ordinal)).ConfigureAwait(false);
+            return;
+        }
+
         var normalizedArguments = CoverageRunArgumentBinding.Normalize(args);
         var cliArguments = doctorAdmission.IsDoctor
             ? DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(normalizedArguments.Arguments)
@@ -101,6 +108,8 @@ internal static class AppSurfaceCliApp
         AddPwaVerifierServices(services);
         services.AddTransient<PwaVerifier>();
         services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<IGcpCloudRunExecutionObserver>(_ => GcpCloudRunExecutionObserver.Create());
+        services.AddTransient<CloudRunExecutionWorkflow>();
         AddCanaryPollingServices(services);
         services.AddTransient<CanaryPollWorkflow>();
         AddCoverageServices(services);
@@ -151,6 +160,31 @@ internal static class AppSurfaceCliApp
         {
             CommandService.PrimaryServiceProvider = previousServiceProvider;
             CoverageTestArgumentValues.Value = previousTestArgumentValues;
+        }
+    }
+
+    private static async Task WriteCloudRunAdmissionFailureAsync(ConsoleOptions options, bool json)
+    {
+        try
+        {
+            var services = new ServiceCollection();
+            services.AddLogging();
+            foreach (var customRegistration in options.CustomRegistrations) customRegistration(services);
+            await using var provider = services.BuildServiceProvider();
+            var configured = provider.GetService<IConsole>();
+            if (configured is not null)
+                Environment.ExitCode = await DeliverAsync(configured).ConfigureAwait(false);
+            else
+            {
+                using var console = new SystemConsole();
+                Environment.ExitCode = await DeliverAsync(console).ConfigureAwait(false);
+            }
+            Task<int> DeliverAsync(IConsole console) => new CloudRunExecutionOutput(console.Output, console.Error, json)
+                .DeliverAsync(CloudRunExecutionWorkflowResult.Invalid(), console.RegisterCancellationHandler());
+        }
+        catch (Exception exception) when (IsNonfatal(exception))
+        {
+            Environment.ExitCode = 2;
         }
     }
 

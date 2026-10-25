@@ -26,9 +26,22 @@ public sealed record GcpCloudRunBindingProfile(
     IReadOnlyDictionary<string, GcpCloudRunSecretBinding> Secrets)
 {
     private static readonly TimeSpan PatternMatchTimeout = TimeSpan.FromSeconds(1);
+    private string? _projectNumber;
 
     /// <summary>Gets the only schema version supported by this package.</summary>
     public const string SupportedSchemaVersion = "1.0";
+
+    /// <summary>Gets or initializes the optional canonical positive Google Cloud project number.</summary>
+    /// <remarks>The value is decimal, positive, within signed 64-bit range, and has no leading zeroes.</remarks>
+    public string? ProjectNumber
+    {
+        get => _projectNumber;
+        init
+        {
+            if (value is not null) ValidateProjectNumber(value);
+            _projectNumber = value;
+        }
+    }
 
     /// <summary>Loads and strictly validates a profile without resolving any secret value.</summary>
     /// <param name="path">Path to a regular JSON file. The file and every ancestor to the filesystem root must not be symbolic links or reparse points, except the standard macOS <c>/var</c>, <c>/tmp</c>, and <c>/etc</c> aliases.</param>
@@ -75,7 +88,7 @@ public sealed record GcpCloudRunBindingProfile(
         {
             var root = RequireObject(document.RootElement, "$", "ASDEPLOY132");
             RejectSecretShapedProperties(root, "$");
-            RejectUnknown(root, "$", "schemaVersion", "environment", "project", "region", "jobs", "cloudSqlInstanceConnectionName", "network", "serviceAccounts", "secrets");
+            RejectUnknown(root, "$", "schemaVersion", "environment", "project", "projectNumber", "region", "jobs", "cloudSqlInstanceConnectionName", "network", "serviceAccounts", "secrets");
             var schema = RequiredString(root, "schemaVersion", "$");
             if (!string.Equals(schema, SupportedSchemaVersion, StringComparison.Ordinal))
             {
@@ -89,6 +102,10 @@ public sealed record GcpCloudRunBindingProfile(
             }
 
             var project = RequiredString(root, "project", "$");
+            var projectNumber = root.TryGetProperty("projectNumber", out var projectNumberElement)
+                ? RequiredString(root, "projectNumber", "$")
+                : null;
+            if (projectNumber is not null) ValidateProjectNumber(projectNumber);
             var region = RequiredString(root, "region", "$");
             ValidateProjectId(project, "project");
             ValidateRegion(region, "region");
@@ -130,7 +147,10 @@ public sealed record GcpCloudRunBindingProfile(
                 secrets.Add(property.Name, new GcpCloudRunSecretBinding(secretId, mode));
             }
 
-            return new GcpCloudRunBindingProfile(environment, project, region, ReadOnly(jobs), cloudSql, network, ReadOnly(serviceAccounts), new ReadOnlyDictionary<string, GcpCloudRunSecretBinding>(secrets));
+            return new GcpCloudRunBindingProfile(environment, project, region, ReadOnly(jobs), cloudSql, network, ReadOnly(serviceAccounts), new ReadOnlyDictionary<string, GcpCloudRunSecretBinding>(secrets))
+            {
+                ProjectNumber = projectNumber,
+            };
         }
     }
 
@@ -237,6 +257,15 @@ public sealed record GcpCloudRunBindingProfile(
     }
 
     private static void ValidateProjectId(string value, string field) => ValidatePattern(value, field, "^[a-z][a-z0-9-]{4,28}[a-z0-9]$", "a 6-30 character lowercase Google Cloud project id");
+
+    private static void ValidateProjectNumber(string value)
+    {
+        if (!Regex.IsMatch(value, "^[1-9][0-9]*$", RegexOptions.CultureInvariant, PatternMatchTimeout) ||
+            !long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) || number <= 0)
+        {
+            throw Failure("ASDEPLOY170", "GCP project number is malformed.", "The project number must be a positive signed 64-bit decimal without leading zeroes.", "Use the canonical numeric project number.");
+        }
+    }
 
     private static void ValidateRegion(string value, string field) => ValidatePattern(value, field, "^[a-z]+(?:-[a-z0-9]+)+[0-9]$", "a canonical Google Cloud region such as us-central1");
 

@@ -52,3 +52,64 @@ Shadow parity compares operational configuration while the legacy deployment com
 Cloud Run runtime names (`CLOUD_RUN_*`, `K_*`, and `PORT`) and `GOOGLE_APPLICATION_CREDENTIALS` cannot be declared as application settings. Use the runtime metadata as supplied and the explicit service identity for Google API access.
 
 Owned parity additionally requires canonical environment and source-revision labels after state import and writer cutover. Effective inherited or custom IAM remains `not-independently-verified`; a public `allUsers` or `allAuthenticatedUsers` Job principal is always a failure.
+
+## Exact Cloud Run execution observation
+
+The GCP execution observer consumes the same immutable `DeploymentRenderResult` produced by the three-artifact render contract. Callers construct artifacts with `DeploymentArtifact.Create(fileName, bytes)` and pass the complete result to `CloudRunExecutionObservationRequest`; the package intentionally does not add a public bundle loader. The CLI is the trusted-bundle loader: it admits exactly the three canonical files and optional ownership marker, rejects symlinks/reparse points and unexpected entries, and enforces a 4 MiB limit per artifact.
+
+Use `GcpCloudRunExecutionObserver.Create()` for production. Tests and hosts that need deterministic time inject `IBoundedGcloudExecutionReader` and `TimeProvider` through `new GcpCloudRunExecutionObserver(reader, timeProvider)`. The bounded reader exposes complete output, nonzero exit, tool unavailable, output limit, invalid encoding, deadline, read failure, and cleanup-unconfirmed outcomes. No unbounded runner fallback exists.
+
+The request requires a logical Job id, a canonical full execution resource (`projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`), and finite positive timeout/interval values with interval no greater than timeout. The observer matches a project ID or explicitly configured project number literally; it never resolves aliases or infers equivalence. It never selects latest, lists executions, uses a name prefix, reads today's Job to fill gaps, submits/cancels/retries work, or changes cloud state. The request's timeout is one monotonic budget covering validation, reads, polling, and cleanup. The caller owns submission correlation, acceptance, recovery, and any later retry.
+
+`GcpCloudRunBindingProfile` retains its existing positional constructor and adds `ProjectNumber` only as an optional non-positional `init` property. When present it is a canonical positive decimal project number; when absent, only the configured project ID is admitted. This additive shape preserves existing source construction while allowing exact ID-or-number resource matching. Google documents project-number resource naming in the [Cloud Run execution resource schema](https://cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs.executions).
+
+`CloudRunExecutionObservation` is deliberately small: logical id, selected resource, `CloudRunExecutionState`, `ConfigurationMatched`, UTC `ObservedAt`, and fixed diagnostic code. Its versioned CLI JSON is exactly:
+
+```json
+{"schemaVersion":"1.0","logicalJobId":"schema-preparation","executionResourceName":"projects/my-project/locations/us-central1/jobs/schema-preparation/executions/exec-20261024","state":"Succeeded","configurationMatched":true,"observedAt":"2026-10-24T15:04:05.0000000+00:00","diagnosticCode":"ASDEPLOY183"}
+```
+
+It has no rich provider fields, raw JSON, stderr, command arguments, secret/environment values, credentials, provider free text, or exception text. `ConfigurationMatched` is true only after all required captured fields match. A provider read failure is `Unknown`; it cannot be promoted from an earlier `Running` response. Caller cancellation is propagated by the API and maps to CLI exit 130.
+
+### Evidence shape and Cloud SQL proof
+
+The v1 admitted evidence is one gen2 container with the execution identity, UID, current execution generation, complete environment inventory, task settings, conditions, counters, network annotations, and the `run.googleapis.com/cloudsql-instances` annotation. That annotation represents the implicit Cloud SQL socket configuration for v1. The v1 contract intentionally has no explicit volume/mount inventory: it proves declared attachment/configuration only; filesystem permissions, IAM, socket creation, database reachability, and application use remain outside this observer. Any additional v1 volumes or mounts are unsupported evidence and return `Unknown`.
+
+The v2 admitted evidence has typed Cloud SQL volume `cloudSqlInstance.instances` and a matching container mount at `/cloudsql`. It proves the typed attachment and socket projection. Both shapes compare immutable digest image, command, ordered arguments, complete environment and secret reference/version, task count, parallelism, retries, timeout, service identity, network/subnetwork/egress, execution UID, same-execution generation, overall condition, completion marker, and counters. Missing R facts, unproven D defaults, contradictory fields, stale generation, changed UID, or unexplained execution-affecting additions return `Unknown`.
+
+v1/v2 are candidate shapes until the exact gcloud version, OS/launcher, argument vector, output identifier, fixture paths/hashes, and maintainer acceptance appear in `Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun.Tests/Fixtures/ExecutionEvidence/v1/compatibility.json`. Documentation fixtures prove parser behavior only and must not be relabeled live-provider evidence.
+
+For v1, omitted zero counters may be treated as zero only when the exact source shape and SDK/CLI replay document that omission; every positive task count, running/succeeded/failed/cancelled/retried counter, UID, generation, completion marker, and identity fact otherwise requires explicit evidence. The v1 replay source must be bounded and sanitized. For v2, `egress`, `reconciling`, `executionEnvironment`, and all execution counters are explicit required evidence; no omitted provider default is inferred. No global v1/v2 compatibility claim is made.
+
+The CLI bundle path is strict: the directory and every path component must be free of symlinks/reparse points. Callers on macOS must provide the physical `/private/var`, `/private/tmp`, or `/private/etc` path when applicable; the CLI does not accept `/var`, `/tmp`, or `/etc` aliases.
+
+### Diagnostic anchors
+
+The execution contract reserves the following fixed anchors. Each result carries only the code; this table supplies the safe problem, cause, fix, recovery limit, and documentation anchor.
+
+| Code | Safe problem and cause | Fix and recovery limit |
+| --- | --- | --- |
+| <a id="asdeploy170"></a>`ASDEPLOY170` | Invalid identifier, timer, or project-number admission. | Correct local input; no provider call. |
+| <a id="asdeploy171"></a>`ASDEPLOY171` | Invalid, incomplete, oversized, or ambiguous three-artifact bundle. | Republish a bounded bundle; no provider call. |
+| <a id="asdeploy172"></a>`ASDEPLOY172` | Project/region/Job/execution/image identity mismatch. | Select the caller-owned exact execution; no alias lookup or current-Job fallback. |
+| <a id="asdeploy173"></a>`ASDEPLOY173` | Execution UID changed between reads. | Stop polling and investigate identity; never continue the same observation. |
+| <a id="asdeploy174"></a>`ASDEPLOY174` | Malformed, duplicate, conflicting, or impossible evidence. | Correct provider/fixture shape; return `Unknown` until positively proven. |
+| <a id="asdeploy175"></a>`ASDEPLOY175` | Unsupported shape, annotation, mount, default, or state token. | Use an accepted compatibility shape; no guessed normalization. |
+| <a id="asdeploy176"></a>`ASDEPLOY176` | Stale generation, deletion, or terminal contradiction. | Re-read only as a new caller-owned observation after the cause is resolved. |
+| <a id="asdeploy177"></a>`ASDEPLOY177` | Captured configuration mismatch. | Reconcile the bundle or select the intended execution; no workload retry. |
+| <a id="asdeploy178"></a>`ASDEPLOY178` | `gcloud` unavailable. | Install/configure the caller-owned tool and `PATH`; no package-side installation. |
+| <a id="asdeploy179"></a>`ASDEPLOY179` | Provider/read failure. | Investigate local/provider availability; no stale-state promotion. |
+| <a id="asdeploy180"></a>`ASDEPLOY180` | Output limit exceeded or invalid UTF-8. | Use the fixed command and bounded provider output; never expose/truncate JSON. |
+| <a id="asdeploy181"></a>`ASDEPLOY181` | No complete evidence before the monotonic deadline. | Increase caller budget only deliberately; no deadline extension inside the observer. |
+| <a id="asdeploy182"></a>`ASDEPLOY182` | Clean deadline with last matching `Running` evidence. | Caller decides whether to observe again; no automatic retry. |
+| <a id="asdeploy183"></a>`ASDEPLOY183` | Matching terminal success. | Continue caller acceptance; observer performs no mutation. |
+| <a id="asdeploy184"></a>`ASDEPLOY184` | Matching workload failure. | Caller owns recovery; observer does not retry the workload. |
+| <a id="asdeploy185"></a>`ASDEPLOY185` | Matching remote cancellation. | Caller owns recovery/correlation; API cancellation remains distinct. |
+| <a id="asdeploy186"></a>`ASDEPLOY186` | Caller cancellation. | Propagate cancellation after bounded local cleanup; CLI exits 130 and does not retry or mutate. |
+| <a id="asdeploy187"></a>`ASDEPLOY187` | Local process or stream cleanup unconfirmed. | Treat as `Unknown`; no success claim or unbounded cleanup. |
+| <a id="asdeploy188"></a>`ASDEPLOY188` | Output delivery failed after the safe writer latched failure. | Suppress further stdout/stderr writes; CLI returns 2 except caller cancellation, which returns 130. |
+| <a id="asdeploy189"></a>`ASDEPLOY189` | Unexpected internal observation failure. | Return safe `Unknown`; expose only this code and the canonical documentation link; do not expose exception/provider text. |
+
+All local cleanup is bounded; no diagnostic contains provider free text. In text mode, failures write only the fixed diagnostic code, safe problem/cause/fix, recovery limit, and this canonical documentation link to stderr; stdout remains free of provider traces. See the [GCP package execution guide](./ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md#exact-cloud-run-execution-observation) and [adoption guide](adoption.md#observe-an-existing-execution).
+
+The neutral two-consumer walkthrough is in the [Cloud Run execution consumers example](../examples/cloud-run-execution-consumers/README.md). It demonstrates separate `schema-preparation` and `catalog-refresh` identities and swapped-execution rejection without claiming production migration adoption.
