@@ -52,7 +52,7 @@ For names-only environment planning, use the canonical [environment candidate
 inspection quickstart](../../guides/config-logical-keys.md#environment-candidate-inspection).
 It documents the typed, strict-string, and direct composition entry points, snapshot
 lifecycle, error fields, and caller-owned policy boundary. The
-[packed consumer proof](../../tests/config-package-consumer/README.md) exercises the
+[packed consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md) exercises the
 normal module registration route and synthetic source policies.
 
 Declare `Payments:ApiKey` once for every provider. Key identity is ordinal ignore-case;

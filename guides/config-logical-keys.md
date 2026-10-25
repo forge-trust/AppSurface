@@ -230,7 +230,7 @@ native environment lookup or direct composition lookup. It is a names-only proje
 it does not read environment variables or files, call providers, resolve or convert a
 value, establish presence or source ownership, prove aggregate completeness, or consume
 native claim capacity. The caller owns the inventory, its trust and comparer, platform
-presence checks, and the acceptance policy. See the [packed package consumer proof](../tests/config-package-consumer/README.md).
+presence checks, and the acceptance policy. See the [packed package consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 Adopt it with coordinated package versions selected by the
 [package chooser](../packages/README.md) and follow the
 [coordinated migration guide](config-key-migration.md); candidate package proof is not
@@ -246,7 +246,7 @@ have isolated snapshots.
 Start with an existing AppSurface host and the .NET 10 SDK. For this standalone
 snippet, run from an owned project directory. On macOS, set
 `DOTNET_USE_POLLING_FILE_WATCHER=1` if the host's default file watching blocks in a
-restricted development environment, as the [packed consumer verifier](../scripts/verify_config_package_consumer.py)
+restricted development environment, as the [packed consumer verifier](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify_config_package_consumer.py)
 does. This host setup is separate from inspector source activity.
 
 ```csharp
