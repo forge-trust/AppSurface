@@ -8,7 +8,10 @@ public sealed class EnvironmentConfigCandidateInspectorTests
 {
     private readonly ITestOutputHelper _output;
 
-    public EnvironmentConfigCandidateInspectorTests(ITestOutputHelper output) => _output = output;
+    public EnvironmentConfigCandidateInspectorTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
 
     [Theory]
     [InlineData((int)ConfigKeyInputOrigin.StrictString)]

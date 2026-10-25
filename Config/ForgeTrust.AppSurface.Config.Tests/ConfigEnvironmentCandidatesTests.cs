@@ -37,6 +37,7 @@ public class ConfigEnvironmentCandidatesTests
     [InlineData("A.B", "A_B", "A__B")]
     [InlineData("A-B", "A_B", "A__B")]
     [InlineData("A:B", "A_B", "A__B")]
+    // protects=literal projection adapter parity; fails_when=existing dotted spelling changes; no_claim=injective key identity.
     public void CompositionPathLiteralSeparatorsRetainLegacyProjectionAndFirstProducer(string literal, string flat, string hierarchical)
     {
         var pathSegments = literal == "A:B" ? new[] { "A", "B" } : new[] { literal };

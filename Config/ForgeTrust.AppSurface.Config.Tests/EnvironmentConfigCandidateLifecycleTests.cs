@@ -1,7 +1,7 @@
+using System.Collections.Concurrent;
+using ForgeTrust.AppSurface.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using ForgeTrust.AppSurface.Core;
-using System.Collections.Concurrent;
 
 namespace ForgeTrust.AppSurface.Config.Tests;
 
