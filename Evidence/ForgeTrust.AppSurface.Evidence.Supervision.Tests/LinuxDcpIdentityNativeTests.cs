@@ -153,6 +153,35 @@ public sealed class LinuxDcpIdentityNativeTests
             var pid = await helper.StartAsync();
             using var original = new CancellationTokenSource(TimeSpan.FromSeconds(15));
             using var resource = LinuxProcessIdentity.CaptureApplication(pid, 65534, 65534, helper.Unit, original.Token);
+            // Both negative peers are genuine retained kernel identities. A worker role or another
+            // application generation must never select an ancestor in this application's cgroup.
+            await RejectForeignResourceAsync(LinuxKernelIdentityNativeTests.TestUnit.ForApplicationExecutable(executable), application: true);
+            await RejectForeignResourceAsync(new LinuxKernelIdentityNativeTests.TestUnit(), application: false);
+            resource.Recheck(original.Token);
+
+            async Task RejectForeignResourceAsync(LinuxKernelIdentityNativeTests.TestUnit foreignUnit, bool application)
+            {
+                await using (foreignUnit)
+                {
+                    var foreignPid = await foreignUnit.StartAsync();
+                    using var foreignPeer = application
+                        ? LinuxProcessIdentity.CaptureApplication(foreignPid, 65534, 65534, foreignUnit.Unit, original.Token)
+                        : LinuxProcessIdentity.Capture(foreignPid, 65534, 65534, foreignUnit.Unit, original.Token);
+                    Assert.NotEqual(helper.Unit, foreignPeer.Unit);
+                    LinuxDcpCaptureFailure? foreignFailure = null;
+                    Reject(() =>
+                    {
+                        using var unexpected = LinuxApplicationDcpIdentity.CaptureForResource(helper.Unit,
+                            65534, 65534, executable, foreignPeer, original.Token, out foreignFailure);
+                    });
+                    Assert.Equal(LinuxDcpCaptureStage.ParentSelection, foreignFailure!.Stage);
+                    Assert.Equal(1, foreignFailure.MatchingExecutables);
+                    foreignPeer.Recheck(original.Token);
+                    await foreignUnit.StopKillAndJoinAsync();
+                    Assert.True(LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(foreignUnit.Unit, default)));
+                }
+            }
+
             // These are actual retained process identities, but sleep's two arguments are not the resource's six.
             Reject(() => LinuxApplicationDcpIdentity.RequireResourceCommand(resource, executable,
                 directory + "/resource/NativeHttpResource.dll", directory + "/http.sock", original.Token));
