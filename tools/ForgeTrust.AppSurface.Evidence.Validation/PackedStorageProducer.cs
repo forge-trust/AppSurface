@@ -119,18 +119,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
             await Run(1, "coverage", "storage", "restore", "--run", runId, "--output", "restored", "--json");
             await Run(0, "coverage", "storage", "unpin", "--run", runId, "--json");
             var policy = Path.Join(domain, "policy.json");
-            await File.WriteAllTextAsync(policy, "{\"schemaVersion\":1,\"historyMaxBytes\":0}", cancellationToken);
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(policy, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            else
-            {
-                // Keep this fixture policy private so Windows ACL validation exercises its intended owner-only contract.
-                var owner = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
-                var security = new FileSecurity();
-                security.SetOwner(owner);
-                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-                security.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl, AccessControlType.Allow));
-                new FileInfo(policy).SetAccessControl(security);
-            }
+            await WritePrivateRetentionPolicyAsync(policy, cancellationToken);
             var preview = ValidationProof.Data(await Run(0, "coverage", "storage", "maintain", "--json"));
             ValidationProof.Require(preview.GetProperty("candidateRunIds").EnumerateArray().Any(value => value.GetString() == runId), "expired archive preview");
             var applied = ValidationProof.Data(await Run(0, "coverage", "storage", "maintain", "--apply", "--json"));
@@ -167,6 +156,26 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => _workspace?.DisposeAsync() ?? ValueTask.CompletedTask;
+
+    /// <summary>Writes this journey's zero-history policy inside its freshly owned scratch domain.</summary>
+    /// <param name="path">Policy path in the producer-owned domain; never a caller-owned policy.</param>
+    /// <param name="cancellationToken">Cancellation for the policy write.</param>
+    /// <remarks>Uses Unix mode 0600 or a protected current-user Windows ACL before maintenance reads the policy.
+    /// This internal seam lets native coverage tests verify the actual fixture permissions; it does not repair consumer policies.</remarks>
+    internal static async Task WritePrivateRetentionPolicyAsync(string path, CancellationToken cancellationToken)
+    {
+        await File.WriteAllTextAsync(path, "{\"schemaVersion\":1,\"historyMaxBytes\":0}", cancellationToken);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        else
+        {
+            var owner = WindowsIdentity.GetCurrent().User ?? throw new IOException("Current Windows user has no security identifier.");
+            var security = new FileSecurity();
+            security.SetOwner(owner);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl, AccessControlType.Allow));
+            new FileInfo(path).SetAccessControl(security);
+        }
+    }
 
     internal const string FixtureCoverage = """
         <?xml version="1.0" encoding="utf-8"?>

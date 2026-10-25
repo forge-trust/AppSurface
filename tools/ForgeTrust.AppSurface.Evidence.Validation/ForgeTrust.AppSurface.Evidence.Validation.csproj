@@ -10,6 +10,7 @@
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/ForgeTrust.AppSurface.Evidence.Aspire.csproj" />
     <ProjectReference Include="../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/ForgeTrust.AppSurface.Evidence.Planner.csproj" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <Compile Remove="fixtures/**/*.cs" />
     <None Include="fixtures/**/*" Exclude="fixtures/**/bin/**;fixtures/**/obj/**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
