@@ -37,6 +37,30 @@ public sealed class BoundedGcloudExecutionReaderTests
     }
 
     [Fact]
+    public async Task SettledProcessCannotPublishSuccessAfterTheOriginalDeadline()
+    {
+        // protects=the public bounded reader's original monotonic deadline after process and streams settle;
+        // fails_when=late timer delivery permits Complete with expired evidence; no_claim=OS process-start preemption.
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+        using var process = NativeFixture.Create("printf '{}'");
+        var result = await new BoundedGcloudExecutionReader(process.Path, new DelayedTimerExpiryClock())
+            .ReadAsync(Resource(), TimeSpan.FromMilliseconds(100));
+
+        Assert.Equal(BoundedGcloudExecutionReadOutcome.Deadline, result.Outcome);
+        Assert.Empty(result.StandardOutput);
+    }
+
+    private sealed class DelayedTimerExpiryClock : TimeProvider
+    {
+        private int _calls;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Increment(ref _calls) <= 2 ? 0 : TimeSpan.TicksPerSecond;
+        // Model a timer callback delayed by scheduling while monotonic time has already advanced.
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            => TimeProvider.System.CreateTimer(callback, state, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact]
     public async Task ReadAsyncRejectsNonCanonicalResourceWithoutLaunching()
     {
         // protects=canonical execution admission before process launch; fails_when=an incomplete resource reaches launch or returns Complete; no_claim=the remote resource exists.

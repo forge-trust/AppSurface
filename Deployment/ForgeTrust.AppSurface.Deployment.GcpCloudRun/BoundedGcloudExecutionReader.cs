@@ -157,6 +157,8 @@ public sealed class BoundedGcloudExecutionReader : IBoundedGcloudExecutionReader
 
             await combinedTask.ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
+            if (Remaining(start, timeout) <= TimeSpan.Zero)
+                return new(BoundedGcloudExecutionReadOutcome.Deadline, process.ExitCode);
             var stdout = stdoutTask.Result;
             var stderr = stderrTask.Result;
             if (stdout.Exceeded || stderr.Exceeded)
