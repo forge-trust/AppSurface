@@ -1,4 +1,4 @@
-# Issue 891 execution progress
+# Issue 891 implementation and validation checkpoint — 2026-10-25
 
 Plan: [approved execution-observation design](../designs/issue-891-cloud-run-execution-observation.md).
 Evidence: [initial gcloud feasibility assessment](issue-891-gcloud-feasibility.md).
@@ -24,7 +24,7 @@ Recovered source evidence: [Skoolit archive assessment](issue-891-skoolit-eviden
 | Observer, bounded reader and CLI | Implemented with explicit project-number binding, strict full configuration classifier, immutable bundle admission, fixed read command, sequential polling and guarded CLI delivery. Focused integration passed. Final solution coverage and packed proof remain required. |
 | Tests, neutral consumers and package proof | Latest focused results before final snapshot admission refinement: GCP174/174 passed, CLI57/57 passed; packed proof workflow unit tests67/67 passed. Both neutral positive modes succeeded and both swapped modes returned Unknown. Full CLI and example builds succeeded with no warnings/errors. Full artifact/package proof and solution coverage still pending. |
 | Enhance and functional QA | Two-cycle enhance review completed cleanly before its outside checkpoint; native only. See [cycle record](issue-891-enhance.md). Unsupported default mappings, timeout/settlement ownership and coordinated Terraform-expression tamper gaps were fixed. Functional CLI QA follows a clean baseline commit; no browser surface applies. |
-| Draft PR | Not created. Coverage and implementation gates have not passed. |
+| Draft PR | At this checkpoint none was created; the final publication and CI status belongs to the task handoff and PR checks. |
 
 Local inspection evidence is retained in the ignored directory `.gstack/tmp/make-it-so-891/`, including the tool-version result, exact SDK source hashes and a machine-readable feasibility record. It is not a provider fixture or a compatibility certificate.
 
@@ -70,7 +70,7 @@ The owner reported Docker healthy after the interrupted run. A bounded read-only
 - Added alias, environment, resource-default, identity, polling/error and CLI text/command coverage. The shared finite collection helper has exact inclusive boundary tests. No coverage threshold or existing test was disabled or reduced.
 - Generated package docs verify successfully. Formatting and a fresh full coverage run are the next required checks. The old run cannot clear the current code.
 
-## Current run and remaining gate work
+## Earlier run and remaining gate work at that checkpoint
 
 - Final affected functional QA on compiled `255b81c6` passed all scoped synthetic CLI contracts: both consumers, terminal failure/cancellation, one-read Running deadline, swapped/mismatched/stale evidence, provider/local failures, safe text, exact describe argv, unchanged bundle hashes and native caller SIGINT. The ignored report is `.gstack/qa-reports/issue-891-final/report.md`; its materialized verdict has no open items. This is agent-run offline QA, not a human onboarding or live-provider measurement.
 - The independent native correctness/adversarial review of `255b81c6` returned no actionable findings. A later narrow review accepted the absolute-end anchor correction. Outside CLI/model review is unclaimed.
@@ -99,3 +99,7 @@ Final focused pass 5 passed 453/453 GCP and 111/111 CLI observation tests with z
 The plan completion audit found stale worksheet review placeholders. The worksheets/manifest now name the implementing agent and repository owner, bind the existing owner-authorized 2026-10-24 technical acceptance, and retain candidate/not-certified status and all unresolved provider limitations. Both manifest/hash tests passed2/2 and the scoped formatter passed. No required configuration field or omission rule changed.
 
 The first actual `verify-packages` run on `c3e97aac` emitted candidate archives and passed the packed coverage CLI and Docs proofs, then failed the existing Durable template `authored-tests` phase at180.053s (exit-1, missingTRX/zero counters, owned cleanup complete). Docker remained healthy. No budget, test or package gate was waived; a separate isolated reproduction is investigating the timeout. No final package manifest was produced, so this is a failed overall proof. Candidate #891 archive checks can still run independently but cannot clear that failure.
+
+The separate exact-candidate #891 package proof then passed against `0.0.0-ci.89120261025`: both neutral API consumers passed positive/swapped modes, the old custom-runner/render/verify consumer compiled from packages, and the installed CLI passed both consumers' success/swapped/mismatch/failure/remote-cancel/Running/local-rejection/provider-error/caller-cancel contracts. Nuspec identity/version and archive SHA-256 comparisons bound every restored first-party archive to the candidate feed. It remains offline synthetic contract evidence; legacy runtime parity is covered separately by existing regressions. Three earlier proof-harness setup failures (evidence filename slash, cache archive naming) were retained and fixed only in the ignored script before its passing fourth attempt. No product behavior or gate changed.
+
+This file is a historical implementation checkpoint, not a live CI dashboard. Subsequent full-gate, artifact and PR/CI outcomes are retained in the task's private invocation evidence and final handoff; the presence of an implementation or a passing focused proof does not imply any pending gate passed.
