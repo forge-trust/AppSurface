@@ -216,18 +216,10 @@ internal sealed class LinuxProtectedNode
         Check(token, _deadline); Recheck();
         using var fresh = OpenAt2(Fd(_handle), ".", DirectoryFlags, 0, ChildResolution);
         var buffer = new byte[32 * 1024];
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        while (true)
-        {
-            Check(token, _deadline);
-            var length = ReadDirectory(fresh, buffer);
-            if (length == 0) break;
-            foreach (var name in LinuxDirectoryData.Parse(buffer.AsSpan(0, length)))
-                if (names.Count >= LinuxProtectedDeployment.MaximumNodes || !names.Add(name))
-                    throw LinuxProtectedDeployment.InvalidDeployment();
-        }
+        var names = SupervisionDirectoryRead.ReadActual(fresh, buffer, () => Check(token, _deadline),
+            static () => { }, LinuxProtectedDeployment.MaximumNodes, null, null, LinuxProtectedDeployment.InvalidDeployment);
         Check(token, _deadline); Recheck();
-        return Array.AsReadOnly(names.Order(StringComparer.Ordinal).ToArray());
+        return Array.AsReadOnly(names);
     }
 
     /// <summary>Classifies an actual link-safe child, without opening special files for data access.</summary>

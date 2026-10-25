@@ -2237,3 +2237,11 @@ path without manufacturing a native capability. The closed diagnostic event is m
 current source's native measurement; portable parser checks and compile-boundary tests cannot stand
 in for that Linux execution. No listener failure latch, custody claim, production budget, registration
 or accepted proof is changed. The private implementation is absent from ordinary images.
+
+The [protected deployment node](LinuxProtectedDeployment.cs) also borrows the same directory read
+procedure for its fresh getdents descriptor. The original directory/type guard, initial and final
+metadata/name rechecks, 32 KiB buffer, total node ceiling and ordinal read-only inventory remain with
+the owner. It checks the original input token and deadline before every native read, including EOF,
+and again before the final recheck. This caller has no post-read callback or read-attempt ceiling;
+using the shared procedure adds neither. No descriptor is acquired, released or authenticated by
+the procedure, and returned names cannot establish deployment custody.
