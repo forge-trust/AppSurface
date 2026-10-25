@@ -87,11 +87,11 @@
   "worksheets": [
     {
       "path": "schema-preparation/worksheet.json",
-      "sha256": "84976211c3ecc825643f05decd03265b7feb1c583e85e93e064425245840eddf"
+      "sha256": "f9b932323e0c3d7c291e85797b8189ee7c6a412a28f8d5b9909cb51d07eec2b7"
     },
     {
       "path": "catalog-refresh/worksheet.json",
-      "sha256": "c9fb210bf4dcfbff38df5cbc7bfad1af92e79bbc6400929f68cac3b13b22a963"
+      "sha256": "3b23112d19ccbe069342ec590780035756c01dc79ece801b1ff9f16786669708"
     }
   ],
   "fixtures": [
@@ -125,9 +125,10 @@
     "For this fixed v1 adapter, omitted all-five nonnullable counters are admitted as zero under the generated Go client omitempty contract and installed gcloud integer handling. Null, negative, overflow, duplicate or unknown counter shapes remain rejected/Unknown."
   ],
   "review": {
-    "owner": "unassigned",
-    "acceptingMaintainer": "unassigned",
-    "status": "owner-authorized-technical-evidence-provider-certification-pending"
+    "owner": "Codex",
+    "acceptingMaintainer": "Andrew (repository owner)",
+    "status": "owner-authorized-technical-evidence-provider-certification-pending",
+    "acceptanceSource": "Owner-authorized technical acceptance recorded in the approved 2026-10-24 execution amendment; provider certification remains pending."
   },
   "technicalAcceptance": "owner-authorized reviewed mapping plus executable fixture/hash/replay checks; this is not provider certification"
 }

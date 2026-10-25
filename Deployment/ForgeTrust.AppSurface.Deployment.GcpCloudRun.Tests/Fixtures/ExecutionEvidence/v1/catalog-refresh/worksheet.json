@@ -166,13 +166,14 @@
     }
   ],
   "review": {
-    "implementingOwner": "unassigned",
-    "acceptingMaintainer": "unassigned",
+    "implementingOwner": "Codex",
+    "acceptingMaintainer": "Andrew (repository owner)",
     "date": "2026-10-24",
-    "disposition": "pending-maintainer-acceptance",
+    "disposition": "owner-authorized-technical-evidence-provider-certification-pending",
     "unresolvedFacts": [
       "No provider read; gcloud version is local candidate only.",
       "v1 implicit socket projection is docs-derived, not a socket-connectivity claim."
-    ]
+    ],
+    "acceptanceSource": "Owner instruction on 2026-10-24: update the plan using Skoolit evidence, reconcile both assumptions without weakening configuration proof, and continue make-it-so; scope is the reviewed offline technical mapping, not live provider certification."
   }
 }

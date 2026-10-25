@@ -17,6 +17,11 @@ public sealed class ExecutionCompatibilityManifestTests
             var worksheetPath = item.GetProperty("path").GetString()!;
             AssertHash(root, worksheetPath, item.GetProperty("sha256").GetString()!);
             using var worksheet = JsonDocument.Parse(File.ReadAllText(TestPathUtils.PathUnder(root, worksheetPath)));
+            var review = worksheet.RootElement.GetProperty("review");
+            Assert.Equal("Codex", review.GetProperty("implementingOwner").GetString());
+            Assert.Equal("Andrew (repository owner)", review.GetProperty("acceptingMaintainer").GetString());
+            Assert.Equal("owner-authorized-technical-evidence-provider-certification-pending", review.GetProperty("disposition").GetString());
+            Assert.Contains("not live provider certification", review.GetProperty("acceptanceSource").GetString());
             foreach (var fixtureName in new[] { "positiveFixture", "negativeFixture" })
             {
                 var fixture = worksheet.RootElement.GetProperty(fixtureName);
