@@ -497,7 +497,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
    require(not os.path.lexists(output_root/'coverage/merged/post-stop-denied.xml'),
            'post-stop-no-probe-artifact')
   if case=='configure-sync-stall':
-   require(not app_seen and not observed,'configure-stall-before-application-start')
+   lifecycle_stalls.require_configure_before_application_start(observed,app_seen,generation)
   else:
    settled=[event for event in observed if event.get('phase')=='settled']
    require(app_seen and len(settled)==1 and settled[0].get('group_empty_twice') is True

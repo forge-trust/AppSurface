@@ -161,6 +161,32 @@ def require_fatal_reason(prefix, expected_case):
     return label
 
 
+def require_configure_before_application_start(observed, application_seen, generation):
+    """Accept only exact empty pending-application cleanup, not startup or health authority.
+
+    Root retains the application holder before configure. Its cleanup emits a settled
+    observation even when no application process was dispatched. The native caller
+    separately verifies the fatal callback reason, groups and original output pumps.
+    """
+    reason = "configure-stall-before-application-start"
+    require(type(generation) is str and len(generation) == 32
+            and all(char in "0123456789abcdef" for char in generation), reason)
+    require(application_seen is False and type(observed) is list and len(observed) == 1, reason)
+    value = observed[0]
+    require(type(value) is dict and set(value) == {
+        "schema", "phase", "lease_id", "unit", "main_code", "main_status", "group_empty_twice",
+        "pumps_joined", "pending_start_joined", "received_bytes", "ledger_failure", "monitor_failed"}, reason)
+    require(value["schema"] == "evidence-application-native-v1" and value["phase"] == "settled"
+            and value["lease_id"] == generation
+            and value["unit"] == "appsurface-evidence-application-" + generation + ".service"
+            and value["main_code"] is None and value["main_status"] is None
+            and value["group_empty_twice"] is True and value["pumps_joined"] is True
+            and value["pending_start_joined"] is True and value["monitor_failed"] is False
+            and type(value["received_bytes"]) is int and value["received_bytes"] == 0
+            and value["ledger_failure"] == "None", reason)
+    return {"application_started": False, "pending_holder_settled": True}
+
+
 def require_joined_output(value, leaves, expected_case):
     """Bind retained prefix lengths to the original joined shared output ledger.
 

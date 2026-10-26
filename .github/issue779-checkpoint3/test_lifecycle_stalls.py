@@ -312,5 +312,50 @@ class PostStopMarkerControls(unittest.TestCase):
                 subject.require_post_stop_terminal(prefix)
 
 
+class ConfigurePendingApplicationControls(unittest.TestCase):
+    """Closed diagnostic comparisons only; no application or root authority is created."""
+
+    generation = "a" * 32
+
+    def settled(self):
+        return {"schema": "evidence-application-native-v1", "phase": "settled",
+                "lease_id": self.generation,
+                "unit": "appsurface-evidence-application-" + self.generation + ".service",
+                "main_code": None, "main_status": None, "group_empty_twice": True,
+                "pumps_joined": True, "pending_start_joined": True, "received_bytes": 0,
+                "ledger_failure": "None", "monitor_failed": False}
+
+    def test_unstarted_pending_holder_may_settle_without_becoming_an_application_start(self):
+        value = self.settled()
+        self.assertEqual({"application_started": False, "pending_holder_settled": True},
+                         subject.require_configure_before_application_start([value], False, self.generation))
+        self.assertEqual(self.settled(), value)
+
+    def test_each_nonempty_started_or_unjoined_fact_rejects_the_otherwise_valid_neighbor(self):
+        for key, wrong in (("schema", "private-canary"), ("phase", "started"), ("phase", "ready"),
+                           ("lease_id", "b" * 32), ("unit", "private-canary.service"),
+                           ("main_code", 1), ("main_status", 0), ("group_empty_twice", False),
+                           ("pumps_joined", False), ("pending_start_joined", False),
+                           ("received_bytes", 1), ("received_bytes", False),
+                           ("ledger_failure", "WorkloadFailed"), ("monitor_failed", True)):
+            value = dict(self.settled(), **{key: wrong})
+            with self.subTest(key=key, wrong=wrong), self.assertRaisesRegex(
+                    RuntimeError, "^configure-stall-before-application-start$"):
+                subject.require_configure_before_application_start([value], False, self.generation)
+
+    def test_missing_duplicate_or_foreign_observations_and_seen_main_pid_cannot_pass(self):
+        value = self.settled()
+        missing = dict(value)
+        del missing["main_code"]
+        for rows, seen, generation in (([], False, self.generation), ([value, value], False, self.generation),
+                                       ([missing], False, self.generation),
+                                       ([dict(value, extra="private-canary")], False, self.generation),
+                                       ([value], True, self.generation), ([value], 0, self.generation),
+                                       ([value], False, "private-canary")):
+            with self.subTest(seen=seen, count=len(rows)), self.assertRaisesRegex(
+                    RuntimeError, "^configure-stall-before-application-start$"):
+                subject.require_configure_before_application_start(rows, seen, generation)
+
+
 if __name__ == "__main__":
     unittest.main()
