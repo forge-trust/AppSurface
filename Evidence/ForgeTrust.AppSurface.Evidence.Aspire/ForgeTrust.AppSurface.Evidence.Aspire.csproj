@@ -10,6 +10,7 @@
     <NoWarn>$(NoWarn);ASPIREPIPELINES001;ASPIREFILESYSTEM001;ASPIREUSERSECRETS001</NoWarn>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidencePrivateC3SdkLifecycleStall)' == 'ConfigureSync'">$(DefineConstants);EVIDENCE_PRIVATE_C3SDK_CONFIGURE_SYNC_STALL</DefineConstants>
     <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidencePrivateC3SdkLifecycleStall)' == 'RegisteredDisposer'">$(DefineConstants);EVIDENCE_PRIVATE_C3SDK_REGISTERED_DISPOSER_STALL</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidencePrivateC3SdkPostStopGuards)' == 'true'">$(DefineConstants);EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS</DefineConstants>
   </PropertyGroup>
 
   <Target Name="ValidatePrivateC3SdkLifecycleStall" BeforeTargets="PrepareForBuild">
@@ -17,6 +18,12 @@
            Text="EvidencePrivateC3SdkLifecycleStall is permitted only for EvidencePrivateQualification=C3Sdk." />
     <Error Condition="'$(EvidencePrivateC3SdkLifecycleStall)' != '' and '$(EvidencePrivateC3SdkLifecycleStall)' != 'ConfigureSync' and '$(EvidencePrivateC3SdkLifecycleStall)' != 'RegisteredDisposer'"
            Text="EvidencePrivateC3SdkLifecycleStall must be ConfigureSync or RegisteredDisposer." />
+    <Error Condition="'$(EvidencePrivateC3SdkPostStopGuards)' != '' and '$(EvidencePrivateC3SdkPostStopGuards)' != 'true' and '$(EvidencePrivateC3SdkPostStopGuards)' != 'false'"
+           Text="EvidencePrivateC3SdkPostStopGuards must be true or false." />
+    <Error Condition="'$(EvidencePrivateC3SdkPostStopGuards)' != '' and '$(EvidencePrivateQualification)' != 'C3Sdk'"
+           Text="EvidencePrivateC3SdkPostStopGuards is permitted only for EvidencePrivateQualification=C3Sdk." />
+    <Error Condition="'$(EvidencePrivateC3SdkPostStopGuards)' == 'true' and '$(EvidencePrivateC3SdkLifecycleStall)' != ''"
+           Text="EvidencePrivateC3SdkPostStopGuards cannot be combined with EvidencePrivateC3SdkLifecycleStall." />
   </Target>
 
   <ItemGroup>

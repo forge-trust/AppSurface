@@ -1,4 +1,7 @@
 using System.Diagnostics;
+#if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
+using System.Text.Json;
+#endif
 using Aspire.Hosting;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using ForgeTrust.AppSurface.Evidence.Coverage;
@@ -975,6 +978,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             throw new EvidenceAdmissionException("ASEVD410", "Owned work has not stopped; finalization is forbidden.");
         }
 
+#if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
+        await ObservePrivateC3SdkPostStopGuardsAsync(stopAndDisposeSucceeded, lifecycle, admission, root, worker)
+            .ConfigureAwait(false);
+#endif
+
         var terminalFailureCode = TerminalFailureCode(lifecycle.TerminalCode);
         var metrics = new EvidenceExecutionMetrics(
             ResourceReadinessMilliseconds: readiness.ResourceResults.Sum(static result => result.ElapsedMilliseconds),
@@ -1132,6 +1140,78 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
         return new ResourceReadiness(results, null);
     }
+
+#if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
+    private async Task ObservePrivateC3SdkPostStopGuardsAsync(bool stopAndDisposeSucceeded,
+        EvidenceWorkerExecution lifecycle, EvidenceAdmissionResult admission, EvidenceLinuxArtifactRoot? root,
+        EvidenceLinuxWorkerSupervisor? worker)
+    {
+        if (!stopAndDisposeSucceeded || root is null || worker is null || root.Identity.Inode == 0
+            || root.Identity.Uid != worker.Descriptor.WorkerUid || root.Identity.Gid != worker.Descriptor.WorkerGid
+            || !worker.IsArmed || !lifecycle.IsAdmissionClosed
+            || !lifecycle.CleanupCompleted || !lifecycle.OwnWorkStopped
+            || lifecycle.TerminalCode != EvidenceWorkerTerminalCode.None)
+        {
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+        }
+
+        admission.ValidateActive(_plan);
+        if (_artifactWriters.Count != 1 || _plan.Profile.Producers.Count != 1
+            || _plan.Profile.Producers[0].ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == "post-stop-probe")
+                is not { RelativeRoot: "lifecycle-probe", MediaType: "application/octet-stream", Required: false, MaximumBytes: 0 })
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+
+        var writer = _artifactWriters[0];
+        var priorArtifacts = writer.WrittenArtifacts.ToArray();
+        if (priorArtifacts.Any(artifact => artifact.LogicalName == "post-stop-probe"
+            || artifact.RelativePath == "lifecycle-probe/denied.bin"))
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+        var launched = 0;
+        var lateWork = lifecycle.TrackOwnedWork(_ =>
+        {
+            Interlocked.Increment(ref launched);
+            return ValueTask.CompletedTask;
+        });
+        var newWorkRejected = lateWork is null && Volatile.Read(ref launched) == 0;
+        if (lateWork is not null)
+            await lateWork.ConfigureAwait(false);
+        if (!newWorkRejected)
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+
+        var writeRejected = false;
+        try
+        {
+            await writer.WriteAsync("post-stop-probe", "lifecycle-probe/denied.bin", ReadOnlyMemory<byte>.Empty)
+                .ConfigureAwait(false);
+        }
+        catch (EvidenceAdmissionException error)
+        {
+            writeRejected = error.Code == "ASEVD410" && error.InnerException is null
+                && error.Message.StartsWith("ASEVD410: Artifact write admission is closed.", StringComparison.Ordinal);
+        }
+
+        var artifactsUnchanged = writer.WrittenArtifacts.SequenceEqual(priorArtifacts);
+        admission.ValidateActive(_plan);
+        if (!writeRejected || !artifactsUnchanged || !worker.IsArmed
+            || lifecycle.TerminalCode != EvidenceWorkerTerminalCode.None)
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            schema = "evidence-worker-post-stop-guards-v1",
+            @case = "post-stop-guards",
+            phase = "completed",
+            active_admission = true,
+            current_worker = true,
+            owned_work_joined = true,
+            new_work_rejected = true,
+            write_rejected = true,
+            artifacts_unchanged = true,
+            native_acceptance = false,
+        }));
+        throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+    }
+#endif
 
     private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(
         CancellationToken cancellationToken,

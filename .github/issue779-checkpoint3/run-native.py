@@ -9,7 +9,7 @@ c2=importlib.util.module_from_spec(spec);spec.loader.exec_module(c2)
 require=c2.require;write=c2.write;canonical=c2.canonical;command=c2.command;sha=c2.sha
 MAX_LOG=8*1024*1024
 CASES=('normal','sdk-normal','readiness','factory-stall','cancel','stuck-descendant','disposal-failure')
-LIFECYCLE_STALL_CASES=('configure-sync-stall','registered-disposer-stall')
+LIFECYCLE_STALL_CASES=('configure-sync-stall','registered-disposer-stall','post-stop-guards')
 OWNER_REFERENCE_GUARDS=(
  'workspace-accounts',
  'workspace-owner',
@@ -178,6 +178,7 @@ def stage(args,end,*,sdk_only=False,lifecycle_only=False):
   variant='normal' if key=='sdk-normal' or key in LIFECYCLE_STALL_CASES else key;data=prep['variants'][variant]
   source_tool=(getattr(args,'configure_stall_tool',None) if key=='configure-sync-stall'
                else getattr(args,'disposer_stall_tool',None) if key=='registered-disposer-stall'
+               else getattr(args,'post_stop_guards_tool',None) if key=='post-stop-guards'
                else args.sdk_tool if key=='sdk-normal' else args.tool)
   require(source_tool is not None,'lifecycle-stall-tool-bound')
   tool=parent/key;c2.copy_tree(source_tool,tool)
@@ -458,7 +459,8 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
  stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;descriptor=None;app_seen=False
  deadline=min(end,time.monotonic()+480)
  result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
- expected_marker='configure-sync-stall' if case=='configure-sync-stall' else 'registered-application-disposer-stall'
+ expected_marker=('configure-sync-stall' if case=='configure-sync-stall'
+                  else 'post-stop-guards' if case=='post-stop-guards' else 'registered-application-disposer-stall')
  launch=owner_command(runtime,tool,owner,marker/'armed',request_path)
  try:
   with stdout.open('xb') as out,stderr.open('xb') as err:
@@ -481,7 +483,8 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   import lifecycle_stalls
   marker_event,worker_prefixes,prefix_digests=lifecycle_stalls.read_worker_marker(
    generation,expected_marker,deadline=min(deadline,time.monotonic()+5))
-  fatal_reason=lifecycle_stalls.require_fatal_reason(worker_prefixes['stderr.prefix'],expected_marker)
+  fatal_reason=(lifecycle_stalls.require_post_stop_terminal(worker_prefixes['stderr.prefix'])
+                if case=='post-stop-guards' else lifecycle_stalls.require_fatal_reason(worker_prefixes['stderr.prefix'],expected_marker))
   output_rows=events(stderr,'evidence-coverage-output-v1')
   require(len(output_rows)==1,'lifecycle-output-receipt-count')
   joined_output=lifecycle_stalls.require_joined_output(output_rows[0],worker_prefixes,expected_marker)
@@ -490,6 +493,9 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   output_root=Path('/run/appsurface-evidence-'+generation+'/output/evidence')
   require(not (output_root/'evidence-manifest.json').exists()
           and not (output_root/'manifest.json').exists(),'lifecycle-stall-no-final-manifest')
+  if case=='post-stop-guards':
+   require(not os.path.lexists(output_root/'coverage/lifecycle-probe/denied.bin'),
+           'post-stop-no-probe-artifact')
   if case=='configure-sync-stall':
    require(not app_seen and not observed,'configure-stall-before-application-start')
   else:
@@ -543,7 +549,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
  return result
 
 def run_lifecycle_stalls(args,end):
- """Run only the two compile-owned failure controls; the original seven-case table is untouched."""
+ """Run three compile-owned failure controls; the original seven-case table is untouched."""
  args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
  receipt={'schema':'issue779-c3sdk-lifecycle-stalls-v1','source':args.source,'base':args.base,
           'exit':1,'cases':[],'native_acceptance':False}
@@ -552,7 +558,7 @@ def run_lifecycle_stalls(args,end):
   for case in LIFECYCLE_STALL_CASES:
    result=execute_lifecycle_stall(args,case,tools,runtime,end);receipt['cases'].append(result)
    if not result['passed']:break
-  if len(receipt['cases'])==2 and all(row['passed'] for row in receipt['cases']):
+  if len(receipt['cases'])==len(LIFECYCLE_STALL_CASES) and all(row['passed'] for row in receipt['cases']):
    parent=runtime.parent;generation=parent.name.removeprefix('issue779-c3-input-')
    receipt['staging_reclaimed_nodes']=remove_sealed_fixture_tree(parent,generation,end)
    require(not os.path.lexists(parent),'lifecycle-staging-absence')
@@ -596,15 +602,17 @@ def main():
  parser.add_argument('--lifecycle-stalls',action='store_true')
  parser.add_argument('--configure-stall-tool',type=Path)
  parser.add_argument('--disposer-stall-tool',type=Path)
+ parser.add_argument('--post-stop-guards-tool',type=Path)
  args=parser.parse_args();os.umask(0o077)
  require(os.geteuid()==0 and sys.platform=='linux' and platform.machine()=='x86_64','native-root-linux-x64')
  if args.lifecycle_stalls:
-  require(args.configure_stall_tool is not None and args.disposer_stall_tool is not None,
-          'both-fixed-lifecycle-stall-images-required')
+  require(args.configure_stall_tool is not None and args.disposer_stall_tool is not None
+          and args.post_stop_guards_tool is not None,'all-fixed-lifecycle-images-required')
   end=time.monotonic()+1200
   require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
   return run_lifecycle_stalls(args,end)
- require(args.configure_stall_tool is None and args.disposer_stall_tool is None,
+ require(args.configure_stall_tool is None and args.disposer_stall_tool is None
+         and args.post_stop_guards_tool is None,
          'lifecycle-stall-tools-require-dedicated-partition')
  # The original matrix still pays for protected SDK/bundle preparation within 1800 seconds.
  # These orchestration clocks do not replace job, owner, case or cleanup deadlines.

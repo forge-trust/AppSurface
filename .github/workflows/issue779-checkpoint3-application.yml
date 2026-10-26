@@ -402,7 +402,7 @@ jobs:
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
 
-      - name: Build the two fixed SDK lifecycle stall images without changing the original image set
+      - name: Build the three fixed SDK lifecycle images without changing the original image set
         shell: bash
         run: |
           set -euo pipefail
@@ -410,21 +410,30 @@ jobs:
           support="$RUNNER_TEMP/checkpoint3-exit-support/ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll"
           test -s "$support"
           # A full graph rebuild prevents reuse of the ordinary SDK assembly for either fixed selector.
-          for selection in ConfigureSync RegisteredDisposer; do
-            if [[ "$selection" == ConfigureSync ]]; then label=configure; else label=disposer; fi
+          for selection in ConfigureSync RegisteredDisposer PostStopGuards; do
+            if [[ "$selection" == ConfigureSync ]]; then
+              label=configure
+              selected=(-p:EvidencePrivateC3SdkLifecycleStall=ConfigureSync)
+            elif [[ "$selection" == RegisteredDisposer ]]; then
+              label=disposer
+              selected=(-p:EvidencePrivateC3SdkLifecycleStall=RegisteredDisposer)
+            else
+              label=post-stop-guards
+              selected=(-p:EvidencePrivateC3SdkPostStopGuards=true)
+            fi
             tool="$RUNNER_TEMP/checkpoint3-$label-stall-tool"
             log="$CHECKPOINT3_LIFECYCLE_EVIDENCE/cli-$label-stall-build.log"
             mkdir -m 0700 "$tool"
-            timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" > "$log" 2>&1
-            timeout --signal=KILL 180 dotnet build "$cli" --no-restore --no-incremental -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" >> "$log" 2>&1
-            timeout --signal=KILL 180 dotnet publish "$cli" --no-build --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" -o "$tool" >> "$log" 2>&1
+            timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk "${selected[@]}" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" > "$log" 2>&1
+            timeout --signal=KILL 180 dotnet build "$cli" --no-restore --no-incremental -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk "${selected[@]}" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" >> "$log" 2>&1
+            timeout --signal=KILL 180 dotnet publish "$cli" --no-build --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk "${selected[@]}" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" -o "$tool" >> "$log" 2>&1
             mkdir -p "$tool/reportgenerator/net10.0"
             cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$tool/reportgenerator/net10.0/"
             cp -R "$RUNNER_TEMP/checkpoint3-subject-packages" "$tool/nuget"
             test -s "$tool/ForgeTrust.AppSurface.Cli.dll"
           done
 
-      - name: Run the two real SDK lifecycle stall controls under their original owner and teardown clocks
+      - name: Run the three real SDK lifecycle controls under their original owner and teardown clocks
         shell: bash
         run: |
           set -euo pipefail
@@ -438,6 +447,7 @@ jobs:
             --tool "$CHECKPOINT3_TOOL" --sdk-tool "$CHECKPOINT3_SDK_TOOL" \
             --configure-stall-tool "$RUNNER_TEMP/checkpoint3-configure-stall-tool" \
             --disposer-stall-tool "$RUNNER_TEMP/checkpoint3-disposer-stall-tool" \
+            --post-stop-guards-tool "$RUNNER_TEMP/checkpoint3-post-stop-guards-stall-tool" \
             --runtime "$CHECKPOINT3_SDK_ROOT" --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint3/subject" \
             --prepared "$CHECKPOINT3_PREPARED/payload-preparation.json" \
             --digests "$CHECKPOINT3_EVIDENCE/registration-digests.json" \
@@ -481,15 +491,15 @@ jobs:
           root = pathlib.Path(sys.argv[1])
           uid, gid = int(sys.argv[2]), int(sys.argv[3])
           assert root.is_dir() and not root.is_symlink()
-          allowed = {'source.json', 'cli-configure-stall-build.log', 'cli-disposer-stall-build.log',
+          allowed = {'source.json', 'cli-configure-stall-build.log', 'cli-disposer-stall-build.log', 'cli-post-stop-guards-stall-build.log',
                      'lifecycle-stall-driver.log', 'lifecycle-stall-controls.log', 'staging.json',
                      'lifecycle-stall-receipt.json'}
-          for case in ('configure-sync-stall', 'registered-disposer-stall'):
+          for case in ('configure-sync-stall', 'registered-disposer-stall', 'post-stop-guards'):
               allowed.update(case + '-' + leaf for leaf in ('owner.stdout', 'owner.stderr',
                   'worker-stdout.prefix', 'worker-stderr.prefix', 'worker-state.json'))
               allowed.add(case + '.json')
           paths = list(root.iterdir())
-          assert len(paths) <= len(allowed) == 19
+          assert len(paths) <= len(allowed) == 26
           total = 0
           for path in paths:
               value = path.lstat()

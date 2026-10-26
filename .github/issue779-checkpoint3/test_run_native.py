@@ -398,7 +398,7 @@ class LifecycleStallMarkerTests(unittest.TestCase):
     def test_fixed_compile_owned_markers_are_data_only(self):
         cases = (("configure-sync-stall", "configure-sync-stall"),
                  ("registered-disposer-stall", "registered-application-disposer-stall"))
-        self.assertEqual(tuple(case for case, _ in cases), runner.LIFECYCLE_STALL_CASES)
+        self.assertEqual((*tuple(case for case, _ in cases), "post-stop-guards"), runner.LIFECYCLE_STALL_CASES)
         for case, marker_case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 log = Path(directory) / "stderr.log"

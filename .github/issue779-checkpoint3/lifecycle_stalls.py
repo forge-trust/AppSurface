@@ -111,6 +111,36 @@ def marker_from_prefix(prefix, expected_case):
     return marker
 
 
+def post_stop_marker_from_prefix(prefix):
+    """Require the closed worker observations; bytes alone grant no authority."""
+    require(type(prefix) is bytes and len(prefix) <= PREFIX_LIMIT, "post-stop-marker-input")
+    markers = []
+    for line in prefix.splitlines():
+        try:
+            value = json.loads(line, object_pairs_hook=_object)
+        except (ValueError, UnicodeError):
+            continue
+        if type(value) is dict and value.get("schema") == "evidence-worker-post-stop-guards-v1":
+            markers.append(value)
+    require(len(markers) == 1, "post-stop-marker-count")
+    value = markers[0]
+    facts = ("active_admission", "current_worker", "owned_work_joined", "new_work_rejected",
+             "write_rejected", "artifacts_unchanged")
+    require(set(value) == {"schema", "case", "phase", "native_acceptance", *facts}
+            and value["case"] == "post-stop-guards" and value["phase"] == "completed"
+            and value["native_acceptance"] is False
+            and all(value[name] is True for name in facts), "post-stop-marker-value")
+    return value
+
+
+def require_post_stop_terminal(prefix):
+    """Require intentional failure after the checks, without claiming a fatal path."""
+    text = b"Private post-stop admission guards completed."
+    require(type(prefix) is bytes and len(prefix) <= PREFIX_LIMIT and prefix.count(text) == 1,
+            "post-stop-terminal-reason")
+    return "post-stop-guards-completed-unsuccessfully"
+
+
 def require_fatal_reason(prefix, expected_case):
     """Require the intended production fail-stop reason, not an unrelated nonzero exit.
 
@@ -139,7 +169,7 @@ def require_joined_output(value, leaves, expected_case):
     The configure stall starts no application/producer; normal SDK cleanup has
     the original worker, application, and producer pairs.
     """
-    require(expected_case in _CASES and type(value) is dict
+    require(expected_case in (*_CASES, "post-stop-guards") and type(value) is dict
             and set(value) == {"schema", "registered_pairs", "received_bytes", "received_byte_limit",
                                "failure", "quota_exceeded", "stop_signal_failed", "pairs"},
             "lifecycle-output-shape")
@@ -192,7 +222,8 @@ def read_worker_marker(generation, expected_case, *, deadline):
         try:
             selected = os.fstat(directory)
             leaves = read_prefix_directory(directory, expected_uid=0, expected_gid=0, deadline=deadline)
-            marker = marker_from_prefix(leaves["stderr.prefix"], expected_case)
+            marker = (post_stop_marker_from_prefix(leaves["stderr.prefix"]) if expected_case == "post-stop-guards"
+                      else marker_from_prefix(leaves["stderr.prefix"], expected_case))
             require(identity(os.fstat(directory)) == identity(selected)
                     == identity(os.stat(name, dir_fd=parent, follow_symlinks=False)),
                     "lifecycle-diagnostic-root-changed")

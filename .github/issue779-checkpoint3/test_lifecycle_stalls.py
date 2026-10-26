@@ -260,5 +260,57 @@ class JoinedWorkerOutputControls(unittest.TestCase):
             subject.require_joined_output(value, leaves, "configure-sync-stall")
 
 
+class PostStopMarkerControls(unittest.TestCase):
+    """Detached projections only; native callers separately prove the actual worker."""
+
+    def value(self):
+        return {"schema": "evidence-worker-post-stop-guards-v1", "case": "post-stop-guards",
+                "phase": "completed", "active_admission": True, "current_worker": True,
+                "owned_work_joined": True, "new_work_rejected": True, "write_rejected": True,
+                "artifacts_unchanged": True, "native_acceptance": False}
+
+    def test_fixture_policy_and_generated_closed_declaration_share_the_unused_zero_byte_slot(self):
+        spec = importlib.util.spec_from_file_location("post_stop_payload", Path(__file__).with_name("prepare_payload.py"))
+        payload = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(payload)
+        for case in payload.CASES:
+            with self.subTest(case=case):
+                policy = payload.policy_for(case)
+                slots = policy["Profiles"][0]["Producers"][0]["ArtifactSlots"]
+                self.assertEqual(2, len(slots))
+                self.assertEqual({"LogicalName": "post-stop-probe", "RelativeRoot": "lifecycle-probe",
+                                  "MediaType": "application/octet-stream", "Required": False,
+                                  "MaximumBytes": 0}, slots[1])
+                generated = payload.definition_source(case, [], policy)
+                self.assertEqual(1, generated.count('new EvidenceArtifactSlot("post-stop-probe", "lifecycle-probe", "application/octet-stream", false, 0)'))
+                self.assertIn('new EvidenceArtifactSlot("coverage-report", "merged", "application/xml", true, 20_971_520)', generated)
+
+    def test_completed_event_requires_each_true_fact_and_one_private_terminal_reason(self):
+        value = self.value()
+        prefix = json.dumps(value).encode() + b"\nASEVD410: Private post-stop admission guards completed."
+        self.assertEqual(value, subject.post_stop_marker_from_prefix(prefix))
+        self.assertEqual("post-stop-guards-completed-unsuccessfully", subject.require_post_stop_terminal(prefix))
+        ledger, leaves = JoinedWorkerOutputControls.data("registered-application-disposer-stall")
+        self.assertIs(ledger, subject.require_joined_output(ledger, leaves, "post-stop-guards"))
+        for name in ("active_admission", "current_worker", "owned_work_joined", "new_work_rejected",
+                     "write_rejected", "artifacts_unchanged"):
+            for bad in (False, 1, None, "private-canary"):
+                with self.subTest(name=name, bad=bad), self.assertRaises(RuntimeError) as error:
+                    subject.post_stop_marker_from_prefix(json.dumps(dict(value, **{name: bad})).encode())
+                self.assertNotIn("private-canary", str(error.exception))
+
+    def test_missing_duplicate_nonclosed_or_wrong_case_cannot_replace_completed_checks(self):
+        value = self.value()
+        for rows in ([], [value, value], [dict(value, case="configure-sync-stall")],
+                     [dict(value, phase="entered")], [dict(value, native_acceptance=True)],
+                     [dict(value, extra="private-canary")]):
+            with self.subTest(rows=rows), self.assertRaises(RuntimeError):
+                subject.post_stop_marker_from_prefix(b"\n".join(json.dumps(row).encode() for row in rows))
+        for prefix in (b"unrelated-crash", b"Private post-stop admission guards completed." * 2,
+                       b"x" * (subject.PREFIX_LIMIT + 1)):
+            with self.subTest(length=len(prefix)), self.assertRaises(RuntimeError):
+                subject.require_post_stop_terminal(prefix)
+
+
 if __name__ == "__main__":
     unittest.main()
