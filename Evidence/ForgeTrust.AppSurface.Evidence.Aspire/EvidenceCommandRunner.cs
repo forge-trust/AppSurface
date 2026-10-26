@@ -86,7 +86,7 @@ public sealed class EvidenceCommandRunner
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
             {
-                throw CreateBudgetException(exception);
+                throw CreateBudgetException(exception, "before_start");
             }
         }
 
@@ -155,7 +155,7 @@ public sealed class EvidenceCommandRunner
             await process.WaitForExitAsync(lifetime.Token).ConfigureAwait(false);
             if (budgetFailure.Task.IsCompletedSuccessfully)
             {
-                failure = CreateBudgetException(budgetFailure.Task.Result);
+                failure = CreateBudgetException(budgetFailure.Task.Result, "during_execution");
             }
             else if (cancellationToken.IsCancellationRequested)
             {
@@ -171,7 +171,7 @@ public sealed class EvidenceCommandRunner
         catch (OperationCanceledException)
         {
             failure = budgetFailure.Task.IsCompletedSuccessfully
-                ? CreateBudgetException(budgetFailure.Task.Result)
+                ? CreateBudgetException(budgetFailure.Task.Result, "during_execution")
                 : new EvidenceCommandException("timeout", "The evidence command exceeded its deadline.");
             captureLifetime.Cancel();
             await TerminateAndDrainAsync(process, stdout, stderr).ConfigureAwait(false);
@@ -210,7 +210,7 @@ public sealed class EvidenceCommandRunner
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
             catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
             {
-                throw CreateBudgetException(exception);
+                throw CreateBudgetException(exception, "after_execution");
             }
         }
         elapsed.Stop();
@@ -256,10 +256,11 @@ public sealed class EvidenceCommandRunner
         }
     }
 
-    private static EvidenceCommandException CreateBudgetException(Exception exception) =>
+    private static EvidenceCommandException CreateBudgetException(Exception exception, string phase) =>
         exception is EvidenceWorkspaceBudgetException
             ? new EvidenceCommandException("budget_exceeded", "The evidence workspace budget was exhausted.")
-            : new EvidenceCommandException("budget_check_failed", "The evidence workspace budget check failed.");
+            : new EvidenceCommandException("budget_check_failed",
+                $"The evidence workspace budget check failed ({phase}; HRESULT 0x{exception.HResult:X8}).");
 
     private static async Task TerminateAndDrainAsync(Process process, Task stdout, Task stderr)
     {

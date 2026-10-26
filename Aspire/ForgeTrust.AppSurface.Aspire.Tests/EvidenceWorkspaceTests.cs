@@ -56,7 +56,9 @@ public sealed class EvidenceWorkspaceTests
             Assert.Equal(changed, File.ReadAllBytes(marker));
             Assert.True(Directory.Exists(workspace.RootPath));
             File.WriteAllBytes(marker, original);
-            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
+            if (OperatingSystem.IsLinux()) File.SetLastWriteTimeUtc(marker, created);
+            else File.SetCreationTimeUtc(marker, created);
+            Assert.Equal(created, File.GetCreationTimeUtc(marker));
             await workspace.DisposeAsync();
         }
         finally { Directory.Delete(parent, recursive: true); }
@@ -365,16 +367,25 @@ public sealed class EvidenceWorkspaceTests
         var parent = NewDirectory();
         var workspace = EvidenceWorkspace.Create(parent);
         var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
-        var original = File.ReadAllBytes(marker);
         var created = File.GetCreationTimeUtc(marker);
-        File.WriteAllText(marker, "different-owner");
+        var retainedMarker = Path.Join(parent, "original-owner-marker");
+        File.Move(marker, retainedMarker);
+        try
+        {
+            File.WriteAllText(marker, "different-owner");
+            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
 
-        Assert.Throws<IOException>(workspace.CheckBudget);
-        await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
-        Assert.True(Directory.Exists(workspace.RootPath));
-        File.WriteAllBytes(marker, original);
-        if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
-        await workspace.DisposeAsync();
+            Assert.Throws<IOException>(workspace.CheckBudget);
+            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+            Assert.True(Directory.Exists(workspace.RootPath));
+            Assert.Equal("different-owner", File.ReadAllText(marker));
+        }
+        finally
+        {
+            if (File.Exists(marker)) File.Delete(marker);
+            File.Move(retainedMarker, marker);
+            await workspace.DisposeAsync();
+        }
         Directory.Delete(parent, recursive: true);
     }
 
@@ -629,16 +640,20 @@ public sealed class EvidenceWorkspaceTests
         {
             var workspace = EvidenceWorkspace.Create(parent);
             var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
-            var original = File.ReadAllBytes(marker);
-            var created = File.GetCreationTimeUtc(marker);
-            File.Delete(marker);
-
-            Assert.Throws<IOException>(workspace.CheckBudget);
-            await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
-            Assert.True(Directory.Exists(workspace.RootPath));
-            File.WriteAllBytes(marker, original);
-            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
-            await workspace.DisposeAsync();
+            var retainedMarker = Path.Join(parent, "original-owner-marker");
+            File.Move(marker, retainedMarker);
+            try
+            {
+                Assert.Throws<IOException>(workspace.CheckBudget);
+                await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
+                Assert.True(Directory.Exists(workspace.RootPath));
+                Assert.False(File.Exists(marker));
+            }
+            finally
+            {
+                File.Move(retainedMarker, marker);
+                await workspace.DisposeAsync();
+            }
         }
         finally { Directory.Delete(parent, recursive: true); }
     }

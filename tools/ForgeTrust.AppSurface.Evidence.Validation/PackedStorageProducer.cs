@@ -145,7 +145,7 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
         }
         catch (EvidenceCommandException exception)
         {
-            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], "Packed storage command failed: " + exception.Code);
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], "Packed storage command failed: " + exception.Code + ". " + exception.Message);
         }
         finally
         {

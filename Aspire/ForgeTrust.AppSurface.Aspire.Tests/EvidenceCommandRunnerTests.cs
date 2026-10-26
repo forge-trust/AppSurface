@@ -220,6 +220,9 @@ public sealed class EvidenceCommandRunnerTests
         };
         var beforeException = await Assert.ThrowsAsync<EvidenceCommandException>(() => new EvidenceCommandRunner().RunAsync(before));
         Assert.Equal("budget_check_failed", beforeException.Code);
+        Assert.Contains("before_start; HRESULT 0x80131509", beforeException.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic", beforeException.Message, StringComparison.Ordinal);
+        Assert.Null(beforeException.InnerException);
 
         var checks = 0;
         var during = CreateShellRequest("sleep 30", "Start-Sleep -Seconds 30") with
@@ -230,6 +233,9 @@ public sealed class EvidenceCommandRunnerTests
         };
         var duringException = await Assert.ThrowsAsync<EvidenceCommandException>(() => new EvidenceCommandRunner().RunAsync(during));
         Assert.Equal("budget_check_failed", duringException.Code);
+        Assert.Contains("during_execution; HRESULT 0x80131509", duringException.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic", duringException.Message, StringComparison.Ordinal);
+        Assert.Null(duringException.InnerException);
 
         var capturesCompleted = 0;
         var afterRunner = new EvidenceCommandRunner(stream => new EofObservingStream(stream,
@@ -243,6 +249,9 @@ public sealed class EvidenceCommandRunnerTests
         var afterException = await Assert.ThrowsAsync<EvidenceCommandException>(() => afterRunner.RunAsync(after));
         Assert.Equal(2, capturesCompleted);
         Assert.Equal("budget_check_failed", afterException.Code);
+        Assert.Contains("after_execution; HRESULT 0x80131509", afterException.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("synthetic", afterException.Message, StringComparison.Ordinal);
+        Assert.Null(afterException.InnerException);
     }
 
     [Fact]

@@ -181,8 +181,8 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
     public void CheckBudget()
     {
         ThrowIfDisposed();
-        ValidateOwnedRoot();
-        var measuredBytes = MeasureLogicalBytes(RootPath, _options.MaximumBytes);
+        var measuredBytes = MeasureWithRetry(
+            () => MeasureLogicalBytes(RootPath, _options.MaximumBytes), ValidateOwnedRoot, OperatingSystem.IsWindows());
         var logicalBytes = _logicalSize?.Invoke(RootPath) ?? measuredBytes;
         var freeBytes = _freeBytes?.Invoke(RootPath) ?? FindContainingVolume(RootPath).AvailableFreeSpace;
         if (logicalBytes > _options.MaximumBytes)
@@ -301,6 +301,36 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         }
 
         return total;
+    }
+
+    /// <summary>Retries a complete inventory only for transient Windows filesystem access failures.</summary>
+    /// <param name="measure">The complete bounded inventory and byte measurement; partial results are discarded.</param>
+    /// <param name="validateOwnedRoot">Ownership validation before each attempt and after successful measurement.</param>
+    /// <param name="retryTransientWindowsErrors">Whether the caller is running on Windows.</param>
+    /// <returns>A complete measurement after successful ownership validation.</returns>
+    /// <remarks>
+    /// Maintenance can delete descendants while a budget sample inventories them. At most three measurements
+    /// are attempted, separated by 10 ms, for exact access-denied, sharing-violation or delete-pending HRESULTs.
+    /// Ownership validation, inventory bounds, quota checks and volume checks are never retried or suppressed.
+    /// The delegates allow friend assemblies to verify the retry boundary without replacing production checks.
+    /// </remarks>
+    internal static long MeasureWithRetry(Func<long> measure, Action validateOwnedRoot, bool retryTransientWindowsErrors)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            validateOwnedRoot();
+            long measured;
+            try { measured = measure(); }
+            catch (Exception exception) when (retryTransientWindowsErrors && attempt < 2 &&
+                exception is IOException or UnauthorizedAccessException &&
+                exception.HResult is unchecked((int)0x80070005) or unchecked((int)0x80070020) or unchecked((int)0x8007012F))
+            {
+                Thread.Sleep(10);
+                continue;
+            }
+            validateOwnedRoot();
+            return measured;
+        }
     }
 
     private static void DeleteOwnedTree(string root, IReadOnlyList<WorkspaceEntry> inventory)
