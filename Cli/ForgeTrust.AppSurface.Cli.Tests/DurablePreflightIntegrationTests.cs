@@ -465,6 +465,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
 
         const string readerName = "issue845-cancelled-catalog-reader";
         using var cancellation = new CancellationTokenSource();
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
         var read = fixture.RunAsync(RuntimeA, applicationName: readerName, cancellationToken: cancellation.Token);
         await fixture.WaitForWaitEventAsync(readerName, "relation");
         var cancelElapsed = Stopwatch.StartNew();
@@ -474,9 +475,76 @@ public sealed class DurableSchemaPreflightIntegrationTests
         Assert.NotNull(error);
         Assert.True(cancelElapsed.Elapsed < DurableSchemaPreflightVerifier.TotalTimeout,
             $"Npgsql cancellation, physical close, and verifier cleanup took {cancelElapsed.Elapsed}.");
+        // Client socket close is one-way; the server must observe it within the same total budget.
+        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token);
         Assert.Equal(0, await fixture.CountSessionsAsync(readerName));
         await fixture.AssertNoFenceLocksAsync();
         await blockerTransaction.CommitAsync();
+    }
+
+    [Fact]
+    public async Task Cancellation_closes_client_socket_while_owned_backend_is_stopped_then_releases_fence()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await using var blocker = await fixture.OpenOwnerConnectionAsync();
+        await using var blockerTransaction = await blocker.BeginTransactionAsync();
+        await using (var lockCommand = new NpgsqlCommand(
+            "LOCK TABLE appsurface_durable.store_metadata IN ACCESS EXCLUSIVE MODE", blocker, blockerTransaction))
+        {
+            await lockCommand.ExecuteNonQueryAsync();
+        }
+
+        const string readerName = "issue845-stopped-cancel-reader";
+        using var cancellation = new CancellationTokenSource();
+        using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+        var read = fixture.RunAsync(RuntimeA, applicationName: readerName, cancellationToken: cancellation.Token);
+        var backendPid = 0;
+        var backendStopped = false;
+        try
+        {
+            await fixture.WaitForWaitEventAsync(readerName, "relation");
+            backendPid = await fixture.WaitForBackendAsync(readerName);
+            backendStopped = true;
+            await fixture.StopBackendAsync(backendPid, completionDeadline.Token);
+
+            cancellation.Cancel();
+            var error = await Record.ExceptionAsync(async () => await read)
+                .WaitAsync(completionDeadline.Token);
+            Assert.NotNull(error);
+            // A stopped backend cannot process socket EOF or release its session-scoped fence.
+            // The completed verifier task therefore demonstrates client-side connection closure first.
+            Assert.Equal(1, await fixture.CountSessionsAsync(readerName));
+            Assert.Equal(1, await fixture.CountGrantedSharedFenceOwnersAsync(readerName));
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try
+            {
+                if (backendStopped) await fixture.ResumeBackendAsync(backendPid);
+            }
+            finally
+            {
+                try
+                {
+                    if (blockerTransaction.Connection is not null)
+                        await blockerTransaction.CommitAsync();
+                }
+                finally
+                {
+                    try
+                    {
+                        _ = await Record.ExceptionAsync(async () => await read)
+                            .WaitAsync(completionDeadline.Token);
+                    }
+                    finally
+                    {
+                        await fixture.WaitForSessionExitAsync(readerName, completionDeadline.Token);
+                        await fixture.AssertNoFenceLocksAsync();
+                    }
+                }
+            }
+        }
     }
 
     [Fact]
@@ -1893,6 +1961,36 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
             }
             throw new TimeoutException($"PostgreSQL backend {applicationName} did not connect.");
+        }
+
+        /// <summary>Stops the supplied positive PID and confirms its kernel state is stopped in this test container.</summary>
+        /// <remarks>The observed PID is test data scoped to this owned PostgreSQL container.</remarks>
+        internal async Task StopBackendAsync(int pid, CancellationToken token)
+        {
+            Assert.True(pid > 0);
+            using var helperDeadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            helperDeadline.CancelAfter(TimeSpan.FromSeconds(5));
+            var result = await _container.ExecAsync(["/bin/sh", "-c",
+                "kill -STOP \"$1\" || exit; n=0; while [ \"$n\" -lt 100 ]; do " +
+                "state=; while IFS=' \t' read -r key value rest; do " +
+                "if [ \"$key\" = State: ]; then state=$value; break; fi; done < \"/proc/$1/status\"; " +
+                "case \"$state\" in T|t) exit 0;; esac; n=$((n + 1)); sleep 0.02; done; exit 1",
+                "issue779-backend",
+                pid.ToString(System.Globalization.CultureInfo.InvariantCulture)], helperDeadline.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5), helperDeadline.Token);
+            Assert.Equal(0, result.ExitCode);
+        }
+
+        /// <summary>Resumes only the supplied positive PID inside this owned test container.</summary>
+        /// <remarks>The observed PID is test data, not process identity or authority outside the container.</remarks>
+        internal async Task ResumeBackendAsync(int pid)
+        {
+            Assert.True(pid > 0);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var result = await _container.ExecAsync(["/bin/sh", "-c", "kill -CONT \"$1\"", "issue779-backend",
+                pid.ToString(System.Globalization.CultureInfo.InvariantCulture)], deadline.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5), deadline.Token);
+            Assert.Equal(0, result.ExitCode);
         }
 
         internal async Task TerminateBackendAsync(int pid)

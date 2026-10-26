@@ -1,43 +1,14 @@
 # EvidenceHost C# runtime cutover
 
-## Latest verified consumer checkpoint - 2026-10-26
+## Latest verified consumer checkpoint — 2026-10-26
 
-[Revision 88, run 40238626739](https://github.com/forge-trust/AppSurface/actions/runs/40238626739)
-completed all native and consumer jobs, but its full solution command stopped
-with `ASCOV120` before numerical gating. The CLI project passed 3,217 of 3,218
-tests; the concurrent artifact-allocation test timed out waiting for two queued
-test callbacks to reach their readiness barrier, before either allocator ran.
-The fixture now uses dedicated threads, keeps its original five-second bounds,
-and releases and joins every started thread even after partial startup. Local
-validation passed all 17 artifact-root tests; a forced shared-pool regression
-failed both new scheduling controls. The actual allocator race and complete
-solution/patch gates still require fresh Linux validation. Production limits,
-allocation behavior and coverage policy are unchanged.
+[Run 40255212264](https://github.com/forge-trust/AppSurface/actions/runs/40255212264), attempt 1 at source `0f2c91f777e476529506e5ce1236acf21ec78425`, has independently verified retained consumer artifacts for all 16 C1 worker controls, all 13 original C3 native cases, 41 root-class tests, 41 supplementary tests declared by the run binding, account creation and expected rollback, and seven packaged C2 producer/artifact cases. The complete source capture contains 3,577 files; its SHA-256 is `93ac64b60793aa3bdca5be9efb095e4b156ddb25396d918b89370ff2f1036cec`. All 11 bounded artifact-verification commands exited zero, joined, and matched their log hashes. The final C2 verification records 118 checks, including both original stdout/stderr EOFs for all seven cases. The retained local `terminal-observed.json` receipt is SHA-256 `46e884ad473d55ea36951fd92b2179509fea5416cfbb988f20be8dd00f7c6f2d`.
 
-[Run 40244632082](https://github.com/forge-trust/AppSurface/actions/runs/40244632082),
-at source `b58c00f667783dc0a4d1977a38c81f3d92eb2f0b`, has independently verified
-retained artifacts for all sixteen worker controls, seven application/CLI/SDK controls,
-six workspace rejections, 41 root controls, 41 supplementary root controls, account
-creation and expected rollback, and seven packaged producer/artifact controls.
-The complete 3,576-file source capture has SHA-256
-`6957cfe39a43108bff6e2b7e180729fcceef9bb54cb2821b2d5d4511b5e26b3d`.
-All eleven bounded artifact-verification commands exited zero and joined. The final
-producer verification includes both original stdout/stderr EOFs and empty groups
-for all seven cases; it does not treat a successful launcher exit as physical cleanup.
+The 41 supplementary tests are a binding-declared count, not a claim of native acceptance. The 22 package-smoke rows match the reviewed command fingerprints, but the raw smoke logs and starter/plan/summary JSON are absent, so outputs were not independently revalidated. These consumer checks do not establish a passing full solution or patch coverage gate and do not close the 57-group acceptance map. The receipt expressly sets `full_gate_claim`, `consumer_receipt_gate_pass`, and `consumer_receipt_native_acceptance` to false; revision 90's full gates remain pending, with no numeric pass claimed. See the [coverage gate reference](issue779-coverage-gate.md) and [acceptance map](issue779-acceptance-status.md).
 
-The packaged smoke record retains 22 command fingerprints matching the reviewed
-exit/argv/log-digest matrix. Its raw smoke logs are not retained, so those rows were
-not independently re-executed or fully revalidated by the artifact verifier.
-The revision-57 CLI shutdown correction remains a test-fixture clock change with
-unchanged production deadlines and stopping allowances; its Linux regression rows
-passed in the [recorded regression run](https://github.com/forge-trust/AppSurface/actions/runs/39716808709).
+Revision 89's full run ended `ASCOV120` before numerical gating after two unrelated test failures: the PostgreSQL session-count check and the second-page form timeout. Revision 88's earlier `ASCOV120` is a separate event and also produced no numerical gate result.
 
-Revision 89's full numerical gate was still pending when this checkpoint was
-recorded; revision 88 produced no numerical gate result. These consumer results do not establish a passing
-[solution or patch coverage gate](issue779-coverage-gate.md), close the
-[57-group acceptance map](issue779-acceptance-status.md), or enroll a production
-Trusted catalogue or accepted consumer proof. Later source edits require fresh
-source-bound validation. The dated records below remain historical observations.
+The revision-57 CLI shutdown-test fix changes only the fixture clock: its Linux regression passed 578/578 focused CLI tests, while production deadlines and stopping allowances remained unchanged ([regression run](https://github.com/forge-trust/AppSurface/actions/runs/40104067585)). Production Trusted registration and accepted-proof tables remain intentionally closed; this checkpoint neither enables Trusted nor claims Windows/macOS or other unsupported-platform acceptance. Later source changes require fresh source-bound validation.
 
 ## Recorded Linux validation — 2026-10-24
 

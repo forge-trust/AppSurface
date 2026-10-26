@@ -840,6 +840,73 @@ public sealed class RazorWireMvcPlaywrightTests
     }
 
     [Fact]
+    public async Task IncrementCounter_LazySidebarLoadsAfterSecondContextScrollsIntoView()
+    {
+        const int secondViewportHeight = 40;
+        await using var firstContext = await _fixture.Browser.NewContextAsync();
+        await using var secondContext = await _fixture.Browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = new ViewportSize
+            {
+                Width = 1280,
+                Height = secondViewportHeight
+            }
+        });
+
+        var firstPage = await firstContext.NewPageAsync();
+        var secondPage = await secondContext.NewPageAsync();
+        var sidebarRequests = new ConcurrentQueue<string>();
+        secondPage.Request += (_, request) =>
+        {
+            if (Uri.TryCreate(request.Url, UriKind.Absolute, out var requestUri)
+                && string.Equals(requestUri.AbsolutePath, "/Reactivity/Sidebar", StringComparison.Ordinal))
+            {
+                sidebarRequests.Enqueue(request.Url);
+            }
+        };
+        await secondPage.AddInitScriptAsync(
+            """
+            (() => {
+                window.__sidebarFrameLoadCount = 0;
+                document.addEventListener("turbo:frame-load", event => {
+                    if (event.target instanceof Element && event.target.id === "permanent-island") {
+                        window.__sidebarFrameLoadCount++;
+                    }
+                }, true);
+            })();
+            """);
+
+        await firstPage.GotoAsync(_fixture.ReactivityUrl);
+        await secondPage.GotoAsync(_fixture.ReactivityUrl);
+        await WaitForStreamConnectedAsync(firstPage);
+        await WaitForStreamConnectedAsync(secondPage);
+
+        var sidebarFrame = secondPage.Locator("turbo-frame#permanent-island");
+        var frameBounds = await sidebarFrame.BoundingBoxAsync();
+        Assert.NotNull(frameBounds);
+        Assert.True(
+            frameBounds!.Y >= secondViewportHeight,
+            $"Expected lazy sidebar below the {secondViewportHeight}px viewport, got Y={frameBounds.Y}, height={frameBounds.Height}.");
+
+        await secondPage.EvaluateAsync("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+        Assert.False(await sidebarFrame.EvaluateAsync<bool>("frame => frame.hasAttribute('complete')"));
+        Assert.Empty(sidebarRequests);
+        Assert.Equal(0, await secondPage.EvaluateAsync<int>("() => window.__sidebarFrameLoadCount"));
+
+        await WaitForCounterReadyAsync(firstPage);
+        await WaitForCounterReadyAsync(secondPage);
+        await secondPage.WaitForFunctionAsync(
+            "() => document.querySelector('turbo-frame#permanent-island')?.hasAttribute('complete') === true && window.__sidebarFrameLoadCount === 1",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+        Assert.True(await sidebarFrame.EvaluateAsync<bool>("frame => frame.hasAttribute('complete')"));
+        Assert.NotEmpty(sidebarRequests);
+        Assert.Equal(1, await secondPage.EvaluateAsync<int>("() => window.__sidebarFrameLoadCount"));
+        Assert.Equal(1, await secondPage.Locator("[data-counter-form]").CountAsync());
+    }
+
+    [Fact]
     public async Task IncrementCounter_SessionScorePersists_AcrossAllPageNavigation()
     {
         await using var context = await _fixture.Browser.NewContextAsync();
@@ -1380,8 +1447,13 @@ public sealed class RazorWireMvcPlaywrightTests
         return false;
     }
 
+    /// <summary>Waits for the lazy sidebar counter to become available for interaction.</summary>
+    /// <remarks>Scrolls the fixed island into view first so Turbo's lazy frame loading can fetch its content.</remarks>
     private static async Task WaitForCounterReadyAsync(IPage page)
     {
+        await page.Locator("turbo-frame#permanent-island").ScrollIntoViewIfNeededAsync(
+            new LocatorScrollIntoViewIfNeededOptions { Timeout = 30_000 });
+
         var selectorOptions = new PageWaitForSelectorOptions { Timeout = 30_000 };
         await page.WaitForSelectorAsync("[data-counter-form]", selectorOptions);
         await page.WaitForSelectorAsync("#instance-score-value", selectorOptions);

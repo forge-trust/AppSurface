@@ -213,6 +213,20 @@ public sealed class LinuxKernelIdentityNativeTests
                 ["-c", bridge + " -c '" + runtime + " 30 & wait' & wait"]);
         }
 
+        /// <summary>Starts two actual shells using the same audited executable, followed by one fixed runtime leaf.</summary>
+        /// <remarks>Only fresh fixed-name /run fixture paths are accepted; the application unit and clocks are unchanged.</remarks>
+        internal static TestUnit ForApplicationRepeatedExecutableTree(string executable, string runtime)
+        {
+            var parent = Path.GetDirectoryName(executable);
+            if (parent is null || !System.Text.RegularExpressions.Regex.IsMatch(parent,
+                    "^/run/issue779-dcp-tree-native-[0-9a-f]{32}$")
+                || executable != parent + "/dcp" || runtime != parent + "/runtime"
+                || !File.Exists(executable) || !File.Exists(runtime))
+                throw new ArgumentException("Existing fixed-name test-owned executables are required.");
+            return new(LinuxUnitRole.Application, executable,
+                ["-c", executable + " -c '" + runtime + " 30 & wait' & wait"]);
+        }
+
         internal LinuxUnitName Unit { get; }
         internal string GeneratedControlGroupPath => "/system.slice/" + Unit.Value;
 

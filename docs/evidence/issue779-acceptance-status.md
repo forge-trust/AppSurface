@@ -1,26 +1,14 @@
 # Issue #779 acceptance map — 2026-10-02
 
-## Latest verified consumer checkpoint - 2026-10-26
+## Latest verified consumer checkpoint — 2026-10-26
 
-[Run 40244632082](https://github.com/forge-trust/AppSurface/actions/runs/40244632082)
-at source `b58c00f667783dc0a4d1977a38c81f3d92eb2f0b` has source-bound retained-artifact
-verification for all sixteen worker controls, the seven application/CLI/SDK cases,
-six workspace rejections, 41 root controls, 41 supplementary root controls, account
-creation and expected rollback, and seven packaged producer/artifact cases. The
-eleven artifact-verification commands exited zero and joined; the final producer
-packet includes both stream EOFs and empty groups for every case. The
-[cutover checkpoint](issue779-csharp-runtime-cutover.md#latest-verified-consumer-checkpoint---2026-10-26)
-records the complete source capture and the limits of the retained smoke evidence.
+[Run 40255212264](https://github.com/forge-trust/AppSurface/actions/runs/40255212264), attempt 1 at source `0f2c91f777e476529506e5ce1236acf21ec78425`, has source-bound consumer-artifact verification for all 16 C1 worker controls, all 13 original C3 native cases, 41 root-class tests, the 41 supplementary tests declared by the run binding, account creation and expected rollback, and seven packaged C2 producer/artifact cases. All 11 bounded verification commands exited zero, joined their children, and matched their retained log hashes. The C2 packet records 118 checks, including both stdout/stderr EOFs for each of its seven cases. The source capture contains 3,577 files and has SHA-256 `93ac64b60793aa3bdca5be9efb095e4b156ddb25396d918b89370ff2f1036cec`. See the [consumer run](https://github.com/forge-trust/AppSurface/actions/runs/40255212264), the [cutover record](issue779-csharp-runtime-cutover.md#latest-verified-consumer-checkpoint--2026-10-26), and the retained local `terminal-observed.json` receipt (SHA-256 `46e884ad473d55ea36951fd92b2179509fea5416cfbb988f20be8dd00f7c6f2d`).
 
-Revision 88 stopped with a CLI test readiness-barrier timeout and `ASCOV120`
-before numerical gating; the fixture correction and its local regression
-controls are recorded in the cutover checkpoint. Revision 89's numerical gate
-was still pending at this observation. These consumer results do not close the
-complete 57-group plan, the unchanged solution/patch gates, or production Trusted acceptance.
-Production application registration and accepted-proof tables remain closed. The
-revision-57 shutdown-test fix preserves production limits; its Linux regression
-result is linked in the cutover checkpoint. Later revisions need their own
-source-bound verification. Earlier dated status sections below are historical.
+The 41 supplementary tests are a run-binding count; this receipt does not claim they were natively accepted. These results verify the listed consumer artifacts and checks only. They do not close the 57-group acceptance plan or establish a passing full solution/patch coverage gate. The retained receipt explicitly records `full_gate_claim: false`, `consumer_receipt_gate_pass: false`, and `consumer_receipt_native_acceptance: false`. The 22 package-smoke command fingerprints match the reviewed exit/argv/log-digest matrix, but raw smoke logs and starter/plan/summary JSON were not retained, so those command outputs are not independently revalidated here.
+
+Revision 89's full run ended `ASCOV120` before numerical gating after two unrelated test failures: the PostgreSQL session-count check and the second-page form timeout. This is not a revision-90 gate result. Revision 90's full solution and patch gates remain pending; no numeric pass is claimed.
+
+The revision-57 CLI shutdown-test correction remains a fixture-clock change only. Its Linux regression passed 578/578 focused CLI tests, with production deadlines and stopping allowances unchanged ([regression run](https://github.com/forge-trust/AppSurface/actions/runs/40104067585)). Production Trusted registration and accepted-proof records remain intentionally closed; this consumer verification does not enable Trusted or claim unsupported-platform acceptance. Earlier dated group-map entries below are historical and do not constitute current 57-group closure.
 
 ## Current C# runtime validation status — 2026-10-24
 
