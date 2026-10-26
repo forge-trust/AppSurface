@@ -7,8 +7,10 @@ namespace ForgeTrust.AppSurface.Config;
 /// <remarks>
 /// Mappings are exact suffix replacements in both scoped and unscoped layers. The suffix is deliberately narrower
 /// than a logical segment so the environment codec remains injective and collision checks remain deterministic.
-/// Configure these options before the host starts. Provider construction snapshots them; subsequent mutations
-/// do not change an existing provider. Canonical and historical aliases are both replaced by a mapping.
+/// Configure these options before building or resolving the host. The first built-in provider or
+/// <see cref="IEnvironmentConfigCandidateInspector"/> resolution freezes one snapshot shared by both in that container;
+/// subsequent mutations do not change either consumer. Direct provider construction uses an isolated snapshot.
+/// Canonical and historical aliases are both replaced by a mapping.
 /// The replacement also applies when resolving a member through its aggregate: MapKey("App:Name", "CUSTOM_NAME")
 /// binds App.Name from CUSTOM_NAME or its scoped form, even when no APP__ prefix is present. APP__NAME is ignored.
 /// </remarks>

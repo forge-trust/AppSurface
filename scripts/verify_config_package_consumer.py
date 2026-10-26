@@ -150,6 +150,70 @@ def validate_web_evidence(output, candidate):
     return proof
 
 
+def validate_candidate_inspection(output):
+    proof = json_evidence(output, "Environment candidate inspection evidence: ")
+    expected_native = [
+        ("PRODUCTION__Approved_ApiKey", "Scoped", False, True),
+        ("Approved_ApiKey", "Unscoped", False, True),
+    ]
+    native = [(item["Name"], item["scope"], item["IsLegacyAlias"], item["IsExplicitMapping"])
+              for item in proof["typed"]]
+    if native != expected_native:
+        raise RuntimeError("Typed mapped candidate names, order, or flags are incorrect.")
+    expected_unmapped = [
+        ("PRODUCTION__SERVICE__API-KEY", "Scoped", False, False),
+        ("SERVICE__API-KEY", "Unscoped", False, False),
+    ]
+    unmapped = [(item["Name"], item["scope"], item["IsLegacyAlias"], item["IsExplicitMapping"])
+                for item in proof["unmappedTyped"]]
+    if unmapped != expected_unmapped:
+        raise RuntimeError("Unmapped typed native candidates or flags are incorrect.")
+    expected_strict = [
+        ("PRODUCTION__PAYMENTS.APIKEY", "Scoped", False, False),
+        ("PAYMENTS.APIKEY", "Unscoped", False, False),
+        ("PRODUCTION_PAYMENTS_APIKEY", "Scoped", True, False),
+        ("PRODUCTION__PAYMENTS_APIKEY", "Scoped", True, False),
+        ("PAYMENTS_APIKEY", "Unscoped", True, False),
+    ]
+    strict = [(item["Name"], item["scope"], item["IsLegacyAlias"], item["IsExplicitMapping"])
+              for item in proof["strict"]]
+    if strict != expected_strict:
+        raise RuntimeError("Strict string candidates, order, or compatibility flags are incorrect.")
+    expected_path = [
+        ("PRODUCTION_PAYMENTS_APIKEY", "Scoped", False),
+        ("PAYMENTS_APIKEY", "Unscoped", False),
+        ("PRODUCTION__PAYMENTS__APIKEY", "Scoped", True),
+        ("PAYMENTS__APIKEY", "Unscoped", True),
+    ]
+    path = [(item["Name"], item["scope"], item["IsHierarchical"]) for item in proof["composition"]]
+    if path != expected_path:
+        raise RuntimeError("Composition candidates, order, or hierarchy flags are incorrect.")
+    controls = proof["callerPolicy"]
+    if controls != {"fileAllowedWithoutOverride": True, "fileOverrideRejected": True,
+                    "fileOrdinalMissesMixedCase": True, "fileIgnoreCaseRejectsMixedCase": True,
+                    "approvedProviderConfigured": True, "providerAllowedWithoutOverride": True,
+                    "providerOverrideRejected": True, "providerOrdinalMissesMixedCase": True,
+                    "providerIgnoreCaseRejectsMixedCase": True,
+                    "omittedAncestorMisses": True, "restoredAncestorRejects": True}:
+        raise RuntimeError("Caller-owned policy, comparer, or omitted-ancestor controls failed.")
+    if proof["environmentReads"] != 0 or proof["sourceFactories"] != {
+            "environment": 0, "file": 0, "secret": 0, "provider": 0}:
+        raise RuntimeError("Inspector source-activity counters were not zero.")
+    if (proof["invalidOptionsEnvironmentReads"] != 0 or proof["invalidOptionsSourceFactories"] != {
+            "environment": 0, "file": 0, "secret": 0, "provider": 0}
+            or proof["providerResolveCalls"] != 0 or proof["invalidOptionsProviderResolveCalls"] != 0
+            or proof["ancestorSourceFactories"] != {"environment": 0, "file": 0, "secret": 0, "provider": 0}
+            or proof["rebuiltSourceFactories"] != {"environment": 0, "file": 0, "secret": 0, "provider": 0}
+            or proof["rebuiltEnvironmentReads"] != 0 or proof["rebuiltProviderResolveCalls"] != 0
+            or proof["errors"] != {"syntax": "config-key-invalid", "unencodable": "config-candidate-unencodable",
+                                   "invalidOptions": "config-candidate-options-invalid",
+                                   "nullDtos": "config-candidate-null", "nullElements": "config-candidate-null",
+                                   "originalTypesPreserved": True, "sixFieldsAndHelpLink": True, "safeFixes": True}
+            or proof["lifecycle"] != {"lateOptionsMutationIgnored": True, "rebuildRequired": True}):
+        raise RuntimeError("Error metadata, late-mutation, or validation purity evidence is missing.")
+    return proof
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", type=Path, help="Existing packed package directory; otherwise pack candidate sources.")
@@ -316,9 +380,11 @@ def main():
             ("domain-fixture", domain_feed),
             ("nuget.org", "https://api.nuget.org/v3/index.json"),
         ])
-        for filename in [
-            "Program.cs", "ExplicitRegistrationExample.cs", "WorkerRootConfigs.cs", "WorkerStageProof.cs", "appsettings.json",
-        ]:
+        consumer_sources = [
+            "Program.cs", "ExplicitRegistrationExample.cs", "WorkerRootConfigs.cs", "WorkerStageProof.cs",
+            "EnvironmentCandidateInspectionProof.cs", "appsettings.json",
+        ]
+        for filename in consumer_sources:
             shutil.copyfile(repo / "tests/config-package-consumer" / filename, consumer / filename)
         timings["scaffold"] = round(time.monotonic() - started, 3)
         if project_reference_count(consumer / "Consumer.csproj") != 0:
@@ -380,6 +446,7 @@ def main():
         evidence["proofPhases"] = {"baseline": baseline_counts, "candidate": candidate_counts}
         evidence["webPhases"] = {"baseline": baseline_web, "candidate": validate_web_evidence(first, candidate=True)}
         evidence["workerStages"] = validate_worker_evidence(first)
+        evidence["environmentCandidateInspection"] = validate_candidate_inspection(first)
 
         override_environment = candidate_environment.copy()
         override_environment["PAYMENTS__APIKEY"] = "environment override"

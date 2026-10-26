@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace ForgeTrust.AppSurface.Config;
 
 /// <summary>
@@ -15,11 +17,15 @@ internal static class ConfigEnvironmentCandidates
     /// unscoped hierarchical order.
     /// </returns>
     internal static IReadOnlyList<string> GetDirectCandidates(string environment, string key)
+        => GetDirectMetadataCandidates(environment, key).Select(candidate => candidate.Name).ToArray();
+
+    /// <summary>Materializes direct legacy producers and their scope/shape before ordinal de-duplication.</summary>
+    internal static ImmutableArray<EnvironmentCompositionPathCandidate> GetDirectMetadataCandidates(string environment, string key)
     {
         var envPrefix = NormalizeSegment(environment);
         var legacyKey = NormalizeSegment(key);
         var hierarchicalKey = NormalizeHierarchicalKey(key);
-        return BuildDirectCandidates(envPrefix, legacyKey, hierarchicalKey);
+        return BuildMetadataCandidates(envPrefix, legacyKey, hierarchicalKey);
     }
 
     /// <summary>
@@ -34,9 +40,15 @@ internal static class ConfigEnvironmentCandidates
     internal static IReadOnlyList<string> GetPathCandidates(
         string environment,
         IReadOnlyList<string> segments)
+        => GetPathMetadataCandidates(environment, segments).Select(candidate => candidate.Name).ToArray();
+
+    /// <summary>Projects literal path segments through the existing dotted composition spelling.</summary>
+    /// <remarks>This projection is intentionally not an injective logical-key encoding.</remarks>
+    internal static ImmutableArray<EnvironmentCompositionPathCandidate> GetPathMetadataCandidates(
+        string environment, IReadOnlyList<string> segments)
     {
         ArgumentNullException.ThrowIfNull(segments);
-        return GetDirectCandidates(environment, string.Join('.', segments));
+        return GetDirectMetadataCandidates(environment, string.Join('.', segments));
     }
 
     /// <summary>
@@ -74,25 +86,30 @@ internal static class ConfigEnvironmentCandidates
         string envPrefix,
         string legacyKey,
         string hierarchicalKey)
+        => BuildMetadataCandidates(envPrefix, legacyKey, hierarchicalKey).Select(candidate => candidate.Name).ToArray();
+
+    /// <summary>Attaches producer metadata and retains the first ordinal name in legacy precedence order.</summary>
+    internal static ImmutableArray<EnvironmentCompositionPathCandidate> BuildMetadataCandidates(
+        string envPrefix, string legacyKey, string hierarchicalKey)
     {
-        var ordered = new[]
+        EnvironmentCompositionPathCandidate[] ordered =
         {
-            $"{envPrefix}_{legacyKey}",
-            legacyKey,
-            $"{envPrefix}__{hierarchicalKey}",
-            hierarchicalKey
+            new($"{envPrefix}_{legacyKey}", EnvironmentCandidateScope.Scoped, false),
+            new(legacyKey, EnvironmentCandidateScope.Unscoped, false),
+            new($"{envPrefix}__{hierarchicalKey}", EnvironmentCandidateScope.Scoped, true),
+            new(hierarchicalKey, EnvironmentCandidateScope.Unscoped, true)
         };
 
-        var distinct = new List<string>(ordered.Length);
+        var distinct = ImmutableArray.CreateBuilder<EnvironmentCompositionPathCandidate>(ordered.Length);
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var candidate in ordered)
         {
-            if (seen.Add(candidate))
+            if (seen.Add(candidate.Name))
             {
                 distinct.Add(candidate);
             }
         }
 
-        return distinct;
+        return distinct.ToImmutable();
     }
 }
