@@ -1,0 +1,45 @@
+name: EvidenceHost protected parent qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: Reviewed record identifier already committed on protected main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  protected-parent:
+    if: github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/evidencehost-parent-dotnet
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - name: Check out only the protected workflow revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Install the protected semantic consumer SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: '10.0.401'
+      - name: Verify parent transport controls without candidate execution
+        working-directory: .github/issue779-protected-consumer
+        run: timeout --signal=KILL 60 python3 -B -m unittest -v test_provenance test_github_parent test_dispatch test_entrypoint
+      - name: Build only the protected semantic consumer and dependencies
+        run: |
+          timeout --signal=KILL 120 dotnet restore .github/issue779-protected-consumer/semantic-gate/ProtectedParentGate.csproj --locked-mode --disable-parallel -warnaserror
+          timeout --signal=KILL 120 dotnet build .github/issue779-protected-consumer/semantic-gate/ProtectedParentGate.csproj -c Release --no-restore -m:1 -nr:false -p:UseSharedCompilation=false -warnaserror
+      - name: Resolve one reviewed completed producer record and invoke the fixed semantic gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEWED_RECORD_ID: ${{ inputs.record }}
+        run: timeout --signal=KILL 160 python3 -B .github/issue779-protected-consumer/entrypoint.py "$REVIEWED_RECORD_ID"

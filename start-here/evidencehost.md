@@ -21,7 +21,7 @@ policy against explicit changed paths without executing producers. `verify` chec
 not prove who supplied the files or admit them to a gate. The [migration and support guide](../docs/evidence/evidencehost-migration.md)
 describes the current boundaries and required migration. Use the existing [private coverage gate](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate)
 for numeric coverage enforcement. The [consumer acceptance record](../docs/evidence/issue779-consumer-acceptance.md)
-tracks the required proofs and excluded providers.
+tracks the required proofs and excluded providers. The [protected-parent qualification reference](../.github/issue779-protected-consumer/entrypoint-README.md) describes the reviewed-record, exact-run/artifact and semantic checks now prepared for protected `main`. Its record table remains empty; its local public-data tests do not enable Trusted or supply accepted consumer proof.
 
 ## The first five minutes
 

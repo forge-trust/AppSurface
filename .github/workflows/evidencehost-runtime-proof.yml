@@ -13,6 +13,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  protected-parent-controls:
+    name: Protected parent transport and semantic controls (no admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/evidencehost-parent-controls-dotnet
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: '10.0.401'
+      - name: Bind current source and test closed parent transport without API access
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/protected-parent-controls"
+          mkdir -m 0700 "$evidence"
+          printf 'PARENT_CONTROL_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          (cd .github/issue779-protected-consumer && timeout --signal=KILL 60 python3 -B -m unittest -v test_provenance test_github_parent test_dispatch test_entrypoint) > "$evidence/transport-controls.log" 2>&1
+      - name: Compile the ordinary semantic consumer and exercise the actual fixed child
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          project=.github/issue779-protected-consumer/semantic-gate/ProtectedParentGate.csproj
+          timeout --signal=KILL 120 dotnet restore "$project" --locked-mode --disable-parallel -warnaserror > "$PARENT_CONTROL_EVIDENCE/build.log" 2>&1
+          timeout --signal=KILL 120 dotnet build "$project" -c Release --no-restore -m:1 -nr:false -p:UseSharedCompilation=false -warnaserror >> "$PARENT_CONTROL_EVIDENCE/build.log" 2>&1
+          host="$(readlink -f "$(command -v dotnet)")"
+          timeout --signal=KILL 90 python3 -B .github/issue779-protected-consumer/test_semantic_gate.py --dotnet "$host" --consumer "$GITHUB_WORKSPACE/.github/issue779-protected-consumer/semantic-gate/bin/Release/net10.0/EvidenceHost.ProtectedParentGate.dll" > "$PARENT_CONTROL_EVIDENCE/semantic-controls.log" 2>&1
+          (cd .github/issue779-protected-consumer && ISSUE779_PARENT_TEST_DOTNET="$host" timeout --signal=KILL 30 python3 -B -m unittest -v test_dispatch_semantic) > "$PARENT_CONTROL_EVIDENCE/dispatch-semantic-controls.log" 2>&1
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$PARENT_CONTROL_EVIDENCE/source.json" --verify
+      - name: Retain bounded parent control logs without protected-acceptance claims
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-protected-parent-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/protected-parent-controls
+          retention-days: 7
+          include-hidden-files: true
+
   worker-controls:
     name: All sixteen current CSharp worker controls
     uses: ./.github/workflows/issue779-checkpoint1-worker.yml
@@ -161,7 +207,7 @@ jobs:
 
   solution-coverage:
     name: Unchanged solution and codecov patch gates
-    needs: [worker-controls, application-consumers, account-creation, account-rollback, packaged-producer, worker-measurement-none, worker-measurement-n04, worker-measurement-n05, worker-measurement-n06, worker-measurement-n07, worker-measurement-n08, worker-measurement-n09, worker-measurement-n10, worker-measurement-n11, worker-measurement-n12, worker-measurement-n13, worker-measurement-n14, worker-measurement-n15, worker-measurement-n16]
+    needs: [protected-parent-controls, worker-controls, application-consumers, account-creation, account-rollback, packaged-producer, worker-measurement-none, worker-measurement-n04, worker-measurement-n05, worker-measurement-n06, worker-measurement-n07, worker-measurement-n08, worker-measurement-n09, worker-measurement-n10, worker-measurement-n11, worker-measurement-n12, worker-measurement-n13, worker-measurement-n14, worker-measurement-n15, worker-measurement-n16]
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
