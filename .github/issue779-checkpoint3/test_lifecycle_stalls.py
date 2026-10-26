@@ -269,7 +269,7 @@ class PostStopMarkerControls(unittest.TestCase):
                 "owned_work_joined": True, "new_work_rejected": True, "write_rejected": True,
                 "artifacts_unchanged": True, "native_acceptance": False}
 
-    def test_fixture_policy_and_generated_closed_declaration_share_the_unused_zero_byte_slot(self):
+    def test_fixture_policy_and_generated_closed_declaration_share_the_unused_positive_capacity_slot(self):
         spec = importlib.util.spec_from_file_location("post_stop_payload", Path(__file__).with_name("prepare_payload.py"))
         payload = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(payload)
@@ -280,9 +280,9 @@ class PostStopMarkerControls(unittest.TestCase):
                 self.assertEqual(2, len(slots))
                 self.assertEqual({"LogicalName": "post-stop-probe", "RelativeRoot": "lifecycle-probe",
                                   "MediaType": "application/octet-stream", "Required": False,
-                                  "MaximumBytes": 0}, slots[1])
+                                  "MaximumBytes": 1}, slots[1])
                 generated = payload.definition_source(case, [], policy)
-                self.assertEqual(1, generated.count('new EvidenceArtifactSlot("post-stop-probe", "lifecycle-probe", "application/octet-stream", false, 0)'))
+                self.assertEqual(1, generated.count('new EvidenceArtifactSlot("post-stop-probe", "lifecycle-probe", "application/octet-stream", false, 1)'))
                 self.assertIn('new EvidenceArtifactSlot("coverage-report", "merged", "application/xml", true, 20_971_520)', generated)
 
     def test_completed_event_requires_each_true_fact_and_one_private_terminal_reason(self):

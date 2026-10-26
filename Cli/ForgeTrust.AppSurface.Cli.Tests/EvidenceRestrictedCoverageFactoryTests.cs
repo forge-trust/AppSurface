@@ -11,6 +11,29 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
 {
     private const string Canary = "restricted-factory-canary-779";
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void OptionalPrivateProbeMustHavePositiveCapacityBeforeTheSharedFactoryCanRegisterIt(long maximumBytes)
+    {
+        var declaration = Declaration();
+        declaration = declaration with
+        {
+            ArtifactSlots = [.. declaration.ArtifactSlots,
+                new("post-stop-probe", "lifecycle-probe", "application/octet-stream", false, maximumBytes)],
+        };
+        if (maximumBytes == 0)
+        {
+            AssertSafe(Assert.Throws<EvidenceAdmissionException>(() =>
+                EvidenceRestrictedCoverageProducerFactory.Create(declaration)), "ASEVD404");
+            return;
+        }
+
+        var registration = EvidenceRestrictedCoverageProducerFactory.Create(declaration);
+        Assert.Equal(1, registration.Declaration.ArtifactSlots.Single(slot => slot.LogicalName == "post-stop-probe").MaximumBytes);
+        Assert.Equal(EvidenceCanonicalJson.Serialize(declaration), EvidenceCanonicalJson.Serialize(registration.Declaration));
+    }
+
     [Fact]
     public void FactorySnapshotsEveryListAndProvidesInspectableFixedMetadata()
     {

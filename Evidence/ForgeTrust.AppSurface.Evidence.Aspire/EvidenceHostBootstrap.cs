@@ -1158,7 +1158,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         admission.ValidateActive(_plan);
         if (_artifactWriters.Count != 1 || _plan.Profile.Producers.Count != 1
             || _plan.Profile.Producers[0].ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == "post-stop-probe")
-                is not { RelativeRoot: "lifecycle-probe", MediaType: "application/octet-stream", Required: false, MaximumBytes: 0 })
+                is not { RelativeRoot: "lifecycle-probe", MediaType: "application/octet-stream", Required: false, MaximumBytes: 1 })
             throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
 
         var writer = _artifactWriters[0];
