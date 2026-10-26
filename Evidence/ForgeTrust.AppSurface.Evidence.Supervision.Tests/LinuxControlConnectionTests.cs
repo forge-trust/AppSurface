@@ -456,6 +456,95 @@ public sealed class LinuxControlConnectionTests
         Assert.Equal(1, escapedStream.WriteCalls);
     }
 
+    [Fact]
+    public async Task ReadyPhasesMustCompleteInOrderBeforeTheFinalReplyCanCloseTheStream()
+    {
+        using var stream = new ScriptedStream(Ready);
+        using var framing = new SupervisionControlLineFraming(stream);
+        Assert.IsType<EvidenceReadyControlRequest>(await framing.ReadRequestAsync(default));
+
+        await framing.WritePreparationAsync(17, default);
+        Assert.Equal(0, stream.DisposeCount);
+        await framing.WriteAdmissionStartAsync(default);
+        Assert.Equal(0, stream.DisposeCount);
+        await framing.WriteResponseAsync(Encoding.UTF8.GetBytes("{\"ok\":true}"), default);
+
+        var lines = Encoding.UTF8.GetString(stream.Written.ToArray()).Split('\n');
+        Assert.Equal(4, lines.Length);
+        using var preparation = JsonDocument.Parse(lines[0]);
+        Assert.Equal("pre-admission", preparation.RootElement.GetProperty("phase").GetString());
+        Assert.Equal(17, preparation.RootElement.GetProperty("remaining_job_ms").GetInt64());
+        using var admission = JsonDocument.Parse(lines[1]);
+        Assert.Equal("admission-start", admission.RootElement.GetProperty("phase").GetString());
+        Assert.Equal("{\"ok\":true}", lines[2]);
+        Assert.Empty(lines[3]);
+        Assert.Equal(3, stream.WriteCalls);
+        Assert.Equal(1, stream.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData("before-read")]
+    [InlineData("other-operation")]
+    [InlineData("missing-preparation")]
+    [InlineData("zero-allowance")]
+    [InlineData("excess-allowance")]
+    [InlineData("repeated-preparation")]
+    [InlineData("repeated-admission")]
+    [InlineData("reply-before-admission")]
+    public async Task InvalidReadyPhaseNeverWritesAnAdditionalFrame(string scenario)
+    {
+        using var stream = new ScriptedStream(scenario == "other-operation"
+            ? Encoding.UTF8.GetBytes("{\"op\":\"stop\"}\n") : Ready);
+        using var framing = new SupervisionControlLineFraming(stream);
+        if (scenario != "before-read") await framing.ReadRequestAsync(default);
+        if (scenario is "repeated-preparation" or "repeated-admission" or "reply-before-admission")
+            await framing.WritePreparationAsync(17, default);
+        if (scenario == "repeated-admission") await framing.WriteAdmissionStartAsync(default);
+        var originalBytes = stream.Written.ToArray();
+        var originalWrites = stream.WriteCalls;
+
+        var error = await Assert.ThrowsAsync<ControlLineException>(() => scenario switch
+        {
+            "missing-preparation" or "repeated-admission" => framing.WriteAdmissionStartAsync(default),
+            "reply-before-admission" => framing.WriteResponseAsync(Encoding.UTF8.GetBytes("{\"ok\":true}"), default),
+            "zero-allowance" => framing.WritePreparationAsync(0, default),
+            "excess-allowance" => framing.WritePreparationAsync(3600001, default),
+            _ => framing.WritePreparationAsync(17, default),
+        });
+
+        Assert.Equal(ControlLineFailure.InvalidSequence, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.Equal(originalWrites, stream.WriteCalls);
+        Assert.Equal(originalBytes, stream.Written.ToArray());
+        Assert.Equal(1, stream.DisposeCount);
+    }
+
+    [Fact]
+    public async Task AdmissionCannotOvertakeAnUnsettledPreparationWrite()
+    {
+        using var stream = new ScriptedStream(Ready, gateWrite: true);
+        using var framing = new SupervisionControlLineFraming(stream);
+        await framing.ReadRequestAsync(default);
+        var preparation = framing.WritePreparationAsync(17, default);
+        try
+        {
+            await stream.Entered.Task.WaitAsync(Guard);
+            var error = await Assert.ThrowsAsync<ControlLineException>(() => framing.WriteAdmissionStartAsync(default));
+            Assert.Equal(ControlLineFailure.InvalidSequence, error.Failure);
+            Assert.Equal(1, stream.WriteCalls);
+            Assert.False(preparation.IsCompleted);
+            stream.Release();
+            var originalError = await Assert.ThrowsAsync<ControlLineException>(() => preparation.WaitAsync(Guard));
+            Assert.Equal(ControlLineFailure.Closed, originalError.Failure);
+            Assert.Equal(1, stream.DisposeCount);
+        }
+        finally
+        {
+            stream.Release();
+            try { await preparation.WaitAsync(Guard); } catch (ControlLineException) { }
+        }
+    }
+
     private sealed class CloseBarrierStream(bool gateRead = false, bool failClose = true) : Stream
     {
         private readonly MemoryStream _input = new(Ready, writable: false);
