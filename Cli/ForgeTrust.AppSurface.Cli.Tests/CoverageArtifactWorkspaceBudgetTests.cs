@@ -159,16 +159,25 @@ public sealed class CoverageArtifactWorkspaceBudgetTests
 
     private sealed class HResultIOException : IOException
     {
-        public HResultIOException(int hresult) : base("fixture transient inventory error") => HResult = hresult;
+        public HResultIOException(int hresult) : base("fixture transient inventory error")
+        {
+            HResult = hresult;
+        }
     }
 
     private sealed class HResultUnauthorizedAccessException : UnauthorizedAccessException
     {
-        public HResultUnauthorizedAccessException(int hresult) : base("fixture transient inventory error") => HResult = hresult;
+        public HResultUnauthorizedAccessException(int hresult) : base("fixture transient inventory error")
+        {
+            HResult = hresult;
+        }
     }
 
     private sealed class HResultInvalidOperationException : InvalidOperationException
     {
-        public HResultInvalidOperationException(int hresult) : base("fixture unexpected measurement error") => HResult = hresult;
+        public HResultInvalidOperationException(int hresult) : base("fixture unexpected measurement error")
+        {
+            HResult = hresult;
+        }
     }
 }
