@@ -26,6 +26,12 @@ REJECTIONS = frozenset((
     'evidence-observation-without-control', 'evidence-legacy-observation-without-control',
     'evidence-conflicting-mode',
 ))
+SDK_LOAD_MARKERS = (
+    b'PACKAGED_EVIDENCE_MIGRATION legacy-omitted ASEVD401 callbacks=0',
+    b'PACKAGED_EVIDENCE_MIGRATION legacy-false ASEVD401 callbacks=0',
+    b'PACKAGED_EVIDENCE_MIGRATION legacy-true ASEVD402 callbacks=0',
+)
+SDK_LOAD_COMPLETION = b'Exact packaged SDK planning, schema and closed-entry controls passed.'
 STARTER = ('evidence.policy.json', 'EvidenceHost.cs', 'README.md')
 OUTPUTS = {name + '.log': name + '.log' for name in COMMANDS}
 OUTPUTS.update({'starter/' + name: 'planning-consumer/.appsurface/evidence/' + name
@@ -129,6 +135,14 @@ def validate(bodies, source):
     require(b'unverified trusted-envelope:' in bodies['evidence-doctor.log']
             and b'do not grant admission' in bodies['evidence-doctor.log']
             and b'issue779-consumer-acceptance.md' in bodies['evidence-doctor.log'])
+    sdk_load_lines = bodies['sdk-load.log'].splitlines()
+    marker_positions = []
+    for marker in SDK_LOAD_MARKERS:
+        require(sdk_load_lines.count(marker) == 1)
+        marker_positions.append(sdk_load_lines.index(marker))
+    require(marker_positions == sorted(marker_positions)
+            and sdk_load_lines.count(SDK_LOAD_COMPLETION) == 1
+            and sdk_load_lines[-1] == SDK_LOAD_COMPLETION)
     require(all(value in bodies['evidence-explain.log'] for value in (
         b'Evidence plan: targeted-coverage (targeted)', b'Required producers: coverage',
         b'Required resources: none', b'changed-behavior-covered')))

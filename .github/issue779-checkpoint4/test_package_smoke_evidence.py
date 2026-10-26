@@ -34,6 +34,8 @@ class PackageSmokeEvidenceTests(unittest.TestCase):
         self.bodies['evidence-explain.log'] = (
             b'Evidence plan: targeted-coverage (targeted)\nRequired producers: coverage\n'
             b'Required resources: none\nchanged-behavior-covered\n')
+        self.bodies['sdk-load.log'] = b'\n'.join((
+            *subject.SDK_LOAD_MARKERS, subject.SDK_LOAD_COMPLETION)) + b'\n'
         self.bodies['starter/evidence.policy.json'] = b'{"generatedBy":"appsurface-evidence-starter-v1"}'
         self.bodies['starter/EvidenceHost.cs'] = b'// actual file fixture\n'
         self.bodies['starter/README.md'] = b'# Starter\n'
@@ -117,6 +119,28 @@ class PackageSmokeEvidenceTests(unittest.TestCase):
         self.receipt['commands'][8]['log_sha256'] = self.sha(self.bodies['evidence-doctor.log'])
         self.save()
         self.reject()
+
+    def test_missing_each_packaged_migration_marker_rejects_before_copy(self):
+        original = self.bodies['sdk-load.log'].splitlines()
+        command = next(item for item in self.receipt['commands'] if item['name'] == 'sdk-load')
+        for marker in subject.SDK_LOAD_MARKERS:
+            with self.subTest(marker=marker):
+                self.bodies['sdk-load.log'] = b'\n'.join(line for line in original if line != marker) + b'\n'
+                command['log_sha256'] = self.sha(self.bodies['sdk-load.log'])
+                self.save()
+                self.reject()
+
+    def test_substituted_each_packaged_migration_marker_rejects_before_copy(self):
+        original = self.bodies['sdk-load.log'].splitlines()
+        command = next(item for item in self.receipt['commands'] if item['name'] == 'sdk-load')
+        for marker in subject.SDK_LOAD_MARKERS:
+            with self.subTest(marker=marker):
+                replacement = marker.replace(b'callbacks=0', b'callbacks=1')
+                self.bodies['sdk-load.log'] = b'\n'.join(
+                    replacement if line == marker else line for line in original) + b'\n'
+                command['log_sha256'] = self.sha(self.bodies['sdk-load.log'])
+                self.save()
+                self.reject()
 
     def test_claim_flags_and_coherent_execution_summary_reject(self):
         self.receipt['protected_execution'] = True

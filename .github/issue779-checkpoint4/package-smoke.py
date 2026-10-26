@@ -174,12 +174,15 @@ var canonical = EvidenceCanonicalJson.Serialize(plan);
 if (!canonical.AsSpan().SequenceEqual(EvidenceCanonicalJson.Serialize(
     EvidenceCanonicalJson.Deserialize<EvidencePlan>(canonical))))
     throw new InvalidOperationException("SDK canonical roundtrip mismatch.");
-try
+foreach (var unsupportedSchema in new[] { "0.9", "2.0", "9999" })
 {
-    _ = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan with { ContractVersion = "2.0" }));
-    throw new InvalidOperationException("Unsupported schema was accepted.");
+    try
+    {
+        _ = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan with { ContractVersion = unsupportedSchema }));
+        throw new InvalidOperationException("Unsupported schema was accepted.");
+    }
+    catch (JsonException error) when (error.InnerException is null) { }
 }
-catch (JsonException error) when (error.InnerException is null) { }
 foreach (var observation in new[] { false, true })
 {
     try
@@ -199,6 +202,51 @@ try
 }
 catch (EvidenceAdmissionException error) when (error.Code == "ASEVD402" && error.InnerException is null) { }
 if (configured) throw new InvalidOperationException("Configuration ran before authentication.");
+#pragma warning disable CS0618
+var omittedConfigured = false;
+await using (var omittedHost = EvidenceHostBootstrap.Create(plan, _ => omittedConfigured = true))
+{
+    var omittedRun = omittedHost.RunAsync();
+    try
+    {
+        await omittedRun;
+        throw new InvalidOperationException("The omitted legacy Boolean overload was accepted.");
+    }
+    catch (EvidenceAdmissionException error) when (error.Code == "ASEVD401" && error.InnerException is null) { }
+}
+#pragma warning restore CS0618
+if (omittedConfigured) throw new InvalidOperationException("Omitted legacy Boolean configured the host.");
+Console.WriteLine("PACKAGED_EVIDENCE_MIGRATION legacy-omitted ASEVD401 callbacks=0");
+#pragma warning disable CS0618
+var falseConfigured = false;
+await using (var falseHost = EvidenceHostBootstrap.Create(plan, _ => falseConfigured = true))
+{
+    var falseRun = falseHost.RunAsync(false);
+    try
+    {
+        await falseRun;
+        throw new InvalidOperationException("The false legacy Boolean overload was accepted.");
+    }
+    catch (EvidenceAdmissionException error) when (error.Code == "ASEVD401" && error.InnerException is null) { }
+}
+#pragma warning restore CS0618
+if (falseConfigured) throw new InvalidOperationException("False legacy Boolean configured the host.");
+Console.WriteLine("PACKAGED_EVIDENCE_MIGRATION legacy-false ASEVD401 callbacks=0");
+#pragma warning disable CS0618
+var trueConfigured = false;
+await using (var trueHost = EvidenceHostBootstrap.Create(plan, _ => trueConfigured = true))
+{
+    var trueRun = trueHost.RunAsync(true);
+    try
+    {
+        await trueRun;
+        throw new InvalidOperationException("The true legacy Boolean overload was accepted.");
+    }
+    catch (EvidenceAdmissionException error) when (error.Code == "ASEVD402" && error.InnerException is null) { }
+}
+#pragma warning restore CS0618
+if (trueConfigured) throw new InvalidOperationException("True legacy Boolean configured the host.");
+Console.WriteLine("PACKAGED_EVIDENCE_MIGRATION legacy-true ASEVD402 callbacks=0");
 Console.WriteLine("Exact packaged SDK planning, schema and closed-entry controls passed.");
 ''')
         # A fresh package cache forces actual restore of the local SDK graph and its declared external dependencies.
