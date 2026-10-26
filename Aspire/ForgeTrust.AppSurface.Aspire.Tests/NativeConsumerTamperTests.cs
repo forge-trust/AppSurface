@@ -482,7 +482,16 @@ public sealed class NativeConsumerTamperTests
         var pack = await new EvidenceCommandRunner().RunAsync(new EvidenceCommandRequest(dotnet,
             ["pack", TestPathUtils.PathUnder(repository, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
                 "--no-build", "--no-restore", "--configuration", configuration, "--output", feed,
-                "/p:PackageVersion=" + ownVersion, "/p:RepositoryCommit=" + identity], repository, TimeSpan.FromMinutes(5)));
+                "/p:PackageVersion=" + ownVersion, "/p:RepositoryCommit=" + identity], repository, TimeSpan.FromMinutes(5))
+        {
+            // This bounded fixture command must not leave reusable build processes holding its output pipes.
+            Environment = new Dictionary<string, string>
+            {
+                ["MSBUILDDISABLENODEREUSE"] = "1",
+                ["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0",
+                ["UseSharedCompilation"] = "false",
+            },
+        });
         Assert.True(pack.ExitCode == 0 && !pack.OutputTruncated, pack.StandardOutput + pack.StandardError);
         return new Candidate(TestPathUtils.PathUnder(feed, "ForgeTrust.AppSurface.Cli." + ownVersion + ".nupkg"), ownVersion, identity);
     }
