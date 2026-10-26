@@ -15,11 +15,12 @@ internal static class EnvironmentCandidateInspectionProof
         var activity = new SourceActivityCounters();
         var environment = new CountingEnvironmentProvider();
         var provider = new CountingProvider();
-        using var host = CreateHost(environment, activity, provider,
-            options => options.MapKey("Payments:ApiKey", "Approved_ApiKey")
+        Action<AppSurfaceEnvironmentConfigOptions> configureMappings = options =>
+            options.MapKey("Payments:ApiKey", "Approved_ApiKey")
                 .MapKey("Feature:Endpoint", "Feature_Endpoint")
                 .MapKey("Service", "Root_Config")
-                .MapKey("Service:ApiKey", "Service_ApiKey"), out var approvedProviderRegistered);
+                .MapKey("Service:ApiKey", "Service_ApiKey");
+        using var host = CreateHost(environment, activity, provider, configureMappings, out var approvedProviderRegistered);
         var inspector = host.Services.GetRequiredService<IEnvironmentConfigCandidateInspector>();
 
         var typed = inspector.InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Payments:ApiKey"));
@@ -67,19 +68,19 @@ internal static class EnvironmentCandidateInspectionProof
         if (compositionCopy.Candidates.Count != 4 || compositionChanged.Candidates.Count != 4
             || deconstructedPathCandidates.Count != 4 || !deconstructedPath.Equals(composition.Path))
             throw new InvalidOperationException("composition-plan-copy-contract-failed");
-        var nullCounters = Capture(() => new EnvironmentNativeKeyPlan(null!, []));
-        var nullNativeList = Capture(() => new EnvironmentNativeKeyPlan(AppSurfaceConfigKey.Parse("Path"), null!));
-        var nullList = Capture(() => new EnvironmentCompositionPathPlan(AppSurfaceConfigKey.Parse("Path"), null!));
-        var nullElement = Capture(() => new EnvironmentNativeKeyPlan(AppSurfaceConfigKey.Parse("Path"), [null!]));
-        var nullCompositionElement = Capture(() => new EnvironmentCompositionPathPlan(
+        var nullCounters = Capture<ArgumentNullException>(() => new EnvironmentNativeKeyPlan(null!, []));
+        var nullNativeList = Capture<ArgumentNullException>(() => new EnvironmentNativeKeyPlan(AppSurfaceConfigKey.Parse("Path"), null!));
+        var nullList = Capture<ArgumentNullException>(() => new EnvironmentCompositionPathPlan(AppSurfaceConfigKey.Parse("Path"), null!));
+        var nullElement = Capture<ArgumentException>(() => new EnvironmentNativeKeyPlan(AppSurfaceConfigKey.Parse("Path"), [null!]));
+        var nullCompositionElement = Capture<ArgumentException>(() => new EnvironmentCompositionPathPlan(
             AppSurfaceConfigKey.Parse("Path"), [null!]));
         AssertDiagnostic(nullCounters, "config-candidate-null", "#config-candidate-null", typeof(ArgumentNullException));
         AssertDiagnostic(nullNativeList, "config-candidate-null", "#config-candidate-null", typeof(ArgumentNullException));
         AssertDiagnostic(nullList, "config-candidate-null", "#config-candidate-null", typeof(ArgumentNullException));
         AssertDiagnostic(nullElement, "config-candidate-null", "#config-candidate-null", typeof(ArgumentException));
         AssertDiagnostic(nullCompositionElement, "config-candidate-null", "#config-candidate-null", typeof(ArgumentException));
-        var nullNativeWithKey = Capture(() => _ = copied with { Key = null! });
-        var nullCompositionWithPath = Capture(() => _ = compositionCopy with { Path = null! });
+        var nullNativeWithKey = Capture<ArgumentNullException>(() => _ = copied with { Key = null! });
+        var nullCompositionWithPath = Capture<ArgumentNullException>(() => _ = compositionCopy with { Path = null! });
         AssertDiagnostic(nullNativeWithKey, "config-candidate-null", "#config-candidate-null", typeof(ArgumentNullException));
         AssertDiagnostic(nullCompositionWithPath, "config-candidate-null", "#config-candidate-null", typeof(ArgumentNullException));
 
@@ -132,8 +133,27 @@ internal static class EnvironmentCandidateInspectionProof
             || latePlan.Candidates[0].Name != "PRODUCTION__LATE__KEY")
             throw new InvalidOperationException("candidate-late-options-mutation-changed-snapshot");
 
-        var syntax = Capture(() => inspector.InspectNativeKey("Production", "Payments::ApiKey"));
-        var unencodable = Capture(() => inspector.InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Secret:_sentinel-secret")));
+        // protects=rebuilt host captures corrected mappings; fails_when=new host remains stale; no_claim=refreshing an existing container.
+        var rebuiltActivity = new SourceActivityCounters();
+        var rebuiltEnvironment = new CountingEnvironmentProvider();
+        var rebuiltProvider = new CountingProvider();
+        using var rebuiltHost = CreateHost(rebuiltEnvironment, rebuiltActivity, rebuiltProvider, options =>
+        {
+            configureMappings(options);
+            options.MapKey("Late:Key", "Late_Suffix");
+        }, out _);
+        var rebuiltInspector = rebuiltHost.Services.GetRequiredService<IEnvironmentConfigCandidateInspector>();
+        var rebuiltPlan = rebuiltInspector.InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Late:Key"));
+        Equal(rebuiltPlan.Candidates.Select(c => (c.Name, c.Scope, c.IsLegacyAlias, c.IsExplicitMapping)),
+            [("PRODUCTION__Late_Suffix", EnvironmentCandidateScope.Scoped, false, true),
+             ("Late_Suffix", EnvironmentCandidateScope.Unscoped, false, true)], "rebuilt-mapping");
+        Equal(inspector.InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Late:Key")).Candidates,
+            latePlan.Candidates, "original-snapshot-after-rebuild");
+        var rebuildRequired = rebuiltPlan.Candidates.All(candidate => candidate.IsExplicitMapping)
+            && latePlan.Candidates.All(candidate => !candidate.IsExplicitMapping);
+
+        var syntax = Capture<FormatException>(() => inspector.InspectNativeKey("Production", "Payments::ApiKey"));
+        var unencodable = Capture<InvalidOperationException>(() => inspector.InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Secret:_sentinel-secret")));
         AssertDiagnostic(syntax, "config-key-invalid", "#config-key-invalid", typeof(FormatException));
         AssertDiagnostic(unencodable, "config-candidate-unencodable", "#config-candidate-unencodable", typeof(InvalidOperationException));
         var invalidOptionsEnvironment = new CountingEnvironmentProvider();
@@ -141,11 +161,12 @@ internal static class EnvironmentCandidateInspectionProof
         var invalidOptionsProvider = new CountingProvider();
         using var invalidOptionsHost = CreateHost(invalidOptionsEnvironment, invalidOptionsActivity, invalidOptionsProvider,
             options => options.MaxAdHocClaims = 0, out _);
-        var invalidOptions = Capture(() => invalidOptionsHost.Services.GetRequiredService<IEnvironmentConfigCandidateInspector>()
+        var invalidOptions = Capture<OptionsValidationException>(() => invalidOptionsHost.Services.GetRequiredService<IEnvironmentConfigCandidateInspector>()
             .InspectNativeKey("Production", AppSurfaceConfigKey.Parse("Payments:ApiKey")));
         AssertDiagnostic(invalidOptions, "config-candidate-options-invalid", "#config-candidate-options-invalid",
             typeof(OptionsValidationException));
         if (environment.Reads != 0 || activity.Total != 0 || provider.ResolveCalls != 0
+            || rebuiltEnvironment.Reads != 0 || rebuiltActivity.Total != 0 || rebuiltProvider.ResolveCalls != 0
             || invalidOptionsEnvironment.Reads != 0 || invalidOptionsActivity.Total != 0 || invalidOptionsProvider.ResolveCalls != 0)
             throw new InvalidOperationException("candidate-inspection-performed-source-io");
 
@@ -157,14 +178,16 @@ internal static class EnvironmentCandidateInspectionProof
                 invalidOptions = "config-candidate-options-invalid", originalTypesPreserved = true,
                 nullDtos = "config-candidate-null", nullElements = "config-candidate-null",
                 sixFieldsAndHelpLink = true, safeFixes = true },
-            lifecycle = new { lateOptionsMutationIgnored = true, rebuildRequired = true },
+            lifecycle = new { lateOptionsMutationIgnored = true, rebuildRequired },
             callerPolicy = new { fileAllowedWithoutOverride, fileOverrideRejected, fileOrdinalMissesMixedCase,
                 fileIgnoreCaseRejectsMixedCase, approvedProviderConfigured, providerAllowedWithoutOverride,
                 providerOverrideRejected, providerOrdinalMissesMixedCase, providerIgnoreCaseRejectsMixedCase,
                 omittedAncestorMisses, restoredAncestorRejects }, environmentReads = environment.Reads,
             sourceFactories = activity.ToEvidence(), invalidOptionsEnvironmentReads = invalidOptionsEnvironment.Reads,
             providerResolveCalls = provider.ResolveCalls, invalidOptionsProviderResolveCalls = invalidOptionsProvider.ResolveCalls,
-            ancestorSourceFactories = ancestorActivity.ToEvidence(), invalidOptionsSourceFactories = invalidOptionsActivity.ToEvidence() };
+            ancestorSourceFactories = ancestorActivity.ToEvidence(), invalidOptionsSourceFactories = invalidOptionsActivity.ToEvidence(),
+            rebuiltSourceFactories = rebuiltActivity.ToEvidence(), rebuiltEnvironmentReads = rebuiltEnvironment.Reads,
+            rebuiltProviderResolveCalls = rebuiltProvider.ResolveCalls };
     }
 
     private static IHost CreateHost(CountingEnvironmentProvider environment, SourceActivityCounters activity,
@@ -189,10 +212,10 @@ internal static class EnvironmentCandidateInspectionProof
     private static bool HasEnvironmentCandidate(IEnumerable<EnvironmentNativeCandidate> candidates,
         HashSet<string> environmentNames) => candidates.Any(candidate => environmentNames.Contains(candidate.Name));
 
-    private static Exception Capture(Action action)
+    private static TException Capture<TException>(Action action) where TException : Exception
     {
         try { action(); }
-        catch (Exception exception) { return exception; }
+        catch (TException exception) { return exception; }
         throw new InvalidOperationException("candidate-expected-error-not-thrown");
     }
 

@@ -25,7 +25,7 @@ For portable configuration, start with the [logical-key quickstart](Config/Forge
 [coordinated upgrade guide](guides/config-key-migration.md).
 For names-only environment candidate planning and caller-owned source policy, see the
 [environment inspection quickstart](guides/config-logical-keys.md#environment-candidate-inspection)
-and its [packed package consumer proof](tests/config-package-consumer/README.md).
+and its [packed package consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 If a shared typed wrapper lives in a Domain assembly outside normal module
 discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
 and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).

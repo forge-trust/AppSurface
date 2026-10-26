@@ -203,6 +203,8 @@ def validate_candidate_inspection(output):
             "environment": 0, "file": 0, "secret": 0, "provider": 0}
             or proof["providerResolveCalls"] != 0 or proof["invalidOptionsProviderResolveCalls"] != 0
             or proof["ancestorSourceFactories"] != {"environment": 0, "file": 0, "secret": 0, "provider": 0}
+            or proof["rebuiltSourceFactories"] != {"environment": 0, "file": 0, "secret": 0, "provider": 0}
+            or proof["rebuiltEnvironmentReads"] != 0 or proof["rebuiltProviderResolveCalls"] != 0
             or proof["errors"] != {"syntax": "config-key-invalid", "unencodable": "config-candidate-unencodable",
                                    "invalidOptions": "config-candidate-options-invalid",
                                    "nullDtos": "config-candidate-null", "nullElements": "config-candidate-null",

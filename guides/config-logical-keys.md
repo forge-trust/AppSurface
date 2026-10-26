@@ -1,7 +1,5 @@
 # Logical configuration keys
 
-
-
 An AppSurface key has one identity across configuration providers. `Payments:ApiKey`
 and `payments:apikey` compare equal; `Payments:Api-Key` and `Payments:Api:Key` do not.
 Start with the [Config quickstart](../Config/ForgeTrust.AppSurface.Config/README.md),

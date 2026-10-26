@@ -174,6 +174,9 @@ configures one explicit native mapping before build and asserts the complete ord
 typed, strict-string, and direct composition candidate lists, including scope and
 producer flags. It checks constructor list copying, `with` assignment copying, plain
 record copying, and generated deconstruction through the packed public assembly.
+It also proves that a mapping added after the first inspection leaves the original
+host frozen, while rebuilding a host with the corrected configuration exposes the
+mapped candidates. Both hosts retain zero inspector source-activity counters.
 
 The helper's guarded environment, file-location, secret-provider, and ordinary-provider
 factories stay unactivated across inspection; its separate environment read counter is
