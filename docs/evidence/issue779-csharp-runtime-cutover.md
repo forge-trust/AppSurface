@@ -2,6 +2,18 @@
 
 ## Latest verified consumer checkpoint - 2026-10-26
 
+[Revision 88, run 40238626739](https://github.com/forge-trust/AppSurface/actions/runs/40238626739)
+completed all native and consumer jobs, but its full solution command stopped
+with `ASCOV120` before numerical gating. The CLI project passed 3,217 of 3,218
+tests; the concurrent artifact-allocation test timed out waiting for two queued
+test callbacks to reach their readiness barrier, before either allocator ran.
+The fixture now uses dedicated threads, keeps its original five-second bounds,
+and releases and joins every started thread even after partial startup. Local
+validation passed all 17 artifact-root tests; a forced shared-pool regression
+failed both new scheduling controls. The actual allocator race and complete
+solution/patch gates still require fresh Linux validation. Production limits,
+allocation behavior and coverage policy are unchanged.
+
 [Run 40244632082](https://github.com/forge-trust/AppSurface/actions/runs/40244632082),
 at source `b58c00f667783dc0a4d1977a38c81f3d92eb2f0b`, has independently verified
 retained artifacts for all sixteen worker controls, seven application/CLI/SDK controls,
@@ -20,8 +32,8 @@ The revision-57 CLI shutdown correction remains a test-fixture clock change with
 unchanged production deadlines and stopping allowances; its Linux regression rows
 passed in the [recorded regression run](https://github.com/forge-trust/AppSurface/actions/runs/39716808709).
 
-The revision-88/89 full numerical gates were still running when this checkpoint
-was recorded. These consumer results do not establish a passing
+Revision 89's full numerical gate was still pending when this checkpoint was
+recorded; revision 88 produced no numerical gate result. These consumer results do not establish a passing
 [solution or patch coverage gate](issue779-coverage-gate.md), close the
 [57-group acceptance map](issue779-acceptance-status.md), or enroll a production
 Trusted catalogue or accepted consumer proof. Later source edits require fresh

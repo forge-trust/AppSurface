@@ -322,7 +322,7 @@ public sealed class EvidenceLinuxArtifactRootTests
         }
 
         var parent = NewPrivateDirectory();
-        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var gate = new ManualResetEventSlim();
         var firstReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var secondReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<(EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)>? first = null;
@@ -333,11 +333,11 @@ public sealed class EvidenceLinuxArtifactRootTests
         var bodySucceeded = false;
         var identity = default(EvidenceLinuxArtifactIdentity);
 
-        async Task<(EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error)> AllocateAfterGate(
+        (EvidenceLinuxArtifactRoot? Root, EvidenceLinuxArtifactAllocationOperation Operation, Exception? Error) AllocateAfterGate(
             TaskCompletionSource<bool> ready)
         {
             ready.SetResult(true);
-            await gate.Task.ConfigureAwait(false);
+            gate.Wait();
             var operation = EvidenceLinuxArtifactAllocationOperation.None;
             try
             {
@@ -352,10 +352,12 @@ public sealed class EvidenceLinuxArtifactRootTests
         try
         {
             identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
-            first = Task.Run(() => AllocateAfterGate(firstReady));
-            second = Task.Run(() => AllocateAfterGate(secondReady));
+            // Each synchronous allocator has its own thread. Shared test-host thread-pool load must
+            // not consume the unchanged readiness bound before either native attempt can begin.
+            first = RunAllocatorThread(() => AllocateAfterGate(firstReady));
+            second = RunAllocatorThread(() => AllocateAfterGate(secondReady));
             await Task.WhenAll(firstReady.Task, secondReady.Task).WaitAsync(TimeSpan.FromSeconds(5));
-            gate.SetResult(true);
+            gate.Set();
             attempts = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
 
             var successful = attempts.Where(attempt => attempt.Root is not null).ToArray();
@@ -398,19 +400,16 @@ public sealed class EvidenceLinuxArtifactRootTests
         }
         finally
         {
-            gate.TrySetResult(true);
-            var allAttemptsSettled = first is null && second is null;
-            if (first is not null && second is not null)
+            gate.Set();
+            var allAttemptsSettled = false;
+            try
             {
-                try
-                {
-                    attempts = await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
-                    allAttemptsSettled = true;
-                }
-                catch
-                {
-                    allAttemptsSettled = false;
-                }
+                attempts = await ReleaseAndJoinAllocatorThreads(gate, first, second);
+                allAttemptsSettled = true;
+            }
+            catch
+            {
+                allAttemptsSettled = false;
             }
 
             var completedRoots = new List<EvidenceLinuxArtifactRoot>();
@@ -452,6 +451,51 @@ public sealed class EvidenceLinuxArtifactRootTests
             if (bodySucceeded && allAttemptsSettled && allRootsDisposed && Directory.Exists(parent))
                 Directory.Delete(parent, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Allocator_fixture_threads_are_independent_of_the_shared_pool_and_all_started_threads_join_after_release(bool startSecond)
+    {
+        using var gate = new ManualResetEventSlim();
+        var firstReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondReady = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        int Enter(TaskCompletionSource<bool> ready)
+        {
+            ready.SetResult(Thread.CurrentThread.IsThreadPoolThread);
+            gate.Wait();
+            return Environment.CurrentManagedThreadId;
+        }
+        Task<int>? first = null;
+        Task<int>? second = null;
+        int[] threadIds = [];
+        try
+        {
+            first = RunAllocatorThread(() => Enter(firstReady));
+            if (startSecond) second = RunAllocatorThread(() => Enter(secondReady));
+            var ready = startSecond ? new[] { firstReady.Task, secondReady.Task } : [firstReady.Task];
+            var poolThreads = await Task.WhenAll(ready).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.All(poolThreads, isPoolThread => Assert.False(isPoolThread));
+            Assert.False(first.IsCompleted);
+            if (second is not null) Assert.False(second.IsCompleted);
+        }
+        finally
+        {
+            threadIds = await ReleaseAndJoinAllocatorThreads(gate, first, second);
+        }
+        Assert.Equal(startSecond ? 2 : 1, threadIds.Length);
+        Assert.Equal(threadIds.Length, threadIds.Distinct().Count());
+    }
+
+    // Test-only scheduling: callbacks remain synchronous and their original Tasks are always joined.
+    private static Task<T> RunAllocatorThread<T>(Func<T> callback) => Task.Factory.StartNew(callback,
+        CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+    private static async Task<T[]> ReleaseAndJoinAllocatorThreads<T>(ManualResetEventSlim gate, params Task<T>?[] attempts)
+    {
+        gate.Set();
+        return await Task.WhenAll(attempts.OfType<Task<T>>()).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

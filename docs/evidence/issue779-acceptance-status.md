@@ -12,8 +12,11 @@ packet includes both stream EOFs and empty groups for every case. The
 [cutover checkpoint](issue779-csharp-runtime-cutover.md#latest-verified-consumer-checkpoint---2026-10-26)
 records the complete source capture and the limits of the retained smoke evidence.
 
-This does not close the complete 57-group plan, the revision-88/89 numerical gates
-that were still running at this observation, or production Trusted acceptance.
+Revision 88 stopped with a CLI test readiness-barrier timeout and `ASCOV120`
+before numerical gating; the fixture correction and its local regression
+controls are recorded in the cutover checkpoint. Revision 89's numerical gate
+was still pending at this observation. These consumer results do not close the
+complete 57-group plan, the unchanged solution/patch gates, or production Trusted acceptance.
 Production application registration and accepted-proof tables remain closed. The
 revision-57 shutdown-test fix preserves production limits; its Linux regression
 result is linked in the cutover checkpoint. Later revisions need their own
