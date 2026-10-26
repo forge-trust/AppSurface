@@ -1462,7 +1462,7 @@ Migration map for repo-owned AppSurface Docs export:
 
 ### `appsurface deployment gcp-cloud-run observe-execution`
 
-Use this command to inspect one caller-selected Cloud Run Job execution against a published AppSurface bundle. It is read-only and never submits, cancels, retries, or mutates a Job. The bundle directory contains exactly `deployment-intent.v1.json`, `gcp-cloud-run-migration.tf.json`, and `gcp-cloud-run-migration.plan.json`, plus the optional ownership marker. Each artifact is bounded to 4 MiB and validated before `gcloud` starts.
+Use this command to inspect one caller-selected Cloud Run Job execution against a published AppSurface bundle. It is read-only and never submits, cancels, retries, or mutates a Job. The bundle directory contains exactly `deployment-intent.v1.json`, `gcp-cloud-run-migration.tf.json`, and `gcp-cloud-run-migration.plan.json`, plus the optional ownership marker. Each artifact is bounded to 4 MiB and validated before `gcloud` starts. The CLI opens the artifacts and optional marker through no-follow regular-file admission; a non-regular entry such as a FIFO is rejected locally with `ASDEPLOY171` before provider observation.
 
 ```sh
 appsurface deployment gcp-cloud-run observe-execution \
@@ -1474,7 +1474,7 @@ appsurface deployment gcp-cloud-run observe-execution \
 
 `--bundle-dir`, `--job`, and `--execution` are required. The execution must be the complete canonical resource `projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`. The project is matched against the configured project ID or explicitly configured project number; no ID/number inference or alias lookup occurs. `--timeout` defaults to `60s`; `--poll-interval` defaults to `2s`. The API contract itself has no duration defaults.
 
-The library path receives an existing `DeploymentRenderResult` from the target's `RenderAsync` call. It does not expose a public bundle loader. A trusted published directory can be reconstructed into that same immutable shape with the bounded three-file read below; the exact filenames and `DeploymentArtifact.Create` admission are part of the contract:
+The library path receives an existing `DeploymentRenderResult` from the target's `RenderAsync` call. It does not expose a public bundle loader. A trusted published directory can be reconstructed into that same immutable shape with the bounded three-file read below; the exact filenames and `DeploymentArtifact.Create` admission are part of the contract. This example assumes a caller-controlled directory and ancestors containing stable regular files, with no concurrent replacement while the files are read:
 
 ```csharp
 using ForgeTrust.AppSurface.Deployment;
@@ -1526,7 +1526,7 @@ static async Task<DeploymentRenderResult> ReadPublishedBundleAsync(
 }
 ```
 
-The production construction is `GcpCloudRunExecutionObserver.Create()`. Tests inject `new GcpCloudRunExecutionObserver(reader, timeProvider)` with `IBoundedGcloudExecutionReader`; there is no arbitrary executable or unbounded-runner API. The published directory must already be trusted and complete; callers must also apply the CLI's strict reparse-free path admission and ownership checks rather than treating this compact reconstruction as a replacement for the full CLI loader.
+The production construction is `GcpCloudRunExecutionObserver.Create()`. Tests inject `new GcpCloudRunExecutionObserver(reader, timeProvider)` with `IBoundedGcloudExecutionReader`; there is no arbitrary executable or unbounded-runner API. The published directory must already be trusted and complete; callers must also apply the CLI's strict reparse-free path admission and ownership checks rather than treating this compact reconstruction as a replacement for the full CLI loader. The direct `FileStream` opens shown above do not provide the CLI's handle-based, no-follow, nonblocking regular-file admission; byte limits and asynchronous reads do not bound a FIFO open. For bundle directories that cannot meet the stable regular-file precondition, pass the existing rendered result to the library or use the CLI's bundle loader.
 
 With `--json`, stdout receives exactly one versioned object containing only `schemaVersion: "1.0"`, `logicalJobId`, `executionResourceName`, `state`, `configurationMatched`, RFC 3339 UTC `observedAt`, and `diagnosticCode`. It has no raw provider JSON, stderr, command arguments, secret/environment values, credentials, provider messages, or exception text. On caller cancellation the command attempts one safe `Unknown`/false envelope only before any output failure; after the first stdout write/flush failure it suppresses further writes and returns 130 even when the envelope cannot be delivered. Ordinary output failure is `ASDEPLOY188` and returns 2; unexpected internal failure is `ASDEPLOY189` and returns safe `Unknown`. Text-mode failures write only fixed safe problem/cause/fix/recovery guidance and the canonical reference link to stderr.
 
