@@ -108,6 +108,37 @@ public sealed class LinuxProducerWorkspaceTests
             "/run/input", "/run/input/" + relative));
     }
 
+    [Fact]
+    public void RelativeSolutionMeasuresComponentBoundsInUtf8Bytes()
+    {
+        var exact = string.Concat(Enumerable.Repeat("𐐀", 63)) + "abc";
+        Assert.Equal(255, Encoding.UTF8.GetByteCount(exact));
+        Assert.True(exact.Length <= 255);
+        Assert.Equal(exact, LinuxProducerWorkspaceLayout.RelativeSolution("/run/input", "/run/input/" + exact));
+
+        var oversized = exact + "d";
+        Assert.Equal(256, Encoding.UTF8.GetByteCount(oversized));
+        Assert.True(oversized.Length <= 255);
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProducerWorkspaceLayout.RelativeSolution("/run/input", "/run/input/" + oversized));
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public void RelativeSolutionRejectsMalformedUtf16WithoutLeakingEncoderDetails()
+    {
+        var error = Assert.Throws<EvidenceAdmissionException>(() =>
+            LinuxProducerWorkspaceLayout.RelativeSolution("/run/input", "/run/input/\ud800.csproj"));
+
+        Assert.Equal("ASEVD402", error.Code);
+        Assert.Null(error.InnerException);
+        Assert.StartsWith("ASEVD402: The protected deployment or launch input is unavailable or changed.", error.Message,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("EncoderFallbackException", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("csproj", error.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("generation")]
     [InlineData("accounts")]

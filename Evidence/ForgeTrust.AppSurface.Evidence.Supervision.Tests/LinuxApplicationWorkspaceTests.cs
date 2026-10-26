@@ -507,6 +507,71 @@ public sealed class LinuxApplicationWorkspaceTests
         finally { Directory.Delete(directory, recursive: true); }
     }
 
+    [Fact]
+    public void LinuxMarkerReopenRejectsSymlinkAtFixedNameWithoutChangingOutsideTarget()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return;
+        var directory = Path.Combine(Path.GetTempPath(), "application-marker-link-" + Guid.NewGuid().ToString("N"));
+        var outside = Path.Combine(Path.GetTempPath(), "application-marker-target-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(outside);
+        try
+        {
+            using var parent = new SafeFileHandle((nint)OpenTestDirectory(directory, 0x10000 | 0x80000), ownsHandle: true);
+            Assert.False(parent.IsInvalid);
+            var path = Path.Combine(directory, "armed");
+            File.WriteAllText(path, "original marker");
+            using var original = File.OpenHandle(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            File.Move(path, Path.Combine(directory, "held-original"));
+
+            var sentinel = Path.Combine(outside, "sentinel");
+            File.WriteAllText(sentinel, "outside sentinel remains unchanged");
+            File.CreateSymbolicLink(path, sentinel);
+
+            var error = Record.Exception(() =>
+            {
+                using var rejected = LinuxApplicationWorkspace.OpenMarkerReadOnly(parent, original, default);
+            });
+            Assert.IsAssignableFrom<IOException>(error);
+            Assert.Equal("outside sentinel remains unchanged", File.ReadAllText(sentinel));
+            Assert.Equal("original marker", File.ReadAllText(Path.Combine(directory, "held-original")));
+            Assert.Equal(sentinel, new FileInfo(path).LinkTarget);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+            Directory.Delete(outside, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void LinuxMarkerReopenChecksCancellationBeforeUsingOrdinaryDescriptors()
+    {
+        if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64) return;
+        var directory = Path.Combine(Path.GetTempPath(), "application-marker-cancel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var parent = new SafeFileHandle((nint)OpenTestDirectory(directory, 0x10000 | 0x80000), ownsHandle: true);
+            Assert.False(parent.IsInvalid);
+            var path = Path.Combine(directory, "armed");
+            File.WriteAllText(path, "armed marker");
+            using var original = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var cancelled = new CancellationTokenSource();
+            cancelled.Cancel();
+
+            Assert.ThrowsAny<OperationCanceledException>(() =>
+            {
+                using var rejected = LinuxApplicationWorkspace.OpenMarkerReadOnly(parent, original, cancelled.Token);
+            });
+            Assert.False(parent.IsClosed);
+            Assert.False(original.IsClosed);
+            Assert.Equal("armed marker", File.ReadAllText(path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
     private static void RequireDescriptorAccessDenied(Action operation)
     {
         // Linux .NET maps EBADF to UnauthorizedAccessException with an IOException cause;
