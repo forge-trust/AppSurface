@@ -124,7 +124,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, [`appsurface deployment gcp-cloud-run observe-execution`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-deployment-gcp-cloud-run-observe-execution) exact read-only Cloud Run execution observation, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
 
 ### [EvidenceHost](./start-here/evidencehost.md)
 
@@ -147,7 +147,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 ### [Deployment](./Deployment/README.md)
 
 - [**ForgeTrust.AppSurface.Deployment**](./Deployment/ForgeTrust.AppSurface.Deployment/README.md) – Portable, schema-versioned deployment intent, validation, diagnostics, deterministic serialization, and provider contracts with no Aspire or cloud dependency.
-- [**ForgeTrust.AppSurface.Deployment.GcpCloudRun**](./Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) – Deterministic Cloud Run migration-job Terraform/evidence compilation and read-only shadow or owned parity verification.
+- [**ForgeTrust.AppSurface.Deployment.GcpCloudRun**](./Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) – Deterministic Cloud Run migration-job Terraform/evidence compilation, read-only shadow or owned parity verification, and exact execution observation.
 
 These packages are designed to work together so that features can be shared
 across different application types while maintaining a consistent startup
