@@ -23,6 +23,9 @@ For bounded HTTP readiness in tests, see the [EvidenceHost readiness choices](./
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
+For names-only environment candidate planning and caller-owned source policy, see the
+[environment inspection quickstart](guides/config-logical-keys.md#environment-candidate-inspection)
+and its [packed package consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 If a shared typed wrapper lives in a Domain assembly outside normal module
 discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
 and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).

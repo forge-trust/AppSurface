@@ -34,6 +34,18 @@ public class ConfigEnvironmentCandidatesTests
     }
 
     [Theory]
+    [InlineData("A.B", "A_B", "A__B")]
+    [InlineData("A-B", "A_B", "A__B")]
+    [InlineData("A:B", "A_B", "A__B")]
+    // protects=literal projection adapter parity; fails_when=existing dotted spelling changes; no_claim=injective key identity.
+    public void CompositionPathLiteralSeparatorsRetainLegacyProjectionAndFirstProducer(string literal, string flat, string hierarchical)
+    {
+        var pathSegments = literal == "A:B" ? new[] { "A", "B" } : new[] { literal };
+        var candidates = ConfigEnvironmentCandidates.GetPathCandidates("Production", pathSegments);
+        Assert.Equal(new[] { $"PRODUCTION_{flat}", flat, $"PRODUCTION__{hierarchical}", hierarchical }, candidates);
+    }
+
+    [Theory]
     [InlineData("production.api-key", "PRODUCTION_API_KEY")]
     [InlineData(" Prod-Us ", " PROD_US ")]
     public void NormalizeSegment_UppercasesAndFlattensLegacySeparators(string value, string expected)
@@ -49,4 +61,18 @@ public class ConfigEnvironmentCandidatesTests
     {
         Assert.Equal(expected, ConfigEnvironmentCandidates.NormalizeHierarchicalKey(value));
     }
+    [Fact]
+    // protects=compatibility adapter names and first producer flags; fails_when=adapter diverges or duplicate changes provenance; no_claim=source presence.
+    public void BuildDirectAdapterAndMetadataRetainIndependentFirstProducerTable()
+    {
+        Assert.Equal(new[] { "PROD_SERVICE", "SERVICE", "PROD__SERVICE" },
+            ConfigEnvironmentCandidates.BuildDirectCandidates("PROD", "SERVICE", "SERVICE"));
+        Assert.Equal(new[]
+        {
+            new EnvironmentCompositionPathCandidate("PROD_SERVICE", EnvironmentCandidateScope.Scoped, false),
+            new EnvironmentCompositionPathCandidate("SERVICE", EnvironmentCandidateScope.Unscoped, false),
+            new EnvironmentCompositionPathCandidate("PROD__SERVICE", EnvironmentCandidateScope.Scoped, true),
+        }, ConfigEnvironmentCandidates.BuildMetadataCandidates("PROD", "SERVICE", "SERVICE"));
+    }
+
 }

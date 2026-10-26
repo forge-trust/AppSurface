@@ -10,6 +10,17 @@
 
 **Effort:** Human M / agent S, estimated; owner and provider access dominate elapsed time. **Priority:** P3. **Depends on / blocked by:** Accepted exact-version evidence manifest, working packaged observer, named adopter and separately authorized cloud reads/release. Deferred by autoplan CEO C6; this adds no #891 acceptance gate.
 
+## Metadata-only deployment-name linter (#890 follow-up)
+
+**What:** Consider an offline deployment-manifest linter built on the [candidate inspector design](docs/designs/issue-890-environment-candidate-inspection.md) after concrete adopter demand.
+**Why:** Hosts could check supplied environment-name inventories without resolving secret values or duplicating AppSurface spelling rules.
+**Pros:** Reuses the pure candidate contract and could catch deployment policy mistakes earlier.
+**Cons:** Introduces manifest grammar, inventory trust/casing, complete-path selection and application policy contracts that #890 deliberately leaves to callers.
+**Context:** #890 delivers names only and two neutral public-package examples. First gather an adopter's manifest and policy; do not treat generated candidates as proof of presence, ownership or complete aggregate composition.
+**Effort:** L human team / L agent assistance (unmeasured; new tool and policy surface).
+**Priority:** P3.
+**Depends on / blocked by:** Shipped #890 API, verified adopter need and a separately reviewed inventory/policy contract. Deferred by autoplan CEO C5; no linter implementation in #890.
+
 ## DevAuth persona fixture activation (#772)
 
 ### Host-owned durable or multi-process reference example
