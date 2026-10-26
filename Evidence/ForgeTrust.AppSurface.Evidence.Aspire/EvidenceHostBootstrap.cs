@@ -959,6 +959,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         var producerResults = readiness.FailureResults
             ?? await ProduceAsync(cancellationToken, lifecycle, timeBudget, admission).ConfigureAwait(false);
 
+#if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
+        // Capture an unused admitted writer before stopping. Reusing the completed producer writer would
+        // let duplicate logical-name rejection mask a missing post-stop write-admission guard.
+        var postStopWriter = PreparePrivatePostStopWriter(lifecycle, admission, root, worker);
+#endif
         State = EvidenceHostState.Cleaning;
         _ = timeBudget.TryAbandonStagesAndBeginCleanup(stageClosed: true);
         var cleanupTimer = Stopwatch.StartNew();
@@ -979,7 +984,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
 #if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
-        await ObservePrivateC3SdkPostStopGuardsAsync(stopAndDisposeSucceeded, lifecycle, admission, root, worker)
+        await ObservePrivateC3SdkPostStopGuardsAsync(stopAndDisposeSucceeded, lifecycle, admission, root, worker, postStopWriter)
             .ConfigureAwait(false);
 #endif
 
@@ -1142,9 +1147,24 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     }
 
 #if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
+    private EvidenceArtifactWriter PreparePrivatePostStopWriter(EvidenceWorkerExecution lifecycle,
+        EvidenceAdmissionResult admission, EvidenceLinuxArtifactRoot? root, EvidenceLinuxWorkerSupervisor? worker)
+    {
+        admission.ValidateActive(_plan);
+        if (root is null || worker is null || _artifactQuota is null || lifecycle.IsAdmissionClosed
+            || root.Identity.Inode == 0 || root.Identity.Uid != worker.Descriptor.WorkerUid
+            || root.Identity.Gid != worker.Descriptor.WorkerGid || !worker.IsArmed
+            || _artifactWriters.Count != 1 || _plan.Profile.Producers.Count != 1
+            || _plan.Profile.Producers[0].ArtifactSlots.Count != 1
+            || _plan.Profile.Producers[0].ArtifactSlots[0] is not
+                { LogicalName: "coverage-report", RelativeRoot: "merged", MediaType: "application/xml", Required: true, MaximumBytes: 20_971_520 })
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+        return new EvidenceArtifactWriter(_plan.Profile.Producers[0], root, _artifactQuota, lifecycle, admission);
+    }
+
     private async Task ObservePrivateC3SdkPostStopGuardsAsync(bool stopAndDisposeSucceeded,
         EvidenceWorkerExecution lifecycle, EvidenceAdmissionResult admission, EvidenceLinuxArtifactRoot? root,
-        EvidenceLinuxWorkerSupervisor? worker)
+        EvidenceLinuxWorkerSupervisor? worker, EvidenceArtifactWriter writer)
     {
         if (!stopAndDisposeSucceeded || root is null || worker is null || root.Identity.Inode == 0
             || root.Identity.Uid != worker.Descriptor.WorkerUid || root.Identity.Gid != worker.Descriptor.WorkerGid
@@ -1156,15 +1176,10 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
         admission.ValidateActive(_plan);
-        if (_artifactWriters.Count != 1 || _plan.Profile.Producers.Count != 1
-            || _plan.Profile.Producers[0].ArtifactSlots.SingleOrDefault(slot => slot.LogicalName == "post-stop-probe")
-                is not { RelativeRoot: "lifecycle-probe", MediaType: "application/octet-stream", Required: false, MaximumBytes: 1 })
-            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
-
-        var writer = _artifactWriters[0];
+        var originalArtifacts = _artifactWriters[0].WrittenArtifacts.ToArray();
         var priorArtifacts = writer.WrittenArtifacts.ToArray();
-        if (priorArtifacts.Any(artifact => artifact.LogicalName == "post-stop-probe"
-            || artifact.RelativePath == "lifecycle-probe/denied.bin"))
+        if (priorArtifacts.Length != 0 || originalArtifacts.Any(artifact =>
+            artifact.RelativePath == "merged/post-stop-denied.xml"))
             throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
         var launched = 0;
         var lateWork = lifecycle.TrackOwnedWork(_ =>
@@ -1181,7 +1196,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         var writeRejected = false;
         try
         {
-            await writer.WriteAsync("post-stop-probe", "lifecycle-probe/denied.bin", ReadOnlyMemory<byte>.Empty)
+            await writer.WriteAsync("coverage-report", "merged/post-stop-denied.xml", ReadOnlyMemory<byte>.Empty)
                 .ConfigureAwait(false);
         }
         catch (EvidenceAdmissionException error)
@@ -1190,7 +1205,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 && error.Message.StartsWith("ASEVD410: Artifact write admission is closed.", StringComparison.Ordinal);
         }
 
-        var artifactsUnchanged = writer.WrittenArtifacts.SequenceEqual(priorArtifacts);
+        var artifactsUnchanged = writer.WrittenArtifacts.SequenceEqual(priorArtifacts)
+            && _artifactWriters[0].WrittenArtifacts.SequenceEqual(originalArtifacts);
         admission.ValidateActive(_plan);
         if (!writeRejected || !artifactsUnchanged || !worker.IsArmed
             || lifecycle.TerminalCode != EvidenceWorkerTerminalCode.None)

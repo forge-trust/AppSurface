@@ -63,12 +63,6 @@ def policy_for(case):
                         "MediaType": "application/xml",
                         "Required": True,
                         "MaximumBytes": 20_971_520,
-                    }, {
-                        "LogicalName": "post-stop-probe",
-                        "RelativeRoot": "lifecycle-probe",
-                        "MediaType": "application/octet-stream",
-                        "Required": False,
-                        "MaximumBytes": 1,
                     }],
                     "TimeoutSeconds": 180,
                     "CoverageGate": {
@@ -199,8 +193,7 @@ def definition_source(case, rows, policy):
         "            Array.AsReadOnly(new EvidenceClosedProducerRegistration[]",
         "            { new(new EvidenceProducerDeclaration(\"coverage\", \"coverage\", \"1.0.0\", Array.AsReadOnly(new[] { \"native-http\" }),",
         "                Array.AsReadOnly(new[] { \"appsurface/coverage/behavioral-patch@1\" }),",
-        "                Array.AsReadOnly(new[] { new EvidenceArtifactSlot(\"coverage-report\", \"merged\", \"application/xml\", true, 20_971_520),",
-        "                    new EvidenceArtifactSlot(\"post-stop-probe\", \"lifecycle-probe\", \"application/octet-stream\", false, 1) }),",
+        "                Array.AsReadOnly(new[] { new EvidenceArtifactSlot(\"coverage-report\", \"merged\", \"application/xml\", true, 20_971_520) }),",
         "                180, new EvidenceCoverageGateRequirements(95m, 85m, null, null, \"measurable\", 0.5m)), \"coverage\", \"1.0.0\") }),",
         "            Array.AsReadOnly(new EvidenceClosedBundleFile[]",
         "            {",

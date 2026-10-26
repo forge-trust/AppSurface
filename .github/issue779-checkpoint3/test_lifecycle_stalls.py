@@ -269,7 +269,7 @@ class PostStopMarkerControls(unittest.TestCase):
                 "owned_work_joined": True, "new_work_rejected": True, "write_rejected": True,
                 "artifacts_unchanged": True, "native_acceptance": False}
 
-    def test_fixture_policy_and_generated_closed_declaration_share_the_unused_positive_capacity_slot(self):
+    def test_original_policy_and_generated_declaration_keep_one_supported_coverage_slot(self):
         spec = importlib.util.spec_from_file_location("post_stop_payload", Path(__file__).with_name("prepare_payload.py"))
         payload = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(payload)
@@ -277,12 +277,12 @@ class PostStopMarkerControls(unittest.TestCase):
             with self.subTest(case=case):
                 policy = payload.policy_for(case)
                 slots = policy["Profiles"][0]["Producers"][0]["ArtifactSlots"]
-                self.assertEqual(2, len(slots))
-                self.assertEqual({"LogicalName": "post-stop-probe", "RelativeRoot": "lifecycle-probe",
-                                  "MediaType": "application/octet-stream", "Required": False,
-                                  "MaximumBytes": 1}, slots[1])
+                self.assertEqual([{"LogicalName": "coverage-report", "RelativeRoot": "merged",
+                                   "MediaType": "application/xml", "Required": True,
+                                   "MaximumBytes": 20_971_520}], slots)
                 generated = payload.definition_source(case, [], policy)
-                self.assertEqual(1, generated.count('new EvidenceArtifactSlot("post-stop-probe", "lifecycle-probe", "application/octet-stream", false, 1)'))
+                self.assertEqual(1, generated.count('new EvidenceArtifactSlot('))
+                self.assertNotIn('post-stop-probe', generated)
                 self.assertIn('new EvidenceArtifactSlot("coverage-report", "merged", "application/xml", true, 20_971_520)', generated)
 
     def test_completed_event_requires_each_true_fact_and_one_private_terminal_reason(self):

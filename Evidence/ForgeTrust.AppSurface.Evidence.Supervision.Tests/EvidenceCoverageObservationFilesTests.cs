@@ -40,6 +40,35 @@ public sealed class EvidenceCoverageObservationFilesTests
         Assert.Equal(manifest.ManifestDigest, verified.ManifestDigest);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnUnusedOptionalSlotCannotWidenTheClosedTerminalCoverageDeclaration(bool application)
+    {
+        var original = application ? ApplicationPlan() : Plan();
+        var validManifest = application ? ApplicationManifest(original) : Manifest(original);
+        if (application) Assert.Equal(validManifest.ManifestDigest, VerifyApplication(original, validManifest).ManifestDigest);
+        else Assert.Equal(validManifest.ManifestDigest, Verify(original, validManifest).ManifestDigest);
+        var profile = original.Profile with
+        {
+            Producers = [original.Profile.Producers[0] with
+            {
+                ArtifactSlots = [.. original.Profile.Producers[0].ArtifactSlots,
+                    new("unused-probe", "unused", "application/octet-stream", false, 1)],
+            }],
+        };
+        var policy = original.PolicySnapshot! with
+        {
+            Profiles = original.PolicySnapshot!.Profiles.Select(item => item.Id == profile.Id ? profile : item).ToArray(),
+        };
+        var changed = new EvidencePlanner().Resolve(policy, original.ChangedPaths);
+        var coherentManifest = application ? ApplicationManifest(changed) : Manifest(changed);
+        Assert.True(EvidenceManifestBuilder.Verify(changed, coherentManifest));
+        Assert.Single(coherentManifest.ProducerResults[0].Artifacts!);
+        if (application) Reject(() => VerifyApplication(changed, coherentManifest));
+        else Reject(() => Verify(changed, coherentManifest));
+    }
+
     [Fact]
     public void PhysicalProducerPathIsRequiredAndManifestPathExcludesProducerId()
     {

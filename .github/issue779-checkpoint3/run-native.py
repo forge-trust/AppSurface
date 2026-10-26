@@ -494,7 +494,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   require(not (output_root/'evidence-manifest.json').exists()
           and not (output_root/'manifest.json').exists(),'lifecycle-stall-no-final-manifest')
   if case=='post-stop-guards':
-   require(not os.path.lexists(output_root/'coverage/lifecycle-probe/denied.bin'),
+   require(not os.path.lexists(output_root/'coverage/merged/post-stop-denied.xml'),
            'post-stop-no-probe-artifact')
   if case=='configure-sync-stall':
    require(not app_seen and not observed,'configure-stall-before-application-start')
