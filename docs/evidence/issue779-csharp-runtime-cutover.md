@@ -1,5 +1,32 @@
 # EvidenceHost C# runtime cutover
 
+## Latest verified consumer checkpoint - 2026-10-26
+
+[Run 40244632082](https://github.com/forge-trust/AppSurface/actions/runs/40244632082),
+at source `b58c00f667783dc0a4d1977a38c81f3d92eb2f0b`, has independently verified
+retained artifacts for all sixteen worker controls, seven application/CLI/SDK controls,
+six workspace rejections, 41 root controls, 41 supplementary root controls, account
+creation and expected rollback, and seven packaged producer/artifact controls.
+The complete 3,576-file source capture has SHA-256
+`6957cfe39a43108bff6e2b7e180729fcceef9bb54cb2821b2d5d4511b5e26b3d`.
+All eleven bounded artifact-verification commands exited zero and joined. The final
+producer verification includes both original stdout/stderr EOFs and empty groups
+for all seven cases; it does not treat a successful launcher exit as physical cleanup.
+
+The packaged smoke record retains 22 command fingerprints matching the reviewed
+exit/argv/log-digest matrix. Its raw smoke logs are not retained, so those rows were
+not independently re-executed or fully revalidated by the artifact verifier.
+The revision-57 CLI shutdown correction remains a test-fixture clock change with
+unchanged production deadlines and stopping allowances; its Linux regression rows
+passed in the [recorded regression run](https://github.com/forge-trust/AppSurface/actions/runs/39716808709).
+
+The revision-88/89 full numerical gates were still running when this checkpoint
+was recorded. These consumer results do not establish a passing
+[solution or patch coverage gate](issue779-coverage-gate.md), close the
+[57-group acceptance map](issue779-acceptance-status.md), or enroll a production
+Trusted catalogue or accepted consumer proof. Later source edits require fresh
+source-bound validation. The dated records below remain historical observations.
+
 ## Recorded Linux validation — 2026-10-24
 
 [Linux run 40104067585](https://github.com/forge-trust/AppSurface/actions/runs/40104067585),

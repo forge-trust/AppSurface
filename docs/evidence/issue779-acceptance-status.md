@@ -1,5 +1,24 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Latest verified consumer checkpoint - 2026-10-26
+
+[Run 40244632082](https://github.com/forge-trust/AppSurface/actions/runs/40244632082)
+at source `b58c00f667783dc0a4d1977a38c81f3d92eb2f0b` has source-bound retained-artifact
+verification for all sixteen worker controls, the seven application/CLI/SDK cases,
+six workspace rejections, 41 root controls, 41 supplementary root controls, account
+creation and expected rollback, and seven packaged producer/artifact cases. The
+eleven artifact-verification commands exited zero and joined; the final producer
+packet includes both stream EOFs and empty groups for every case. The
+[cutover checkpoint](issue779-csharp-runtime-cutover.md#latest-verified-consumer-checkpoint---2026-10-26)
+records the complete source capture and the limits of the retained smoke evidence.
+
+This does not close the complete 57-group plan, the revision-88/89 numerical gates
+that were still running at this observation, or production Trusted acceptance.
+Production application registration and accepted-proof tables remain closed. The
+revision-57 shutdown-test fix preserves production limits; its Linux regression
+result is linked in the cutover checkpoint. Later revisions need their own
+source-bound verification. Earlier dated status sections below are historical.
+
 ## Current C# runtime validation status — 2026-10-24
 
 The original revision-56 shutdown-test failure is fixed and passed its subsequent
