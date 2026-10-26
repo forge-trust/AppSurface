@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using ForgeTrust.AppSurface.Evidence.Contracts;
+using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
@@ -63,6 +64,57 @@ public sealed class LinuxRetainedReportNativeTests
             RandomAccess.Write(write, "changed!"u8, 0);
         Assert.Throws<IOException>(() => reports.ReadChunk("coverage.xml", 0, 1));
         Assert.Throws<IOException>(() => reports.ListReports());
+    }
+
+    [RootReportFact]
+    public void SafeModeChangePoisonsTheRetainedSetEvenAfterMetadataIsRestored()
+    {
+        using var fixture = new Fixture();
+        var original = "unchanged report bytes"u8.ToArray();
+        fixture.File("coverage.xml", original);
+        var outside = fixture.Root + "/outside-sentinel";
+        System.IO.File.WriteAllText(outside, "outside sentinel remains unchanged");
+        System.IO.File.SetUnixFileMode(outside, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        using var reports = fixture.Open(["coverage.xml"]);
+        Assert.Equal("coverage.xml", Assert.Single(reports.ListReports()).RelativePath);
+
+        var reportPath = fixture.Results + "/coverage.xml";
+        System.IO.File.SetUnixFileMode(reportPath, UnixFileMode.UserRead);
+        Assert.Throws<IOException>(() => reports.ListReports());
+        Assert.Equal(original, System.IO.File.ReadAllBytes(reportPath));
+
+        System.IO.File.SetUnixFileMode(reportPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Assert.Throws<IOException>(() => reports.ListReports());
+        Assert.Equal(original, System.IO.File.ReadAllBytes(reportPath));
+        Assert.Equal("outside sentinel remains unchanged", System.IO.File.ReadAllText(outside));
+    }
+
+    [RootReportFact]
+    public void SelectedReportGroupChangePoisonsTheRetainedSetWithoutChangingBytes()
+    {
+        using var fixture = new Fixture();
+        var original = "unchanged selected report"u8.ToArray();
+        fixture.File("coverage.xml", original);
+        var reportPath = fixture.Results + "/coverage.xml";
+        using var held = System.IO.File.OpenHandle(reportPath, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        var outside = fixture.Root + "/outside-sentinel";
+        System.IO.File.WriteAllText(outside, "outside sentinel remains unchanged");
+        System.IO.File.SetUnixFileMode(outside, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        using var reports = fixture.Open(["coverage.xml"]);
+        Assert.Equal("coverage.xml", Assert.Single(reports.ListReports()).RelativePath);
+
+        Assert.Equal(0, Chown(reportPath, Fixture.Uid, Fixture.Gid + 1));
+        Assert.Throws<IOException>(() => reports.ListReports());
+        Assert.Equal(original, ReadHeldBytes(held, original.Length));
+
+        Assert.Equal(0, Chown(reportPath, Fixture.Uid, Fixture.Gid));
+        Assert.Throws<IOException>(() => reports.ListReports());
+        Assert.Equal(original, ReadHeldBytes(held, original.Length));
+        Assert.Equal(original, System.IO.File.ReadAllBytes(reportPath));
+        Assert.Equal("outside sentinel remains unchanged", System.IO.File.ReadAllText(outside));
     }
 
     [RootReportFact]
@@ -129,6 +181,13 @@ public sealed class LinuxRetainedReportNativeTests
         public RootReportTheoryAttribute() { if (!Available()) Skip = "Requires actual Linux x64 root filesystem access."; }
     }
     private static bool Available() => OperatingSystem.IsLinux() && RuntimeInformation.ProcessArchitecture == Architecture.X64 && GetEffectiveUid() == 0;
+
+    private static byte[] ReadHeldBytes(SafeFileHandle handle, int length)
+    {
+        var bytes = new byte[length];
+        Assert.Equal(length, RandomAccess.Read(handle, bytes, 0));
+        return bytes;
+    }
 
     private sealed class Fixture : IDisposable
     {

@@ -177,6 +177,42 @@ public sealed class LinuxRunAccountsTests
         AssertClosed(() => pending.ReserveNext());
     }
 
+    [Theory]
+    [InlineData(false, 0, 2)]
+    [InlineData(false, 1, 4)]
+    [InlineData(false, 2, 5)]
+    [InlineData(true, 0, 2)]
+    [InlineData(true, 1, 4)]
+    [InlineData(true, 2, 5)]
+    [InlineData(true, 3, 7)]
+    [InlineData(true, 4, 8)]
+    public void FailureAfterEachReservationPrefixRetainsOnlyItsExactReverseObligations(
+        bool includeApplication, int reservationIndex, int expectedCleanupCount)
+    {
+        var names = LinuxRunAccountNames.Create(Run);
+        var pending = new LinuxRunAccountReservations(names, includeApplication);
+        var cleanupBeforeFailure = new List<LinuxRunAccountCommand>();
+
+        for (var index = 0; index <= reservationIndex; index++)
+        {
+            _ = pending.ReserveNext();
+            cleanupBeforeFailure = [.. pending.ReverseCleanup()];
+        }
+
+        pending.MarkFailed(); // Ambiguous dispatch at this prefix keeps every reserved obligation.
+
+        Assert.True(pending.Failed);
+        var cleanup = pending.ReverseCleanup();
+        Assert.Equal(expectedCleanupCount, cleanup.Length);
+        Assert.Equal(cleanupBeforeFailure.Select(command => command.Operation),
+            cleanup.Select(command => command.Operation));
+        Assert.Equal(cleanupBeforeFailure.Select(command => command.Arguments.Single()),
+            cleanup.Select(command => command.Arguments.Single()));
+        AssertClosed(() => pending.ReserveNext());
+        Assert.Equal(cleanupBeforeFailure.Select(command => command.Arguments.Single()),
+            pending.ReverseCleanup().Select(command => command.Arguments.Single()));
+    }
+
     [Fact]
     public void ValidIdentityDataNeedsBothNamedPrivateGroupsAndASeparateResultsGroup()
     {
@@ -308,6 +344,41 @@ public sealed class LinuxRunAccountsTests
         Assert.Empty(LinuxRunAccountGroup.Parse(names.Results, 602, []).Members);
     }
 
+    [Theory]
+    [InlineData("unknown-prefix")]
+    [InlineData("short-name")]
+    [InlineData("uppercase-hex")]
+    [InlineData("non-hex-suffix")]
+    [InlineData("control-character")]
+    public void UserAndGroupIdentityParsersRejectMalformedGeneratedNames(string mutation)
+    {
+        var valid = LinuxRunAccountNames.Create(Run).Worker;
+        var malformed = mutation switch
+        {
+            "unknown-prefix" => "evq" + valid[3..],
+            "short-name" => valid[..^1],
+            "uppercase-hex" => valid[..^1] + "A",
+            "non-hex-suffix" => valid[..^1] + "g",
+            _ => valid[..^1] + "\n",
+        };
+        Assert.Equal(mutation == "short-name" ? valid.Length - 1 : valid.Length, malformed.Length);
+        Assert.False(LinuxRunAccountNames.IsGenerated(malformed));
+
+        var userError = Assert.Throws<LinuxRunAccountException>(() =>
+            LinuxRunAccountUser.Parse(malformed, 600, 601, "/nonexistent", "/usr/sbin/nologin"));
+        Assert.Equal(LinuxRunAccountFailure.InvalidData, userError.Failure);
+        Assert.Null(userError.InnerException);
+        Assert.DoesNotContain(malformed, userError.ToString());
+
+        var groupError = Assert.Throws<LinuxRunAccountException>(() =>
+            LinuxRunAccountGroup.Parse(malformed, 601, []));
+        Assert.Equal(LinuxRunAccountFailure.InvalidData, groupError.Failure);
+        Assert.Null(groupError.InnerException);
+        Assert.DoesNotContain(malformed, groupError.ToString());
+        Assert.Equal(valid, LinuxRunAccountUser.Parse(valid, 600, 601, "/nonexistent", "/usr/sbin/nologin").Name);
+        Assert.Equal(valid, LinuxRunAccountGroup.Parse(valid, 601, []).Name);
+    }
+
     [Fact]
     public void CompleteSnapshotRevalidatesConstructedRecordsInsteadOfTrustingDataConstructors()
     {
@@ -416,6 +487,44 @@ public sealed class LinuxRunAccountsTests
         Assert.Null(error.InnerException);
         Assert.Equal(620u, Parse(data).ApplicationUid);
         Assert.Equal(0u, Parse(Data()).ApplicationUid);
+    }
+
+    [Fact]
+    public void ApplicationUserWithoutEitherRequiredGroupCannotFallBackToTheDefaultProfile()
+    {
+        var data = Data(includeApplication: true);
+        var incomplete = data with { ApplicationGroup = null, ResourceAccessGroup = null };
+
+        var error = Assert.Throws<LinuxRunAccountException>(() => Parse(incomplete));
+
+        Assert.Equal(LinuxRunAccountFailure.IdentityMismatch, error.Failure);
+        Assert.Null(error.InnerException);
+        Assert.Equal(620u, Parse(data).ApplicationUid);
+        Assert.Equal(0u, Parse(Data()).ApplicationUid);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public void SnapshotRejectsEachMissingRequiredRecordWithItsParameterName(int missing)
+    {
+        var data = Data();
+        var error = Assert.Throws<ArgumentNullException>(() => LinuxRunAccountSnapshot.Parse(
+            missing == 0 ? null! : data.Names,
+            missing == 1 ? null! : data.Worker,
+            missing == 2 ? null! : data.Subject,
+            missing == 3 ? null! : data.WorkerGroup,
+            missing == 4 ? null! : data.SubjectGroup,
+            missing == 5 ? null! : data.Results));
+
+        Assert.Equal(new[] { "names", "worker", "subject", "workerGroup", "subjectGroup", "resultsGroup" }[missing],
+            error.ParamName);
+        Assert.Null(error.InnerException);
+        Assert.Equal(65010u, Parse(data).WorkerUid);
     }
 
     [Fact]
