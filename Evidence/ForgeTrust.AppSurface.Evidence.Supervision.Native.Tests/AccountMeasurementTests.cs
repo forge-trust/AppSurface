@@ -70,6 +70,8 @@ public sealed class AccountMeasurementTests
     [InlineData("wrapper")]
     [InlineData("final-groups")]
     [InlineData("cleanup")]
+    [InlineData("cleanup-identity-guards")]
+    [InlineData("rollback-cleanup-identity-guards")]
     [InlineData("close-sharing")]
     [InlineData("acceptance")]
     [InlineData("uid-zero")]
@@ -107,6 +109,9 @@ public sealed class AccountMeasurementTests
             case "wrapper": fixture.Native["wrapper_exit"] = 1; break;
             case "final-groups": fixture.Native["final_groups_empty"] = false; break;
             case "cleanup": receipt["close_completed"] = false; break;
+            case "cleanup-identity-guards":
+            case "rollback-cleanup-identity-guards":
+                receipt["cleanup_identity_guards_checked"] = mutation == "rollback-cleanup-identity-guards"; break;
             case "close-sharing": receipt["shared_close_task"] = false; break;
             case "acceptance": fixture.Native["native_acceptance"] = true; break;
             case "uid-zero": ids["worker_uid"] = 0; break;
@@ -230,6 +235,7 @@ public sealed class AccountMeasurementTests
             Receipt["variant"] = variant; Receipt["generation"] = new string('a', 32);
             Receipt["managed_entry_sha256"] = new string('b', 64);
             Receipt["native_acceptance"] = false; Receipt["consumer_started"] = false;
+            Receipt["cleanup_identity_guards_checked"] = rollback ? null : JsonValue.Create(true);
             Receipt["shared_close_task"] = rollback ? null : JsonValue.Create(true);
             Receipt["closed_holder_rejected"] = rollback ? null : JsonValue.Create(true);
             foreach (var key in new[] { "names_absent", "numeric_ids_absent", "close_completed", "original_handles_closed" })

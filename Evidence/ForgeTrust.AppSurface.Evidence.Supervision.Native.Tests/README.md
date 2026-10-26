@@ -276,6 +276,13 @@ source/artifact digest verification. That run's SDK worker startup failed and it
 full gate was skipped; account success establishes neither consumer acceptance nor
 a solution/patch coverage pass.
 
+The current C4Accounts receipt contract additionally requires
+`cleanup_identity_guards_checked: true` after three read-only NSS identity-mismatch
+controls and matching-present rechecks; C4AccountRollback requires this field null.
+Detached receipt tests verify this distinction only. A fresh root-Linux C4Accounts
+measurement is still required to establish that the native checks ran; historical
+account receipts do not gain that result retroactively.
+
 ### Producer root measurement validation
 
 [`ProducerRootsMeasurement.Validate`](ProducerRootsMeasurement.cs) takes eight byte

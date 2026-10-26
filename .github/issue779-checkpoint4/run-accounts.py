@@ -46,7 +46,8 @@ CURRENT_WITNESSES = {
         '            .ConfigureAwait(false);\n    }'),
 }
 FIELDS = set(('schema variant creation_succeeded generation managed_entry_sha256 native_acceptance '
-              'consumer_started shared_close_task closed_holder_rejected names_absent numeric_ids_absent '
+              'consumer_started cleanup_identity_guards_checked shared_close_task closed_holder_rejected '
+              'names_absent numeric_ids_absent '
               'utilities settled_utilities failed_utilities close_completed quarantined reservation_failed '
               'identities_published original_handles_closed ids operation_failure').split())
 
@@ -157,6 +158,7 @@ def validate_receipt(value, variant, generation, entry):
     rollback = variant == 'C4AccountRollback'
     require(variant in VARIANTS and value['creation_succeeded'] is (not rollback)
             and value['identities_published'] is (not rollback) and value['reservation_failed'] is rollback, 'receipt-variant')
+    require(value['cleanup_identity_guards_checked'] is (None if rollback else True), 'receipt-cleanup-identity-guards')
     count = value['utilities']
     require(type(count) is int and (7 <= count <= 9 if rollback else 6 <= count <= 8)
             and type(value['settled_utilities']) is int and value['settled_utilities'] == count

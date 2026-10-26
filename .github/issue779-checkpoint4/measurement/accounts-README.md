@@ -71,6 +71,21 @@ snapshot and a second actual NSS read. The latter repeats forward/reverse lookup
 and primary-group-only checks. Successful utility settlement must leave the owner
 active before teardown.
 
+Before `BeginRootTeardown`, C4Accounts also performs three read-only cleanup-name
+checks against those actual NSS entries: the worker `DeleteUser` command with only
+its expected UID changed to the distinct allocated subject UID, the same command
+with only its expected GID changed to the distinct subject GID, and the results
+`DeleteGroup` command with only its expected GID changed to the distinct worker
+GID. Each must throw `LinuxRunAccountException` with `IdentityMismatch`; any other
+exception, no exception, or reported absence fails the control. Repeating each
+check with the original expected snapshot must return `false` (present and matching),
+and a fresh independent NSS read plus a second account-state snapshot must still
+equal the originals. These probes dispatch no utilities and do not delete the
+tampered identity. The normal shared `CloseAsync` sequence then performs the only
+account deletions. The C4 receipt sets `cleanup_identity_guards_checked` true;
+rollback leaves that field null because it never reaches successful identity
+publication. This source change still requires a fresh genuine Linux run.
+
 After `BeginRootTeardown`, two `CloseAsync` calls must return the same actual task.
 That original task is joined before any result is interpreted. Closure must be
 successful without quarantine, reservation failure or a first fault. Both closed
@@ -144,8 +159,11 @@ The fixed schema is `issue779-c4-accounts-v1`. It records the compiled variant,
 actual owner generation, retained managed-entry SHA-256, five allocated numeric IDs,
 actual utility counts and closure/absence observations. `operation_failure` is null
 for `C4Accounts`; rollback retains its actual closed failure fields and numeric exit
-sample. `shared_close_task` and `closed_holder_rejected` are null for rollback,
-because failed creation returns no production holder to the runner.
+sample. `cleanup_identity_guards_checked` is true only after all three negative and
+matching-positive NSS checks complete without changing the created utility/account
+state; it is null for rollback. `shared_close_task` and `closed_holder_rejected`
+are also null for rollback because failed creation returns no production holder to
+the runner.
 
 `native_acceptance` and `consumer_started` are always false. CLI exit zero means
 this private mechanism control satisfied its own expected outcome; rollback still

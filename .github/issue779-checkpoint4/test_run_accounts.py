@@ -20,6 +20,7 @@ class AccountDriverDataTests(unittest.TestCase):
         return {'schema': 'issue779-c4-accounts-v1', 'variant': subject.VARIANTS[int(rollback)],
                 'generation': self.generation, 'managed_entry_sha256': self.entry,
                 'native_acceptance': False, 'consumer_started': False, 'creation_succeeded': not rollback,
+                'cleanup_identity_guards_checked': None if rollback else True,
                 'shared_close_task': None if rollback else True, 'closed_holder_rejected': None if rollback else True,
                 'names_absent': True, 'numeric_ids_absent': True, 'utilities': 7 if rollback else 6,
                 'settled_utilities': 7 if rollback else 6, 'failed_utilities': int(rollback),
@@ -47,7 +48,8 @@ class AccountDriverDataTests(unittest.TestCase):
         for rollback in (False, True):
             good = self.valid(rollback); self.check(good)
             for key in ('names_absent', 'numeric_ids_absent', 'close_completed', 'original_handles_closed',
-                        'native_acceptance', 'consumer_started', 'quarantined', 'creation_succeeded',
+                        'native_acceptance', 'consumer_started', 'cleanup_identity_guards_checked',
+                        'quarantined', 'creation_succeeded',
                         'identities_published', 'reservation_failed'):
                 value = copy.deepcopy(good); value[key] = not good[key]
                 with self.subTest(key=key), self.assertRaises(RuntimeError): self.check(value)

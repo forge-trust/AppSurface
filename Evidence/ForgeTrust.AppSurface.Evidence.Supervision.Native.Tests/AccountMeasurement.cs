@@ -19,7 +19,7 @@ internal static class AccountMeasurement
 {
     private const int MaximumBytes = 8 * 1024 * 1024;
     internal const string WitnessSource = ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs";
-    internal const string WitnessSourceSha256 = "6810182cb7a93c8928f7aca9a8e55d575b7d4e2ebc0a85f3d0cb64c4ed4135fa";
+    internal const string WitnessSourceSha256 = "ab4161ac58b33b8286077f4b9f32945d0f0ef1f08ef0644a4b0961b7309c0340";
     internal const string PartialSourceSha256 = "1535f37daa077b917d589a9b725e018c1dba3c404cd92fc966e20d1e8066d700";
     private const string AccountsSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs";
     private const string OwnerSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
@@ -27,7 +27,8 @@ internal static class AccountMeasurement
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
         "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli"];
     private static readonly string[] ReceiptFields = ["schema", "variant", "creation_succeeded", "generation",
-        "managed_entry_sha256", "native_acceptance", "consumer_started", "shared_close_task", "closed_holder_rejected",
+        "managed_entry_sha256", "native_acceptance", "consumer_started", "cleanup_identity_guards_checked",
+        "shared_close_task", "closed_holder_rejected",
         "names_absent", "numeric_ids_absent", "utilities", "settled_utilities", "failed_utilities", "close_completed",
         "quarantined", "reservation_failed", "identities_published", "original_handles_closed", "ids", "operation_failure"];
 
@@ -139,6 +140,8 @@ internal static class AccountMeasurement
             Assert.Equal(values.Length, values.Distinct().Count());
         }
         var rollback = variant == "C4AccountRollback";
+        if (rollback) Assert.Equal(JsonValueKind.Null, receipt.GetProperty("cleanup_identity_guards_checked").ValueKind);
+        else Assert.True(receipt.GetProperty("cleanup_identity_guards_checked").GetBoolean());
         foreach (var key in new[] { "creation_succeeded", "identities_published" })
             Assert.Equal(!rollback, receipt.GetProperty(key).GetBoolean());
         Assert.Equal(rollback, receipt.GetProperty("reservation_failed").GetBoolean());
@@ -207,7 +210,7 @@ internal static class AccountMeasurement
         var lines = document.Value.GetProperty(declaring).GetProperty(method).GetProperty("Lines");
         Assert.True(lines.EnumerateObject().Any(line => int.TryParse(line.Name, NumberStyles.None,
             CultureInfo.InvariantCulture, out var number) && number >= (creation ? 28 : 284)
-            && number <= (creation ? 219 : 295) && line.Name == number.ToString(CultureInfo.InvariantCulture)
+            && number <= (creation ? 236 : 295) && line.Name == number.ToString(CultureInfo.InvariantCulture)
             && line.Value.TryGetInt64(out var hits) && hits > 0),
             "Prior account/owner hits cannot replace the current compiled variant's method witness.");
     }

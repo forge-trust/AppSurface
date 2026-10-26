@@ -47,6 +47,7 @@ internal static class LinuxAccountMeasurement
         long closeStarted = 0;
         var closeAllowance = TimeSpan.Zero;
         var cleanupToken = CancellationToken.None;
+        bool? cleanupIdentityGuardsChecked = null;
         try
         {
             originalToken.ThrowIfCancellationRequested();
@@ -100,6 +101,22 @@ internal static class LinuxAccountMeasurement
                 || !created.IdentitiesPublished || created.FirstFailure is not null)
                 throw Rejected();
             owner.RequireActive(job.Token); // Successful local utility settlement has not closed admission.
+            var names = LinuxRunAccountNames.Create(owner.RunId);
+            await RequireCleanupIdentityMismatchAsync(owner,
+                LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, names.Worker),
+                snapshot with { WorkerUid = snapshot.SubjectUid }, snapshot, job.Token).ConfigureAwait(false);
+            await RequireCleanupIdentityMismatchAsync(owner,
+                LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteUser, names.Worker),
+                snapshot with { WorkerGid = snapshot.SubjectGid }, snapshot, job.Token).ConfigureAwait(false);
+            await RequireCleanupIdentityMismatchAsync(owner,
+                LinuxRunAccountCommand.Create(LinuxRunAccountOperation.DeleteGroup, names.Results),
+                snapshot with { ResultsGid = snapshot.WorkerGid }, snapshot, job.Token).ConfigureAwait(false);
+            var verifiedAfterIdentityGuards = await LinuxRunAccountNss.ReadAsync(owner, job.Token, includeApplication: false)
+                .ConfigureAwait(false);
+            if (accounts.CaptureAccountMeasurementState(owner) != created || verifiedAfterIdentityGuards != snapshot)
+                throw Rejected();
+            cleanupIdentityGuardsChecked = true;
+            owner.RequireActive(job.Token); // Read-only identity mismatches leave the owner active for original cleanup.
             owner.BeginRootTeardown();
             var first = accounts.CloseAsync(owner.RootTeardownToken);
             var second = accounts.CloseAsync(owner.RootTeardownToken);
@@ -182,6 +199,7 @@ internal static class LinuxAccountMeasurement
             managed_entry_sha256 = entrySha256,
             native_acceptance = false,
             consumer_started = false,
+            cleanup_identity_guards_checked = cleanupIdentityGuardsChecked,
             shared_close_task = sharedClose,
             closed_holder_rejected = closedHolderRejected,
             names_absent = namesAbsent,
@@ -216,6 +234,26 @@ internal static class LinuxAccountMeasurement
         if (receipt.Length is 0 or > 4096) throw Rejected();
         LinuxEmptyObservationExecution.RequireFinalClose(TimeProvider.System, closeStarted, closeAllowance, originalToken);
         return receipt;
+    }
+
+    /// <summary>Requires a substituted NSS identity to reject while the correct live identity remains present.</summary>
+    /// <remarks>No account utility is dispatched; both lookups use the authentic owner's existing time budget.</remarks>
+    private static async Task RequireCleanupIdentityMismatchAsync(LinuxOwnerActivation owner,
+        LinuxRunAccountCommand command, LinuxRunAccountSnapshot incorrect, LinuxRunAccountSnapshot expected,
+        CancellationToken token)
+    {
+        var rejected = false;
+        try
+        {
+            _ = await LinuxRunAccountNss.IsCleanupNameAbsentAsync(owner, command, incorrect, token).ConfigureAwait(false);
+        }
+        catch (LinuxRunAccountException error) when (error.Failure == LinuxRunAccountFailure.IdentityMismatch)
+        {
+            rejected = true;
+        }
+        if (!rejected) throw Rejected();
+        if (await LinuxRunAccountNss.IsCleanupNameAbsentAsync(owner, command, expected, token).ConfigureAwait(false))
+            throw Rejected();
     }
 
     /// <summary>Copies a single actual holder's rollback observation without changing its native outcome.</summary>
