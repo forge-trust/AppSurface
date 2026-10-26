@@ -16,6 +16,32 @@ def require(ok,code):
  if not ok:raise RuntimeError(code)
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def canonical(v):return json.dumps(v,sort_keys=True,separators=(',',':')).encode()
+def require_quota_disposition(root_stdout,manifest):
+ """Require no eligible claim after the actual quota case; detached data grants no authority.
+
+ The caller has already observed original quota overflow and will still require
+ group, pump and account settlement. A missing manifest is allowed; an existing
+ failure manifest must explicitly carry no claim, no eligibility and no passing
+ producer assertion. No private output or supplied diagnostic is echoed.
+ """
+ require(type(root_stdout) is bytes and root_stdout==b'','quota-no-root-result')
+ if manifest is None:
+  return {'manifest_present':False,'root_result_present':False,'execution_verdict':None,
+          'claim_kind':None,'eligibility':None,'eligible_result':False}
+ require(type(manifest) is dict and manifest.get('Mode')=='Observation'
+         and manifest.get('ExecutionVerdict') in ('Incomplete','Invalid')
+         and manifest.get('ClaimKind')=='None' and manifest.get('Eligibility')=='None',
+         'quota-no-eligible-manifest')
+ results=manifest.get('ProducerResults')
+ require(type(results) is list and len(results)<=1,'quota-failed-producer-set')
+ for result in results:
+  require(type(result) is dict and result.get('Outcome') in
+          ('Failed','Flaky','TimedOut','Unavailable','Cancelled','Invalid')
+          and result.get('SatisfiedAssertionIds')==[],'quota-no-passing-producer-assertion')
+ return {'manifest_present':True,'root_result_present':False,
+         'execution_verdict':manifest['ExecutionVerdict'],'claim_kind':manifest['ClaimKind'],
+         'eligibility':manifest['Eligibility'],'eligible_result':False}
+
 def sealed_descriptor(path,expected_schema="evidence-worker-linux-v1",*,after_custody=False):
  """Observe publication data, or the root-only terminal seal after physical settlement; never authenticate."""
  require(expected_schema in ("evidence-worker-linux-v1","evidence-worker-linux-v2"),"actual-descriptor-expected-schema")
@@ -508,6 +534,8 @@ def execute_case(args,case,end,receipt):
     observed=read_output_observation(stderr.read_bytes())
     require(observed['quota_exceeded'] is True and observed['received_bytes']>observed['received_byte_limit']==16*1024*1024,'actual-output-quota-crossed')
     result['output_observation']=observed
+    result['quota_disposition']=require_quota_disposition(stdout.read_bytes(),
+     json.loads(final.read_bytes()) if final.exists() else None)
   require(groups_empty(units),'all-owned-groups-empty')
   result['groups_empty']=True
   # Observe both generated names and numeric IDs through retained root-sealed directory metadata/descriptor.

@@ -28,6 +28,38 @@ class DriverControls(unittest.TestCase):
   self.assertNotIn('Trusted',json.dumps(native.policy()));self.assertEqual(6,len(native.FIXED))
   self.assertEqual('HOME=/nonexistent',native.FIXED[1])
 
+class QuotaDispositionControls(unittest.TestCase):
+ def failed(self):
+  return {'Mode':'Observation','ExecutionVerdict':'Incomplete','ClaimKind':'None',
+          'Eligibility':'None','ProducerResults':[{'Outcome':'Failed','SatisfiedAssertionIds':[]}]}
+
+ def test_absence_or_an_explicit_failed_unclaimed_result_cannot_be_gate_eligible(self):
+  missing=native.require_quota_disposition(b'',None)
+  self.assertFalse(missing['manifest_present']);self.assertFalse(missing['eligible_result'])
+  for verdict in ('Incomplete','Invalid'):
+   value=dict(self.failed(),ExecutionVerdict=verdict)
+   result=native.require_quota_disposition(b'',value)
+   self.assertTrue(result['manifest_present']);self.assertFalse(result['root_result_present'])
+   self.assertFalse(result['eligible_result']);self.assertEqual('None',result['claim_kind'])
+   self.assertEqual('None',result['eligibility']);self.assertEqual(verdict,result['execution_verdict'])
+
+ def test_each_passing_unknown_or_gate_eligible_projection_rejects(self):
+  good=self.failed();native.require_quota_disposition(b'',good)
+  values=[dict(good,Mode='Trusted'),dict(good,ExecutionVerdict='Passed'),
+          dict(good,ExecutionVerdict='private-canary'),dict(good,ClaimKind='ObservationOnly'),
+          dict(good,ClaimKind='TargetedComplete'),dict(good,Eligibility='Informational'),
+          dict(good,Eligibility='PullRequestGate'),dict(good,Eligibility='ReleaseGate'),
+          dict(good,ProducerResults=None),dict(good,ProducerResults=good['ProducerResults']*2),
+          dict(good,ProducerResults=[{'Outcome':'Passed','SatisfiedAssertionIds':[]}]),
+          dict(good,ProducerResults=[{'Outcome':'Failed','SatisfiedAssertionIds':['appsurface/coverage/behavioral-patch@1']}]),
+          dict(good,ProducerResults=[{'Outcome':'private-canary','SatisfiedAssertionIds':[]}])]
+  for value in values:
+   with self.subTest(value=value),self.assertRaises(RuntimeError) as error:
+    native.require_quota_disposition(b'',value)
+   self.assertNotIn('private-canary',str(error.exception))
+  for raw in (b'{}',b'private-canary',''):
+   with self.subTest(raw=raw),self.assertRaises(RuntimeError):native.require_quota_disposition(raw,None)
+
 class ProducerSamplingControls(unittest.TestCase):
  def sample(self,*,uid=1001,gid=1002,proc_uids=None,proc_gids=None,cgroup=None,
             starts=(7654,7654),manager_pids=('4321','4321'),pending=None):
