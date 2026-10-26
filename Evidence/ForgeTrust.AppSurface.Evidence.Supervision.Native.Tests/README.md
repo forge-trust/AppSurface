@@ -99,7 +99,7 @@ coverage thresholds remain independently required.
 
 The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) runs a
 separate standard collector pass for `LinuxOwnerGuardNativeTests` (19 cases),
-`LinuxCustodySupplementNativeTests` (9 cases), and `LinuxProducerFileTreeNativeTests`
+`LinuxCustodySupplementNativeTests` (12 cases), and `LinuxProducerFileTreeNativeTests`
 (13 cases). These actual Linux x64 root tests
 exercise atomic marker consumption, replay, cancellation and object mutation, and
 retained nested report names, selected root pins, unknown reads and cancellation.
@@ -108,9 +108,11 @@ accepted consumer proof or production registration.
 
 The supplementary [producer file-copy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerFileTreeNativeTests.cs) add 13 actual root cases against [the retained deployment copy API](../ForgeTrust.AppSurface.Evidence.Supervision/LinuxProducerFileTree.cs). They check exclusive destination rejection, audited-source changes, cancellation, expired deadlines and use after close, with real file descriptors and separate valid copies. Their numeric ownership is fixture metadata, not an account reservation, authenticated workspace or producer lease.
 
+The three additional [retained-report boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) reject a nested directory symlink without altering its outside file, read a genuine report at the existing 1 MiB limit before rejecting one extra byte, and reject replacement of the selected root's parent through two independent retained sets. Every failed operation stays closed; the original file bytes remain unchanged. Their fixed names are required alongside the larger count. Local compilation cannot establish that these Linux-only controls passed; fresh current-source root execution is required.
+
 The supplemental `root-supplement.trx` and `root_supplement_tests` binding are
 separate from the original 41-case `root-files.trx` consumed by the account lineage.
-The binding requires exact SHA-256, 41 executed/passed rows with no skips or failures,
+The binding requires exact SHA-256, 44 executed/passed rows with no skips or failures,
 and exactly the three fixed classes. The same already verified C3 dependency image
 is measured, its DLL/PDB bytes are rechecked after collector restoration, and its
 genuine report is merged through Coverlet's standard `--merge-with` before the
@@ -130,7 +132,7 @@ The runtime workflow downloads the current application-lane artifact and copies 
 | `native-sdk-failure.json` | Independently finalized standard report for the genuine failed-test SDK control. |
 | `sdk-test-failure.json` | Finalized failed-SDK receipt, restoration and pre-exit worker-cache provenance. |
 | `root-files.trx` | Hash-bound current-run passing root filesystem/kernel controls for all four expected classes; zero skips or failures. |
-| `root-supplement.trx` | Separate hash-bound 41-case marker/subtree/copy supplement; no replacement of the original root TRX or account lineage. |
+| `root-supplement.trx` | Separate hash-bound 44-case marker/subtree/copy supplement; no replacement of the original root TRX or account lineage. |
 | `source.json` | Complete source capture bound to the tested Git revision. |
 | `native-receipt.json` | Receipt for the seven native C3 controls, including source, per-case outcomes, and `trusted_eligibility: false`. |
 

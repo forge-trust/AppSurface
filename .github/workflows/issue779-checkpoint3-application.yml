@@ -376,17 +376,20 @@ jobs:
           document = ET.parse(trx)
           ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
           counters = document.find('.//' + ns + 'Counters').attrib
-          assert all(int(counters[key]) == 41 for key in ('total', 'executed', 'passed'))
+          assert all(int(counters[key]) == 44 for key in ('total', 'executed', 'passed'))
           assert all(int(counters.get(key, '0')) == 0 for key in ('failed', 'error', 'notExecuted', 'warning'))
           rows = document.findall('.//' + ns + 'UnitTestResult')
-          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 9, 'LinuxProducerFileTreeNativeTests': 13}
-          assert len(rows) == 41 and len({row.attrib['testName'] for row in rows}) == 41
+          expected = {'LinuxOwnerGuardNativeTests': 19, 'LinuxCustodySupplementNativeTests': 12, 'LinuxProducerFileTreeNativeTests': 13}
+          assert len(rows) == 44 and len({row.attrib['testName'] for row in rows}) == 44
           assert all(row.attrib['outcome'] == 'Passed' for row in rows)
           for name, count in expected.items():
               assert sum(row.attrib['testName'].startswith('ForgeTrust.AppSurface.Evidence.Supervision.Tests.' + name + '.') for row in rows) == count
+          names = {row.attrib['testName'] for row in rows}
+          for name in ('NestedDirectorySymlinkCannotSelectAnOutsideReport', 'ActualReportAtTheByteLimitReadsExactEofAndTheNextByteRejectsBeforeRetention', 'ReplacedParentOfTheSelectedRootPoisonsTheRetainedSet'):
+              assert 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxCustodySupplementNativeTests.' + name in names
           binding_path = root / 'measurement-binding.json'
           binding = json.loads(binding_path.read_bytes())
-          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 41, 'passed': 41, 'native_acceptance': False}
+          binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 44, 'passed': 44, 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-supplement.' + suffix)
               assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024

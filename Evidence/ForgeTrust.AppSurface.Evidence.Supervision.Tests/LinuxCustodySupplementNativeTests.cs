@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Runtime.Versioning;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
@@ -115,6 +116,112 @@ public sealed class LinuxCustodySupplementNativeTests
         Assert.Equal(new byte[] { 1, 2 }, File.ReadAllBytes(fixture.Results + "/report.xml"));
     }
 
+    [RootCustodyFact]
+    public void NestedDirectorySymlinkCannotSelectAnOutsideReport()
+    {
+        using var fixture = new Fixture();
+        var outside = fixture.Root + "/outside";
+        Directory.CreateDirectory(outside);
+        fixture.Own(outside);
+        System.IO.File.SetUnixFileMode(outside,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        var sentinel = outside + "/coverage.xml";
+        System.IO.File.WriteAllBytes(sentinel, "outside report"u8.ToArray());
+        fixture.Own(sentinel);
+        System.IO.File.SetUnixFileMode(sentinel, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        Directory.CreateSymbolicLink(fixture.Results + "/nested", outside);
+
+        Assert.ThrowsAny<IOException>(() => fixture.Open(["nested/coverage.xml"]));
+        Assert.Equal("outside report"u8.ToArray(), System.IO.File.ReadAllBytes(sentinel));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, System.IO.File.GetUnixFileMode(sentinel));
+        Assert.Equal(outside, new DirectoryInfo(fixture.Results + "/nested").LinkTarget);
+    }
+
+    [RootCustodyFact]
+    public void ActualReportAtTheByteLimitReadsExactEofAndTheNextByteRejectsBeforeRetention()
+    {
+        using var fixture = new Fixture();
+        var bytes = new byte[LinuxRetainedReportSet.MaximumFileBytes];
+        bytes[0] = 1;
+        bytes[^1] = 2;
+        fixture.File("coverage.xml", bytes);
+        using (var reports = fixture.Open(["coverage.xml"]))
+        {
+            var selected = Assert.Single(reports.ListReports());
+            Assert.Equal(bytes.LongLength, selected.Length);
+            Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), selected.Sha256);
+            using var collected = new MemoryStream();
+            long offset = 0;
+            while (offset < selected.Length)
+            {
+                var chunk = reports.ReadChunk("coverage.xml", offset, LinuxRetainedReportSet.MaximumChunkBytes);
+                Assert.InRange(chunk.Length, 1, LinuxRetainedReportSet.MaximumChunkBytes);
+                collected.Write(chunk);
+                offset += chunk.Length;
+            }
+            Assert.Equal(bytes, collected.ToArray());
+            Assert.Throws<IOException>(() => reports.ReadChunk("coverage.xml", offset, 1));
+        }
+        var path = fixture.Results + "/coverage.xml";
+        using (var writer = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+        {
+            writer.Position = writer.Length;
+            writer.WriteByte(3);
+        }
+        Assert.Equal(bytes.LongLength + 1, new FileInfo(path).Length);
+        Assert.Throws<IOException>(() => fixture.Open(["coverage.xml"]));
+        using var unchanged = new FileStream(path, FileMode.Open, FileAccess.Read);
+        Assert.Equal(1, unchanged.ReadByte());
+        unchanged.Position = bytes.LongLength - 1;
+        Assert.Equal(2, unchanged.ReadByte());
+        Assert.Equal(3, unchanged.ReadByte());
+        Assert.Equal(-1, unchanged.ReadByte());
+    }
+
+    [RootCustodyFact]
+    public void ReplacedParentOfTheSelectedRootPoisonsTheRetainedSet()
+    {
+        using var fixture = new Fixture();
+        var originalBytes = "original bytes"u8.ToArray();
+        var replacementBytes = "replacement bytes"u8.ToArray();
+        fixture.File("coverage.xml", originalBytes);
+        var reportsForList = fixture.Open(["coverage.xml"]);
+        LinuxRetainedReportSet? reportsForChunk = null;
+        var retainedRoot = fixture.Root + "-retained";
+        try
+        {
+            reportsForChunk = fixture.Open(["coverage.xml"]);
+            Assert.Single(reportsForList.ListReports());
+            Assert.Single(reportsForChunk.ListReports());
+
+            Directory.Move(fixture.Root, retainedRoot);
+            Directory.CreateDirectory(fixture.Root,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.CreateDirectory(fixture.Results);
+            fixture.SetResultOwner();
+            fixture.File("coverage.xml", replacementBytes);
+
+            Assert.Throws<IOException>(() => reportsForList.ListReports());
+            Assert.Throws<IOException>(() => reportsForChunk.ReadChunk("coverage.xml", 0, 1));
+            Assert.Throws<IOException>(() => reportsForList.ReadChunk("coverage.xml", 0, 1));
+            Assert.Throws<IOException>(() => reportsForChunk.ListReports());
+            Assert.Equal(originalBytes, System.IO.File.ReadAllBytes(retainedRoot + "/results/coverage.xml"));
+            Assert.Equal(replacementBytes, System.IO.File.ReadAllBytes(fixture.Results + "/coverage.xml"));
+        }
+        finally
+        {
+            try { reportsForList.Dispose(); }
+            finally
+            {
+                try { reportsForChunk?.Dispose(); }
+                finally
+                {
+                    if (Directory.Exists(retainedRoot)) Directory.Delete(retainedRoot, recursive: true);
+                }
+            }
+        }
+    }
+
     private sealed class Fixture : IDisposable
     {
         private const uint Uid = 12345;
@@ -147,6 +254,8 @@ public sealed class LinuxCustodySupplementNativeTests
             Assert.Equal(0, Chown(path, Uid, Gid));
             System.IO.File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
+        internal void Own(string path) => Assert.Equal(0, Chown(path, Uid, Gid));
+        internal void SetResultOwner() => OwnDirectory(Results);
         internal LinuxProtectedMetadata Metadata()
         {
             Assert.Equal(0, Statx(-100, Results, 0x100, 0x7ff, out var value));
