@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 using ForgeTrust.AppSurface.Testing;
@@ -171,6 +173,51 @@ public sealed class CloudRunExecutionWorkflowTests
         // protects=caller cancellation precedence; fails_when=valid result is delivered after caller cancellation; no_claim=remote cancellation
         await Assert.ThrowsAsync<OperationCanceledException>(() => new CloudRunExecutionWorkflow(observer, TimeProvider.System).RunAsync(bundle.Path, "job", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "60s", "2s", cancellation.Token));
     }
+
+    [Theory]
+    [InlineData("deployment-intent.v1.json")]
+    [InlineData("gcp-cloud-run-migration.tf.json")]
+    [InlineData("gcp-cloud-run-migration.plan.json")]
+    [InlineData(DeploymentArtifactBundleWriter.OwnershipMarkerFileName)]
+    public async Task RunAsync_RejectsFifoWithoutBlocking(string filename)
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using var bundle = BundleDirectory.Create(includeMarker: true);
+        var candidate = TestPathUtils.PathUnder(bundle.Path, filename);
+        File.Delete(candidate);
+        Assert.Equal(0, MakeFifo(candidate, Convert.ToUInt32("600", 8)));
+        var releaseBlockedReader = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            using var handle = File.Open(candidate, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        });
+        var observer = new RecordingObserver();
+        var stopwatch = Stopwatch.StartNew();
+
+        var result = await new CloudRunExecutionWorkflow(observer, TimeProvider.System).RunAsync(
+            bundle.Path,
+            "job",
+            "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1",
+            "60s",
+            "2s",
+            CancellationToken.None);
+
+        stopwatch.Stop();
+        await releaseBlockedReader;
+
+        // protects=bounded no-follow regular-file admission for each bundle input; fails_when=FIFO blocks to the release writer, returns another diagnostic, or calls observer; no_claim=protection from concurrent path replacement
+        Assert.Equal("ASDEPLOY171", result.DiagnosticCode);
+        Assert.Null(observer.Request);
+        // gstack-timing-ok: FIFO rejection must finish before the independently delayed 1s opener; this bound detects blocking open, not throughput.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromMilliseconds(750), $"FIFO rejection took {stopwatch.Elapsed}.");
+    }
+
+    [DllImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
+    private static extern int MakeFifo([MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
 
     private sealed class RecordingObserver : IGcpCloudRunExecutionObserver
     {

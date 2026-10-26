@@ -1,11 +1,12 @@
 using System.Text;
 using ForgeTrust.AppSurface.Deployment;
 using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 
 namespace ForgeTrust.AppSurface.Cli;
 
 /// <summary>Loads one finite published bundle and passes only the remaining monotonic allowance to observation.</summary>
-/// <remarks>Regular files and directory ancestors must be free of reparse points; hashes establish consistency, not publisher authenticity.</remarks>
+/// <remarks>Bundle files are opened through the shared coverage artifact reader, which rejects non-regular files and does not follow links. Hashes establish consistency, not publisher authenticity.</remarks>
 internal sealed class CloudRunExecutionWorkflow
 {
     private const int MaximumArtifactBytes = 4 * 1024 * 1024;
@@ -99,7 +100,8 @@ internal sealed class CloudRunExecutionWorkflow
             checkBudget();
             var file = entries.SingleOrDefault(e => e.Name == name);
             if (file is null || file.Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException();
-            await using var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            await using var stream = CoverageRunArtifactReader.OpenRegularFile(
+                Path.GetPathRoot(full)!, full, file.FullName);
             using var memory = new MemoryStream();
             var buffer = new byte[64 * 1024];
             while (true)
@@ -117,7 +119,8 @@ internal sealed class CloudRunExecutionWorkflow
         if (marker is not null)
         {
             checkBudget();
-            await using var stream = new FileStream(marker.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 128, FileOptions.Asynchronous);
+            await using var stream = CoverageRunArtifactReader.OpenRegularFile(
+                Path.GetPathRoot(full)!, full, marker.FullName);
             var bytes = new byte[128];
             var count = 0;
             while (count < bytes.Length)
