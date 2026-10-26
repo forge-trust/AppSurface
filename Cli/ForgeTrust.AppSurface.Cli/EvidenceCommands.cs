@@ -197,8 +197,9 @@ internal sealed partial class EvidenceVerifyCommand(EvidenceCliWorkflow workflow
 {
     private readonly EvidenceCliWorkflow _workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
 
-    /// <summary>Gets or sets the manifest path to verify.</summary>
-    [CommandParameter(0, Description = "Generated evidence-manifest.json path to verify.")]
+    /// <summary>Gets or sets the required manifest path to verify.</summary>
+    /// <remarks>Missing input reaches the stable ASEVD212 diagnostic rather than a generic binder error.</remarks>
+    [CommandParameter(0, Description = "Required evidence-manifest.json path. Omitting it fails with ASEVD212.")]
     public string ManifestPath { get; set; } = string.Empty;
 
     /// <summary>Gets or sets the resolved plan path. Defaults next to the manifest.</summary>

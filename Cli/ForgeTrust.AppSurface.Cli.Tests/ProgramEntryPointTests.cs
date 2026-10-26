@@ -3469,6 +3469,21 @@ public sealed class ProgramEntryPointTests
     }
 
     [Fact]
+    public async Task EntryPoint_VerifyHelpExplainsTheRequiredManifestAndPreservesItsMissingArgumentDiagnostic()
+    {
+        var help = await InvokeEntryPointAsync(["evidence", "verify", "--help"]);
+        Assert.Equal(0, help.ExitCode);
+        Assert.Contains("Required evidence-manifest.json path.", help.AllText, StringComparison.Ordinal);
+        Assert.Contains("ASEVD212", help.AllText, StringComparison.Ordinal);
+
+        var missing = await InvokeEntryPointAsync(["evidence", "verify"]);
+        Assert.Equal(1, missing.ExitCode);
+        Assert.Contains("ASEVD212: evidence verify requires an evidence-manifest.json path.",
+            missing.AllText, StringComparison.Ordinal);
+        Assert.DoesNotContain("structurally verified", missing.AllText, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EntryPoint_ShouldPreserveEvidencePlanningAndVerificationWhileRequiringProtectedAdmission()
     {
         using var directory = TestDirectory.Create();
