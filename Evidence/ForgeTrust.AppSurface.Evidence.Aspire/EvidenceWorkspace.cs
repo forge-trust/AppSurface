@@ -71,8 +71,8 @@ public sealed class EvidenceWorkspaceBudgetException : IOException
 /// workspace after validating its ownership marker and retained filesystem metadata. A missing, replaced, or linked
 /// root is treated as invalid evidence. Inventory is bounded by <see cref="EvidenceWorkspaceOptions.MaxEntries"/>
 /// and <see cref="EvidenceWorkspaceOptions.MaxDepth"/> before any cleanup deletion begins. The retained metadata
-/// combines a unique marker with retained metadata and, on Linux, a held device/inode identity because directory
-/// creation timestamps can change when children change. Callers must treat the workspace as trusted and must
+/// combines a unique marker with retained metadata, a held device/inode identity on Linux, and a held
+/// volume/file identity on Windows. Creation timestamps alone cannot establish directory identity. Callers must treat the workspace as trusted and must
 /// not concurrently replace or mutate its paths while it is in use. No portable implementation can eliminate every
 /// time-of-check/time-of-use race against a hostile concurrent process.
 /// </remarks>
@@ -84,13 +84,14 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
     private DateTime _rootCreationTimeUtc;
     private DateTime _markerCreationTimeUtc;
     private readonly EvidenceWorkspaceLinuxIdentity? _linuxIdentity;
+    private readonly EvidenceWorkspaceWindowsIdentity? _windowsIdentity;
     private readonly EvidenceWorkspaceOptions _options;
     private readonly Func<string, long>? _logicalSize;
     private readonly Func<string, long>? _freeBytes;
     private int _disposed;
 
     private EvidenceWorkspace(string rootPath, string identity, EvidenceWorkspaceOptions options, Func<string, long>? logicalSize, Func<string, long>? freeBytes,
-        EvidenceWorkspaceLinuxIdentity? linuxIdentity = null)
+        EvidenceWorkspaceLinuxIdentity? linuxIdentity = null, EvidenceWorkspaceWindowsIdentity? windowsIdentity = null)
     {
         RootPath = rootPath;
         _markerPath = Path.Join(rootPath, MarkerFileName);
@@ -98,6 +99,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         _rootCreationTimeUtc = new DirectoryInfo(rootPath).CreationTimeUtc;
         _markerCreationTimeUtc = new FileInfo(_markerPath).CreationTimeUtc;
         _linuxIdentity = linuxIdentity ?? (OperatingSystem.IsLinux() ? EvidenceWorkspaceLinuxIdentity.Open(rootPath) : null);
+        _windowsIdentity = windowsIdentity ?? (OperatingSystem.IsWindows() ? EvidenceWorkspaceWindowsIdentity.Open(rootPath) : null);
         _options = options;
         _logicalSize = logicalSize;
         _freeBytes = freeBytes;
@@ -156,7 +158,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
             workspace = new EvidenceWorkspace(root, identity, resolvedOptions, null, null);
             beforeMarker?.Invoke(root);
             File.WriteAllText(workspace._markerPath, identity, Encoding.UTF8);
-            // Complete the timestamp baseline after initialization. Linux uses a stable native root identity instead.
+            // Complete the timestamp baseline after initialization. Linux and Windows retain native root identities.
             workspace._rootCreationTimeUtc = new DirectoryInfo(root).CreationTimeUtc;
             workspace._markerCreationTimeUtc = new FileInfo(workspace._markerPath).CreationTimeUtc;
             workspace.CheckBudget();
@@ -169,7 +171,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
                 if (workspace is not null) TryDeleteOwnedRoot(workspace);
                 else TryDeleteEmptyRoot(root, initialCreationTimeUtc);
             }
-            finally { workspace?._linuxIdentity?.Dispose(); }
+            finally { workspace?._linuxIdentity?.Dispose(); workspace?._windowsIdentity?.Dispose(); }
             throw;
         }
     }
@@ -230,6 +232,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         ValidateOwnedRoot();
         DeleteOwnedTree(RootPath, inventory);
         _linuxIdentity?.Dispose();
+        _windowsIdentity?.Dispose();
         Volatile.Write(ref _disposed, 1);
         return ValueTask.CompletedTask;
     }
@@ -247,7 +250,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         // Allocate with permissive physical limits; the injected counters are intentionally exercised by the caller's
         // first explicit CheckBudget invocation rather than during this factory's setup.
         var workspace = Create(parent, new EvidenceWorkspaceOptions(long.MaxValue, 0, 100_000, 64));
-        return new EvidenceWorkspace(workspace.RootPath, workspace._identity, resolvedOptions, logicalSize, freeBytes, workspace._linuxIdentity);
+        return new EvidenceWorkspace(workspace.RootPath, workspace._identity, resolvedOptions, logicalSize, freeBytes, workspace._linuxIdentity, workspace._windowsIdentity);
     }
 
     private void ValidateOwnedRoot()
@@ -260,7 +263,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
         var rootInfo = new DirectoryInfo(RootPath);
         var markerInfo = new FileInfo(_markerPath);
         if (rootInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
-            (_linuxIdentity is not null ? !_linuxIdentity.Matches(RootPath) : rootInfo.CreationTimeUtc != _rootCreationTimeUtc) ||
+            !RootIdentityMatches(rootInfo) ||
             !markerInfo.Exists ||
             markerInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
             markerInfo.CreationTimeUtc != _markerCreationTimeUtc)
@@ -274,6 +277,9 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
             throw new IOException("Evidence workspace ownership marker is invalid.");
         }
     }
+
+    private bool RootIdentityMatches(DirectoryInfo root) =>
+        _windowsIdentity?.Matches(RootPath) ?? _linuxIdentity?.Matches(RootPath) ?? root.CreationTimeUtc == _rootCreationTimeUtc;
 
     private long MeasureLogicalBytes(string root, long limit)
     {
@@ -336,7 +342,7 @@ public sealed class EvidenceWorkspace : IAsyncDisposable
             {
                 var root = new DirectoryInfo(workspace.RootPath);
                 if (root.Exists && !root.Attributes.HasFlag(FileAttributes.ReparsePoint)
-                    && (workspace._linuxIdentity?.Matches(workspace.RootPath) ?? root.CreationTimeUtc == workspace._rootCreationTimeUtc)
+                    && workspace.RootIdentityMatches(root)
                     && !Directory.EnumerateFileSystemEntries(workspace.RootPath).Any())
                     Directory.Delete(workspace.RootPath);
                 return;

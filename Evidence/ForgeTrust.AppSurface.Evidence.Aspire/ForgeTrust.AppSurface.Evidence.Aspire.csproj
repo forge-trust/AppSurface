@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
   </ItemGroup>
 
   <ItemGroup>

@@ -55,6 +55,9 @@ public sealed class EvidenceWorkspaceTests
             await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
             Assert.Equal(changed, File.ReadAllBytes(marker));
             Assert.True(Directory.Exists(workspace.RootPath));
+            File.WriteAllBytes(marker, original);
+            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
+            await workspace.DisposeAsync();
         }
         finally { Directory.Delete(parent, recursive: true); }
     }
@@ -362,28 +365,36 @@ public sealed class EvidenceWorkspaceTests
         var parent = NewDirectory();
         var workspace = EvidenceWorkspace.Create(parent);
         var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
+        var original = File.ReadAllBytes(marker);
+        var created = File.GetCreationTimeUtc(marker);
         File.WriteAllText(marker, "different-owner");
 
         Assert.Throws<IOException>(workspace.CheckBudget);
         await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
         Assert.True(Directory.Exists(workspace.RootPath));
+        File.WriteAllBytes(marker, original);
+        if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
+        await workspace.DisposeAsync();
         Directory.Delete(parent, recursive: true);
     }
 
     [Fact]
-    public void CheckBudget_RejectsInventoryEntryAndDepthLimits()
+    public async Task CheckBudget_RejectsInventoryEntryAndDepthLimits()
     {
         var parent = NewDirectory();
         var tooMany = EvidenceWorkspace.CreateForTests(parent, new EvidenceWorkspaceOptions(MaxEntries: 1), _ => 0, _ => long.MaxValue);
         File.WriteAllText(tooMany.GetPath("one"), "1");
         File.WriteAllText(tooMany.GetPath("two"), "2");
         Assert.Throws<IOException>(tooMany.CheckBudget);
-        Directory.Delete(tooMany.RootPath, recursive: true);
+        File.Delete(Path.Join(tooMany.RootPath, "one"));
+        File.Delete(Path.Join(tooMany.RootPath, "two"));
+        await tooMany.DisposeAsync();
 
         var tooDeep = EvidenceWorkspace.CreateForTests(parent, new EvidenceWorkspaceOptions(MaxDepth: 1), _ => 0, _ => long.MaxValue);
         Directory.CreateDirectory(tooDeep.GetPath("one/two"));
         Assert.Throws<IOException>(tooDeep.CheckBudget);
-        Directory.Delete(tooDeep.RootPath, recursive: true);
+        Directory.Delete(Path.Join(tooDeep.RootPath, "one"), recursive: true);
+        await tooDeep.DisposeAsync();
         Directory.Delete(parent, recursive: true);
     }
 
@@ -422,11 +433,14 @@ public sealed class EvidenceWorkspaceTests
         var sentinel = Path.Join(parent, "caller-owned.txt");
         File.WriteAllText(sentinel, "keep");
         var workspace = EvidenceWorkspace.Create(parent);
-        Directory.Delete(workspace.RootPath, recursive: true);
+        var retained = Path.Join(parent, "original");
+        Directory.Move(workspace.RootPath, retained);
 
         var exception = await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
         Assert.Contains("missing or was replaced", exception.Message, StringComparison.Ordinal);
         Assert.True(File.Exists(sentinel));
+        Directory.Move(retained, workspace.RootPath);
+        await workspace.DisposeAsync();
         Directory.Delete(parent, recursive: true);
     }
 
@@ -435,12 +449,16 @@ public sealed class EvidenceWorkspaceTests
     {
         var parent = NewDirectory();
         var workspace = EvidenceWorkspace.Create(parent);
-        Directory.Delete(workspace.RootPath, recursive: true);
+        var retained = Path.Join(parent, "original");
+        Directory.Move(workspace.RootPath, retained);
         Directory.CreateDirectory(workspace.RootPath);
         File.WriteAllText(Path.Join(workspace.RootPath, "replacement.txt"), "not owned");
 
         await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
         Assert.True(File.Exists(Path.Join(workspace.RootPath, "replacement.txt")));
+        Directory.Delete(workspace.RootPath, recursive: true);
+        Directory.Move(retained, workspace.RootPath);
+        await workspace.DisposeAsync();
         Directory.Delete(parent, recursive: true);
     }
 
@@ -451,12 +469,31 @@ public sealed class EvidenceWorkspaceTests
         var workspace = EvidenceWorkspace.Create(parent);
         var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
         var markerContents = File.ReadAllText(marker);
-        Directory.Delete(workspace.RootPath, recursive: true);
+        var rootCreated = Directory.GetCreationTimeUtc(workspace.RootPath);
+        var markerCreated = File.GetCreationTimeUtc(marker);
+        var retained = Path.Join(parent, "original");
+        Directory.Move(workspace.RootPath, retained);
         Directory.CreateDirectory(workspace.RootPath);
         File.WriteAllText(marker, markerContents);
+        var replacement = Path.Join(workspace.RootPath, "replacement.txt");
+        File.WriteAllText(replacement, "preserve replacement");
+        if (OperatingSystem.IsWindows())
+        {
+            Directory.SetCreationTimeUtc(workspace.RootPath, rootCreated);
+            File.SetCreationTimeUtc(marker, markerCreated);
+            Assert.Equal(rootCreated, Directory.GetCreationTimeUtc(workspace.RootPath));
+            Assert.Equal(markerCreated, File.GetCreationTimeUtc(marker));
+        }
 
+        Assert.Throws<IOException>(workspace.CheckBudget);
+        Assert.Throws<IOException>(() => workspace.GetPath("new-output.txt"));
         await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
         Assert.True(File.Exists(marker));
+        Assert.Equal("preserve replacement", File.ReadAllText(replacement));
+        Assert.True(Directory.Exists(retained));
+        Directory.Delete(workspace.RootPath, recursive: true);
+        Directory.Move(retained, workspace.RootPath);
+        await workspace.DisposeAsync();
         Directory.Delete(parent, recursive: true);
     }
 
@@ -591,11 +628,17 @@ public sealed class EvidenceWorkspaceTests
         try
         {
             var workspace = EvidenceWorkspace.Create(parent);
-            File.Delete(Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner"));
+            var marker = Path.Join(workspace.RootPath, ".appsurface-evidence-workspace-owner");
+            var original = File.ReadAllBytes(marker);
+            var created = File.GetCreationTimeUtc(marker);
+            File.Delete(marker);
 
             Assert.Throws<IOException>(workspace.CheckBudget);
             await Assert.ThrowsAsync<IOException>(async () => await workspace.DisposeAsync());
             Assert.True(Directory.Exists(workspace.RootPath));
+            File.WriteAllBytes(marker, original);
+            if (!OperatingSystem.IsLinux()) File.SetCreationTimeUtc(marker, created);
+            await workspace.DisposeAsync();
         }
         finally { Directory.Delete(parent, recursive: true); }
     }
