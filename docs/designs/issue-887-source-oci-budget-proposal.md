@@ -1,6 +1,6 @@
 # Original-source OCI entry budget disposition (#887)
 
-Status: the approved source-only ceiling is implemented in the private proof and the new package source; final-image limits remain unchanged. The [approved fixture card](issue-887-feasibility-card.md) keeps the final-image reader at 128 MiB. The [implementation patch](issue-887-source-oci-budget-proposal.patch) is a reviewable private-draft adaptation, not a supported API commitment.
+Status: the approved source-only ceiling is implemented in the private proof and the new package source; final-image limits remain unchanged. The [approved fixture card](issue-887-feasibility-card.md) keeps the final-image reader at 128 MiB. The [implementation patch](https://github.com/forge-trust/AppSurface/blob/7bded81f8ae4ff76c2c524e1d9a3e9ab50d93927/docs/designs/issue-887-source-oci-budget-proposal.patch) is a reviewable private-draft adaptation, not a supported API commitment.
 
 Original upstream manifest/config/layer bytes were recovered using only the already-pinned identities and verified SHA-256/descriptor sizes. Neither a synthetic archive nor extracted source files can substitute for this graph verification. Acquisition completed in 9.407 seconds; the private receipt is `.gstack/tmp/issue-887/prepared-inputs/original-source/receipt.json`.
 
