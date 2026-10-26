@@ -889,6 +889,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             {
                 token.ThrowIfCancellationRequested();
                 admission.ValidateActive(_plan);
+#if EVIDENCE_PRIVATE_C3SDK_CONFIGURE_SYNC_STALL
+                EvidencePrivateLifecycleStall.EnterConfigureSyncStall();
+#endif
                 _configure(_registration);
                 return ValueTask.FromResult(true);
             },

@@ -8,7 +8,16 @@
     <PackageTags>appsurface;evidence;aspire;ci;testing;e2e</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <NoWarn>$(NoWarn);ASPIREPIPELINES001;ASPIREFILESYSTEM001;ASPIREUSERSECRETS001</NoWarn>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidencePrivateC3SdkLifecycleStall)' == 'ConfigureSync'">$(DefineConstants);EVIDENCE_PRIVATE_C3SDK_CONFIGURE_SYNC_STALL</DefineConstants>
+    <DefineConstants Condition="'$(EvidencePrivateQualification)' == 'C3Sdk' and '$(EvidencePrivateC3SdkLifecycleStall)' == 'RegisteredDisposer'">$(DefineConstants);EVIDENCE_PRIVATE_C3SDK_REGISTERED_DISPOSER_STALL</DefineConstants>
   </PropertyGroup>
+
+  <Target Name="ValidatePrivateC3SdkLifecycleStall" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(EvidencePrivateC3SdkLifecycleStall)' != '' and '$(EvidencePrivateQualification)' != 'C3Sdk'"
+           Text="EvidencePrivateC3SdkLifecycleStall is permitted only for EvidencePrivateQualification=C3Sdk." />
+    <Error Condition="'$(EvidencePrivateC3SdkLifecycleStall)' != '' and '$(EvidencePrivateC3SdkLifecycleStall)' != 'ConfigureSync' and '$(EvidencePrivateC3SdkLifecycleStall)' != 'RegisteredDisposer'"
+           Text="EvidencePrivateC3SdkLifecycleStall must be ConfigureSync or RegisteredDisposer." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Aspire.Hosting" VersionOverride="[13.4.4,14.0.0)" />

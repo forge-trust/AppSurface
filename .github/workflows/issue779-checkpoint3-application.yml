@@ -43,6 +43,10 @@ jobs:
           mkdir -m 0700 "$evidence"
           printf 'CHECKPOINT3_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          lifecycle="$RUNNER_TEMP/checkpoint3-lifecycle-evidence"
+          mkdir -m 0700 "$lifecycle"
+          cp "$evidence/source.json" "$lifecycle/source.json"
+          printf 'CHECKPOINT3_LIFECYCLE_EVIDENCE=%s\n' "$lifecycle" >> "$GITHUB_ENV"
 
       - name: Restore and run ordinary None core, CLI, and Aspire tests with warnings as errors
         shell: bash
@@ -398,6 +402,49 @@ jobs:
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
 
+      - name: Build the two fixed SDK lifecycle stall images without changing the original image set
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli=Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj
+          support="$RUNNER_TEMP/checkpoint3-exit-support/ForgeTrust.AppSurface.Evidence.ExitBarrier.Support.dll"
+          test -s "$support"
+          # A full graph rebuild prevents reuse of the ordinary SDK assembly for either fixed selector.
+          for selection in ConfigureSync RegisteredDisposer; do
+            if [[ "$selection" == ConfigureSync ]]; then label=configure; else label=disposer; fi
+            tool="$RUNNER_TEMP/checkpoint3-$label-stall-tool"
+            log="$CHECKPOINT3_LIFECYCLE_EVIDENCE/cli-$label-stall-build.log"
+            mkdir -m 0700 "$tool"
+            timeout --signal=KILL 180 dotnet restore "$cli" --locked-mode --disable-parallel -warnaserror -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" > "$log" 2>&1
+            timeout --signal=KILL 180 dotnet build "$cli" --no-restore --no-incremental -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" >> "$log" 2>&1
+            timeout --signal=KILL 180 dotnet publish "$cli" --no-build --no-restore -c Release --self-contained false -warnaserror -p:UseSharedCompilation=false -p:EvidencePrivateQualification=C3Sdk -p:EvidencePrivateC3SdkLifecycleStall="$selection" -p:EvidenceC3RegistrationSource="$CHECKPOINT3_REGISTRATION_SOURCE" -p:EvidenceSdkExitBarrierAssembly="$support" -o "$tool" >> "$log" 2>&1
+            mkdir -p "$tool/reportgenerator/net10.0"
+            cp -R "$HOME/.nuget/packages/reportgenerator/5.5.10/tools/net10.0/." "$tool/reportgenerator/net10.0/"
+            cp -R "$RUNNER_TEMP/checkpoint3-subject-packages" "$tool/nuget"
+            test -s "$tool/ForgeTrust.AppSurface.Cli.dll"
+          done
+
+      - name: Run the two real SDK lifecycle stall controls under their original owner and teardown clocks
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          ulimit -c 0
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_lifecycle_stalls.py > "$CHECKPOINT3_LIFECYCLE_EVIDENCE/lifecycle-stall-controls.log" 2>&1
+          # This uninstrumented partition supplies failure-contract observations, never coverage counters.
+          # Its original per-case request and cleanup allowances are still selected by request_data.
+          timeout --signal=KILL 1230 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 \
+            /usr/bin/python3 -B .github/issue779-checkpoint3/run-native.py \
+            --tool "$CHECKPOINT3_TOOL" --sdk-tool "$CHECKPOINT3_SDK_TOOL" \
+            --configure-stall-tool "$RUNNER_TEMP/checkpoint3-configure-stall-tool" \
+            --disposer-stall-tool "$RUNNER_TEMP/checkpoint3-disposer-stall-tool" \
+            --runtime "$CHECKPOINT3_SDK_ROOT" --subject "$GITHUB_WORKSPACE/.github/issue779-checkpoint3/subject" \
+            --prepared "$CHECKPOINT3_PREPARED/payload-preparation.json" \
+            --digests "$CHECKPOINT3_EVIDENCE/registration-digests.json" \
+            --source "$GITHUB_SHA" --base 416b30919e6c4d03b634d9d3fe558884b02f0b91 \
+            --output "$CHECKPOINT3_LIFECYCLE_EVIDENCE" --lifecycle-stalls \
+            > "$CHECKPOINT3_LIFECYCLE_EVIDENCE/lifecycle-stall-driver.log" 2>&1
+
       - name: Recheck complete source after preparation, builds, and native execution
         if: always()
         shell: bash
@@ -419,6 +466,50 @@ jobs:
         with:
           name: issue779-checkpoint3-application-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/checkpoint3-evidence
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Bound the separate private lifecycle diagnostics without expanding the original artifact
+        id: lifecycle-retention
+        if: always() && env.CHECKPOINT3_LIFECYCLE_EVIDENCE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_LIFECYCLE_EVIDENCE" "$(id -u)" "$(id -g)" <<'PY'
+          import os, pathlib, stat, sys
+          root = pathlib.Path(sys.argv[1])
+          uid, gid = int(sys.argv[2]), int(sys.argv[3])
+          assert root.is_dir() and not root.is_symlink()
+          allowed = {'source.json', 'cli-configure-stall-build.log', 'cli-disposer-stall-build.log',
+                     'lifecycle-stall-driver.log', 'lifecycle-stall-controls.log', 'staging.json',
+                     'lifecycle-stall-receipt.json'}
+          for case in ('configure-sync-stall', 'registered-disposer-stall'):
+              allowed.update(case + '-' + leaf for leaf in ('owner.stdout', 'owner.stderr',
+                  'worker-stdout.prefix', 'worker-stderr.prefix', 'worker-state.json'))
+              allowed.add(case + '.json')
+          paths = list(root.iterdir())
+          assert len(paths) <= len(allowed) == 19
+          total = 0
+          for path in paths:
+              value = path.lstat()
+              assert path.name in allowed and stat.S_ISREG(value.st_mode) and value.st_nlink == 1
+              assert value.st_size <= 8 * 1024 * 1024
+              total += value.st_size
+          assert total <= 32 * 1024 * 1024
+          for path in paths:
+              os.chown(path, uid, gid, follow_symlinks=False)
+              path.chmod(0o600)
+          os.chown(root, uid, gid, follow_symlinks=False)
+          root.chmod(0o700)
+          PY
+
+      - name: Retain the separate bounded lifecycle stall proof and private diagnostics
+        if: always() && steps.lifecycle-retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-c3sdk-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint3-lifecycle-evidence
           include-hidden-files: true
           retention-days: 1
           if-no-files-found: error

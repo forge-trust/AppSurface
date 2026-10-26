@@ -63,6 +63,7 @@ class DescendantControlTests(unittest.TestCase):
             finally:
                 control.close()
 
+
     def test_each_identity_drift_rejects_before_signal_and_closes_original_fd(self):
         for key, value in (("pid", 124), ("uid", 457), ("gid", 790),
                            ("starttime", 43), ("cgroup", "/system.slice/other.service")):
@@ -367,6 +368,63 @@ class OwnerReferenceGuardEventTests(unittest.TestCase):
         for generation in (None, 7, "", "A" * 32, "a" * 31, "a" * 33):
             with self.subTest(generation=generation), self.assertRaises(RuntimeError):
                 self.inspect([self.event()], generation)
+
+
+class FixtureCleanupGuardTests(unittest.TestCase):
+    """Rejected path data must never begin a filesystem cleanup operation."""
+
+    def test_only_exact_generated_roots_can_begin_cleanup(self):
+        generation = "a" * 32
+        paths = (Path("/"), Path("/run"), Path("/tmp/issue779-c3-lifecycle-" + generation),
+                 Path("/run/issue779-c3-lifecycle-" + generation) / "..",
+                 Path("/run/appsurface-evidence-owners") / ("b" * 32))
+        for path in paths:
+            with self.subTest(path=path), patch.object(runner.os, "open") as opened, \
+                 patch.object(Path, "lstat") as observed:
+                with self.assertRaisesRegex(RuntimeError, "fixed-fixture-cleanup-root"):
+                    runner.remove_sealed_fixture_tree(path, generation, 0)
+                opened.assert_not_called()
+                observed.assert_not_called()
+        for bad in ("", "A" * 32, "a" * 31, "a" * 33, "../" + "a" * 29):
+            with self.subTest(generation=bad), patch.object(runner.os, "open") as opened, \
+                 patch.object(Path, "lstat") as observed:
+                with self.assertRaisesRegex(RuntimeError, "fixed-fixture-cleanup-root"):
+                    runner.remove_sealed_fixture_tree(Path("/run/issue779-c3-lifecycle-" + bad), bad, 0)
+                opened.assert_not_called()
+                observed.assert_not_called()
+
+
+class LifecycleStallMarkerTests(unittest.TestCase):
+    def test_fixed_compile_owned_markers_are_data_only(self):
+        cases = (("configure-sync-stall", "configure-sync-stall"),
+                 ("registered-disposer-stall", "registered-application-disposer-stall"))
+        self.assertEqual(tuple(case for case, _ in cases), runner.LIFECYCLE_STALL_CASES)
+        for case, marker_case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                log = Path(directory) / "stderr.log"
+                log.write_text(json.dumps({"schema": "evidence-worker-lifecycle-stall-v1", "case": marker_case,
+                                           "phase": "entered", "native_acceptance": False}) + "\n")
+                marker = runner.lifecycle_stall_events(log, marker_case)
+                self.assertIs(marker["native_acceptance"], False)
+
+    def test_wrong_case_duplicate_marker_and_extra_fields_are_rejected(self):
+        valid = {"schema": "evidence-worker-lifecycle-stall-v1", "case": "configure-sync-stall",
+                 "phase": "entered", "native_acceptance": False}
+        for rows in ([dict(valid, case="registered-application-disposer-stall")],
+                     [valid, valid], [dict(valid, admission=True)],
+                     [dict(valid, native_acceptance=True)], [dict(valid, phase="completed")]):
+            with self.subTest(rows=rows), tempfile.TemporaryDirectory() as directory:
+                log = Path(directory) / "stderr.log"
+                log.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+                with self.assertRaises(RuntimeError):
+                    runner.lifecycle_stall_events(log, "configure-sync-stall")
+
+    def test_unrelated_json_and_malformed_lines_cannot_supply_the_marker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "stderr.log"
+            log.write_text("not-json\n" + json.dumps({"schema": "other", "case": "configure-sync-stall"}) + "\n")
+            with self.assertRaises(RuntimeError):
+                runner.lifecycle_stall_events(log, "configure-sync-stall")
 
 
 if __name__ == "__main__":

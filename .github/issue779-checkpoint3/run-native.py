@@ -9,6 +9,7 @@ c2=importlib.util.module_from_spec(spec);spec.loader.exec_module(c2)
 require=c2.require;write=c2.write;canonical=c2.canonical;command=c2.command;sha=c2.sha
 MAX_LOG=8*1024*1024
 CASES=('normal','sdk-normal','readiness','factory-stall','cancel','stuck-descendant','disposal-failure')
+LIFECYCLE_STALL_CASES=('configure-sync-stall','registered-disposer-stall')
 OWNER_REFERENCE_GUARDS=(
  'workspace-accounts',
  'workspace-owner',
@@ -59,6 +60,12 @@ def owner_reference_guards(path,generation):
  require(type(value['rejected']) is list and value['rejected']==list(OWNER_REFERENCE_GUARDS)
          and value['native_acceptance'] is False,'owner-reference-guard-denials')
  return value
+
+def lifecycle_stall_events(path,expected_case):
+ """Detached file-to-marker helper; native controls separately bind the retained root directory."""
+ import lifecycle_stalls
+ require(path.is_file() and path.stat().st_size<=lifecycle_stalls.PREFIX_LIMIT,'lifecycle-stall-marker-input')
+ return lifecycle_stalls.marker_from_prefix(path.read_bytes(),expected_case)
 
 def sealed_descriptor(path):
  """Share the same sealed-publication observer as C2, selecting only the v2 data schema."""
@@ -151,8 +158,9 @@ def output_accounting(stderr):
  require(all(p['stdout_eof'] and p['stderr_eof'] and p['failure']=='None' for p in pairs),'actual-all-eof')
  return row
 
-def stage(args,end,*,sdk_only=False):
+def stage(args,end,*,sdk_only=False,lifecycle_only=False):
  require(type(sdk_only) is bool,'closed-staging-selector')
+ require(type(lifecycle_only) is bool and not (sdk_only and lifecycle_only),'closed-lifecycle-staging-selector')
  prep=json.loads(args.prepared.read_bytes());digests=json.loads(args.digests.read_bytes())
  require(prep['schema']=='issue779-c3-preparation-input-v1' and digests['schema']=='issue779-c3-registration-digests-v1','preparation-shape')
  entries={e['application_id']:e['application_entry_digest'] for e in digests['entries']}
@@ -160,9 +168,19 @@ def stage(args,end,*,sdk_only=False):
  parent=Path('/var/lib')/('issue779-c3-input-'+uuid.uuid4().hex);c2.create_traversable_root(parent)
  runtime=parent/'runtime';inventory={'runtime':c2.copy_tree(args.runtime,runtime),'deployments':{}}
  tools={}
- for key in (('sdk-normal',) if sdk_only else ('normal','sdk-normal','readiness','factory-stall','stuck-descendant')):
-  variant='normal' if key=='sdk-normal' else key;data=prep['variants'][variant]
-  tool=parent/key;c2.copy_tree(args.sdk_tool if key=='sdk-normal' else args.tool,tool)
+ if lifecycle_only:
+  keys=LIFECYCLE_STALL_CASES
+ elif sdk_only:
+  keys=('sdk-normal',)
+ else:
+  keys=('normal','sdk-normal','readiness','factory-stall','stuck-descendant')
+ for key in keys:
+  variant='normal' if key=='sdk-normal' or key in LIFECYCLE_STALL_CASES else key;data=prep['variants'][variant]
+  source_tool=(getattr(args,'configure_stall_tool',None) if key=='configure-sync-stall'
+               else getattr(args,'disposer_stall_tool',None) if key=='registered-disposer-stall'
+               else args.sdk_tool if key=='sdk-normal' else args.tool)
+  require(source_tool is not None,'lifecycle-stall-tool-bound')
+  tool=parent/key;c2.copy_tree(source_tool,tool)
   bundle=tool/'application';c2.copy_tree(Path(data['application_path']),bundle)
   policy=Path(data['policy_path']);require(sha(policy)==data['policy_sha256'],'bound-policy-bytes')
   write(tool/'fixture-policy.json',policy.read_bytes(),0o444)
@@ -199,6 +217,9 @@ def remove_sealed_fixture_tree(path,generation,deadline):
  # Fixture housekeeping only AFTER original positive custody/account-absence checks.
  # Every leaf is root-owned, single-link regular data; no symlinks, devices or mounts are traversed.
  allowed={Path('/run')/(prefix+generation) for prefix in ('appsurface-evidence-producer-data-','appsurface-app-')}
+ allowed.update((Path('/run')/('issue779-c3-lifecycle-'+generation),
+                 Path('/run/appsurface-evidence-owners')/generation,
+                 Path('/var/lib')/('issue779-c3-input-'+generation)))
  require(path in allowed and len(generation)==32 and all(c in '0123456789abcdef' for c in generation),'fixed-fixture-cleanup-root')
  root=path.lstat();require(stat.S_ISDIR(root.st_mode) and root.st_uid==root.st_gid==0 and root.st_mode&0o7022==0,'sealed-fixture-root')
  count=0;flags=os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC
@@ -229,8 +250,11 @@ def remove_sealed_fixture_tree(path,generation,deadline):
  fd=os.open(path,flags)
  try:
   actual=os.fstat(fd);require((actual.st_dev,actual.st_ino)==(root.st_dev,root.st_ino),'sealed-fixture-root-binding')
-  parent=os.open('/run',flags)
-  try:expected_mount=mount_id(parent)
+  parent=os.open(path.parent,flags)
+  try:
+   metadata=os.fstat(parent)
+   require(metadata.st_uid==metadata.st_gid==0 and metadata.st_mode&0o7022==0,'fixture-cleanup-parent')
+   expected_mount=mount_id(parent)
   finally:os.close(parent)
   walk(fd,expected_mount)
  finally:os.close(fd)
@@ -415,6 +439,129 @@ def execute(args,case,tools,runtime,end):
   write(args.output/(case+'.json'),canonical(result))
  return result
 
+def execute_lifecycle_stall(args,case,tools,runtime,end):
+ """Run one fixed compile-owned C3Sdk stall through the original authenticated owner recipe."""
+ require(case in LIFECYCLE_STALL_CASES,'closed-lifecycle-stall-case')
+ tool,definition,digest=tools[case];generation=uuid.uuid4().hex
+ root=Path('/run')/('issue779-c3-lifecycle-'+generation);c2.create_traversable_root(root)
+ subject=root/'subject';c2.copy_tree(args.subject,subject)
+ (subject/'Scenario.cs').write_text('namespace NativePreparation.Subject; public static class Scenario { public static string Kind => "normal"; }\n')
+ for path in (subject,*subject.rglob('*')):
+  os.chown(path,0,0,follow_symlinks=False);path.chmod(0o555 if path.is_dir() else 0o444)
+ owner='appsurface-evidence-owner-'+generation+'.service';appunit='appsurface-evidence-application-'+generation+'.service'
+ units=[owner,'appsurface-evidence-worker-'+generation+'.service','appsurface-evidence-producer-'+generation+'.service',appunit]
+ request=request_data(args,tool,runtime,definition,digest,subject,'normal')
+ request_path=root/'request.json';write(request_path,canonical(request))
+ guard=Path('/run/appsurface-evidence-owners');guard.mkdir(mode=0o700,exist_ok=True)
+ require(guard.stat().st_uid==0 and stat.S_IMODE(guard.stat().st_mode)==0o700,'guard-parent')
+ marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
+ stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;descriptor=None;app_seen=False
+ deadline=min(end,time.monotonic()+480)
+ result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
+ expected_marker='configure-sync-stall' if case=='configure-sync-stall' else 'registered-application-disposer-stall'
+ launch=owner_command(runtime,tool,owner,marker/'armed',request_path)
+ try:
+  with stdout.open('xb') as out,stderr.open('xb') as err:
+   process=subprocess.Popen(launch,stdin=subprocess.DEVNULL,stdout=out,stderr=err,start_new_session=True)
+   while time.monotonic()<deadline:
+    require(stdout.stat().st_size+stderr.stat().st_size<=MAX_LOG,'root-output-bound')
+    control=Path('/run/appsurface-evidence-'+generation+'/worker/worker-control.json')
+    if descriptor is None:descriptor=sealed_descriptor(control)
+    if descriptor is not None:
+     facts=c2.show(appunit,deadline)
+     if int(facts.get('MainPID','0'))>0:app_seen=True
+    if process.poll() is not None:break
+    time.sleep(.1)
+   require(process.poll() is not None,'lifecycle-stall-root-terminal-before-bound')
+   code=process.wait(timeout=5)
+  require(descriptor is not None,'lifecycle-stall-authenticated-worker-descriptor')
+  require(code!=0 and stdout.read_bytes()==b'','lifecycle-stall-no-successful-root-result')
+  require(c2.groups_empty(units),'lifecycle-stall-owned-groups-empty')
+  observed=events(stderr,'evidence-application-native-v1')
+  import lifecycle_stalls
+  marker_event,worker_prefixes,prefix_digests=lifecycle_stalls.read_worker_marker(
+   generation,expected_marker,deadline=min(deadline,time.monotonic()+5))
+  fatal_reason=lifecycle_stalls.require_fatal_reason(worker_prefixes['stderr.prefix'],expected_marker)
+  output_rows=events(stderr,'evidence-coverage-output-v1')
+  require(len(output_rows)==1,'lifecycle-output-receipt-count')
+  joined_output=lifecycle_stalls.require_joined_output(output_rows[0],worker_prefixes,expected_marker)
+  # Preserve the original root-retained bytes privately. Owner stderr is not a worker reader.
+  for name,data in worker_prefixes.items():write(args.output/(case+'-worker-'+name),data)
+  output_root=Path('/run/appsurface-evidence-'+generation+'/output/evidence')
+  require(not (output_root/'evidence-manifest.json').exists()
+          and not (output_root/'manifest.json').exists(),'lifecycle-stall-no-final-manifest')
+  if case=='configure-sync-stall':
+   require(not app_seen and not observed,'configure-stall-before-application-start')
+  else:
+   settled=[event for event in observed if event.get('phase')=='settled']
+   require(app_seen and len(settled)==1 and settled[0].get('group_empty_twice') is True
+           and settled[0].get('pumps_joined') is True and settled[0].get('pending_start_joined') is True,
+           'registered-disposer-after-actual-application-settlement')
+  result.update({'root_exit':code,'groups_empty':True,'application_observations':observed,
+                 'lifecycle_stall':marker_event,'application_seen':app_seen,
+                 'worker_prefix_sha256':prefix_digests,'fatal_reason':fatal_reason,'output':joined_output})
+  # The root-authenticated descriptor supplies the exact fresh run IDs for absence checks.
+  result['accounts']=named_accounts(generation,False,deadline)
+  ids=[('passwd',descriptor['worker_uid']),('passwd',descriptor['subject_uid']),
+       ('passwd',descriptor['application']['application_uid']),('group',descriptor['worker_gid']),
+       ('group',descriptor['subject_gid']),('group',descriptor['application']['application_gid']),
+       ('group',descriptor['application']['results_gid']),('group',descriptor['application']['resource_access_gid'])]
+  for table,number in ids:
+   require(command(['/usr/bin/getent',table,str(number)],deadline,allowed=(0,2)).returncode==2,
+           'lifecycle-stall-numeric-account-absence')
+  result['passed']=True
+ except BaseException as failure:
+  result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
+ finally:
+  if process is not None and process.poll() is None:
+   for unit in units:
+    try:command(['/usr/bin/systemctl','stop',unit],min(end,time.monotonic()+15),allowed=(0,1,5))
+    except Exception:pass
+   try:os.killpg(process.pid,signal.SIGKILL)
+   except ProcessLookupError:pass
+   process.wait(timeout=5)
+  result['final_groups_empty']=c2.groups_empty(units)
+  if result['final_groups_empty'] is not True:
+   result['passed']=False;result['failure_category']='lifecycle-final-groups-not-empty'
+  for name in ('owner.stdout','owner.stderr'):
+   path=root/name
+   if path.is_file() and path.stat().st_size<=MAX_LOG:
+    shutil.copyfile(path,args.output/(case+'-'+name));(args.output/(case+'-'+name)).chmod(0o600)
+  if result.get('passed'):
+   try:
+    # Only after the original owner is terminal, groups are empty, accounts absent,
+    # and the original diagnostic bytes have been copied. This is fixture housekeeping.
+    result['fixture_reclaimed_nodes']={
+     'case':remove_sealed_fixture_tree(root,generation,deadline),
+     'activation_guard':remove_sealed_fixture_tree(marker,generation,deadline)}
+    require(not os.path.lexists(root) and not os.path.lexists(marker),'lifecycle-fixture-absence')
+    result['fixture_paths_absent']=True
+   except (OSError,RuntimeError) as failure:
+    result['passed']=False;result['failure_category']='lifecycle-fixture-cleanup-failed'
+    result['fixture_cleanup_error']=type(failure).__name__
+  write(args.output/(case+'.json'),canonical(result))
+ return result
+
+def run_lifecycle_stalls(args,end):
+ """Run only the two compile-owned failure controls; the original seven-case table is untouched."""
+ args.output.mkdir(mode=0o700,parents=True,exist_ok=True)
+ receipt={'schema':'issue779-c3sdk-lifecycle-stalls-v1','source':args.source,'base':args.base,
+          'exit':1,'cases':[],'native_acceptance':False}
+ try:
+  tools,runtime=stage(args,end,lifecycle_only=True)
+  for case in LIFECYCLE_STALL_CASES:
+   result=execute_lifecycle_stall(args,case,tools,runtime,end);receipt['cases'].append(result)
+   if not result['passed']:break
+  if len(receipt['cases'])==2 and all(row['passed'] for row in receipt['cases']):
+   parent=runtime.parent;generation=parent.name.removeprefix('issue779-c3-input-')
+   receipt['staging_reclaimed_nodes']=remove_sealed_fixture_tree(parent,generation,end)
+   require(not os.path.lexists(parent),'lifecycle-staging-absence')
+   receipt['staging_path_absent']=True
+   receipt['exit']=0
+ finally:
+  write(args.output/'lifecycle-stall-receipt.json',canonical(receipt))
+ return receipt['exit']
+
 def run_partitions(args,end):
  """Run original seven under their supplied bound, then one fresh fixed 900-second guard partition.
 
@@ -445,8 +592,20 @@ def run_partitions(args,end):
 def main():
  parser=argparse.ArgumentParser()
  for name in ('tool','sdk-tool','runtime','subject','prepared','digests','output'):parser.add_argument('--'+name,type=Path,required=True)
- parser.add_argument('--source',required=True);parser.add_argument('--base',required=True);args=parser.parse_args();os.umask(0o077)
+ parser.add_argument('--source',required=True);parser.add_argument('--base',required=True)
+ parser.add_argument('--lifecycle-stalls',action='store_true')
+ parser.add_argument('--configure-stall-tool',type=Path)
+ parser.add_argument('--disposer-stall-tool',type=Path)
+ args=parser.parse_args();os.umask(0o077)
  require(os.geteuid()==0 and sys.platform=='linux' and platform.machine()=='x86_64','native-root-linux-x64')
+ if args.lifecycle_stalls:
+  require(args.configure_stall_tool is not None and args.disposer_stall_tool is not None,
+          'both-fixed-lifecycle-stall-images-required')
+  end=time.monotonic()+1200
+  require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')
+  return run_lifecycle_stalls(args,end)
+ require(args.configure_stall_tool is None and args.disposer_stall_tool is None,
+         'lifecycle-stall-tools-require-dedicated-partition')
  # The original matrix still pays for protected SDK/bundle preparation within 1800 seconds.
  # These orchestration clocks do not replace job, owner, case or cleanup deadlines.
  end=time.monotonic()+1800;require(command(['/usr/bin/systemctl','--version'],end).stdout.splitlines()[0].startswith(b'systemd 255'),'systemd-255')

@@ -127,7 +127,13 @@ internal sealed class EvidenceRestrictedAspireApplication : IAsyncDisposable
             _disposed = true;
             _started = null;
             _resourceStage = null;
+#if EVIDENCE_PRIVATE_C3SDK_REGISTERED_DISPOSER_STALL
+            // Close has required the actual joined pre-disposal phase. Never use
+            // this marker as a substitute for that existing lifecycle guard.
+            return EvidencePrivateLifecycleStall.EnterRegisteredDisposerStall();
+#else
             return ValueTask.CompletedTask;
+#endif
         }
     }
 
@@ -169,6 +175,41 @@ internal sealed class EvidenceRestrictedAspireApplication : IAsyncDisposable
         internal bool Consumed { get; set; }
     }
 }
+
+#if EVIDENCE_PRIVATE_C3SDK_CONFIGURE_SYNC_STALL || EVIDENCE_PRIVATE_C3SDK_REGISTERED_DISPOSER_STALL
+/// <summary>Compile-owned, fixed C3Sdk lifecycle stalls; absent from ordinary and non-C3Sdk builds.</summary>
+internal static class EvidencePrivateLifecycleStall
+{
+#if EVIDENCE_PRIVATE_C3SDK_CONFIGURE_SYNC_STALL
+    internal static void EnterConfigureSyncStall()
+    {
+        WriteEntered("configure-sync-stall");
+        new ManualResetEventSlim(initialState: false).Wait();
+    }
+#endif
+
+#if EVIDENCE_PRIVATE_C3SDK_REGISTERED_DISPOSER_STALL
+    internal static ValueTask EnterRegisteredDisposerStall()
+    {
+        WriteEntered("registered-application-disposer-stall");
+        // Returning an unsettled task makes skipping the actual DisposeAsync await
+        // observable. A synchronous block alone would hide that regression.
+        return new ValueTask(new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously).Task);
+    }
+#endif
+
+    private static void WriteEntered(string caseName)
+    {
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schema = "evidence-worker-lifecycle-stall-v1",
+            @case = caseName,
+            phase = "entered",
+            native_acceptance = false,
+        }));
+    }
+}
+#endif
 
 /// <summary>Local cleanup state; owns no supervisor, application start, admission or transport capability.</summary>
 /// <remarks>Extracted to verify registered cleanup and permanently failed premature disposal through internal APIs.</remarks>
