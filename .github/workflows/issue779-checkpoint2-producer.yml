@@ -42,6 +42,7 @@ jobs:
           timeout --signal=KILL 180 dotnet restore Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj --locked-mode --disable-parallel -p:UseSharedCompilation=false > "$RUNNER_TEMP/checkpoint2-evidence/restore.log" 2>&1
           timeout --signal=KILL 600 bash scripts/evidencehost-package-smoke.sh "$RUNNER_TEMP/checkpoint2-package-smoke" > "$RUNNER_TEMP/checkpoint2-evidence/package-smoke.log" 2>&1
           cp "$RUNNER_TEMP/checkpoint2-package-smoke/receipt.json" "$RUNNER_TEMP/checkpoint2-evidence/package-smoke.json"
+          timeout --signal=KILL 15 python3 -B .github/issue779-checkpoint4/package_smoke_evidence.py retain --work "$RUNNER_TEMP/checkpoint2-package-smoke" --output "$RUNNER_TEMP/checkpoint2-evidence/package-smoke-details" --source "$GITHUB_SHA"
           CHECKPOINT2_TOOL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tool_image"])' "$RUNNER_TEMP/checkpoint2-evidence/package-smoke.json")"
           test -s "$CHECKPOINT2_TOOL/ForgeTrust.AppSurface.Cli.dll"
           printf 'CHECKPOINT2_TOOL=%s\n' "$CHECKPOINT2_TOOL" >> "$GITHUB_ENV"
@@ -78,6 +79,7 @@ jobs:
           set -euo pipefail
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_roots.py > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
           timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_producer_retention.py >> "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint4/test_package_smoke_evidence.py >> "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-controls.log" 2>&1
           timeout --signal=KILL 180 dotnet tool install coverlet.console --version 10.0.1 --tool-path "$RUNNER_TEMP/checkpoint2-coverlet" > "$RUNNER_TEMP/checkpoint2-evidence/producer-roots-install.log" 2>&1
       - name: Download only the current successful rollback predecessor
         if: inputs.prior_artifact_name != ''

@@ -18,6 +18,16 @@ The same installed CLI also follows the [documented planning journey](../../star
 
 The private `receipt.json` records source revision, package SHA-256, command/log digests, exact consumer dependency versions, exit status, and `tool_image`, the installed managed image directory. That path is deployment input for the [native producer fixture](../../.github/issue779-checkpoint2/README.md), which independently copies/audits it and runs the actual same-product C# root/worker/producer controls. This data field grants no admission. The installed tool is not writable by the restricted worker after protected staging.
 
+The producer workflow also retains the 22 original command logs, the three generated starter files, the plan, the summary and their original receipt in `package-smoke-details`. The [bounded evidence helper](../../.github/issue779-checkpoint4/package_smoke_evidence.py) validates every actual file against that receipt before copying it into a fresh directory. Each leaf is limited to 1 MiB and the complete set to 4 MiB; the existing 128-file/32-MiB producer-artifact limit still applies. Links, hard links, changed files, missing logs, unexpected command decisions and occupied destinations reject. Directory mode is `0700` and file mode is `0600`. A partial copy is not a passing smoke result.
+
+After downloading the matching source-bound artifact, revalidate its raw installation and planning outputs with:
+
+```bash
+python3 -B .github/issue779-checkpoint4/package_smoke_evidence.py verify --output /absolute/artifact/package-smoke-details --source FULL_SOURCE_COMMIT
+```
+
+`retain --work /absolute/fresh/package-smoke --output /absolute/fresh/details --source FULL_SOURCE_COMMIT` is the corresponding workflow preparation operation. Both commands require absolute paths and the exact 40-character source commit. Verification compares raw command-log hashes, six expected rejection decisions, starter/plan/summary hashes and the planning-only messages. It cannot establish runtime isolation or human usability. Earlier artifacts that retained only hashes cannot be retroactively revalidated as raw output.
+
 The smoke driver has one cumulative nine-minute process bound; callers should also apply their own external bound. Failure retains its fresh directory and original nonzero result. A smoke pass proves installation and dependency consumption, not kernel isolation, physical cleanup, native application registration or Trusted acceptance. The SDK consumer has no accepted admission or application startup; its configuration callback must remain uncalled on the authentication rejection. The separate [application workflow](../../.github/issue779-checkpoint3/README.md) proves both callers with explicitly private compiled registrations.
 
 ## SDK deployment boundary
