@@ -124,7 +124,7 @@ The package bounds metadata JSON to 16 KiB, access tokens to 8 KiB, gRPC receive
 
 ### Dispositions and diagnostic catalog
 
-A receipt describes whether task creation was accepted or what bounded evidence was available. It never says which Work ran or whether the Work completed. Each code below has a permanent lowercase fragment identifier for stable references.
+A receipt describes whether task creation was accepted or what bounded evidence was available. It never says which Work ran or whether the Work completed. Each code below has a permanent lowercase fragment identifier for stable references. The `package.version` diagnostic tag and activity-source version preserve the NuGet version, including its prerelease suffix; build/source-revision metadata is omitted. They do not use the fixed assembly compatibility version.
 
 <a id="asct001"></a>
 #### ASCT001 — Created

@@ -226,6 +226,7 @@ public sealed class CloudTasksActivationClientTests
                     activity.ParentId,
                     activity.OperationName,
                     activity.Source.Name,
+                    activity.Source.Version,
                     activity.Kind,
                     activity.TraceId.ToHexString(),
                     activity.SpanId.ToHexString(),
@@ -280,6 +281,11 @@ public sealed class CloudTasksActivationClientTests
         Assert.Equal("cloudtasks.dispatch.failure", createFailure.OperationName);
         Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", tokenFailure.SourceName);
         Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", createFailure.SourceName);
+        var expectedPackageVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(ICloudTasksActivationClient).Assembly.Location).ProductVersion!.Split('+', 2)[0];
+        Assert.Equal(expectedPackageVersion, tokenFailure.SourceVersion);
+        Assert.Equal(expectedPackageVersion, createFailure.SourceVersion);
+        Assert.Equal(expectedPackageVersion, tokenFailure.EventTags["package.version"]);
+        Assert.Equal(expectedPackageVersion, createFailure.EventTags["package.version"]);
         Assert.Equal(ActivityKind.Internal, tokenFailure.Kind);
         Assert.Equal(ActivityKind.Internal, createFailure.Kind);
         Assert.NotEmpty(tokenFailure.TraceId);
@@ -374,6 +380,7 @@ public sealed class CloudTasksActivationClientTests
         string ParentId,
         string OperationName,
         string SourceName,
+        string? SourceVersion,
         ActivityKind Kind,
         string TraceId,
         string SpanId,

@@ -477,7 +477,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
                 {
                     var relative = Path.GetRelativePath(source, file);
-                    var destination = Path.Combine(target, relative);
+                    var destination = TestPathUtils.PathUnder(target, relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                     File.Copy(file, destination);
                 }

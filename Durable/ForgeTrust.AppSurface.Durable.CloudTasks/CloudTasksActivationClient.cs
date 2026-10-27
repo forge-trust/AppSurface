@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using Grpc.Core;
 
 namespace ForgeTrust.AppSurface.Durable.CloudTasks;
@@ -116,7 +117,10 @@ internal static class CloudTasksDiagnostics
 {
     /// <summary>Name for standard .NET Activity listeners.</summary>
     internal const string SourceName = "ForgeTrust.AppSurface.Durable.CloudTasks";
-    private static readonly ActivitySource Source = new(SourceName, typeof(CloudTasksDiagnostics).Assembly.GetName().Version?.ToString());
+    // InformationalVersion carries the NuGet prerelease; AssemblyVersion is fixed for binary compatibility.
+    private static readonly string PackageVersion = typeof(CloudTasksDiagnostics).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+', 2)[0];
+    private static readonly ActivitySource Source = new(SourceName, PackageVersion);
 
     /// <summary>Identifies process-corrupting errors which must never become receipts.</summary>
     internal static bool IsFatal(Exception exception) => exception is OutOfMemoryException or StackOverflowException or AccessViolationException;
@@ -134,7 +138,7 @@ internal static class CloudTasksDiagnostics
                 ["cause"] = cause,
                 ["stage"] = operation == "token" ? "acquisition" : "submission",
                 ["code"] = code,
-                ["package.version"] = typeof(CloudTasksDiagnostics).Assembly.GetName().Version?.ToString(),
+                ["package.version"] = PackageVersion,
                 ["phase.sequence"] = operation == "token" ? "validate>token>failure" : "validate>token>create>failure"
             }));
         }

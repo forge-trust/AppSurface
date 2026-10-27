@@ -202,6 +202,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.validate-tag.outputs.tag-commit }}
+          fetch-depth: 0 # Packed Cloud Tasks isolation proof archives the pinned baseline commit.
           persist-credentials: false
 
       - name: Set up .NET SDK
