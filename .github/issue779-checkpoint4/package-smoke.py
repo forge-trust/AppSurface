@@ -10,6 +10,7 @@ import time
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
+SDK_PACKAGES = ("Contracts", "Planner", "Coverage", "Readiness", "Aspire")
 
 
 def main():
@@ -45,6 +46,9 @@ def main():
         records.append({"name": name, "argv": [str(a) for a in args], "exit": code,
                         "log_sha256": hashlib.sha256(body).hexdigest()})
         if code != expected:
+            # Keep the failing command's bounded tail in the existing outer smoke log.
+            # The full private command log remains in work; neither log grants authority.
+            sys.stderr.buffer.write(body[-32768:])
             raise ValueError("Package consumer command failed: " + name)
         return body
 
@@ -149,7 +153,7 @@ def main():
             "entry": "installed-nuget-tool", "producer_execution": False,
             "trusted_acceptance": False, "independent_human_usability": False,
         }
-        for name in ("Contracts", "Planner", "Coverage", "Aspire"):
+        for name in SDK_PACKAGES:
             project = ROOT / ("Evidence/ForgeTrust.AppSurface.Evidence." + name) / ("ForgeTrust.AppSurface.Evidence." + name + ".csproj")
             run("sdk-pack-" + name.lower(), ["dotnet", "pack", str(project), *common])
         consumer = work / "sdk-consumer"
@@ -258,7 +262,7 @@ Console.WriteLine("Exact packaged SDK planning, schema and closed-entry controls
         run("sdk-load", ["dotnet", str(consumer / "bin/Debug/net10.0/Consumer.dll"),
                          str(starter / "evidence.policy.json"), str(journey / "missing-control.sock")], cwd=consumer)
         dependencies = json.loads((consumer / "bin/Debug/net10.0/Consumer.deps.json").read_bytes())["libraries"]
-        for name in ("Contracts", "Planner", "Coverage", "Aspire"):
+        for name in SDK_PACKAGES:
             if "ForgeTrust.AppSurface.Evidence." + name + "/" + version not in dependencies:
                 raise ValueError("The fresh SDK consumer used a different package graph.")
         receipt["sdk_dependencies"] = sorted(dependencies)

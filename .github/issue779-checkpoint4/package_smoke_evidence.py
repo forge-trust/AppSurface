@@ -1,6 +1,6 @@
 """Retain and recheck ordinary package-smoke outputs, without runtime authority.
 
-Only the fixed 22 command logs, starter files and planning outputs are copied.
+Only the fixed 23 command logs, starter files and planning outputs are copied.
 The existing producer artifact's 128-file/32-MiB limits still apply independently.
 """
 from pathlib import Path
@@ -18,7 +18,7 @@ COMMANDS = (
     'unsupported-owner', 'omitted-mode', 'evidence-starter', 'evidence-doctor',
     'evidence-explain', 'evidence-starter-repeat', 'evidence-observation-without-control',
     'evidence-legacy-observation-without-control', 'evidence-conflicting-mode',
-    'sdk-pack-contracts', 'sdk-pack-planner', 'sdk-pack-coverage', 'sdk-pack-aspire',
+    'sdk-pack-contracts', 'sdk-pack-planner', 'sdk-pack-coverage', 'sdk-pack-readiness', 'sdk-pack-aspire',
     'sdk-restore', 'sdk-locked-restore', 'sdk-build', 'sdk-load',
 )
 REJECTIONS = frozenset((

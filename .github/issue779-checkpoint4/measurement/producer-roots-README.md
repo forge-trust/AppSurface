@@ -68,6 +68,17 @@ standalone v1 report is not a gate input; `ready_for_gate` remains false. V2 pre
 requires separate native proof, workflow wiring and independent lineage validation before
 the parent may use it as a gate input.
 
+The [ordinary package smoke](../package-smoke.py) packs Contracts, Planner, Coverage,
+[Readiness](../../../Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) and Aspire at
+one source-derived version, then restores and loads a fresh consumer from that complete graph.
+The [retained-output validator](../package_smoke_evidence.py) requires all 23 command logs and
+the five starter/planning files plus receipt: 29 fixed leaves under the existing 4 MiB curated
+total and the independent C2 128-file/32 MiB artifact bound. Missing Readiness pack output fails
+the closed inventory even when the remaining log hashes agree. The original 540-second smoke
+clock is unchanged. On a command failure, at most its final 32 KiB is added to the existing
+outer smoke log; the failed command and receipt remain failed. These installation/planning
+checks do not grant runtime admission or protected acceptance.
+
 The following Python is the complete argument construction. `collector` uses
 [`measurement_arguments.arguments`](../measurement_arguments.py) for .NET's
 `ProcessStartInfo.Arguments` grammar. It never constructs a shell command. Run this

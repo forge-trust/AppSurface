@@ -78,7 +78,7 @@ class PackageSmokeEvidenceTests(unittest.TestCase):
     def test_real_files_roundtrip_includes_empty_logs_and_only_fixed_outputs(self):
         subject.retain(self.work, self.output, SOURCE)
         self.assertEqual(self.receipt, subject.verify(self.output, SOURCE))
-        self.assertEqual(28, len(subject.OUTPUTS))
+        self.assertEqual(29, len(subject.OUTPUTS))
         for name, expected in self.bodies.items():
             self.assertEqual(expected, (self.output / name).read_bytes())
             self.assertEqual(0o600, stat.S_IMODE((self.output / name).stat().st_mode))
@@ -86,6 +86,12 @@ class PackageSmokeEvidenceTests(unittest.TestCase):
 
     def test_missing_actual_empty_log_rejects_before_creating_destination(self):
         (self.work / 'sdk-build.log').unlink()
+        self.reject()
+
+    def test_omitted_readiness_pack_rejects_even_with_coherent_remaining_logs(self):
+        self.receipt['commands'] = [command for command in self.receipt['commands']
+                                    if command['name'] != 'sdk-pack-readiness']
+        self.save()
         self.reject()
 
     def test_changed_log_and_generated_file_reject_without_echo_or_copy(self):
