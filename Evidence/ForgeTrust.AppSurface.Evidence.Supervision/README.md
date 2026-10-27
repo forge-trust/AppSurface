@@ -5,6 +5,17 @@ The [restricted application owner](application-execution.md) extends the same C#
 > **Current integration status (2026-10-18):** Checkpoints one (16 Linux controls), two (seven producer/custody controls), and three (seven application/CLI/SDK controls) passed their recorded native revisions. Runtime supervision now uses C# in the same executable; the Python runtime has been retired. The [cutover reference](../../docs/evidence/issue779-csharp-runtime-cutover.md) records the current packaging, consumer and unchanged coverage gates. Production application registration and Trusted acceptance remain closed. Dated preparation notes below are historical, not the current validation result.
 
 
+## Protected qualification support records
+
+The internal [support-record parser and matcher](protected-support.md) accept canonical, bounded
+record data only when its exact bytes match a separately supplied expected digest. They freeze parsed
+collections and compare current provider/workflow/deployment facts. They do not authenticate those inputs
+or create admission. The application support shape names the existing `evidence-worker-linux-v2`
+protocol, independently of the record schema version. The
+[protected qualification prerequisite](../../.github/issue779-protected-qualification/README.md) must run
+on reviewed protected `main`; independent final evidence verification and support registration remain
+required. The root request path remains Observation-only and Planner still rejects accepted proof.
+
 ## Account identity during teardown
 
 The internal [producer cleanup procedure](producer-cleanup.md) preserves pending-stop, stopped observation, pump joins and local closes in their original failure-preserving order. It creates no native owner or settlement fact.

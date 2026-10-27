@@ -4,6 +4,7 @@ on:
   push:
     branches: [codex/issue779-checkpoint4-cutover-20261018]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

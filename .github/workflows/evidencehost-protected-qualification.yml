@@ -27,14 +27,14 @@ jobs:
       - name: Exercise detached qualification boundary controls without API access
         run: timeout --signal=KILL 30 python3 -B .github/issue779-protected-qualification/test_entrypoint.py -v
 
-  worker-controls:
-    name: Protected qualification worker controls
+  full-runtime-proof:
+    name: Full current runtime proof and unchanged gates
     needs: protected-context
-    uses: ./.github/workflows/issue779-checkpoint1-worker.yml
+    uses: ./.github/workflows/evidencehost-runtime-proof.yml
 
   retain-partial-qualification:
-    name: Retain partial qualification provenance without acceptance
-    needs: worker-controls
+    name: Retain full-runtime qualification provenance without acceptance
+    needs: full-runtime-proof
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -43,9 +43,10 @@ jobs:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Bind the protected checkout and collect the fixed current aggregate
+      - name: Bind the protected checkout and collect the current C1 aggregate after the full graph
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE779_FULL_RUNTIME_RESULT: ${{ needs.full-runtime-proof.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -59,7 +60,7 @@ jobs:
       - name: Retain exact bounded qualification material
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: issue779-protected-qualification-partial-${{ github.run_id }}-${{ github.run_attempt }}
+          name: issue779-protected-full-runtime-partial-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/protected-qualification
           include-hidden-files: true
           if-no-files-found: error

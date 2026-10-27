@@ -20,9 +20,24 @@ import github_parent as transport
 
 REPOSITORY = 'forge-trust/AppSurface'
 WORKFLOW = '.github/workflows/evidencehost-protected-qualification.yml'
-PREFIX = 'Protected qualification worker controls / '
+RUNTIME_PREFIX = 'Full current runtime proof and unchanged gates / '
+WORKER_PREFIX = RUNTIME_PREFIX + 'All sixteen current CSharp worker controls / '
+PREFIX = WORKER_PREFIX
+RUNTIME_WORKFLOW = '.github/workflows/evidencehost-runtime-proof.yml'
 SELECTORS = ('None', 'N04', 'N05', 'N06', 'N07', 'N08', 'N09', 'N10', 'N11', 'N12', 'N13', 'N14', 'N15', 'N16')
 CASES = tuple('N' + str(index).zfill(2) for index in range(1, 17))
+REQUIRED_RUNTIME_JOBS = frozenset(
+    {'Check the protected qualification source',
+     RUNTIME_PREFIX + 'Protected parent transport and semantic controls (no admission)',
+     RUNTIME_PREFIX + 'Packaged CSharp CLI producer and artifact custody / linux',
+     RUNTIME_PREFIX + 'CSharp CLI and SDK application consumers / linux-native-application',
+     RUNTIME_PREFIX + 'Genuine account creation with the successful C3 measurement / accounts',
+     RUNTIME_PREFIX + 'Genuine reserved rollback with the successful account measurement / accounts',
+     RUNTIME_PREFIX + 'Unchanged solution and codecov patch gates'}
+    | {WORKER_PREFIX + 'Current CSharp worker ' + selector for selector in SELECTORS}
+    | {WORKER_PREFIX + 'Reconcile all sixteen current worker controls'}
+    | {RUNTIME_PREFIX + 'Standard root measurement for current C1 ' + selector
+       + ' / Measure current CSharp worker ' + selector for selector in SELECTORS})
 MAX_ARCHIVE = 64 * 1024
 MAX_DOCUMENT = 16 * 1024
 SHA1 = re.compile(r'[0-9a-f]{40}\Z')
@@ -111,7 +126,8 @@ def aggregate_archive(raw, metadata, source, capture_sha256):
 
 
 def collect(environment, checkout_head, token, capture_raw, workflow_raw, *, total_timeout=120):
-    """Resolve fixed current-run artifacts using protected provider context, returning only partial receipt data."""
+    """Resolve C1 material after the protected caller's full reusable runtime graph succeeds."""
+    need(environment.get('ISSUE779_FULL_RUNTIME_RESULT') == 'success')
     repository_id, run_id, attempt = context(environment, checkout_head)
     need(type(token) is str and 0 < len(token) <= 4096 and not any(c.isspace() for c in token))
     capture = transport._response_json(capture_raw, 'protected-qualification-source')
@@ -120,6 +136,10 @@ def collect(environment, checkout_head, token, capture_raw, workflow_raw, *, tot
          and type(capture['tree']) is str and SHA1.fullmatch(capture['tree']) is not None
          and capture.get('source') == checkout_head and type(capture.get('count')) is int
          and type(capture.get('files')) is dict and capture['count'] == len(capture['files']) > 0)
+    runtime_entry = capture['files'].get(RUNTIME_WORKFLOW)
+    need(type(runtime_entry) is dict and type(runtime_entry.get('sha256')) is str
+         and SHA256.fullmatch(runtime_entry['sha256']) is not None
+         and type(runtime_entry.get('git_blob')) is str and SHA1.fullmatch(runtime_entry['git_blob']) is not None)
     workflow_sha256 = hashlib.sha256(workflow_raw).hexdigest()
     budget = transport._Budget(total_timeout)
     api = transport.API_ORIGIN + '/repos/' + REPOSITORY
@@ -144,11 +164,10 @@ def collect(environment, checkout_head, token, capture_raw, workflow_raw, *, tot
     need(type(jobs.get('total_count')) is int and type(jobs.get('jobs')) is list
          and jobs['total_count'] == len(jobs['jobs']) <= 100
          and all(type(row) is dict for row in jobs['jobs']))
-    expected_jobs = {PREFIX + 'Current CSharp worker ' + selector for selector in SELECTORS}
-    expected_jobs.add(PREFIX + 'Reconcile all sixteen current worker controls')
-    chosen = [row for row in jobs['jobs'] if row.get('name') in expected_jobs]
-    need(len(chosen) == len(expected_jobs) and {row['name'] for row in chosen} == expected_jobs
-         and len({row.get('id') for row in chosen}) == len(expected_jobs)
+    chosen = [row for row in jobs['jobs'] if row.get('name') in REQUIRED_RUNTIME_JOBS]
+    need(len(chosen) == len(REQUIRED_RUNTIME_JOBS)
+         and {row['name'] for row in chosen} == REQUIRED_RUNTIME_JOBS
+         and len({row.get('id') for row in chosen}) == len(REQUIRED_RUNTIME_JOBS)
          and all(row.get('status') == 'completed' and row.get('conclusion') == 'success'
                  and row.get('head_sha') == checkout_head and type(row.get('id')) is int
                  and row['id'] > 0 and type(row.get('run_attempt')) is int
@@ -173,16 +192,20 @@ def collect(environment, checkout_head, token, capture_raw, workflow_raw, *, tot
     capture_sha256 = hashlib.sha256(capture_raw).hexdigest()
     body = aggregate_archive(raw, metadata, checkout_head, capture_sha256)
     budget.timeout()
-    receipt = {'schema': 'issue779-protected-worker-qualification-partial-v1', 'repository': REPOSITORY,
+    receipt = {'schema': 'issue779-protected-full-runtime-partial-v1', 'repository': REPOSITORY,
                'repository_id': repository_id, 'workflow_path': WORKFLOW, 'workflow_commit': checkout_head,
                'workflow_sha256': workflow_sha256, 'event': 'workflow_dispatch', 'ref': 'refs/heads/main',
+               'runtime_workflow_path': RUNTIME_WORKFLOW,
+               'runtime_workflow_sha256': runtime_entry['sha256'],
+               'runtime_workflow_git_blob': runtime_entry['git_blob'],
+               'runtime_job_result': environment['ISSUE779_FULL_RUNTIME_RESULT'],
                'run_id': run_id, 'run_attempt': attempt, 'observed_run_status': 'in_progress',
                'source_capture_sha256': capture_sha256, 'source_count': capture['count'],
                'source_tree': capture['tree'],
                'artifact_id': metadata['id'], 'artifact_name': name, 'artifact_bytes': len(raw),
                'artifact_sha256': hashlib.sha256(raw).hexdigest(),
                'aggregate_sha256': hashlib.sha256(body).hexdigest(),
-               'control_jobs': sorted(row['id'] for row in chosen),
+               'runtime_job_ids': sorted(row['id'] for row in chosen),
                'selector_callbacks_independently_verified': False, 'qualification_complete': False,
                'admission_created': False, 'trusted_manifest_created': False,
                'gate_claimed': False, 'native_acceptance_claimed': False}

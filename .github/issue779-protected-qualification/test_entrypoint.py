@@ -22,9 +22,11 @@ class QualificationBoundaryControls(unittest.TestCase):
             'GITHUB_REF_PROTECTED': 'true', 'GITHUB_WORKFLOW_REF': subject.REPOSITORY + '/' + subject.WORKFLOW + '@refs/heads/main',
             'GITHUB_SHA': self.head, 'GITHUB_WORKFLOW_SHA': self.head,
             'GITHUB_REPOSITORY_ID': '12345', 'GITHUB_RUN_ID': '98765', 'GITHUB_RUN_ATTEMPT': '2',
+            'ISSUE779_FULL_RUNTIME_RESULT': 'success',
         }
         self.capture = json.dumps({'schema': 'issue779-checkpoint2-source-v1', 'source': self.head,
-                                   'tree': 'b' * 40, 'count': 1, 'files': {'fixed.cs': {}}}).encode()
+                                   'tree': 'b' * 40, 'count': 1, 'files': {
+                                       subject.RUNTIME_WORKFLOW: {'sha256': 'c' * 64, 'git_blob': 'd' * 40}}}).encode()
         self.workflow = b'fixed protected workflow fixture bytes'
         self.aggregate = {'schema': 'issue779-checkpoint1-aggregate-v1', 'source': self.head,
                           'source_capture_sha256': hashlib.sha256(self.capture).hexdigest(),
@@ -39,8 +41,7 @@ class QualificationBoundaryControls(unittest.TestCase):
         self.run = {'id': 98765, 'run_attempt': 2, 'event': 'workflow_dispatch', 'head_branch': 'main',
                     'head_sha': self.head, 'path': subject.WORKFLOW, 'repository': self.repository,
                     'status': 'in_progress', 'conclusion': None}
-        names = {subject.PREFIX + 'Current CSharp worker ' + name for name in subject.SELECTORS}
-        names.add(subject.PREFIX + 'Reconcile all sixteen current worker controls')
+        names = subject.REQUIRED_RUNTIME_JOBS
         self.jobs = {'total_count': len(names), 'jobs': [dict(id=100 + index, name=name,
                      status='completed', conclusion='success', head_sha=self.head, run_attempt=2)
                      for index, name in enumerate(sorted(names))]}
@@ -67,6 +68,7 @@ class QualificationBoundaryControls(unittest.TestCase):
                 return result, api, download
 
     def test_valid_detached_neighbors_return_partial_flags_and_exact_original_bytes(self):
+        self.assertEqual(36, len(subject.REQUIRED_RUNTIME_JOBS))
         (receipt, raw, body), api, download = self.invoke()
         self.assertIs(self.archive, raw)
         self.assertEqual(self.aggregate, json.loads(body))
@@ -74,9 +76,23 @@ class QualificationBoundaryControls(unittest.TestCase):
                     'trusted_manifest_created', 'gate_claimed', 'native_acceptance_claimed'):
             self.assertIs(False, receipt[key])
         self.assertEqual('in_progress', receipt['observed_run_status'])
+        self.assertEqual('issue779-protected-full-runtime-partial-v1', receipt['schema'])
+        self.assertEqual(subject.RUNTIME_WORKFLOW, receipt['runtime_workflow_path'])
+        self.assertEqual('c' * 64, receipt['runtime_workflow_sha256'])
+        self.assertEqual('d' * 40, receipt['runtime_workflow_git_blob'])
+        self.assertEqual('success', receipt['runtime_job_result'])
+        self.assertFalse(receipt['qualification_complete'])
         self.assertEqual(5, api.call_count)
         self.assertEqual(1, download.call_count)
         self.assertEqual((12345, 98765, 2), subject.context(self.environment, self.head))
+
+    def test_full_runtime_dependency_must_succeed_before_any_api_access(self):
+        for result in ('failure', 'cancelled', None):
+            with self.subTest(result=result), mock.patch.object(subject.transport, '_api_json') as api:
+                bad = dict(self.environment, ISSUE779_FULL_RUNTIME_RESULT=result)
+                with self.assertRaisesRegex(ValueError, '^protected-qualification-rejected$'):
+                    subject.collect(bad, self.head, 'token', self.capture, self.workflow)
+                api.assert_not_called()
 
     def test_each_protected_context_mismatch_rejects_before_api(self):
         for key in self.environment:
@@ -129,6 +145,29 @@ class QualificationBoundaryControls(unittest.TestCase):
                 jobs['jobs'][0][key] = value
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 self.invoke(responses)
+
+    def test_full_runtime_consumers_accounts_and_gate_are_required_before_download(self):
+        selected = (subject.RUNTIME_PREFIX + 'CSharp CLI and SDK application consumers / linux-native-application',
+                    subject.RUNTIME_PREFIX + 'Genuine account creation with the successful C3 measurement / accounts',
+                    subject.RUNTIME_PREFIX + 'Genuine reserved rollback with the successful account measurement / accounts',
+                    subject.RUNTIME_PREFIX + 'Packaged CSharp CLI producer and artifact custody / linux',
+                    subject.RUNTIME_PREFIX + 'Unchanged solution and codecov patch gates')
+        for name in selected:
+            for fault in ('missing', 'skipped', 'failed'):
+                responses = copy.deepcopy(self.responses())
+                row = next(item for item in responses[3]['jobs'] if item['name'] == name)
+                if fault == 'missing':
+                    responses[3]['jobs'].remove(row)
+                    responses[3]['total_count'] -= 1
+                elif fault == 'skipped':
+                    row['status'], row['conclusion'] = 'completed', 'skipped'
+                else:
+                    row['status'], row['conclusion'] = 'completed', 'failure'
+                with self.subTest(name=name, fault=fault), mock.patch.object(
+                        subject.transport, '_api_json', side_effect=responses):
+                    with mock.patch.object(subject.transport, '_download') as download, self.assertRaises(ValueError):
+                        subject.collect(self.environment, self.head, 'token', self.capture, self.workflow)
+                    download.assert_not_called()
 
     def test_artifact_identity_bounds_expiry_and_digest_reject(self):
         for key, value in (('id', True), ('name', 'issue779-checkpoint1-current-98765-1'), ('expired', True),

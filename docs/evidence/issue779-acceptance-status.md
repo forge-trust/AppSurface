@@ -5,6 +5,36 @@
 
 ## Revision 96 verified results and revision 97 correction — 2026-10-27
 
+### Current isolated preparation and focused Linux validation — revision 101
+
+[Revision 101](https://github.com/forge-trust/AppSurface/actions/runs/40445212390), source
+`3fb45d86151262152394405f7d8072c46ea9a1cf`, retains the unchanged production limits,
+comparison base, thresholds and exclusions. Its full consumer and numerical-gate chain is still
+in progress as this status is written. The fifteen C1 artifacts independently matched their API digests
+and all 3,624 immutable source blobs/modes. Original callback replay returned N01–N16 exactly once,
+all passed and unskipped, and reproduced the retained aggregate. The C1 verification receipt has
+SHA-256 `8539a43dd0b4fdd15c9d4ed6eeafa73f1451ab34712de70f1b29d183f07e469d`. The separate
+[focused Linux run](https://github.com/forge-trust/AppSurface/actions/runs/40445212296) completed
+successfully. Independent verification checked artifact `12706909955` (266,061 bytes,
+SHA-256 `78d7414656466df87dd277a4c9d08ca6ba0ed44b61fa17451ed25eb99cd62147`), its exact
+3,624-entry source capture and all seventeen passed, executed, unskipped TRX rows: six application
+bundle-audit cases and eleven report-discovery cases. Restore/build/source/TRX checks exited zero;
+the build reported zero warnings and errors. These are actual root Linux file controls, not a
+full consumer, coverage or Trusted result. The focused verification receipt has SHA-256
+`a3434121117f0ede28ca65c091091c8ceeb89f67b7d2439a5f98769b9f070d9d`.
+
+The reviewed [protected qualification prerequisite](../../.github/issue779-protected-qualification/README.md)
+now calls the complete runtime-proof graph. Its data-only collector requires the protected context
+and all thirty-five runtime leaf jobs to succeed for the exact current head and attempt before
+retaining the original C1 aggregate. Twelve detached boundary controls passed. The internal
+[support-record parser and matcher](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/protected-support.md)
+also passed 52 detached canonical-record and current-fact controls after aligning its worker protocol
+with the existing v2 application descriptor. They do not authenticate their caller-supplied digests
+or provider facts and do not issue admission. This workflow has
+not run on protected `main`; a candidate run cannot establish that prerequisite. Full post-run
+artifact verification and the separately reviewed support registration remain required before
+runtime Trusted admission can be enabled and accepted.
+
 ### Current follow-up preparation and verified C1 boundary
 
 [Revision 98](https://github.com/forge-trust/AppSurface/actions/runs/40438904270), source
