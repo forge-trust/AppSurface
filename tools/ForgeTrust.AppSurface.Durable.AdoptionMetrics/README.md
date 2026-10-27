@@ -27,3 +27,14 @@ counts and pass values are checked before the deterministic result is written,
 so source drift fails instead of silently refreshing the evidence. Git
 verification is bounded to 30 seconds per command and Ctrl-C cancels the active
 measurement; a canceled or timed-out child process is terminated best-effort.
+
+The internal `GitConsumerRevisionVerifier` accepts an optional `TimeProvider` for
+command-deadline tests; normal execution uses `TimeProvider.System` and the same
+30-second command limit. Both output-reading and quiet source probes use that
+clock. Descendant and pipe cleanup retains its separate two-second system-time
+budget, so a paused test clock cannot suspend cleanup. Real-process regression
+tests observe the child PID before advancing the original one-second timeout or
+caller-cancellation clock. They also force delayed shell startup and verify that
+each recorded child exits. The real-time deadline tests remain in place. See the
+[.NET time-provider testing reference](https://learn.microsoft.com/en-us/dotnet/core/extensions/timeprovider-testing)
+for the distinction between advancing a test clock and changing a production limit.

@@ -26,6 +26,14 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 
 `EvidenceClaimKind.TargetedComplete` is eligible for a pull-request gate; `ReleaseComplete` is eligible only for a release gate and requires `ValidatedNotAttested` envelope status. `ObservationOnly` is deliberately informative, never gate-eligible. `NoEvidenceRequired` is valid only when the selected profile declares no resources, producers, or obligations.
 
+## Streaming artifact writes
+
+Use [`EvidenceArtifactWriter.WriteAsync`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs) with a `Stream` when a producer has an artifact that may be large or is supplied by a non-seekable process stream. The writer copies in bounded chunks, computes the lower-case SHA-256 digest as bytes arrive, and enforces both the slot's `MaximumBytes` and the shared 256 MiB producer budget before accepting each chunk. The input stream remains owned by the caller and is read to end; the writer exposes only `EvidenceArtifactResult` metadata.
+
+The existing `ReadOnlyMemory<byte>` overload remains useful for already-buffered small values. Use `VerifyWrittenArtifactsAsync` after producer work or before returning a result when the output directory may have been touched by another process. Verification also streams each file and returns `false` for missing, inaccessible, truncated, or tampered artifacts. Cancellation and copy errors remove the partial destination and release the logical-name, destination, slot, and aggregate reservations so the producer can retry safely.
+
+Avoid seeking or rewinding the input stream: streaming writes consume it exactly once. Do not close the input stream as part of producer cleanup unless the producer owns it. A failed write cannot be resumed from its partial file; retry by supplying a fresh stream, because the partial destination is deleted before the reservation is released.
+
 ## Claim rules
 
 A complete claim is deliberately conservative:
@@ -46,3 +54,5 @@ An unavailable capability, timeout, skipped producer, incomplete test profile, o
 - Do not edit generated plan or manifest JSON. `EvidenceManifestBuilder.Verify(...)` and `appsurface evidence verify` detect inconsistent or edited claim fields by recomputing internal digests; they do not authenticate their inputs. Gates must obtain the plan and manifest through a trusted CI channel.
 
 Read next: the [planner README](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md), the [Aspire lifecycle README](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md), and the [EvidenceHost cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).
+
+Coverage declarations optionally include `coverageExecution`: `configuration` (default `Debug`, a simple identifier up to 32 characters), `parallelism` (1 through 32, default 1), and `testResults` (`none` or `junit`, default `none`). These settings control execution and report production; they do not alter coverage gates or source filters. Omitting the property preserves the previous canonical declaration bytes and legacy behavior. An explicitly supplied value participates in the policy and plan digests. See the [built-in coverage workflow](../ForgeTrust.AppSurface.Evidence.Cli/README.md) and [native consumer acceptance recipe](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md).

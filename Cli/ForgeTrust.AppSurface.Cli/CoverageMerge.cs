@@ -58,6 +58,14 @@ internal sealed partial class CoverageMergeCommand : ICommand
     [CommandOption("output", Description = "Coverage output directory. Defaults to TestResults/coverage-merged.")]
     public string OutputDirectory { get; set; } = Path.Join("TestResults", "coverage-merged");
 
+    /// <summary>Gets or sets retention for optional redundant XML; public staged merge inputs are always retained.</summary>
+    [CommandOption("artifact-retention", Description = "Artifact retention: managed (default) or full. Existing public reportgenerator-input files are retained in both modes.")]
+    public string ArtifactRetention { get; set; } = "managed";
+
+    /// <summary>Gets or sets whether existing output artifacts are preserved before merge.</summary>
+    [CommandOption("no-clean", Description = "Preserve unrelated existing output artifacts; selected canonical paths may still be replaced.")]
+    public bool NoClean { get; set; }
+
     /// <inheritdoc />
     [ExcludeFromCodeCoverage]
     public async ValueTask ExecuteAsync(IConsole console)
@@ -73,7 +81,9 @@ internal sealed partial class CoverageMergeCommand : ICommand
     /// <returns>A task that completes when the merge finishes.</returns>
     internal async ValueTask ExecuteAsync(IConsole console, CancellationToken cancellationToken)
     {
-        var request = new CoverageMergeRequest(SourceDirectory, OutputDirectory, Clean: true);
+        if (ArtifactRetention is not ("managed" or "full"))
+            throw new CliFx.CommandException("ASCOV208 --artifact-retention must be managed or full. No merge has started.");
+        var request = new CoverageMergeRequest(SourceDirectory, OutputDirectory, Clean: !NoClean) { ArtifactRetention = ArtifactRetention };
         try
         {
             await _workflow.MergeAsync(
@@ -97,7 +107,11 @@ internal sealed partial class CoverageMergeCommand : ICommand
 /// <param name="SourceDirectory">Directory recursively searched for shard files named <c>coverage.cobertura.xml</c>.</param>
 /// <param name="OutputDirectory">Directory that receives merged AppSurface coverage artifacts.</param>
 /// <param name="Clean">Whether existing AppSurface-owned merge artifacts should be cleaned first.</param>
-internal sealed record CoverageMergeRequest(string? SourceDirectory, string OutputDirectory, bool Clean);
+internal sealed record CoverageMergeRequest(string? SourceDirectory, string OutputDirectory, bool Clean)
+{
+    /// <summary>Gets duplicate retention for this merge, without altering the public staged-input contract.</summary>
+    internal string ArtifactRetention { get; init; } = "managed";
+}
 
 /// <summary>
 /// Result of a public coverage merge.
@@ -150,19 +164,33 @@ internal sealed class CoverageMergeWorkflow
         var currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
         var sourceDirectory = ResolveSourceDirectory(request.SourceDirectory, currentDirectory);
         var outputDirectory = ResolveOutputDirectory(request.OutputDirectory, currentDirectory);
-        CoverageMergeOutputGuard.Prepare(outputDirectory, sourceDirectory, request.Clean);
+        CoverageMergeOutputGuard.Validate(outputDirectory, sourceDirectory);
+        if (request.ArtifactRetention is not ("managed" or "full"))
+            throw CoverageRunDiagnostics.Create("ASCOV208", "Artifact retention is invalid.", "Expected managed or full.", "Select managed or full and retry once.", "guides/coverage-storage.md#ascov208");
         var selectedReports = CoverageMergeSourceResolver.Resolve(sourceDirectory, outputDirectory);
+        using (var output = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, true, false)) { }
+        using var participants = MergeArtifactLeases.Acquire(outputDirectory, selectedReports);
+        using var artifactSession = await CoverageArtifactSession.BeginAsync(outputDirectory, currentDirectory,
+            request.Clean, console, _timeProvider, cancellationToken, participants.Writer);
+        artifactSession.VerifyBinding();
+        var outcome = "failed";
+        try
+        {
+        CoverageMergeOutputGuard.Prepare(outputDirectory, sourceDirectory, request.Clean);
 
         await PrintDiscoveryAsync(console, sourceDirectory, outputDirectory, selectedReports, currentDirectory);
 
         var totalStarted = _timeProvider.GetTimestamp();
         var stagingDirectory = Path.Join(outputDirectory, "reportgenerator-input");
         var stagedReports = StageReports(sourceDirectory, selectedReports, stagingDirectory, cancellationToken);
+        foreach (var staged in stagedReports) artifactSession.Inventory.RecordFile(staged);
 
         var mergeStarted = _timeProvider.GetTimestamp();
         var reportGeneratorDirectory = Path.Join(outputDirectory, "reportgenerator");
         Directory.CreateDirectory(reportGeneratorDirectory);
+        if (request.Clean) artifactSession.Inventory.RecordFreshTree(reportGeneratorDirectory);
         var reportGlob = Path.Join(stagingDirectory, "**", "coverage.cobertura.xml");
+        var previousMergeSummary = artifactSession.Inventory.ObserveBeforeWrite(Path.Join(reportGeneratorDirectory, "Summary.txt"));
         CoverageRunMergeResult merge;
         try
         {
@@ -210,6 +238,7 @@ internal sealed class CoverageMergeWorkflow
             if (File.Exists(merge.SummaryPath))
             {
                 File.Copy(merge.SummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
+                artifactSession.Inventory.RecordFile(Path.Join(outputDirectory, "reportgenerator-summary.txt"));
             }
 
             await WriteSummaryAsync(outputDirectory, mergedCoveragePath, currentDirectory, console, cancellationToken);
@@ -223,6 +252,18 @@ internal sealed class CoverageMergeWorkflow
                 merge.ExitCode,
                 currentDirectory,
                 cancellationToken);
+            artifactSession.Inventory.RecordFile(mergedCoveragePath);
+            artifactSession.Inventory.RecordFile(Path.Join(outputDirectory, "summary.txt"));
+            artifactSession.Inventory.RecordFile(Path.Join(outputDirectory, "timings.json"));
+            if (request.Clean)
+            {
+                artifactSession.Inventory.RecordFile(merge.CoberturaPath);
+                artifactSession.Inventory.RecordFile(merge.SummaryPath);
+            }
+            else
+            {
+                artifactSession.Inventory.RecordAfterWrite(merge.SummaryPath, previousMergeSummary);
+            }
         }
         catch (CommandException)
         {
@@ -241,7 +282,58 @@ internal sealed class CoverageMergeWorkflow
         await console.Output.WriteLineAsync($"Coverage artifacts: {FormatDisplayPath(outputDirectory, currentDirectory)}");
         await console.Output.WriteLineAsync($"Next: appsurface coverage gate --coverage {FormatDisplayPath(mergedCoveragePath, currentDirectory)} --min-line <percent> --min-branch <percent>");
 
+        outcome = "success";
         return new CoverageMergeResult(outputDirectory, mergedCoveragePath, selectedReports);
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = "interrupted";
+            throw;
+        }
+        finally
+        {
+            await artifactSession.CompleteAsync(outcome, CoverageArtifactInventory.Provenance(
+                "merge", "existing-shards", selectedReports.Select(path => Path.GetRelativePath(sourceDirectory, path)), null, null));
+        }
+    }
+
+    private sealed class MergeArtifactLeases : IDisposable
+    {
+        private readonly List<CoverageArtifactOperationLease> _leases = [];
+        internal CoverageArtifactOperationLease Writer { get; private set; } = null!;
+        internal static MergeArtifactLeases Acquire(string output, IReadOnlyList<string> reports)
+        {
+            var participants = new MergeArtifactLeases();
+            try
+            {
+                using var outputDirectory = CoverageRunOutputLease.AcquireArtifactDirectory(output, false, false)!;
+                var desired = new Dictionary<string, (string Path, bool Writer)>(StringComparer.Ordinal)
+                { [outputDirectory.ArtifactDirectoryIdentity] = (output, true) };
+                var observedRoots = new Dictionary<string, bool>(
+                    OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+                foreach (var report in reports)
+                {
+                    var inputRoot = CoverageArtifactSession.FindOwnedInputRoot(report, observedRoots);
+                    if (inputRoot is null) continue;
+                    using var root = CoverageRunOutputLease.AcquireArtifactDirectory(inputRoot, false, false)!;
+                    desired.TryAdd(root.ArtifactDirectoryIdentity, (inputRoot, false));
+                }
+                foreach (var item in desired.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+                {
+                    var lease = CoverageArtifactOperationLease.Acquire(item.Value.Path, item.Value.Writer);
+                    if (lease.PhysicalIdentity != item.Key) { lease.Dispose(); throw new IOException("Merge participant identity changed."); }
+                    participants._leases.Add(lease);
+                    if (item.Value.Writer) participants.Writer = lease;
+                }
+                return participants;
+            }
+            catch { participants.Dispose(); throw; }
+        }
+        public void Dispose()
+        {
+            foreach (var lease in _leases.AsEnumerable().Reverse()) lease.Dispose();
+            _leases.Clear();
+        }
     }
 
     private static string ResolveSourceDirectory(string? requestedSource, string currentDirectory)
@@ -753,6 +845,11 @@ internal static class CoverageMergeOutputGuard
         File.WriteAllText(marker, "AppSurface coverage output directory" + Environment.NewLine);
     }
 
+    /// <summary>Validates merge output without creating, replacing or removing any artifact.</summary>
+    /// <param name="outputDirectory">The proposed output directory.</param>
+    /// <param name="sourceDirectory">The selected source root.</param>
+    internal static void Validate(string outputDirectory, string sourceDirectory) => ValidateCore(outputDirectory, sourceDirectory);
+
     private static void ValidateCore(string outputDirectory, string sourceDirectory)
     {
         if (string.IsNullOrWhiteSpace(outputDirectory))
@@ -816,7 +913,9 @@ internal static class CoverageMergeOutputGuard
         if (Directory.Exists(output))
         {
             var entries = Directory.EnumerateFileSystemEntries(output)
-                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal))
+                .Where(path => !string.Equals(Path.GetFileName(path), MarkerFileName, StringComparison.Ordinal)
+                    && !(string.Equals(Path.GetFileName(path), ".appsurface-coverage-operation.lock", StringComparison.Ordinal)
+                        && File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0))
                 .ToArray();
             if (entries.Length > 0 && !File.Exists(marker))
             {

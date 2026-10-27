@@ -76,15 +76,46 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
         ArgumentNullException.ThrowIfNull(gateRequest);
         ArgumentNullException.ThrowIfNull(writers);
 
-        var runResult = await runWorkflow.RunAsync(runRequest, writers, cancellationToken).ConfigureAwait(false);
-        if (!runResult.Success)
+        var root = Path.GetDirectoryName(Path.GetFullPath(runRequest.SolutionPath ?? Directory.GetCurrentDirectory()))
+            ?? Directory.GetCurrentDirectory();
+        var session = runRequest.ArtifactSession;
+        var ownsSession = session is null;
+        async Task<CoverageArtifactSession> CreateSessionAsync(CancellationToken token)
         {
-            return new CoverageEvidenceExecutionResult(runResult, null);
+            if (session is null)
+            {
+                session = await CoverageArtifactSession.BeginAsync(Path.GetFullPath(runRequest.OutputDirectory), root,
+                    runRequest.Clean, writers, TimeProvider.System, token).ConfigureAwait(false);
+            }
+            return session;
         }
 
-        var gateResult = await CoverageGateEvaluator.EvaluateAsync(gateRequest, cancellationToken).ConfigureAwait(false);
-        await CoverageGateReportWriter.WriteAsync(gateResult, gateRequest, cancellationToken).ConfigureAwait(false);
-        return new CoverageEvidenceExecutionResult(runResult, gateResult);
+        if (session is null) runRequest = runRequest with { ArtifactSessionFactory = CreateSessionAsync };
+        try
+        {
+            var runResult = await runWorkflow.RunAsync(runRequest, writers, cancellationToken).ConfigureAwait(false);
+            if (!runResult.Success) return new CoverageEvidenceExecutionResult(runResult, null);
+
+            // Dry-run returns before the collection workflow requests its session; gate output still needs
+            // a compatible context, acquired only after run preflight has completed.
+            session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+            gateRequest = gateRequest with { ArtifactSession = session };
+            var gateResult = await CoverageGateEvaluator.EvaluateAsync(gateRequest, cancellationToken).ConfigureAwait(false);
+            await CoverageGateReportWriter.WriteAsync(gateResult, gateRequest, cancellationToken).ConfigureAwait(false);
+            using var gateContext = await CoverageArtifactGateContext.AcquireAsync(gateRequest, writers.Error, cancellationToken).ConfigureAwait(false);
+            await gateContext.RecordReportsAsync(gateRequest, gateResult, cancellationToken).ConfigureAwait(false);
+            if (runRequest.DryRun)
+            {
+                await session.CompleteAsync("success", CoverageArtifactInventory.Provenance(
+                    runRequest.CoverageDriver.ToString(), runRequest.Configuration, runRequest.TestProjects,
+                    runRequest.IncludeFilter, runRequest.ExcludeFilter)).ConfigureAwait(false);
+            }
+            return new CoverageEvidenceExecutionResult(runResult, gateResult);
+        }
+        finally
+        {
+            if (ownsSession) session?.Dispose();
+        }
     }
 }
 
