@@ -254,6 +254,22 @@ class CompletedAccountsTests(unittest.TestCase):
             self.assertFalse(result.qualification_complete)
             self.assertFalse(result.admission_created)
 
+            # Expire on the post-callback check for the second variant. The first
+            # four calls are entry, first iteration start/end, second iteration start.
+            expired_deadline = time.monotonic() + 5
+            original_remaining = subject._remaining
+            calls = {'count': 0}
+            def expire_after_final_callback(deadline):
+                calls['count'] += 1
+                if calls['count'] == 5:
+                    raise ValueError('completed-accounts-deadline')
+                return original_remaining(deadline)
+            with patch.object(subject, '_validate_original_prior', side_effect=prior_fixture), \
+                 patch.object(subject, '_remaining', side_effect=expire_after_final_callback):
+                with self.assertRaisesRegex(ValueError, '^completed-accounts-deadline$'):
+                    subject.replay_completed_accounts(stage, inventory, stage_dir, source, capture_raw,
+                                                      deadline=expired_deadline)
+
     def test_projection_defaults_are_non_authorizing(self):
         projection = subject.AccountReplay('fixed-name', 'C4Accounts', 'a' * 64, 'b' * 64,
                                            'c' * 64, 'd' * 64, 'e' * 64, 'f' * 64, 'g' * 64)
@@ -261,6 +277,19 @@ class CompletedAccountsTests(unittest.TestCase):
         self.assertFalse(projection.qualification_complete)
         with self.assertRaises(AttributeError):
             projection.native_acceptance = True
+
+    def test_completed_result_cannot_return_after_absolute_deadline(self):
+        stage = subject.completed_run.CompletedRunStage(1, 17, 2, 'a' * 40, 'workflow.yml', (), 'b' * 40,
+            'c' * 64, tuple(range(1, 38)), (), 0)
+        rows = tuple(subject.AccountReplay(name, variant, 'c' * 64, 'd' * 64, 'e' * 64,
+                                           'f' * 64, 'a' * 64, 'b' * 64, 'c' * 64)
+                     for name, variant in zip(('fixed-a', 'fixed-b'), subject.VARIANTS))
+        with self.assertRaisesRegex(ValueError, '^completed-accounts-deadline$'):
+            subject._finish_completed_accounts(stage, rows, time.monotonic() - 1)
+        result = subject._finish_completed_accounts(stage, rows, time.monotonic() + 5)
+        self.assertEqual((17, 2, 'a' * 40), (result.run_id, result.run_attempt, result.head_sha))
+        self.assertFalse(result.qualification_complete)
+        self.assertFalse(result.admission_created)
 
     def test_receipt_json_rejects_duplicate_keys(self):
         with self.assertRaisesRegex(ValueError, 'completed-accounts-receipt-json'):

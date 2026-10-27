@@ -238,6 +238,14 @@ class CompletedAccounts:
     admission_created: bool = False
 
 
+def _finish_completed_accounts(stage, projections, deadline):
+    """Return the completed non-authorizing projection only before the caller's deadline."""
+    _remaining(deadline)
+    _need(len(projections) == 2 and tuple(item.variant for item in projections) == VARIANTS,
+          'variant-order')
+    return CompletedAccounts(stage.run_id, stage.run_attempt, stage.head_sha, tuple(projections))
+
+
 def replay_completed_accounts(stage, inventory, stage_directory, source_root, source_capture, *, deadline):
     """Read the two fixed account ZIPs and invoke only the captured pure data validator.
 
@@ -248,7 +256,6 @@ def replay_completed_accounts(stage, inventory, stage_directory, source_root, so
     _need(isinstance(stage, completed_run.CompletedRunStage), 'stage-type')
     _need(isinstance(inventory, completed_validation.ParsedCompletedRunInventory), 'inventory-type')
     completed_c1._assert_projection(stage, inventory)
-    projection_by_name = {item.artifact_name: item for item in inventory.archives}
     _remaining(deadline)
     projection_by_name = {item.artifact_name: item for item in inventory.archives}
     stage_directory = Path(stage_directory)
@@ -344,12 +351,11 @@ def replay_completed_accounts(stage, inventory, stage_directory, source_root, so
             _need(measurement == expected_measurement, 'measurement-binding')
         except Exception as error:
             raise ValueError('completed-accounts-original-validator') from error
+        _remaining(deadline)
         projections.append(AccountReplay(name, variant, stage.source_capture_sha256,
                                          binding.sha256, _sha(receipt_raw),
                                          _sha(bodies['account-original.json'] + bodies['account-instrumented.json']),
                                          _sha(json.dumps(witness, ensure_ascii=False, sort_keys=True,
                                                          separators=(',', ':')).encode()),
                                          validator_sha, helper_sha))
-    _need(len(projections) == 2 and tuple(item.variant for item in projections) == VARIANTS,
-          'variant-order')
-    return CompletedAccounts(stage.run_id, stage.run_attempt, stage.head_sha, tuple(projections))
+    return _finish_completed_accounts(stage, projections, deadline)

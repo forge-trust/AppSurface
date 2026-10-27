@@ -414,7 +414,11 @@ def retained_fixture():
                "root_exit": 1, "lifecycle_stall": marker_value, "fatal_reason": fatal,
                "application_seen": case != "configure-sync-stall",
                "application_observations": [app_event], "worker_prefix_sha256": hashes,
-               "output": output, "accounts": [{"present": False} for _ in range(8)]}
+               "output": output, "accounts": [
+                   {"name": prefix + generation[:28], "table": table, "present": False}
+                   for prefix, table in (("evw", "passwd"), ("evs", "passwd"), ("eva", "passwd"),
+                                         ("evw", "group"), ("evs", "group"), ("eva", "group"),
+                                         ("evr", "group"), ("evg", "group"))]}
         if case == "configure-sync-stall":
             row["application_seen"] = False
         files.update({case + ".json": json.dumps(row, sort_keys=True).encode(),
@@ -459,6 +463,24 @@ class RetainedLifecycleReceiptTests(unittest.TestCase):
             with self.subTest(fault=fault), self.assertRaises(RuntimeError):
                 subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
                                                   deadline=time.monotonic() + 10)
+
+    def test_rebound_lifecycle_case_rejects_wrong_account_name_or_table(self):
+        for field in ("name", "table"):
+            receipt, files, source = retained_fixture()
+            row = receipt["cases"][1]
+            row["accounts"][0][field] = "other-account" if field == "name" else "shadow"
+            files["registered-disposer-stall.json"] = json.dumps(row, sort_keys=True).encode()
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "^lifecycle-accounts$"):
+                subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
+                                                  deadline=time.monotonic() + 10)
+
+    def test_malformed_account_row_fails_with_closed_category(self):
+        receipt, files, source = retained_fixture()
+        receipt["cases"][1]["accounts"][0] = "not-an-account-object"
+        files["registered-disposer-stall.json"] = json.dumps(receipt["cases"][1], sort_keys=True).encode()
+        with self.assertRaisesRegex(RuntimeError, "^lifecycle-accounts$"):
+            subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
+                                              deadline=time.monotonic() + 10)
 
 
 if __name__ == "__main__":

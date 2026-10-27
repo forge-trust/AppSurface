@@ -315,7 +315,11 @@ def validate_retained_receipt(receipt, files, *, source, base, deadline):
         accounts = row.get("accounts")
         require(type(accounts) is list and len(accounts) == 8
                 and all(type(item) is dict for item in accounts)
-                and all(item.get("present") is False for item in accounts), "lifecycle-accounts")
+                and accounts == [
+                    {"name": prefix + generation[:28], "table": table, "present": False}
+                    for prefix, table in (("evw", "passwd"), ("evs", "passwd"), ("eva", "passwd"),
+                                          ("evw", "group"), ("evs", "group"), ("eva", "group"),
+                                          ("evr", "group"), ("evg", "group"))], "lifecycle-accounts")
         case_raw = files.get(case + ".json")
         require(type(case_raw) is bytes and json.loads(case_raw, object_pairs_hook=_object) == row,
                 "lifecycle-case-file")

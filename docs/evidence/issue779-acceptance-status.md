@@ -9,8 +9,18 @@ two stale streaming fixtures before a numerical gate result. Revision 110 repair
 without runtime changes; ten focused tests and the full 4,262-test CLI suite pass locally, with
 five platform skips. Its new complete Linux chain is running. The six revision-109 portable
 procedures and separate 29-plus-four custody checks passed with all authority flags false.
-Completed C2 and measurement-chain replay are mechanism checks only; protected qualification,
+Completed C2, measurement-chain, C3 and account replay are mechanism checks only; protected qualification,
 numerical gates, final orchestration and actual Trusted/downstream acceptance remain open.
+
+The [revision-113 focused Linux run](https://github.com/forge-trust/AppSurface/actions/runs/40524812393)
+passed all 29 filesystem/report and four separate peer-credential tests without skips. Its original
+provider-digest-verified archives bind source `1d5b8a00f04da6e0cfd6f81ee22b51ad4f06127d`, tree
+`eef32358a06073ca1dae5a516b38fec2ba42c4a5` and all 4,004 immutable Git paths/blobs/modes.
+The [runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40524812444) is still running.
+The local combined qualification selection passes 101 tests with five explicit opt-in fixture skips;
+the C3 selection passes 53. Source review also corrected the exact multi-path coverage-capture member,
+bound lifecycle account names/tables to the generation, and rejected account replay completion after
+its original deadline. These follow-up fixes require their own source-bound candidate run.
 
 Latest remote `main` (`ebb562be618c2649c1ef0ade12095e56468882c7`) is merged into the
 continuation branch. The [native-validation tool and workflow](../designs/native-evidence-validation.md)
@@ -42,8 +52,10 @@ These source-bound checks do not enable Trusted execution.
 The [completed C1 callback mechanism](../../.github/issue779-protected-qualification/completed-c1-README.md),
 [C2 receipt replay](../../.github/issue779-protected-qualification/completed-c2-README.md) and
 [measured C1 chain replay](../../.github/issue779-protected-qualification/completed-measurement-chain-README.md)
-are bounded preparations. Full completion validation still requires C3/account closeout,
-full orchestration and unchanged coverage/Codecov checks. Protected-main qualification,
+are bounded preparations, along with [C3 retained closeout](../../.github/issue779-protected-qualification/completed-c3-README.md)
+and [account lineage replay](../../.github/issue779-protected-qualification/completed-accounts-README.md).
+Full completion validation still requires the original C# Native.Tests data validators,
+full orchestration and unchanged coverage/Codecov replay checks. Protected-main qualification,
 authenticated provider/commit/tree/file anchoring, reviewed exact support registration, an ordinary
 Trusted CLI/SDK journey and downstream protected acceptance remain outstanding. The production
 catalogue, request mode and accepted-proof decision remain closed. The historical numerical figures
