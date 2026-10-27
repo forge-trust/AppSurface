@@ -230,12 +230,60 @@ public sealed class BoundedGcloudExecutionReaderTests
     public async Task NativeDeadlineWithSettledCleanupReportsDeadline()
     {
         // protects=deadline classification after confirmed cleanup; fails_when=a killed and settled child is
-        // represented as complete; no_claim=all OS schedules fit a tiny cleanup allowance.
+        // represented as complete or unconfirmed; no_claim=all OS schedules fit a tiny real-time cleanup allowance.
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
         using var slow = NativeFixture.Create("exec sleep 5");
-        var result = await new BoundedGcloudExecutionReader(slow.Path, TimeProvider.System)
+        var clock = new SettledCleanupClock();
+        var read = new BoundedGcloudExecutionReader(slow.Path, clock)
             .ReadAsync(Resource(), TimeSpan.FromSeconds(2));
+
+        // ReadAsync has started the real child before its first asynchronous wait. Expire only the work
+        // timer, leaving the original 200 ms of logical time available for real process and pipe cleanup.
+        clock.ExpireWork();
+        var result = await read.WaitAsync(TimeSpan.FromSeconds(2));
+
         Assert.Equal(BoundedGcloudExecutionReadOutcome.Deadline, result.Outcome);
+        Assert.Equal(new[] { TimeSpan.FromMilliseconds(1800), TimeSpan.FromMilliseconds(200) }, clock.TimerDueTimes);
+        Assert.Empty(result.StandardOutput);
+    }
+
+    /// <summary>Drives the real work cancellation callback while holding the original cleanup reserve open.</summary>
+    /// <remarks>
+    /// This clock isolates confirmed-cleanup classification from OS scheduling. The unchanged real-clock
+    /// deadline, expired-cleanup, cancellation and inherited-pipe tests cover actual cleanup uncertainty.
+    /// </remarks>
+    private sealed class SettledCleanupClock : TimeProvider
+    {
+        private readonly List<TimeSpan> _timerDueTimes = [];
+        private Action? _expireWork;
+        private long _timestamp;
+
+        public IReadOnlyList<TimeSpan> TimerDueTimes => _timerDueTimes;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref _timestamp);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            Assert.Equal(Timeout.InfiniteTimeSpan, period);
+            _timerDueTimes.Add(dueTime);
+            if (_timerDueTimes.Count == 1)
+            {
+                _expireWork = () =>
+                {
+                    Interlocked.Exchange(ref _timestamp, dueTime.Ticks);
+                    callback(state);
+                };
+            }
+
+            // CTS still owns a disposable timer, but only the test advances this clock and fires work.
+            return TimeProvider.System.CreateTimer(callback, state, Timeout.InfiniteTimeSpan, period);
+        }
+
+        public void ExpireWork()
+        {
+            Assert.NotNull(_expireWork);
+            _expireWork();
+        }
     }
 
     [Fact]
