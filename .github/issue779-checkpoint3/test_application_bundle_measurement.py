@@ -11,7 +11,7 @@ import application_bundle_measurement as subject
 def data(changed=None):
     root = ET.Element(subject.NS + 'TestRun')
     counters = {key: '0' for key in subject.ZERO_COUNTERS}
-    counters.update(total='6', executed='6', passed='6')
+    counters.update(total='17', executed='17', passed='17')
     if changed in counters:
         counters[changed] = '1'
     if changed == 'unknown-counter':
@@ -19,13 +19,17 @@ def data(changed=None):
     ET.SubElement(ET.SubElement(root, subject.NS + 'ResultSummary'), subject.NS + 'Counters', counters)
     rows = ET.SubElement(root, subject.NS + 'Results')
     for index, name in enumerate(subject.METHODS):
-        if changed == 'missing' and index == 5:
+        if changed == 'six-only' and index >= 6:
             continue
-        if changed == 'duplicate' and index == 5:
-            name = subject.METHODS[0]
+        if changed in ('missing', 'missing-discovery-case') and index == len(subject.METHODS) - 1:
+            continue
+        if changed == 'duplicate' and index == len(subject.METHODS) - 1:
+            name = subject.METHODS[6]
         if changed == 'foreign' and index == 5:
-            name = 'Unselected'
-        ET.SubElement(rows, subject.NS + 'UnitTestResult', testName=subject.PREFIX + name,
+            name = subject.AUDIT_PREFIX + 'Unselected'
+        if changed == 'mismatched-parameter' and index == 9:
+            name = subject.DISCOVERY_PREFIX + 'SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: "not-symlink")'
+        ET.SubElement(rows, subject.NS + 'UnitTestResult', testName=name,
                       outcome='NotExecuted' if changed == 'outcome' and index == 5 else 'Passed')
     return ET.tostring(root, encoding='utf-8')
 
@@ -38,7 +42,8 @@ class ApplicationBundleMeasurementControls(unittest.TestCase):
                 subject.parse_trx(data(counter))
 
     def test_exact_fixed_rows_and_xml_bounds(self):
-        for changed in ('missing', 'duplicate', 'foreign', 'outcome'):
+        for changed in ('six-only', 'missing-discovery-case', 'mismatched-parameter',
+                        'missing', 'duplicate', 'foreign', 'outcome'):
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 subject.parse_trx(data(changed))
         for raw in (b'', b'x' * (subject.MAXIMUM_BYTES + 1),
@@ -52,7 +57,7 @@ class ApplicationBundleMeasurementControls(unittest.TestCase):
             root = Path(directory)
             selected = root / 'application-bundle.trx'
             selected.write_bytes(data())
-            self.assertEqual(6, subject.read_trx(selected)['passed'])
+            self.assertEqual(17, subject.read_trx(selected)['passed'])
             original = selected.read_bytes()
             alias = root / 'alias'
             os.link(selected, alias)
@@ -67,7 +72,7 @@ class ApplicationBundleMeasurementControls(unittest.TestCase):
                 subject.read_trx(selected)
             parser.assert_not_called()
             selected.write_bytes(original)
-            self.assertEqual(6, subject.read_trx(selected)['executed'])
+            self.assertEqual(17, subject.read_trx(selected)['executed'])
 
 
 if __name__ == '__main__':

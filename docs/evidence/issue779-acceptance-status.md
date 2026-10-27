@@ -5,6 +5,36 @@
 
 ## Revision 96 verified results and revision 97 correction — 2026-10-27
 
+### Current follow-up preparation and verified C1 boundary
+
+[Revision 98](https://github.com/forge-trust/AppSurface/actions/runs/40438904270), source
+`a9c7f5132422827fbb16ca8ce97a1b0b3f5f9f41`, has independently verified all fifteen
+C1 artifacts against their API digests and complete 3,611-file source capture. Replaying
+the original selector callbacks returned N01–N16 exactly once, with zero skipped cases,
+and reproduced the retained aggregate. The verification receipt SHA-256 is
+`15e11240e243650afb7b12511b83f121277dd76aec8a64405e043785adbf3065`.
+This records C1 only; the consumer chain and numerical coverage gate remain separate.
+
+The next prepared candidate extracts the existing
+[report-discovery procedure](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxProducerReportDiscovery.cs)
+from the custody owner without changing root selection, ownership, native resolution,
+rechecks, limits or deadlines. Eleven actual-root discovery cases join the six application
+audit cases in the same standard collector pass. The
+[closed measurement contract](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#separate-application-bundle-audit-measurement)
+requires exactly seventeen named passed rows; the original 43-row root and 44-row
+supplementary measurements remain independent. On macOS, ordinary supervision passed
+3,013 cases with 77 explicit Linux/root skips; these skips establish no native outcome.
+
+Local validation also reproduced and corrected the account verifier's stale source pin
+after the settlement-policy extraction. Its
+[reviewed hash and method spans](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#reviewed-producer-root-witness-mappings)
+now match the actual source. Rebound historical hashes and the obsolete rollback span
+still reject; the lineage zero-hit control zeros the actual current hit map. The full
+measurement test project passed 395 cases with one native-only skip, and the combined
+TRX parser passed three portable methods. Those are local data/source checks, not new
+Linux coverage or Trusted acceptance. No process limit, deadline, coverage threshold,
+exclusion or comparison base changed.
+
 [Revision 96](https://github.com/forge-trust/AppSurface/actions/runs/40418448002), source `3a650e86eafc1553e54aad0b0d2c12713a2c27f1`, has independently verified C1 and C3 artifacts. All 15 C1 archives matched their API digests, the complete 3,603-file source capture, immutable Git blobs and modes; the original selector callbacks returned exactly 16 unique passing, unskipped controls and reproduced the aggregate. The C1 verification receipt is SHA-256 `21f675f819ecb8b99707e475e98ef65494fd9277391c927f0f27b1b8f694e9e9`.
 
 The application artifact `12699233184` (SHA-256 `c76b756ad20405c5a08341177567d822efa0214c93ef373bd83882adbf2ea48c`) passed independent source/receipt checks for 13 original records (seven application/lifecycle cases and six bundle/scratch cases), 43/43 root tests and the separate 44/44 supplementary root tests. The intended SDK failed-test control retained five passed tests and one expected failed test, with cleanup and account absence. The separate lifecycle artifact `12699308275` (SHA-256 `adfdb7f9c464fb2558fc6c53cc57595d9d22db8a9be159ca47af398cb2d894ad`) verified all three fixed lifecycle cases and their final group/path/account absence. Verification receipts are SHA-256 `6880cf6427d2b4de0c7bec9c49d5691871262f607ff06c6c33294245f1930591` and `56f70f10509536e78224d6bc00284d21e80284bb92472d3cdfb5a2f893c1db14`. These are retained source-bound mechanism and consumer results, not Trusted acceptance.

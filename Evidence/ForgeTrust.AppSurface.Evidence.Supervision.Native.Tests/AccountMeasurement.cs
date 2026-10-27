@@ -19,8 +19,12 @@ internal static class AccountMeasurement
 {
     private const int MaximumBytes = 8 * 1024 * 1024;
     internal const string WitnessSource = ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs";
-    internal const string WitnessSourceSha256 = "ab4161ac58b33b8286077f4b9f32945d0f0ef1f08ef0644a4b0961b7309c0340";
+    internal const string WitnessSourceSha256 = "36fa9539adae9c8fd4e74e12b923076f8ae7a6fb6ae9ae45c95d455b12ff1848";
     internal const string PartialSourceSha256 = "1535f37daa077b917d589a9b725e018c1dba3c404cd92fc966e20d1e8066d700";
+    internal const int CreationWitnessFirstLine = 28;
+    internal const int CreationWitnessLastLine = 239;
+    internal const int RollbackWitnessFirstLine = 324;
+    internal const int RollbackWitnessLastLine = 335;
     private const string AccountsSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxRunAccounts.cs";
     private const string OwnerSource = "Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxOwnerActivation.cs";
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
@@ -209,8 +213,10 @@ internal static class AccountMeasurement
             || row.Name.Replace('\\', '/').EndsWith("/" + WitnessSource, StringComparison.Ordinal));
         var lines = document.Value.GetProperty(declaring).GetProperty(method).GetProperty("Lines");
         Assert.True(lines.EnumerateObject().Any(line => int.TryParse(line.Name, NumberStyles.None,
-            CultureInfo.InvariantCulture, out var number) && number >= (creation ? 28 : 284)
-            && number <= (creation ? 236 : 295) && line.Name == number.ToString(CultureInfo.InvariantCulture)
+            CultureInfo.InvariantCulture, out var number)
+            && number >= (creation ? CreationWitnessFirstLine : RollbackWitnessFirstLine)
+            && number <= (creation ? CreationWitnessLastLine : RollbackWitnessLastLine)
+            && line.Name == number.ToString(CultureInfo.InvariantCulture)
             && line.Value.TryGetInt64(out var hits) && hits > 0),
             "Prior account/owner hits cannot replace the current compiled variant's method witness.");
     }

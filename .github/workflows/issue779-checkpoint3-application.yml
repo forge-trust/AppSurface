@@ -402,7 +402,7 @@ jobs:
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
 
-      - name: Measure the application bundle audit against real root-owned files
+      - name: Measure application bundle audit and producer report discovery
         shell: bash
         run: |
           set -euo pipefail
@@ -410,7 +410,7 @@ jobs:
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/application-bundle-tests" <<'PY_ARGS'
           import subprocess, sys
-          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests', '--logger:trx;LogFileName=application-bundle.trx', '--ResultsDirectory:' + sys.argv[2]]
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests|FullyQualifiedName~LinuxProducerReportDiscoveryNativeTests', '--logger:trx;LogFileName=application-bundle.trx', '--ResultsDirectory:' + sys.argv[2]]
           assert all(not any(c in value for c in '\n\r"\\') for value in values)
           print(subprocess.list2cmdline(values))
           PY_ARGS

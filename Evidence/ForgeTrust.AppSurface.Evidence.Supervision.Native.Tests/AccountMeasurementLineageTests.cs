@@ -57,8 +57,9 @@ public sealed class AccountMeasurementLineageTests
             case "nullable-root": fixture.Rollback.Binding["prior_root_trx_sha256"] = new string('d', 64); break;
             case "witness-zero":
                 var witness = fixture.Rollback.Binding["current_witness"]!;
-                fixture.Rollback.Supervision[AccountMeasurement.WitnessSource]![witness["declaring_type"]!.GetValue<string>()]!
-                    [witness["method"]!.GetValue<string>()]!["Lines"]!["290"] = 0;
+                var lines = fixture.Rollback.Supervision[AccountMeasurement.WitnessSource]![witness["declaring_type"]!.GetValue<string>()]!
+                    [witness["method"]!.GetValue<string>()]!["Lines"]!.AsObject();
+                foreach (var key in lines.Select(static row => row.Key).ToArray()) lines[key] = 0;
                 break;
             case "raw-c3": fixture.C3Binding["schema"] = "issue779-c4-account-measurement-v2"; fixture.RebindChain(); break;
             case "c3-failure": fixture.C3Native["exit"] = 1; fixture.RebindChain(); break;
@@ -147,8 +148,13 @@ public sealed class AccountMeasurementLineageTests
                     new XAttribute("outcome", "Passed"), new XAttribute("testName", "ForgeTrust.AppSurface.Evidence.Supervision.Tests."
                         + classes[index % classes.Length] + ".DetachedMetadata" + index))))));
             _trx = Encoding.UTF8.GetBytes(document.ToString(SaveOptions.DisableFormatting));
-            C3Binding["root_file_tests"] = new JsonObject { ["trx_sha256"] = Digest(_trx),
-                ["executed"] = rootCount, ["passed"] = rootCount, ["native_acceptance"] = false };
+            C3Binding["root_file_tests"] = new JsonObject
+            {
+                ["trx_sha256"] = Digest(_trx),
+                ["executed"] = rootCount,
+                ["passed"] = rootCount,
+                ["native_acceptance"] = false
+            };
             Creation.Binding["prior_kind"] = "c3"; Creation.Binding["prior_variant"] = "C3";
             Creation.Binding["prior_artifact_name"] = "issue779-checkpoint3-application-99-1";
             Rollback.Binding["prior_kind"] = "accounts"; Rollback.Binding["prior_variant"] = "C4Accounts";
@@ -158,8 +164,11 @@ public sealed class AccountMeasurementLineageTests
 
         private static JsonArray Cases(string[] names) => new(names.Select(static name => (JsonNode)new JsonObject
         {
-            ["case"] = name, ["passed"] = true, ["groups_empty"] = true,
-            ["final_groups_empty"] = true, ["native_acceptance"] = false
+            ["case"] = name,
+            ["passed"] = true,
+            ["groups_empty"] = true,
+            ["final_groups_empty"] = true,
+            ["native_acceptance"] = false
         }).ToArray());
 
         internal void RebindChain()

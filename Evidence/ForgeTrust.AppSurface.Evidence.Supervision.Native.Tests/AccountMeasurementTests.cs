@@ -21,6 +21,25 @@ public sealed class AccountMeasurementTests
 
         Assert.Equal(AccountMeasurement.WitnessSourceSha256, Convert.ToHexStringLower(SHA256.HashData(witness)));
         Assert.Equal(AccountMeasurement.PartialSourceSha256, Convert.ToHexStringLower(SHA256.HashData(accounts)));
+        var text = System.Text.Encoding.UTF8.GetString(witness);
+        Assert.Equal((AccountMeasurement.CreationWitnessFirstLine, AccountMeasurement.CreationWitnessLastLine),
+            Span("internal static async Task<byte[]> RunAsync(string requestPath, CancellationToken originalToken)",
+                "        return receipt;\n    }"));
+        Assert.Equal((AccountMeasurement.RollbackWitnessFirstLine, AccountMeasurement.RollbackWitnessLastLine),
+            Span("private async Task PrepareAccountMeasurementCollisionAsync(LinuxRunAccountCommand command, CancellationToken token)",
+                "        accountMeasurementSnapshot = await LinuxRunAccountNss.ReadAsync(_owner, token, includeApplication: false)\n"
+                + "            .ConfigureAwait(false);\n    }"));
+
+        (int First, int Last) Span(string signature, string ending)
+        {
+            var first = text.IndexOf(signature, StringComparison.Ordinal);
+            var last = text.IndexOf(ending, StringComparison.Ordinal);
+            Assert.True(first >= 0 && last > first);
+            Assert.Equal(first, text.LastIndexOf(signature, StringComparison.Ordinal));
+            Assert.Equal(last, text.LastIndexOf(ending, StringComparison.Ordinal));
+            return (text[..first].Count(static value => value == '\n') + 1,
+                text[..(last + ending.Length)].Count(static value => value == '\n') + 1);
+        }
     }
 
     /// <summary>Rebinding outer packet digests cannot restore a historical compiler-witness partial.</summary>
@@ -35,6 +54,21 @@ public sealed class AccountMeasurementTests
         const string historical = "25270ce8685d934fc35c65de82118354acabe4d65861355e9b9727d5512fc2b6";
         fixture.Source["files"]![Fixture.AccountPath]!["sha256"] = historical;
         fixture.Binding["current_witness"]!["partial_source_sha256"] = historical;
+        Assert.ThrowsAny<Exception>(() => fixture.ValidateMerged());
+    }
+
+    /// <summary>A consistently rebound old witness hash cannot replace the reviewed policy extraction.</summary>
+    [Theory]
+    [InlineData("C4Accounts")]
+    [InlineData("C4AccountRollback")]
+    public void HistoricalWitnessFingerprintCannotReplaceTheCurrentWitness(string variant)
+    {
+        var fixture = new Fixture(variant);
+        fixture.ConfigureMerged();
+        fixture.ValidateMerged();
+        const string historical = "ab4161ac58b33b8286077f4b9f32945d0f0ef1f08ef0644a4b0961b7309c0340";
+        fixture.Source["files"]![AccountMeasurement.WitnessSource]!["sha256"] = historical;
+        fixture.Binding["current_witness"]!["source_sha256"] = historical;
         Assert.ThrowsAny<Exception>(() => fixture.ValidateMerged());
     }
 
@@ -211,8 +245,12 @@ public sealed class AccountMeasurementTests
             var sourceFiles = new JsonObject();
             foreach (var path in new[] { AccountPath, OwnerPath,
                 ".github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs", ".github/issue779-checkpoint4/run-accounts.py" })
-                sourceFiles[path] = new JsonObject { ["sha256"] = new string('c', 64),
-                    ["git_blob"] = new string('c', 40), ["mode"] = "0644" };
+                sourceFiles[path] = new JsonObject
+                {
+                    ["sha256"] = new string('c', 64),
+                    ["git_blob"] = new string('c', 40),
+                    ["mode"] = "0644"
+                };
             // This deliberately small synthetic capture tests shape only; an integration caller must bind the full real capture.
             Source["schema"] = "issue779-checkpoint2-source-v1";
             Source["source"] = Head; Source["tree"] = new string('c', 40);
@@ -245,20 +283,35 @@ public sealed class AccountMeasurementTests
             Receipt["reservation_failed"] = rollback;
             Receipt["creation_succeeded"] = !rollback; Receipt["identities_published"] = !rollback;
             // UID and GID domains are intentionally allowed to overlap; each domain is internally distinct.
-            Receipt["ids"] = new JsonObject { ["worker_uid"] = 1001, ["subject_uid"] = 1002,
-                ["worker_gid"] = 1001, ["subject_gid"] = 1002, ["results_gid"] = 1003 };
+            Receipt["ids"] = new JsonObject
+            {
+                ["worker_uid"] = 1001,
+                ["subject_uid"] = 1002,
+                ["worker_gid"] = 1001,
+                ["subject_gid"] = 1002,
+                ["results_gid"] = 1003
+            };
             Receipt["operation_failure"] = rollback ? new JsonObject
             {
-                ["account_failure"] = "OperationFailed", ["preparation_stage"] = "UtilityExecute",
-                ["utility_stage"] = "TerminalCheck", ["operation"] = "CreateResultsGroup", ["error_kind"] = "Admission",
-                ["diagnostic_code"] = "ASEVD410", ["exec_main_code"] = 1, ["exec_main_status"] = 1, ["dbus_category"] = null
+                ["account_failure"] = "OperationFailed",
+                ["preparation_stage"] = "UtilityExecute",
+                ["utility_stage"] = "TerminalCheck",
+                ["operation"] = "CreateResultsGroup",
+                ["error_kind"] = "Admission",
+                ["diagnostic_code"] = "ASEVD410",
+                ["exec_main_code"] = 1,
+                ["exec_main_status"] = 1,
+                ["dbus_category"] = null
             } : null;
         }
 
         internal static JsonObject Document() => new()
         {
-            ["DataOnlyType"] = new JsonObject { ["DataOnlyMethod"] = new JsonObject
-                { ["Lines"] = new JsonObject { ["10"] = 1 } } }
+            ["DataOnlyType"] = new JsonObject
+            {
+                ["DataOnlyMethod"] = new JsonObject
+                { ["Lines"] = new JsonObject { ["10"] = 1 } }
+            }
         };
 
         internal void Validate(bool rebind = true)
@@ -282,14 +335,21 @@ public sealed class AccountMeasurementTests
                 ? "ForgeTrust.AppSurface.Evidence.Supervision.LinuxAccountMeasurement/<RunAsync>d__2"
                 : "ForgeTrust.AppSurface.Evidence.Supervision.LinuxRunAccounts/<PrepareAccountMeasurementCollisionAsync>d__56";
             var method = "System.Void " + declaring + "::MoveNext()";
-            Binding["current_witness"] = new JsonObject { ["document"] = AccountMeasurement.WitnessSource,
-                ["declaring_type"] = declaring, ["method"] = method,
+            Binding["current_witness"] = new JsonObject
+            {
+                ["document"] = AccountMeasurement.WitnessSource,
+                ["declaring_type"] = declaring,
+                ["method"] = method,
                 ["source_sha256"] = AccountMeasurement.WitnessSourceSha256,
-                ["partial_source_sha256"] = AccountMeasurement.PartialSourceSha256 };
+                ["partial_source_sha256"] = AccountMeasurement.PartialSourceSha256
+            };
             Supervision[AccountMeasurement.WitnessSource] = new JsonObject
             {
-                [declaring] = new JsonObject { [method] = new JsonObject
-                    { ["Lines"] = new JsonObject { [creation ? "60" : "290"] = 1 } } }
+                [declaring] = new JsonObject
+                {
+                    [method] = new JsonObject
+                    { ["Lines"] = new JsonObject { [creation ? "60" : "330"] = 1 } }
+                }
             };
         }
 
@@ -320,6 +380,7 @@ public sealed class AccountMeasurementTests
     [InlineData("C4AccountRollback", "partial")]
     [InlineData("C4Accounts", "method")]
     [InlineData("C4AccountRollback", "span")]
+    [InlineData("C4AccountRollback", "historical-span")]
     [InlineData("C4Accounts", "schema")]
     public void MergedPacketsRequireTheirOwnExactWitness(string variant, string mutation)
     {
@@ -338,6 +399,7 @@ public sealed class AccountMeasurementTests
             case "partial": witness["partial_source_sha256"] = new string('d', 64); break;
             case "method": witness["method"] = "System.Void Other::MoveNext()"; break;
             case "span": lines.Clear(); lines["1"] = 1; break;
+            case "historical-span": lines.Clear(); lines["290"] = 1; break;
             case "schema": fixture.Binding["schema"] = "issue779-c4-account-measurement-v1"; break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }

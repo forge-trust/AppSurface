@@ -74,6 +74,18 @@ ordinary images continue to require the helper's absence.
 
 ### Reviewed producer-root witness mappings
 
+The [account validator](AccountMeasurement.cs) separately pins the private
+[account measurement source](../../.github/issue779-checkpoint4/measurement/LinuxAccountMeasurement.cs)
+to SHA-256 `36fa9539adae9c8fd4e74e12b923076f8ae7a6fb6ae9ae45c95d455b12ff1848`.
+The reviewed current method spans are `RunAsync` lines 28–239 and
+`PrepareAccountMeasurementCollisionAsync` lines 324–335, including their closing braces.
+The generated state-machine names remain `d__2` and `d__56`. The
+[checkout controls](AccountMeasurementTests.cs) compare the hash and both complete
+spans with the actual source and reject the historical hash and rollback span even
+when outer packet hashes are rebound. Extracting the account settlement policy
+required this explicit mapping refresh; accepting a supplied hash as its own
+expectation would remove the independent source check.
+
 The [producer-root validator](ProducerRootsMeasurement.cs) pins each witness to a
 reviewed document, type, method, source hash and exact line span. The quota witness
 uses the overflow statement at line 173 in
@@ -331,16 +343,20 @@ outside those witnesses. Checkout fingerprint tests, exact method/span matching,
 original image hashes and positive current-source hit requirements remain in force.
 A source fingerprint alone cannot establish native execution or coverage hits.
 
-### Separate application bundle audit measurement
+### Application bundle audit and producer report-discovery measurement
 
 The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) retains a separate
-`application-bundle-tests/application-bundle.trx` and `application_bundle_tests` binding for the
-[six real root filesystem audit controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs).
+`application-bundle-tests/application-bundle.trx` and the existing `application_bundle_tests` binding for
+the six [application bundle audit controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs)
+and eleven [producer report-discovery controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerReportDiscoveryNativeTests.cs).
 [`ApplicationBundleMeasurement.Validate`](ApplicationBundleMeasurement.cs) requires its exact raw SHA-256,
-six executed and passed rows, all six fixed method names once, zero failed/skipped/error counters, and
+seventeen executed and passed rows, all seventeen fixed test names once (including exact theory parameters), zero failed/skipped/error counters, and
 `native_acceptance: false`. The TRX is bounded to 1 MiB and prohibits DTDs.
-The [detached parser controls](ApplicationBundleMeasurementTests.cs) check malformed, missing, extra,
-duplicate and mismatched inputs; they provide no native or acceptance credit.
+The same single collector pass covers both classes; the original six audit rows remain in the same TRX and the
+43-row root report and 44-row supplement stay separate. The [detached parser controls](ApplicationBundleMeasurementTests.cs)
+reject the old six-row-only shape, a missing discovery row, a changed theory parameter, duplicates, malformed
+and mismatched counters, and provide no native or acceptance credit. These seventeen root-only cases are newly
+defined here; no native execution result is claimed by this source change.
 
 The original 43-row root TRX and 44-row supplement remain separate. The pinned standard collector alone
 merges the new actual report into the existing measured report; no hit values or denominators are

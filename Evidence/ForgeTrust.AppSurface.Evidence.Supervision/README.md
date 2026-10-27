@@ -2194,6 +2194,21 @@ failure preservation. The separate [native controls](../ForgeTrust.AppSurface.Ev
 use actual unprivileged Linux descriptors, including an ordinary-file ENOTDIR rejection; they establish
 filesystem behavior only and do not replace the genuine protected consumer controls.
 
+### Producer report discovery
+
+[`LinuxProducerReportDiscovery`](LinuxProducerReportDiscovery.cs) is the bounded descriptor-relative walk used by
+[`LinuxProducerArtifactCustody`](LinuxProducerArtifactCustody.cs) only after its real producer readiness, owner,
+accounts and selected-results checks. It borrows that selected root descriptor, expected UID/GID, original deadline
+and cancellation token, and returns sorted relative report paths as data. It opens no root from a caller path, retains
+no descriptor after returning, and grants no report custody or acceptance authority.
+
+The walk keeps mandatory `openat2` resolution with no fallback, metadata and named-entry rechecks, the 4,096-node
+and 32-component limits, canonical `coverage.cobertura.xml` names, 64-report and 1 MiB per-file limits, and the
+original aggregate-byte and cancellation checks. Reports must be actual regular files; links, special files,
+unexpected names and empty nested directories reject. The [root-native discovery controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerReportDiscoveryNativeTests.cs)
+use an exclusive `/run` fixture with actual descriptors and subject-owned entries. They test filesystem discovery
+only; skipped non-Linux runs are not native evidence and do not stand in for an authentic producer run.
+
 ### Bounded descriptor reads
 
 [`SupervisionBoundedFileRead`](SupervisionBoundedFileRead.cs) shares the identical byte-reading loop from
@@ -2362,7 +2377,10 @@ use real root-owned Linux files to test selected bytes, changed bytes, unexpecte
 cancellation and depth boundaries. They exercise this inventory utility without constructing an application
 owner or proving application/Trusted acceptance. A skipped non-Linux run provides no native proof. The separate C3 collector pass preserves the original
 43-row root and 44-row supplementary TRXs, requires all six fixed bundle-test names with zero skipped or
-failed rows, and lets the pinned standard collector merge its real report. Its exact TRX hash and counts
+failed rows, and lets the pinned standard collector merge its real report. The same fixed collector pass
+also requires all eleven [report-discovery cases](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerReportDiscoveryNativeTests.cs),
+including exact parameterized names, for seventeen rows total. A six-row-only predecessor cannot satisfy
+this measurement. Its exact TRX hash and counts
 travel in `application_bundle_tests`; the downstream native-measurement test revalidates those bytes.
 Only three bounded private retention leaves are added; product byte quotas and the 96 MiB retention total
 remain unchanged.

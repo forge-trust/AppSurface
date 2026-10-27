@@ -10,18 +10,31 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 /// <remarks>Synthetic XML tests validate the parser contract; they do not claim root execution or native acceptance.</remarks>
 public sealed class ApplicationBundleMeasurementTests
 {
+    private const string AuditTestPrefix = "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxApplicationBundleAuditNativeTests.";
+    private const string DiscoveryTestPrefix = "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxProducerReportDiscoveryNativeTests.";
     private static readonly string[] TestNames =
     [
-        "ActualRootTreeInventoryAcceptsSelectedBytesAndRetainsOnlyBorrowedNodes",
-        "ActualExtraFileIsRejectedAfterItsDescriptorJoinsTheCallersQuarantineSet",
-        "ChangedDeclaredBytesAreRejectedAndTheActualTreeRemainsUnmodifiedByAudit",
-        "PreCancelledAuditStopsBeforeOpeningChildrenAndLeavesRootAndSourceBytesIntact",
-        "InvalidNameAndSpecialFilesystemChildrenAreRejectedWithoutChangingTheirSentinel",
-        "ActualThirtySecondDirectoryLevelIsAcceptedAndThirtyThirdIsRejectedAfterRetention",
+        AuditTestPrefix + "ActualRootTreeInventoryAcceptsSelectedBytesAndRetainsOnlyBorrowedNodes",
+        AuditTestPrefix + "ActualExtraFileIsRejectedAfterItsDescriptorJoinsTheCallersQuarantineSet",
+        AuditTestPrefix + "ChangedDeclaredBytesAreRejectedAndTheActualTreeRemainsUnmodifiedByAudit",
+        AuditTestPrefix + "PreCancelledAuditStopsBeforeOpeningChildrenAndLeavesRootAndSourceBytesIntact",
+        AuditTestPrefix + "InvalidNameAndSpecialFilesystemChildrenAreRejectedWithoutChangingTheirSentinel",
+        AuditTestPrefix + "ActualThirtySecondDirectoryLevelIsAcceptedAndThirtyThirdIsRejectedAfterRetention",
+        DiscoveryTestPrefix + "ActualResultsDescriptorDiscoversOnlySortedCanonicalReportPaths",
+        DiscoveryTestPrefix + "NonReportEntriesAndEmptyNestedDirectoriesReject(kind: \"non-report\")",
+        DiscoveryTestPrefix + "NonReportEntriesAndEmptyNestedDirectoriesReject(kind: \"empty-nested-directory\")",
+        DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"symlink\")",
+        DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"hardlink\")",
+        DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"fifo\")",
+        DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"wrong-mode\")",
+        DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"wrong-owner\")",
+        DiscoveryTestPrefix + "SixtyFourthReportIsAcceptedAndTheNextActualReportIsRejected",
+        DiscoveryTestPrefix + "ThirtySecondPathComponentIsAcceptedAndThirtyThirdIsRejected",
+        DiscoveryTestPrefix + "PreCancelledDiscoveryStopsBeforeNativeEnumeration",
     ];
 
     [Fact]
-    public void ExactSixAuditRowsAreAcceptedAsNonAcceptanceMeasurement()
+    public void ExactSeventeenAuditAndDiscoveryRowsAreAcceptedAsNonAcceptanceMeasurement()
     {
         var bytes = Data();
         using var binding = Binding(bytes);
@@ -35,7 +48,7 @@ public sealed class ApplicationBundleMeasurementTests
     [InlineData("executed")]
     [InlineData("passed")]
     [InlineData("native-acceptance")]
-    public void BindingMustDescribeOnlyTheExactSixRowNonAcceptanceTrx(string fault)
+    public void BindingMustDescribeOnlyTheExactSeventeenRowNonAcceptanceTrx(string fault)
     {
         var bytes = Data();
         using var binding = Binding(bytes, fault);
@@ -44,6 +57,9 @@ public sealed class ApplicationBundleMeasurementTests
 
     [Theory]
     [InlineData("missing-row")]
+    [InlineData("six-only")]
+    [InlineData("missing-discovery-case")]
+    [InlineData("mismatched-parameter")]
     [InlineData("duplicate-row")]
     [InlineData("foreign-method")]
     [InlineData("not-passed")]
@@ -72,15 +88,18 @@ public sealed class ApplicationBundleMeasurementTests
     {
         XNamespace ns = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
         var rows = TestNames.Select(name => new XElement(ns + "UnitTestResult",
-            new XAttribute("testName", "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxApplicationBundleAuditNativeTests." + name),
+            new XAttribute("testName", name),
             new XAttribute("outcome", "Passed"))).ToList();
-        if (fault == "missing-row") rows.RemoveAt(rows.Count - 1);
-        if (fault == "duplicate-row") rows[^1].SetAttributeValue("testName", rows[0].Attribute("testName")!.Value);
-        if (fault == "foreign-method") rows[^1].SetAttributeValue("testName", "ForgeTrust.AppSurface.Evidence.Supervision.Tests.OtherAuditTests.Unselected");
+        if (fault == "six-only") rows.RemoveRange(6, rows.Count - 6);
+        if (fault is "missing-row" or "missing-discovery-case") rows.RemoveAt(rows.Count - 1);
+        if (fault == "duplicate-row") rows[^1].SetAttributeValue("testName", rows[6].Attribute("testName")!.Value);
+        if (fault == "foreign-method") rows[^1].SetAttributeValue("testName", DiscoveryTestPrefix + "Unselected");
+        if (fault == "mismatched-parameter") rows[9].SetAttributeValue("testName",
+            DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"not-symlink\")");
         if (fault == "not-passed") rows[^1].SetAttributeValue("outcome", "NotExecuted");
         var counters = new XElement(ns + "Counters",
-            new XAttribute("total", 6), new XAttribute("executed", 6),
-            new XAttribute("passed", 6),
+            new XAttribute("total", 17), new XAttribute("executed", 17),
+            new XAttribute("passed", 17),
             new XAttribute("failed", fault == "counter-mismatch" ? 1 : 0),
             new XAttribute("error", 0), new XAttribute("notExecuted", fault == "nonzero-skip-counter" ? 1 : 0),
             new XAttribute("warning", 0), new XAttribute("aborted", 0), new XAttribute("inconclusive", 0),
@@ -100,8 +119,8 @@ public sealed class ApplicationBundleMeasurementTests
         var binding = new JsonObject
         {
             ["trx_sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes)),
-            ["executed"] = 6,
-            ["passed"] = 6,
+            ["executed"] = 17,
+            ["passed"] = 17,
             ["native_acceptance"] = false,
         };
         if (fault == "missing-binding-field") binding.Remove("passed");

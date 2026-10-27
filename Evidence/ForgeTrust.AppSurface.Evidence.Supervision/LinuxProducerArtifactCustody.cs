@@ -1,4 +1,3 @@
-using System.Text;
 using ForgeTrust.AppSurface.Evidence.Contracts;
 using Microsoft.Win32.SafeHandles;
 using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxFileSystem;
@@ -15,12 +14,10 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 internal sealed class LinuxProducerArtifactCustody : IDisposable
 {
     internal const int MaximumRequestedChunkBytes = 128 * 1024;
-    private const int MaximumDiscoveryNodes = 4096;
     private const uint DirectoryMode = 0x41c0; // 0700.
     private const ulong PathFlags = 0x200000 | 0x80000; // O_PATH | O_CLOEXEC.
     private const ulong DirectoryFlags = 0x10000 | 0x80000; // O_DIRECTORY | O_CLOEXEC.
     private const ulong AncestorResolution = 0x02 | 0x04 | 0x08;
-    private const ulong ChildResolution = AncestorResolution | 0x01;
     private const string ReportName = "coverage.cobertura.xml";
 
     private readonly object _gate = new();
@@ -94,7 +91,7 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
             var gid = accounts.SubjectGid;
             using var discovery = SelectedResultsRoot.Open(selected.Path, selected.Metadata, uid, gid,
                 input.Deadline, token);
-            var paths = DiscoverReports(discovery.Root, uid, gid, input.Deadline, token);
+            var paths = LinuxProducerReportDiscovery.Discover(discovery.Root, uid, gid, input.Deadline, token);
             var inventoryPaths = ValidateReportPaths(paths);
             discovery.Recheck(input.Deadline, token);
 
@@ -209,92 +206,6 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
         if (validated.Any(static path => !StringComparer.Ordinal.Equals(
                 path[(path.LastIndexOf('/') + 1)..], ReportName))) throw Invalid();
         return validated;
-    }
-
-    private static string[] DiscoverReports(SafeFileHandle root, uint uid, uint gid,
-        LinuxInputDeadline deadline, CancellationToken token)
-    {
-        var paths = new List<string>();
-        long total = 0;
-        var nodes = 1;
-        Visit(root, string.Empty, 0, uid, gid, deadline, token, paths, ref nodes, ref total);
-        return paths.Order(StringComparer.Ordinal).ToArray();
-    }
-
-    private static void Visit(SafeFileHandle directory, string prefix, int depth, uint uid, uint gid,
-        LinuxInputDeadline deadline, CancellationToken token, List<string> paths, ref int nodes, ref long total)
-    {
-        deadline.Check(token);
-        var before = LinuxProtectedMetadata.From(StatFd(directory));
-        LinuxRetainedReportSet.RequireMetadata(before, true, uid, gid);
-        var names = ReadNames(directory, before, deadline, token);
-        foreach (var name in names)
-        {
-            deadline.Check(token);
-            if (++nodes > MaximumDiscoveryNodes) throw Invalid();
-            var path = prefix.Length == 0 ? name : prefix + "/" + name;
-            if (path.Split('/').Length > 32 || Encoding.UTF8.GetByteCount(path) > 4095) throw Invalid();
-
-            using var probe = OpenAt2(Fd(directory), name, PathFlags, 0, ChildResolution);
-            var metadata = LinuxProtectedMetadata.From(StatFd(probe));
-            deadline.Check(token);
-            var type = metadata.Mode & 0xf000;
-            if (type == 0x4000)
-            {
-                LinuxRetainedReportSet.RequireMetadata(metadata, true, uid, gid);
-                using var child = OpenAt2(Fd(directory), name, DirectoryFlags, 0, ChildResolution);
-                var opened = LinuxProtectedMetadata.From(StatFd(child));
-                deadline.Check(token);
-                if (!opened.SameAncestorAs(metadata)) throw Invalid();
-                Visit(child, path, depth + 1, uid, gid, deadline, token, paths, ref nodes, ref total);
-                RequireNamed(directory, name, metadata, directory: true, uid, gid, deadline, token);
-                continue;
-            }
-
-            if (type != 0x8000 || !StringComparer.Ordinal.Equals(name, ReportName)) throw Invalid();
-            LinuxRetainedReportSet.RequireMetadata(metadata, false, uid, gid);
-            if (paths.Count >= LinuxRetainedReportSet.MaximumFiles) throw Invalid();
-            total = LinuxRetainedReportSet.AddLength(total, metadata.Length);
-            paths.Add(path);
-            RequireNamed(directory, name, metadata, directory: false, uid, gid, deadline, token);
-        }
-
-        var after = LinuxProtectedMetadata.From(StatFd(directory));
-        LinuxRetainedReportSet.RequireMetadata(after, true, uid, gid);
-        if (!after.SameAncestorAs(before)
-            || !ReadNames(directory, after, deadline, token).SequenceEqual(names, StringComparer.Ordinal)) throw Invalid();
-        if (depth > 0 && names.Length == 0) throw Invalid();
-        deadline.Check(token);
-    }
-
-    private static string[] ReadNames(SafeFileHandle directory, LinuxProtectedMetadata expected,
-        LinuxInputDeadline deadline, CancellationToken token)
-    {
-        deadline.Check(token);
-        using var fresh = OpenAt2(Fd(directory), ".", DirectoryFlags, 0, ChildResolution);
-        var opened = LinuxProtectedMetadata.From(StatFd(fresh));
-        if (!opened.SameAncestorAs(expected)) throw Invalid();
-        var buffer = new byte[32 * 1024];
-        var names = SupervisionDirectoryRead.ReadActual(fresh, buffer,
-            () => deadline.Check(token), () => deadline.Check(token),
-            MaximumDiscoveryNodes, MaximumDiscoveryNodes, null, Invalid);
-        deadline.Check(token);
-        return names;
-    }
-
-    private static void RequireNamed(SafeFileHandle parent, string name, LinuxProtectedMetadata expected,
-        bool directory, uint uid, uint gid, LinuxInputDeadline deadline, CancellationToken token)
-    {
-        deadline.Check(token);
-        using var named = OpenAt2(Fd(parent), name, PathFlags, 0, ChildResolution);
-        var current = LinuxProtectedMetadata.From(StatFd(named));
-        deadline.Check(token);
-        if (directory)
-        {
-            LinuxRetainedReportSet.RequireMetadata(current, true, uid, gid);
-            if (!current.SameAncestorAs(expected)) throw Invalid();
-        }
-        else if (!LinuxReportCustodyMetadata.SameFileSample(current, expected)) throw Invalid();
     }
 
     private void CheckWork(CancellationToken token)
