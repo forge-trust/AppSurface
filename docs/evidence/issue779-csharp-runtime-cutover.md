@@ -57,6 +57,23 @@ cleanup. The follow-up tool diagnostic now retains runner failure code plus an a
 category and numeric HRESULT, preserving both failures without raw exception text. It does not waive cleanup
 or establish that the Windows cause has been fixed. Fresh exact-source results remain required.
 
+The [revision-106 portable run](https://github.com/forge-trust/AppSurface/actions/runs/40473383309)
+passed all six jobs on its first attempt. All six original procedure archives were checked against provider
+size/digest metadata, plan/report bindings and artifact hashes, with all authority flags false. Windows storage
+completed the apply command and cleanup; this does not identify or repair the earlier intermittent failure.
+The [revision-106 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40473383872) passed all
+fourteen worker selectors, reconciliation and repaired parent semantic controls, but failed the SDK negative
+consumer before worker admission. Original coverage shows the application descriptor writer serializing the new
+ordinary retention property into the strict eight-field v2 producer object, which the unchanged parser rejects.
+
+The descriptor regression reproduces that mismatch before the correction. The writer now explicitly projects
+the existing eight fields and rejects unsupported retention or explicit execution settings before projection;
+the parser, admission checks and gate remain closed and unchanged. Local descriptor controls pass 35/35,
+and the full supervision suite passes 3,105 with 91 Linux/root-only skips. The separate exact-source
+[focused Linux file-custody run](https://github.com/forge-trust/AppSurface/actions/runs/40473383920)
+retained 29 passing filesystem/report tests and a separate four passing actual peer-credential tests.
+These do not replace the blocked consumer/measurement chain or numerical gate.
+
 Revision 101's existing observer subsequently recorded [run 40445212390](https://github.com/forge-trust/AppSurface/actions/runs/40445212390)
 terminal failure at 2026-10-27 07:02:45 UTC. All prerequisite jobs succeeded; the gate
 stopped in the native-data validator with the known `Expected: 41 / Actual: 43` account-lineage

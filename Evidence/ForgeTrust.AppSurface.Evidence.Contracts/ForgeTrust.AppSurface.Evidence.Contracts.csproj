@@ -19,6 +19,7 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Supervision.Tests" />
     <InternalsVisibleTo Include="EvidenceHost.LifecycleWorker" />
     <InternalsVisibleTo Include="EvidenceHost.ControlProtocolWorker" />
   </ItemGroup>

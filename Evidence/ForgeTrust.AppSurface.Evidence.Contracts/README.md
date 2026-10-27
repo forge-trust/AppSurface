@@ -50,6 +50,8 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 
 `EvidenceProducerDeclaration.CoverageExecution` is an optional immutable `EvidenceCoverageExecutionOptions` record for ordinary built-in coverage runs. The planner validates configuration as a simple identifier, parallelism from 1 through 32, and test results as `none` or `junit`; validated values are forwarded to the ordinary coverage engine. `CoverageArtifactRetention` supports `managed` and `full`. Neither property changes coverage filters, gates or source scope. These broader options are not accepted by the fixed protected restricted adapter, whose command remains Debug, serial and without managed test results; restricted declarations must omit execution options or state those exact defaults and must use managed retention. See the [restricted registration contract](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration) before selecting options for a protected declaration.
 
+The [closed v2 application descriptor](../ForgeTrust.AppSurface.Evidence.Supervision/README.md#worker-descriptor-publication-data) has a narrower representation: omit `CoverageExecution` entirely and use managed retention. Its eight-field producer wire cannot represent an explicit execution object, even one spelling the in-memory defaults, and rejects it before serialization rather than silently dropping it.
+
 ### Bounded JSON input
 
 `EvidenceCanonicalJson.Deserialize<T>(ReadOnlySpan<byte>)` preserves the existing in-memory entry point and enforces a protected **20 MiB** input ceiling. Use `DeserializeAsync<T>(Stream, maximumBytes, cancellationToken)` when reading a file or another stream: it counts bytes while reading, does not depend on seekability or advertised length, and stops after observing the first byte over the limit, before parsing or allocating a full document. The stream remains owned by the caller. `maximumBytes` may lower the ceiling (including zero) but cannot raise it. The span overload with an explicit limit is available for callers that already hold bytes.
@@ -284,6 +286,12 @@ The five positive stage caps retain the existing ceilings: admission 30 seconds,
 Every object at every depth rejects missing, unknown, duplicated or case-aliased fields, null required values and wrong JSON types. Application metadata is bounded to 1 MiB of UTF-8 JSON. Arrays are copied into read-only collections; records retain no `JsonDocument` lifetime dependency. Descriptor errors produce fixed `ASEVD402` text without echoing supplied values.
 
 Resource objects require `id`, `readiness` (`aspire_health` or `completion`), `deadline_seconds` (1–120) and `requires` (at most 16 unique resource IDs). Producer objects require `id`, `kind`, `version`, `required_resources` (at most 16 unique IDs), `assertion_ids` (at most 128 unique nonblank strings, each at most 128 characters), `artifact_slots` (at most 128 unique logical names), `timeout_seconds` (1–600) and `coverage_gate`. A declaration's kind/version is data; only the protected catalogue may authorize an implementation.
+
+Those eight producer fields remain the complete v2 wire shape. The typed declaration reconstructs the
+ordinary record's managed-retention and null-execution defaults; neither additive property is a wire field.
+The [root descriptor writer](../ForgeTrust.AppSurface.Evidence.Supervision/README.md#worker-descriptor-publication-data)
+projects the fixed fields and rejects unsupported settings before serialization. Sending either additive
+field, even with a default value, remains an unknown-field error in the strict parser.
 
 Artifact slots require `logical_name`, `relative_root`, `media_type`, `required` (JSON Boolean) and `maximum_bytes` (0–256 MiB). A non-null coverage gate requires all six fields: `min_line_percent`, `min_branch_percent`, nullable `min_patch_line_percent`, nullable `min_patch_branch_percent`, `patch_line_mode` (`measurable` or `codecov`) and `tolerance_percent`. Percentages are JSON numbers from 0 through 100. `coverage_gate` itself may be explicit JSON null; omitting it is invalid. No declaration field is silently defaulted.
 

@@ -455,6 +455,16 @@ as v1: 38 required fields plus nullable `diff_file`, `diff_sha256` and `solution
 worker unit/cgroup come from the generation; provider/platform are the existing `github-actions`/`linux-x64`,
 mode is observation and proof digest is empty. No application metadata or Trusted enrollment is introduced.
 
+When root-selected application metadata is present, the same serializer emits the existing v2 application
+descriptor and validates it through the [closed application protocol](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#closed-descriptor-schema).
+`EvidenceApplicationDescriptorData.Serialize` projects each producer's eight existing wire fields explicitly:
+ID, kind, version, required resources, assertions, artifact slots, timeout and coverage gate. The protocol
+implicitly uses managed retention and omitted execution settings. Full retention or any explicit execution
+object rejects with `ASEVD402` before serialization, including an explicit object spelling default values.
+Use omitted settings for this closed v2 path; the wider ordinary producer envelope does not extend its wire
+grammar. This prevents new public record properties from leaking into a strict protected descriptor or being
+silently discarded. Gate thresholds, source scope, process capabilities and admission checks are unchanged.
+
 The serializer checks the complete fixed layout/account relation and existing Contracts structural parsers.
 `LinuxWorkspaceLayout.AccountData` retains all five immutable account scalars: directory owners alone do not
 contain the subject's separate primary group and cannot substantiate that complete comparison.
