@@ -348,7 +348,8 @@ public sealed class BoundedGcloudExecutionReaderTests
 
         public void Dispose()
         {
-            try { File.Delete(Path); } catch { }
+            try { File.Delete(Path); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
         }
     }
 }

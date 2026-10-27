@@ -14,7 +14,7 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
     [MemberData(nameof(MalformedArguments))]
     public async Task RunAsync_RejectsMalformedObserveArgumentsWithoutEchoingRawInput(string[] args)
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var original = Environment.ExitCode;
         try
         {
@@ -34,7 +34,7 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
     [MemberData(nameof(MixedCaseMalformedArguments))]
     public async Task RunAsync_MixedCaseMalformedAdmissionUsesSafeJsonBeforeCliFx(string[] args)
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var original = Environment.ExitCode;
         try
         {
@@ -71,7 +71,7 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
     [Fact]
     public async Task RunAsync_AllowsHelpThroughNormalCliFxHelpPath()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var original = Environment.ExitCode;
         try
         {
@@ -87,7 +87,7 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
     [Fact]
     public async Task RunAsync_MalformedJsonAdmissionUsesConfiguredConsoleAndSafeEnvelope()
     {
-        var console = new FakeInMemoryConsole();
+        using var console = new FakeInMemoryConsole();
         var original = Environment.ExitCode;
         try
         {
