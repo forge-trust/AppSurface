@@ -51,7 +51,8 @@ public sealed class CloudTasksNeutralPackageContractTests
         Assert.Equal(expected, document.RootElement.GetProperty("Dependencies").GetProperty("Groups")[0].GetProperty("Dependencies")[0].GetProperty("Version").GetString());
     }
 
-    // protects=dependency target frameworks and selection metadata are part of the package contract; fails_when=framework, ID, range, include/exclude or custom attributes differ invisibly; no_claim=does not prove effective transitive restore.
+    // Value: protects=dependency target frameworks and selection metadata are part of the package contract; fails_when=framework-specific assembly entries collapse or sort inconsistently;
+    // why_new=CI patch target identifies the secondary selection-metadata ordering path; seam=none; no_claim=does not prove effective transitive restore.
     [Fact]
     public void Read_PreservesTargetFrameworksRangesAndMetadataAttributes()
     {
@@ -59,7 +60,7 @@ public sealed class CloudTasksNeutralPackageContractTests
             <package><metadata><dependencies>
               <group targetFramework="net10.0"><dependency id="System.Text.Json" version="[10.0.0,11.0.0)" include="Runtime" exclude="Build" custom="keep" /></group>
               <group targetFramework="netstandard2.0"><dependency id="System.Text.Json" version="[9.0.0,10.0.0)" /></group>
-            </dependencies><frameworkAssemblies><frameworkAssembly assemblyName="System.Xml" targetFramework="net10.0" /></frameworkAssemblies>
+            </dependencies><frameworkAssemblies><frameworkAssembly assemblyName="System.Xml" targetFramework="net10.0" /><frameworkAssembly assemblyName="System.Xml" targetFramework="net9.0" /></frameworkAssemblies>
             <references><group targetFramework="net10.0"><reference file="AppSurface.dll" condition="x" /></group></references>
             </metadata></package>
             """);
@@ -73,6 +74,9 @@ public sealed class CloudTasksNeutralPackageContractTests
         var frameworkAssembly = root.GetProperty("FrameworkAssemblies").GetProperty("Items")[0];
         Assert.Equal("System.Xml", frameworkAssembly.GetProperty("Name").GetString());
         Assert.Contains(frameworkAssembly.GetProperty("Attributes").EnumerateArray(), attribute => attribute.GetProperty("Name").GetString() == "targetFramework" && attribute.GetProperty("Value").GetString() == "net10.0");
+        var frameworkAssemblies = root.GetProperty("FrameworkAssemblies").GetProperty("Items");
+        Assert.Equal(2, frameworkAssemblies.GetArrayLength());
+        Assert.Contains(frameworkAssemblies[1].GetProperty("Attributes").EnumerateArray(), attribute => attribute.GetProperty("Name").GetString() == "targetFramework" && attribute.GetProperty("Value").GetString() == "net9.0");
         var reference = root.GetProperty("References").GetProperty("Groups")[0];
         Assert.Equal("net10.0", reference.GetProperty("TargetFramework").GetString());
         Assert.Contains(reference.GetProperty("References")[0].GetProperty("Attributes").EnumerateArray(), attribute => attribute.GetProperty("Name").GetString() == "condition" && attribute.GetProperty("Value").GetString() == "x");
@@ -119,9 +123,14 @@ public sealed class CloudTasksNeutralPackageContractTests
             CloudTasksNeutralPackageContract.Read(changedPackage.Path, Version));
     }
 
-    // protects=malformed or ambiguous packed nuspecs do not produce evidence; fails_when=duplicate/missing dependency contracts are canonicalized as a clean empty graph; no_claim=does not replace ZIP safety limits in package validation.
+    // Value: protects=malformed or ambiguous packed nuspecs do not produce evidence; fails_when=invalid XML/root or missing/unknown dependency contracts produce a clean graph;
+    // why_new=CI patch targets expose untested malformed XML and unsupported top-level dependency paths; seam=none; no_claim=does not replace ZIP safety limits in package validation.
     [Theory]
+    [InlineData("<package>", "malformed XML")]
+    [InlineData("<other><metadata><dependencies /></metadata></other>", "root must be 'package'")]
+    [InlineData("<package />", "no metadata")]
     [InlineData("<package><metadata></metadata></package>", "no dependencies contract")]
+    [InlineData("<package><metadata><dependencies><other /></dependencies></metadata></package>", "unsupported element 'other'")]
     [InlineData("<package><metadata><dependencies><group targetFramework=\"net10.0\"/><group targetFramework=\"net10.0\"/></dependencies></metadata></package>", "repeat targetFramework")]
     [InlineData("<package><metadata><dependencies><group /></dependencies></metadata></package>", "missing targetFramework")]
     [InlineData("<package><metadata><dependencies><group targetFramework=\"net10.0\"><other /></group></dependencies></metadata></package>", "unsupported element")]
@@ -154,9 +163,11 @@ public sealed class CloudTasksNeutralPackageContractTests
         Assert.Contains(attributes.EnumerateArray(), value => value.GetProperty("Name").GetString() == "{urn:proof}include" && value.GetProperty("Value").GetString() == "runtime");
     }
 
-    // protects=framework and reference selection metadata cannot be silently discarded; fails_when=unsupported frameworkReferences or ambiguous reference/framework records produce equal contracts; no_claim=does not parse framework reference semantics.
+    // Value: protects=framework and reference selection metadata cannot be silently discarded; fails_when=unsupported framework elements or ambiguous records produce a clean contract;
+    // why_new=CI patch targets expose the unsupported frameworkAssemblies child rejection; seam=none; no_claim=does not parse framework reference semantics.
     [Theory]
     [InlineData("<frameworkReferences><frameworkReference targetFramework=\"net10.0\" /></frameworkReferences>", "framework references are not supported")]
+    [InlineData("<frameworkAssemblies><other /></frameworkAssemblies>", "unsupported element")]
     [InlineData("<frameworkAssemblies><frameworkAssembly assemblyName=\"A\"/><frameworkAssembly assemblyName=\"A\"/></frameworkAssemblies>", "repeats 'A'")]
     [InlineData("<frameworkAssemblies><frameworkAssembly /></frameworkAssemblies>", "requires 'assemblyName'")]
     [InlineData("<references><group /><group /></references>", "missing targetFramework")]

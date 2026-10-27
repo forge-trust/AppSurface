@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests
 {
@@ -135,21 +136,24 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Contains("dependency graph changed", exception.Message, StringComparison.Ordinal);
         }
 
-        // protects=external neutral dependency versions and SHA512 content identity stay pinned; fails_when=an upstream version or bytes change undetected; no_claim=does not verify signatures or package provenance.
-        [Fact]
-        public void AssertNeutralGraph_RejectsExternalVersionOrContentHashDrift()
+        // protects=external neutral dependency versions and SHA512 content identity stay pinned; fails_when=an upstream version, bytes, or an external node omission changes undetected; why_new=version drift is caught by graph shape while this also checks external hash and node-presence guards; seam=none; no_claim=does not verify signatures or package provenance.
+        [Theory]
+        [InlineData("version")]
+        [InlineData("hash")]
+        [InlineData("missing")]
+        public void AssertNeutralGraph_RejectsExternalVersionOrContentHashDrift(string drift)
         {
             var baseline = Graph(Node("System.Text.Json", "10.0.0", "before"));
-            var candidate = Graph(Node("System.Text.Json", "10.0.1", "after"));
+            var candidate = drift switch
+            {
+                "version" => Graph(Node("System.Text.Json", "10.0.1", "after")),
+                "hash" => Graph(Node("System.Text.Json", "10.0.0", "after")),
+                _ => Graph()
+            };
 
             var exception = Assert.Throws<PackageIndexException>(
                 () => CloudTasksPackageConsumerProof.AssertNeutralGraph(baseline, candidate));
-            Assert.Contains("dependency graph changed", exception.Message, StringComparison.Ordinal);
-
-            var sameVersionDifferentHash = Graph(Node("System.Text.Json", "10.0.0", "after"));
-            var hashException = Assert.Throws<PackageIndexException>(
-                () => CloudTasksPackageConsumerProof.AssertNeutralGraph(baseline, sameVersionDifferentHash));
-            Assert.Contains("content hashes", hashException.Message, StringComparison.Ordinal);
+            Assert.Contains(drift == "hash" ? "content hashes" : "dependency graph changed", exception.Message, StringComparison.Ordinal);
         }
 
         // protects=only first-party coordinated package IDs receive version normalization; fails_when=provider package versions are normalized or first-party IDs are missed; no_claim=does not validate package IDs against a manifest.
@@ -175,18 +179,23 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             bool expected)
             => Assert.Equal(expected, PackagePublishPlanResolver.ShouldIncludeForVerification(packageId, Enum.Parse<PackagePublishDecision>(decision), blocker, verifyBlocked));
 
-        // protects=neutral consumer project files cannot directly reference Google Tasks SDK packages; fails_when=a forbidden PackageReference is absent from reported violations; no_claim=does not inspect package transitive edges.
-        [Fact]
-        public void FindNeutralProjectReferenceViolations_RejectsDirectGooglePackageReferenceFromNeutralConsumer()
+        // protects=neutral consumer projects cannot reference the SDK or optional Cloud Tasks package; fails_when=a forbidden package or project reference escapes detection;
+        // why_new=CI reports the project-reference guard uncovered; seam=none; no_claim=does not inspect transitive restore edges.
+        [Theory]
+        [InlineData("PackageReference", "Google.Cloud.Tasks.V2")]
+        [InlineData("PackageReference", "ForgeTrust.AppSurface.Durable.CloudTasks")]
+        [InlineData("ProjectReference", "ForgeTrust.AppSurface.Durable.CloudTasks")]
+        public void FindNeutralProjectReferenceViolations_RejectsDirectGooglePackageReferenceFromNeutralConsumer(string referenceType, string packageId)
         {
             var root = Path.Combine(Path.GetTempPath(), "cloudtasks-neutral-fixture-" + Guid.NewGuid().ToString("N"));
             var consumer = Path.Combine(root, "Durable", "packed-consumers", "Adopter");
             Directory.CreateDirectory(consumer);
-            File.WriteAllText(Path.Combine(consumer, "Adopter.csproj"), "<Project><ItemGroup><PackageReference Include=\"Google.Cloud.Tasks.V2\" /></ItemGroup></Project>");
+            var reference = referenceType == "ProjectReference" ? packageId + ".csproj" : packageId;
+            File.WriteAllText(Path.Combine(consumer, "Adopter.csproj"), $"<Project><ItemGroup><{referenceType} Include=\"{reference}\" /></ItemGroup></Project>");
             try
             {
                 var violations = CloudTasksPackageConsumerProof.FindNeutralProjectReferenceViolations(root);
-                Assert.Contains("Durable/packed-consumers/Adopter/Adopter.csproj:Google.Cloud.Tasks.V2", violations, StringComparer.Ordinal);
+                Assert.Contains($"Durable/packed-consumers/Adopter/Adopter.csproj:{packageId}", violations, StringComparer.Ordinal);
             }
             finally { Directory.Delete(root, recursive: true); }
         }
@@ -280,21 +289,52 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Empty(runner.ConsumerRestoreRequests);
         }
 
-        // protects=runtime package lock closure is complete and content-bound; fails_when=a removed/new transitive node, changed lock hash or missing direct edge is accepted; no_claim=fixture assets do not replace an actual NuGet restore.
+        // protects=runtime package lock closure is complete, content-bound, and rooted in the exact direct packages; fails_when=a missing target, removed/new node, changed lock hash/edge, or missing root is accepted; why_new=the existing table varies asset-graph mutations across each independent lock invariant; seam=none; no_claim=fixture assets do not replace an actual NuGet restore.
         [Theory]
+        [InlineData("missing-target")]
         [InlineData("missing")]
         [InlineData("extra")]
         [InlineData("hash")]
         [InlineData("edge")]
+        [InlineData("root")]
+        [InlineData("node")]
         public async Task RunAsync_RejectsCloudTasksLockClosureDrift(string changedPart)
         {
             using var fixture = new PackedProofFixture();
+            if (changedPart == "missing-target")
+            {
+                using var lockDocument = JsonDocument.Parse(File.ReadAllBytes(fixture.LockFilePath));
+                var lockJson = JsonSerializer.Deserialize<JsonObject>(lockDocument.RootElement.GetRawText())!;
+                lockJson["dependencies"]!.AsObject().Remove("net10.0");
+                var lockPath = Path.Combine(fixture.ArtifactsDirectory, "missing-target-lock.json");
+                File.WriteAllText(lockPath, lockJson.ToJsonString());
+                var assetsPath = WriteAssets(new
+                {
+                    targets = new Dictionary<string, object> { ["net10.0"] = new Dictionary<string, object>() },
+                    libraries = new Dictionary<string, object>()
+                });
+                try
+                {
+                    var missingTargetError = Assert.Throws<PackageIndexException>(() => CloudTasksPackageConsumerProof.ValidateCloudTasksRuntimeGraph(assetsPath, lockPath));
+                    Assert.Contains("does not contain the net10.0 target closure", missingTargetError.Message, StringComparison.Ordinal);
+                }
+                finally
+                {
+                    File.Delete(assetsPath);
+                }
+                return;
+            }
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, invalidCloudTasksGraph: changedPart);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
                 new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
-            Assert.Contains(changedPart == "edge" ? "direct packages.lock.json roots" : "differs from packages.lock.json", error.Message, StringComparison.Ordinal);
+            Assert.Contains(changedPart switch
+            {
+                "edge" or "root" => "direct packages.lock.json roots",
+                "node" => "dependency edges differ",
+                _ => "differs from packages.lock.json"
+            }, error.Message, StringComparison.Ordinal);
             Assert.Equal(2, runner.ConsumerRestoreRequests.Count);
         }
 
@@ -641,7 +681,8 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 using var lockDocument = JsonDocument.Parse(File.ReadAllBytes(lockFilePath));
                 var target = new Dictionary<string, object>();
                 var libraries = new Dictionary<string, object>();
-                var lockedPackages = lockDocument.RootElement.GetProperty("dependencies").GetProperty("net10.0").EnumerateObject().ToArray();
+                var lockedTarget = lockDocument.RootElement.GetProperty("dependencies").GetProperty("net10.0");
+                var lockedPackages = lockedTarget.EnumerateObject().ToArray();
                 foreach (var package in lockedPackages)
                 {
                     if (invalidCloudTasksGraph == "missing" && string.Equals(package.Name, "Google.Api.Gax", StringComparison.OrdinalIgnoreCase)) continue;
@@ -650,18 +691,22 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     var dependencies = package.Value.TryGetProperty("dependencies", out var dependencySet)
                         ? dependencySet.EnumerateObject().ToDictionary(dependency => dependency.Name, dependency => dependency.Value.GetString()!, StringComparer.OrdinalIgnoreCase)
                         : new Dictionary<string, string>();
+                    if (invalidCloudTasksGraph == "node" && package.Name == "Google.Cloud.Tasks.V2") dependencies.Remove("Google.Api.Gax.Grpc");
                     target[key] = new { type = "package", dependencies };
                     var hash = package.Value.GetProperty("contentHash").GetString();
                     libraries[key] = new { type = "package", sha512 = invalidCloudTasksGraph == "hash" && package.Name == "Google.Api.Gax" ? "altered-content-hash" : hash };
                 }
                 var cloudTasksKey = $"ForgeTrust.AppSurface.Durable.CloudTasks/{candidateVersion}";
-                var directPackageDependencies = lockDocument.RootElement.GetProperty("dependencies").GetProperty("net10.0")
+                var directPackageDependencies = lockedTarget
                     .EnumerateObject()
                     .Where(static package => string.Equals(package.Value.GetProperty("type").GetString(), "Direct", StringComparison.Ordinal))
                     .ToDictionary(static package => package.Name, static package => package.Value.GetProperty("requested").GetString()!, StringComparer.OrdinalIgnoreCase);
-                if (invalidCloudTasksGraph == "edge") directPackageDependencies.Remove("Grpc.Net.Client");
-                target[cloudTasksKey] = new { type = "package", dependencies = directPackageDependencies };
-                libraries[cloudTasksKey] = new { type = "package", sha512 = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(candidatePackages["ForgeTrust.AppSurface.Durable.CloudTasks"]))) };
+                if (invalidCloudTasksGraph is "edge" or "root") directPackageDependencies.Remove("Grpc.Net.Client");
+                if (invalidCloudTasksGraph != "root")
+                {
+                    target[cloudTasksKey] = new { type = "package", dependencies = directPackageDependencies };
+                    libraries[cloudTasksKey] = new { type = "package", sha512 = Convert.ToBase64String(SHA512.HashData(File.ReadAllBytes(candidatePackages["ForgeTrust.AppSurface.Durable.CloudTasks"]))) };
+                }
                 var consumerDiKey = "Microsoft.Extensions.DependencyInjection/10.0.8";
                 target[consumerDiKey] = new { type = "package", dependencies = new Dictionary<string, string>() };
                 libraries[consumerDiKey] = new { type = "package", sha512 = "consumer-di-hash" };
