@@ -115,7 +115,7 @@ public sealed class NativeValidationProcedureTests
         Assert.Equal(1, following.RunCount);
         var results = report.ProducerResults.ToDictionary(static result => result.ProducerId, StringComparer.Ordinal);
         Assert.Equal(EvidenceProducerOutcome.Failed, results[throwing.Id].Outcome);
-        Assert.Equal("Procedure failed.", results[throwing.Id].Diagnostic);
+        Assert.StartsWith("Procedure failed (invalid-operation; HRESULT 0x", results[throwing.Id].Diagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain("native validation private exception text", results[throwing.Id].Diagnostic, StringComparison.Ordinal);
         Assert.Empty(results[throwing.Id].SatisfiedAssertionIds);
         Assert.Equal(EvidenceProducerOutcome.Passed, results[following.Id].Outcome);
@@ -162,7 +162,7 @@ public sealed class NativeValidationProcedureTests
         var result = Assert.Single(report.ProducerResults);
         Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
         Assert.Empty(result.SatisfiedAssertionIds);
-        Assert.Equal("Producer cleanup failed.", result.Diagnostic);
+        Assert.StartsWith("Producer cleanup failed (io; HRESULT 0x", result.Diagnostic, StringComparison.Ordinal);
         Assert.Equal(1, producer.DisposeCount);
     }
 
@@ -453,6 +453,82 @@ public sealed class NativeValidationProcedureTests
     }
 
     [Fact]
+    public async Task RunAsync_PreservesPrimaryAndCleanupFailureCategoriesWithoutPrivateDetails()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = Producer("packed-storage", "storage/result@1", 600, async (context, token) =>
+        {
+            await context.Artifacts!.WriteAsync("result", "proof/result.json", "partial"u8.ToArray(), token);
+            throw new InvalidOperationException("private primary failure; type name must not escape");
+        }, dispose: () => throw new InjectedIOException("private cleanup detail", unchecked((int)0x80070020)));
+
+        var report = await NativeValidationProcedure.RunAsync(Plan(producer), [producer], Path.Join(directory.Path, "output"), CancellationToken.None);
+
+        Assert.False(report.ProcedurePassed);
+        Assert.False(report.CleanupCompleted);
+        var result = Assert.Single(report.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("Producer cleanup failed (io; HRESULT 0x80070020).", result.Diagnostic, StringComparison.Ordinal);
+        Assert.Contains("Prior failure: Procedure failed (invalid-operation; HRESULT 0x", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("private primary failure", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("private cleanup detail", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(InjectedIOException), result.Diagnostic, StringComparison.Ordinal);
+        Assert.Equal(1, producer.DisposeCount);
+    }
+
+    [Fact]
+    public async Task RunAsync_BoundsCombinedPrimaryAndCleanupDiagnosticKeepingCleanupPrefix()
+    {
+        using var directory = TestDirectory.Create();
+        var producer = Producer("packed-storage", "storage/result@1", 600, (_, _) =>
+            ValueTask.FromResult(new EvidenceProducerResult("packed-storage", EvidenceProducerOutcome.Failed, [], new string('x', 3000))),
+            dispose: () => throw new InjectedIOException("private cleanup detail", unchecked((int)0x80070020)));
+
+        var report = await NativeValidationProcedure.RunAsync(Plan(producer), [producer], Path.Join(directory.Path, "output"), CancellationToken.None);
+
+        Assert.False(report.ProcedurePassed);
+        Assert.False(report.CleanupCompleted);
+        var result = Assert.Single(report.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Equal(1024, result.Diagnostic!.Length);
+        Assert.StartsWith("Producer cleanup failed (io; HRESULT 0x80070020). Prior failure:", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(InjectedIOException), result.Diagnostic, StringComparison.Ordinal);
+        Assert.Equal(1, producer.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData("io", "io")]
+    [InlineData("access", "access-denied")]
+    [InlineData("argument", "argument")]
+    [InlineData("other", "other")]
+    public async Task RunAsync_ProjectsOnlySafeFailureCategoryAndHResult(string kind, string category)
+    {
+        using var directory = TestDirectory.Create();
+        Exception failure = kind switch
+        {
+            "io" => new IOException("diagnostic-canary-message"),
+            "access" => new UnauthorizedAccessException("diagnostic-canary-message"),
+            "argument" => new ArgumentException("diagnostic-canary-message"),
+            _ => new CanaryExceptionType("diagnostic-canary-message"),
+        };
+        var producer = Producer("packed-storage", "storage/result@1", 600,
+            (_, _) => ValueTask.FromException<EvidenceProducerResult>(failure));
+
+        var report = await NativeValidationProcedure.RunAsync(Plan(producer), [producer], Path.Join(directory.Path, "output"), CancellationToken.None);
+
+        Assert.False(report.ProcedurePassed);
+        Assert.True(report.CleanupCompleted);
+        var result = Assert.Single(report.ProducerResults);
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Equal($"Procedure failed ({category}; HRESULT 0x{failure.HResult:X8}).", result.Diagnostic);
+        Assert.DoesNotContain("diagnostic-canary-message", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(nameof(CanaryExceptionType), result.Diagnostic, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RunAsync_PropagatesCallerCancellationAfterJoiningAndDisposing()
     {
         using var directory = TestDirectory.Create();
@@ -553,6 +629,18 @@ public sealed class NativeValidationProcedureTests
             DisposeCount++;
             if (throwOnDispose) throw new IOException("private synchronous cleanup detail");
         }
+    }
+
+    private sealed class InjectedIOException : IOException
+    {
+        public InjectedIOException(string message, int hresult) : base(message)
+        {
+            HResult = hresult;
+        }
+    }
+
+    private sealed class CanaryExceptionType(string message) : Exception(message)
+    {
     }
 
     private sealed class TestDirectory : IDisposable

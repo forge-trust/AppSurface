@@ -171,15 +171,24 @@ public sealed class NativeEvidenceValidationTests
                 MinimumFreeBytes: 0);
             await using (var producer = new PackedStorageProducer(settings))
             {
-                var declaration = Declaration(producer.Id, ["storage/published-cli@1"], false);
+                var declaration = Declaration(producer.Id, ["storage/published-cli@1"], true);
                 var context = new EvidenceProducerContext(new EvidencePlan("1", "p", "pd", "diff",
-                    new("p", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "digest"), declaration, TimeProvider.System);
+                    new("p", EvidenceProfileScope.Targeted, [], [declaration], []), [], [], "digest"), declaration, TimeProvider.System,
+                    new EvidenceArtifactWriter(declaration, Path.Join(parent, "artifacts")));
 
                 var result = await producer.ProduceAsync(context, CancellationToken.None);
 
                 Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
                 Assert.Empty(result.SatisfiedAssertionIds);
                 Assert.Contains(missingExecutable ? "start_failed" : "storage command exit and complete capture", result.Diagnostic, StringComparison.Ordinal);
+                using var transcript = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(parent, "artifacts/proof/transcript.json")));
+                var command = Assert.Single(transcript.RootElement.EnumerateArray());
+                if (missingExecutable)
+                {
+                    Assert.Equal("start_failed", command.GetProperty("commandFailure").GetString());
+                    Assert.DoesNotContain(settings.DotnetPath, command.GetProperty("diagnostic").GetString(), StringComparison.Ordinal);
+                }
+                else Assert.NotEqual(0, command.GetProperty("ExitCode").GetInt32());
             }
             Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
             Assert.Equal("preserve", await File.ReadAllTextAsync(sentinel));

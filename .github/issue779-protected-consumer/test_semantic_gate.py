@@ -27,6 +27,10 @@ def envelope():
     value = fixture.synthetic_envelope()
     plan = value['Plan']
     policy = plan['PolicySnapshot']
+    # The current public producer declaration serializes its default retention mode.
+    # Keep the synthetic structural fixture on the same canonical contract shape.
+    plan['Profile']['Producers'][0]['CoverageArtifactRetention'] = 'managed'
+    policy['Profiles'][0]['Producers'][0]['CoverageArtifactRetention'] = 'managed'
     policy['Rules'] = [{'Id': 'source', 'Pattern': 'src/**', 'ProfileId': 'synthetic-api', 'Precedence': 0}]
     plan['MatchedRuleIds'] = ['source']
     plan['PolicyDigest'] = fixture.digest(policy)
@@ -57,6 +61,29 @@ class ProtectedParentSemanticGateTests(unittest.TestCase):
 
     def test_real_planner_reconstructs_supported_neighbor_before_public_gate(self):
         self.check(envelope(), 0, 'EVIDENCE_PARENT_GATE_ALLOWED')
+
+    def test_legacy_synthetic_shape_without_public_default_is_denied(self):
+        value = envelope()
+        plan = json.loads(base64.b64decode(value['PlanBytes']))
+        policy = json.loads(base64.b64decode(value['PolicyBytes']))
+        del plan['Profile']['Producers'][0]['CoverageArtifactRetention']
+        del plan['PolicySnapshot']['Profiles'][0]['Producers'][0]['CoverageArtifactRetention']
+        del policy['Profiles'][0]['Producers'][0]['CoverageArtifactRetention']
+        policy_bytes = fixture.canonical(policy)
+        plan['PolicyDigest'] = fixture.digest(policy)
+        plan['PolicySnapshot'] = policy
+        plan['PlanDigest'] = ''
+        plan['PlanDigest'] = fixture.digest(plan)
+        manifest = json.loads(base64.b64decode(value['ManifestBytes']))
+        manifest['PlanDigest'] = plan['PlanDigest']
+        manifest['ManifestDigest'] = ''
+        manifest['ManifestDigest'] = fixture.digest(manifest)
+        value['PolicyBytes'] = b64(policy_bytes)
+        value['PolicySha256'] = fixture.hashlib.sha256(policy_bytes).hexdigest()
+        value['PlanBytes'] = b64(fixture.canonical(plan))
+        value['ManifestBytes'] = b64(fixture.canonical(manifest))
+        value['Expected']['PolicyDigest'] = plan['PolicyDigest']
+        self.check(value, 1, 'EVIDENCE_PARENT_GATE_DENIED')
 
     def test_coherent_uploaded_plan_cannot_replace_protected_policy(self):
         value = envelope()

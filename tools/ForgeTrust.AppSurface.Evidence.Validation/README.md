@@ -68,6 +68,12 @@ Artifact metadata carries the logical slot, producer-relative path, media type, 
 SHA-256 digest; bytes are rechecked after cleanup. The shared [artifact contract](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md)
 defines validation of this metadata. None of these data bindings grants admission.
 
+The storage transcript retains the command runner's fixed failure code and secret-safe diagnostic when
+a command throws before returning an exit result. Procedure and cleanup exceptions report only an
+allowlisted category and numeric HRESULT, without raw exception messages, paths, or supplied type names.
+If cleanup also fails, its diagnostic retains the prior procedure failure within the same 1,024-character
+limit. Both failures still prevent success. These fields support diagnosis; they grant no cleanup waiver.
+
 The report is structurally bounded by the closed procedure catalogue: at most three producer results (`packed-storage`, `installed-consumer`, and optional `native-fan-in`), at most four declared artifact metadata records, and diagnostics capped at 1,024 characters per producer. The tool does not accept caller-selected producer declarations. It is not an Evidence manifest and is not accepted by `appsurface evidence verify` as one. Procedure mode must not write `evidence-manifest.json`. A successful process exit and `procedurePassed: true` mean the declared local checks and cleanup passed; they do not mean protected admission, native qualification, a consumer proof, or a gate passed. Keep the procedure plan/report in the CI artifact for diagnostics, not as gate evidence.
 
 The CI workflow uses read-only repository permissions and runs storage and consumer as separate, parallel matrix entries on each of Linux, Windows, and macOS. Each entry checks these exact files and flags after its procedure command and fails if an Evidence manifest appears. The original 25-minute outer job deadline applies to each entry; it may abort a long consumer run, which then cannot pass. Producer deadlines are unchanged. The unchanged lifecycle, tamper, and fan-in contract tests run separately. A passing workflow check is not native accepted evidence.

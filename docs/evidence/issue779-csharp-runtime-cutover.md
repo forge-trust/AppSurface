@@ -42,6 +42,21 @@ production catalogue, protected gate, full coverage script and protected workflo
 by this procedure migration. The merged source still needs its complete actual Linux chain and
 unchanged numerical gate before current coverage gaps can be recalculated.
 
+The exact-source [revision-105 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40470302017)
+completed unsuccessfully: all fourteen worker selector jobs and reconciliation passed, while the protected-parent
+semantic fixture and C3 retention fixture failed before the downstream consumer/measurement/gate chain.
+The former omitted the newly serialized public `CoverageArtifactRetention: "managed"` default; the latter
+still expected rejection at 135 leaves despite the new peer TRX occupying that existing slot. Their fixture
+repairs retain the production gate, all native callbacks, and the 135-file/96 MiB validation bound.
+
+The separate [revision-105 portable procedure run](https://github.com/forge-trust/AppSurface/actions/runs/40470449150)
+finished with five passing jobs and a Windows storage failure. All six builds and contract-test steps passed.
+The failure report withheld every authority claim and showed failed cleanup; the transcript ended after
+successful maintenance preview, before an apply result was recorded. The exact exception was masked by
+cleanup. The follow-up tool diagnostic now retains runner failure code plus an allowlisted procedure/cleanup
+category and numeric HRESULT, preserving both failures without raw exception text. It does not waive cleanup
+or establish that the Windows cause has been fixed. Fresh exact-source results remain required.
+
 Revision 101's existing observer subsequently recorded [run 40445212390](https://github.com/forge-trust/AppSurface/actions/runs/40445212390)
 terminal failure at 2026-10-27 07:02:45 UTC. All prerequisite jobs succeeded; the gate
 stopped in the native-data validator with the known `Expected: 41 / Actual: 43` account-lineage

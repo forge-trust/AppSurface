@@ -88,7 +88,7 @@ internal static class NativeValidationProcedure
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException)
                 {
-                    failure = "Procedure failed.";
+                    failure = FailureDiagnostic("Procedure failed", exception);
                 }
 
                 var elapsedDuration = clock.GetElapsedTime(started);
@@ -135,7 +135,13 @@ internal static class NativeValidationProcedure
                     cleanupCompleted = false;
                     procedurePassed = false;
                     if (reports.TryGetValue(producer.Id, out var report))
-                        reports[producer.Id] = report with { Outcome = EvidenceProducerOutcome.Failed, SatisfiedAssertionIds = [], Diagnostic = "Producer cleanup failed." };
+                        reports[producer.Id] = report with
+                        {
+                            Outcome = EvidenceProducerOutcome.Failed,
+                            SatisfiedAssertionIds = [],
+                            Diagnostic = BoundDiagnostic(FailureDiagnostic("Producer cleanup failed", exception)
+                                + (string.IsNullOrEmpty(report.Diagnostic) ? "" : " Prior failure: " + report.Diagnostic)),
+                        };
                 }
             }
         }
@@ -163,6 +169,18 @@ internal static class NativeValidationProcedure
     private static string BoundDiagnostic(string? diagnostic) => string.IsNullOrEmpty(diagnostic)
         ? "Producer procedure failed."
         : diagnostic.Length <= 1024 ? diagnostic : diagnostic[..1024];
+
+    // Project only a fixed category and numeric HRESULT. Exception messages, paths and type names are not output.
+    private static string FailureDiagnostic(string stage, Exception exception) =>
+        $"{stage} ({exception switch
+        {
+            UnauthorizedAccessException => "access-denied",
+            IOException => "io",
+            OperationCanceledException => "cancellation",
+            ArgumentException => "argument",
+            InvalidOperationException => "invalid-operation",
+            _ => "other",
+        }}; HRESULT 0x{exception.HResult:X8}).";
 
     private static bool SameArtifacts(IReadOnlyList<EvidenceArtifactResult> left, IReadOnlyList<EvidenceArtifactResult> right) =>
         left.OrderBy(static artifact => artifact.LogicalName, StringComparer.Ordinal)
