@@ -45,10 +45,11 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
             ValidateInput();
             inputValidated = true;
             var readOnly = (operation is "status" or "inspect" or "maintain") && !RequestsMutation;
-            using var store = readOnly
-                ? CoverageArtifactStore.OpenReadOnly() : CoverageArtifactStore.Open();
+            using var store = OpensConfiguredDomain
+                ? readOnly ? CoverageArtifactStore.OpenReadOnly() : CoverageArtifactStore.Open()
+                : null;
             cancellationToken.ThrowIfCancellationRequested();
-            details = await ExecuteOperationAsync(store, cancellationToken, value => effects = value, value => status = value).ConfigureAwait(false);
+            details = await ExecuteOperationAsync(store!, cancellationToken, value => effects = value, value => status = value).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -147,7 +148,7 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         }
 
         var envelope = new CoverageStorageResult(
-            1, operation, status, DomainId(), started, new { scope = "registered-domain", complete = status == "complete", completeness = status switch { "complete" => "complete", "partial" => "lower-bound", "cancelled" => "cancelled", _ => "unavailable" } },
+            1, operation, status, OpensConfiguredDomain ? DomainId() : "domain-unselected", started, new { scope = OpensConfiguredDomain ? "registered-domain" : "new-domain", complete = status == "complete", completeness = status switch { "complete" => "complete", "partial" => "lower-bound", "cancelled" => "cancelled", _ => "unavailable" } },
             details, diagnostics.Take(MaximumDiagnostics).ToArray(), effects, recovery, reconcile, 1);
         if (Json)
             await console.Output.WriteLineAsync(JsonSerializer.Serialize(envelope, JsonOptions)).ConfigureAwait(false);
@@ -233,6 +234,9 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
 
     /// <summary>Gets whether an explicit operation authorizes private-store mutation.</summary>
     protected virtual bool RequestsMutation => false;
+
+    /// <summary>Gets whether execution requires the configured existing store. New-domain selection never opens the old domain.</summary>
+    protected virtual bool OpensConfiguredDomain => true;
 
     /// <summary>Validates explicit command inputs before opening or initializing the store.</summary>
     protected virtual void ValidateInput() { }
@@ -529,5 +533,51 @@ internal sealed partial class CoverageStorageUnpinCommand : CoverageStorageComma
     {
         setEffects("unknown"); await store.PinAsync(Run, false, token).ConfigureAwait(false); setEffects("complete");
         return new { runId = Run, pinned = false };
+    }
+}
+
+/// <summary>Previews or explicitly creates a fresh private domain, preserving an unproven old domain in place.</summary>
+[Command("coverage storage new-domain", Description = "Preview a fresh private --output domain; pass --apply to create it without adopting old history.")]
+internal sealed partial class CoverageStorageNewDomainCommand : CoverageStorageCommandBase
+{
+    /// <summary>Creates the noninteractive new-domain command.</summary>
+    public CoverageStorageNewDomainCommand() : base("new-domain") { }
+
+    /// <summary>Gets or sets the fresh absolute destination beneath an existing non-linked parent.</summary>
+    [CommandOption("output", Description = "Fresh absolute domain path beneath an existing parent. Existing paths are refused.")]
+    public string Output { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets whether the explicitly selected new domain should be created.</summary>
+    [CommandOption("apply", Description = "Create the previewed empty private domain. Does not change APPSURFACE_ARTIFACT_HOME or transfer history.")]
+    public bool Apply { get; set; }
+
+    /// <inheritdoc />
+    protected override bool OpensConfiguredDomain => false;
+
+    /// <inheritdoc />
+    protected override void ValidateInput()
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(Output);
+        if (!Path.IsPathFullyQualified(Output)) throw new ArgumentException("An absolute destination is required.");
+        _ = Path.GetFullPath(Output);
+    }
+
+    /// <inheritdoc />
+    protected override string InvalidInputGuidance => "Supply --output as a fresh absolute directory beneath an existing non-linked parent; preview before --apply.";
+
+    /// <inheritdoc />
+    protected override ValueTask<object?> ExecuteOperationAsync(CoverageArtifactStore store, CancellationToken token, Action<string> setEffects, Action<string> setStatus)
+    {
+        if (Apply) setEffects("unknown");
+        _ = CoverageArtifactStore.CreateNewDomain(Output, Apply, token);
+        setEffects(Apply ? "complete" : "none");
+        return ValueTask.FromResult<object?>(new
+        {
+            apply = Apply,
+            created = Apply,
+            historyTransferred = false,
+            configurationChanged = false,
+            nextAction = "Preserve the entire old domain in a private backup. Select the fresh path with APPSURFACE_ARTIFACT_HOME for future commands; historical reports retain their original provenance and outcome."
+        });
     }
 }

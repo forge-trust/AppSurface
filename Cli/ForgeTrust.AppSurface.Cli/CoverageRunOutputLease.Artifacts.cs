@@ -229,8 +229,9 @@ internal sealed partial class CoverageRunOutputLease
 
     /// <summary>Creates a private immediate child and retains its complete no-follow path.</summary>
     /// <param name="name">One portable path component.</param>
+    /// <param name="beforeCreate">Optional per-call race observation after preflight; native creation still requires a fresh destination.</param>
     /// <returns>The privately created child directory.</returns>
-    internal CoverageRunOutputLease CreateArtifactDirectory(string name)
+    internal CoverageRunOutputLease CreateArtifactDirectory(string name, Action? beforeCreate = null)
     {
         ValidateArtifactComponent(name);
         VerifyBinding();
@@ -238,12 +239,16 @@ internal sealed partial class CoverageRunOutputLease
         {
             var path = Path.Join(_outputPath, name);
             if (Directory.Exists(path) || File.Exists(path)) throw new IOException("Artifact destination already exists.");
+            beforeCreate?.Invoke();
+            VerifyBinding();
             CreatePrivateWindowsDirectory(path);
         }
-        else if (MkdirAt(_outputHandle!.DangerousGetHandle().ToInt32(), name, 0x1c0) != 0)
-            throw NativeIOException("Unable to create private artifact directory.");
         else
         {
+            beforeCreate?.Invoke();
+            VerifyBinding();
+            if (MkdirAt(_outputHandle!.DangerousGetHandle().ToInt32(), name, 0x1c0) != 0)
+                throw NativeIOException("Unable to create private artifact directory.");
             using var created = OpenAt(_outputHandle!, name, directory: true)
                 ?? throw new IOException("Created private artifact directory disappeared.");
             if (_unixFChmod(created.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
@@ -479,7 +484,29 @@ internal sealed partial class CoverageRunOutputLease
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
         security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-        new DirectoryInfo(path).Create(security);
+        CreateArtifactWindowsDirectory(path, security.GetSecurityDescriptorBinaryForm());
+    }
+
+    /// <summary>Publishes a fresh Windows directory with its already-built private security descriptor in the native create call.</summary>
+    /// <param name="path">The validated absolute Windows path beneath a retained parent.</param>
+    /// <param name="descriptor">The complete private security descriptor, pinned until native creation returns.</param>
+    /// <param name="createDirectory">Optional per-call native creation seam; omission calls CreateDirectoryW. Simulations do not prove Windows ACL enforcement.</param>
+    internal static unsafe void CreateArtifactWindowsDirectory(string path, byte[] descriptor, Func<string, nint, bool>? createDirectory = null)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        fixed (byte* descriptorPointer = descriptor)
+        {
+            var attributes = new ArtifactWindowsSecurityAttributes
+            {
+                Length = sizeof(ArtifactWindowsSecurityAttributes),
+                SecurityDescriptor = (nint)descriptorPointer,
+                InheritHandle = 0
+            };
+            // Unlike DirectoryInfo.Create, CreateDirectoryW fails atomically if a competing
+            // creator won the pathname. Never adopt or repair that creator's directory.
+            if (!(createDirectory ?? WindowsCreateDirectory)(WindowsExtendedPath(path), (nint)(&attributes)))
+                throw new IOException("Unable to create a fresh private artifact directory.", new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
     }
 
     // Windows takes a new file's owner from the token's default owner, which can be
@@ -548,12 +575,12 @@ internal sealed partial class CoverageRunOutputLease
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(user);
         ArgumentNullException.ThrowIfNull(rules);
-        if (!string.Equals(owner, user, StringComparison.Ordinal)) throw new IOException("Artifact store owner differs from the current user.");
+        if (!string.Equals(owner, user, StringComparison.Ordinal)) throw CoverageArtifactStoreFailure.PrivateAccess();
         foreach (var rule in rules)
             if (rule.Allows && rule.Rights != 0
                 && !string.Equals(rule.Principal, user, StringComparison.Ordinal)
                 && rule.Principal is not ("S-1-5-18" or "S-1-5-32-544"))
-                throw new IOException("Artifact store has permissions for another principal.");
+                throw CoverageArtifactStoreFailure.PrivateAccess();
     }
 
     /// <summary>Validates ownership, link count and private permissions from one retained Unix object.</summary>
@@ -581,7 +608,7 @@ internal sealed partial class CoverageRunOutputLease
                 ? unchecked((ulong)Marshal.ReadInt64(stat, 16)) : unchecked((uint)Marshal.ReadInt32(stat, 20));
             if (!directory && links != 1) throw new IOException("Artifact file must have exactly one hard link.");
             if (requirePrivate && (owner != (effectiveUserId ?? ArtifactEffectiveUserId()) || (mode & 0xfff) != (directory ? 0x1c0u : 0x180u)))
-                throw new IOException("Artifact storage requires current-user ownership and private 0700 directories / 0600 files.");
+                throw CoverageArtifactStoreFailure.PrivateAccess();
         }
         finally { Marshal.FreeHGlobal(stat); }
     }

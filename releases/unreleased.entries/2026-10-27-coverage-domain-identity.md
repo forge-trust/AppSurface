@@ -1,0 +1,3 @@
+<!-- appsurface:unreleased-entry section="taking-shape" -->
+
+- Keep coverage-store identity mismatches fail-closed and add `coverage storage new-domain` to preview or create a fresh private empty domain without opening, editing, or migrating a degraded schema-v1 store. The [coverage storage guide](../../guides/coverage-storage.md#replacing-a-domain-whose-identity-no-longer-matches) documents recovery limits. The [issue #899 evidence record](../../docs/designs/issue-899-domain-identity.md) distinguishes native current-mount tests and a disposable APFS device-reassignment experiment from simulated mismatch decisions; the original mismatch cause remains unknown, and Windows/Linux native lifecycle evidence remains unproven.
