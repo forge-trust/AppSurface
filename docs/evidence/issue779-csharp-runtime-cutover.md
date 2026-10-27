@@ -60,6 +60,16 @@ Linux run is required for these callbacks. The coverage artifact upload now pres
 JUnit result XML alongside timings and logs, so later validators can inspect exact public data-test
 identities; this adds retention only and changes no collection, execution or numerical policy.
 
+The [account receipt replay](../../.github/issue779-protected-qualification/completed-accounts-README.md)
+now invokes the captured original receipt, instrumentation, source-witness and predecessor
+validators for creation and rollback. It checks the actual owner stdout/stderr binding, raw
+capture equality, current/final receipt hashes and ZIP inventory projections before returning
+non-authorizing data. Ten portable tests pass; an explicitly enabled synthetic wrapper fixture
+also passes, with its predecessor handoff isolated and separate original-callback lineage tests.
+This does not constitute an authentic completed protected-run replay. The original C#
+Native.Tests data validators, [numerical replay](../../.github/issue779-protected-qualification/completed-gate-README.md),
+fixed orchestration and reviewed protected support/acceptance still remain required.
+
 ## Local integration with current main — 2026-10-27
 
 The prepared revision-104 files were preserved in local commit `6402d8edc64aca84523b94132afaa153749640c3`
