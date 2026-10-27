@@ -35,8 +35,18 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         var originalBytes = ReadTree(original);
         var copiedBytes = ReadTree(copied);
 
-        Assert.ThrowsAny<InvalidDataException>(() => { using var _ = CoverageArtifactStore.Open(copied); });
-        Assert.ThrowsAny<InvalidDataException>(() => { using var _ = CoverageArtifactStore.OpenReadOnly(copied); });
+        var writableFailure = Assert.ThrowsAny<InvalidDataException>(() => { using var _ = CoverageArtifactStore.Open(copied); });
+        var readOnlyFailure = Assert.ThrowsAny<InvalidDataException>(() => { using var _ = CoverageArtifactStore.OpenReadOnly(copied); });
+        foreach (var failure in new[] { writableFailure, readOnlyFailure })
+        {
+            // Both roots are on the same native volume. The copied marker must report
+            // an object-identity refusal without suggesting that only volumes differ.
+            var diagnostic = CoverageArtifactDiagnostic.Failure("ASCOV201", "status", failure);
+            Assert.Equal("IdentityMismatch", diagnostic.Reason);
+            Assert.Contains("ownership and continuity are unproven", diagnostic.Cause, StringComparison.Ordinal);
+            Assert.Contains("in-place reconciliation is refused", diagnostic.Recovery, StringComparison.Ordinal);
+            Assert.DoesNotContain(copied, diagnostic.Cause, StringComparison.Ordinal);
+        }
 
         AssertTreeBytesEqual(originalBytes, ReadTree(original));
         AssertTreeBytesEqual(copiedBytes, ReadTree(copied));
