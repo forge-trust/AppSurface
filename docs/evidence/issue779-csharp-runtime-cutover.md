@@ -80,6 +80,31 @@ stopped in the native-data validator with the known `Expected: 41 / Actual: 43` 
 mismatch. That correction is included in revision 104. The failed run supplies no passing
 numerical result and does not change the historical revision-91 coverage figures below.
 
+### Revision 107 continuation and completed C1 mechanism
+
+The [revision-107 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40476296231)
+uses source `e1aed288b197a6ade0288f1372b49d3c574561db` and the 3,986-file capture
+SHA-256 `a7c2f82a9f68fd6dddbcd2e6c0e9d74d81c64e69585cdb7a31e5407df5e19b03`.
+All fourteen original selectors and reconciliation passed; the SDK negative consumer,
+seven application/six workspace controls and separate SDK lifecycle controls also passed.
+The application, account creation and rollback jobs completed successfully. The packaged producer
+then failed at `sdk-pack-aspire`, so the subsequent measurement jobs and numerical gates were skipped.
+Local reproduction found NU5118: Aspire included its README twice alongside the shared repository
+pack target. Removing the duplicate project item preserves the README in the package. The prepared
+ordinary package journey also packs the new Readiness dependency and requires it in the fresh
+consumer dependency graph. Its 23 fixed logs and 29 curated leaves still fit the existing retention
+bounds; a failed command now adds at most 32 KiB of its private log tail to the existing outer smoke log.
+Fresh source-bound Linux execution remains required. These observations remain bound
+to revision 107 even if later source preparations are committed.
+
+The next [completed C1 callback mechanism](../../.github/issue779-protected-qualification/completed-c1-README.md)
+consumes the staged run/inventory, checks exact selector and run/attempt identities, and invokes
+the original retained-evidence callbacks from a complete verified checkout at its recorded path.
+It compares the returned aggregate with the retained aggregate and requires invocation cleanup.
+The mechanism does not register support, issue admission, validate the measurement/consumer chain,
+or replace the unchanged numerical gate. The production catalogue and accepted-proof decision
+remain closed.
+
 <a id="latest-verified-consumer-checkpoint--2026-10-26"></a>
 
 ## Latest verified consumer artifacts — revision 101 — 2026-10-27

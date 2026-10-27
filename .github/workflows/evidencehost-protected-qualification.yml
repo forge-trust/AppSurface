@@ -26,7 +26,7 @@ jobs:
         run: timeout --signal=KILL 10 python3 -B .github/issue779-protected-qualification/entrypoint.py guard
       - name: Exercise detached qualification boundary controls without API access
         working-directory: .github/issue779-protected-qualification
-        run: timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation
+        run: timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation test_completed_c1
 
   full-runtime-proof:
     name: Full current runtime proof and unchanged gates

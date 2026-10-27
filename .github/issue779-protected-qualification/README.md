@@ -110,3 +110,5 @@ archive structure before allocating ZIP entry objects, compares embedded source 
 original C1 aggregate and partial receipt, and returns immutable metadata only. It deliberately
 does not certify the nested native controls or gate. In particular, successful archive parsing is
 never a substitute for the original validators or protected runtime admission.
+
+The next [fixed C1 callback step](completed-c1-README.md) reopens the original selector archives and invokes only the checked-out source's existing aggregate and retained-evidence callbacks. It has a separate non-authorizing result and requires its own cleanup to complete. The remaining consumer, measurement and numerical gate validators, protected finalizer and reviewed support registration are still required.

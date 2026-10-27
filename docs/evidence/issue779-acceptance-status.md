@@ -1,5 +1,42 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Native-validation migration and current continuation — 2026-10-27
+
+Latest remote `main` (`ebb562be618c2649c1ef0ade12095e56468882c7`) is merged into the
+continuation branch. The [native-validation tool and workflow](../designs/native-evidence-validation.md)
+now run an explicit portable procedure, write a procedure report instead of an Evidence manifest,
+and fix protected admission, native acceptance and gate eligibility to false. Unsupported protected
+operation rejects before input/output access. The migration preserves numerical coverage policy,
+the fixed comparison base, native deadlines and the closed production admission boundary.
+
+The [cutover record](issue779-csharp-runtime-cutover.md#local-integration-with-current-main--2026-10-27)
+records the 393-test local migration selection, the six passing revision-106 OS/mode procedure jobs,
+and the revision-107 repair of the closed application descriptor writer. The strict parser remains
+unchanged; unsupported settings are rejected before its existing eight-field wire projection.
+Full supervision passed 3,105 local tests with 91 explicit Linux/root-only skips. These local and
+portable results supply no protected acceptance or current solution/patch gate result.
+
+The [revision-107 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40476296231)
+is bound to source `e1aed288b197a6ade0288f1372b49d3c574561db` and its 3,986-file capture.
+All fourteen original selectors and reconciliation passed, as did the SDK negative consumer,
+seven application/six workspace controls and separate SDK lifecycle controls. The application job
+and both account jobs completed successfully. The packaged producer then failed while packing Aspire;
+the dependent measurement jobs and numerical gates were skipped. Local reproduction identified
+the duplicate README pack item (NU5118), and the prepared repair uses the shared pack target and
+includes the Readiness dependency in the ordinary package journey. A fresh run remains required.
+The [focused custody run](https://github.com/forge-trust/AppSurface/actions/runs/40476295971)
+completed successfully: original artifacts matched provider digests and the immutable source tree,
+with 29 filesystem/report rows and four separate actual peer-credential rows passed and unskipped.
+These source-bound checks do not enable Trusted execution.
+
+The [completed C1 callback mechanism](../../.github/issue779-protected-qualification/completed-c1-README.md)
+is the next bounded preparation. Full completion validation still requires the measured C1 chain,
+C2/C3/account validators and unchanged coverage/Codecov checks. Protected-main qualification,
+authenticated provider/commit/tree/file anchoring, reviewed exact support registration, an ordinary
+Trusted CLI/SDK journey and downstream protected acceptance remain outstanding. The production
+catalogue, request mode and accepted-proof decision remain closed. The historical numerical figures
+below describe their original source and must not be projected onto this continuation.
+
 <a id="latest-verified-consumer-checkpoint--2026-10-26"></a>
 
 
