@@ -24,6 +24,8 @@
     <PackageVersion Include="coverlet.msbuild" Version="10.0.1" />
     <PackageVersion Include="FakeItEasy" Version="9.0.1" />
     <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.4" />
+    <PackageVersion Include="Google.Cloud.Tasks.V2" Version="3.7.0" />
+    <PackageVersion Include="Grpc.Net.Client" Version="2.80.0" Condition="'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'" />
     <PackageVersion Include="Google.Cloud.SecretManager.V1" Version="2.7.0" />
     <PackageVersion Include="HtmlSanitizer" Version="[9.2.995]" />
     <PackageVersion Include="JunitXml.TestLogger" Version="8.0.0" />

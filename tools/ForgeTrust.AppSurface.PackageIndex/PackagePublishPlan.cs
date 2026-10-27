@@ -31,11 +31,13 @@ internal sealed class PackagePublishPlanResolver
     /// <param name="repositoryRoot">Absolute repository root.</param>
     /// <param name="manifestPath">Absolute path to the package manifest.</param>
     /// <param name="cancellationToken">Cancellation token used while loading metadata.</param>
+    /// <param name="includeReadinessBlockedForVerification">Includes blocked manifest entries in package proof without changing publication filtering.</param>
     /// <returns>The ordered package publish plan.</returns>
     internal async Task<PackagePublishPlan> ResolveAsync(
         string repositoryRoot,
         string manifestPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeReadinessBlockedForVerification = false)
     {
         if (!Directory.Exists(repositoryRoot))
         {
@@ -61,7 +63,11 @@ internal sealed class PackagePublishPlanResolver
 
         return new PackagePublishPlan(
             resolvedEntries
-                .Where(entry => entry.Manifest.PublishDecision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish)
+                .Where(entry => ShouldIncludeForVerification(
+                    entry.Metadata.PackageId,
+                    entry.Manifest.PublishDecision,
+                    entry.Manifest.ReadinessBlocker,
+                    includeReadinessBlockedForVerification))
                 .OrderBy(entry => entry.Manifest.Order)
                 .Select(entry => new PackagePublishPlanEntry(
                     entry.Manifest.Project,
@@ -74,6 +80,16 @@ internal sealed class PackagePublishPlanResolver
                     entry.Manifest.ReleaseGuidanceVariant ?? string.Empty))
                 .ToArray());
     }
+
+    internal static bool ShouldIncludeForVerification(
+        string packageId,
+        PackagePublishDecision? decision,
+        string? readinessBlocker,
+        bool includeReadinessBlockedForVerification) =>
+        decision is PackagePublishDecision.Publish or PackagePublishDecision.SupportPublish
+        || (includeReadinessBlockedForVerification
+            && string.Equals(packageId, "ForgeTrust.AppSurface.Durable.CloudTasks", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(readinessBlocker));
 
     private async Task<IReadOnlyDictionary<string, PackageProjectMetadata>> LoadMetadataAsync(
         string repositoryRoot,

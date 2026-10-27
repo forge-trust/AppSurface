@@ -6,9 +6,9 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 
 ## Summary
 
-- Packages: 64
-- Evidence status: manifest evidence complete: 43; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 12
-- Product families: AppSurface: 41; Forge Trust: 2; Internal support: 18; RazorWire: 3
+- Packages: 65
+- Evidence status: manifest evidence complete: 43; transitive package evidence complete: 7; proof-host evidence complete: 2; excluded by publish decision: 12; blocked: 1
+- Product families: AppSurface: 42; Forge Trust: 2; Internal support: 18; RazorWire: 3
 
 ## Package evidence matrix
 
@@ -40,6 +40,7 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | AppSurface | `ForgeTrust.AppSurface.Durable.PostgreSql` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | [README](../Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) | [notes](../releases/current.md) |
 | Internal support | `ForgeTrust.AppSurface.Durable.PostgreSql.TestHost` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Durable.PostgreSql.V2WorkHarness` | excluded | do not publish | excluded by publish decision | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
+| AppSurface | `ForgeTrust.AppSurface.Durable.CloudTasks` | public | publish | blocked | Blocker: #892<br />Note: Publication remains blocked until the packed public API and direct/transitive consumer dependency-graph isolation proof completes and the coordinated release artifacts are reviewed. The real local SDK fixture has verified explicit credentials, configured bounds, and protocol-declared pre-acceptance REFUSED_STREAM replay; it does not establish live Google identity, IAM, effective queue routing, or real task delivery.<br />Maintainer blocker #892 is set. | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Testing` | public | publish | manifest evidence complete | None | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | `ForgeTrust.AppSurface.Durable`<br />`ForgeTrust.AppSurface.Durable.Provider` | [README](../Durable/ForgeTrust.AppSurface.Durable.Testing/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Console` | public | publish | manifest evidence complete | None | None | `ForgeTrust.AppSurface.Core` | [README](../Console/ForgeTrust.AppSurface.Console/README.md) | [notes](../releases/current.md) |
 | AppSurface | `ForgeTrust.AppSurface.Durable.Templates` | public | publish | manifest evidence complete | None | None | None | [README](../Durable/ForgeTrust.AppSurface.Durable.Templates/README.md) | [notes](../releases/current.md) |
@@ -78,6 +79,10 @@ This dashboard is a maintainer review surface for package-index evidence. It is 
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.osx-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | Internal support | `ForgeTrust.AppSurface.Web.Tailwind.Runtime.win-x64` | support | support publish | transitive package evidence complete | None | None | None | Not applicable | [notes](../releases/unreleased.md) |
 | RazorWire | `ForgeTrust.RazorWire.Cli` | excluded | do not publish | excluded by publish decision | None | None | None | [RazorWire CLI README](../Web/ForgeTrust.RazorWire.Cli/README.md) | [notes](../releases/unreleased.md) |
+
+## Blocking evidence
+
+- `ForgeTrust.AppSurface.Durable.CloudTasks`: Maintainer blocker #892 is set. Fix: Resolve the linked issue or PR, then remove readiness_blocker from packages/package-index.yml.
 
 ## Maintainer workflow
 

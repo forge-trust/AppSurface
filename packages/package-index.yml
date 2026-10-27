@@ -371,6 +371,26 @@ packages:
       - ForgeTrust.AppSurface.Durable
     expected_dependency_package_ids:
       - ForgeTrust.AppSurface.Durable
+  - project: Durable/ForgeTrust.AppSurface.Durable.CloudTasks/ForgeTrust.AppSurface.Durable.CloudTasks.csproj
+    release_guidance_variant: experimental
+    classification: public
+    publish_decision: publish
+    product_family: appsurface
+    release_status: public_preview
+    commercial_status: commercial_ready
+    release_track: coordinated
+    readiness_blocker: "#892"
+    readiness_note: >-
+      Publication remains blocked until the packed public API and direct/transitive consumer dependency-graph isolation
+      proof completes and the coordinated release artifacts are reviewed. The real local SDK fixture has verified explicit
+      credentials, configured bounds, and protocol-declared pre-acceptance REFUSED_STREAM replay; it does not establish
+      live Google identity, IAM, effective queue routing, or real task delivery.
+    order: 49
+    use_when: Add this only to a Google Cloud application that already uses Durable external activation and needs an explicitly credentialed payload-free named task creation transport.
+    includes: Explicit singleton OAuth token source, validated queue and worker OIDC target, empty POST task projection, bounded official SDK transport, and safe creation receipts.
+    does_not_include: Durable execution or storage, application outboxes or recovery, worker authentication, queue configuration, task payloads, automatic retry or resubmission, live IAM setup, or proof of real delivery.
+    start_here_path: Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md
+    recipe_summary: Add this optional package only to a GCP-targeted Durable external-activation producer; review the [activation reference](../Durable/cloudtasks-activation.md) for creator token versus worker OIDC identity, safe receipt meanings, retained task IDs, and the simulated-delivery boundary.
   - project: Durable/ForgeTrust.AppSurface.Durable.PostgreSql/ForgeTrust.AppSurface.Durable.PostgreSql.csproj
     release_guidance_variant: default
     classification: public
