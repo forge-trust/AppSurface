@@ -361,7 +361,10 @@ public sealed class CloudTasksActivationClientTests
         internal int Calls => Volatile.Read(ref _calls);
         internal FakeTokenSource(string token) : this(_ => ValueTask.FromResult(token)) { }
         internal FakeTokenSource(Func<ValueTask<string>> get) : this(_ => get()) { }
-        internal FakeTokenSource(Func<CancellationToken, ValueTask<string>> get) => _get = token => { Interlocked.Increment(ref _calls); return get(token); };
+        internal FakeTokenSource(Func<CancellationToken, ValueTask<string>> get)
+        {
+            _get = token => { Interlocked.Increment(ref _calls); return get(token); };
+        }
         public ValueTask<string> GetAccessTokenAsync(CancellationToken cancellationToken = default) => _get(cancellationToken);
     }
 

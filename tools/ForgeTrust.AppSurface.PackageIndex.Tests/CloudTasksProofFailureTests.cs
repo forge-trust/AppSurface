@@ -348,7 +348,10 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 
     public sealed class SdkMemberSignatureLeak
     {
-        public SdkMemberSignatureLeak(Google.Cloud.Tasks.V2.LeakedSdkType value) => ProviderField = value;
+        public SdkMemberSignatureLeak(Google.Cloud.Tasks.V2.LeakedSdkType value)
+        {
+            ProviderField = value;
+        }
 
         public Google.Cloud.Tasks.V2.LeakedSdkType ProviderField;
 

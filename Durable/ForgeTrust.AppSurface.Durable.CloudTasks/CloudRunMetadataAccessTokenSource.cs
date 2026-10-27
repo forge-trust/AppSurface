@@ -9,8 +9,10 @@ internal sealed class TokenAcquisitionException : Exception
 {
     /// <summary>Initializes a safe acquisition failure with its closed invalid/unavailable classification.</summary>
     internal TokenAcquisitionException(bool invalidToken)
-        : base(invalidToken ? "The metadata token response was invalid." : "The metadata token source was unavailable.") =>
+        : base(invalidToken ? "The metadata token response was invalid." : "The metadata token source was unavailable.")
+    {
         InvalidToken = invalidToken;
+    }
 
     /// <summary>Gets whether the response contained invalid token fields rather than an unavailable response.</summary>
     internal bool InvalidToken { get; }

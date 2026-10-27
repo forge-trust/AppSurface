@@ -1,10 +1,11 @@
 using System.Buffers.Binary;
-using System.Net;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using ForgeTrust.AppSurface.Durable.CloudTasks;
 using Google.Api.Gax;
 using Google.Api.Gax.Grpc;
 using Google.Cloud.Tasks.V2;
@@ -12,19 +13,17 @@ using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Configuration;
-
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ProviderTask = Google.Cloud.Tasks.V2.Task;
 using Task = System.Threading.Tasks.Task;
-using ForgeTrust.AppSurface.Durable.CloudTasks;
 
 namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 
