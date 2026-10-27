@@ -511,6 +511,8 @@ internal sealed record CoverageRunProcessDrainResult(bool Confirmed, string Stat
 internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
 {
     private const string ArtifactName = "coverage-watchdog.json";
+    /// <summary>Gets the artifact writer callback bound to the participating output inventory.</summary>
+    internal Action<string>? ArtifactPublished { get; set; }
     private const int MaximumConcurrentArtifactOperations = 32;
     private const int MaximumArtifactTextLength = 1024;
     private const int MaximumArtifactCommandOptions = 32;
@@ -1284,6 +1286,7 @@ internal sealed class CoverageRunWatchdogSupervisor : IAsyncDisposable
             File.Move(staged, destination, overwrite: true);
             staged = null;
             reportedArtifactPath = destination;
+            ArtifactPublished?.Invoke(destination);
             lock (_sync)
             {
                 if (_terminalIncident?.Ordinal == incident.Ordinal)

@@ -523,6 +523,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
     private readonly string _gitExecutable;
     private readonly TimeSpan _commandTimeout;
     private readonly Func<Process, IDisposable> _processOwnershipFactory;
+    private readonly TimeProvider _timeProvider;
 
     internal static GitConsumerRevisionVerifier Instance { get; } = new(
         "git",
@@ -534,6 +535,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
     /// <param name="processOwnershipFactory">
     /// An optional test seam that assigns the started probe to a descendant-cleanup boundary.
     /// </param>
+    /// <param name="timeProvider">Clock for command deadlines; defaults to system time. Tests can advance
+    /// the unchanged deadline after observing real process readiness. The cleanup budget still uses system time.</param>
     /// <remarks>
     /// The configurable seams keep timeout, cancellation, and ownership-failure behavior
     /// deterministic in tests.
@@ -541,7 +544,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
     internal GitConsumerRevisionVerifier(
         string gitExecutable,
         TimeSpan commandTimeout,
-        Func<Process, IDisposable>? processOwnershipFactory = null)
+        Func<Process, IDisposable>? processOwnershipFactory = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutable);
         if (commandTimeout <= TimeSpan.Zero)
@@ -555,6 +559,7 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         _gitExecutable = gitExecutable;
         _commandTimeout = commandTimeout;
         _processOwnershipFactory = processOwnershipFactory ?? ProcessOwnership.Attach;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task VerifyAsync(
@@ -632,8 +637,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
 
         using (ownership)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_commandTimeout);
+            using var deadline = new CancellationTokenSource(_commandTimeout, _timeProvider);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
             var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
             try
@@ -679,8 +684,8 @@ internal sealed class GitConsumerRevisionVerifier : IConsumerRevisionVerifier
         {
             process.Start();
             using var ownership = _processOwnershipFactory(process);
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(_commandTimeout);
+            using var deadline = new CancellationTokenSource(_commandTimeout, _timeProvider);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
             var standardOutputDrain = process.StandardOutput.BaseStream.CopyToAsync(
                 Stream.Null,
                 CancellationToken.None);

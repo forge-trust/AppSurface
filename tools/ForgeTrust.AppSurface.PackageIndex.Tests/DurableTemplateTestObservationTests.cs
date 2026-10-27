@@ -9,6 +9,8 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
 {
     private static readonly XNamespace Namespace = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010";
     private const string Secret = "private-assertion-argument-credential";
+    private const string FirstWorkClass = "DurableWorkerTemplate.Tests.FirstDurableWorkTests";
+    private const string FirstWorkMethod = "FirstDurableWork_persists_typed_terminal_result_and_exports_the_real_activation";
     private readonly string _root = Path.Join(Path.GetTempPath(), "template-test-observation-" + Guid.NewGuid().ToString("N"));
 
     public DurableTemplateTestObservationTests()
@@ -49,6 +51,176 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
         Assert.DoesNotContain("Fails", json, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(FirstWorkClass)]
+    [InlineData(FirstWorkClass + ", DurableWorkerTemplate.Tests, Version=1.0.0.0, Culture=neutral")]
+    public void Failed_first_work_identity_attaches_only_its_stdout_diagnostic(string className)
+    {
+        var path = Write(Report(3, 3, 1, 2,
+            [ResultWithOutput("target", "Failed", FirstWorkMarker()),
+                ResultWithOutput("unrelated", "Failed", FirstWorkMarker("sdk-export-flush")),
+                ResultWithOutput("passed", "Passed", FirstWorkMarker("typed-work-acceptance"))],
+            [Definition("target", className, FirstWorkMethod), Definition("unrelated", "Unrelated.Tests", FirstWorkMethod),
+                Definition("passed", FirstWorkClass, FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+
+        Assert.Equal("observed", result.Status);
+        Assert.Equal(3, result.Total);
+        Assert.Equal(3, result.Executed);
+        Assert.Equal(1, result.Passed);
+        Assert.Equal(2, result.Failed);
+        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("initial-readiness", "TimeoutException", "none"),
+            Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<DurableTemplateFirstWorkDiagnostic>>(result.FirstWorkFailures)));
+    }
+
+    [Fact]
+    public void First_work_failure_serialization_redacts_all_output_fields_without_claiming_success()
+    {
+        var output = Secret + " before\n" + FirstWorkMarker(code: Secret, cleanup: Secret) + "\n" + Secret + " after";
+        var path = Write(Report(1, 1, 0, 1, [ResultWithOutput("target", "Failed", output)],
+            [Definition("target", FirstWorkClass + ", " + Secret, FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+        var json = JsonSerializer.Serialize(result);
+        using var document = JsonDocument.Parse(json);
+        var diagnostic = Assert.Single(document.RootElement.GetProperty("FirstWorkFailures").EnumerateArray());
+
+        Assert.Equal("observed", result.Status);
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Executed);
+        Assert.Equal(0, result.Passed);
+        Assert.Equal(1, result.Failed);
+        Assert.Single(result.FailedMethodSha256);
+        Assert.Equal(7, document.RootElement.EnumerateObject().Count());
+        Assert.Equal(3, diagnostic.EnumerateObject().Count());
+        Assert.Equal("initial-readiness", diagnostic.GetProperty("Phase").GetString());
+        Assert.Equal("Other", diagnostic.GetProperty("Code").GetString());
+        Assert.Equal("unknown", diagnostic.GetProperty("Cleanup").GetString());
+        Assert.DoesNotContain(Secret, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(FirstWorkClass, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(FirstWorkMethod, json, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Unrelated.Tests", FirstWorkMethod)]
+    [InlineData(FirstWorkClass + "Extra", FirstWorkMethod)]
+    [InlineData(FirstWorkClass + "+Nested", FirstWorkMethod)]
+    [InlineData("Prefix." + FirstWorkClass, FirstWorkMethod)]
+    [InlineData(FirstWorkClass, FirstWorkMethod + "Extra")]
+    [InlineData(FirstWorkClass, "Unrelated_method")]
+    public void Unrelated_failed_methods_cannot_attach_a_first_work_diagnostic(string className, string methodName)
+    {
+        var path = Write(Report(1, 1, 0, 1, [ResultWithOutput("target", "Failed", FirstWorkMarker())],
+            [Definition("target", className, methodName)]));
+
+        AssertNoFirstWorkFailure(DurableTemplateTestObservation.Read(path));
+    }
+
+    [Fact]
+    public void Passing_first_work_and_unmatched_failed_ids_cannot_attach_diagnostics()
+    {
+        var path = Write(Report(2, 2, 1, 1,
+            [ResultWithOutput("passed", "Passed", FirstWorkMarker()), ResultWithOutput("unmatched", "Failed", FirstWorkMarker())],
+            [Definition("passed", FirstWorkClass, FirstWorkMethod), Definition("different-id", FirstWorkClass, FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+
+        AssertNoFirstWorkFailure(result);
+        Assert.Equal(1, result.Passed);
+        Assert.Equal(1, result.Failed);
+        Assert.Empty(result.FailedMethodSha256);
+    }
+
+    [Theory]
+    [InlineData("StdErr")]
+    [InlineData("Message")]
+    [InlineData("StackTrace")]
+    public void First_work_markers_in_other_output_fields_are_not_retained(string field)
+    {
+        var testResult = Result("target", "Failed");
+        var output = testResult.Element(Namespace + "Output")!;
+        if (field == "StdErr") output.Add(new XElement(Namespace + field, FirstWorkMarker()));
+        else output.Element(Namespace + "ErrorInfo")!.Element(Namespace + field)!.Value = FirstWorkMarker();
+        var path = Write(Report(1, 1, 0, 1, [testResult], [Definition("target", FirstWorkClass, FirstWorkMethod)]));
+
+        AssertNoFirstWorkFailure(DurableTemplateTestObservation.Read(path));
+    }
+
+    [Fact]
+    public void Absent_or_invalid_stdout_withholds_only_the_first_work_detail()
+    {
+        foreach (var output in new string?[] { null, string.Empty, FirstWorkMarker("unreviewed-phase"), FirstWorkMarker() + "\n" + FirstWorkMarker() })
+        {
+            var testResult = output is null ? Result("target", "Failed") : ResultWithOutput("target", "Failed", output);
+            var result = DurableTemplateTestObservation.Read(Write(Report(1, 1, 0, 1, [testResult],
+                [Definition("target", FirstWorkClass, FirstWorkMethod)])));
+
+            AssertNoFirstWorkFailure(result);
+            Assert.Equal(1, result.Failed);
+            Assert.Single(result.FailedMethodSha256);
+        }
+    }
+
+    [Fact]
+    public void Missing_output_preserves_the_failed_identity_without_attaching_first_work_details()
+    {
+        var testResult = ResultWithOutput("target", "Failed", FirstWorkMarker());
+        testResult.Element(Namespace + "Output")!.Remove();
+        var path = Write(Report(1, 1, 0, 1, [testResult], [Definition("target", FirstWorkClass, FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+
+        AssertNoFirstWorkFailure(result);
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Executed);
+        Assert.Equal(0, result.Passed);
+        Assert.Equal(1, result.Failed);
+        Assert.Single(result.FailedMethodSha256);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void First_work_failure_inventory_is_distinct_and_ordered_by_phase_code_then_cleanup()
+    {
+        DurableTemplateFirstWorkDiagnostic[] expected =
+        [
+            new("authenticated-work-activation", "TrueException", "none"),
+            new("initial-readiness", "EqualException", "owned-cleanup-unfinished"),
+            new("initial-readiness", "IOException", "none"),
+            new("initial-readiness", "IOException", "owned-cleanup-total-budget-exhausted"),
+            new("initial-readiness", "IOException", "owned-cleanup-unfinished"),
+            new("typed-work-acceptance", "TimeoutException", "none"),
+        ];
+        var inputs = expected.Reverse().Concat([expected[2]]).ToArray();
+
+        var result = ObserveFirstWorkFailures(inputs);
+
+        Assert.Equal(expected, result.FirstWorkFailures);
+    }
+
+    [Fact]
+    public void First_work_failure_inventory_applies_the_sixteen_item_bound_after_distinct_ordering()
+    {
+        string[] phases = ["authenticated-work-activation", "authorization-before-wake-body", "healthy-readiness-transition",
+            "host-read-only-startup", "initial-readiness", "persisted-terminal-work", "postgresql-fixture-setup",
+            "read-only-startup-catalog", "sdk-export-flush", "typed-work-acceptance"];
+        var distinct = phases.SelectMany(phase => new[]
+        {
+            new DurableTemplateFirstWorkDiagnostic(phase, "EqualException", "none"),
+            new DurableTemplateFirstWorkDiagnostic(phase, "TimeoutException", "none"),
+        }).ToArray();
+        // Put repeated values before unsorted distinct values to detect truncation before deduplication or sorting.
+        var result = ObserveFirstWorkFailures(Enumerable.Repeat(distinct[0], 8).Concat(distinct.Reverse()).ToArray());
+        var actual = Assert.IsAssignableFrom<IReadOnlyList<DurableTemplateFirstWorkDiagnostic>>(result.FirstWorkFailures);
+
+        Assert.Equal(16, actual.Count);
+        Assert.Equal(16, actual.Distinct().Count());
+        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("authenticated-work-activation", "EqualException", "none"), actual[0]);
+        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("read-only-startup-catalog", "TimeoutException", "none"), actual[^1]);
+        Assert.DoesNotContain(actual, item => item.Phase is "sdk-export-flush" or "typed-work-acceptance");
+    }
+
     [Fact]
     public void Method_hash_inventory_is_distinct_sorted_and_bounded()
     {
@@ -73,6 +245,41 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
             Assert.Equal("observed", result.Status);
             Assert.Empty(result.FailedMethodSha256);
         }
+    }
+
+    [Fact]
+    public void Missing_results_element_preserves_counters_without_inventing_failed_identity()
+    {
+        var report = Report(1, 1, 0, 1, [ResultWithOutput("target", "Failed", FirstWorkMarker())],
+            [Definition("target", FirstWorkClass, FirstWorkMethod)]);
+        report.Root!.Element(Namespace + "Results")!.Remove();
+
+        var result = DurableTemplateTestObservation.Read(Write(report));
+
+        AssertNoFirstWorkFailure(result);
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Executed);
+        Assert.Equal(0, result.Passed);
+        Assert.Equal(1, result.Failed);
+        Assert.Empty(result.FailedMethodSha256);
+    }
+
+    [Fact]
+    public void Failed_result_without_test_id_cannot_borrow_a_first_work_definition()
+    {
+        var testResult = ResultWithOutput("target", "Failed", FirstWorkMarker());
+        testResult.SetAttributeValue("testId", null);
+        var path = Write(Report(1, 1, 0, 1, [testResult], [Definition("target", FirstWorkClass, FirstWorkMethod)]));
+
+        var result = DurableTemplateTestObservation.Read(path);
+
+        AssertNoFirstWorkFailure(result);
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Executed);
+        Assert.Equal(0, result.Passed);
+        Assert.Equal(1, result.Failed);
+        Assert.Empty(result.FailedMethodSha256);
+        Assert.DoesNotContain(Secret, JsonSerializer.Serialize(result), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -137,6 +344,23 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
         Assert.Equal(0, result.Passed);
         Assert.Equal(0, result.Failed);
         Assert.Empty(result.FailedMethodSha256);
+        Assert.Null(result.FirstWorkFailures);
+    }
+
+    private static void AssertNoFirstWorkFailure(DurableTemplateTestObservation result)
+    {
+        Assert.Equal("observed", result.Status);
+        Assert.Null(result.FirstWorkFailures);
+        Assert.DoesNotContain("FirstWorkFailures", JsonSerializer.Serialize(result), StringComparison.Ordinal);
+    }
+
+    private DurableTemplateTestObservation ObserveFirstWorkFailures(IReadOnlyList<DurableTemplateFirstWorkDiagnostic> diagnostics)
+    {
+        var ids = Enumerable.Range(0, diagnostics.Count).Select(index => index.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var results = ids.Select((id, index) => ResultWithOutput(id, "Failed",
+            FirstWorkMarker(diagnostics[index].Phase, diagnostics[index].Code, diagnostics[index].Cleanup)));
+        var definitions = ids.Select(id => Definition(id, FirstWorkClass, FirstWorkMethod));
+        return DurableTemplateTestObservation.Read(Write(Report(ids.Length, ids.Length, 0, ids.Length, results, definitions)));
     }
 
     private string Write(XDocument report)
@@ -157,6 +381,16 @@ public sealed class DurableTemplateTestObservationTests : IDisposable
         new XAttribute("testId", id), new XAttribute("outcome", outcome), new XAttribute("testName", Secret),
         new XElement(Namespace + "Output", new XElement(Namespace + "ErrorInfo",
             new XElement(Namespace + "Message", Secret), new XElement(Namespace + "StackTrace", Secret))));
+
+    private static XElement ResultWithOutput(string id, string outcome, string stdout)
+    {
+        var result = Result(id, outcome);
+        result.Element(Namespace + "Output")!.Add(new XElement(Namespace + "StdOut", stdout), new XElement(Namespace + "StdErr", Secret));
+        return result;
+    }
+
+    private static string FirstWorkMarker(string phase = "initial-readiness", string code = "TimeoutException", string cleanup = "none") =>
+        $"[FirstDurableWork] failure phase={phase} code={code} at={Secret} cause={Secret}; cleanup={cleanup}; retry={Secret}";
 
     private static XElement Definition(string id, string className, string name) => new(Namespace + "UnitTest",
         new XAttribute("id", id), new XAttribute("name", Secret), new XElement(Namespace + "TestMethod",

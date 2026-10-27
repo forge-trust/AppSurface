@@ -18,6 +18,7 @@
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Evidence.Cli" />
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.CoverageLeaseProbe" />
   </ItemGroup>
 
   <ItemGroup>
@@ -33,6 +34,21 @@
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunArtifactReader.cs" Link="CoverageRunArtifactReader.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunHangDiagnosticsReader.cs" Link="CoverageRunHangDiagnosticsReader.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunOutputLease.cs" Link="CoverageRunOutputLease.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunOutputLease.Artifacts.cs" Link="CoverageRunOutputLease.Artifacts.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactPolicy.cs" Link="CoverageArtifactPolicy.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactArchive.cs" Link="CoverageArtifactArchive.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactDiagnostics.cs" Link="CoverageArtifactDiagnostics.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactInspection.cs" Link="CoverageArtifactInspection.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactInventory.cs" Link="CoverageArtifactInventory.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactSession.cs" Link="CoverageArtifactSession.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactStore.cs" Link="CoverageArtifactStore.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactOperationLease.cs" Link="CoverageArtifactOperationLease.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactGateContext.cs" Link="CoverageArtifactGateContext.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactSettings.cs" Link="CoverageArtifactSettings.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactWarnings.cs" Link="CoverageArtifactWarnings.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactJson.cs" Link="CoverageArtifactJson.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactMetadataPublication.cs" Link="CoverageArtifactMetadataPublication.cs" />
+    <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageArtifactInspectionCursorStore.cs" Link="CoverageArtifactInspectionCursorStore.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageProjectManifest.cs" Link="CoverageProjectManifest.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageRunSlowTestDiagnostics.cs" Link="CoverageRunSlowTestDiagnostics.cs" />
     <Compile Include="../../Cli/ForgeTrust.AppSurface.Cli/CoverageFileSystemInterop.cs" Link="CoverageFileSystemInterop.cs" />

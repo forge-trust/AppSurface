@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Time.Testing;
 
 namespace ForgeTrust.AppSurface.Durable.AdoptionMetrics.Tests;
 
@@ -643,8 +644,10 @@ public sealed class AdoptionMeasurementTests : IDisposable
         Assert.Equal(cancellation.Token, canceled.CancellationToken);
     }
 
-    [Fact]
-    public async Task GitVerifierTimeoutAndCancellationCleanUpHeartbeatChildren()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public async Task GitVerifierTimeoutAndCancellationCleanUpHeartbeatChildren(int startupDelaySeconds)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -655,20 +658,34 @@ public sealed class AdoptionMeasurementTests : IDisposable
         var childProcessIdsPath = Path.Join(_root, "cleanup-child-pids");
         var executable = await CreateUnixExecutableAsync(
             Path.Join(_root, "cleanup-git"),
-            $"#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/cleanup-child-pids\"\nsleep 30\n");
+            $"#!/bin/sh\nsleep {startupDelaySeconds}\n(sleep 30) &\nprintf '%s\\n' \"$!\" >> \"$PWD/cleanup-child-pids\"\nsleep 30\n");
 
+        var timeoutClock = new FakeTimeProvider();
         var timeoutVerifier = new GitConsumerRevisionVerifier(
             executable,
-            TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAsync<AdoptionMeasurementException>(
-            () => timeoutVerifier.VerifyAsync(
-                _root,
-                Commit,
-                [],
-                CancellationToken.None));
-
-        var timeoutChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
-        Assert.NotEmpty(timeoutChildProcessIds);
+            TimeSpan.FromSeconds(1),
+            timeProvider: timeoutClock);
+        using var timeoutAbort = new CancellationTokenSource();
+        var timeoutRun = timeoutVerifier.VerifyAsync(_root, Commit, [], timeoutAbort.Token);
+        IReadOnlyList<int> timeoutChildProcessIds;
+        try
+        {
+            timeoutChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+            Assert.NotEmpty(timeoutChildProcessIds);
+            Assert.False(timeoutRun.IsCompleted);
+            timeoutClock.Advance(TimeSpan.FromMilliseconds(999));
+            Assert.False(timeoutRun.IsCompleted);
+            timeoutClock.Advance(TimeSpan.FromMilliseconds(1));
+            var timeout = await Assert.ThrowsAsync<AdoptionMeasurementException>(
+                () => timeoutRun.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Contains("within 1 seconds", timeout.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            await timeoutAbort.CancelAsync();
+            try { await timeoutRun; }
+            catch (Exception exception) when (exception is AdoptionMeasurementException or OperationCanceledException) { }
+        }
         foreach (var processId in timeoutChildProcessIds)
         {
             Assert.True(
@@ -677,20 +694,31 @@ public sealed class AdoptionMeasurementTests : IDisposable
         }
 
         File.Delete(childProcessIdsPath);
+        var cancellationClock = new FakeTimeProvider();
         var cancellationVerifier = new GitConsumerRevisionVerifier(
             executable,
-            TimeSpan.FromSeconds(30));
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
-        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => cancellationVerifier.VerifyAsync(
-                _root,
-                Commit,
-                [],
-                cancellation.Token));
-        Assert.Equal(cancellation.Token, canceled.CancellationToken);
-
-        var cancellationChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
-        Assert.NotEmpty(cancellationChildProcessIds);
+            TimeSpan.FromSeconds(30),
+            timeProvider: cancellationClock);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1), cancellationClock);
+        var cancellationRun = cancellationVerifier.VerifyAsync(_root, Commit, [], cancellation.Token);
+        IReadOnlyList<int> cancellationChildProcessIds;
+        try
+        {
+            cancellationChildProcessIds = await WaitForProcessIdsFileAsync(childProcessIdsPath);
+            Assert.NotEmpty(cancellationChildProcessIds);
+            cancellationClock.Advance(TimeSpan.FromMilliseconds(999));
+            Assert.False(cancellationRun.IsCompleted);
+            cancellationClock.Advance(TimeSpan.FromMilliseconds(1));
+            var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => cancellationRun.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(cancellation.Token, canceled.CancellationToken);
+        }
+        finally
+        {
+            await cancellation.CancelAsync();
+            try { await cancellationRun; }
+            catch (Exception exception) when (exception is AdoptionMeasurementException or OperationCanceledException) { }
+        }
         foreach (var processId in cancellationChildProcessIds)
         {
             Assert.True(

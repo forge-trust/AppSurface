@@ -296,7 +296,8 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
 
         var snapshot = CaptureTreeSnapshot(_outputHandle!, entries);
 
-        var artifacts = entries.Where(entry => !string.Equals(entry.Name, MarkerFileName, StringComparison.Ordinal)).ToArray();
+        var artifacts = entries.Where(entry => !string.Equals(entry.Name, MarkerFileName, StringComparison.Ordinal)
+            && !string.Equals(entry.Name, ".appsurface-coverage-operation.lock", StringComparison.Ordinal)).ToArray();
         if (artifacts.Length > 0 && marker is null)
         {
             throw CoverageRunOutputGuard.UnsafeOutput("--output already contains files and is not marked as AppSurface-owned.");
@@ -471,7 +472,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
 
     private static IReadOnlyList<string> EnumerateUnixNames(SafeFileHandle directory)
     {
-        var duplicated = Duplicate(directory.DangerousGetHandle().ToInt32());
+        var duplicated = DuplicateCloseOnExec(directory.DangerousGetHandle().ToInt32());
         if (duplicated < 0)
         {
             throw NativeIOException("Unable to duplicate the retained output directory descriptor.");
@@ -1094,6 +1095,7 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
             : name is "coverage.cobertura.xml" or "coverage.json" or CoverageGateArtifactNames.Json or CoverageGateArtifactNames.Markdown
                 or CoverageGateArtifactNames.PatchTargetsJson or CoverageGateArtifactNames.PatchTargetsMarkdown
                 or "coverage-watchdog.json" or "summary.txt" or "timings.json" or "reportgenerator-summary.txt"
+                or ".appsurface-coverage-run.json"
                 or CoverageRunSlowTestDiagnosticsWriter.MarkdownFileName or CoverageRunSlowTestDiagnosticsWriter.JsonFileName;
 
     private static bool IsPatternOutputEntry(OutputEntry entry)
@@ -1393,10 +1395,10 @@ internal sealed partial class CoverageRunOutputLease : IDisposable
     private static int UnixCloseOnExec => OperatingSystem.IsMacOS() ? 0x01000000 : 0x00080000;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixDirectory => OperatingSystem.IsMacOS() ? 0x00100000 : 0x00010000;
+    private static int UnixDirectory => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).Directory;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
-    private static int UnixNoFollow => OperatingSystem.IsMacOS() ? 0x00000100 : 0x00020000;
+    private static int UnixNoFollow => UnixTraversalFlags(OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture).NoFollow;
 
     [ExcludeFromCodeCoverage(Justification = "The platform security lanes exercise the OS-specific native flag values.")]
     private static int UnixNonBlocking => OperatingSystem.IsMacOS() ? 0x00000004 : 0x00000800;

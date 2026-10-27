@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PackageDescription>Explicit consumer-owned Aspire lifecycle integration for AppSurface EvidenceHost producers and readiness checks.</PackageDescription>
     <PackageTags>appsurface;evidence;aspire;ci;testing;e2e</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -18,6 +19,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="ForgeTrust.AppSurface.Aspire.Tests" />
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Cli.Tests" />
   </ItemGroup>
 
   <ItemGroup>

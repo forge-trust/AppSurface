@@ -27,6 +27,6 @@ internal sealed partial class CoverageCommand : ICommand
     [ExcludeFromCodeCoverage(Justification = "CliFx command discovery covers the root help path; subcommands carry behavior tests.")]
     public async ValueTask ExecuteAsync(IConsole console)
     {
-        await console.Output.WriteLineAsync("Use 'appsurface coverage run --help' to produce Cobertura coverage, 'appsurface coverage merge --help' to fan in existing shards, 'appsurface coverage gate --help' to enforce thresholds, or 'appsurface coverage clean --help' to reclaim private coverage artifacts.");
+        await console.Output.WriteLineAsync("Use 'appsurface coverage run --help' to produce Cobertura coverage, 'appsurface coverage merge --help' to fan in existing shards, 'appsurface coverage gate --help' to enforce thresholds, 'appsurface coverage storage --help' for history, growth, pin and restore controls, or 'appsurface coverage clean --help' to reclaim private coverage artifacts.");
     }
 }

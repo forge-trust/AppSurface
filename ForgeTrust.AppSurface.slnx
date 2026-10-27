@@ -161,11 +161,13 @@
     <Project Path="tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex.Tests/ForgeTrust.AppSurface.PackageIndex.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.PackageIndex/ForgeTrust.AppSurface.PackageIndex.csproj" />
+    <Project Path="tools/ForgeTrust.AppSurface.Evidence.Validation/ForgeTrust.AppSurface.Evidence.Validation.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.ReleaseContracts/ForgeTrust.AppSurface.ReleaseContracts.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release.Tests/ForgeTrust.AppSurface.Release.Tests.csproj" />
     <Project Path="tools/ForgeTrust.AppSurface.Release/ForgeTrust.AppSurface.Release.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/ForgeTrust.AppSurface.CoverageLeaseProbe/ForgeTrust.AppSurface.CoverageLeaseProbe.csproj" />
     <Project Path="tests/ForgeTrust.AppSurface.Testing/ForgeTrust.AppSurface.Testing.csproj" />
     <Project Path="tests/ForgeTrust.AppSurface.Testing.Tests/ForgeTrust.AppSurface.Testing.Tests.csproj" />
   </Folder>

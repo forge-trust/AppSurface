@@ -20,6 +20,11 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed record DurableTemplateTestObservation(
     string Status, int Total, int Executed, int Passed, int Failed, IReadOnlyList<string> FailedMethodSha256)
 {
+    /// <summary>Gets at most 16 distinct closed failure markers from identity-matched failed first-work tests.</summary>
+    /// <remarks>Null means no valid marker was available. These diagnostics never authorize a successful proof.</remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DurableTemplateFirstWorkDiagnostic>? FirstWorkFailures { get; init; }
+
     private const long MaximumBytes = 1024 * 1024;
     private const int MaximumTests = 10_000;
     private const int MaximumMethodCharacters = 1024;
@@ -49,14 +54,17 @@ internal sealed record DurableTemplateTestObservation(
             var passed = Count(counters, "passed");
             var failed = Count(counters, "failed");
             if (executed > total || passed + failed > executed) return Empty("invalid");
-            var failedIds = document.Root.Element(Namespace + "Results")?.Elements(Namespace + "UnitTestResult")
+            var failedResults = (document.Root.Element(Namespace + "Results")?.Elements(Namespace + "UnitTestResult") ?? [])
                 .Where(result => (string?)result.Attribute("outcome") == "Failed")
-                .Select(result => (string?)result.Attribute("testId"))
-                .Where(id => id is not null).ToHashSet(StringComparer.Ordinal) ?? [];
+                .Where(result => result.Attribute("testId") is not null)
+                .ToLookup(result => (string)result.Attribute("testId")!, StringComparer.Ordinal);
             var hashes = new SortedSet<string>(StringComparer.Ordinal);
+            var firstWorkFailures = new List<DurableTemplateFirstWorkDiagnostic>();
+            var observedFirstWorkIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var test in document.Root.Element(Namespace + "TestDefinitions")?.Elements(Namespace + "UnitTest") ?? [])
             {
-                if (!failedIds.Contains((string?)test.Attribute("id"))) continue;
+                var testId = (string?)test.Attribute("id");
+                if (testId is null || !failedResults.Contains(testId)) continue;
                 var method = test.Element(Namespace + "TestMethod");
                 var className = (string?)method?.Attribute("className");
                 var name = (string?)method?.Attribute("name");
@@ -64,8 +72,23 @@ internal sealed record DurableTemplateTestObservation(
                     || className.Length > MaximumMethodCharacters || name.Length > MaximumMethodCharacters)
                     return Empty("invalid");
                 hashes.Add(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(className + "\n" + name))));
+                if (name == "FirstDurableWork_persists_typed_terminal_result_and_exports_the_real_activation"
+                    && className.Split(',')[0] == "DurableWorkerTemplate.Tests.FirstDurableWorkTests"
+                    && observedFirstWorkIds.Add(testId))
+                {
+                    foreach (var result in failedResults[testId])
+                    {
+                        if (DurableTemplateFirstWorkDiagnostic.Read(result.Element(Namespace + "Output")?.Element(Namespace + "StdOut")?.Value) is { } diagnostic)
+                            firstWorkFailures.Add(diagnostic);
+                    }
+                }
             }
-            return new("observed", total, executed, passed, failed, hashes.Take(16).ToArray());
+            return new("observed", total, executed, passed, failed, hashes.Take(16).ToArray())
+            {
+                FirstWorkFailures = firstWorkFailures.Count == 0 ? null : firstWorkFailures.Distinct()
+                    .OrderBy(x => x.Phase, StringComparer.Ordinal).ThenBy(x => x.Code, StringComparer.Ordinal)
+                    .ThenBy(x => x.Cleanup, StringComparer.Ordinal).Take(16).ToArray(),
+            };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or XmlException or PackageIndexException)
         {

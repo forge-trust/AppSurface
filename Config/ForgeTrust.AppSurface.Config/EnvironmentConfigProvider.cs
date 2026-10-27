@@ -34,13 +34,35 @@ internal sealed class EnvironmentConfigProvider : IEnvironmentConfigProvider, IC
         IOptions<AppSurfaceEnvironmentConfigOptions>? environmentOptions = null,
         IOptions<ConfigResourceOptions>? resourceOptions = null,
         ConfigDeclarationRegistry? declarationRegistry = null)
+        : this(environmentProvider ?? throw new ArgumentNullException(nameof(environmentProvider)),
+            (resourceOptions?.Value ?? new ConfigResourceOptions()).Snapshot(),
+            new EnvironmentConfigMappingSnapshot(environmentOptions?.Value ?? new AppSurfaceEnvironmentConfigOptions()),
+            declarationRegistry)
     {
-        _environmentProvider = environmentProvider ?? throw new ArgumentNullException(nameof(environmentProvider));
-        _limits = (resourceOptions?.Value ?? new ConfigResourceOptions()).Snapshot();
-        var options = environmentOptions?.Value ?? new AppSurfaceEnvironmentConfigOptions();
-        _mappings = options.Snapshot();
+    }
+
+    /// <summary>Creates the built-in provider using the same immutable mapping snapshot as its container's inspector.</summary>
+    /// <param name="environmentProvider">The existing environment snapshot source.</param>
+    /// <param name="mappingSnapshot">Validated mappings and claim capacity, frozen before construction.</param>
+    /// <param name="resourceOptions">Positive snapshot and binding limits.</param>
+    /// <param name="declarationRegistry">Final declarations used for startup reverse-claim validation.</param>
+    internal EnvironmentConfigProvider(IEnvironmentProvider environmentProvider,
+        EnvironmentConfigMappingSnapshot mappingSnapshot,
+        IOptions<ConfigResourceOptions>? resourceOptions = null,
+        ConfigDeclarationRegistry? declarationRegistry = null)
+        : this(environmentProvider ?? throw new ArgumentNullException(nameof(environmentProvider)),
+            (resourceOptions?.Value ?? new ConfigResourceOptions()).Snapshot(), mappingSnapshot, declarationRegistry)
+    {
+    }
+
+    private EnvironmentConfigProvider(IEnvironmentProvider environmentProvider, ConfigResourceOptions limits,
+        EnvironmentConfigMappingSnapshot mappingSnapshot, ConfigDeclarationRegistry? declarationRegistry)
+    {
+        _environmentProvider = environmentProvider;
+        _limits = limits;
+        _mappings = mappingSnapshot.Mappings;
         _knownKeys = (declarationRegistry?.Keys ?? []).Concat(_mappings.Keys).Distinct().ToArray();
-        _claims = new EnvironmentNativeClaims(_knownKeys, _mappings, options.MaxAdHocClaims);
+        _claims = new EnvironmentNativeClaims(_knownKeys, _mappings, mappingSnapshot.MaxAdHocClaims);
         _claims.Validate(environmentProvider.Environment);
     }
 
