@@ -148,8 +148,12 @@ public sealed class CoverageStorageCommandNewDomainTests
         var sentinel = TestPathUtils.PathUnder(destination, "sentinel");
         Assert.Throws<IOException>(() => parent.CreateArtifactDirectory("competing-domain", () =>
         {
-            Directory.CreateDirectory(destination);
-            File.WriteAllText(sentinel, "belongs to the competing creator");
+            // The competing directory must itself satisfy private admission. Otherwise
+            // a later ACL refusal could hide an idempotent-create ownership bug.
+            using var competitor = parent.CreateArtifactDirectory("competing-domain");
+            using var file = competitor.OpenArtifactFile("sentinel", createNew: true);
+            file.Write("belongs to the competing creator"u8);
+            file.Flush(true);
         }));
         Assert.Equal("belongs to the competing creator", File.ReadAllText(sentinel));
         Assert.Single(Directory.EnumerateFileSystemEntries(destination));
