@@ -82,7 +82,9 @@ internal static class SignedRepository
         var signature = signatures[0];
         if (signature.SignatureType != PgpSignature.CanonicalTextDocument || signature.HashAlgorithm != HashAlgorithmTag.Sha512 || signature.KeyAlgorithm != PublicKeyAlgorithmTag.RsaGeneral)
             throw new InvalidDataException("Release signature algorithm is not approved.");
-        var ring = new PgpPublicKeyRingBundle(PgpUtilities.GetDecoderStream(new MemoryStream(keyringBytes, writable: false)));
+        using var keyringInput = new MemoryStream(keyringBytes, writable: false);
+        using var decodedKeyring = PgpUtilities.GetDecoderStream(keyringInput);
+        var ring = new PgpPublicKeyRingBundle(decodedKeyring);
         var key = ring.GetPublicKey(signature.KeyId) ?? throw new InvalidDataException("Release signer is absent from the keyring.");
         var actual = Convert.ToHexString(key.GetFingerprint());
         if (!actual.Equals(fingerprint, StringComparison.OrdinalIgnoreCase))

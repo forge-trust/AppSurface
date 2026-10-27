@@ -100,9 +100,9 @@ internal static class DebPayloadReader
         var newSet = actual.Where(x => Included(x.Path, ex, inc)).ToDictionary(x => Canonical(x.Path), StringComparer.Ordinal);
         foreach (var path in oldSet.Keys.Union(newSet.Keys, StringComparer.Ordinal))
         {
-            var hasOld = oldSet.TryGetValue(path, out var o);
-            var hasNew = newSet.TryGetValue(path, out var n);
-            var changed = !hasOld || !hasNew || o!.Kind != n!.Kind || o.Sha256 != n.Sha256;
+            oldSet.TryGetValue(path, out var o);
+            newSet.TryGetValue(path, out var n);
+            var changed = o is null || n is null || o.Kind != n.Kind || o.Sha256 != n.Sha256;
             if (changed != want.ContainsKey(path))
                 throw new InvalidDataException("Inventory delta is incomplete or unexpected.");
             if (changed && want[path].Kind == "file" && want[path].Sha256 != n?.Sha256)
@@ -141,7 +141,7 @@ internal static class DebPayloadReader
         using var zstd = member.Name.EndsWith(".gz", StringComparison.Ordinal) ? null : new Decompressor();
         if (zstd is not null)
             zstd.SetParameter(ZstdSharp.Unsafe.ZSTD_dParameter.ZSTD_d_windowLogMax, 23);
-        using var decoded = member.Name.EndsWith(".gz", StringComparison.Ordinal) ? new GZipStream(throttled, CompressionMode.Decompress) as Stream : new DecompressionStream(throttled, zstd!);
+        using Stream decoded = member.Name.EndsWith(".gz", StringComparison.Ordinal) ? new GZipStream(throttled, CompressionMode.Decompress) : new DecompressionStream(throttled, zstd!);
         using var cancellable = new TokenCheckingStream(decoded, cancellationToken);
         using var preflight = new TarBudgetReadStream(cancellable, ExpandedLimit, maxEntry, checked(maxEntries), 16 * 1024 * 1024, 64 * 1024);
         using var tar = new TarReader(preflight, leaveOpen: true);

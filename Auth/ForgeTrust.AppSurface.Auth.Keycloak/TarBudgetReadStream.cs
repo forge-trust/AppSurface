@@ -87,6 +87,7 @@ internal sealed class TarBudgetReadStream : Stream
         Span<byte> buffer = stackalloc byte[8192];
         while (Read(buffer) != 0)
         {
+            // Drain through Read so every remaining header and payload is validated and charged to the budget.
         }
     }
 
