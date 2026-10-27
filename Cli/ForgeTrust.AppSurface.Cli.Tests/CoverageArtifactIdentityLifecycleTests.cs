@@ -71,17 +71,40 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
     }
 
     [Fact]
-    public void RetainedNestedLease_RejectsAncestorReplacement()
+    public void RetainedNestedLease_PreservesBindingWhenAncestorReplacementIsAttempted()
     {
         using var temp = TestDirectory.Create();
         var ancestor = temp.CreateDirectory("ancestor");
         var child = Directory.CreateDirectory(TestPathUtils.PathUnder(ancestor, "child")).FullName;
+        var sentinel = TestPathUtils.PathUnder(child, "sentinel");
+        File.WriteAllText(sentinel, "original nested bytes");
         using var retained = CoverageRunOutputLease.AcquireArtifactDirectory(child, false, false, allowWindowsRenameSharing: true)!;
-        Directory.Move(ancestor, TestPathUtils.PathUnder(temp.Path, "renamed-ancestor"));
+        var identity = retained.ArtifactDirectoryIdentity;
+        var renamed = TestPathUtils.PathUnder(temp.Path, "renamed-ancestor");
+        if (OperatingSystem.IsWindows())
+        {
+            // NTFS refuses renaming an ancestor with a retained descendant, even when
+            // those handles share deletion. Verify prevention, then prove the same
+            // rename succeeds once this lease is released; never skip the invariant.
+            Assert.Throws<IOException>(() => Directory.Move(ancestor, renamed));
+            retained.VerifyArtifactBinding();
+            Assert.Equal(identity, retained.ArtifactDirectoryIdentity);
+            Assert.Equal("original nested bytes", File.ReadAllText(sentinel));
+            Assert.False(Directory.Exists(renamed));
+            retained.Dispose();
+            Directory.Move(ancestor, renamed);
+            Assert.Equal("original nested bytes", File.ReadAllText(TestPathUtils.PathUnder(renamed, "child", "sentinel")));
+            Assert.False(Directory.Exists(ancestor));
+            return;
+        }
+
+        Directory.Move(ancestor, renamed);
         Directory.CreateDirectory(ancestor);
         Directory.CreateDirectory(TestPathUtils.PathUnder(ancestor, "child"));
 
         Assert.Throws<IOException>(retained.VerifyArtifactBinding);
+        Assert.Equal("original nested bytes", File.ReadAllText(TestPathUtils.PathUnder(renamed, "child", "sentinel")));
+        Assert.False(File.Exists(sentinel));
     }
 
     [Fact]
