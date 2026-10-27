@@ -60,6 +60,18 @@ public sealed class CoverageStorageCommandNewDomainTests
         Assert.Single(Directory.EnumerateFileSystemEntries(destination));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NewDomain_RefusesExistingRegularFileDuringPreviewAndApply(bool apply)
+    {
+        using var temp = TestDirectory.Create();
+        var destination = temp.WriteFile("existing-file", "unowned file bytes");
+        Assert.Throws<IOException>(() => CoverageArtifactStore.CreateNewDomain(destination, apply, CancellationToken.None));
+        Assert.Equal("unowned file bytes", File.ReadAllText(destination));
+        Assert.False(Directory.Exists(destination));
+    }
+
     [Fact]
     public void NewDomain_RefusesLinkedParentOrRootAndMissingParent()
     {

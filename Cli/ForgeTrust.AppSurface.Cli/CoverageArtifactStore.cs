@@ -95,6 +95,14 @@ internal sealed class CoverageArtifactStore : IDisposable
         cancellationToken.ThrowIfCancellationRequested();
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(root)!, false, false)
             ?? throw new DirectoryNotFoundException("The fresh domain's parent must already exist.");
+        // File/directory Exists helpers suppress errors and the Windows directory-only
+        // probe reports a regular file as absent. Treat any named entry as occupied.
+        FileAttributes? existingAttributes;
+        try { existingAttributes = File.GetAttributes(root); }
+        catch (FileNotFoundException) { existingAttributes = null; }
+        catch (DirectoryNotFoundException) { existingAttributes = null; }
+        if (existingAttributes.HasValue)
+            throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
         using (var existing = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, false))
             if (existing is not null) throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
         parent.VerifyArtifactBinding();
