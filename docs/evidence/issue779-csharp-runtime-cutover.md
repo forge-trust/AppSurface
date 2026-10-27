@@ -2,6 +2,19 @@
 
 ## Completed validator preparation and N05 timing repair — 2026-10-27
 
+The [revision-114 runtime validation](https://github.com/forge-trust/AppSurface/actions/runs/40532277987)
+rejected preparation before native dispatch because the three changed procedure files still had
+their preceding `ported_sha256` inventory pins. The follow-up updates only those current content
+pins, retaining all historical file/provenance fields, and tests the production inventory loader
+against every current port. The same run caught two portable input-fixture assumptions: a `0755`
+directory inherited the runner's private umask, and unlink/recreate could reuse an inode on Linux.
+The corrected fixtures set the intended mode explicitly and keep the original inode alive by
+renaming it before substitution. The complete qualification suite passes under umask `0077`.
+These corrections retain the original rejection checks. Revision 114's separate
+[focused custody validation](https://github.com/forge-trust/AppSurface/actions/runs/40532277530)
+passed all 29 filesystem/report controls and four peer-credential controls without skips; its
+provider-bound artifacts and complete 4,012-file source capture match `d013674f`.
+
 The [fixed native input adapter](../../.github/issue779-protected-qualification/completed-native-inputs-README.md)
 now selects the public C# measurement validator's exact 24 input leaves from the four original
 consumer/account/producer archives. It checks the full typed stage/inventory, provider-bound ZIP

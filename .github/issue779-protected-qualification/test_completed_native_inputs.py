@@ -130,6 +130,7 @@ class NativeInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'private-mode'):
             wrong = self.base / 'loose'
             wrong.mkdir(mode=0o755)
+            wrong.chmod(0o755)
             subject.stage_native_inputs(self.stage, self.inventory, self.stage_root, self.capture,
                                         wrong, deadline=time.monotonic() + 10)
         self.assertEqual([], list(self.parent.iterdir()))
@@ -240,12 +241,15 @@ class NativeInputTests(unittest.TestCase):
     def test_cleanup_refuses_substituted_output_and_does_not_remove_parent(self):
         data = self._stage()
         target = data.root / data.files[0].relative_path
-        target.unlink()
+        saved = self.base / 'owned-before-substitution'
+        target.rename(saved)
         target.write_bytes(b'caller substitution')
         target.chmod(0o600)
         with self.assertRaises(ValueError):
             subject.cleanup_native_inputs(data)
         self.assertTrue(self.parent.exists())
+        self.assertEqual(b'caller substitution', target.read_bytes())
+        self.assertEqual(b'{}', saved.read_bytes())
 
     def test_readback_rejects_same_inode_changed_bytes_and_extra_tree_member(self):
         data = self._stage()
