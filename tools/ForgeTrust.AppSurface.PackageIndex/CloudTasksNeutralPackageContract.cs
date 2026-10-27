@@ -191,7 +191,8 @@ internal static class CloudTasksNeutralPackageContract
 
     private static IReadOnlyList<AttributeContract> Attributes(XElement element, params string[] excludedNames)
         => element.Attributes()
-            .Where(attribute => !attribute.IsNamespaceDeclaration && !excludedNames.Contains(attribute.Name.LocalName, StringComparer.Ordinal))
+            .Where(attribute => !attribute.IsNamespaceDeclaration
+                && (attribute.Name.Namespace != XNamespace.None || !excludedNames.Contains(attribute.Name.LocalName, StringComparer.Ordinal)))
             .Select(static attribute => new AttributeContract(attribute.Name.ToString(), attribute.Value))
             .OrderBy(static attribute => attribute.Name, StringComparer.Ordinal)
             .ToArray();

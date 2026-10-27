@@ -81,6 +81,20 @@ remains authored content; after that, retain the markers exactly.
    paths with Cobertura paths. A fixture nested inside this checkout must use that explicit root: the CLI's
    automatic Git-root detection otherwise selects the outer checkout and cannot match consumer-relative paths.
 
+## Cloud Tasks packed isolation proof (#892)
+
+When CloudTasks is in the verification plan, `verify-packages` requires the
+[packed isolation proof](../../Durable/cloudtasks-activation.md#packed-package-proof-and-first-party-reproducibility) before writing a successful artifact manifest.
+It builds and runs the public GCP consumer from exact validated local archives, checks the complete pinned SDK closure,
+and compares independent packed baseline and candidate neutral consumers in isolated caches. Invalid-token rejection
+before provider I/O, direct/transitive dependency isolation, public SDK-type leak scans and artifact hash bindings remain required.
+The [approved plan](../../docs/plans/issue-892-cloudtasks-activation-transport.md)
+allows binary differences only for Core, Flow, Workers and Durable after unchanged authored sources/projects,
+Flow.Generators and shared build inputs are proved. Packed framework/dependency contracts, library entry sets,
+external package IDs/versions/hashes/edges and each restored local archive binding remain exact; both raw archive
+and library hashes are retained. Any failed check withholds the manifest. Normalization approval alone proves
+neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md#local-proof) for local commands and proof limits.
+
 ## Tailwind artifact provenance (#798)
 
 The reusable [native evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/tailwind-native-host-evidence.yml) selects the frozen inventory through `artifact_manifest_file`. Its optional string default is `package-artifact-manifest.json` for manual rehearsal; both release publishers pass `package-artifact-manifest.unapproved.json`. Only those two basenames are accepted, and all native proof, mutation and aggregate commands use the selected file without discovery or aliasing. The [provenance reference](../../docs/tailwind-artifact-provenance.md#shared-bundle-and-producer-identity) explains the stage boundary: native proof validates the original manifest bytes; protected publication still validates the separate PostgreSQL candidate receipt before consuming the byte-identical approved copy.

@@ -140,6 +140,20 @@ public sealed class CloudTasksNeutralPackageContractTests
         Assert.Contains(expected, error.Message, StringComparison.Ordinal);
     }
 
+    // protects=namespaced selection metadata remains part of the packed contract; fails_when=reserved local names cause namespace-qualified attributes to disappear; no_claim=does not assign NuGet semantics to extension attributes.
+    [Fact]
+    public void Read_PreservesNamespacedAttributesWhoseLocalNamesMatchReservedFields()
+    {
+        using var baseline = new PackageFixture("<package xmlns:x=\"urn:proof\"><metadata><dependencies><group targetFramework=\"net10.0\"><dependency id=\"System.Text.Json\" version=\"10.0.0\" x:version=\"before\" x:include=\"runtime\" /></group></dependencies></metadata></package>");
+        using var candidate = new PackageFixture("<package xmlns:x=\"urn:proof\"><metadata><dependencies><group targetFramework=\"net10.0\"><dependency id=\"System.Text.Json\" version=\"10.0.0\" x:version=\"after\" x:include=\"runtime\" /></group></dependencies></metadata></package>");
+        var before = CloudTasksNeutralPackageContract.Read(baseline.Path, Version);
+        var after = CloudTasksNeutralPackageContract.Read(candidate.Path, Version);
+        Assert.NotEqual(before, after);
+        using var document = System.Text.Json.JsonDocument.Parse(before);
+        var attributes = document.RootElement.GetProperty("Dependencies").GetProperty("Groups")[0].GetProperty("Dependencies")[0].GetProperty("AdditionalAttributes");
+        Assert.Contains(attributes.EnumerateArray(), value => value.GetProperty("Name").GetString() == "{urn:proof}include" && value.GetProperty("Value").GetString() == "runtime");
+    }
+
     // protects=framework and reference selection metadata cannot be silently discarded; fails_when=unsupported frameworkReferences or ambiguous reference/framework records produce equal contracts; no_claim=does not parse framework reference semantics.
     [Theory]
     [InlineData("<frameworkReferences><frameworkReference targetFramework=\"net10.0\" /></frameworkReferences>", "framework references are not supported")]
