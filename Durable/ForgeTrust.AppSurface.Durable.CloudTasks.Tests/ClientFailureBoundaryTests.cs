@@ -12,6 +12,7 @@ public sealed class ClientFailureBoundaryTests
 {
     private static readonly CloudTasksActivationRequest Request = new(new("project", "us-central1", "queue", new Uri("https://worker.example/"), "worker@example.com", "worker", TimeSpan.FromSeconds(15)), "task");
 
+    // protects=expired budget and caller cancellation during token acquisition prevent SDK calls; fails_when=source work proceeds into transport or source errors leak; no_claim=transport retry behavior.
     [Fact]
     public async Task Expired_source_failure_and_post_token_caller_cancellation_prevent_rpc()
     {
@@ -37,6 +38,7 @@ public sealed class ClientFailureBoundaryTests
         Assert.Equal(0, rpc.Calls);
     }
 
+    // protects=fatal source and transport failures escape while ordinary transport outcomes map safely; fails_when=fatal exceptions become receipts or raw provider text leaks; no_claim=live provider status coverage.
     [Fact]
     public async Task Source_and_transport_preserve_fatal_failures_and_uncertain_statuses()
     {
@@ -59,6 +61,7 @@ public sealed class ClientFailureBoundaryTests
         }
     }
 
+    // protects=caller/budget signals arriving after a noncancellation transport failure do not overwrite its evidence; fails_when=late cancellation masks the provider or local failure; no_claim=outcome for cancellation-shaped transport failures.
     [Fact]
     public async Task Noncancellation_transport_evidence_survives_late_caller_and_budget_signals()
     {
@@ -85,6 +88,7 @@ public sealed class ClientFailureBoundaryTests
         }
     }
 
+    // protects=padding-only values cannot be accepted as bearer credentials; fails_when=empty-after-padding token reaches RPC; no_claim=credential source authentication.
     [Theory]
     [InlineData("=")]
     [InlineData("==")]
@@ -96,6 +100,7 @@ public sealed class ClientFailureBoundaryTests
         Assert.Equal(0, rpc.Calls);
     }
 
+    // protects=credential failure classification retains zero-RPC provenance; fails_when=invalid and unavailable credentials collapse to one result; no_claim=metadata server behavior.
     [Fact]
     public async Task Metadata_invalidity_and_unavailability_keep_zero_rpc_provenance()
     {
@@ -109,6 +114,7 @@ public sealed class ClientFailureBoundaryTests
         }
     }
 
+    // protects=fatal local HTTP handler failures propagate through the official SDK boundary; fails_when=SDK converts fatal process failures into ordinary dispatch evidence; no_claim=remote server behavior.
     [Fact]
     public async Task Fatal_local_handler_failure_is_not_converted_by_the_official_sdk_to_a_receipt()
     {
@@ -118,6 +124,7 @@ public sealed class ClientFailureBoundaryTests
         Assert.Same(fatal, await Record.ExceptionAsync(() => client.DispatchAsync(Request)));
     }
 
+    // protects=noncooperative token sources are observed to completion and never detached past budget expiry; fails_when=client returns early while source work remains active or submits after expiry; no_claim=forcefully stopping arbitrary user code.
     [Fact]
     public async Task Noncooperative_custom_source_is_awaited_until_it_finishes_without_detached_work()
     {

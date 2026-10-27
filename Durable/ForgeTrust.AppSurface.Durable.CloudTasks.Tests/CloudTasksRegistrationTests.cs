@@ -152,6 +152,7 @@ public sealed class CloudTasksRegistrationTests
         Assert.True(transport.IsDisposed);
     }
 
+    // protects=null options fail with stable safe validation metadata before registration; fails_when=invalid options mutate services or expose unsafe diagnostics; no_claim=all option value validation.
     [Fact]
     public void Required_options_report_safe_validation_metadata_before_registration()
     {

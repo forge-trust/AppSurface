@@ -90,6 +90,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             }
         }
 
+        // protects=the neutral graph parser rejects hidden restore target frameworks; fails_when=additional targets are silently ignored; no_claim=does not compare per-framework package closure.
         [Fact]
         public void AssertNeutralGraph_AllowsOnlyCoordinatedFirstPartyVersionAndPackageArchiveHashChanges()
         {
@@ -105,6 +106,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             CloudTasksPackageConsumerProof.AssertNeutralGraph(baseline, candidate);
         }
 
+        // protects=optional Google/GAX/Grpc packages cannot enter the neutral dependency graph; fails_when=any provider edge is accepted as neutral; no_claim=does not classify unrelated non-provider dependencies.
         [Fact]
         public void AssertNeutralGraph_RejectsGoogleGrpcAndGaxProviderEdges()
         {
@@ -117,6 +119,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             }
         }
 
+        // protects=neutral package edges remain the same across baseline and candidate; fails_when=a first-party dependency target changes; no_claim=does not detect source changes that preserve package edges.
         [Fact]
         public void AssertNeutralGraph_RejectsFirstPartyDependencyEdgeDrift()
         {
@@ -132,6 +135,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Contains("dependency graph changed", exception.Message, StringComparison.Ordinal);
         }
 
+        // protects=external neutral dependency versions and SHA512 content identity stay pinned; fails_when=an upstream version or bytes change undetected; no_claim=does not verify signatures or package provenance.
         [Fact]
         public void AssertNeutralGraph_RejectsExternalVersionOrContentHashDrift()
         {
@@ -148,12 +152,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Contains("content hashes", hashException.Message, StringComparison.Ordinal);
         }
 
+        // protects=only first-party coordinated package IDs receive version normalization; fails_when=provider package versions are normalized or first-party IDs are missed; no_claim=does not validate package IDs against a manifest.
         [Theory]
         [InlineData("ForgeTrust.AppSurface.Durable/0.1.0", "forgetrust.appsurface.durable/<coordinated>")]
         [InlineData("Google.Cloud.Tasks.V2/3.7.0", "google.cloud.tasks.v2/3.7.0")]
         public void CanonicalizePackageId_NormalizesOnlyFirstPartyVersion(string input, string expected)
             => Assert.Equal(expected, CloudTasksPackageConsumerProof.CanonicalizePackageId(input, "0.1.0"));
 
+        // protects=verification may include only Cloud Tasks readiness-blocked entries without changing publish filtering; fails_when=other blocked packages enter verification or Cloud Tasks stays omitted; no_claim=does not resolve package project metadata.
         [Theory]
         [InlineData("ForgeTrust.AppSurface.Durable.CloudTasks", "Publish", null, false, true)]
         [InlineData("ForgeTrust.AppSurface.Durable", "SupportPublish", null, false, true)]
@@ -169,6 +175,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             bool expected)
             => Assert.Equal(expected, PackagePublishPlanResolver.ShouldIncludeForVerification(packageId, Enum.Parse<PackagePublishDecision>(decision), blocker, verifyBlocked));
 
+        // protects=neutral consumer project files cannot directly reference Google Tasks SDK packages; fails_when=a forbidden PackageReference is absent from reported violations; no_claim=does not inspect package transitive edges.
         [Fact]
         public void FindNeutralProjectReferenceViolations_RejectsDirectGooglePackageReferenceFromNeutralConsumer()
         {
@@ -184,6 +191,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             finally { Directory.Delete(root, recursive: true); }
         }
 
+        // protects=public API leak scanning inspects package assemblies for Google SDK types in member signatures; fails_when=the test assembly's public provider leak returns no result; no_claim=does not validate XML docs or execute SDK methods.
         [Fact]
         public void ScanPublicApiForGoogleTypes_DetectsProviderTypesInPublicMemberSignatures()
         {
@@ -208,6 +216,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             }
         }
 
+        // protects=the packed proof sequences exact local artifacts, locked isolated restores, SDK runtime evidence, and evidence report output; fails_when=successful proof lacks any required stage or evidence binding; no_claim=fixture command responses do not prove a live provider call.
         [Fact]
         public async Task RunAsync_UsesValidatedPackagesLockedIsolatedConsumersAndWritesGraphEvidence()
         {
@@ -241,6 +250,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Equal(6, runner.ConsumerRestoreRequests.Count);
         }
 
+        // protects=provider dependencies are rejected in the neutral graph and temporary proof state is cleaned; fails_when=Google edge survives or workspace remains after failure; no_claim=does not exercise a real restore.
         [Fact]
         public async Task RunAsync_RejectsGoogleEdgeInNeutralGraphAndCleansWorkspace()
         {

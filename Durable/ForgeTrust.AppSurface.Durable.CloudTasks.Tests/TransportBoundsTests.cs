@@ -9,6 +9,7 @@ namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 // no_claim: this does not prove HTTP/2 protocol correctness or live Google behavior.
 public sealed class TransportBoundsTests
 {
+    // protects=all supported read APIs enforce the decoded byte boundary and dispose the owned input; fails_when=any read shape bypasses the limit or disposal leaks the stream; no_claim=HTTP/2 framing behavior.
     [Fact]
     public async Task All_supported_read_shapes_share_limit_plus_one_and_dispose_the_owned_stream()
     {
@@ -33,6 +34,7 @@ public sealed class TransportBoundsTests
         Assert.False(input.CanRead);
     }
 
+    // protects=gzip decompression enforces the same expansion limit as plain responses; fails_when=compressed input expands past the configured bound; no_claim=SDK integration behavior.
     [Fact]
     public void Bounded_gzip_provider_roundtrips_exact_limit_and_rejects_an_expansion_over_limit()
     {

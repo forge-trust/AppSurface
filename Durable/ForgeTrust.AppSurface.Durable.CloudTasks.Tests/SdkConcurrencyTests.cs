@@ -26,6 +26,7 @@ namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 // seam: internal real SDK channel and a loopback TLS peer; no_claim: live Google credential validity.
 public sealed class SdkConcurrencyTests
 {
+    // protects=overlapping SDK requests carry their own invocation token on the HTTP/2 wire; fails_when=authorization metadata bleeds or token acquisition repeats; no_claim=validity of live Google credentials.
     [Fact]
     public async Task Concurrent_sdk_requests_each_carry_exactly_their_own_explicit_token()
     {

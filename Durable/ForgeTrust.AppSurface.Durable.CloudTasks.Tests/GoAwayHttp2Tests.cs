@@ -14,6 +14,7 @@ namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 // seam: loopback TLS HTTP/2 peer; no_claim: Google acceptance, IAM, or real delivery.
 public sealed class GoAwayHttp2Tests
 {
+    // protects=protocol-declared unprocessed streams replay only within the finite SDK invocation bound; fails_when=GOAWAY causes unbounded retry or application-level replay; no_claim=Google acceptance or real delivery.
     [Fact]
     public async Task Goaway_declaring_stream_unprocessed_is_bounded_below_one_sdk_invocation()
     {

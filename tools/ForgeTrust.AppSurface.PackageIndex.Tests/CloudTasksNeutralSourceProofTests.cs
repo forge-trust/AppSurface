@@ -6,6 +6,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests;
 
 public sealed class CloudTasksNeutralSourceProofTests
 {
+    // protects=only the two exact Cloud Tasks central pins are normalized while all other source and policy hashes remain evidenced; fails_when=another input differs or an approved pin is altered; no_claim=does not assert compiled binaries are byte-identical.
     [Fact]
     public void Verify_AllowsOnlyApprovedCloudTasksPinsAndReturnsSortedHashEvidence()
     {
@@ -23,6 +24,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Equal(Hash(fixture.CandidatePath("ForgeTrust.AppSurface.Core/Source.cs")), evidence["candidate/ForgeTrust.AppSurface.Core/Source.cs"]);
     }
 
+    // protects=generated build outputs cannot hide drift or destabilize authored-source comparison; fails_when=bin or obj contents affect parity; no_claim=does not prove those ignored outputs are safe to package.
     [Fact]
     public void Verify_IgnoresGeneratedBinAndObjTrees()
     {
@@ -37,6 +39,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.DoesNotContain(evidence.Keys, path => path.Contains("/bin/", StringComparison.Ordinal));
     }
 
+    // protects=all neutral package sources and ancestor/shared build policies stay identical; fails_when=authored source, a shared policy, or optional SDK input is added, removed, or changed; no_claim=does not prove every unrelated repository input is consumed by these projects.
     [Theory]
     [InlineData("source-bytes")]
     [InlineData("candidate-addition")]
@@ -85,6 +88,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Contains("Neutral source parity failed", error.Message, StringComparison.Ordinal);
     }
 
+    // protects=central package XML permits only the exact Google Tasks and conditional Grpc pins; fails_when=an unapproved pin, version, condition, attribute, duplicate, or baseline pin is accepted; no_claim=does not resolve the full NuGet graph.
     [Theory]
     [InlineData("unapproved-version")]
     [InlineData("unapproved-package")]
@@ -134,6 +138,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Contains("Directory.Packages.props", error.Message, StringComparison.Ordinal);
     }
 
+    // protects=neutral source proof reads regular authored inputs without following file links; fails_when=a linked source file is accepted; no_claim=does not scan directories outside the five declared packages.
     [Fact]
     public void Verify_RejectsSymbolicLinksInNeutralPackageInputs()
     {
@@ -151,6 +156,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Contains("symbolic link or reparse point", error.Message, StringComparison.Ordinal);
     }
 
+    // protects=package source traversal rejects linked ancestors before enumerating their contents; fails_when=a symlinked package parent can supply source inputs; no_claim=does not police filesystem links outside the provided roots.
     [Fact]
     public void Verify_RejectsSymbolicLinkInPackageDirectoryAncestor()
     {
@@ -168,6 +174,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Contains("symbolic link or reparse point", error.Message, StringComparison.Ordinal);
     }
 
+    // protects=required shared policy files and parseable central package XML are prerequisites for parity evidence; fails_when=missing LICENSE or malformed CPM input proceeds; no_claim=does not validate the legal completeness of LICENSE.
     [Fact]
     public void Verify_RejectsMissingRequiredInputsAndMalformedCentralPackageXml()
     {

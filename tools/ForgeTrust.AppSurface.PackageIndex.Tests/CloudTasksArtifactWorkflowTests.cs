@@ -9,6 +9,7 @@ public sealed partial class PackageArtifactValidationTests
     private const string WebProject = "Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj";
     private const string WebPackage = "ForgeTrust.AppSurface.Web";
 
+    // protects=verification includes the blocked Cloud Tasks archive before manifest creation while publication keeps rejecting its blocker; fails_when=proof omits the validated archive or publish workflow accepts readiness-blocked Cloud Tasks; no_claim=does not execute the real packed consumer or publish an artifact.
     [Fact]
     public async Task PackageArtifactWorkflow_ProvesReadinessBlockedCloudTasksArchiveBeforeManifestAndKeepsPublicationBlocked()
     {
@@ -74,6 +75,7 @@ public sealed partial class PackageArtifactValidationTests
         Assert.Empty(publishRunner.Requests);
     }
 
+    // protects=Cloud Tasks proof failure cannot leave a stale or newly written publish manifest; fails_when=the artifact manifest survives the failing proof seam; no_claim=does not simulate failures from the real SDK consumer.
     [Fact]
     public async Task PackageArtifactWorkflow_DeletesStaleManifestWhenCloudTasksProofFails()
     {

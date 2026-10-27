@@ -34,6 +34,7 @@ namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 // no_claim: local fixtures do not establish live Google IAM/OIDC or queue delivery.
 public sealed class SdkHttp2Tests
 {
+    // protects=official SDK request count, receipt mapping, and bounded response decoding across real HTTP/2 fixtures; fails_when=SDK retry/status/framing behavior escapes the expected bounds; no_claim=live IAM or queue delivery.
     [Theory]
     [InlineData("success", "ASCT001", 1, 1)]
     [InlineData("unavailable", "ASCT302", 1, 0)]
@@ -65,6 +66,7 @@ public sealed class SdkHttp2Tests
     public async Task OfficialSdkRespectsBoundedTransport(string mode, string expectedCode, int expectedRequests, int expectedAccepted)
         => await VerifyAsync(mode, expectedCode, expectedRequests, expectedAccepted);
 
+    // protects=captured SDK task reaches the actual authenticated host route and persisted work advances; fails_when=wire projection, empty body, OIDC fields, or host acceptance differ; no_claim=Google identity or production delivery.
     [Fact]
     [Trait("Category", "HostIntegration")]
     public async Task Captured_official_sdk_wake_simulates_delivery_to_real_host_and_persisted_Work()
