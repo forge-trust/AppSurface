@@ -76,6 +76,7 @@ dotnet_run_args+=(
   --parallelism "${COVERAGE_PARALLELISM:-1}"
   # These suites start containers, nested dotnet builds, or time-sensitive child processes.
   --exclusive-test-project ForgeTrust.AppSurface.Config.Tests.csproj
+  --exclusive-test-project ForgeTrust.AppSurface.Aspire.Tests.csproj
   --exclusive-test-project AuthAspNetCoreDevAuthExample.Tests.csproj
   --exclusive-test-project AuthWebRazorWireProofExample.Tests.csproj
   --exclusive-test-project ForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj
@@ -99,32 +100,23 @@ fi
 cd "$ROOT_DIR"
 dotnet "${dotnet_run_args[@]}"
 
-coverage_gate_args=(
-  run
-  --project "$CLI_PROJECT"
-  --configuration "$BUILD_CONFIGURATION"
-)
-
-if [[ "${BUILD_NO_RESTORE:-false}" == "true" ]]; then
-  coverage_gate_args+=(--no-restore)
+# With attested native evidence, retain the original full-solution aggregate gate
+# independently. The cross-platform report is used only for the patch gate.
+if [[ -n "${COVERAGE_FANIN_NATIVE:-}" ]]; then
+  python3 "$ROOT_DIR/scripts/coverage_fanin.py" capture \
+    --configuration "$BUILD_CONFIGURATION" --scope solution \
+    --report "$ROOT_DIR/TestResults/coverage-merged/coverage.cobertura.xml" \
+    --timings "$ROOT_DIR/TestResults/coverage-merged/timings.json" \
+    --output "$ROOT_DIR/TestResults/coverage-merged/fanin-primary"
+  if [[ -z "${COVERAGE_FANIN_REPORT:-}" ]]; then
+    python3 "$ROOT_DIR/scripts/coverage_fanin.py" prepare-default \
+      --configuration "$BUILD_CONFIGURATION" --output "$ROOT_DIR/TestResults/coverage-fanin"
+  fi
+  python3 "$ROOT_DIR/scripts/coverage_fanin.py" merge \
+    --configuration "$BUILD_CONFIGURATION" \
+    --primary "$ROOT_DIR/TestResults/coverage-merged/fanin-primary" \
+    --native "$COVERAGE_FANIN_NATIVE" \
+    --output "${COVERAGE_FANIN_REPORT:-$ROOT_DIR/TestResults/coverage-fanin}"
 fi
 
-coverage_gate_args+=(
-  --
-  coverage
-  gate
-  --coverage "$ROOT_DIR/TestResults/coverage-merged/coverage.cobertura.xml"
-  --min-line 95
-  --min-branch 85
-)
-
-if [[ -n "$COVERAGE_GATE_DIFF_BASE" ]]; then
-  coverage_gate_args+=(
-    --diff-base "$COVERAGE_GATE_DIFF_BASE"
-    --min-patch-line 95
-    --min-patch-branch 85
-    --patch-line-mode codecov
-  )
-fi
-
-dotnet "${coverage_gate_args[@]}"
+"$ROOT_DIR/scripts/coverage-gate-fanin.sh"

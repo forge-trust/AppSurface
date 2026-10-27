@@ -10,6 +10,10 @@
 
 **Effort:** Human M / agent S, estimated; owner and provider access dominate elapsed time. **Priority:** P3. **Depends on / blocked by:** Accepted exact-version evidence manifest, working packaged observer, named adopter and separately authorized cloud reads/release. Deferred by autoplan CEO C6; this adds no #891 acceptance gate.
 
+## Coverage storage: remote/team retention follow-up
+
+- **What:** Evaluate an optional remote archive/export integration only after an adopter needs evidence beyond the user-local managed history. **Why:** Local byte/age retention cannot promise durable team access. **Pros:** Could preserve selected release or investigation evidence across machines. **Cons:** Adds credentials, transfer cost, remote retention and deletion ownership. **Context:** The [coverage storage design](docs/designs/coverage-artifact-storage.md) keeps ordinary upgrades local, preserves current reports and exposes explicit pin/restore; existing uploads remain available. **Effort:** L human / M agent, estimated. **Priority:** P3. **Depends on:** Shipped local lifecycle plus an identified adopter/owner and concrete remote retention requirement. Deferred in CEO C6; no remote service is part of this delivery.
+
 ## Metadata-only deployment-name linter (#890 follow-up)
 
 **What:** Consider an offline deployment-manifest linter built on the [candidate inspector design](docs/designs/issue-890-environment-candidate-inspection.md) after concrete adopter demand.

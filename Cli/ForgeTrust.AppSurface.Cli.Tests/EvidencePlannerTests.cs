@@ -8,6 +8,26 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class EvidencePlannerTests
 {
     [Fact]
+    public void DefaultExecutionOptions_ShouldPreserveExistingCanonicalDeclarationBytes()
+    {
+        var declaration = new EvidenceProducerDeclaration("coverage", "coverage", "1", [], [], [], 60);
+        var oldShape = new
+        {
+            declaration.Id,
+            declaration.Kind,
+            declaration.Version,
+            declaration.RequiredResources,
+            declaration.AssertionIds,
+            declaration.ArtifactSlots,
+            declaration.TimeoutSeconds,
+            declaration.CoverageGate,
+            declaration.CoverageArtifactRetention,
+        };
+        Assert.Equal(EvidenceCanonicalJson.Serialize(oldShape), EvidenceCanonicalJson.Serialize(declaration));
+        var explicitRelease = declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions("Release") };
+        Assert.NotEqual(EvidenceDigest.CanonicalSha256(declaration), EvidenceDigest.CanonicalSha256(explicitRelease));
+    }
+    [Fact]
     public void Resolve_ShouldSelectExplicitNoEvidenceProfileForDocumentationPath()
     {
         var planner = new EvidencePlanner();
@@ -571,6 +591,65 @@ public sealed class EvidencePlannerTests
 
         Assert.Equal("ASEVD127", exception.Code);
         Assert.Contains("patchLineMode", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("", "ASEVD129")]
+    [InlineData("Release --no-restore", "ASEVD129")]
+    [InlineData("Release/QA", "ASEVD129")]
+    public void Planner_ShouldRejectUnsafeCoverageExecutionConfigurations(string configuration, string code)
+    {
+        var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var policy = CreatePolicy() with
+        {
+            Profiles =
+            [
+                validProfile with
+                {
+                    Producers = [validProfile.Producers[0] with { CoverageExecution = new EvidenceCoverageExecutionOptions(configuration) }],
+                },
+            ],
+        };
+
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(policy), code);
+    }
+
+    [Theory]
+    [InlineData(0, "ASEVD130")]
+    [InlineData(33, "ASEVD130")]
+    public void Planner_ShouldRejectOutOfRangeCoverageExecutionParallelism(int parallelism, string code)
+    {
+        var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var policy = CreatePolicy() with
+        {
+            Profiles =
+            [
+                validProfile with
+                {
+                    Producers = [validProfile.Producers[0] with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: parallelism) }],
+                },
+            ],
+        };
+
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(policy), code);
+    }
+
+    [Fact]
+    public void Planner_ShouldRejectUnsupportedCoverageExecutionTestResults()
+    {
+        var validProfile = CreateCoverageProfile(EvidenceProfileScope.Targeted);
+        var policy = CreatePolicy() with
+        {
+            Profiles =
+            [
+                validProfile with
+                {
+                    Producers = [validProfile.Producers[0] with { CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: (EvidenceCoverageTestResultFormat)99) }],
+                },
+            ],
+        };
+
+        AssertPlanningCode(() => EvidencePlanner.ValidatePolicy(policy), "ASEVD131");
     }
 
     [Fact]
