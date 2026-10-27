@@ -1,5 +1,34 @@
 # EvidenceHost C# runtime cutover
 
+## Fixed public replay controllers — 2026-10-27
+
+The [native-data replay controller](../../.github/issue779-protected-qualification/completed-native-replay-README.md)
+and [public gate replay controller](../../.github/issue779-protected-qualification/completed-gate-replay-README.md)
+now verify an exact clean disposable source checkout, select fixed retained inputs, build with SDK
+10.0.401 in locked mode and invoke only the existing public test or coverage command. They reject
+pre-existing ignored build outputs, preserve bounded logs/reports, recheck source and input bytes,
+and leave generated build/cache state under caller-owned isolated workspace disposal. Their fixed
+false authority fields and `cleanup_complete: false` do not certify a completed protected run.
+The numerical evaluator, fixed base, thresholds, tolerance and Codecov mode are unchanged.
+
+Detached Linux validation passed 163 qualification-data tests with five explicit original-fixture
+opt-in skips. These include real harmless process-group deadline/output/closed-pipe-child controls
+and synthetic stage/build/test orchestration boundaries. The actual SDK and public-method
+feasibility runs below remain separate: no complete protected 37-artifact run has been replayed,
+and run 109 still cannot pass the gate controller's required-original-report preflight.
+Fixed orchestration of every completed-run role, original successful test/merge binding,
+protected source/support anchoring and actual Trusted/downstream acceptance remain required.
+
+The [revision-115 N05 job](https://github.com/forge-trust/AppSurface/actions/runs/40533927699/job/122293911966)
+passed the genuine original procedure without skips after the current content pins and fixture
+repairs. Its original provider archive `12748371126` has SHA-256
+`2339b01d710338a419cd8f3c3986e7517d39711c4d58a0a07c50b1a2d37f04f3` and binds source
+`5857a96419f51b4f1ba64257f9646b1c76025760` and the complete 4,013-file capture. The initial/final
+ordinary OS passes took 73/79 seconds and the unchanged launch guard allowed the remaining native
+procedure to run; its total phase elapsed was 375.7135 seconds with exit zero. This source-bound
+negative control remains an Observation with native acceptance false. The full chain and numerical
+gate are still running and this individual result does not establish their success.
+
 ## Completed validator preparation and N05 timing repair — 2026-10-27
 
 The [revision-114 runtime validation](https://github.com/forge-trust/AppSurface/actions/runs/40532277987)

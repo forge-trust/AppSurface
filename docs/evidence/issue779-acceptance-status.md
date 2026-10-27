@@ -2,6 +2,13 @@
 
 ## Native-validation migration and current continuation — 2026-10-27
 
+The [fixed replay-controller preparation](issue779-csharp-runtime-cutover.md#fixed-public-replay-controllers--2026-10-27)
+adds exact-source isolated build/test and public CLI replay controllers with bounded output,
+deadline and process-group checks. Detached Linux validation passes 163 tests with five explicit
+fixture opt-in skips; genuine protected full-stage replay and original-success binding remain open.
+Revision 115's genuine N05 procedure now passes under the unchanged bounds. Its full runtime chain
+and numerical gate remain pending, and admission/catalogue/support registration stay closed.
+
 The [latest completed-validator preparation](issue779-csharp-runtime-cutover.md#completed-validator-preparation-and-n05-timing-repair--2026-10-27)
 adds fixed native input/custody and single-method TRX contracts plus original gate archive/report
 checks. The public C# data validator passed once against revision 109's exact captured source and

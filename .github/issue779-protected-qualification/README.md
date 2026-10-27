@@ -120,7 +120,10 @@ C# validator's 24 data leaves and verifies their inventory, content and owned in
 [native result contract](completed-native-result-README.md) checks the exact single-method TRX
 and supplies the fixed VSTest argument shape. The [gate input and report comparison](completed-gate-README.md)
 checks retained original inputs and compares strict JSON data without coverage arithmetic.
-These pieces do not execute a completed-run replay controller. Its isolated exact-source
-build/test/gate execution, successful original workflow binding, fixed orchestration, protected
+The [native test replay controller](completed-native-replay-README.md) and
+[public gate replay controller](completed-gate-replay-README.md) now prepare fixed isolated
+source builds and invoke those public entry points. Their process and orchestration controls
+are tested with detached fixtures; a genuine successful full-stage replay remains required.
+Successful original workflow/test inventory binding, fixed orchestration, protected
 finalizer and reviewed support registration remain required. No successfully parsed projection
 may fill those gaps or enable runtime Trusted admission.
