@@ -1,5 +1,55 @@
 # EvidenceHost C# runtime cutover
 
+## Revision 109 validation and revision 110 repair — 2026-10-27
+
+The [revision-109 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40483696166)
+used source `64e25cb406243a648edee31a9cf76935034759a7` and the 3,989-file capture
+SHA-256 `a4764325c21c8934e4b9ec69975b32b8edb47308f442122801a80884e684488a`.
+All fourteen worker selectors and reconciliation, C3/application and separate SDK lifecycle,
+account creation and rollback, packaged C2 and all fourteen ordered measurement jobs passed.
+Its only failed job was the unchanged solution/Codecov gate: two stream-read failure fixtures
+threw `DirectoryNotFoundException` while deleting a destination parent that had not yet been
+created. The resulting `ASCOV120` is a test failure, not a numerical threshold result. There
+is no passing current solution/patch gate and no newly measured patch deficit from that run.
+
+The incoming writer deliberately buffers bounded stream input before persistence. Revision 110
+(`18e5f128d752a26c3764eaab94c1a7b67824f06b`) corrects only those fixtures and their
+[stream API reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md): they
+assert absent output during the read, create a caller-owned file or directory, throw the original
+read exception, then require the identical exception, unchanged caller path, open caller stream,
+empty artifact metadata and a successful fresh retry. The focused selection changed from eight
+passes/two failures to ten passes/no skips. The full CLI suite subsequently passed 4,262 tests
+with five platform skips under ordinary local permissions. An earlier restricted run's eight
+environment failures are retained separately; no timeouts, skips or product behavior were changed.
+
+The [revision-109 portable procedure](https://github.com/forge-trust/AppSurface/actions/runs/40484008132)
+passed all six OS/mode jobs. Provider size/SHA-256 checks on all original archives confirmed passed
+procedures and cleanup, with protected admission, native acceptance and gate eligibility false.
+The [separate revision-109 custody run](https://github.com/forge-trust/AppSurface/actions/runs/40483696101)
+also passed its 29 filesystem/report controls and four separate actual-peer credential controls
+without skips. These are source-bound observations, not protected acceptance.
+
+The [revision-110 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40517643465)
+is bound to source `18e5f128d752a26c3764eaab94c1a7b67824f06b` and capture SHA-256
+`abbe9285f6feec5b4a5e203e1c88335c490bfe103f1540f6f7d79e66539cac32` (3,989 files).
+Its complete consumer/measurement/gate chain is still running. The separate
+[focused custody run](https://github.com/forge-trust/AppSurface/actions/runs/40517643367)
+has retained provider-digest-matching archives with all 29 filesystem/report and four peer-credential
+TRX rows passed and unskipped. The fixed comparison base
+`1991280e8af049db592ebcb705cbf66f4b4c6e8b`, thresholds, exclusions, clocks, quotas,
+retention limits and closed production admission remain unchanged.
+
+The next non-authorizing completed-run steps are the
+[C2 receipt replay](../../.github/issue779-protected-qualification/completed-c2-README.md)
+and [fourteen-segment measurement replay](../../.github/issue779-protected-qualification/completed-measurement-chain-README.md).
+The C2 mechanism ran its original captured callbacks against run 109, checked all seven cases,
+and rejected coherently rebound EOF loss. The measurement mechanism ran all fourteen original
+segments, returned the original N16 report and all sixteen case rows, and rejected a changed
+retained predecessor. These isolated replays use original artifacts from a failed candidate run;
+they cannot satisfy the completed successful protected-run resolver. C3/account closeout adapters,
+the full gate replay, fixed orchestration, provider/support anchoring and actual Trusted/downstream
+acceptance remain separate required work. No projection grants admission or registers support.
+
 ## Local integration with current main — 2026-10-27
 
 The prepared revision-104 files were preserved in local commit `6402d8edc64aca84523b94132afaa153749640c3`

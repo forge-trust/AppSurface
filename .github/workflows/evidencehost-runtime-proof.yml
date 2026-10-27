@@ -44,7 +44,7 @@ jobs:
           printf 'PARENT_CONTROL_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
           (cd .github/issue779-protected-consumer && timeout --signal=KILL 60 python3 -B -m unittest -v test_provenance test_github_parent test_dispatch test_entrypoint) > "$evidence/transport-controls.log" 2>&1
-          (cd .github/issue779-protected-qualification && timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation test_completed_c1) > "$evidence/qualification-data-controls.log" 2>&1
+          (cd .github/issue779-protected-qualification && timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation test_completed_c1 test_completed_c2 test_completed_measurement_chain) > "$evidence/qualification-data-controls.log" 2>&1
       - name: Compile the ordinary semantic consumer and exercise the actual fixed child
         shell: bash
         run: |

@@ -2,6 +2,16 @@
 
 ## Native-validation migration and current continuation — 2026-10-27
 
+The [current revision-109/110 record](issue779-csharp-runtime-cutover.md#revision-109-validation-and-revision-110-repair--2026-10-27)
+supersedes the continuation results below. Revision 109 passed all original selectors,
+consumer/account/C2 jobs and fourteen ordered measurements, then failed the unchanged gate on
+two stale streaming fixtures before a numerical gate result. Revision 110 repairs those fixtures
+without runtime changes; ten focused tests and the full 4,262-test CLI suite pass locally, with
+five platform skips. Its new complete Linux chain is running. The six revision-109 portable
+procedures and separate 29-plus-four custody checks passed with all authority flags false.
+Completed C2 and measurement-chain replay are mechanism checks only; protected qualification,
+numerical gates, final orchestration and actual Trusted/downstream acceptance remain open.
+
 Latest remote `main` (`ebb562be618c2649c1ef0ade12095e56468882c7`) is merged into the
 continuation branch. The [native-validation tool and workflow](../designs/native-evidence-validation.md)
 now run an explicit portable procedure, write a procedure report instead of an Evidence manifest,
@@ -29,9 +39,11 @@ completed successfully: original artifacts matched provider digests and the immu
 with 29 filesystem/report rows and four separate actual peer-credential rows passed and unskipped.
 These source-bound checks do not enable Trusted execution.
 
-The [completed C1 callback mechanism](../../.github/issue779-protected-qualification/completed-c1-README.md)
-is the next bounded preparation. Full completion validation still requires the measured C1 chain,
-C2/C3/account validators and unchanged coverage/Codecov checks. Protected-main qualification,
+The [completed C1 callback mechanism](../../.github/issue779-protected-qualification/completed-c1-README.md),
+[C2 receipt replay](../../.github/issue779-protected-qualification/completed-c2-README.md) and
+[measured C1 chain replay](../../.github/issue779-protected-qualification/completed-measurement-chain-README.md)
+are bounded preparations. Full completion validation still requires C3/account closeout,
+full orchestration and unchanged coverage/Codecov checks. Protected-main qualification,
 authenticated provider/commit/tree/file anchoring, reviewed exact support registration, an ordinary
 Trusted CLI/SDK journey and downstream protected acceptance remain outstanding. The production
 catalogue, request mode and accepted-proof decision remain closed. The historical numerical figures
