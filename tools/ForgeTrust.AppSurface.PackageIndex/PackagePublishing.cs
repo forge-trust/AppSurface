@@ -46,16 +46,52 @@ internal sealed class CliWrapCommandRunner : IExternalCommandRunner
 
             using var standardOutput = new BoundedCaptureStream(request.CapturePolicy.MaximumBytesPerStream);
             using var standardError = new BoundedCaptureStream(request.CapturePolicy.MaximumBytesPerStream);
-            var result = await command
-                .WithStandardOutputPipe(PipeTarget.ToStream(standardOutput))
-                .WithStandardErrorPipe(PipeTarget.ToStream(standardError))
-                .ExecuteAsync(timeoutCts.Token);
-            return new ExternalCommandResult(
-                result.ExitCode,
-                standardOutput.GetText(),
-                standardError.GetText(),
-                standardOutput.Truncated,
-                standardError.Truncated);
+            using var processExited = new CancellationTokenSource();
+            Process? observedProcess = null;
+            void OnProcessExited(object? sender, EventArgs args)
+            {
+                try { processExited.Cancel(); }
+                catch (ObjectDisposedException) { } // An already-queued exit callback can race with teardown.
+            }
+
+            var capturedCommand = command
+                .WithStandardOutputPipe(CreateCaptureTarget(standardOutput))
+                .WithStandardErrorPipe(CreateCaptureTarget(standardError));
+            try
+            {
+                var result = await capturedCommand.ExecuteAsync(
+                    configureStartInfo: null,
+                    configureProcess: process =>
+                    {
+                        if (!request.CapturePolicy.CompleteOnProcessExit) return;
+                        observedProcess = process;
+                        process.EnableRaisingEvents = true;
+                        process.Exited += OnProcessExited;
+                        // CliWrap invokes this callback after Start; don't miss a child that already exited.
+                        if (process.HasExited) OnProcessExited(process, EventArgs.Empty);
+                    },
+                    forcefulCancellationToken: timeoutCts.Token);
+                return new ExternalCommandResult(result.ExitCode, standardOutput.GetText(), standardError.GetText(),
+                    standardOutput.Truncated, standardError.Truncated);
+            }
+            finally
+            {
+                if (observedProcess is not null) observedProcess.Exited -= OnProcessExited;
+            }
+
+            PipeTarget CreateCaptureTarget(BoundedCaptureStream capture)
+            {
+                if (!request.CapturePolicy.CompleteOnProcessExit) return PipeTarget.ToStream(capture);
+                return PipeTarget.Create(async (source, cancellation) =>
+                {
+                    using var observation = CancellationTokenSource.CreateLinkedTokenSource(cancellation, processExited.Token);
+                    try { await source.CopyToAsync(capture, observation.Token); }
+                    catch (OperationCanceledException) when (processExited.IsCancellationRequested && !cancellation.IsCancellationRequested)
+                    {
+                        capture.MarkIncompleteAfterProcessExit();
+                    }
+                });
+            }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -118,9 +154,14 @@ internal sealed record ExternalCommandRequest(
 /// Use this for provenance proof commands, whose diagnostics must remain bounded even if a child process is noisy.
 /// The default of four MiB per stream is the release proof contract; ordinary existing commands retain their
 /// buffered behavior unless they explicitly pass a policy.
+/// CompleteOnProcessExit is reserved for launchers whose descendants intentionally outlive the direct child.
+/// It cancels only output observation, preserves the child's exit code and command deadline, and marks output
+/// incomplete if EOF was not observed. Do not use it for complete structured-output proofs. Native pg_ctl startup
+/// uses independent postmaster ownership, listening, authentication and version checks to establish readiness.
 /// </summary>
 /// <param name="MaximumBytesPerStream">Positive byte cap for stdout and, independently, stderr.</param>
-internal sealed record ExternalCapturePolicy(int MaximumBytesPerStream = 4 * 1024 * 1024)
+/// <param name="CompleteOnProcessExit">Whether to end output observation when the direct child exits, even if a descendant retains its pipes. Defaults to false.</param>
+internal sealed record ExternalCapturePolicy(int MaximumBytesPerStream = 4 * 1024 * 1024, bool CompleteOnProcessExit = false)
 {
     /// <summary>The standard bounded capture policy for release proof commands.</summary>
     internal static ExternalCapturePolicy ReleaseProof { get; } = new();
@@ -132,8 +173,8 @@ internal sealed record ExternalCapturePolicy(int MaximumBytesPerStream = 4 * 102
 /// <param name="ExitCode">Process exit code, or -1 for a launch/timeout failure.</param>
 /// <param name="StandardOutput">Captured stdout, possibly ending with a truncation marker.</param>
 /// <param name="StandardError">Captured stderr, possibly ending with a truncation marker.</param>
-/// <param name="StandardOutputTruncated">Whether stdout exceeded its capture policy and later bytes were drained.</param>
-/// <param name="StandardErrorTruncated">Whether stderr exceeded its capture policy and later bytes were drained.</param>
+/// <param name="StandardOutputTruncated">Whether stdout exceeded its capture limit or observation ended before EOF.</param>
+/// <param name="StandardErrorTruncated">Whether stderr exceeded its capture limit or observation ended before EOF.</param>
 internal sealed record ExternalCommandResult(
     int ExitCode,
     string StandardOutput,
@@ -151,6 +192,7 @@ internal sealed class BoundedCaptureStream : Stream
     private const string TruncationMarker = "\n[output truncated after configured byte limit]\n";
     private readonly MemoryStream _captured;
     private readonly int _maximumBytes;
+    private bool _incompleteAfterProcessExit;
 
     /// <summary>Creates a bounded sink. The byte cap applies before UTF-8 decoding.</summary>
     internal BoundedCaptureStream(int maximumBytes)
@@ -160,14 +202,24 @@ internal sealed class BoundedCaptureStream : Stream
         _captured = new MemoryStream(Math.Min(maximumBytes, 64 * 1024));
     }
 
-    /// <summary>Whether bytes after the configured cap were drained and discarded.</summary>
+    /// <summary>Whether bytes exceeded the capture cap or output observation ended before EOF.</summary>
     internal bool Truncated { get; private set; }
+
+    /// <summary>Marks a pipe whose direct child exited before its inherited writers reached EOF.</summary>
+    /// <remarks>Call only after the stream's copy operation has settled. Retained bytes remain bounded;
+    /// this flag prevents an incomplete capture from being accepted as complete structured evidence.</remarks>
+    internal void MarkIncompleteAfterProcessExit()
+    {
+        _incompleteAfterProcessExit = true;
+        Truncated = true;
+    }
 
     /// <summary>Returns retained UTF-8 text with an explicit truncation marker when needed.</summary>
     internal string GetText()
     {
         var text = Encoding.UTF8.GetString(_captured.GetBuffer().AsSpan(0, checked((int)_captured.Length)));
-        return Truncated ? text + TruncationMarker : text;
+        return _incompleteAfterProcessExit ? text + "\n[output incomplete after process exit]\n"
+            : Truncated ? text + TruncationMarker : text;
     }
 
     /// <inheritdoc />
@@ -473,6 +525,10 @@ internal sealed class PackagePublishWorkflow
                 cancellationToken);
             RequirePreparedEntries(plannedEntries, artifactManifest, request.TailwindEvidence.PublicationDirectory);
         }
+
+        if (plan.Entries.Any(entry => string.Equals(entry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)))
+            DurableTemplateReleaseEvidence.Require(request.DurableTemplateEvidenceDirectory, request.DurableTemplateSourceCommit,
+                artifactManifest, request.ArtifactsInputPath);
 
         var apiKey = _credentialProvider.Read(request.ApiKeyEnvironmentVariable);
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -816,8 +872,8 @@ internal sealed class PackageSmokeInstallWorkflow
     }
 
     /// <summary>
-    /// Restores all non-tool <c>publish</c> entries in one aggregate smoke project, then verifies each tool package
-    /// independently from isolated per-tool workspaces.
+    /// Restores library entries in one aggregate smoke project, verifies tools in isolated workspaces, and replays
+    /// a promoted Durable template against all installed package archives.
     /// </summary>
     /// <param name="request">
     /// Smoke install request containing the repository root, package index manifest path, artifact manifest path,
@@ -841,9 +897,11 @@ internal sealed class PackageSmokeInstallWorkflow
     /// </para>
     /// <para>
     /// Pitfall: a failed aggregate package restore marks every non-tool package entry failed, but tool smoke still runs
-    /// and is reported independently. Request validation and manifest or package-plan mismatches throw before a report is
-    /// written; command failures are captured in the returned report unless the supplied <paramref name="cancellationToken" />
-    /// cancels the workflow.
+    /// and is reported independently. Failed library or tool smoke withholds promoted template replay and published
+    /// runtime-preflight proof. The report records completed library/tool results before either proof, and adds a template
+    /// success only after replay and owned cleanup pass. Request validation and manifest or package-plan mismatches throw
+    /// before a report is written; command failures without a required proof remain in the returned report unless the
+    /// supplied <paramref name="cancellationToken" /> cancels the workflow.
     /// </para>
     /// </remarks>
     internal async Task<PackageSmokeInstallReport> RunAsync(
@@ -872,7 +930,8 @@ internal sealed class PackageSmokeInstallWorkflow
         await File.WriteAllTextAsync(nugetConfigPath, RenderNuGetConfig(request.Source), cancellationToken);
 
         var reportEntries = new List<PackageSmokeInstallReportEntry>(entries.Length);
-        var packageEntries = entries.Where(entry => !entry.ManifestEntry.IsTool).ToArray();
+        var packageEntries = entries.Where(entry => !entry.ManifestEntry.IsTool
+            && !string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (packageEntries.Length > 0)
         {
             var packageManifestEntries = packageEntries.Select(entry => entry.ManifestEntry).ToArray();
@@ -936,34 +995,51 @@ internal sealed class PackageSmokeInstallWorkflow
                 CombineOutput(result)));
         }
 
+        var hasTemplate = entries.Any(entry => string.Equals(entry.ManifestEntry.PackageId,
+            DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
         var report = new PackageSmokeInstallReport(manifest.PackageVersion, request.Source, reportEntries);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ReportPath)!);
         await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
 
-        if (request.PreflightProof is not null)
+        if (hasTemplate || request.PreflightProof is not null)
         {
             if (reportEntries.Any(entry => entry.Status != PackageSmokeInstallStatus.Restored))
             {
-                throw new PackageIndexException("Public-feed smoke failed; the published runtime-preflight proof cannot run.");
+                throw new PackageIndexException(hasTemplate
+                    ? "Public-feed smoke failed; the promoted template replay cannot run."
+                    : "Public-feed smoke failed; the published runtime-preflight proof cannot run.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.CandidatePreflightReceiptPath)
-                || string.IsNullOrWhiteSpace(request.PublishedPreflightReceiptPath))
+            if (request.PreflightProof is not null && (string.IsNullOrWhiteSpace(request.CandidatePreflightReceiptPath)
+                || string.IsNullOrWhiteSpace(request.PublishedPreflightReceiptPath)))
             {
                 throw new PackageIndexException("Public-feed runtime-preflight proof requires candidate and published receipt paths.");
             }
 
+            // Both proofs consume every manifest archive; tool install keeps its archive outside the library cache.
             foreach (var entry in entries.Where(entry => entry.ManifestEntry.IsTool))
             {
                 var toolPath = Path.Join(request.WorkDirectory, SanitizeFileName(entry.ManifestEntry.PackageId), "tools");
                 StageInstalledToolArchive(toolPath, entry.ManifestEntry, manifest.PackageVersion, sharedPackagesPath);
             }
+        }
 
+        if (hasTemplate)
+        {
+            await DurableTemplatePublicReplay.RunAsync(request, manifest, sharedPackagesPath, _commandRunner, cancellationToken);
+            var templateEntry = entries.Single(entry => string.Equals(entry.ManifestEntry.PackageId, DurableTemplateStaging.PackageId, StringComparison.OrdinalIgnoreCase));
+            reportEntries.Add(new(DurableTemplateStaging.PackageId, templateEntry.ManifestEntry.ProjectPath, false,
+                PackageSmokeInstallStatus.Restored, 0, "Promoted native template and generated Work proof passed after owned cleanup."));
+            await File.WriteAllTextAsync(request.ReportPath, _reportRenderer.RenderMarkdown(report), cancellationToken);
+        }
+
+        if (request.PreflightProof is not null)
+        {
             await _preflightArtifactProof.RunPublishedAsync(
                 request.PreflightProof,
-                request.CandidatePreflightReceiptPath,
+                request.CandidatePreflightReceiptPath!,
                 sharedPackagesPath,
-                request.PublishedPreflightReceiptPath,
+                request.PublishedPreflightReceiptPath!,
                 cancellationToken);
         }
 
@@ -1476,6 +1552,8 @@ internal sealed class PackageSmokeInstallReportRenderer
 /// <param name="PublishLogPath">Markdown publish ledger path.</param>
 /// <param name="Source">NuGet source URL.</param>
 /// <param name="ApiKeyEnvironmentVariable">Environment variable that supplies the NuGet API key.</param>
+/// <param name="DurableTemplateEvidenceDirectory">Trusted exact-ID OS receipt download required for template publication.</param>
+/// <param name="DurableTemplateSourceCommit">Expected full source revision supplied independently by the protected workflow.</param>
 /// <param name="TailwindEvidence">Original candidate and native evidence required when the resolved plan contains Tailwind; omitted for non-Tailwind plans.</param>
 internal sealed record PackagePublishRequest(
     string RepositoryRoot,
@@ -1485,7 +1563,8 @@ internal sealed record PackagePublishRequest(
     string PublishLogPath,
     string Source,
     string ApiKeyEnvironmentVariable,
-    TailwindPublicationRequest? TailwindEvidence = null);
+    TailwindPublicationRequest? TailwindEvidence = null,
+    string? DurableTemplateEvidenceDirectory = null, string? DurableTemplateSourceCommit = null);
 
 /// <summary>
 /// Trusted workflow identity and paths needed to validate a Tailwind publication. Values are supplied from protected

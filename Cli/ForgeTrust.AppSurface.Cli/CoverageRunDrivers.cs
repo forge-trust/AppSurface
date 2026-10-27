@@ -78,6 +78,7 @@ internal static class CoverageRunDriverPreflight
     /// <param name="supervisor">Run-scoped supervisor for discovery operations and cancellation.</param>
     /// <param name="cancellationToken">Cancellation token for capability evaluation.</param>
     /// <param name="processOutputQuota">Optional Evidence invocation-wide quota shared with capability-evaluation child processes.</param>
+    /// <param name="observeCapabilities">Optional observer called once for each successfully parsed outer or framework evaluation.</param>
     /// <returns>A task that completes when every project is compatible.</returns>
     /// <remarks>Throws a stable coverage execution diagnostic for an engine incompatibility or aggregated project package and capability failures in stable project order.</remarks>
     public static async Task ValidateAsync(
@@ -87,7 +88,8 @@ internal static class CoverageRunDriverPreflight
         ICoverageRunProcessRunner processRunner,
         CoverageRunWatchdogSupervisor supervisor,
         CancellationToken cancellationToken,
-        EvidenceRunByteQuota? processOutputQuota = null)
+        EvidenceRunByteQuota? processOutputQuota = null,
+        Action<CoverageRunProject, string?, string>? observeCapabilities = null)
     {
         ValidateEngine(resolution.SolutionDirectory);
         var requiredPackage = driver == CoverageRunDriver.Collector ? "coverlet.collector" : "coverlet.msbuild";
@@ -119,6 +121,7 @@ internal static class CoverageRunDriverPreflight
                 failures.Add($"{project.RelativePath}: capability evaluation failed");
                 continue;
             }
+            observeCapabilities?.Invoke(project, null, result.StandardOutput);
 
             if (hasDuplicatePackage)
             {
@@ -162,6 +165,7 @@ internal static class CoverageRunDriverPreflight
                     failures.Add($"{project.RelativePath} [{targetFramework}]: capability evaluation failed");
                     continue;
                 }
+                observeCapabilities?.Invoke(project, targetFramework, innerResult.StandardOutput);
 
                 if (innerHasDuplicatePackage)
                 {
@@ -199,7 +203,7 @@ internal static class CoverageRunDriverPreflight
             "msbuild",
             project.FullPath,
             "-getItem:PackageReference",
-            "-getProperty:TestingPlatformDotnetTestSupport,TargetFramework,TargetFrameworks",
+            "-getProperty:TestingPlatformDotnetTestSupport,TargetFramework,TargetFrameworks,RunSettingsFilePath,Configuration",
             $"-property:Configuration={configuration}",
             "-nologo",
         };
@@ -625,13 +629,15 @@ internal static class CoverageRunDriverStrategy
     /// <param name="commitGate">Optional gate that must authorize canonical artifact replacement.</param>
     /// <param name="beforeArtifactOpen">Optional test seam invoked after candidate discovery and before the artifact is opened.</param>
     /// <param name="deleteStagedFile">Optional test seam that replaces deletion of the staged coverage file.</param>
+    /// <param name="removeRedundantRaw">Whether verified, invocation-owned duplicate XML may be removed after publication.</param>
     /// <returns>A stable normalization status and the canonical absolute artifact path only when produced.</returns>
     public static async Task<CoverageRunDriverNormalization> NormalizeDetailedAsync(
         CoverageRunDriverInvocation invocation,
         CancellationToken cancellationToken,
         Action<Action>? commitGate = null,
         Action? beforeArtifactOpen = null,
-        Action<string>? deleteStagedFile = null)
+        Action<string>? deleteStagedFile = null,
+        bool removeRedundantRaw = false)
     {
         var canonical = Path.Join(invocation.ProjectOutputDirectory, "coverage.cobertura.xml");
         if (invocation.Driver == CoverageRunDriver.Msbuild)
@@ -716,6 +722,34 @@ internal static class CoverageRunDriverStrategy
                 }
             }
 
+            if (removeRedundantRaw)
+            {
+                try
+                {
+                    using var rawParent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(candidate)!, false, false)
+                        ?? throw new IOException("Collector artifact directory disappeared.");
+                    using var canonicalParent = CoverageRunOutputLease.AcquireArtifactDirectory(invocation.ProjectOutputDirectory, false, false)
+                        ?? throw new IOException("Canonical artifact directory disappeared.");
+                    string identity;
+                    using (var raw = rawParent.OpenArtifactFile(Path.GetFileName(candidate), false, requirePrivate: false))
+                    using (var published = canonicalParent.OpenArtifactFile("coverage.cobertura.xml", false, requirePrivate: false))
+                    {
+                        identity = CoverageRunOutputLease.GetArtifactObjectIdentity(raw.SafeFileHandle);
+                        var rawHash = await SHA256.HashDataAsync(raw, cancellationToken);
+                        var publishedHash = await SHA256.HashDataAsync(published, cancellationToken);
+                        if (raw.Length != published.Length
+                            || !CryptographicOperations.FixedTimeEquals(rawHash, publishedHash))
+                            throw new IOException("Collector and canonical bytes no longer agree.");
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    rawParent.DeleteArtifactEntry(Path.GetFileName(candidate), 1, identity);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    cleanupDiagnostic = "ASCOV123 Redundant collector XML was retained because verified duplicate cleanup could not complete ("
+                        + exception.GetType().Name + "). Canonical publication and the primary normalization outcome were retained.";
+                }
+            }
             return new CoverageRunDriverNormalization("produced", canonical, CleanupDiagnostic: cleanupDiagnostic);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or InvalidDataException or CoverageRunArtifactContractException)

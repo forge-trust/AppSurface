@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -217,7 +218,21 @@ public sealed record EvidenceProducerDeclaration(
     IReadOnlyList<string> AssertionIds,
     IReadOnlyList<EvidenceArtifactSlot> ArtifactSlots,
     int TimeoutSeconds,
-    EvidenceCoverageGateRequirements? CoverageGate = null);
+    EvidenceCoverageGateRequirements? CoverageGate = null)
+{
+    /// <summary>Gets the optional built-in coverage execution envelope, defaulting to Debug, no managed test results, and serial execution.</summary>
+    /// <remarks>Only coverage producers interpret this value. It does not change coverage filters, gates, or source scope.</remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public EvidenceCoverageExecutionOptions? CoverageExecution { get; init; }
+
+    /// <summary>Gets the optional raw coverage artifact retention mode.</summary>
+    /// <remarks>
+    /// Only coverage producers interpret this value. Exactly <c>managed</c> and <c>full</c> are supported;
+    /// neither changes collection or coverage gates. The existing positional constructor remains unchanged.
+    /// See the <c>coverageArtifactRetention</c> reference in the coverage storage guide.
+    /// </remarks>
+    public string CoverageArtifactRetention { get; init; } = "managed";
+}
 
 /// <summary>
 /// Declares an evidence resource required by a profile.
@@ -577,6 +592,68 @@ public sealed class EvidenceArtifactWriter
         return result!;
     }
 
+    /// <summary>Streams a declared artifact through the same bounded lifecycle tracking as byte-array writes.</summary>
+    /// <param name="logicalName">Declared artifact slot identifier.</param>
+    /// <param name="relativePath">Normalized path relative to the producer artifact directory.</param>
+    /// <param name="contents">Source stream, which remains owned by the caller.</param>
+    /// <param name="cancellationToken">Cancellation token for the write.</param>
+    /// <returns>Verified artifact metadata.</returns>
+    public async ValueTask<EvidenceArtifactResult> WriteAsync(string logicalName, string relativePath, Stream contents, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        if (_execution is null) return await WriteStreamCoreAsync(logicalName, relativePath, contents, cancellationToken).ConfigureAwait(false);
+        _admission!.ValidateActive();
+        EvidenceArtifactResult? result = null;
+        var write = _execution.TrackOwnedWork(async token =>
+        {
+            result = await WriteStreamCoreAsync(logicalName, relativePath, contents, token).ConfigureAwait(false);
+        }, cancellationToken) ?? throw new EvidenceAdmissionException("ASEVD410", "Artifact write admission is closed.");
+        await write.ConfigureAwait(false);
+        return result!;
+    }
+
+    private async ValueTask<EvidenceArtifactResult> WriteStreamCoreAsync(
+        string logicalName,
+        string relativePath,
+        Stream contents,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        if (_producer.ArtifactSlots.FirstOrDefault(slot => string.Equals(slot.LogicalName, logicalName, StringComparison.Ordinal)) is not { } slot)
+        {
+            throw new InvalidOperationException($"Artifact '{logicalName}' is not declared by producer '{_producer.Id}'.");
+        }
+
+        var normalizedPath = EvidenceArtifactValidation.NormalizeRelativePath(relativePath);
+        EvidenceArtifactValidation.ValidatePathForSlot(slot, normalizedPath);
+        long aggregateRemaining;
+        lock (_sync) aggregateRemaining = MaximumTotalArtifactBytes - _totalBytes;
+        var maximumBufferedBytes = Math.Min(slot.MaximumBytes, aggregateRemaining);
+        if (_runQuota is not null) maximumBufferedBytes = Math.Min(maximumBufferedBytes, _runQuota.Limit);
+        using var buffered = new MemoryStream();
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        try
+        {
+            while (true)
+            {
+                var read = await contents.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read == 0) break;
+                if (buffered.Length > maximumBufferedBytes - read)
+                    throw new InvalidOperationException($"Artifact '{logicalName}' exceeds its evidence size limit.");
+                await buffered.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+
+            // The protected writer is the only persistence boundary for admitted output. Reusing
+            // WriteCoreAsync also reserves the same shared run quota and the producer-local quota.
+            return await WriteCoreAsync(logicalName, normalizedPath,
+                new ReadOnlyMemory<byte>(buffered.GetBuffer(), 0, checked((int)buffered.Length)), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private async ValueTask<EvidenceArtifactResult> WriteCoreAsync(
         string logicalName, string relativePath, ReadOnlyMemory<byte> contents, CancellationToken cancellationToken)
     {
@@ -647,12 +724,35 @@ public sealed class EvidenceArtifactWriter
                     continue;
                 }
                 path = EvidenceArtifactValidation.GetContainedPath(_rootPath, artifact.RelativePath);
-                await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
-                    81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
-                if (input.Length != artifact.LengthBytes || input.Length > MaximumTotalArtifactBytes)
-                    return false;
-                var digest = Convert.ToHexString(await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false)).ToLowerInvariant();
-                if (input.Length != artifact.LengthBytes || !string.Equals(digest, artifact.Sha256, StringComparison.Ordinal))
+                await using var input = new FileStream(path, new FileStreamOptions
+                {
+                    Mode = FileMode.Open,
+                    Access = FileAccess.Read,
+                    Share = FileShare.Read,
+                    BufferSize = 64 * 1024,
+                    Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
+                });
+                using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+                long lengthBytes = 0;
+                try
+                {
+                    while (true)
+                    {
+                        var read = await input.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                        if (read == 0) break;
+                        lengthBytes += read;
+                        if (lengthBytes > artifact.LengthBytes || lengthBytes > MaximumTotalArtifactBytes) return false;
+                        hash.AppendData(buffer, 0, read);
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
+
+                var digest = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+                if (lengthBytes != artifact.LengthBytes || !string.Equals(digest, artifact.Sha256, StringComparison.Ordinal))
                 {
                     return false;
                 }
@@ -666,7 +766,7 @@ public sealed class EvidenceArtifactWriter
         return true;
     }
 
-    private void ReserveArtifact(string logicalName, string normalizedPath, int lengthBytes, long maximumBytes)
+    private void ReserveArtifact(string logicalName, string normalizedPath, long lengthBytes, long maximumBytes)
     {
         lock (_sync)
         {
@@ -693,7 +793,7 @@ public sealed class EvidenceArtifactWriter
         }
     }
 
-    private void ReleaseArtifact(string logicalName, string normalizedPath, int lengthBytes)
+    private void ReleaseArtifact(string logicalName, string normalizedPath, long lengthBytes)
     {
         lock (_sync)
         {

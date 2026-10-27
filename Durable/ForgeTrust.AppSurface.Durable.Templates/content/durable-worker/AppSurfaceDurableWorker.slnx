@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AppSurfaceDurableWorker/AppSurfaceDurableWorker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AppSurfaceDurableWorker.Tests/AppSurfaceDurableWorker.Tests.csproj" />
+  </Folder>
+</Solution>

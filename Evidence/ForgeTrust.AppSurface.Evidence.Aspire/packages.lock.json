@@ -513,6 +513,9 @@
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
       },
+      "forgetrust.appsurface.evidence.readiness": {
+        "type": "Project"
+      },
       "CliWrap": {
         "type": "CentralTransitive",
         "requested": "[3.10.1, )",

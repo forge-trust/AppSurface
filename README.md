@@ -18,10 +18,14 @@ ForgeTrust.AppSurface is a collection of .NET libraries designed to provide a li
 
 If you are deciding which package to install first, start with the [AppSurface package chooser](./packages/README.md). If you are choosing among Auth packages, use the [AppSurface Auth adoption ladder](./start-here/auth-adoption-ladder.md) before installing optional auth adapters.
 If your CI gate should distinguish an explicit low-risk change from an incomplete test run, start with the [EvidenceHost guide](./start-here/evidencehost.md).
+For bounded HTTP readiness in tests, see the [EvidenceHost readiness choices](./start-here/evidencehost.md#aspire-http-readiness).
 
 For portable configuration, start with the [logical-key quickstart](Config/ForgeTrust.AppSurface.Config/README.md#logical-key-quickstart),
 [executable provider proof](examples/config-key-contract/README.md), and
 [coordinated upgrade guide](guides/config-key-migration.md).
+For names-only environment candidate planning and caller-owned source policy, see the
+[environment inspection quickstart](guides/config-logical-keys.md#environment-candidate-inspection)
+and its [packed package consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
 If a shared typed wrapper lives in a Domain assembly outside normal module
 discovery, use the [three-step explicit registration example](Config/ForgeTrust.AppSurface.Config/README.md#three-step-domain-example)
 and its [packed NuGet consumer proof](https://github.com/forge-trust/AppSurface/blob/main/tests/config-package-consumer/README.md).
@@ -97,6 +101,7 @@ This approach aims to:
 
 ### [Durable](./Durable/README.md)
 
+- [**Durable worker start guide**](./start-here/durable-worker.md) – installs the public-preview ForgeTrust.AppSurface.Durable.Templates package, generates a standalone .NET 10 PostgreSQL external-activation host, and runs the four-checkpoint first-Work proof. The generated project is application-owned and requires manual upgrades.
 - [**ForgeTrust.AppSurface.Durable**](./Durable/ForgeTrust.AppSurface.Durable/README.md) – Public-preview contracts for portable Work, resumable Flow, schedules, payloads, registration, and clients without installing a runtime. Use [typed Work definitions](./Durable/migrations/typed-work-definitions-v1.md) to share contract facts between registration and requests.
 - [**ForgeTrust.AppSurface.Durable.Provider**](./Durable/ForgeTrust.AppSurface.Durable.Provider/README.md) – Public runtime-provider and operator SPI for claims, bounded activation, health, drain, recovery, controlled repair, and verified Flow-retention lifecycle contracts.
 - [**ForgeTrust.AppSurface.Durable.PostgreSql**](./Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md) – Public-preview PostgreSQL provider for passive storage registration, explicit schema management, atomic Work acceptance, manually driven Flow persistence, [Work-first Schedule storage](./Durable/schedule-protocol-v1.md), and verified per-Flow retention; hosted processing requires an explicit `AddWorkerHost()` opt-in.
@@ -114,7 +119,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 - [**ForgeTrust.AppSurface.Web**](./Web/ForgeTrust.AppSurface.Web/README.md) – Bootstraps ASP.NET Core apps, lets modules register pre-routing middleware, endpoint-aware middleware, and endpoints, and includes the [shared semantic theme-pair quickstart](./Web/ForgeTrust.AppSurface.Web/README.md#theme-pairs-quickstart), [browser-local presentation preferences with one canonical document](./Web/ForgeTrust.AppSurface.Web/README.md#browser-local-theme-preferences), [host-owned selection of registered theme pairs](./Web/ForgeTrust.AppSurface.Web/README.md#host-owned-theme-selection), [protected preview named deploy canary evaluation and bounded snapshots](./Web/ForgeTrust.AppSurface.Web/README.md#named-canary-endpoints), conventional browser status pages, and opt-in production 500 pages.
 - [**ForgeTrust.AppSurface.Web.Push**](./Web/ForgeTrust.AppSurface.Web.Push/README.md) – Optional protected Web Push subscription and one-attempt delivery rail with app-owned custody, explicit cookie-antiforgery or bearer mapping, exact push-service origin allowlisting, and safe terminal cleanup.
 - [**ForgeTrust.AppSurface.Web.OpenApi**](./Web/ForgeTrust.AppSurface.Web.OpenApi/README.md) – Optional module that adds OpenAPI generation with development-only endpoint exposure by default.
-- [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps.
+- [**ForgeTrust.RazorWire**](./Web/ForgeTrust.RazorWire/README.md) – Adds reactive Razor-based streaming, islands, and CDN-default export tooling for server-rendered web apps, including [nested form collections](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md#nested-collections-and-index-tokens).
 - [**ForgeTrust.RazorWire.Auth.AspNetCore**](./Web/ForgeTrust.RazorWire.Auth.AspNetCore/README.md) – ASP.NET Core adapter for RazorWire auth projection helpers, delegating rendered UI state to host-owned AppSurface policy evaluation without adding auth schemes, redirects, or endpoint enforcement.
 - [**ForgeTrust.AppSurface.Docs**](./Web/ForgeTrust.AppSurface.Docs/README.md) – Reusable Razor Class Library package that serves harvested source docs with section-first landing, sidebar, search, built-in trust plus contributor-provenance details, optional published-version archive surfaces, [retargetable exact-release aliases](./Web/ForgeTrust.AppSurface.Docs/README.md#version-aliases), and [metadata-driven recommended next reads](./Web/ForgeTrust.AppSurface.Docs/README.md#recommended-next-reads). The [consumer guide](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md) covers a [three-page next-read example](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#build-a-three-page-next-read-example) and [independently configured named Docs products](./Web/ForgeTrust.AppSurface.Docs/use-appsurface-docs.md#run-multiple-independent-docs-products) with separate source, route, branding, and authorization boundaries.
 - [**ForgeTrust.AppSurface.Docs.Standalone**](./Web/ForgeTrust.AppSurface.Docs.Standalone/README.md) – Thin export host for exporting or serving AppSurface Docs as an application.
@@ -122,11 +127,12 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 
 ### [CLI](./Cli/ForgeTrust.AppSurface.Cli/README.md)
 
-- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, and `appsurface coverage gate` local threshold enforcement.
+- [**ForgeTrust.AppSurface.Cli**](./Cli/ForgeTrust.AppSurface.Cli/README.md) – Public `appsurface` command-line tool, including [`appsurface evidence`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) policy-aware CI evidence planning, [`appsurface release compose`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-release-compose) deterministic release-note composition, [`appsurface canary poll`](./Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-canary-poll) bounded read-only deployment proof for protected AppSurface Web named canaries, `appsurface docs` preview/export workflows, `appsurface secrets` local-secret diagnostics, `appsurface coverage run` package-consumer test orchestration, `appsurface coverage merge` Cobertura fan-in, `appsurface coverage gate` local threshold enforcement, and [`appsurface coverage storage`](./guides/coverage-storage.md) history, warning, pin, restore, and cleanup controls.
 
 ### [EvidenceHost](./start-here/evidencehost.md)
 
 - [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
+- [**Native EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own packed CLI and installed-consumer journeys, with bounded commands, owned scratch budgets, independent assertions and verifiable manifests.
 - [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.
@@ -246,6 +252,10 @@ Matching local and hosted patch results also requires the same coverage artifact
 inventory. If the results disagree, compare the commit and base, source paths, and measurable
 changed-line counts. A file can have coverage in a hosted report while contributing no diff lines;
 a passing local gate does not establish that the hosted patch status passed.
+
+For repository-native code that needs platform-specific execution, the [verified cross-platform coverage
+fan-in guide](./guides/coverage-fan-in.md) documents the matching-source and SDK manifest checks that
+extend the existing aggregate and patch gates without changing their thresholds or scope.
 
 The repository lane requires a non-sandboxed host by default. Set
 `COVERAGE_REQUIRE_NON_SANDBOX=false` only when a restricted run is intentional. This marker check
@@ -426,6 +436,8 @@ For the intentional validation-failure shape, run `dotnet run --project examples
 
 The [RazorWire MVC example](./examples/razorwire-mvc/README.md#server-selected-dialogs) includes explicit [server-selected dialog responses](./Web/ForgeTrust.RazorWire/Docs/dialog-responses.md) at `/Reactivity/DialogResponses`, with status responses, follow-up forms, validation, and full HTML fallbacks.
 
+The [nested collections quickstart](./examples/razorwire-mvc/NESTED-COLLECTIONS.md) in the same MVC host runs a minimal DateOnly editor at `/Reactivity/NestedCollections` with physical/mark removal, sparse-key invalid redisplay, and ordinary server commands. The separate [faithful V4 fixture](./examples/razorwire-mvc/NESTED-COLLECTIONS.md#faithful-v4-consumer-fixture) at `/Reactivity/SkoolitV4Collections` retains the source's temporal policy and explains the exact-package proof. See the [Form Interactions guide](./Web/ForgeTrust.RazorWire/Docs/form-interactions.md) for the shared API and migration contract; fixture results do not establish live adoption.
+
 The RazorWire MVC example includes a failed-form UX page at `/Reactivity/FormFailures` that shows server-handled validation, development anti-forgery diagnostics, default fallback rendering, and consumer styling hooks. It also includes `/Reactivity/FormLoading` for local and shared status indicators, the package fallback, and Turbo Frame loading; see the [Form Loading Feedback guide](./Web/ForgeTrust.RazorWire/Docs/form-loading.md) for the public contract.
 
 ## Release notes and upgrade policy
@@ -473,6 +485,7 @@ how to use this project.
 - [Flow approval local example](examples/flow-approval-local/README.md) – shows a typed
   flow that waits for an approval event and resumes through the in-memory runner.
 - [Durable PostgreSQL example](examples/durable-postgresql/README.md) – demonstrates disposable one-pair and complete two-pair manifests, distinct runtime preflight commands, and the boundary between local source proof and candidate/public package receipts. For the canonical legacy, deadline-only, and planned retry chooser, see the [execution-policy guide](Durable/execution-policies-v1.md).
+- [Durable external activation example](examples/durable-external-activation/README.md) – documents the public host/service contract and explicit PostgreSQL provisioning for an existing custom HTTP host; for a new standalone host, use the [Durable worker template guide](start-here/durable-worker.md).
 - [Product readiness lab](examples/product-readiness-lab/README.md) – runs a composed
   local evaluator with AppSurface Web, Auth.AspNetCore, Flow, DurableTask-facing
   host-shape guidance, and Postgres product-state proof. Use its AppHost `verify`

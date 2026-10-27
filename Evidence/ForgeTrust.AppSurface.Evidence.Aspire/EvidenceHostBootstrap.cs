@@ -46,7 +46,12 @@ public enum EvidenceHostState
 /// <param name="ArtifactDirectory">Legacy local path retained for source compatibility; admitted runs use the protected output root.</param>
 public sealed record EvidenceHostOptions(
     bool RequireTrustedEnvelope = false,
-    string? ArtifactDirectory = null);
+    string? ArtifactDirectory = null)
+{
+    /// <summary>Gets the maximum grace period for cancelled producers to finish before owned registrations are disposed.</summary>
+    /// <remarks>Defaults to ten seconds. If a producer remains active, cleanup fails and its registrations are preserved.</remarks>
+    public TimeSpan ProducerCleanupTimeout { get; init; } = TimeSpan.FromSeconds(10);
+}
 
 /// <summary>
 /// Describes a secret-safe execution-envelope validation result.
@@ -351,6 +356,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     private EvidenceAdmissionResult? _admission;
     private EvidenceWorkerExecution? _lifecycle;
     private readonly List<EvidenceArtifactWriter> _artifactWriters = [];
+    private readonly List<Task> _producerExecutions = [];
+    private readonly TimeSpan _producerCleanupTimeout;
+    private readonly TimeProvider _timeProvider;
     private string? _testArtifactDirectory;
     private bool _cleaned;
     private bool _runClaimed;
@@ -363,10 +371,14 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private EvidenceHostBootstrap(
         EvidencePlan plan,
-        Action<EvidenceHostRegistration> configure)
+        Action<EvidenceHostRegistration> configure,
+        TimeSpan producerCleanupTimeout,
+        TimeProvider timeProvider)
     {
         _plan = plan;
         _configure = configure;
+        _producerCleanupTimeout = producerCleanupTimeout;
+        _timeProvider = timeProvider;
     }
 
     /// <summary>Gets the immutable plan owned by this host instance.</summary>
@@ -381,18 +393,24 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     /// <param name="plan">Resolved immutable plan.</param>
     /// <param name="configure">Consumer-owned registration callback.</param>
     /// <param name="options">Optional lifecycle constraints.</param>
+    /// <param name="timeProvider">Optional clock for ordinary producer contexts and cleanup grace; protected admission retains its system clock.</param>
     /// <returns>A single-use EvidenceHost instance.</returns>
     public static EvidenceHostBootstrap Create(
         EvidencePlan plan,
         Action<EvidenceHostRegistration> configure,
-        EvidenceHostOptions? options = null)
+        EvidenceHostOptions? options = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(configure);
+        var effectiveOptions = options ?? new EvidenceHostOptions();
+        if (effectiveOptions.ProducerCleanupTimeout <= TimeSpan.Zero || effectiveOptions.ProducerCleanupTimeout > TimeSpan.FromMinutes(1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "Producer cleanup timeout must be positive and at most one minute.");
+        }
 
         var snapshot = EvidenceCanonicalJson.Deserialize<EvidencePlan>(EvidenceCanonicalJson.Serialize(plan));
-        _ = options;
-        return new EvidenceHostBootstrap(snapshot, configure);
+        return new EvidenceHostBootstrap(snapshot, configure, effectiveOptions.ProducerCleanupTimeout, timeProvider ?? TimeProvider.System);
     }
 
     /// <summary>
@@ -482,7 +500,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             }
 
             _runClaimed = true;
-            var clock = TimeProvider.System;
+            var clock = _timeProvider;
             var admissionLimit = EvidenceRunBudgetLimits.Admission;
             var startLimit = loweredStartAllowance ?? EvidenceRunBudgetLimits.Start;
             var collectionLimit = EvidenceRunBudgetLimits.Collection;
@@ -825,7 +843,12 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 return;
             }
 
-            await CleanAsync().ConfigureAwait(false);
+            var failure = await CleanAsync().ConfigureAwait(false);
+            if (failure is not null)
+            {
+                throw new InvalidOperationException(failure);
+            }
+
             State = EvidenceHostState.Disposed;
         }
         finally
@@ -867,7 +890,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             });
         }
 
-        if (!lifecycle.RegisterDisposer(_ => CleanRegistrationsAsync()))
+        if (!lifecycle.RegisterDisposer(token => CleanRegistrationsAsync(token)))
         {
             throw new EvidenceAdmissionException("ASEVD410", "Registration cleanup could not be admitted.");
         }
@@ -1251,15 +1274,19 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 async token =>
                 {
                     var producer = (_restrictedProducers ?? _registration.Producers)[declaration.Id];
-                    var context = new EvidenceProducerContext(_plan, declaration, TimeProvider.System, artifacts);
+                    var context = new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts);
                     if (_restrictedWorker is null)
                     {
-                        return await producer.ProduceAsync(context, token).ConfigureAwait(false);
+                        var producerTask = producer.ProduceAsync(context, token).AsTask();
+                        _producerExecutions.Add(producerTask);
+                        return await producerTask.ConfigureAwait(false);
                     }
 
                     using var lease = artifacts.BindRestrictedProducerLease(_restrictedWorker, admission, _plan,
                         _protectedDiffBytes, _processOutputQuota!, lifecycle, token);
-                    return await producer.ProduceAsync(context, token).ConfigureAwait(false);
+                    var restrictedProducerTask = producer.ProduceAsync(context, token).AsTask();
+                    _producerExecutions.Add(restrictedProducerTask);
+                    return await restrictedProducerTask.ConfigureAwait(false);
                 },
                 cancellationToken,
                 admission).ConfigureAwait(false);
@@ -1388,9 +1415,9 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         return (valid, finalized);
     }
 
-    private async ValueTask CleanRegistrationsAsync()
+    private async ValueTask CleanRegistrationsAsync(CancellationToken cleanupToken)
     {
-        var failure = await CleanAsync().ConfigureAwait(false);
+        var failure = await CleanAsync(cleanupToken).ConfigureAwait(false);
         if (failure is not null)
         {
             throw new InvalidOperationException("Evidence registration cleanup failed.");
@@ -1411,7 +1438,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         _ => "ASEVD410",
     };
 
-    private async Task<string?> CleanAsync()
+    private async Task<string?> CleanAsync(CancellationToken cleanupToken = default)
     {
         if (_cleaned)
         {
@@ -1419,6 +1446,28 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
         State = EvidenceHostState.Cleaning;
+        var producerTasks = _producerExecutions.Where(static task => !task.IsCompleted).ToArray();
+        if (producerTasks.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(producerTasks).WaitAsync(_producerCleanupTimeout, _timeProvider, cleanupToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                return "Evidence cleanup timed out while a producer remained active.";
+            }
+            catch (OperationCanceledException) when (cleanupToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsNonFatalException(exception))
+            {
+                // Producer failure is already represented by the run result; its completion is the
+                // ownership boundary that permits disposal of registrations.
+            }
+        }
+
         _cleaned = true;
         Exception? failure = null;
         var owned = _registration.Producers.Values.Reverse().Cast<object>()
@@ -1447,7 +1496,10 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
     }
 
-    private static bool IsNonFatalException(Exception exception) =>
+    /// <summary>Classifies failures the host and readiness adapters may retain as nonfatal diagnostics.</summary>
+    /// <param name="exception">Failure being classified.</param>
+    /// <returns>False for fatal runtime failures; true otherwise.</returns>
+    internal static bool IsNonFatalException(Exception exception) =>
         exception is not OutOfMemoryException
             and not StackOverflowException
             and not AccessViolationException

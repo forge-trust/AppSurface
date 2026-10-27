@@ -623,7 +623,8 @@
           "Aspire.Hosting": "[13.4.4, 14.0.0)",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )",
           "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )",
-          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )"
+          "ForgeTrust.AppSurface.Evidence.Coverage": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Readiness": "[0.1.0, )"
         }
       },
       "forgetrust.appsurface.evidence.contracts": {
@@ -844,6 +845,22 @@
           "CliWrap": "[3.10.1, )",
           "ForgeTrust.AppSurface.Evidence.Contracts": "[0.1.0, )"
         }
+      },
+      "Microsoft.Extensions.TimeProvider.Testing": {
+        "type": "Direct",
+        "requested": "[10.9.0, )",
+        "resolved": "10.9.0",
+        "contentHash": "0If8xc915BgRpYmKB9tOOOprvHMt8Tue6kiD8ARgVf8Ok6PNUxkJScKT7QUp7+RllR4RN2DNACgaxioy9BJxeQ=="
+      },
+      "forgetrust.appsurface.evidence.validation": {
+        "type": "Project",
+        "dependencies": {
+          "ForgeTrust.AppSurface.Evidence.Aspire": "[0.1.0, )",
+          "ForgeTrust.AppSurface.Evidence.Planner": "[0.1.0, )"
+        }
+      },
+      "forgetrust.appsurface.evidence.readiness": {
+        "type": "Project"
       }
     }
   }

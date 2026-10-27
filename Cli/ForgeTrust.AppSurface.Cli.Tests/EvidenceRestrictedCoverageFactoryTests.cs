@@ -56,6 +56,45 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
     }
 
     [Fact]
+    public void FactoryAcceptsTheExplicitFixedRestrictedExecutionEnvelope()
+    {
+        var declaration = Declaration() with
+        {
+            CoverageExecution = new EvidenceCoverageExecutionOptions("Debug", EvidenceCoverageTestResultFormat.None, 1),
+        };
+
+        var registration = EvidenceRestrictedCoverageProducerFactory.Create(declaration);
+
+        Assert.Equal(EvidenceCanonicalJson.Serialize(declaration), EvidenceCanonicalJson.Serialize(registration.Declaration));
+    }
+
+    [Theory]
+    [InlineData("configuration")]
+    [InlineData("parallelism")]
+    [InlineData("test-results")]
+    [InlineData("invalid-configuration")]
+    [InlineData("invalid-parallelism")]
+    [InlineData("invalid-test-results")]
+    [InlineData("retention")]
+    [InlineData("invalid-retention")]
+    public void FactoryRejectsExecutionOrRetentionOutsideTheFixedRestrictedEnvelope(string change)
+    {
+        var declaration = change switch
+        {
+            "configuration" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions("Release") },
+            "parallelism" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: 2) },
+            "test-results" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: EvidenceCoverageTestResultFormat.Junit) },
+            "invalid-configuration" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions(null!) },
+            "invalid-parallelism" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: 0) },
+            "invalid-test-results" => Declaration() with { CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: (EvidenceCoverageTestResultFormat)99) },
+            "retention" => Declaration() with { CoverageArtifactRetention = "full" },
+            _ => Declaration() with { CoverageArtifactRetention = "archive" },
+        };
+
+        AssertSafe(Assert.Throws<EvidenceAdmissionException>(() => EvidenceRestrictedCoverageProducerFactory.Create(declaration)), "ASEVD404");
+    }
+
+    [Fact]
     public async Task FactoryCannotRunThroughMissingOrPublicWriterAndPublicWriterCannotBind()
     {
         using var directory = TestDirectory.Create();
@@ -94,8 +133,10 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
         var declaration = Declaration();
         declaration = change switch
         {
-            "kind" => declaration with { Kind = Canary }, "version" => declaration with { Version = "2.0.0" },
-            "id-null" => declaration with { Id = null! }, "id-control" => declaration with { Id = Canary + "\n" },
+            "kind" => declaration with { Kind = Canary },
+            "version" => declaration with { Version = "2.0.0" },
+            "id-null" => declaration with { Id = null! },
+            "id-control" => declaration with { Id = Canary + "\n" },
             "id-limit" => declaration with { Id = new string('a', 97) },
             "resources-null" => declaration with { RequiredResources = null! },
             "resources-limit" => declaration with { RequiredResources = Enumerable.Range(0, 17).Select(i => "r" + i).ToArray() },
@@ -104,7 +145,8 @@ public sealed class EvidenceRestrictedCoverageFactoryTests
             "slot-null" => declaration with { ArtifactSlots = [null!] },
             "slot-limit" => declaration with { ArtifactSlots = Enumerable.Repeat(new EvidenceArtifactSlot("slot", "coverage", "application/xml", true, 1024), 65).ToArray() },
             "slot-path-limit" => declaration with { ArtifactSlots = [new("slot", new string('a', 4096), "application/xml", true, 1024)] },
-            "timeout-zero" => declaration with { TimeoutSeconds = 0 }, _ => declaration with { TimeoutSeconds = 1801 },
+            "timeout-zero" => declaration with { TimeoutSeconds = 0 },
+            _ => declaration with { TimeoutSeconds = 1801 },
         };
         AssertSafe(Assert.Throws<EvidenceAdmissionException>(() => EvidenceRestrictedCoverageProducerFactory.Create(declaration)), "ASEVD404");
     }

@@ -8,6 +8,31 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 
 public sealed class CoverageRunArtifactReaderTests
 {
+    [Theory]
+    [InlineData(@"C:\deep\artifact.xml", @"\\?\C:\deep\artifact.xml")]
+    [InlineData("C:/deep/artifact.xml", @"\\?\C:\deep\artifact.xml")]
+    [InlineData(@"\\server\share\artifact.xml", @"\\?\UNC\server\share\artifact.xml")]
+    [InlineData(@"\\?\C:\deep\artifact.xml", @"\\?\C:\deep\artifact.xml")]
+    [InlineData(@"\\?\UNC\server\share\artifact.xml", @"\\?\UNC\server\share\artifact.xml")]
+    public void WindowsExtendedPath_PreservesNativePathIdentity(string input, string expected)
+        => Assert.Equal(expected, CoverageFileSystemInterop.WindowsExtendedPath(input));
+
+    [Fact]
+    public void OpenRegularFile_ShouldReadArtifactBeyondLegacyWindowsPathLimit()
+    {
+        using var repo = ArtifactTempDirectory.Create("appsurface-coverage-long-path-");
+        var project = Path.Join(repo.Path, new string('p', 80), new string('q', 80));
+        var raw = Path.Join(project, "collector-results", new string('r', 80));
+        Directory.CreateDirectory(raw);
+        var candidate = Path.Join(raw, "coverage.cobertura.xml");
+        File.WriteAllText(candidate, "<coverage />");
+        Assert.True(candidate.Length > 260);
+
+        using var stream = CoverageRunArtifactReader.OpenRegularFile(project, raw, candidate);
+        using var reader = new StreamReader(stream);
+        Assert.Equal("<coverage />", reader.ReadToEnd());
+    }
+
     [Fact]
     public void WindowsInteropStructures_ShouldMatchNativeLayouts()
     {

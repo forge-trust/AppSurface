@@ -202,6 +202,10 @@ internal sealed partial class CoverageRunCommand : ICommand
     [CommandOption("no-clean", Description = "Do not clean existing AppSurface-owned output before the run.")]
     public bool NoClean { get; set; }
 
+    /// <summary>Gets or sets duplicate-artifact retention; full preserves raw XML without changing collection or gates.</summary>
+    [CommandOption("artifact-retention", Description = "Artifact retention: managed (default) removes verified duplicate XML; full retains raw XML. --no-clean preserves raw artifacts in either mode.")]
+    public string ArtifactRetention { get; set; } = "managed";
+
     /// <summary>
     /// Gets or sets the <c>dotnet test</c> verbosity.
     /// </summary>
@@ -341,6 +345,10 @@ internal sealed partial class CoverageRunCommand : ICommand
         var noProgressTimeout = CoverageRunDurationParser.Parse(NoProgressTimeout, "--no-progress-timeout", allowZero: false);
         var watchdogMode = ParseWatchdogMode();
         var coverageDriver = ParseCoverageDriver();
+        if (ArtifactRetention is not ("managed" or "full"))
+        {
+            throw new CommandException("ASCOV208 --artifact-retention must be managed or full. No coverage execution has started.");
+        }
 
         return new CoverageRunRequest(
             SolutionPath,
@@ -370,7 +378,8 @@ internal sealed partial class CoverageRunCommand : ICommand
             noProgressTimeout,
             watchdogMode,
             coverageDriver,
-            RequireNonSandbox);
+            RequireNonSandbox)
+        { ArtifactRetention = ArtifactRetention };
     }
 
     private CoverageRunScheduleMode ParseScheduleMode()
@@ -534,7 +543,17 @@ internal sealed record CoverageRunRequest(
     CoverageRunDriver CoverageDriver,
     bool RequireNonSandbox,
     CoverageProducerDeadline? ProducerDeadline = null,
-    EvidenceRunByteQuota? ProcessOutputQuota = null);
+    EvidenceRunByteQuota? ProcessOutputQuota = null)
+{
+    /// <summary>Gets current-invocation duplicate retention; no-clean preservation takes precedence.</summary>
+    internal string ArtifactRetention { get; init; } = "managed";
+
+    /// <summary>Gets the explicitly scoped output context shared by nested first-party Evidence operations.</summary>
+    internal CoverageArtifactSession? ArtifactSession { get; init; }
+
+    /// <summary>Gets an Evidence-owned session factory invoked only after project and collector preflight succeeds.</summary>
+    internal Func<CancellationToken, Task<CoverageArtifactSession>>? ArtifactSessionFactory { get; init; }
+}
 
 /// <summary>
 /// Monotonic Evidence producer budget shared with the private coverage workflow. The deadline does
@@ -843,6 +862,11 @@ internal sealed class CoverageRunWorkflow
         var terminalMergeSeconds = 0L;
         int? terminalMergeExitCode = null;
         CoverageRunSlowTestDiagnosticsRun? terminalDiagnostics = null;
+        CoverageArtifactSession? artifactSession = request.ArtifactSession;
+        var ownsArtifactSession = false;
+        var artifactOutcome = "failed";
+        if (request.ArtifactRetention is not ("managed" or "full"))
+            throw CoverageRunDiagnostics.Create("ASCOV208", "Artifact retention is invalid.", "Expected managed or full.", "Select managed or full and retry once.", "guides/coverage-storage.md#ascov208");
         try
         {
             CoverageRunDriverStrategy.ValidateTestArguments(request.CoverageDriver, request.TestArguments);
@@ -856,6 +880,7 @@ internal sealed class CoverageRunWorkflow
                 .Select(entry => new CoverageRunProjectExecutionState(entry))
                 .ToArray();
             CoverageRunOutputGuard.Validate(outputDirectory, resolution.SolutionDirectory, resolution.Projects);
+            var collectorObservations = new List<CoverageArtifactSettingsResult>();
             await CoverageRunDriverPreflight.ValidateAsync(
                 request.CoverageDriver,
                 request.Configuration,
@@ -863,13 +888,33 @@ internal sealed class CoverageRunWorkflow
                 _processRunner,
                 supervisor,
                 supervisedCancellationToken,
-                request.ProcessOutputQuota);
-
+                request.ProcessOutputQuota,
+                (project, framework, json) => collectorObservations.Add(
+                    CoverageArtifactSettings.Observe(project, framework, json, request.Configuration, request.TestArguments)));
             await PrintDiscoveryAsync(runConsole, request, resolution, outputDirectory, schedulePlan);
             if (request.DryRun)
             {
                 return new CoverageRunResult(true, outputDirectory, Path.Join(outputDirectory, "coverage.cobertura.xml"));
             }
+
+            if (artifactSession is null)
+            {
+                if (request.ArtifactSessionFactory is not null)
+                {
+                    artifactSession = await request.ArtifactSessionFactory(supervisedCancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    artifactSession = await CoverageArtifactSession.BeginAsync(outputDirectory, resolution.SolutionDirectory,
+                        request.Clean, console, _timeProvider, supervisedCancellationToken).ConfigureAwait(false);
+                    ownsArtifactSession = true;
+                }
+            }
+            artifactSession.VerifyBinding();
+            request = request with { ArtifactSession = artifactSession };
+            supervisor.ArtifactPublished = artifactSession.Inventory.RecordFile;
+            try { await artifactSession.Warnings.SettingsAsync(collectorObservations).ConfigureAwait(false); }
+            catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception) || exception is OperationCanceledException) { }
 
             CoverageRunOutputGuard.Prepare(outputDirectory, resolution.SolutionDirectory, resolution.Projects, request.Clean);
             terminalOutputPrepared = true;
@@ -980,6 +1025,7 @@ internal sealed class CoverageRunWorkflow
             // can never mistake a retained output from an earlier run for this merge's result.
             var mergeDirectory = Path.Join(outputDirectory, "reportgenerator", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(mergeDirectory);
+            artifactSession.Inventory.RecordFreshTree(mergeDirectory);
             CoverageRunMergeResult merge;
             try
             {
@@ -1036,9 +1082,11 @@ internal sealed class CoverageRunWorkflow
                 supervisor.Commit(() =>
                 {
                     File.Move(stagedCoveragePath, mergedCoveragePath, overwrite: true);
+                    artifactSession.Inventory.RecordFile(mergedCoveragePath);
                     if (hasSummary)
                     {
                         File.Move(stagedSummaryPath, Path.Join(outputDirectory, "reportgenerator-summary.txt"), overwrite: true);
+                        artifactSession.Inventory.RecordFile(Path.Join(outputDirectory, "reportgenerator-summary.txt"));
                     }
                 });
             }
@@ -1046,6 +1094,11 @@ internal sealed class CoverageRunWorkflow
             {
                 File.Delete(stagedCoveragePath);
                 File.Delete(stagedSummaryPath);
+            }
+
+            if (request.Clean && request.ArtifactRetention == "managed")
+            {
+                await RemoveRedundantMergedCoverageAsync(merge.CoberturaPath, outputDirectory, console.Error, supervisedCancellationToken);
             }
 
             using (supervisor.Start("artifacts"))
@@ -1082,6 +1135,7 @@ internal sealed class CoverageRunWorkflow
 
             var failureLogPath = projectResults.FirstOrDefault(result => result.ExitCode != 0)?.LogFile;
             supervisor.ThrowIfFailed();
+            artifactOutcome = projectResults.All(result => result.ExitCode == 0) ? "success" : "failed";
             return new CoverageRunResult(projectResults.All(result => result.ExitCode == 0), outputDirectory, mergedCoveragePath, failureLogPath);
         }
         catch (Exception ex) when (ex is not OperationCanceledException
@@ -1107,6 +1161,7 @@ internal sealed class CoverageRunWorkflow
         }
         catch (OperationCanceledException)
         {
+            artifactOutcome = "interrupted";
             if (terminalOutputPrepared
                 && terminalResolution is not null
                 && terminalSchedulePlan is not null
@@ -1159,6 +1214,51 @@ internal sealed class CoverageRunWorkflow
 
             supervisor.ThrowIfFailed();
             throw;
+        }
+        finally
+        {
+            if (artifactSession is not null && terminalOutputPrepared)
+            {
+                await artifactSession.CompleteAsync(artifactOutcome, CoverageArtifactInventory.Provenance(
+                    request.CoverageDriver.ToString(), request.Configuration,
+                    terminalResolution?.Projects.Select(project => project.RelativePath) ?? [], request.IncludeFilter, request.ExcludeFilter));
+            }
+            if (ownsArtifactSession) artifactSession?.Dispose();
+        }
+    }
+
+    /// <summary>Retires generated merged XML only after matching the published canonical bytes.</summary>
+    /// <param name="generatedPath">Exact report emitted by the current merge invocation.</param>
+    /// <param name="outputDirectory">Current canonical output root.</param>
+    /// <param name="errors">Diagnostic stream for optional failures.</param>
+    /// <param name="token">Original supervised cancellation.</param>
+    /// <remarks>Missing roots and other optional filesystem failures warn without replacing collection success.
+    /// Cancellation still propagates; deletion requires the opened generated object's identity.</remarks>
+    internal static async Task RemoveRedundantMergedCoverageAsync(string generatedPath, string outputDirectory,
+        TextWriter errors, CancellationToken token)
+    {
+        try
+        {
+            using var rawParent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(generatedPath)!, false, false)
+                ?? throw new IOException("Generated coverage directory disappeared before optional duplicate cleanup.");
+            using var currentParent = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, false, false)
+                ?? throw new IOException("Canonical coverage directory disappeared before optional duplicate cleanup.");
+            string rawIdentity;
+            using (var raw = rawParent.OpenArtifactFile(Path.GetFileName(generatedPath), false, false))
+            using (var current = currentParent.OpenArtifactFile("coverage.cobertura.xml", false, false))
+            {
+                rawIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(raw.SafeFileHandle);
+                var rawHash = await System.Security.Cryptography.SHA256.HashDataAsync(raw, token);
+                var currentHash = await System.Security.Cryptography.SHA256.HashDataAsync(current, token);
+                if (raw.Length != current.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(rawHash, currentHash))
+                    throw new IOException("Generated and canonical coverage bytes differ.");
+            }
+            token.ThrowIfCancellationRequested();
+            rawParent.DeleteArtifactEntry(Path.GetFileName(generatedPath), 1, rawIdentity);
+        }
+        catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
+        {
+            await CoverageArtifactDiagnostic.Failure("ASCOV201", "duplicate-cleanup", exception).WriteAsync(errors);
         }
     }
 
@@ -1981,6 +2081,7 @@ internal sealed class CoverageRunWorkflow
                 resolution.SolutionDirectory,
                 project,
                 cancellationToken);
+            request.ArtifactSession?.Inventory.RecordFile(Path.Join(projectOutputDirectory, CoverageProjectManifest.FileName));
         }
         catch (OperationCanceledException)
         {
@@ -2006,6 +2107,10 @@ internal sealed class CoverageRunWorkflow
         var testResults = CreateTestResultArtifacts(request, outputDirectory, project, index);
         var hangPlan = CoverageRunHangPolicy.Plan(request);
         var driverInvocation = CoverageRunDriverStrategy.CreateInvocation(request, projectOutputDirectory, hangPlan);
+        var producerPaths = new[] { logFile, cleanupLogFile }.Concat(testResults.Select(artifact => artifact.Path)).ToArray();
+        var beforeProducer = producerPaths.ToDictionary(path => path, path => request.ArtifactSession?.Inventory.ObserveBeforeWrite(path));
+        if (driverInvocation.RawResultsDirectory is not null)
+            request.ArtifactSession?.Inventory.RecordFreshTree(driverInvocation.RawResultsDirectory);
         CoverageRunProcessResult processResult;
         CoverageRunDriverNormalization normalization;
         string? cleanupLogPath = null;
@@ -2031,7 +2136,10 @@ internal sealed class CoverageRunWorkflow
                     driverInvocation,
                     cancellationToken,
                     supervisor.Commit,
-                    deleteStagedFile: _deleteStagedCoverageFile);
+                    deleteStagedFile: _deleteStagedCoverageFile,
+                    removeRedundantRaw: request.Clean && request.ArtifactRetention == "managed");
+                if (normalization.Status == "produced")
+                    request.ArtifactSession?.Inventory.RecordFile(Path.Join(projectOutputDirectory, "coverage.cobertura.xml"));
                 if (normalization.CleanupDiagnostic is not null)
                 {
                     var cleanupLog = await (_appendCleanupDiagnostic ?? CoverageRunProjectLog.AppendCleanupDiagnosticAsync)(
@@ -2049,6 +2157,10 @@ internal sealed class CoverageRunWorkflow
             {
                 supervisor.ThrowIfFailed();
                 throw;
+            }
+            finally
+            {
+                foreach (var path in producerPaths) request.ArtifactSession?.Inventory.RecordAfterWrite(path, beforeProducer[path]);
             }
         }
         var seconds = ElapsedSeconds(started);
@@ -2408,6 +2520,7 @@ internal sealed class CoverageRunWorkflow
             staged?.Invoke();
             cancellationToken.ThrowIfCancellationRequested();
             commit(() => File.Move(stagedPath, summaryPath, overwrite: true));
+            request.ArtifactSession?.Inventory.RecordFile(summaryPath);
         }
         finally
         {
@@ -2635,6 +2748,7 @@ internal sealed class CoverageRunWorkflow
             }
             cancellationToken.ThrowIfCancellationRequested();
             commit(() => File.Move(stagedPath, timingsPath, overwrite: true));
+            request.ArtifactSession?.Inventory.RecordFile(timingsPath);
         }
         finally
         {
@@ -2713,6 +2827,8 @@ internal sealed class CoverageRunWorkflow
                 transition,
                 _beforeSlowTestDiagnosticsPromotion);
 
+            request.ArtifactSession?.Inventory.RecordFile(diagnostics.MarkdownPath);
+            request.ArtifactSession?.Inventory.RecordFile(diagnostics.JsonPath);
             await console.WriteOutputAsync(FormattableString.Invariant(
                 $"Slow-test diagnostics: {diagnostics.MarkdownPath} ({diagnostics.AggregationSeconds}s, {diagnostics.AggregationPercent:0.00}% overhead)"), cancellationToken);
             return diagnostics;
@@ -4168,6 +4284,13 @@ internal static class CoverageRunOutputGuard
                 return new CoverageOwnedCleanupResult(output, OutputExists: false, IsOwned: false, [], Applied: false);
             }
 
+            using var operation = apply ? CoverageArtifactOperationLease.Acquire(output, exclusive: true) : null;
+            if (operation is not null)
+            {
+                operation.VerifyBinding();
+                if (!string.Equals(operation.PhysicalIdentity, lease.ArtifactDirectoryIdentity, StringComparison.Ordinal))
+                    throw new IOException("The cleanup output identity changed before exclusive authority was acquired.");
+            }
             var plan = lease.CleanKnownOwnedArtifacts(apply);
             return new CoverageOwnedCleanupResult(output, OutputExists: true, plan.IsOwned, plan.Artifacts, apply && plan.IsOwned);
         }

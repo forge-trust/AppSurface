@@ -1,5 +1,7 @@
 # EvidenceHost Cookbook
 
+For a checked-in executable example, see [native EvidenceHost acceptance](../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md). AppSurface uses that recipe to validate its packed storage CLI and installed-package consumer through the same explicit producer contracts available to applications.
+
 This cookbook turns the [EvidenceHost guide](../start-here/evidencehost.md) into concrete CI patterns. The goal is not a higher coverage number. The goal is a visible, truthful claim that the changed risk was mediated.
 
 ## Status and safe scope
@@ -72,6 +74,18 @@ application. This checkout also lacks accepted full consumer/CI proof. Do not co
 When a supported consumer path is admitted, readiness probes must wait for the condition the test needs, not just
 resource creation, and a producer must return only its declared assertion ids. A timeout, failed assertion, or
 incomplete cleanup must remain ineligible.
+
+### HTTP readiness in an ordinary Aspire test
+
+For one profile-based AppHost test, prefer the [typed readiness fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture). It composes the existing `CreateAsync` or `CreateConfiguredAsync` builder with native resource health, one named endpoint, and one status-only HTTP probe. The fixture owns the returned builder and application lifecycle; `Application` and `Endpoint` are borrowed for assertions. Do not build or dispose the borrowed application separately.
+
+Use [Aspire's native health wait](https://learn.microsoft.com/dotnet/aspire/testing/accessing-resources) alone when resource health is enough. Use [native Aspire HTTP health checks](https://aspire.dev/reference/api/csharp/aspire.hosting/resourcebuilderextensions/methods/) when their configured endpoint/status condition already meets the test's need. The shared [standalone readiness probe](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#httpreadinessprobewaitasync) is for an already-owned `HttpClient` and endpoint. None of these status checks replaces a body assertion, browser journey, or business readiness predicate.
+
+The complete [.NET 10 standalone package consumer](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-consumer) and [typed fixture consumer](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-typed-consumer) are the canonical executable quickstarts; the [consumer verification script](https://github.com/forge-trust/AppSurface/blob/main/scripts/verify-evidence-readiness-consumers.sh) runs their package proofs. Follow the projects there for exact coordinated package versions, setup, commands, and recorded output rather than copying a second sample into this cookbook. Controlled-handler output proves package behavior; it is not a live endpoint or real Aspire resource result.
+
+For an EvidenceHost resource, keep the application lease and browser producer in the existing explicit evidence composition. `EvidenceAspireApplication.CreateHttpReadiness(...)` binds the declared Evidence resource id to one Aspire resource, endpoint, and probe path. Each readiness wait first observes native resource health, then resolves the endpoint and runs the shared HTTP condition with an independent owned client. Register the adapter once; its cleanup drains admitted waits and releases its own application registration. Other adapters retain the same application until their registrations also release; the final release joins application cleanup. Dispose all created adapters, and do not dispose the lease directly concurrently with an active readiness wait. See the [Evidence.Aspire adapter reference](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#http-readiness-adapter) and the coordination record for [issue #778](https://github.com/forge-trust/AppSurface/issues/778).
+
+Both pinned Skoolit gate equivalences preserve their existing consumer policy: three-minute startup deadline, `MaxAttempts = 30`, three-second request timeout, 250 ms retry delay, `UseProxy = false`, and two-second `ConnectTimeout`. These are explicit migration settings, not SDK defaults. Equivalence fixtures are not actual Skoolit adoption, and headers-only probing does not buffer or assert response bodies as a prior probe might. No latency or reliability improvement is claimed without measurements.
 
 ## Release evidence
 

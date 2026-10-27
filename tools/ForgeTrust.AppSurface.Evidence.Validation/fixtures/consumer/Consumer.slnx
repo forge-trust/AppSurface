@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Consumer.Alpha/Consumer.Alpha.csproj" />
+  <Project Path="Consumer.Alpha.Tests/Consumer.Alpha.Tests.csproj" />
+  <Project Path="Consumer.Beta/Consumer.Beta.csproj" />
+  <Project Path="Consumer.Beta.Tests/Consumer.Beta.Tests.csproj" />
+</Solution>

@@ -183,6 +183,15 @@ public sealed class EvidencePlanner
         {
             RequireIdentifier(producer.Id, "producer id");
             RequireIdentifier(producer.Kind, "producer kind");
+            if (string.Equals(producer.Kind, "coverage", StringComparison.Ordinal))
+            {
+                ValidateCoverageExecution(producer.Id, producer.CoverageExecution);
+            }
+            if (string.Equals(producer.Kind, "coverage", StringComparison.Ordinal)
+                && producer.CoverageArtifactRetention is not ("managed" or "full"))
+            {
+                throw new EvidencePlanningException("ASEVD132", $"Coverage producer '{producer.Id}' has invalid coverageArtifactRetention.", "Use managed (the default) or full without changing coverage gate requirements.");
+            }
             if (producer.TimeoutSeconds <= 0)
             {
                 throw new EvidencePlanningException("ASEVD110", $"Producer '{producer.Id}' has a non-positive timeout.", "Set timeoutSeconds to a positive value.");
@@ -355,6 +364,55 @@ public sealed class EvidencePlanner
     }
 
     private static bool IsPercentage(decimal value) => value is >= 0 and <= 100;
+
+    private static void ValidateCoverageExecution(string producerId, EvidenceCoverageExecutionOptions? execution)
+    {
+        if (execution is null) return;
+        if (!IsSimpleIdentifier(execution.Configuration))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD129",
+                $"Coverage producer '{producerId}' has an invalid coverage execution configuration.",
+                "Use a nonempty configuration identifier containing only letters, digits, '.', '-', or '_'.");
+        }
+
+        if (execution.Parallelism is < 1 or > 32)
+        {
+            throw new EvidencePlanningException(
+                "ASEVD130",
+                $"Coverage producer '{producerId}' has coverage execution parallelism outside the allowed range.",
+                "Set parallelism to a value from 1 through 32.");
+        }
+
+        if (execution.TestResults is not (EvidenceCoverageTestResultFormat.None or EvidenceCoverageTestResultFormat.Junit))
+        {
+            throw new EvidencePlanningException(
+                "ASEVD131",
+                $"Coverage producer '{producerId}' has an unsupported coverage execution test-results format.",
+                "Use none or junit.");
+        }
+    }
+
+    private static bool IsSimpleIdentifier(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 32)
+        {
+            return false;
+        }
+
+        foreach (var character in value)
+        {
+            if (character is not (>= 'a' and <= 'z')
+                and not (>= 'A' and <= 'Z')
+                and not (>= '0' and <= '9')
+                and not ('.' or '-' or '_'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private sealed record RuleCandidate(EvidencePolicyRule Rule, int Specificity);
 }

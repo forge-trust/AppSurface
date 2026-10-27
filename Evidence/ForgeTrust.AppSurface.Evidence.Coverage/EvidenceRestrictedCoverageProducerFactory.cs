@@ -8,6 +8,8 @@ namespace ForgeTrust.AppSurface.Evidence.Coverage;
 /// lease internally bound to an activated protected artifact writer by the CLI or Aspire host. Public/local
 /// writers, caller-selected paths and public transport injection cannot supply that lease. The production
 /// consumer acceptance registry remains closed; this factory does not establish Trusted or native acceptance.
+/// Restricted declarations must retain the fixed Debug, serial, no-managed-results execution envelope and
+/// managed artifact retention. The ordinary coverage producer accepts the wider planner-validated options.
 /// </remarks>
 public static class EvidenceRestrictedCoverageProducerFactory
 {
@@ -31,7 +33,8 @@ public static class EvidenceRestrictedCoverageProducerFactory
                 || declaration.ArtifactSlots.Any(static item => item is null || !BoundedText(item.LogicalName, 96)
                     || !BoundedText(item.RelativeRoot, 4095) || !BoundedText(item.MediaType, 128)
                     || item.MaximumBytes is < 1 or > EvidenceArtifactWriter.MaximumTotalArtifactBytes)
-                || declaration.TimeoutSeconds is < 1 or > 1800)
+                || declaration.TimeoutSeconds is < 1 or > 1800
+                || !EvidenceCoverageExecutionOptions.SupportsRestrictedExecution(declaration))
                 throw InvalidDeclaration();
             var bytes = EvidenceCanonicalJson.Serialize(declaration);
             if (bytes.Length > EvidenceCanonicalJson.MaximumInputBytes) throw InvalidDeclaration();

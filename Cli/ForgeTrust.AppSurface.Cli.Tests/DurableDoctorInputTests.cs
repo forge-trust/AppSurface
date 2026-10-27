@@ -86,17 +86,18 @@ public sealed class DurableDoctorInputTests
     }
 
     [Theory]
-    [InlineData("Username=operator;Password=private")]
-    [InlineData("Host= ;Username=operator")]
-    [InlineData("Host=localhost;Port=65536;Username=operator")]
-    [InlineData("Host=localhost;Port=0;Username=operator")]
-    [InlineData("Host=localhost;Port=invalid;Username=operator")]
-    [InlineData("Host=localhost;UnsupportedDoctorSetting=private")]
+    [InlineData("Username=doctor-user-redaction-sentinel;Password=doctor-value-redaction-sentinel")]
+    [InlineData("Host= ;Username=doctor-user-redaction-sentinel")]
+    [InlineData("Host=localhost;Port=65536;Username=doctor-user-redaction-sentinel")]
+    [InlineData("Host=localhost;Port=0;Username=doctor-user-redaction-sentinel")]
+    [InlineData("Host=localhost;Port=invalid;Username=doctor-user-redaction-sentinel")]
+    [InlineData("Host=localhost;UnsupportedDoctorSetting=doctor-value-redaction-sentinel")]
     public void Create_rejects_unparseable_or_hostless_connection_settings_without_exposing_values(string connection)
     {
         var exception = Assert.Throws<DurableDoctorInputException>(() => CreateInput(connectionString: connection));
-        Assert.DoesNotContain("private", exception.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("operator", exception.ToString(), StringComparison.Ordinal);
+        // Unique fixture values distinguish credential leaks from source paths in exception stack traces.
+        Assert.DoesNotContain("doctor-value-redaction-sentinel", exception.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("doctor-user-redaction-sentinel", exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

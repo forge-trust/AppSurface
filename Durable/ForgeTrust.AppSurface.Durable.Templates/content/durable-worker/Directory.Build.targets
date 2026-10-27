@@ -1,0 +1,3 @@
+<Project>
+  <!-- Deliberately stops parent-repository targets from flowing into this generated application. -->
+</Project>

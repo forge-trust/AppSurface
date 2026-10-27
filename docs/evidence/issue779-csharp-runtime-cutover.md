@@ -1,5 +1,40 @@
 # EvidenceHost C# runtime cutover
 
+## Local integration with current main — 2026-10-27
+
+The prepared revision-104 files were preserved in local commit `6402d8edc64aca84523b94132afaa153749640c3`
+before integrating GitHub main `ebb562be618c2649c1ef0ade12095e56468882c7`.
+The integration retains the complete native measurement chain and the incoming
+[coverage fan-in](../../guides/coverage-fan-in.md), readiness and package-validation APIs.
+Both consuming coverage lanes use SDK 10.0.401, matching the EvidenceHost measurement
+chain; the fixed comparison base, thresholds, exclusions and runtime limits remain unchanged.
+The broker's fixed environment command now carries the fan-in directory and same-run
+repository/run/attempt identity into the nonroot coverage process.
+
+The incoming stream artifact overload uses the admitted writer's existing protected-root,
+shared artifact-quota and owned-work boundaries. Restricted coverage registration accepts
+only its existing Debug, serial, no-managed-results command with managed retention;
+[ordinary coverage execution options](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+remain available to the ordinary producer. The integration needs its own source-bound Linux
+and numerical gate results; previous receipts continue to describe their original source.
+
+**Additional open migration:** main's [native validation tool](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md)
+and [workflow](../../.github/workflows/native-evidence-validation.yml) invoke the legacy host
+entry point and expect complete evidence on all three operating systems. That entry point
+fails closed under the [explicit admission contract](evidencehost-migration.md).
+These journeys therefore do not run successfully on this integration. Migrating their
+production execution requires genuine protected admission and supported consumer evidence;
+using a test supervisor or relabeling Observation would not satisfy that requirement.
+The incoming HTTP readiness host unit fixtures now use the existing internal admission test
+seam; their simulated results provide no native acceptance. None of this local merge enables Trusted mode, accepts a platform proof or publishes
+a completed acceptance record.
+
+Revision 101's existing observer subsequently recorded [run 40445212390](https://github.com/forge-trust/AppSurface/actions/runs/40445212390)
+terminal failure at 2026-10-27 07:02:45 UTC. All prerequisite jobs succeeded; the gate
+stopped in the native-data validator with the known `Expected: 41 / Actual: 43` account-lineage
+mismatch. That correction is included in revision 104. The failed run supplies no passing
+numerical result and does not change the historical revision-91 coverage figures below.
+
 <a id="latest-verified-consumer-checkpoint--2026-10-26"></a>
 
 ## Latest verified consumer artifacts — revision 101 — 2026-10-27

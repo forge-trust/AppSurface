@@ -5,7 +5,7 @@ using ForgeTrust.AppSurface.Testing;
 
 namespace ForgeTrust.AppSurface.Aspire.Tests;
 
-public sealed class EvidenceHostBootstrapTests
+public sealed partial class EvidenceHostBootstrapTests
 {
     [Fact]
     public async Task EvidenceAspireApplication_ShouldDisposePartialApplicationWhenAspireStartupFails()
@@ -413,13 +413,13 @@ public sealed class EvidenceHostBootstrapTests
     public async Task RunAsync_ShouldProtectResourceOrderingAndRequiredArtifactIntegrity()
     {
         var cyclicPlan = SealPlan(CreatePlan().Profile with
-            {
-                Resources =
+        {
+            Resources =
                 [
                     new EvidenceResourceDeclaration("postgres", "aspire_health", 30, ["redis"]),
                     new EvidenceResourceDeclaration("redis", "aspire_health", 30, ["postgres"]),
                 ],
-            });
+        });
         await using var cyclic = EvidenceHostBootstrap.Create(
             cyclicPlan,
             registration =>
@@ -432,8 +432,8 @@ public sealed class EvidenceHostBootstrapTests
         Assert.Contains("ASEVD304", cycleException.Message, StringComparison.Ordinal);
 
         var artifactPlan = SealPlan(CreatePlan().Profile with
-            {
-                Producers =
+        {
+            Producers =
                 [
                     new EvidenceProducerDeclaration(
                         "coverage",
@@ -444,7 +444,7 @@ public sealed class EvidenceHostBootstrapTests
                         [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)],
                         30),
                 ],
-            });
+        });
         await using var requiredArtifact = EvidenceHostBootstrap.Create(
             artifactPlan,
             registration =>
@@ -461,8 +461,8 @@ public sealed class EvidenceHostBootstrapTests
     public async Task RunAsync_ShouldInvalidateAProducerWhenItsWrittenArtifactChangesBeforeCollection()
     {
         var artifactPlan = SealPlan(CreatePlan().Profile with
-            {
-                Producers =
+        {
+            Producers =
                 [
                     new EvidenceProducerDeclaration(
                         "coverage",
@@ -473,7 +473,7 @@ public sealed class EvidenceHostBootstrapTests
                         [new EvidenceArtifactSlot("report", "coverage", "text/plain", Required: true, MaximumBytes: 16)],
                         30),
                 ],
-            });
+        });
         using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Trusted, artifactPlan);
         await using var host = EvidenceHostBootstrap.Create(
             artifactPlan,
@@ -497,22 +497,22 @@ public sealed class EvidenceHostBootstrapTests
     public async Task RunAsync_ShouldProtectLifecycleBoundsSharedDependenciesAndCallerCancelledProducers()
     {
         var oversizedPlan = SealPlan(CreatePlan().Profile with
-            {
-                Resources = Enumerable.Range(0, 17).Select(index => new EvidenceResourceDeclaration($"resource-{index}", "aspire_health", 30, [])).ToArray(),
-            });
+        {
+            Resources = Enumerable.Range(0, 17).Select(index => new EvidenceResourceDeclaration($"resource-{index}", "aspire_health", 30, [])).ToArray(),
+        });
         await using var oversized = EvidenceHostBootstrap.Create(oversizedPlan, _ => { });
         var oversizedException = await Assert.ThrowsAsync<EvidenceHostException>(() => RunAcceptedAsync(oversized));
         Assert.Contains("ASEVD301", oversizedException.Message, StringComparison.Ordinal);
 
         var dependencyPlan = SealPlan(CreatePlan().Profile with
-            {
-                Resources =
+        {
+            Resources =
                 [
                     new EvidenceResourceDeclaration("postgres", "aspire_health", 30, []),
                     new EvidenceResourceDeclaration("cache", "aspire_health", 30, ["postgres"]),
                     new EvidenceResourceDeclaration("search", "aspire_health", 30, ["postgres"]),
                 ],
-            });
+        });
         var postgres = new SyncDisposableReadyResource("postgres");
         await using var dependencyHost = EvidenceHostBootstrap.Create(
             dependencyPlan,
@@ -528,9 +528,9 @@ public sealed class EvidenceHostBootstrapTests
         Assert.Equal(1, postgres.DisposeCount);
 
         var missingDependencyPlan = SealPlan(CreatePlan().Profile with
-            {
-                Resources = [new EvidenceResourceDeclaration("postgres", "aspire_health", 30, ["missing"])],
-            });
+        {
+            Resources = [new EvidenceResourceDeclaration("postgres", "aspire_health", 30, ["missing"])],
+        });
         await using var missingDependency = EvidenceHostBootstrap.Create(
             missingDependencyPlan,
             registration =>
@@ -656,6 +656,57 @@ public sealed class EvidenceHostBootstrapTests
         Assert.True(manifest.Metrics.CleanupCompleted);
         Assert.Equal(EvidenceDigest.CanonicalSha256(manifest with { ManifestDigest = string.Empty }), manifest.ManifestDigest);
         Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+    }
+
+    [LinuxArtifactFact]
+    public async Task ProtectedWriter_StreamWriteUsesRetainedRootAndSharedArtifactQuota()
+    {
+
+        var parent = Path.Combine(Path.GetTempPath(), $"appsurface-evidence-protected-stream-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(parent);
+        File.SetUnixFileMode(parent, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        EvidenceLinuxArtifactRoot? root = null;
+        try
+        {
+            var identity = EvidenceLinuxArtifactRoot.InspectDirectoryIdentity(parent);
+            root = EvidenceLinuxArtifactRoot.Allocate(parent, identity, "run", identity.Uid, identity.Gid);
+            var declaration = new EvidenceProducerDeclaration("inventory", "inventory", "1.0.0", [],
+                ["inventory/assertion@1"],
+                [new EvidenceArtifactSlot("first", "inventory", "text/plain", Required: false, MaximumBytes: 8),
+                 new EvidenceArtifactSlot("second", "inventory", "text/plain", Required: false, MaximumBytes: 8)],
+                TimeoutSeconds: 30);
+            var plan = SealPlan(EvidenceHostAdmissionTestRun.CreateObservationPlan().Profile with { Producers = [declaration] });
+            using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan);
+            var admission = await EvidenceAdmission.AdmitAsync(EvidenceExecutionMode.Observation, plan,
+                run.Context, run.Supervisor, verifier: null, CancellationToken.None);
+            admission.Activate("test-output");
+            var execution = new EvidenceWorkerExecution(run.Supervisor, TimeProvider.System,
+                TimeSpan.FromHours(1), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(1), admission: admission);
+            var quota = EvidenceRunByteQuota.CreateArtifact(limit: 4, onExceeded: execution.LatchFailure);
+            var writer = new EvidenceArtifactWriter(declaration, root, quota, execution, admission);
+
+            var stage = await execution.ExecuteAsync(EvidenceRunStage.Producer, TimeSpan.FromSeconds(10), async token =>
+            {
+                var first = await writer.WriteAsync("first", "inventory/first.txt", new MemoryStream("data"u8.ToArray()), token);
+                Assert.Equal(4, first.LengthBytes);
+                var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(async () =>
+                    await writer.WriteAsync("second", "inventory/second.txt", new MemoryStream("x"u8.ToArray()), token));
+                Assert.Equal("ASEVD420", exception.Code);
+                return true;
+            });
+
+            Assert.NotEqual(EvidenceWorkerStageOutcome.Passed, stage.Outcome);
+            Assert.True(quota.IsFailed);
+            Assert.Equal(4, quota.AccountedBytes);
+            await root.VerifyAsync("inventory/inventory/first.txt", 4, EvidenceDigest.Sha256("data"u8), CancellationToken.None);
+            await Assert.ThrowsAsync<IOException>(async () =>
+                await root.VerifyAsync("inventory/inventory/second.txt", 1, EvidenceDigest.Sha256("x"u8), CancellationToken.None));
+        }
+        finally
+        {
+            if (root is not null) await root.DisposeAsync();
+            Directory.Delete(parent, recursive: true);
+        }
     }
 
     [Fact]
@@ -1067,6 +1118,16 @@ public sealed class EvidenceHostBootstrapTests
         finally
         {
             File.Delete(artifactFile);
+        }
+    }
+
+    private sealed class LinuxArtifactFactAttribute : FactAttribute
+    {
+        public LinuxArtifactFactAttribute()
+        {
+            if (!OperatingSystem.IsLinux()
+                || System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture != System.Runtime.InteropServices.Architecture.X64)
+                Skip = "Requires the actual Linux x64 protected artifact filesystem.";
         }
     }
 

@@ -222,6 +222,50 @@ public sealed class EvidenceClosedApplicationCatalogueTests
     }
 
     [Theory]
+    [InlineData("configuration")]
+    [InlineData("parallelism")]
+    [InlineData("test-results")]
+    [InlineData("invalid-configuration")]
+    [InlineData("invalid-parallelism")]
+    [InlineData("invalid-test-results")]
+    [InlineData("retention")]
+    [InlineData("invalid-retention")]
+    public void SnapshotRejectsCoverageOptionsOutsideTheFixedRestrictedCommand(string change)
+    {
+        var entry = Candidate();
+        var declaration = entry.Producers[0].Declaration;
+        declaration = change switch
+        {
+            "configuration" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions("Release") },
+            "parallelism" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: 2) },
+            "test-results" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: EvidenceCoverageTestResultFormat.Junit) },
+            "invalid-configuration" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions(null!) },
+            "invalid-parallelism" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions(Parallelism: 0) },
+            "invalid-test-results" => declaration with { CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: (EvidenceCoverageTestResultFormat)99) },
+            "retention" => declaration with { CoverageArtifactRetention = "full" },
+            _ => declaration with { CoverageArtifactRetention = "archive" },
+        };
+        var profile = entry.Policy.Profiles.Single(item => item.Id == entry.ProfileId);
+        profile = profile with
+        {
+            Producers = profile.Producers.Select(item => item.Id == declaration.Id ? declaration : item).ToArray(),
+        };
+        var policy = entry.Policy with
+        {
+            Profiles = entry.Policy.Profiles.Select(item => item.Id == entry.ProfileId ? profile : item).ToArray(),
+        };
+        entry = entry with
+        {
+            Policy = policy,
+            Producers = entry.Producers.Select(item => item.Declaration.Id == declaration.Id
+                ? item with { Declaration = declaration }
+                : item).ToArray(),
+        };
+
+        RejectAudit(() => EvidenceClosedApplicationCatalogue.Snapshot(entry));
+    }
+
+    [Theory]
     [InlineData("resource-deadline")]
     [InlineData("resource-readiness")]
     [InlineData("producer-assertion")]

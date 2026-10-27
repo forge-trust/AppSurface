@@ -75,10 +75,83 @@ EvidenceRestrictedCoverageRegistration registration =
 // Inspect registration.Declaration; creation has not admitted or run coverage.
 ```
 
-Malformed or unsupported metadata rejects with fixed `ASEVD404`; null declaration rejects with `ArgumentNullException`. Creation bounds identifiers to 96 characters, assertion text to 256, artifact roots to 4095 and media types to 128; null, blank and control-containing strings reject. Resource/assertion/artifact counts are limited to 16/128/64, producer timeout to 1–1800 seconds, each artifact limit to 1–256 MiB and serialized declaration bytes to 20 MiB. The existing restricted procedure still validates the declared assertions, slots and coverage gate before subject execution.
+Malformed or unsupported metadata rejects with fixed `ASEVD404`; null declaration rejects with `ArgumentNullException`. Creation bounds identifiers to 96 characters, assertion text to 256, artifact roots to 4095 and media types to 128; null, blank and control-containing strings reject. Resource/assertion/artifact counts are limited to 16/128/64, producer timeout to 1–1800 seconds, each artifact limit to 1–256 MiB and serialized declaration bytes to 20 MiB. Because the restricted command is fixed to Debug, serial execution and no managed test results, `coverageExecution` must be omitted or specify exactly `Debug`, `parallelism: 1` and `testResults: none`; `coverageArtifactRetention` must be `managed`. `full` retention and other valid ordinary-producer execution options are rejected with `ASEVD404` before a worker lease can launch native work. The existing restricted procedure still validates the declared assertions, slots and coverage gate before subject execution.
 
 `ProduceAsync(EvidenceProducerContext, CancellationToken)` requires the exact admitted plan and declaration plus a [protected writer binding](../ForgeTrust.AppSurface.Evidence.Contracts/README.md#restricted-producer-callback-binding). Public/local writers, absent bindings, callback reuse, stale admission and mismatches reject with `ASEVD410`. The factory accepts no solution path, executable arguments, transport, reporter, worker or capability parameter. Its internal adapter obtains solution, tool and test-output roots from the actual authenticated supervisor and copies the protected planning diff. Caller cancellation is additional to the actual captured stage token.
 
 The entire restricted run, retained report collection, private staging, protected ReportGenerator merge, numeric gate and cleanup is registered with the existing lifecycle before its task is returned. Ignoring that task cannot remove it from owned stop/join. The subject command and protected reporter share one run-wide received-output quota; artifact writes use the existing retained writer and artifact quota. Assertion output requires both the fixed restricted procedure and its declared numeric gate to pass.
 
 The CLI uses this single implementation. The Aspire host can reference the same package and bind it through its protected lifecycle; the factory itself supplies neither application readiness nor a restricted application lease. Core unit tests use intentionally internal fake transports to check procedure behavior and establish no native or Trusted proof. Production acceptance remains closed as recorded in the [consumer acceptance requirements](../../docs/evidence/issue779-consumer-acceptance.md).
+All coverage orchestration types are internal and visible only to first-party assemblies. Consumers should use the documented public [coverage commands](../../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-run) and [EvidenceHost workflow](../../start-here/evidencehost.md).
+
+The [coverage storage guide](../../guides/coverage-storage.md) documents the in-progress retention contract shared by CLI and Evidence coverage producers. Its `managed` default permits removal only of verified redundant collector XML after canonical publication; `full` retains it. A CLI run using `--no-clean` preserves prior artifacts in either mode, so retained output can include files from earlier invocations. The Evidence declaration's additive `coverageArtifactRetention` property defaults to `managed`; older JSON omitting it remains valid. These docs describe the branch implementation and do not claim an installed package proof or measured storage savings.
+
+### Native operation verification
+
+Artifact safety keeps managed decisions and native acceptance separate. Internal,
+per-call observations cover file-state decoding, private Unix ownership/mode
+checks, Windows rename-buffer encoding, lock-result classification, and
+filesystem/mount classification. Windows access policy uses normalized SID and
+access-mask facts; candidate-file decisions retain explicit handle ownership and
+reject nonregular or unrepresentable sizes before returning a stream. Candidate
+handles remain owned by the inspector until a stream is successfully returned;
+metadata failures release them on every unwind path. Production defaults call the host APIs and retain
+normal no-follow path, identity, and publication checks. The observations are test
+seams, not consumer configuration; they never establish another operating system's
+ABI or filesystem guarantees. Native acceptance still runs on the supported
+Windows/NTFS, macOS/APFS, and Linux/ext4 lanes described in the
+[storage validation record](../../docs/designs/coverage-artifact-storage-validation.md).
+
+Observation state uses a single bounded publication slot per private observation
+directory. Writers hold that directory's exclusive operation lease while they
+reconcile the known slot, flush the new state, and atomically replace the current
+state. A failed or interrupted write can therefore retain at most one known slot;
+unknown files and changed identities are preserved for inspection. Registry input
+validation rejects malformed observation and expiry-receipt entries before they
+reach status or maintenance, keeping optional metadata failures separate from the
+primary coverage outcome. See the [storage recovery guide](../../guides/coverage-storage.md#recovery-recipes).
+
+The CLI's internal storage-command base renders schema-v1 operation data into human
+and JSON results using the [storage result contract](../../guides/coverage-storage.md#status-json-and-exit-behavior).
+Its optional domain identifier observation returns `domain-unknown` for nonfatal
+failures so rendering retains the primary result and safe diagnostic. Gate commands
+validate input and destination policy before acquiring output coordination; invalid
+inputs therefore do not create report directories or contend with active writers.
+Human numeric fields accept JSON numbers only; absent, differently typed, or
+unrepresentable values use the field's documented zero or unknown fallback. This
+keeps presentation of partial results from throwing after the operation has
+already recorded its outcome and side effects. Operation implementations still
+validate their own metadata before producing this result; presentation fallbacks
+do not certify an unknown inventory or make an incomplete result successful.
+
+Current-run sidecar publication cleans up its own staging file on failure in both
+collection and independent gate publication. Cleanup requires the staged object's
+identity to match; a replaced entry is preserved and cleanup failure retains the
+original diagnostic. This is separate from private observation-state staging above.
+
+Secure Unix opens share an internal native-flag selector for Darwin, Linux x64,
+and Linux ARM64. [Linux ARM64 native open flags](https://github.com/torvalds/linux/blob/master/arch/arm64/include/uapi/asm/fcntl.h) use different directory-only and no-follow bits
+from x64; output traversal, collector artifact reads, and storage inspection must
+use the matching pair. Unverified Linux architectures fail before opening a
+candidate. The selector has decision tests, while the native no-follow tests in
+the [platform matrix](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) verify actual host behavior.
+
+Unix metadata calls select libc symbols for the process ABI because callers read
+native `stat` and `statfs` structures at fixed offsets. Intel Darwin dispatches both
+`fstat` and `fstatfs` to their `$INODE64` symbols; Darwin arm64 and Linux use the
+unsuffixed symbols. Dispatch follows the current OS and process architecture. Callers
+must still provide a sufficiently large writable buffer and interpret only the layout
+for that host. The [XNU `stat.h` declarations](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/stat.h)
+define Darwin's inode-versioned symbol mapping; [XNU `mount.h`](https://github.com/apple/darwin-xnu/blob/main/bsd/sys/mount.h)
+defines the 64-bit-inode `statfs` structure, and [XNU's syscall table](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/syscalls.master)
+distinguishes the legacy and 64-bit `fstatfs` interfaces. Injected dispatch tests cover
+Intel and arm64 routing on any host; native tests validate the running host's call and
+layout. They do not replace native Intel Darwin validation.
+
+Recovery invoked by an existing coverage session reuses that session's live exclusive output lease only when its physical identity matches the stored registration. Shared, disposed or unrelated leases grant no recovery authority. The manager keeps ownership of any separately acquired leases and never releases a borrowed session lease. See the [storage lifecycle and recovery guide](../../guides/coverage-storage.md#recovery-recipes).
+
+On Windows, deletable archive and staging candidates coordinate through one empty private `.appsurface-coverage-candidates.lock` file in the domain root. A deterministic byte-range offset derived from the candidate's physical identity keeps independent candidates concurrent. The file stays zero-length because locking beyond its end does not allocate payload storage. Source-output leases keep their existing protocol. Every candidate operation verifies both retained directory and lock-file identities; a hash collision causes safe contention. The fixed file is never removed to force admission. See [Windows byte-range locking](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex).
+
+Applied maintenance also reconciles missing, unpinned historical archive registrations after an interrupted expiry. It verifies absence through a retained private archive parent under the store metadata lease, records a bounded missing-archive receipt, and clears only stale archive accounting. It never deletes an existing entry or reports reconciliation as a new physical deletion. Current, pinned and pending-reservation registrations are excluded. See the [recovery guide](../../guides/coverage-storage.md#recovery-recipes).
+
+The internal `CoverageFileSystemInterop.WindowsCreateFile` boundary normalizes an absolute filesystem path and uses the Windows extended drive or UNC spelling before `CreateFileW`. This supports deeply nested collector output beyond legacy `MAX_PATH`; see [Windows path length limits](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation). Path spelling does not grant access: callers retain the same containment, reparse-point, file-kind, identity and private-access checks. Relative navigation must be normalized before the extended prefix is applied.

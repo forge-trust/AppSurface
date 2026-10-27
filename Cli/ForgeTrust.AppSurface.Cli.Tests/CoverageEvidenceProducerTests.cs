@@ -11,6 +11,27 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageEvidenceProducerTests
 {
     [Fact]
+    public async Task RunAsync_ShouldRejectAnUnsupportedExecutionResultFormatBeforeStartingTheCore()
+    {
+        using var directory = TestDirectory.Create();
+        var output = Path.Join(directory.Path, "output");
+        var producer = CreateProducer(new ThrowingCoverageRunProcessRunner(new InvalidOperationException("core must not start")));
+        var declaration = CreateDeclaration() with
+        {
+            CoverageExecution = new EvidenceCoverageExecutionOptions(TestResults: (EvidenceCoverageTestResultFormat)123),
+        };
+
+        var result = await producer.RunAsync(declaration, Path.Join(directory.Path, "sample.slnx"), output, null,
+            CoverageTextWriters.Create(TextWriter.Null, TextWriter.Null), CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+        Assert.Empty(result.SatisfiedAssertionIds);
+        Assert.Contains("ArgumentOutOfRangeException", result.Diagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain("core must not start", result.Diagnostic, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(output));
+    }
+
+    [Fact]
     public void Constructor_ShouldRejectANullExecutionWorkflow()
     {
         Assert.Throws<ArgumentNullException>(() => new CoverageEvidenceProducer(null!));
@@ -259,6 +280,81 @@ public sealed class CoverageEvidenceProducerTests
         Assert.Contains("Patch line mode: codecov", await File.ReadAllTextAsync(Path.Join(outputDirectory, "coverage", "coverage-gate.md")), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RunAsync_ShouldForwardConfiguredExecutionWithoutChangingCoverageScope()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        foreach (var project in new[] { "Sample1.Tests", "Sample2.Tests" })
+        {
+            var projectPath = Path.Join(directory.Path, "tests", project, $"{project}.csproj");
+            Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+            await File.WriteAllTextAsync(projectPath, "<Project />");
+        }
+        var processRunner = new PassingCoverageRunProcessRunner(projectCount: 2);
+        var producer = CreateProducer(processRunner);
+        var declaration = CreateDeclaration() with
+        {
+            CoverageExecution = new EvidenceCoverageExecutionOptions(
+                Configuration: "Release",
+                TestResults: EvidenceCoverageTestResultFormat.Junit,
+                Parallelism: 2),
+        };
+        using var standardOutput = new StringWriter();
+        using var standardError = new StringWriter();
+
+        var result = await producer.RunAsync(
+            declaration,
+            solutionPath,
+            Path.Join(directory.Path, "output"),
+            null,
+            CoverageTextWriters.Create(standardOutput, standardError),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.Equal(2, processRunner.MaxConcurrentTests);
+        Assert.Equal(2, processRunner.TestArguments.Count);
+        Assert.All(processRunner.TestArguments, arguments =>
+        {
+            Assert.Contains("--configuration", arguments);
+            Assert.Contains("Release", arguments);
+            Assert.Contains(arguments, argument => argument.StartsWith("--logger:junit;LogFilePath=", StringComparison.Ordinal));
+            Assert.DoesNotContain("--filter", arguments);
+            Assert.Contains(arguments, argument => argument.Contains("Exclude=", StringComparison.Ordinal)
+                && argument.Contains("[*.Tests]*", StringComparison.Ordinal)
+                && argument.Contains("[*.IntegrationTests]*", StringComparison.Ordinal));
+        });
+    }
+
+    [Fact]
+    public async Task RunAsync_ShouldPreserveLegacyExecutionDefaults()
+    {
+        using var directory = TestDirectory.Create();
+        var solutionPath = Path.Join(directory.Path, "sample.slnx");
+        await File.WriteAllTextAsync(solutionPath, "{}");
+        var projectPath = Path.Join(directory.Path, "tests", "Sample.Tests", "Sample.Tests.csproj");
+        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        await File.WriteAllTextAsync(projectPath, "<Project />");
+        var processRunner = new PassingCoverageRunProcessRunner();
+        var producer = CreateProducer(processRunner);
+        using var legacyStandardOutput = new StringWriter();
+        using var legacyStandardError = new StringWriter();
+
+        var result = await producer.RunAsync(
+            CreateDeclaration(),
+            solutionPath,
+            Path.Join(directory.Path, "output"),
+            null,
+            CoverageTextWriters.Create(legacyStandardOutput, legacyStandardError),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
+        Assert.Single(processRunner.TestArguments);
+        Assert.Contains("Debug", processRunner.TestArguments[0]);
+        Assert.DoesNotContain(processRunner.TestArguments[0], argument => argument.StartsWith("--logger:junit;", StringComparison.Ordinal));
+    }
+
     private static CoverageEvidenceProducer CreateProducer(ICoverageRunProcessRunner processRunner) => new(
         new CoverageEvidenceExecutionWorkflow(
             new CoverageRunWorkflow(processRunner, new PassingCoverageReportGenerator(), TimeProvider.System)));
@@ -318,7 +414,7 @@ public sealed class CoverageEvidenceProducerTests
         }
     }
 
-    private sealed class PassingCoverageRunProcessRunner : ICoverageRunProcessRunner
+    private sealed class PassingCoverageRunProcessRunner(int projectCount = 1) : ICoverageRunProcessRunner
     {
         private const string CapabilityOutput = """
             {
@@ -329,13 +425,23 @@ public sealed class CoverageEvidenceProducerTests
 
         private const string Cobertura = "<coverage lines-covered=\"10\" lines-valid=\"10\" branches-covered=\"10\" branches-valid=\"10\" line-rate=\"1\" branch-rate=\"1\"><packages /></coverage>";
 
+        private int _activeTests;
+        private int _maxConcurrentTests;
+
+        public List<IReadOnlyList<string>> TestArguments { get; } = [];
+
+        public int MaxConcurrentTests => _maxConcurrentTests;
+
         public async Task<CoverageRunProcessResult> RunAsync(CoverageRunProcessRequest request, CancellationToken cancellationToken)
         {
             request.Lease.Complete();
             var operation = request.Arguments.FirstOrDefault();
             if (string.Equals(operation, "sln", StringComparison.Ordinal))
             {
-                return new CoverageRunProcessResult(0, "Project(s)\n----------\ntests/Sample.Tests/Sample.Tests.csproj\n");
+                var projects = projectCount == 1
+                    ? "tests/Sample.Tests/Sample.Tests.csproj"
+                    : string.Join(Environment.NewLine, Enumerable.Range(1, projectCount).Select(index => $"tests/Sample{index}.Tests/Sample{index}.Tests.csproj"));
+                return new CoverageRunProcessResult(0, $"Project(s)\n----------\n{projects}\n");
             }
 
             if (string.Equals(operation, "msbuild", StringComparison.Ordinal))
@@ -345,20 +451,53 @@ public sealed class CoverageEvidenceProducerTests
 
             if (string.Equals(operation, "test", StringComparison.Ordinal))
             {
+                lock (TestArguments)
+                {
+                    TestArguments.Add(request.Arguments);
+                }
+                var activeTests = Interlocked.Increment(ref _activeTests);
+                InterlockedExtensions.Max(ref _maxConcurrentTests, activeTests);
                 var resultsIndex = request.Arguments.ToList().FindIndex(argument => string.Equals(argument, "--results-directory", StringComparison.Ordinal));
                 Assert.True(resultsIndex >= 0);
                 var collectorDirectory = Path.Join(request.Arguments[resultsIndex + 1], "collector");
                 Directory.CreateDirectory(collectorDirectory);
-                await File.WriteAllTextAsync(Path.Join(collectorDirectory, "coverage.cobertura.xml"), Cobertura, cancellationToken);
-                if (request.OutputFile is not null)
+                try
                 {
-                    await File.WriteAllTextAsync(request.OutputFile, "coverage test output", cancellationToken);
+                    if (projectCount > 1)
+                    {
+                        await Task.Delay(100, cancellationToken);
+                    }
+
+                    await File.WriteAllTextAsync(Path.Join(collectorDirectory, "coverage.cobertura.xml"), Cobertura, cancellationToken);
+                    if (request.OutputFile is not null)
+                    {
+                        await File.WriteAllTextAsync(request.OutputFile, "coverage test output", cancellationToken);
+                    }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _activeTests);
                 }
 
                 return new CoverageRunProcessResult(0, "coverage test output");
             }
 
             return new CoverageRunProcessResult(0, "build output");
+        }
+    }
+
+    private static class InterlockedExtensions
+    {
+        public static void Max(ref int location, int value)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref location);
+                if (current >= value || Interlocked.CompareExchange(ref location, value, current) == current)
+                {
+                    return;
+                }
+            }
         }
     }
 

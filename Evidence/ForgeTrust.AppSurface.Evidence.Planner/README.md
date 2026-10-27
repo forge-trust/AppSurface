@@ -46,7 +46,7 @@ The first definition shape is a native HTTP resource with `native-http-uds` capa
 | Internal model/API | Contract |
 | --- | --- |
 | `EvidenceClosedApplicationDefinition` | Application ID/version/build ID, entire protected policy, selected profile, complete resource/producer registrations, bundle inventory and capability grants. No delegate, absolute host path or argument vector. |
-| `EvidenceClosedResourceRegistration`, `EvidenceClosedProducerRegistration` | Complete policy declarations plus closed capability/implementation identity. Readiness, dependencies, timeouts, assertions, artifacts and coverage gates all participate in matching. |
+| `EvidenceClosedResourceRegistration`, `EvidenceClosedProducerRegistration` | Complete policy declarations plus closed capability/implementation identity. Readiness, dependencies, timeouts, assertions, artifacts, coverage gates, and additive coverage execution/retention properties all participate in matching. The current restricted coverage adapter accepts only omitted/default or exact `Debug`, serial (`1`), no-results execution with `managed` retention. |
 | `EvidenceClosedBundleFile` | Normalized ASCII relative name, closed role, positive exact length, lower-case SHA-256 and Unix permission bits. DLLs, runtime configurations, DCP, extensions, dependencies, `.deps.json` dependency manifests and declared input are explicit inventory. |
 | `EvidenceClosedApplicationCapabilities` | Exactly one declared input; scratch/memory each at most 1 GiB, process/thread tasks at most 128, output at most 1 MiB, startup at most 120 seconds and fresh stop at most 30 seconds. Every allowance is positive. |
 | `EvidenceClosedApplicationBinding`, `EvidenceClosedApplicationIdentities` | Observed provider `github-actions`, platform `linux-x64`, proposed protocol `evidence-worker-linux-v2`, digests, complete registrations/inventory/grants and three positive distinct UIDs plus five positive distinct GIDs. These values cannot populate the compiled table. |
@@ -95,6 +95,10 @@ The root parent still must independently inspect retained bundle bytes, ownershi
 | `ASEVD121` | An identifier is empty or exceeds 128 characters. | Use a stable identifier up to 128 characters. |
 | `ASEVD111`, `ASEVD124` | A producer or resource requires an undeclared resource. | Declare every required resource in the same profile. |
 | `ASEVD128` | A hunked unified diff does not include Git file headers. | Supply a Git-formatted diff or explicit changed paths. |
+| `ASEVD129` | A coverage execution configuration is empty, longer than 32 characters, or contains unsupported characters. | Use letters, digits, `.`, `-`, or `_` in a simple configuration name. |
+| `ASEVD130` | Coverage execution parallelism is outside 1 through 32. | Choose a bounded project concurrency from 1 through 32. |
+| `ASEVD131` | A coverage execution test-result format is unsupported. | Select `none` or `junit` in the [coverage declaration](../ForgeTrust.AppSurface.Evidence.Contracts/README.md). |
+| `ASEVD132` | A coverage producer has an unsupported `coverageArtifactRetention` value. | Use `managed` (the default) or `full`; this setting does not change coverage gate requirements. |
 
 Read next: [contracts](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md), [CLI workflow](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Cli/README.md), and the [policy cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md).
 

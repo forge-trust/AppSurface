@@ -1,0 +1,2 @@
+<!-- appsurface:unreleased-entry section="included" -->
+- Added [native EvidenceHost acceptance](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) for packed coverage storage and installed-package consumers, with reusable bounded command execution, owned workspace budgets, streaming artifact writes/verification, explicit coverage execution settings, and verified cross-platform coverage consumption. Existing coverage thresholds and source scope remain unchanged.

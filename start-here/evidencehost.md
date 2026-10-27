@@ -66,6 +66,7 @@ Only a protected gate with current expected identities and artifacts obtained th
 
 | Situation | Use | Why |
 | --- | --- | --- |
+| A test needs a profile-based AppHost started with a bounded HTTP status check. | [Typed Aspire startup fixture](../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md#http-readiness-fixture) | One startup budget covers profile creation, build, start, native health, endpoint allocation, and the HTTP check. |
 | You need to understand the selected policy before running existing tests. | [`appsurface evidence doctor/explain`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-evidence) | Planning and local prerequisite diagnostics only. |
 | You need numeric Cobertura enforcement today. | [`appsurface coverage gate`](../Cli/ForgeTrust.AppSurface.Cli/README.md#appsurface-coverage-gate) | The current private, local coverage gate; it does not depend on EvidenceHost admission. |
 | Consumer has PostgreSQL, a browser, or a real E2E journey to prove. | [`ForgeTrust.AppSurface.Evidence.Aspire`](../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) and the [migration guide](../docs/evidence/evidencehost-migration.md) | The lifecycle API is provisional; protected consumer and platform proofs are still required before it can gate. |

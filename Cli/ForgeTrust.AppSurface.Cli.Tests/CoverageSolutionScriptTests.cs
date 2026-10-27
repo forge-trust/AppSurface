@@ -10,7 +10,7 @@ public sealed class CoverageSolutionScriptTests
     [Fact]
     public void Script_ShouldDelegateDefaultLaneToSourceCliWithManagedEvidence()
     {
-        var script = ReadScript();
+        var script = string.Concat(ReadScript(), "\n", ReadRepositoryFile("scripts", "coverage-gate-fanin.sh"));
 
         Assert.Contains("CLI_PROJECT=\"$ROOT_DIR/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj\"", script, StringComparison.Ordinal);
         Assert.Contains("coverage", script, StringComparison.Ordinal);
@@ -28,7 +28,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("--slow-test-diagnostics", script, StringComparison.Ordinal);
         Assert.DoesNotContain("--logger \"GitHubActions;report-warnings=false\"", script, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_GATE_DIFF_BASE", script, StringComparison.Ordinal);
-        Assert.Contains("coverage\n  gate", script, StringComparison.Ordinal);
+        Assert.Contains("-- coverage gate", script, StringComparison.Ordinal);
         Assert.Contains("--min-line 95", script, StringComparison.Ordinal);
         Assert.Contains("--min-branch 85", script, StringComparison.Ordinal);
         Assert.Contains("--diff-base \"$COVERAGE_GATE_DIFF_BASE\"", script, StringComparison.Ordinal);
@@ -72,7 +72,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("BUILD_CONFIGURATION: Release", workflow, StringComparison.Ordinal);
         Assert.Contains("BUILD_NO_RESTORE: true", workflow, StringComparison.Ordinal);
         Assert.Contains("COVERAGE_PARALLELISM: 2", workflow, StringComparison.Ordinal);
-        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}", workflow, StringComparison.Ordinal);
         Assert.Contains("./scripts/coverage-solution.sh", workflow, StringComparison.Ordinal);
         Assert.Contains("Publish bounded test-result and slow-test diagnostics summary", workflow, StringComparison.Ordinal);
         Assert.Contains("test-result-diagnostics", workflow, StringComparison.Ordinal);
@@ -96,34 +96,50 @@ public sealed class CoverageSolutionScriptTests
     public void BuildWorkflow_ShouldCaptureCoverageSecurityHangDiagnosticsBeforeTheJobTimeout()
     {
         var workflow = ReadWorkflow();
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
 
-        Assert.Contains(
-            """
-              coverage-security-platform:
-                name: Coverage security contracts (${{ matrix.os }})
-                runs-on: ${{ matrix.os }}
-                timeout-minutes: 10
-            """,
-            workflow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            """
-                      --logger "console;verbosity=detailed"
-                      --blame-hang
-                      --blame-hang-timeout 2m
-                      --blame-hang-dump-type mini
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var coverageJob = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-security-platform")];
+        Assert.Equal("Coverage security contracts (${{ matrix.os }})", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("name")]).Value);
+        Assert.Equal("${{ matrix.os }}", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("runs-on")]).Value);
+        Assert.Equal("10", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
-                  - name: Upload coverage security diagnostics
-                    if: ${{ always() }}
-                    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-                    with:
-                      name: coverage-security-diagnostics-${{ matrix.os }}
-                      path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
-                      if-no-files-found: warn
-                      retention-days: 7
-            """,
-            workflow,
+        var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
+        var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run coverage security contracts");
+        var runCommand = ((YamlScalarNode)runCoverage.Children[new YamlScalarNode("run")]).Value!;
+        Assert.Equal(1, CountOccurrences(runCommand, "dotnet test "));
+        Assert.DoesNotContain("\n", runCommand, StringComparison.Ordinal);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
+        Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang-timeout 2m", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang-dump-type mini", runCommand, StringComparison.Ordinal);
+        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura", runCommand, StringComparison.Ordinal);
+        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains(
+            "-- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"",
+            runCommand,
             StringComparison.Ordinal);
+
+        var uploadDiagnostics = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage security diagnostics");
+        Assert.Equal("${{ always() }}", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("if")]).Value);
+        Assert.Equal("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("uses")]).Value);
+        var uploadWith = (YamlMappingNode)uploadDiagnostics.Children[new YamlScalarNode("with")];
+        Assert.Equal("coverage-security-diagnostics-${{ matrix.os }}", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("name")]).Value);
+        Assert.Equal("${{ runner.temp }}/coverage-native-results", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value);
+        Assert.Equal("warn", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("if-no-files-found")]).Value);
+        Assert.Equal("7", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("retention-days")]).Value);
         Assert.Contains(
             """
                   - name: Prepare generated docs stylesheet for coverage security tests
@@ -850,7 +866,7 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
-            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
+            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Aspire.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }
@@ -945,6 +961,12 @@ public sealed class CoverageSolutionScriptTests
         Directory.CreateDirectory(Path.GetDirectoryName(scriptPath)!);
         Directory.CreateDirectory(binDirectory);
         await File.WriteAllTextAsync(scriptPath, ReadScript());
+        var gateScriptPath = Path.Join(workspace.Path, "scripts", "coverage-gate-fanin.sh");
+        await File.WriteAllTextAsync(gateScriptPath, ReadRepositoryFile("scripts", "coverage-gate-fanin.sh"));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(gateScriptPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
         await File.WriteAllTextAsync(
             dotnetStub,
             "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" >> \"$DOTNET_INVOCATION_MARKER\"\nexit \"$DOTNET_STUB_EXIT_CODE\"\n");
@@ -976,6 +998,8 @@ public sealed class CoverageSolutionScriptTests
         }
 
         startInfo.Environment.Remove("COVERAGE_GATE_DIFF_BASE");
+        startInfo.Environment.Remove("COVERAGE_FANIN_NATIVE");
+        startInfo.Environment.Remove("COVERAGE_DIRECTORY");
 
         startInfo.Environment["DOTNET_INVOCATION_MARKER"] = dotnetInvocationMarker;
         startInfo.Environment["DOTNET_STUB_EXIT_CODE"] = dotnetExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);

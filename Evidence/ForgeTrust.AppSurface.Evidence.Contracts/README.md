@@ -46,6 +46,10 @@ An `EvidencePolicy` resolves into an immutable `EvidencePlan`. A run records dec
 | `EvidenceProducerResult`, `EvidenceManifest` | Terminal producer outcomes and the resulting gate claim. |
 | `EvidenceCanonicalJson`, `EvidenceDigest`, `EvidenceManifestBuilder` | Canonical serialization, digesting, claim calculation, and manifest verification. |
 
+### Built-in coverage declaration options
+
+`EvidenceProducerDeclaration.CoverageExecution` is an optional immutable `EvidenceCoverageExecutionOptions` record for ordinary built-in coverage runs. The planner validates configuration as a simple identifier, parallelism from 1 through 32, and test results as `none` or `junit`; validated values are forwarded to the ordinary coverage engine. `CoverageArtifactRetention` supports `managed` and `full`. Neither property changes coverage filters, gates or source scope. These broader options are not accepted by the fixed protected restricted adapter, whose command remains Debug, serial and without managed test results; restricted declarations must omit execution options or state those exact defaults and must use managed retention. See the [restricted registration contract](../ForgeTrust.AppSurface.Evidence.Coverage/README.md#fixed-restricted-coverage-registration) before selecting options for a protected declaration.
+
 ### Bounded JSON input
 
 `EvidenceCanonicalJson.Deserialize<T>(ReadOnlySpan<byte>)` preserves the existing in-memory entry point and enforces a protected **20 MiB** input ceiling. Use `DeserializeAsync<T>(Stream, maximumBytes, cancellationToken)` when reading a file or another stream: it counts bytes while reading, does not depend on seekability or advertised length, and stops after observing the first byte over the limit, before parsing or allocating a full document. The stream remains owned by the caller. `maximumBytes` may lower the ceiling (including zero) but cannot raise it. The span overload with an explicit limit is available for callers that already hold bytes.
@@ -402,3 +406,21 @@ or upgraded to a completed run. This helper allocates no capability and structur
 origin. The existing v1 SDK empty-Observation fixture retains its legacy `manifest.json`; compiled v2 applications
 use the shared three-file layout required by C# root custody. CLI elapsed totals use the same monotonic clock
 as its lifecycle; timing data never establishes kernel settlement or changes a deadline.
+
+## Streaming artifact writes
+
+Use [`EvidenceArtifactWriter.WriteAsync`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Contracts/EvidenceContracts.cs) with a `Stream` when a producer has an artifact that may be large or is supplied by a non-seekable process stream. The writer copies in bounded chunks, computes the lower-case SHA-256 digest as bytes arrive, and enforces both the slot's `MaximumBytes` and the shared 256 MiB producer budget before accepting each chunk. The input stream remains owned by the caller and is read to end; the writer exposes only `EvidenceArtifactResult` metadata.
+
+The existing `ReadOnlyMemory<byte>` overload remains useful for already-buffered small values. Use `VerifyWrittenArtifactsAsync` after producer work or before returning a result when the output directory may have been touched by another process. Verification also streams each file and returns `false` for missing, inaccessible, truncated, or tampered artifacts. Cancellation and copy errors remove the partial destination and release the logical-name, destination, slot, and aggregate reservations so the producer can retry safely.
+
+Avoid seeking or rewinding the input stream: streaming writes consume it exactly once. Do not close the input stream as part of producer cleanup unless the producer owns it. A failed write cannot be resumed from its partial file; retry by supplying a fresh stream, because the partial destination is deleted before the reservation is released.
+
+### Stream artifact custody
+
+The stream overload of `EvidenceArtifactWriter.WriteAsync` keeps the source stream caller-owned.
+It buffers at most the declared slot limit and remaining producer aggregate limit, capped by the
+shared run quota, then sends those bytes through the same persistence path as the memory overload.
+Admitted writers retain their protected root handles, shared quota reservation, cancellation and
+owned-work tracking; a stream does not grant a path-based persistence bypass. Cancellation or an
+oversized input cannot create a completed artifact. See the [artifact custody reference](../ForgeTrust.AppSurface.Evidence.Supervision/report-custody.md)
+for the root-owned collection boundary.

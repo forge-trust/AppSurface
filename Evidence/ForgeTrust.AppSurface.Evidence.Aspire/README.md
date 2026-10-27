@@ -115,3 +115,31 @@ Compiled v2 application collection uses the [shared protected terminal layout](.
 for the canonical plan, manifest and summary before original root handles close and worker completion is
 requested. V1 SDK empty-Observation collection preserves its existing `manifest.json` filename. Neither layout
 turns informational Observation into a protected gate claim.
+
+## Producer cleanup grace
+
+`EvidenceHostOptions.ProducerCleanupTimeout` defaults to ten seconds and accepts positive values up to one minute. After the original caller or producer deadline cancels work, the host waits this additional bounded grace for producer callbacks to settle before disposing their owned registrations. If a producer ignores cancellation past the grace, cleanup is incomplete and the active producer, resources, and application lease remain undisposed; callers should arrange cooperative cancellation and retry disposal after the work settles. This grace never replaces or extends the original run deadline.
+
+## HTTP Readiness Adapter
+
+The HTTP adapter composes one declared EvidenceHost resource with native Aspire health, one explicitly named endpoint, and the shared status-only HTTP probe. It does not move `EvidenceHostBootstrap` or its readiness contracts to another assembly, and it does not require `Aspire.Hosting.Testing`. Use it when a resource becoming healthy is necessary but the producer also requires one HTTP status condition before running. Keep browser, response-body, credential, and business assertions in the producer.
+
+```csharp
+IEvidenceResourceReadiness EvidenceAspireApplication.CreateHttpReadiness(
+    string evidenceResourceId,
+    string resourceName,
+    string endpointName,
+    string probePath,
+    TimeSpan timeout,
+    EvidenceAspireHttpReadinessOptions? options = null);
+```
+
+`evidenceResourceId` must match a declared EvidenceHost resource. `resourceName` and `endpointName` select the exact Aspire resource and endpoint; no ambient lookup occurs. `probePath` is a relative or root-relative path which must resolve to the endpoint's same HTTP(S) scheme, IDN host, and effective port. `timeout` is an explicit finite positive readiness budget. The EvidenceHost cancellation token is also honored, and its resource deadline may shorten this adapter budget.
+
+`EvidenceAspireHttpReadinessOptions.Http` defaults to a new [`HttpReadinessOptions`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#httpreadinessoptions) instance. Its request timeout defaults to three seconds, retry delay to 250 ms, success predicate to exact HTTP 200, and `MaxAttempts` to null (deadline-only). A configured attempt cap must be positive. `CreateProbeClient` is an optional `Func<Uri, HttpClient>`; null selects the adapter's owned native default. A supplied factory is called at most once for each individual readiness wait, after native health and endpoint resolution. It must return a fresh client; the adapter owns and disposes that client before that wait settles. A null result is terminal invalid configuration. Concurrent and sequential waits do not share client or deadline state.
+
+The adapter starts one monotonic deadline for the wait, resolves the named endpoint asynchronously inside its remaining budget, and calls the shared probe core without restarting that budget. Requests use GET with headers-only completion and never read response bodies. Every response is disposed. Retryable conditions are a rejected status, `HttpRequestException`, and an identifiable request or shorter client timeout; caller cancellation, overall deadline expiry, predicate errors, and programming/configuration failures are terminal. When `MaxAttempts` is reached, no extra delay or request is made. The default success predicate accepts exact 200, so select another status only when the producer's declared precondition requires it.
+
+The adapter's disposal closes admission, cancels and drains already admitted waits including their per-wait client cleanup, then releases its registration with the existing application lease. Each health or HTTP adapter retains a separate registration; only the last adapter release stops and disposes the application. Disposing one adapter therefore leaves another adapter's admitted waits and probe clients intact. Dispose every adapter you create, including adapters that were never waited on. Repeated disposal of the final adapter and direct application disposal join the same application cleanup result, including failure. Do not dispose `EvidenceAspireApplication` directly while a readiness wait is active. The deadline remains cooperative: a transport that ignores cancellation and awaited cleanup may remain pending beyond the wait budget. This contract does not claim whole-host timeout terminalization or fold the separate [#859 cleanup coordination](https://github.com/forge-trust/AppSurface/issues/859) into this adapter.
+
+The canonical [EvidenceHost guide](https://github.com/forge-trust/AppSurface/blob/main/start-here/evidencehost.md#aspire-http-readiness), [readiness cookbook](https://github.com/forge-trust/AppSurface/blob/main/guides/evidencehost-cookbook.md#http-readiness-in-an-ordinary-aspire-test), [neutral probe reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md), and the existing lease's preparation record for [issue #778](https://github.com/forge-trust/AppSurface/issues/778) explain which layer owns startup, transport, and evidence policy.

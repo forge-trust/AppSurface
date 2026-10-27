@@ -259,7 +259,8 @@ internal static partial class EvidenceClosedApplicationCatalogue
         {
             Require(producer is not null && producer.Declaration is not null);
             Require(producer.ImplementationId == "coverage" && producer.ImplementationVersion == "1.0.0"
-                && producer.Declaration.Kind == producer.ImplementationId && producer.Declaration.Version == producer.ImplementationVersion);
+                && producer.Declaration.Kind == producer.ImplementationId && producer.Declaration.Version == producer.ImplementationVersion
+                && EvidenceCoverageExecutionOptions.SupportsRestrictedExecution(producer.Declaration));
         }
         ValidatePolicyBounds(definition.Policy with
         {

@@ -18,6 +18,32 @@ public sealed class CoverageGateProcessStateCollection
 [Collection("CoverageGate process state")]
 public sealed class CoverageGateTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_RejectsMissingInputBeforeCreatingOrAcquiringOutput(bool existingOutput)
+    {
+        using var temp = TempDirectory.Create("appsurface-coverage-gate-");
+        var output = Path.Join(temp.Path, "reports");
+        if (existingOutput) Directory.CreateDirectory(output);
+        using var lease = existingOutput ? CoverageArtifactOperationLease.Acquire(output, true) : null;
+        var before = existingOutput ? Directory.GetFileSystemEntries(output) : [];
+        using var console = new FakeInMemoryConsole();
+        var command = new CoverageGateCommand
+        {
+            CoveragePath = Path.Join(temp.Path, "missing.xml"),
+            OutputDirectory = output,
+            NoGithubSummary = true
+        };
+
+        var exception = await Assert.ThrowsAsync<CliFx.CommandException>(
+            async () => await command.ExecuteAsync(console, CancellationToken.None));
+
+        Assert.Contains("ASCOV001", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(existingOutput, Directory.Exists(output));
+        if (existingOutput) Assert.Equal(before, Directory.GetFileSystemEntries(output));
+    }
+
     [Fact]
     public async Task EvaluateAsync_Passes_WhenCoverageMeetsThresholds()
     {

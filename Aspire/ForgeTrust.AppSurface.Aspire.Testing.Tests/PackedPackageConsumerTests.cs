@@ -11,6 +11,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
     private const string AspireOverrideVersion = "13.4.6";
     private const string AspireBaselineVersion = "13.4.4";
     private const string HostingBaselineVersion = "10.0.8";
+    private const string MessagePackVersion = "2.5.303";
     private const string AppSurfaceTestingPackageId = "ForgeTrust.AppSurface.Aspire.Testing";
     private const string SkoolitSourceCommit = "a589f164ef3346d4ecf8bf39b8a73ec71ea1cb1e";
     private static readonly string[] PackedPackageIds =
@@ -19,6 +20,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         "ForgeTrust.AppSurface.Deployment",
         "ForgeTrust.AppSurface.Console",
         "ForgeTrust.AppSurface.Aspire",
+        "ForgeTrust.AppSurface.Evidence.Readiness",
         AppSurfaceTestingPackageId
     ];
     private readonly ITestOutputHelper _output;
@@ -453,6 +455,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
                 "Deployment/ForgeTrust.AppSurface.Deployment/ForgeTrust.AppSurface.Deployment.csproj",
                 "Console/ForgeTrust.AppSurface.Console/ForgeTrust.AppSurface.Console.csproj",
                 "Aspire/ForgeTrust.AppSurface.Aspire/ForgeTrust.AppSurface.Aspire.csproj",
+                "Evidence/ForgeTrust.AppSurface.Evidence.Readiness/ForgeTrust.AppSurface.Evidence.Readiness.csproj",
                 producerProject
             };
             foreach (var project in projects)
@@ -613,6 +616,7 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         AssertResolvedPackageVersion(libraries, "Aspire.Hosting.AppHost", expectedAspireVersion);
         AssertResolvedPackageVersion(libraries, "Aspire.Hosting.Testing", expectedAspireVersion);
         AssertResolvedPackageVersion(libraries, "Microsoft.Extensions.Hosting", HostingBaselineVersion);
+        AssertResolvedPackageVersion(libraries, "MessagePack", MessagePackVersion);
         AssertResolvedPackageVersion(
             libraries,
             "Microsoft.Extensions.DependencyInjection",
@@ -700,6 +704,8 @@ public sealed class PackedPackageConsumerTests : IClassFixture<PackedPackageCons
         Assert.Equal("13.4.4", dependencies["Aspire.Hosting.AppHost"]);
         Assert.Equal("13.4.4", dependencies["Aspire.Hosting.Testing"]);
         Assert.Equal(expectedPackageVersion, dependencies["ForgeTrust.AppSurface.Aspire"]);
+        // Both NuGet spellings require inclusive 2.5.303 and allow later consumer-selected versions.
+        Assert.Contains(dependencies["MessagePack"], new[] { "2.5.303", "[2.5.303, )" });
     }
 
     /// <summary>Runs a shell-free, bounded dotnet command shared by packed proofs and version regressions.</summary>

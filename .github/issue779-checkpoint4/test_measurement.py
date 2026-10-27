@@ -169,11 +169,16 @@ class OrdinaryBuildMeasurementIntegrationControls(unittest.TestCase):
         build = self.job(current, 'build')
         line = next(row.strip() for row in build.splitlines() if row.strip().startswith('needs:'))
         required = {'worker-controls', 'evidence-native-measurement', 'account-creation',
-                    'account-rollback', 'packaged-producer',
+                    'account-rollback', 'packaged-producer', 'coverage-security-platform',
+                    'durable-postgresql-compatibility',
                     *(f'worker-measurement-{selector}' for selector in selectors)}
         self.assertEqual(required, set(part.strip() for part in line.removeprefix('needs: [').removesuffix(']').split(',')))
         self.assertIn('/usr/bin/bash ./scripts/coverage-solution.sh', build)
-        self.assertIn("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", build)
+        # The broker uses a private base environment. The fixed env command must carry
+        # fan-in inputs and same-run provenance into the nonroot coverage process.
+        for name in ('COVERAGE_FANIN_NATIVE', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'):
+            self.assertIn(name + '="$' + name + '"', build)
+        self.assertIn("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || (github.ref != 'refs/heads/main' && 'origin/main' || '') }}", build)
 
     def test_ordinary_build_stages_all_fixed_validator_inputs_before_enabling_the_test(self):
         workflows = Path(__file__).resolve().parents[1] / 'workflows'
