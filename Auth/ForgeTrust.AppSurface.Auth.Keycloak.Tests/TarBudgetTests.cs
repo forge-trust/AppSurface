@@ -20,7 +20,11 @@ public sealed class TarBudgetTests
         using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 4096, 2, 4))
             Assert.Throws<InvalidDataException>(() => bounded.Finish());
         using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 4096, 2, 4))
-            Assert.Throws<InvalidDataException>(() => new TarReader(bounded).GetNextEntry()!.DataStream!.CopyTo(Stream.Null));
+            Assert.Throws<InvalidDataException>(() =>
+            {
+                using var reader = new TarReader(bounded);
+                reader.GetNextEntry()!.DataStream!.CopyTo(Stream.Null);
+            });
         using (var input = new MemoryStream(Tar("file.txt", "payload").ToArray()[..1024])) using (var bounded = new TarBudgetReadStream(input, 4096, 64, 4))
             Assert.Throws<InvalidDataException>(() => bounded.Finish());
     }
@@ -57,7 +61,11 @@ public sealed class TarBudgetTests
         using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 511, 64, 4))
             Assert.Throws<InvalidDataException>(() => bounded.Finish());
         using (var input = Tar("file.txt", "payload")) using (var bounded = new TarBudgetReadStream(input, 2048, 6, 4))
-            Assert.Throws<InvalidDataException>(() => new TarReader(bounded).GetNextEntry()!.DataStream!.CopyTo(Stream.Null));
+            Assert.Throws<InvalidDataException>(() =>
+            {
+                using var reader = new TarReader(bounded);
+                reader.GetNextEntry()!.DataStream!.CopyTo(Stream.Null);
+            });
     }
 
     [Fact]

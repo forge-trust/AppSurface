@@ -572,16 +572,17 @@ public sealed class OciReaderBoundaryTests
         if (caseName == "cancelled") cancellation.Cancel();
         var digest = caseName == "wrong-digest" ? Digest(Encoding.UTF8.GetBytes("different")) : Digest(source);
         var expected = source.Length;
+        using var stream = new MemoryStream(input);
 
         if (caseName == "exact")
         {
-            OciReader.Spool(new MemoryStream(input), Path.Combine(fixture.Root, "spooled"), expected, digest, new OciReader.Deadline(cancellation.Token, 1024));
+            OciReader.Spool(stream, Path.Combine(fixture.Root, "spooled"), expected, digest, new OciReader.Deadline(cancellation.Token, 1024));
             Assert.Equal(source, File.ReadAllBytes(Path.Combine(fixture.Root, "spooled")));
         }
         else if (caseName == "cancelled")
-            Assert.Throws<OperationCanceledException>(() => { OciReader.Spool(new MemoryStream(input), Path.Combine(fixture.Root, caseName), expected, digest, new OciReader.Deadline(cancellation.Token, 1024)); });
+            Assert.Throws<OperationCanceledException>(() => { OciReader.Spool(stream, Path.Combine(fixture.Root, caseName), expected, digest, new OciReader.Deadline(cancellation.Token, 1024)); });
         else
-            Assert.Throws<InvalidDataException>(() => { OciReader.Spool(new MemoryStream(input), Path.Combine(fixture.Root, caseName), expected, digest, new OciReader.Deadline(cancellation.Token, 1024)); });
+            Assert.Throws<InvalidDataException>(() => { OciReader.Spool(stream, Path.Combine(fixture.Root, caseName), expected, digest, new OciReader.Deadline(cancellation.Token, 1024)); });
     }
 
     [Theory]
@@ -594,13 +595,14 @@ public sealed class OciReaderBoundaryTests
         var input = caseName == "short" ? source[..^1] : caseName == "growing" ? source.Concat(new byte[] { 0xFF }).ToArray() : source;
         using var cancellation = new CancellationTokenSource();
         if (caseName == "cancelled") cancellation.Cancel();
+        using var stream = new MemoryStream(input);
 
         if (caseName == "short")
-            Assert.Throws<EndOfStreamException>(() => OciReader.ReadBounded(new MemoryStream(input), source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
+            Assert.Throws<EndOfStreamException>(() => OciReader.ReadBounded(stream, source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
         else if (caseName == "growing")
-            Assert.Throws<InvalidDataException>(() => OciReader.ReadBounded(new MemoryStream(input), source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
+            Assert.Throws<InvalidDataException>(() => OciReader.ReadBounded(stream, source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
         else
-            Assert.Throws<OperationCanceledException>(() => OciReader.ReadBounded(new MemoryStream(input), source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
+            Assert.Throws<OperationCanceledException>(() => OciReader.ReadBounded(stream, source.Length, new OciReader.Deadline(cancellation.Token, 1024)));
     }
 
     private static string Digest(byte[] value) => "sha256:" + Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();
