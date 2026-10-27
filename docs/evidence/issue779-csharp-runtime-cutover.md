@@ -1,5 +1,53 @@
 # EvidenceHost C# runtime cutover
 
+## Fixed completed-run sequence — 2026-10-27
+
+The [revision-117 focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40537833743)
+passed. Its [runtime validation](https://github.com/forge-trust/AppSurface/actions/runs/40537833740)
+failed in [measured N06](https://github.com/forge-trust/AppSurface/actions/runs/40537833740/job/122377324390).
+The separate selector N06 proof passed, but the source-bound measurement artifact records
+`native-life-outside-fixture`: two ordinary OS audits took 87 and 96 seconds, ELF closure took
+93 seconds, and the launch guard had only 240 seconds left at elapsed 330. Its unchanged condition
+requires more than 246 seconds. The later measured chain and solution/patch gate were skipped;
+this is not a numerical threshold result.
+
+N05/N06's frequent `left()` calls still used an inner shell process for every kernel uptime read.
+The follow-up uses the same direct Bash read already present in None/N12, preserving fresh reads,
+fractional truncation, expiry, the original 600-second fixture, 30-second cleanup reserve,
+N03 minimum bound and launch guard. All eight existing clock controls now include both procedures;
+the added selections fail before the change and pass after it. The two current procedure content
+pins and their slot-documentation pin are refreshed; historical inventory fields remain unchanged.
+An isolated three-run Linux microbenchmark of 10,000 unchanged deadline checks averaged 2.089
+seconds before and 0.173 seconds after, and a separate probe observed 10,000 inner command
+substitutions before and zero after. This is an audit-loop mechanism measurement on an ARM64
+container, not the original x64 native procedure. A fresh source-bound Linux measurement must
+establish the effect on the complete procedure.
+
+The [fixed completed-run orchestrator](../../.github/issue779-protected-qualification/completed-orchestration-README.md)
+now orders every existing callback, consumer, account and measured-chain validator, then checks
+the [retained solution-test inventory](../../.github/issue779-protected-qualification/completed-test-inventory-README.md),
+runs the public native data test in a separate fresh checkout, and replays the public coverage CLI
+last in the original source mount. It retains the closed successful provider job facts before
+archive inspection, pins staged archives and workspace roots through execution, checks typed
+results and expected retained paths, and cleans only its recorded callback scratch directories.
+The retained test inventory binds source-selected projects to timing and parsed JUnit records;
+ordinary test skips remain visible and are not native validation passes.
+
+Detached nonroot Linux validation under umask `0077` passed all 199 qualification tests with
+five explicit original-fixture opt-in skips, using the exact workflow module order. Local macOS
+validation passed the same 199 tests with eleven skips, including six Linux-only process controls.
+All 307 checkpoint-one portable tests passed. The new wiring suite covers all eight fixed phases,
+early job-fact rejection, later-phase suppression, archive/root substitution, foreign-node
+preservation, fixed retained paths and matching gate/test coverage hashes. The inventory suite
+uses synthetic archives to exercise the public parser and rejection contracts; it does not claim
+a successful original protected run.
+
+These are non-authorizing replay mechanisms. A genuine successful eligible full-stage execution,
+original workflow/test completion binding, protected-main/source anchoring, reviewed support
+registration and actual Trusted/downstream acceptance remain required. The admission boundary,
+production catalogue, fixed coverage base, thresholds, exclusions, tolerance and native clocks
+are unchanged.
+
 ## Fixed public replay controllers — 2026-10-27
 
 The [revision-116 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40536624574)

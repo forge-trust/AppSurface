@@ -68,6 +68,18 @@ class ArtifactBinding:
 
 
 @dataclass(frozen=True)
+class CompletedJob:
+    """Source-checked provider facts for one required completed-run job."""
+
+    name: str
+    id: int
+    head_sha: str
+    run_attempt: int
+    status: str
+    conclusion: str
+
+
+@dataclass(frozen=True)
 class CompletedRunStage:
     """Non-authorizing evidence staging metadata for one completed workflow attempt."""
 
@@ -82,6 +94,7 @@ class CompletedRunStage:
     job_ids: tuple[int, ...]
     artifacts: tuple[ArtifactBinding, ...]
     total_archive_bytes: int
+    jobs: tuple[CompletedJob, ...] = ()
 
 
 class _Budget:
@@ -258,17 +271,59 @@ def _decode_workflow_content(value):
 
 
 def _required_jobs(rows, head_sha, attempt):
+    facts = _required_job_facts(rows, head_sha, attempt)
+    return tuple(sorted(row.id for row in facts))
+
+
+def _required_job_facts(rows, head_sha, attempt):
     _need(type(rows) is list and all(type(row) is dict for row in rows), 'completed-run-jobs')
     required = set(REQUIRED_RUNTIME_JOBS) | EXPECTED_TERMINAL_JOBS
-    selected = [row for row in rows if row.get('name') in required]
-    _need(len(selected) == len(required) and {row.get('name') for row in selected} == required
-          and len({row.get('id') for row in selected}) == len(required)
-          and all(type(row.get('id')) is int and row['id'] > 0 and row.get('status') == 'completed'
-                  and row.get('conclusion') == 'success' and row.get('head_sha') == head_sha
-                  and type(row.get('run_attempt')) is int and row['run_attempt'] == attempt
-                  for row in selected),
+    selected = [row for row in rows if type(row.get('name')) is str and row['name'] in required]
+    _need(len(selected) == len(required) and {row['name'] for row in selected} == required,
           'completed-run-required-jobs')
-    return tuple(sorted(row['id'] for row in selected))
+    _need(all(type(row.get('id')) is int and row['id'] > 0
+              and type(row.get('name')) is str and row['name'] in required
+              and type(row.get('head_sha')) is str and row['head_sha'] == head_sha
+              and type(row.get('run_attempt')) is int and row['run_attempt'] == attempt
+              and row.get('status') == 'completed' and row.get('conclusion') == 'success'
+              for row in selected)
+          and len({row['id'] for row in selected}) == len(required),
+          'completed-run-required-jobs')
+    return tuple(sorted((CompletedJob(row['name'], row['id'], row['head_sha'], row['run_attempt'],
+                                      row['status'], row['conclusion']) for row in selected),
+                        key=lambda fact: fact.name))
+
+
+def require_closed_jobs(stage):
+    """Validate retained fixed job facts before consumers use a terminal job ID.
+
+    Legacy positional `CompletedRunStage` construction remains possible and
+    yields an empty `jobs` tuple; such an object deliberately cannot satisfy
+    this stronger provider-fact check.
+    """
+    _need(type(stage) is CompletedRunStage and type(stage.jobs) is tuple
+          and len(stage.jobs) == len(set(REQUIRED_RUNTIME_JOBS) | EXPECTED_TERMINAL_JOBS)
+          and all(type(job) is CompletedJob for job in stage.jobs),
+          'completed-run-closed-jobs-shape')
+    required = set(REQUIRED_RUNTIME_JOBS) | EXPECTED_TERMINAL_JOBS
+    _need(type(stage.head_sha) is str and SHA1.fullmatch(stage.head_sha) is not None
+          and type(stage.run_attempt) is int and 0 < stage.run_attempt < 2**31,
+          'completed-run-closed-jobs-stage-identity')
+    names = [job.name for job in stage.jobs]
+    ids = [job.id for job in stage.jobs]
+    _need(all(type(job.name) is str and type(job.id) is int and job.id > 0
+                  and type(job.head_sha) is str and SHA1.fullmatch(job.head_sha) is not None
+                  and job.head_sha == stage.head_sha
+                  and type(job.run_attempt) is int and job.run_attempt == stage.run_attempt
+                  and type(job.status) is str and job.status == 'completed'
+                  and type(job.conclusion) is str and job.conclusion == 'success'
+                  for job in stage.jobs)
+          and set(names) == required and len(names) == len(set(names))
+          and type(stage.job_ids) is tuple and all(type(value) is int and value > 0
+                                                    for value in stage.job_ids)
+          and len(ids) == len(set(ids)) == len(stage.job_ids) == len(set(stage.job_ids))
+          and set(ids) == set(stage.job_ids), 'completed-run-closed-jobs-identity')
+    return tuple(sorted(stage.jobs, key=lambda job: job.name))
 
 
 def _api_run_matches(run, repository_id, run_id, attempt, head_sha, workflow_id):
@@ -462,7 +517,8 @@ def resolve_completed_run(event_raw, environment, checkout_head, current_capture
     _need(type(jobs.get('total_count')) is int and type(job_rows) is list
           and jobs['total_count'] == len(job_rows) <= 100 and all(type(row) is dict for row in job_rows),
           'completed-run-jobs-page')
-    job_ids = _required_jobs(job_rows, head_sha, attempt)
+    job_facts = _required_job_facts(job_rows, head_sha, attempt)
+    job_ids = tuple(sorted(row.id for row in job_facts))
     artifact_response = transport._api_json(_url('/actions/runs/' + str(run_id) + '/artifacts?per_page=100'),
                                             token, budget)
     rows = artifact_response.get('artifacts')
@@ -495,4 +551,4 @@ def resolve_completed_run(event_raw, environment, checkout_head, current_capture
                              tuple((path, hashlib.sha256(workflow_bytes[path]).hexdigest())
                                    for path in (WORKFLOW, RUNTIME_WORKFLOW)), capture['tree'],
                              hashlib.sha256(current_capture).hexdigest(),
-                             job_ids, tuple(bindings), budget.archive_bytes)
+                             job_ids, tuple(bindings), budget.archive_bytes, job_facts)

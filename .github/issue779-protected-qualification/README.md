@@ -124,6 +124,10 @@ The [native test replay controller](completed-native-replay-README.md) and
 [public gate replay controller](completed-gate-replay-README.md) now prepare fixed isolated
 source builds and invoke those public entry points. Their process and orchestration controls
 are tested with detached fixtures; a genuine successful full-stage replay remains required.
-Successful original workflow/test inventory binding, fixed orchestration, protected
-finalizer and reviewed support registration remain required. No successfully parsed projection
-may fill those gaps or enable runtime Trusted admission.
+The [retained test inventory](completed-test-inventory-README.md) compares source-selected test
+projects with timing records and JUnit results. The [fixed orchestrator](completed-orchestration-README.md)
+now orders all eight steps, uses a separate native checkout, and runs the gate last in the original
+workflow mount. Its wiring and custody tests do not establish a successful protected full-stage
+execution. Successful original workflow/test completion binding, the protected finalizer and
+reviewed support registration remain required. No successfully parsed projection may fill those
+gaps or enable runtime Trusted admission.

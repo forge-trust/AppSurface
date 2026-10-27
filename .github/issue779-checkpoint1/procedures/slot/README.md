@@ -195,7 +195,8 @@ native authority. Fresh Linux execution is required to establish N01 completion.
 
 ### Fresh deadline sampling without a shell child
 
-`left()` in the initial fixture and [N12](../n12/README.md#complete-os-passes-and-fresh-clock-sampling)
+`left()` in the initial fixture, [N05](checkpoint-n05.sh), [N06](checkpoint-n06.sh),
+and [N12](../n12/README.md#complete-os-passes-and-fresh-clock-sampling)
 reads `/proc/uptime` with the Bash `read` builtin, validates the same decimal
 uptime grammar and truncates the fractional part exactly as `monotonic()` did.
 The sample remains fresh on every call; work, cleanup and the nested N03

@@ -8,6 +8,18 @@
 
 The resolver additionally checks the repository, workflow name/path/id, protected-main dispatch, completed-success state, run attempt, head repository, and all source-bound job rows. The required set is the existing `entrypoint.REQUIRED_RUNTIME_JOBS` (35 runtime leaves plus the protected-context check) plus the final partial-retention job. Every selected job must be completed successfully for the same head and attempt.
 
+The stage retains these exact validated provider fields in immutable
+`CompletedJob` records: `name`, `id`, `head_sha`, `run_attempt`, `status`, and
+`conclusion`. Existing positional `CompletedRunStage` construction remains
+compatible and defaults `jobs` to an empty tuple; that legacy shape is not
+sufficient for consumers that need job-name-to-ID attribution. Call
+`require_closed_jobs(stage)` before selecting a fixed job ID. It rechecks the
+37 required names, unique IDs, equality with `stage.job_ids`, and common head,
+attempt, completed status, and successful conclusion, returning the immutable
+job tuple in deterministic name order. These metadata facts bind provider job
+records to this staged run; they do not independently prove source execution,
+protected admission, native acceptance, or qualification.
+
 ## Fixed inventory and bounds
 
 `expected_artifact_names` is a closed 37-name inventory derived from the existing workflows: the parent controls, 14 original C1 selector artifacts, C1 aggregate, C2 producer, C3 application and lifecycle, two account variants, 14 measured C1 segments, the unchanged coverage-gate output, and the partial qualification artifact. The provider artifact list must contain exactly this set. Each item is selected by its exact run/attempt-bound name and must be unexpired, associated with the same run/head, and carry a lowercase SHA-256 digest. The downloaded raw ZIP is streamed to an exclusive mode-0600 file and hashed before the function returns; no ZIP member is opened here.

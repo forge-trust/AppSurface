@@ -2,6 +2,7 @@
 import hashlib
 import json
 import base64
+from dataclasses import replace
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,6 +107,68 @@ class CompletedRunDataTests(unittest.TestCase):
         bool_attempt[0]['run_attempt'] = True
         with self.assertRaises(ValueError):
             completed._required_jobs(bool_attempt, self.head, self.attempt)
+
+    def _job_rows(self):
+        required = set(REQUIRED_RUNTIME_JOBS) | completed.EXPECTED_TERMINAL_JOBS
+        return [{'id': index + 1, 'name': name, 'status': 'completed', 'conclusion': 'success',
+                 'head_sha': self.head, 'run_attempt': self.attempt}
+                for index, name in enumerate(sorted(required))]
+
+    def test_required_job_facts_preserve_each_validated_field_and_bind_closed_stage(self):
+        rows = self._job_rows()
+        facts = completed._required_job_facts(rows, self.head, self.attempt)
+        self.assertEqual(tuple(sorted(REQUIRED_RUNTIME_JOBS | completed.EXPECTED_TERMINAL_JOBS)),
+                         tuple(row.name for row in facts))
+        self.assertEqual(tuple(sorted(row['id'] for row in rows)),
+                         tuple(sorted(row.id for row in facts)))
+        self.assertTrue(all(row.head_sha == self.head and row.run_attempt == self.attempt
+                            and row.status == 'completed' and row.conclusion == 'success'
+                            for row in facts))
+        stage = completed.CompletedRunStage(
+            self.repo_id, self.run_id, self.attempt, self.head, WORKFLOW, (), 'b' * 40, 'c' * 64,
+            tuple(sorted(row.id for row in facts)), (), 0, facts)
+        self.assertEqual(facts, completed.require_closed_jobs(stage))
+
+    def test_required_job_facts_reject_wrong_status_name_head_attempt_and_duplicate_id(self):
+        rows = self._job_rows()
+        cases = (
+            ({**rows[0], 'status': 'in_progress'},),
+            ({**rows[0], 'conclusion': 'failure'},),
+            ({**rows[0], 'name': 'unknown job'},),
+            ({**rows[0], 'head_sha': 'f' * 40},),
+            ({**rows[0], 'run_attempt': self.attempt + 1},),
+            ({**rows[0], 'id': rows[1]['id']},),
+            ({**rows[0], 'id': []},),
+            ({**rows[0], 'name': {}},),
+        )
+        for (first,) in cases:
+            changed = [first, *rows[1:]]
+            with self.subTest(first=first), self.assertRaises(ValueError):
+                completed._required_job_facts(changed, self.head, self.attempt)
+
+    def test_closed_job_helper_rejects_legacy_empty_and_tampered_stage_facts(self):
+        rows = self._job_rows()
+        facts = completed._required_job_facts(rows, self.head, self.attempt)
+        legacy = completed.CompletedRunStage(
+            self.repo_id, self.run_id, self.attempt, self.head, WORKFLOW, (), 'b' * 40, 'c' * 64,
+            tuple(sorted(row.id for row in facts)), (), 0)
+        with self.assertRaisesRegex(ValueError, 'closed-jobs-shape'):
+            completed.require_closed_jobs(legacy)
+
+        cases = (
+            replace(facts[0], status='queued'),
+            replace(facts[0], conclusion='cancelled'),
+            replace(facts[0], name='unexpected'),
+            replace(facts[0], head_sha='f' * 40),
+            replace(facts[0], run_attempt=self.attempt + 1),
+            replace(facts[0], id=facts[1].id),
+            replace(facts[0], name=[]),
+        )
+        for altered in cases:
+            changed = (altered, *facts[1:])
+            stage = replace(legacy, jobs=changed)
+            with self.subTest(job=altered), self.assertRaises(ValueError):
+                completed.require_closed_jobs(stage)
 
     def test_api_run_identity_rejects_boolean_ids_and_attempts(self):
         run = {**self.event['workflow_run']}
@@ -379,6 +442,9 @@ class CompletedRunDataTests(unittest.TestCase):
             self.assertEqual(completed.MAX_ARTIFACTS, len(list(stage.iterdir())))
             self.assertEqual(self.run_id, result.run_id)
             self.assertEqual(self.attempt, result.run_attempt)
+            self.assertEqual(len(REQUIRED_RUNTIME_JOBS | completed.EXPECTED_TERMINAL_JOBS), len(result.jobs))
+            self.assertEqual(tuple(sorted(result.job_ids)), tuple(sorted(row.id for row in result.jobs)))
+            self.assertEqual(result.jobs, completed.require_closed_jobs(result))
             self.assertEqual(2, len(result.workflow_sha256s))
             self.assertEqual(archived, (stage / result.artifacts[0].staged_filename).read_bytes())
             self.assertFalse(set(result.__dataclass_fields__) & {'qualified', 'qualification_complete', 'admission'})

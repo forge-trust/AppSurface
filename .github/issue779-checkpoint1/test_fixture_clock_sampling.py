@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parent
 SCRIPTS = (
     ROOT / "procedures/slot/checkpoint-none.sh",
     ROOT / "procedures/n12/checkpoint-n12-data-integration.sh",
+    ROOT / "procedures/slot/checkpoint-n05.sh",
+    ROOT / "procedures/slot/checkpoint-n06.sh",
 )
 
 
