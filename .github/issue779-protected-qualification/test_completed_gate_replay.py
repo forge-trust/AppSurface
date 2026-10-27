@@ -68,6 +68,7 @@ class GateReplayTests(unittest.TestCase):
             process_commands = []
             replace_coverage = {'value': False}
             extra_output = {'value': False}
+            pinned_fds = []
 
             def run_process(argv, *, cwd, env, deadline, output_limit=8 * 1024 * 1024,
                             cleanup_deadline=None):
@@ -90,9 +91,16 @@ class GateReplayTests(unittest.TestCase):
                     path.write_bytes(body)
                     path.chmod(0o600)
                 if replace_coverage['value']:
+                    # The retained descriptor prevents this immediate unlink/rewrite from
+                    # recycling the original inode number before custody is rechecked.
+                    pinned = os.fstat(pinned_fds[-1])
+                    if pinned.st_nlink != 1:
+                        raise AssertionError('coverage pin was not retained across CLI execution')
                     coverage_path.unlink()
                     coverage_path.write_bytes(b'<coverage />')
                     coverage_path.chmod(0o600)
+                    if os.stat(coverage_path).st_ino == pinned.st_ino:
+                        raise AssertionError('open coverage inode was unexpectedly recycled')
                 if extra_output['value']:
                     (output_path / 'unrecognized.txt').write_bytes(b'unexpected')
                     (output_path / 'unrecognized.txt').chmod(0o600)
@@ -100,7 +108,6 @@ class GateReplayTests(unittest.TestCase):
 
             with patch.object(subject, '_linux_supported', return_value=True), \
                  patch.object(subject, 'SOURCE_MOUNT', source), \
-                 patch.object(subject, '_linux_supported', return_value=True), \
                  patch.object(completed_gate, 'inspect_completed_gate_archive', return_value=inputs), \
                  patch.object(subject, '_source_capture', return_value=({'source': stage.head_sha,
                      'tree': stage.source_tree}, object())) as verify, \
@@ -131,6 +138,11 @@ class GateReplayTests(unittest.TestCase):
             replacement_parent = root / 'coverage-replacement-private'
             replacement_parent.mkdir(mode=0o700)
             os.chmod(replacement_parent, 0o700)
+            original_pin = subject._pin_owned_file
+            def track_pin(path, expected_identity):
+                fd = original_pin(path, expected_identity)
+                pinned_fds.append(fd)
+                return fd
             with patch.object(subject, '_linux_supported', return_value=True), \
                  patch.object(subject, 'SOURCE_MOUNT', source), \
                  patch.object(completed_gate, 'inspect_completed_gate_archive', return_value=inputs), \
@@ -141,10 +153,14 @@ class GateReplayTests(unittest.TestCase):
                  patch.object(completed_native_replay, '_dotnet_path', return_value='/usr/bin/dotnet'), \
                  patch.object(completed_native_replay, '_controlled_environment', return_value={}), \
                  patch.object(completed_native_replay, '_run_fixed_process', side_effect=run_process), \
+                 patch.object(subject, '_pin_owned_file', side_effect=track_pin), \
                  patch.object(subject, '_run_public_cli', side_effect=public_cli):
-                with self.assertRaisesRegex(ValueError, 'input-shape'):
+                with self.assertRaisesRegex(ValueError, 'coverage-custody'):
                     subject.replay_completed_gate(stage, object(), stage_root, b'capture', source,
                         replacement_parent, deadline=time.monotonic() + 600)
+            self.assertEqual(1, len(pinned_fds))
+            with self.assertRaises(OSError):
+                os.fstat(pinned_fds[0])
             replace_coverage['value'] = False
             extra_output['value'] = True
             extra_parent = root / 'extra-output-private'

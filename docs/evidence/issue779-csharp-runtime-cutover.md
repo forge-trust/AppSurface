@@ -2,6 +2,15 @@
 
 ## Fixed public replay controllers — 2026-10-27
 
+The [revision-116 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40536624574)
+rejected one gate-controller substitution test because Linux could immediately reuse the inode
+after its unlink/recreate sequence. The follow-up strengthens the controllers rather than
+changing the rejection: they keep no-follow close-on-exec read descriptors for the copied
+Cobertura input and all 24 native data leaves across execution and readback. The old inodes
+remain allocated until cleanup completes, making same-content replacement detectable. Descriptor
+closure runs on success and failure. Detached nonroot Linux verification under umask `0077`
+passes all 164 qualification tests with five explicit fixture skips after that correction.
+
 The [native-data replay controller](../../.github/issue779-protected-qualification/completed-native-replay-README.md)
 and [public gate replay controller](../../.github/issue779-protected-qualification/completed-gate-replay-README.md)
 now verify an exact clean disposable source checkout, select fixed retained inputs, build with SDK

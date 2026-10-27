@@ -179,6 +179,31 @@ def _read_file(path, *, deadline, maximum, expected_identity=None):
         os.close(fd)
 
 
+def _assert_pinned_file(fd, path, expected_identity):
+    """Keep one inode live and prove its name still identifies that owned inode."""
+    path = Path(path)
+    opened = os.fstat(fd)
+    named = os.stat(path, follow_symlinks=False)
+    _need(stat.S_ISREG(opened.st_mode) and stat.S_ISREG(named.st_mode)
+          and opened.st_uid == named.st_uid == os.geteuid()
+          and opened.st_nlink == named.st_nlink == 1
+          and stat.S_IMODE(opened.st_mode) == stat.S_IMODE(named.st_mode) == 0o600
+          and completed_c1._node_identity(opened) == expected_identity
+          and completed_c1._node_identity(named) == expected_identity,
+          'coverage-custody')
+
+
+def _pin_owned_file(path, expected_identity):
+    path = Path(path)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    try:
+        _assert_pinned_file(fd, path, expected_identity)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 def _run_public_cli(source_root, coverage_path, output_path, *, deadline, cleanup_deadline=None):
     _remaining(deadline)
     dotnet = completed_native_replay._dotnet_path()
@@ -271,6 +296,7 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
     output = work / 'reports'
     owned = {}
     work_identity = None
+    coverage_pin = None
     primary = None
     result = None
     try:
@@ -284,6 +310,7 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
         completed_c1._write_bytes(coverage_path, gate_inputs.coverage_xml,
                                   deadline=deadline, owned=owned, ownership_root=work)
         coverage_identity = owned[('coverage.cobertura.xml',)]
+        coverage_pin = _pin_owned_file(coverage_path, coverage_identity)
         process_records = [_save_process_logs('git-diff', diff_argv, diff_result, work, owned, deadline)]
         _remaining(deadline)
         dotnet = completed_native_replay._dotnet_path()
@@ -322,6 +349,7 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
         _need(build_code == 0, 'build-exit')
         _source_capture(source_capture, source,
             current_binding=completed_c1._load_trusted_current_binding(deadline=deadline), deadline=deadline)
+        _assert_pinned_file(coverage_pin, coverage_path, coverage_identity)
         _need(_remaining(deadline) > REPLAY_RESERVE_SECONDS, 'replay-reserve')
         _need(_remaining(deadline) > REPLAY_RESERVE_SECONDS + FINALIZE_RESERVE_SECONDS,
               'finalize-reserve')
@@ -334,6 +362,7 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
         _need(code == 0, 'cli-exit')
         _workspace_inventory(work, deadline)
         _need(set(os.listdir(output)) == GATE_OUTPUTS, 'output-inventory')
+        _assert_pinned_file(coverage_pin, coverage_path, coverage_identity)
         report = _read_file(output / 'coverage-gate.json', deadline=deadline, maximum=completed_gate.MAX_REPORT_BYTES)
         gate_comparison = completed_gate.compare_gate_reports(
             gate_inputs.original_report, report,
@@ -341,6 +370,7 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
             replay_role_paths={'coverage': str(coverage_path)}, deadline=deadline)
         coverage_raw = _read_file(coverage_path, deadline=deadline, maximum=completed_gate.MAX_COBERTURA_BYTES,
                                   expected_identity=coverage_identity)
+        _assert_pinned_file(coverage_pin, coverage_path, coverage_identity)
         _need(hashlib.sha256(coverage_raw).hexdigest() == input_hashes['coverage'], 'coverage-mutated')
         _need(hashlib.sha256(gate_inputs.original_report).hexdigest() == input_hashes['report']
               and hashlib.sha256(gate_inputs.comparison_base).hexdigest() == input_hashes['base'],
@@ -364,6 +394,13 @@ def replay_completed_gate(stage, inventory, stage_directory, source_capture, sou
             gate_comparison.reports_match, work)
     except BaseException as error:
         primary = error
+    finally:
+        if coverage_pin is not None:
+            try:
+                os.close(coverage_pin)
+            except OSError as error:
+                if primary is None:
+                    primary = error
     if primary is not None or result is None:
         if primary is not None:
             note = 'completed-gate-replay-workspace-preserved:' + str(work)

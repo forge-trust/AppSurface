@@ -406,6 +406,7 @@ def run_native_replay(stage, inventory, stage_directory, source_capture, source_
     test_root_owned = {}
     test_root_identity = None
     copied = {}
+    copied_fds = []
     input_parent = parent / 'native-input-stage'
     input_owned = {}
     state_owned = {}
@@ -449,6 +450,10 @@ def run_native_replay(stage, inventory, stage_directory, source_capture, source_
                                       ownership_root=test_root)
             copied[tuple((rel_root / relative).parts)] = (len(raw), row.sha256,
                 dirs_owned[tuple((rel_root / relative).parts)])
+            pin = os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            copied_fds.append(pin)
+            _need(_identity(os.fstat(pin)) == dirs_owned[tuple((rel_root / relative).parts)]
+                  and os.fstat(pin).st_nlink == 1, 'copied-input-pin')
         for key, (size, digest, identity) in copied.items():
             path = test_root.joinpath(*key)
             raw = completed_c1._open_bound_file(path, size, digest, deadline=deadline,
@@ -535,6 +540,8 @@ def run_native_replay(stage, inventory, stage_directory, source_capture, source_
     except BaseException as error:
         primary = error
     finally:
+        # Keep copied inodes allocated through every identity-based cleanup check.
+        # Unlink/recreate cannot reuse an original input inode while its fd is held.
         # Remove only the exact invocation-owned native input stage.
         if native_inputs is not None:
             try:
@@ -559,6 +566,14 @@ def run_native_replay(stage, inventory, stage_directory, source_capture, source_
                     primary = error
                 elif hasattr(primary, 'add_note'):
                     primary.add_note('completed-native-replay-testresults-cleanup-failed')
+        for pin in copied_fds:
+            try:
+                os.close(pin)
+            except BaseException as error:
+                if primary is None:
+                    primary = error
+                elif hasattr(primary, 'add_note'):
+                    primary.add_note('completed-native-replay-input-pin-close-failed')
         # Bounded command logs and the parsed TRX remain under the private parent
         # with exact inode records in this process. The caller disposes that root.
     if primary is not None:

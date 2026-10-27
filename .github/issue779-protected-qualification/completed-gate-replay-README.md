@@ -35,7 +35,10 @@ The controller reserves 90 seconds for replay, 30 seconds for final checks, and 
 command output. Process-group teardown uses the caller's same absolute deadline. It writes
 bounded raw stdout/stderr receipts and replay outputs under the invocation-owned
 `coverage-gate-replay` child. It verifies source and retained inputs again before
-return. `retained_work_root` names the resulting evidence and generated build/cache
+return. The copied Cobertura file's descriptor remains open for the replay lifetime,
+preventing inode-number reuse during replacement attempts; both its open inode and
+the final path are checked after the CLI and before comparison. `retained_work_root`
+names the resulting evidence and generated build/cache
 files; `cleanup_complete` is false. The caller must dispose the isolated source
 workspace and private parent after preserving any needed review evidence. No recursive
 deletion is attempted, and this controller does not impose a runtime filesystem quota;

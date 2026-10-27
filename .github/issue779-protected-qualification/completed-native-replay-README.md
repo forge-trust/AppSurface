@@ -33,6 +33,12 @@ during SDK discovery, restore, and build; only the fixed VSTest process receives
 fully-qualified method, TRX logger, and result directory. No runsettings or
 collector is accepted.
 
+The controller retains one no-follow, close-on-exec read descriptor for each of
+the 24 copied leaves until all process and owned cleanup checks finish. This keeps
+the original inodes allocated, so unlink/recreate cannot reuse an input inode and
+evade the final identity check. All 24 descriptors close on success and failure;
+they are never inherited by the build or test process.
+
 `_run_fixed_process` is an internal process seam for other fixed replay modules.
 Callers must supply closed argv and a small explicit environment. It uses no
 shell, bounds stdout and stderr independently, enforces the same monotonic

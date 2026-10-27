@@ -170,7 +170,7 @@ assert pathlib.Path({str(ready)!r}).exists()
 
     def _mock_controller_processes(self, fixture, source, calls, *, mutate_copy=False,
                                   sdk=b'10.0.401\n', build_code=0,
-                                  unexpected_output=False):
+                                  unexpected_output=False, replace_copy=False):
         def run(argv, *, cwd, env, deadline, output_limit=replay.MAX_PROCESS_OUTPUT,
                 cleanup_deadline=None):
             calls.append(argv)
@@ -193,6 +193,12 @@ assert pathlib.Path({str(ready)!r}).exists()
                     (output / 'unowned.txt').write_text('keep')
                 if mutate_copy:
                     (source / replay.NATIVE_INPUT_ROOT / 'source.json').write_bytes(b'changed')
+                if replace_copy:
+                    target = source / replay.NATIVE_INPUT_ROOT / 'native-sdk.json'
+                    raw = target.read_bytes()
+                    target.unlink()
+                    target.write_bytes(raw)
+                    target.chmod(0o600)
                 return 0, b'one synthetic seam result\n', b''
             raise AssertionError('unexpected fixed command')
 
@@ -256,6 +262,16 @@ assert pathlib.Path({str(ready)!r}).exists()
             with self.assertRaisesRegex(ValueError, 'file-shape|file-changed|file-binding|file-custody'):
                 replay.run_native_replay(fixture.stage, fixture.inventory, fixture.stage_root,
                     fixture.capture, source, fixture.parent, deadline=_deadline(40))
+
+    def test_same_content_unlink_recreate_cannot_reuse_pinned_input_inode(self):
+        fixture, source = self._controller_fixture()
+        calls = []
+        with self._mock_controller_processes(fixture, source, calls, replace_copy=True):
+            with self.assertRaisesRegex(ValueError, 'file-shape'):
+                replay.run_native_replay(fixture.stage, fixture.inventory, fixture.stage_root,
+                    fixture.capture, source, fixture.parent, deadline=_deadline(40))
+        target = source / replay.NATIVE_INPUT_ROOT / 'native-sdk.json'
+        self.assertEqual(b'{}', target.read_bytes())
 
     def test_source_verification_failure_after_build_prevents_test_and_result(self):
         fixture, source = self._controller_fixture()
