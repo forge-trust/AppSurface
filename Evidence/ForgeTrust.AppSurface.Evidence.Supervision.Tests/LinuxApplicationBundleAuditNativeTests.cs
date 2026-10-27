@@ -135,8 +135,16 @@ public sealed class LinuxApplicationBundleAuditNativeTests
             try
             {
                 var root = LinuxProtectedNode.OpenAbsolute(fixture.Root, true, true, 0, nodes, default);
-                Assert.Throws<EvidenceAdmissionException>(() =>
-                    Audit(data.Files, data.ByPath, nodes, maps).Inventory(root, default));
+                if (kind == "symlink")
+                {
+                    // Mandatory openat2 no-symlink resolution rejects before metadata classification.
+                    var error = Assert.Throws<IOException>(() =>
+                        Audit(data.Files, data.ByPath, nodes, maps).Inventory(root, default));
+                    Assert.Equal(40, Assert.IsType<System.ComponentModel.Win32Exception>(error.InnerException).NativeErrorCode);
+                }
+                else
+                    Assert.Throws<EvidenceAdmissionException>(() =>
+                        Audit(data.Files, data.ByPath, nodes, maps).Inventory(root, default));
                 foreach (var node in nodes) node.Recheck();
                 Assert.Equal(sentinel, File.ReadAllBytes(sentinelPath));
             }

@@ -86,7 +86,27 @@ not establish Linux consumer acceptance.
 
 The checkpoint-four lane additionally uses the [private C3 measurement fixture](../issue779-checkpoint4/measurement/README.md) to retain the authentic worker's private `/tmp` handle before descriptor publication. Only its first normal exit per instrumented image can contribute unchanged, validated tracker bytes; later root files are left unchanged and absent worker files contribute nothing. Coverlet's original tracker and standard report reader perform all counter accumulation. This is compiled out of ordinary images, grants no runtime authority, and changes no unit environment or protected path. The seven selected modules and all original/instrumented DLL/PDB hashes in both images are bound before native execution. Nested pinned collectors instrument C3 and C3Sdk before the same seven controls run once; the SDK report then reaches the outer collector through its supported report merge. The [measurement reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md) specifies the six fixed gate inputs, separate first-worker witnesses, and actual root TRX requirements. This SDK measurement requires a fresh Linux run; prior uninstrumented SDK successes supply no presumed counters.
 
-The seven-module measurement artifact uses a dedicated [retention checker](check-retention.py): JSON up to 32 MiB, XML up to 40 MiB, other files up to 8 MiB, at most 131 files/96 MiB total, with the same regular-file/single-link and private-mode checks. The three additional file slots retain the separate 41-case root-marker/subtree/file-copy supplement's TRX, collector log and portable retention-control log, as documented in the [measurement reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#supplementary-root-marker-and-subtree-controls). These are validation artifact bounds; product output quotas, runtime limits and C2 retention are unchanged. A source build or helper proof is not a successful AppSurface measurement run.
+The seven-module measurement artifact uses a dedicated [retention checker](check-retention.py): JSON up to 32 MiB, XML up to 40 MiB, other files up to 8 MiB, at most 134 files/96 MiB total, with the same regular-file/single-link and private-mode checks. Three supplementary file slots retain the separate 44-case root-marker/subtree/file-copy supplement's TRX, collector log and portable retention-control log; three further slots retain the combined 17-case application-audit/report-discovery TRX and logs, as documented in the [measurement reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#supplementary-root-marker-and-subtree-controls). These are validation artifact bounds; product output quotas, runtime limits and C2 retention are unchanged. A source build or helper proof is not a successful AppSurface measurement run.
+
+### Failed application-audit diagnostics
+
+If the audit collector or its exact TRX comparison fails, the
+[failure-diagnostic helper](audit-failure-retention-README.md) copies only the original
+`application-bundle-driver.log`, optional raw `application-bundle-tests/application-bundle.trx`,
+and original `source.json` into a fresh private diagnostic directory. Their independent
+limits are 8 MiB, 1 MiB and 1 MiB. The fixed
+`issue779-c3-audit-failure-<run>-<attempt>` artifact is uploaded only after that bounded
+copy succeeds, even if ordinary measurement retention subsequently rejects an unfinished
+report. Source bytes remain unchanged; no report is synthesized or truncated. A missing
+TRX is recorded as absent, and the original failed step still fails the job. Diagnostic
+retention grants no native, coverage, gate or acceptance credit.
+
+The [focused Linux filesystem workflow](../issue779-audit-focused/README.md) runs the
+same seventeen audit/discovery cases against the ordinary image in a separate short
+Linux job. It retains raw failure logs and TRX after bounded retention and requires
+the same exact zero-skip row set. It is an early filesystem regression check; it
+does not replace this checkpoint's authenticated owners, consumers or standard
+collector measurement.
 
 ## Native workspace rejection controls
 

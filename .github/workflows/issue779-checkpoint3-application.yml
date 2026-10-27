@@ -403,6 +403,7 @@ jobs:
           PY_BIND
 
       - name: Measure application bundle audit and producer report discovery
+        id: application-audit
         shell: bash
         run: |
           set -euo pipefail
@@ -438,6 +439,34 @@ jobs:
           binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
+
+      - name: Preserve failed audit diagnostics separately from measurement acceptance
+        id: audit-failure-diagnostics
+        if: always() && steps.application-audit.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 15 sudo --non-interactive /usr/bin/python3 -B - \
+            "$CHECKPOINT3_EVIDENCE" "$RUNNER_TEMP" "$(id -u)" "$(id -g)" <<'PY_AUDIT_FAILURE'
+          import pathlib, sys
+          sys.path.insert(0, str(pathlib.Path.cwd() / '.github/issue779-checkpoint3'))
+          from retain_audit_failure import preserve
+          try:
+              preserve(sys.argv[1], sys.argv[2], 'checkpoint3-audit-failure',
+                       destination_uid=int(sys.argv[3]), destination_gid=int(sys.argv[4]))
+          except (OSError, ValueError):
+              raise SystemExit('AUDIT_FAILURE_RETENTION_REJECTED') from None
+          PY_AUDIT_FAILURE
+
+      - name: Retain exact failed audit log and raw TRX without native success claims
+        if: always() && steps.audit-failure-diagnostics.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-c3-audit-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint3-audit-failure
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Build the three fixed SDK lifecycle images without changing the original image set
         shell: bash

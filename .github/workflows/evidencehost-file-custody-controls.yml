@@ -1,0 +1,263 @@
+name: EvidenceHost focused Linux file-custody controls
+
+on:
+  push:
+    branches:
+      - codex/issue779-checkpoint4-cutover-20261018
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-file-controls:
+    name: Linux root filesystem bundle and report controls
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the selected candidate source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Select a fresh private SDK installation directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          sdk_parent="$RUNNER_TEMP/issue779-audit-focused-sdk"
+          mkdir -m 0700 "$sdk_parent"
+          printf 'DOTNET_INSTALL_DIR=%s/installation\n' "$sdk_parent" >> "$GITHUB_ENV"
+          printf 'AUDIT_SDK_ROOT=%s/installation\n' "$sdk_parent" >> "$GITHUB_ENV"
+
+      - name: Install the pinned SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+
+      - name: Capture the complete source and create private bounded evidence
+        id: source-capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/issue779-audit-focused-evidence"
+          mkdir -m 0700 "$evidence"
+          mkdir -m 0700 "$evidence/test-results"
+          printf 'AUDIT_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          cat > "$evidence/commands.json" <<'JSON'
+          {"schema":"issue779-focused-audit-commands-v1","native_acceptance":false,"commands":{"source_capture":{"exit_code":null},"restore":{"exit_code":null},"build":{"exit_code":null},"application_audit":{"exit_code":null},"trx_validation":{"exit_code":null},"source_verify":{"exit_code":null}}}
+          JSON
+          set +e
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json" \
+            > "$evidence/source.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$evidence/commands.json" source_capture "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Restore the fixed test project in locked mode
+        id: restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          project=Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj
+          set +e
+          timeout --signal=KILL 180 "$AUDIT_SDK_ROOT/dotnet" restore "$project" --locked-mode --verbosity quiet \
+            -warnaserror -m:1 -nr:false -p:UseSharedCompilation=false -p:EvidencePrivateQualification=None \
+            > "$AUDIT_EVIDENCE/restore.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/commands.json" restore "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Build the ordinary Release test assembly with warnings as errors
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          project=Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/ForgeTrust.AppSurface.Evidence.Supervision.Tests.csproj
+          set +e
+          timeout --signal=KILL 180 "$AUDIT_SDK_ROOT/dotnet" build "$project" --configuration Release --no-restore \
+            --warnaserror -m:1 -nr:false -p:UseSharedCompilation=false -p:EvidencePrivateQualification=None \
+            > "$AUDIT_EVIDENCE/build.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/commands.json" build "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Run exactly the two root filesystem test classes on native Linux
+        id: application-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          test_args=(vstest "$test_image"
+            '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests|FullyQualifiedName~LinuxProducerReportDiscoveryNativeTests'
+            '--logger:trx;LogFileName=application-bundle.trx'
+            "--ResultsDirectory:$AUDIT_EVIDENCE/test-results")
+          set +e
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_ROOT="$AUDIT_SDK_ROOT" DOTNET_CLI_HOME=/tmp \
+            DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            /usr/bin/bash -c 'umask 077; exec "$@"' _ "$AUDIT_SDK_ROOT/dotnet" "${test_args[@]}" \
+            > "$AUDIT_EVIDENCE/application-audit.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/commands.json" application_audit "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Require the exact seventeen-row TRX without changing outcomes
+        id: trx-validation
+        if: always() && steps.application-audit.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH="$GITHUB_WORKSPACE/.github/issue779-checkpoint3" \
+            /usr/bin/python3 -B - "$AUDIT_EVIDENCE/test-results/application-bundle.trx" \
+            "$AUDIT_EVIDENCE/application-audit-trx-check.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from application_bundle_measurement import read_trx
+          value = read_trx(Path(sys.argv[1]))
+          with open(sys.argv[2], 'x', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          PY
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/commands.json" trx_validation "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Recheck that the complete source capture is unchanged
+        id: source-verify
+        if: always() && steps.source-capture.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" \
+            "$AUDIT_EVIDENCE/source.json" --verify >> "$AUDIT_EVIDENCE/source.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/commands.json" source_verify "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, name, code = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          value = json.load(open(path, encoding='utf-8'))
+          value['commands'][name]['exit_code'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Normalize and validate the private evidence before upload
+        id: retention
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$RUNNER_TEMP/issue779-audit-focused-evidence"
+          sudo --non-interactive chown -R --no-dereference "$(id -u):$(id -g)" "$evidence"
+          python3 -B - "$evidence" <<'PY'
+          import os
+          from pathlib import Path
+          import stat
+          import sys
+          root = Path(sys.argv[1])
+          allowed = {'source.json', 'source.log', 'commands.json', 'restore.log', 'build.log',
+                     'application-audit.log', 'application-audit-trx-check.json',
+                     'test-results/application-bundle.trx'}
+          observed = set()
+          total = 0
+          for directory, names, leaves in os.walk(root, topdown=True, followlinks=False):
+              current = Path(directory)
+              if current.is_symlink():
+                  raise SystemExit('evidence-directory-rejected')
+              os.chmod(current, 0o700, follow_symlinks=False)
+              for name in names:
+                  path = current / name
+                  if path.is_symlink() or not path.is_dir():
+                      raise SystemExit('evidence-directory-rejected')
+                  os.chmod(path, 0o700, follow_symlinks=False)
+              for name in leaves:
+                  path = current / name
+                  metadata = path.lstat()
+                  relative = path.relative_to(root).as_posix()
+                  if relative not in allowed or not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                      raise SystemExit('evidence-leaf-rejected')
+                  os.chmod(path, 0o600, follow_symlinks=False)
+                  observed.add(relative)
+                  total += metadata.st_size
+                  if path.name.endswith('.log') and metadata.st_size > 8 * 1024 * 1024:
+                      raise SystemExit('evidence-log-size-rejected')
+                  if path.name == 'source.json' and metadata.st_size > 1024 * 1024:
+                      raise SystemExit('source-capture-size-rejected')
+                  if path.suffix == '.trx' and metadata.st_size > 1024 * 1024:
+                      raise SystemExit('trx-size-rejected')
+          if len(observed) > 8 or total > 20 * 1024 * 1024:
+              raise SystemExit('evidence-total-bound-rejected')
+          PY
+
+      - name: Retain bounded source, logs and the original TRX
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-audit-focused-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-audit-focused-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
