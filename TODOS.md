@@ -4,6 +4,17 @@
 
 - **What:** Evaluate an optional remote archive/export integration only after an adopter needs evidence beyond the user-local managed history. **Why:** Local byte/age retention cannot promise durable team access. **Pros:** Could preserve selected release or investigation evidence across machines. **Cons:** Adds credentials, transfer cost, remote retention and deletion ownership. **Context:** The [coverage storage design](docs/designs/coverage-artifact-storage.md) keeps ordinary upgrades local, preserves current reports and exposes explicit pin/restore; existing uploads remain available. **Effort:** L human / M agent, estimated. **Priority:** P3. **Depends on:** Shipped local lifecycle plus an identified adopter/owner and concrete remote retention requirement. Deferred in CEO C6; no remote service is part of this delivery.
 
+## Metadata-only deployment-name linter (#890 follow-up)
+
+**What:** Consider an offline deployment-manifest linter built on the [candidate inspector design](docs/designs/issue-890-environment-candidate-inspection.md) after concrete adopter demand.
+**Why:** Hosts could check supplied environment-name inventories without resolving secret values or duplicating AppSurface spelling rules.
+**Pros:** Reuses the pure candidate contract and could catch deployment policy mistakes earlier.
+**Cons:** Introduces manifest grammar, inventory trust/casing, complete-path selection and application policy contracts that #890 deliberately leaves to callers.
+**Context:** #890 delivers names only and two neutral public-package examples. First gather an adopter's manifest and policy; do not treat generated candidates as proof of presence, ownership or complete aggregate composition.
+**Effort:** L human team / L agent assistance (unmeasured; new tool and policy surface).
+**Priority:** P3.
+**Depends on / blocked by:** Shipped #890 API, verified adopter need and a separately reviewed inventory/policy contract. Deferred by autoplan CEO C5; no linter implementation in #890.
+
 ## DevAuth persona fixture activation (#772)
 
 ### Host-owned durable or multi-process reference example
@@ -140,6 +151,26 @@ Skoolit consumer implementation/adoption is separate future work in the [open ca
 ## Documentation alias publication preflight (#176 follow-up)
 
 - **What:** Consider a publish-time catalog validation command only when an adopter needs to reject an invalid alias before deploying. **Why:** #176 validates once in the host; a release pipeline may eventually need earlier feedback. **Pros:** Could reduce deploy-time configuration mistakes. **Cons:** Adds a public CLI contract and risks parser/verification drift. **Context:** Reuse the [#176 alias design](docs/designs/issue-176-version-aliases.md) and [implementation plan](docs/plans/issue-176-version-aliases.md), with the same normalization, duplicate, visibility and verified-target rules; do not build another parser. **Effort:** M human (1 day) / S agent (2–3 hours). **Priority:** P3. **Depends on / blocked by:** #176 runtime adoption and a concrete publication workflow requiring offline feedback. Deferred by autoplan CEO C5; no command implementation in #176.
+
+## Evidence readiness (#867)
+
+### Multi-resource readiness composition
+
+**What:** Consider multi-resource dependency graphs or arbitrary asynchronous readiness predicates only after a concrete adopter demonstrates that the one-resource API cannot serve its test/evidence flow.
+
+**Why:** Avoid each adopter rebuilding needed coordination while keeping the first [Evidence readiness design](docs/designs/issue-867-evidence-readiness.md) small.
+
+**Pros:** A proven second use case could establish reusable ordering and failure semantics.
+
+**Cons:** Adds cancellation, concurrency, ownership and public API commitments that the current single-resource case does not justify.
+
+**Context:** #867 places a BCL-only HTTP probe beneath existing Aspire testing and EvidenceHost adapters. Its C6 expansion is deliberately deferred; start with an adopter's concrete unsatisfied flow and the existing native health APIs. This item adds no wait graph, hosted metrics or bootstrap relocation to #867.
+
+**Effort:** L human team / M with agent assistance.
+
+**Priority:** P3.
+
+**Depends on / blocked by:** #867 adoption evidence and a concrete multi-resource requirement, with separately reviewed ownership/cancellation semantics.
 
 ## Handoff consumer feasibility (#869 follow-up)
 

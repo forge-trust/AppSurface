@@ -39,7 +39,7 @@ internal sealed class CoverageEvidenceProducer
     /// </param>
     /// <param name="outputDirectory">
     /// The nonempty Evidence output directory. The producer creates and cleans its <c>coverage</c> child directory for
-    /// the fixed Debug, serial, input-order collector run and its merged gate report.
+    /// the configured input-order collector run and its merged gate report.
     /// </param>
     /// <param name="diffSnapshot">
     /// The optional bounded immutable diff captured during planning. Patch gates require this snapshot; callers must
@@ -60,8 +60,9 @@ internal sealed class CoverageEvidenceProducer
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
-    /// The private core owns collection-before-gate ordering. This adapter fixes the coverage run defaults to Debug,
-    /// serial input-order execution, collector coverage, fail-mode no-progress handling, clean output, and the established AppSurface test exclusion.
+    /// The private core owns collection-before-gate ordering. This adapter forwards the declared configuration,
+    /// parallelism, and managed test-result format while retaining input-order scheduling, collector coverage,
+    /// fail-mode no-progress handling, clean output, and the established AppSurface test exclusion.
     /// Its monotonic producer budget limits the automatic no-dump VSTest timer without replacing deadline cancellation;
     /// it does not expose a general-purpose coverage configuration surface to Evidence consumers.
     /// </remarks>
@@ -112,7 +113,7 @@ internal sealed class CoverageEvidenceProducer
                 TimeSpan.FromSeconds(producer.TimeoutSeconds));
             deadline.CancelAfter(TimeSpan.FromSeconds(producer.TimeoutSeconds));
             var result = await _executionWorkflow.RunAndGateAsync(
-                CreateRunRequest(solutionPath, outputDirectory) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
+                CreateRunRequest(solutionPath, outputDirectory, producer.CoverageExecution) with { ProducerDeadline = producerDeadline, ArtifactRetention = producer.CoverageArtifactRetention },
                 CreateGateRequest(outputDirectory, diffSnapshot, producer.CoverageGate),
                 writers,
                 deadline.Token).ConfigureAwait(false);
@@ -162,13 +163,16 @@ internal sealed class CoverageEvidenceProducer
         }
     }
 
-    private static CoverageRunRequest CreateRunRequest(string solutionPath, string outputDirectory) => new(
+    private static CoverageRunRequest CreateRunRequest(
+        string solutionPath,
+        string outputDirectory,
+        EvidenceCoverageExecutionOptions? execution) => new(
         solutionPath,
         TestProjects: [],
         ExcludeTestProjects: [],
         OutputDirectory: Path.Join(outputDirectory, "coverage"),
-        Configuration: "Debug",
-        Parallelism: 1,
+        Configuration: (execution ?? new EvidenceCoverageExecutionOptions()).Configuration,
+        Parallelism: (execution ?? new EvidenceCoverageExecutionOptions()).Parallelism,
         ScheduleMode: CoverageRunScheduleMode.InputOrder,
         ScheduleTimingsPath: null,
         PriorityTestProjects: [],
@@ -182,7 +186,12 @@ internal sealed class CoverageEvidenceProducer
         ExclusiveTestProjects: [],
         Loggers: [],
         TestArguments: [],
-        TestResults: CoverageRunTestResultFormat.None,
+        TestResults: (execution ?? new EvidenceCoverageExecutionOptions()).TestResults switch
+        {
+            EvidenceCoverageTestResultFormat.None => CoverageRunTestResultFormat.None,
+            EvidenceCoverageTestResultFormat.Junit => CoverageRunTestResultFormat.Junit,
+            _ => throw new ArgumentOutOfRangeException(nameof(execution)),
+        },
         SlowTestDiagnostics: false,
         Clean: true,
         Verbosity: "minimal",

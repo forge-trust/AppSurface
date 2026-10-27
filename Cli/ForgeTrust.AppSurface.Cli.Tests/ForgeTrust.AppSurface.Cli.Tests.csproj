@@ -38,6 +38,7 @@
     <ProjectReference Include="..\..\Evidence\ForgeTrust.AppSurface.Evidence.Planner\ForgeTrust.AppSurface.Evidence.Planner.csproj" />
     <ProjectReference Include="..\ForgeTrust.AppSurface.Cli\ForgeTrust.AppSurface.Cli.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.Testing\ForgeTrust.AppSurface.Testing.csproj" />
+    <ProjectReference Include="..\..\tools\ForgeTrust.AppSurface.Evidence.Validation\ForgeTrust.AppSurface.Evidence.Validation.csproj" />
     <ProjectReference Include="..\..\tests\ForgeTrust.AppSurface.CoverageLeaseProbe\ForgeTrust.AppSurface.CoverageLeaseProbe.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

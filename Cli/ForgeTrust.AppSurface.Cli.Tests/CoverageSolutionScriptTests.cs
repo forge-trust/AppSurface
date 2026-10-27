@@ -96,51 +96,50 @@ public sealed class CoverageSolutionScriptTests
     public void BuildWorkflow_ShouldCaptureCoverageSecurityHangDiagnosticsBeforeTheJobTimeout()
     {
         var workflow = ReadWorkflow();
+        var yaml = new YamlStream();
+        using var reader = new StringReader(workflow);
+        yaml.Load(reader);
 
-        Assert.Contains(
-            """
-              coverage-security-platform:
-                name: Coverage security contracts (${{ matrix.os }})
-                runs-on: ${{ matrix.os }}
-                timeout-minutes: 10
-            """,
-            workflow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            """
-                      --logger "console;verbosity=detailed"
-                      --blame-hang
-                      --blame-hang-timeout 2m
-                      --blame-hang-dump-type mini
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var coverageJob = (YamlMappingNode)jobs.Children[new YamlScalarNode("coverage-security-platform")];
+        Assert.Equal("Coverage security contracts (${{ matrix.os }})", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("name")]).Value);
+        Assert.Equal("${{ matrix.os }}", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("runs-on")]).Value);
+        Assert.Equal("10", ((YamlScalarNode)coverageJob.Children[new YamlScalarNode("timeout-minutes")]).Value);
 
-                  - name: Collect native Release coverage evidence
-                    run: >-
-                      dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
-                      --configuration Release
-                      --no-restore
-                      /p:TailwindEnabled=false
-                      --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
-                      --logger "console;verbosity=minimal"
-                      --results-directory "${{ runner.temp }}/coverage-native-results"
-                      --collect:"XPlat Code Coverage"
-                      -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
-                      DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
-            """,
-            workflow,
-            StringComparison.Ordinal);
+        var steps = (YamlSequenceNode)coverageJob.Children[new YamlScalarNode("steps")];
+        var runCoverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run coverage security contracts");
+        var runCommand = ((YamlScalarNode)runCoverage.Children[new YamlScalarNode("run")]).Value!;
+        Assert.Equal(1, CountOccurrences(runCommand, "dotnet test "));
+        Assert.DoesNotContain("\n", runCommand, StringComparison.Ordinal);
+        Assert.Contains("dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--configuration Release", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--no-restore", runCommand, StringComparison.Ordinal);
+        Assert.Contains("/p:TailwindEnabled=false", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--filter \"FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--logger \"console;verbosity=detailed\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--results-directory \"${{ runner.temp }}/coverage-native-results\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--collect:\"XPlat Code Coverage\"", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang-timeout 2m", runCommand, StringComparison.Ordinal);
+        Assert.Contains("--blame-hang-dump-type mini", runCommand, StringComparison.Ordinal);
+        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura", runCommand, StringComparison.Ordinal);
+        Assert.Contains("DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"", runCommand, StringComparison.Ordinal);
         Assert.Contains(
-            """
-                  - name: Upload coverage security diagnostics
-                    if: ${{ always() }}
-                    uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-                    with:
-                      name: coverage-security-diagnostics-${{ matrix.os }}
-                      path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
-                      if-no-files-found: warn
-                      retention-days: 7
-            """,
-            workflow,
+            "-- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude=\"[*.Tests]*,[*.IntegrationTests]*\"",
+            runCommand,
             StringComparison.Ordinal);
+
+        var uploadDiagnostics = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage security diagnostics");
+        Assert.Equal("${{ always() }}", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("if")]).Value);
+        Assert.Equal("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", ((YamlScalarNode)uploadDiagnostics.Children[new YamlScalarNode("uses")]).Value);
+        var uploadWith = (YamlMappingNode)uploadDiagnostics.Children[new YamlScalarNode("with")];
+        Assert.Equal("coverage-security-diagnostics-${{ matrix.os }}", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("name")]).Value);
+        Assert.Equal("${{ runner.temp }}/coverage-native-results", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("path")]).Value);
+        Assert.Equal("warn", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("if-no-files-found")]).Value);
+        Assert.Equal("7", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("retention-days")]).Value);
         Assert.Contains(
             """
                   - name: Prepare generated docs stylesheet for coverage security tests
@@ -867,7 +866,7 @@ public sealed class CoverageSolutionScriptTests
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains(
-            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
+            "--exclusive-test-project\nForgeTrust.AppSurface.Config.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Aspire.Tests.csproj\n--exclusive-test-project\nAuthAspNetCoreDevAuthExample.Tests.csproj\n--exclusive-test-project\nAuthWebRazorWireProofExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Durable.PostgreSql.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.DurableExternalActivationExample.Tests.csproj\n--exclusive-test-project\nForgeTrust.RazorWire.Cli.Tests.csproj\n--exclusive-test-project\nForgeTrust.AppSurface.Web.Tailwind.Tests.csproj",
             result.DotnetInvocations,
             StringComparison.Ordinal);
     }

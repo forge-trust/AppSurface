@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using ConfigPackageConsumer;
 using ConfigPackageConsumer.Domain;
 using ForgeTrust.AppSurface.Config;
 using ForgeTrust.AppSurface.Config.Testing;
@@ -169,7 +170,10 @@ Console.WriteLine("Public provider: missing, found-with-notice, terminal, collis
 Console.WriteLine("IConfiguration coexistence: PASS");
 Console.WriteLine("Public conformance: provider counterexample and missing-to-lower fallback PASS 2/2");
 if (candidate)
+{
+    Console.WriteLine("Environment candidate inspection evidence: " + JsonSerializer.Serialize(EnvironmentCandidateInspectionProof.Run()));
     Console.WriteLine("Worker stage evidence: " + JsonSerializer.Serialize(WorkerStageProof.Run()));
+}
 await host.StopAsync();
 
 

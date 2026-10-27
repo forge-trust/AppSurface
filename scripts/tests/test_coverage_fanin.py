@@ -73,6 +73,24 @@ def class_row(name: str, filename: str, *lines: dict, package: str = "Example") 
 
 
 class CoverageFaninTests(unittest.TestCase):
+    def test_identity_commands_have_finite_deadlines(self) -> None:
+        with mock.patch.object(fanin.subprocess, "check_output", return_value="identity\n") as output:
+            self.assertEqual("identity", fanin.command(self.root, "dotnet", "--version"))
+            self.assertEqual(30, output.call_args.kwargs["timeout"])
+        with mock.patch.object(fanin.subprocess, "run") as run, \
+                mock.patch.object(fanin, "command", side_effect=["", "commit", "tree", "sdk"]):
+            self.assertEqual("sdk", fanin.source_identity(self.root)["sdk"])
+            self.assertEqual(30, run.call_args.kwargs["timeout"])
+
+    def test_timed_out_identity_does_not_publish_evidence(self) -> None:
+        report = self.base / "report.xml"
+        self.write_report(report, [class_row("C", "src/C.cs", line(1, 1))])
+        output = self.base / "capture"
+        with mock.patch.object(fanin.subprocess, "run", side_effect=subprocess.TimeoutExpired("git", 30)):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                fanin.capture(self.root, report, output, CONFIGURATION, "native", None, report)
+        self.assertFalse(output.exists())
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

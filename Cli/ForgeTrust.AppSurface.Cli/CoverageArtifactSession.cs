@@ -185,13 +185,7 @@ internal sealed class CoverageArtifactSession : IDisposable
             var run = new CoverageArtifactCurrentRun(manifest, entries, Inventory.OutputDirectory, _repository);
             var json = JsonSerializer.SerializeToUtf8Bytes(run, JsonOptions);
             if (json.LongLength > CoverageArtifactLimits.RunInventoryMaxBytes) throw new InvalidDataException("Current sidecar metadata exceeds its limit.");
-            var staged = ".artifact-sidecar-" + Guid.NewGuid().ToString("N");
-            using (var stream = output.OpenArtifactFile(staged, true, requirePrivate: false))
-            {
-                stream.Write(json);
-                stream.Flush(flushToDisk: true);
-            }
-            output.MoveArtifactEntry(staged, output, SidecarName, replaceFile: true);
+            PublishSidecar(output, json);
             var sidecarEntry = new CoverageArtifactInventoryEntry(SidecarName, json.LongLength,
                 Convert.ToHexString(SHA256.HashData(json)).ToLowerInvariant());
             run = run with { Inventory = entries.Append(sidecarEntry).ToArray() };
@@ -323,17 +317,43 @@ internal sealed class CoverageArtifactSession : IDisposable
             ?? throw new IOException("Gate output root is missing.");
         if (output.ArtifactDirectoryIdentity != run.ManifestBase.OutputIdentity)
             throw new InvalidDataException("Gate output root changed before sidecar publication.");
-        var staged = ".artifact-sidecar-" + Guid.NewGuid().ToString("N");
-        using (var stream = output.OpenArtifactFile(staged, true, requirePrivate: false))
-        {
-            stream.Write(json);
-            stream.Flush(flushToDisk: true);
-        }
-        output.MoveArtifactEntry(staged, output, SidecarName, replaceFile: true);
+        PublishSidecar(output, json);
         var sidecarEntry = new CoverageArtifactInventoryEntry(SidecarName, json.LongLength,
             Convert.ToHexString(SHA256.HashData(json)).ToLowerInvariant());
         var registeredRun = sidecarRun with { Inventory = sidecarEntries.Append(sidecarEntry).ToArray() };
         await store.RegisterAsync(registeredRun, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>Publishes the current sidecar and removes only this call's staging file when publication fails.</summary>
+    /// <param name="output">Retained output directory under the caller's exclusive operation lease.</param>
+    /// <param name="json">Bounded serialized sidecar bytes.</param>
+    /// <param name="beforePublish">Optional per-call scheduling/failure seam after durable staging; omitted in production.</param>
+    /// <remarks>Cleanup checks the staged file's retained object identity. A replacement entry is preserved,
+    /// and cleanup failure never replaces the original publication failure.</remarks>
+    internal static void PublishSidecar(CoverageRunOutputLease output, byte[] json, Action? beforePublish = null)
+    {
+        var staged = ".artifact-sidecar-" + Guid.NewGuid().ToString("N");
+        string? identity = null;
+        try
+        {
+            using (var stream = output.OpenArtifactFile(staged, true, requirePrivate: false))
+            {
+                identity = CoverageRunOutputLease.GetArtifactObjectIdentity(stream.SafeFileHandle);
+                stream.Write(json);
+                stream.Flush(flushToDisk: true);
+            }
+            beforePublish?.Invoke();
+            output.MoveArtifactEntry(staged, output, SidecarName, replaceFile: true, expectedSourceIdentity: identity);
+            identity = null;
+        }
+        finally
+        {
+            if (identity is not null)
+            {
+                try { output.DeleteArtifactEntry(staged, 1, identity); }
+                catch (Exception exception) when (IsOptionalFailure(exception)) { }
+            }
+        }
     }
 
     /// <summary>Finds a physically bound managed input root without adopting copied metadata.</summary>

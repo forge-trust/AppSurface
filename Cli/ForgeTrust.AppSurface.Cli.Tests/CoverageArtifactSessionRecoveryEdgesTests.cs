@@ -7,6 +7,32 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageArtifactSessionRecoveryEdgesTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvalidInventoryCannotPublishCallerFilesEvenWhenDiagnosticWritingFails(bool failDiagnostics)
+    {
+        using var temp = TestDirectory.Create();
+        using var configured = ConfigureStore(Path.Join(temp.Path, "store"));
+        var repository = temp.CreateDirectory("repo");
+        var output = temp.CreateDirectory("repo/output");
+        var callerFile = Path.Join(repository, "caller-owned.xml");
+        File.WriteAllText(callerFile, "preserve caller bytes");
+        using StringWriter errors = failDiagnostics ? new FailingDiagnosticWriter() : new StringWriter();
+        using var session = await CoverageArtifactSession.BeginAsync(output, repository, false,
+            CoverageTextWriters.Create(TextWriter.Null, errors), TimeProvider.System, CancellationToken.None);
+        session.Inventory.RecordFile(callerFile);
+
+        await session.CompleteAsync("failed", new("revision", "unknown", "configuration"));
+
+        Assert.Equal("preserve caller bytes", File.ReadAllText(callerFile));
+        Assert.False(File.Exists(Path.Join(output, CoverageArtifactSession.SidecarName)));
+        using var store = CoverageArtifactStore.Open();
+        Assert.Equal(0, store.GetStatus().RegisteredRuns);
+        if (errors is FailingDiagnosticWriter failedWriter) Assert.True(failedWriter.Attempts > 0);
+        else Assert.Contains("ASCOV201 inventory", errors.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task MissingRepositoryReleasesAcquiredOutputLeaseBeforePropagatingFailure()
     {

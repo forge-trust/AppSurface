@@ -132,8 +132,24 @@ internal sealed partial record CoverageArtifactCapability(
             : OperatingSystem.IsMacOS() ? "macos"
             : OperatingSystem.IsLinux() ? "linux"
             : "other";
-        return ReadFileSystem(root, platform, ObserveWindowsVolume, UnixFStatFs,
+        return ReadFileSystem(root, platform, ObserveWindowsVolume, InvokeCurrentUnixFStatFs,
             _ => File.ReadLines("/proc/self/mountinfo"));
+    }
+
+    private static int InvokeCurrentUnixFStatFs(int descriptor, nint buffer) => InvokeUnixFStatFs(
+        OperatingSystem.IsMacOS() ? "macos" : "unix", RuntimeInformation.ProcessArchitecture,
+        descriptor, buffer, UnixFStatFs, DarwinX64FStatFs);
+
+    /// <summary>Dispatches fstatfs to the symbol matching the native filesystem-stat structure ABI.</summary>
+    /// <remarks>Intel Darwin uses <c>fstatfs$INODE64</c>; arm64 Darwin and Linux use <c>fstatfs</c>.</remarks>
+    internal static int InvokeUnixFStatFs(string platform, Architecture architecture, int descriptor, nint buffer,
+        Func<int, nint, int> unixFStatFs, Func<int, nint, int> darwinX64FStatFs)
+    {
+        ArgumentNullException.ThrowIfNull(unixFStatFs);
+        ArgumentNullException.ThrowIfNull(darwinX64FStatFs);
+        return platform.Equals("macos", StringComparison.OrdinalIgnoreCase) && architecture == Architecture.X64
+            ? darwinX64FStatFs(descriptor, buffer)
+            : unixFStatFs(descriptor, buffer);
     }
 
     /// <summary>
@@ -278,6 +294,9 @@ internal sealed partial record CoverageArtifactCapability(
 
     [LibraryImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
     private static partial int UnixFStatFs(int descriptor, nint buffer);
+
+    [LibraryImport("libc", EntryPoint = "fstatfs$INODE64", SetLastError = true)]
+    private static partial int DarwinX64FStatFs(int descriptor, nint buffer);
 
 }
 

@@ -40,7 +40,12 @@ public enum EvidenceHostState
 /// <param name="ArtifactDirectory">Controlled root for producer artifacts. Defaults to <c>TestResults/evidence/artifacts</c>.</param>
 public sealed record EvidenceHostOptions(
     bool RequireTrustedEnvelope = false,
-    string? ArtifactDirectory = null);
+    string? ArtifactDirectory = null)
+{
+    /// <summary>Gets the separate grace period for cancelled producers to finish before owned registrations are disposed.</summary>
+    /// <remarks>Defaults to ten seconds. If a producer remains active, cleanup fails and its registrations are preserved.</remarks>
+    public TimeSpan ProducerCleanupTimeout { get; init; } = TimeSpan.FromSeconds(10);
+}
 
 /// <summary>
 /// Describes a secret-safe execution-envelope validation result.
@@ -150,6 +155,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     private readonly TimeProvider _timeProvider;
     private readonly string _artifactDirectory;
     private readonly SemaphoreSlim _execution = new(1, 1);
+    private readonly List<Task> _producerExecutions = [];
     private bool _cleaned;
 
     private EvidenceHostBootstrap(
@@ -187,6 +193,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(configure);
+        if (options is not null && (options.ProducerCleanupTimeout <= TimeSpan.Zero || options.ProducerCleanupTimeout > TimeSpan.FromMinutes(1)))
+            throw new ArgumentOutOfRangeException(nameof(options), "Producer cleanup timeout must be positive and at most one minute.");
 
         var registration = new EvidenceHostRegistration();
         configure(registration);
@@ -265,7 +273,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         await _execution.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (State == EvidenceHostState.Disposed)
+            if (State == EvidenceHostState.Disposed && _cleaned)
             {
                 return;
             }
@@ -384,6 +392,7 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
                 var producerTask = _registration.Producers[declaration.Id]
                     .ProduceAsync(new EvidenceProducerContext(_plan, declaration, _timeProvider, artifacts), deadline.Token)
                     .AsTask();
+                _producerExecutions.Add(producerTask);
                 var result = await producerTask.WaitAsync(deadline.Token).ConfigureAwait(false);
                 results.Add(await ValidateProducerResultAsync(
                     declaration,
@@ -467,6 +476,30 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
         State = EvidenceHostState.Cleaning;
+        // A producer can still be stopping an owned child after its execution deadline.
+        // Never delete its workspace or dependencies while that task remains active.
+        var producers = Task.WhenAll(_producerExecutions);
+        try
+        {
+            await producers.WaitAsync(_options.ProducerCleanupTimeout, _timeProvider).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _ = producers.ContinueWith(static task => _ = task.Exception,
+                CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return "Evidence cleanup failed because a producer did not stop within its cleanup deadline; owned registrations were preserved.";
+        }
+        catch (Exception exception) when (IsNonFatalException(exception))
+        {
+            // Completed cancellation or producer failure is already represented in its result.
+        }
+        catch
+        {
+            // The original fatal producer failure is propagated by RunAsync. Do not
+            // replay that task's exception when the caller later disposes the host.
+            _cleaned = true;
+            throw;
+        }
         _cleaned = true;
         Exception? failure = null;
         var owned = _registration.Producers.Values.Reverse().Cast<object>()
@@ -494,7 +527,11 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         return failure is null ? null : $"Evidence cleanup failed with {failure.GetType().Name}.";
     }
 
-    private static bool IsNonFatalException(Exception exception) =>
+    /// <summary>Classifies failures that the host and readiness adapters may summarize or retain as secondary errors.</summary>
+    /// <param name="exception">The failure being classified.</param>
+    /// <returns>False for out-of-memory, stack-overflow, access-violation, and unloaded-domain failures; true otherwise.</returns>
+    /// <remarks>Fatal failures must propagate unchanged. Classification does not perform cleanup or handle corrupted process state.</remarks>
+    internal static bool IsNonFatalException(Exception exception) =>
         exception is not OutOfMemoryException
             and not StackOverflowException
             and not AccessViolationException

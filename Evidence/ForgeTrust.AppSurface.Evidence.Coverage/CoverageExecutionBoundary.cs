@@ -104,8 +104,12 @@ internal sealed class CoverageEvidenceExecutionWorkflow(CoverageRunWorkflow runW
             await CoverageGateReportWriter.WriteAsync(gateResult, gateRequest, cancellationToken).ConfigureAwait(false);
             using var gateContext = await CoverageArtifactGateContext.AcquireAsync(gateRequest, writers.Error, cancellationToken).ConfigureAwait(false);
             await gateContext.RecordReportsAsync(gateRequest, gateResult, cancellationToken).ConfigureAwait(false);
-            await session.CompleteAsync("success", CoverageArtifactInventory.Provenance(
-                runRequest.CoverageDriver.ToString(), runRequest.Configuration, runRequest.TestProjects, runRequest.IncludeFilter, runRequest.ExcludeFilter)).ConfigureAwait(false);
+            if (runRequest.DryRun)
+            {
+                await session.CompleteAsync("success", CoverageArtifactInventory.Provenance(
+                    runRequest.CoverageDriver.ToString(), runRequest.Configuration, runRequest.TestProjects,
+                    runRequest.IncludeFilter, runRequest.ExcludeFilter)).ConfigureAwait(false);
+            }
             return new CoverageEvidenceExecutionResult(runResult, gateResult);
         }
         finally

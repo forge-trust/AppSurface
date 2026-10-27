@@ -108,20 +108,11 @@ jobs:
           /p:TailwindEnabled=false
           --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
           --logger "console;verbosity=detailed"
+          --results-directory "${{ runner.temp }}/coverage-native-results"
+          --collect:"XPlat Code Coverage"
           --blame-hang
           --blame-hang-timeout 2m
           --blame-hang-dump-type mini
-
-      - name: Collect native Release coverage evidence
-        run: >-
-          dotnet test Cli/ForgeTrust.AppSurface.Cli.Tests/ForgeTrust.AppSurface.Cli.Tests.csproj
-          --configuration Release
-          --no-restore
-          /p:TailwindEnabled=false
-          --filter "FullyQualifiedName~CoverageRunArtifactReaderTests|FullyQualifiedName~CoverageRunOutputGuardSecurityTests|FullyQualifiedName~CoverageGateTests|FullyQualifiedName~CoverageArtifact|FullyQualifiedName~CoverageStorageCommand"
-          --logger "console;verbosity=minimal"
-          --results-directory "${{ runner.temp }}/coverage-native-results"
-          --collect:"XPlat Code Coverage"
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
           DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[*.Tests]*,[*.IntegrationTests]*"
 
@@ -147,7 +138,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-security-diagnostics-${{ matrix.os }}
-          path: Cli/ForgeTrust.AppSurface.Cli.Tests/TestResults
+          path: ${{ runner.temp }}/coverage-native-results
           if-no-files-found: warn
           retention-days: 7
 

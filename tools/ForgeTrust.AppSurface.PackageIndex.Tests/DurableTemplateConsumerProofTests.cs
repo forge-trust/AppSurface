@@ -355,6 +355,49 @@ public sealed class DurableTemplateConsumerProofTests : IDisposable
     }
 
     [Theory]
+    [InlineData("first-work")]
+    [InlineData("replacement-first-work")]
+    public async Task First_work_failure_retains_closed_diagnostic_without_retaining_raw_results_or_authorizing_success(string operation)
+    {
+        string? rawPath = null;
+        var runner = new DeterministicRunner(_stagedTemplate, _providerArchive, failOperation: operation,
+            afterCommand: command =>
+            {
+                if (command.OperationName != operation) return;
+                var arguments = command.Arguments.ToList();
+                var results = arguments[arguments.IndexOf("--results-directory") + 1];
+                rawPath = Path.Join(results, "proof.trx");
+                File.WriteAllText(rawPath, $"""
+                    <TestRun xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+                      <Results><UnitTestResult testId="failed" outcome="Failed">
+                        <Output><StdOut>[FirstDurableWork] failure phase=initial-readiness code=TimeoutException at={SecretSentinel} cause={SecretSentinel}; cleanup=none; retry={SecretSentinel}</StdOut></Output>
+                      </UnitTestResult></Results>
+                      <TestDefinitions><UnitTest id="failed"><TestMethod className="DurableWorkerTemplate.Tests.FirstDurableWorkTests" name="FirstDurableWork_persists_typed_terminal_result_and_exports_the_real_activation" /></UnitTest></TestDefinitions>
+                      <ResultSummary><Counters total="1" executed="1" passed="0" failed="1" /></ResultSummary>
+                    </TestRun>
+                    """);
+            });
+        var receiptPath = Path.Join(_root, operation + "-closed-diagnostic.json");
+
+        var receipt = await new DurableTemplateConsumerProof(runner).RunAsync(CreateRequest(receiptPath), CandidateArtifacts());
+
+        Assert.False(receipt.Succeeded);
+        Assert.Equal("TemplateProofFailed", receipt.FailureCode);
+        Assert.Equal(operation, receipt.FailurePhase);
+        Assert.True(receipt.CleanupComplete);
+        var observation = Assert.IsType<DurableTemplateTestObservation>(Assert.Single(receipt.Phases, item => item.Id == operation).TestRun);
+        Assert.Equal(0, observation.Passed);
+        Assert.Equal(1, observation.Failed);
+        Assert.Equal(new DurableTemplateFirstWorkDiagnostic("initial-readiness", "TimeoutException", "none"), Assert.Single(observation.FirstWorkFailures!));
+        Assert.NotNull(rawPath);
+        Assert.False(File.Exists(rawPath));
+        Assert.False(Directory.Exists(runner.ProofRoot));
+        var json = File.ReadAllText(receiptPath);
+        Assert.DoesNotContain(SecretSentinel, json, StringComparison.Ordinal);
+        Assert.Contains("FirstWorkFailures", json, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("authored-tests")]
     [InlineData("archive-tests")]
     [InlineData("feed-tests")]

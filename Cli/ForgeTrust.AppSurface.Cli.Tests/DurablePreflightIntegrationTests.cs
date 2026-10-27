@@ -767,6 +767,68 @@ public sealed class DurableSchemaPreflightIntegrationTests
             $"Successful preflight including nonpooled connection disposal took {elapsed.Elapsed}.");
     }
 
+    // Value: protects=rejected preflight observes server exit before asserting no sessions;
+    // fails_when=the rejection helper bypasses its bounded server observation;
+    // why_new=ordinary error cases cannot force PostgreSQL close acknowledgement ordering;
+    // seam=none; no_claim=the retained connection models delayed backend visibility, not a production leak.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rejected_preflight_observes_delayed_backend_exit_before_asserting_no_sessions(bool backendExits)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.MutateAsync("ALTER SCHEMA appsurface_durable OWNER TO preflight_runtime_a");
+        var retainedSettings = new NpgsqlConnectionStringBuilder(fixture.OwnerConnection)
+        {
+            Pooling = false,
+            ApplicationName = $"issue845-{Owner}",
+        };
+        await using var retainedSession = new NpgsqlConnection(retainedSettings.ConnectionString);
+        await retainedSession.OpenAsync();
+
+        var observationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseObservation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.BeforeSessionExitObservationAsync = async () =>
+        {
+            observationStarted.TrySetResult();
+            await releaseObservation.Task;
+        };
+        var assertion = AssertConnectionRejectedAsync(fixture, Owner, "42501");
+        try
+        {
+            await Task.WhenAny(observationStarted.Task, assertion).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(observationStarted.Task.IsCompletedSuccessfully,
+                "The rejection assertion ran before observing PostgreSQL backend exit.");
+            Assert.False(assertion.IsCompleted);
+            Assert.True(await fixture.CountSessionsAsync($"issue845-{Owner}") > 0);
+            if (backendExits)
+            {
+                await retainedSession.CloseAsync();
+            }
+            releaseObservation.TrySetResult();
+            if (backendExits)
+            {
+                await assertion;
+            }
+            else
+            {
+                await Assert.ThrowsAsync<TimeoutException>(async () => await assertion);
+                Assert.True(await fixture.CountSessionsAsync($"issue845-{Owner}") > 0);
+                await retainedSession.CloseAsync();
+                using var completionDeadline = new CancellationTokenSource(DurableSchemaPreflightVerifier.TotalTimeout);
+                await fixture.WaitForSessionExitAsync($"issue845-{Owner}", completionDeadline.Token);
+            }
+            await fixture.AssertNoFenceLocksAsync();
+            Assert.Equal(0, await fixture.CountPreflightSessionsAsync());
+        }
+        finally
+        {
+            await retainedSession.CloseAsync();
+            releaseObservation.TrySetResult();
+            _ = await Record.ExceptionAsync(async () => await assertion);
+        }
+    }
+
     /// <summary>Proves the rejection helper waits while a matching backend remains visible.</summary>
     [Fact]
     public async Task Rejected_connection_waits_for_visible_backend_exit_before_asserting_zero_sessions()
@@ -1449,7 +1511,8 @@ public sealed class DurableSchemaPreflightIntegrationTests
             (exception as NpgsqlException)?.InnerException as PostgresException;
         Assert.NotNull(serverError);
         Assert.Equal(expectedSqlState, serverError.SqlState);
-        // Like successful preflight, rejection closes the client without a backend acknowledgement.
+        await fixture.AssertNoFenceLocksAsync();
+        // Client disposal is one-way; observe the server's backend exit within the original total budget.
         await fixture.WaitForSessionExitAsync($"issue845-{caller}", completionDeadline.Token, sessionObserved);
         Assert.Equal(0, await fixture.CountSessionsAsync($"issue845-{caller}"));
     }
@@ -1836,6 +1899,10 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 $"Concurrent index build {applicationName} did not reach the expected writer wait for {indexName}.");
         }
 
+        /// <summary>Optional coordination of a test-owned backend before server-exit observation.</summary>
+        /// <remarks>Only the delayed-exit regression sets this callback; it never changes the observation budget.</remarks>
+        internal Func<Task>? BeforeSessionExitObservationAsync { get; set; }
+
         /// <summary>Polls backend disappearance using the existing ten-second window and the caller's original deadline.</summary>
         /// <param name="applicationName">Exact fixture-owned application name to observe.</param>
         /// <param name="cancellationToken">The caller's original deadline; this observer never renews it.</param>
@@ -1845,6 +1912,10 @@ public sealed class DurableSchemaPreflightIntegrationTests
             CancellationToken cancellationToken,
             Func<Task>? sessionObserved = null)
         {
+            if (BeforeSessionExitObservationAsync is { } beforeObservation)
+            {
+                await beforeObservation().WaitAsync(cancellationToken);
+            }
             var timer = System.Diagnostics.Stopwatch.StartNew();
             while (timer.Elapsed < TimeSpan.FromSeconds(10))
             {

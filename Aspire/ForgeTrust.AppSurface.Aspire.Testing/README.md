@@ -12,7 +12,7 @@ Do not use it as a replacement for [Aspire's native testing API](https://learn.m
 
 Version 1 of this preview is compiled and tested against `Aspire.Hosting` and `Aspire.Hosting.Testing` **13.4.4**, which is the package's minimum Aspire version. Consumers may select a later Aspire version without a NuGet exact-version conflict, but that combination is not AppSurface-verified. Advancing Aspire should include re-verifying the complete delegated `IDistributedApplicationTestingBuilder` surface, packed-package consumer compilation, failed-build cleanup, and build/start/disposal integration proof.
 
-The packed package also carries a transitive `MessagePack` dependency floor of **2.5.303**. Keep that floor when overriding central package versions: earlier versions are affected by [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h). NuGet audit remains enabled so consumers continue to receive advisory checks for their complete resolved graph.
+The packed package carries a transitive `MessagePack` dependency floor of **2.5.303**, the patched 2.x release for [GHSA-qhrr-8q5h-9q3h](https://github.com/advisories/GHSA-qhrr-8q5h-9q3h). Keep that floor when overriding central package versions; pinning an older version can fail strict restores. NuGet vulnerability auditing remains enabled for the complete resolved graph. The packed consumer checks verify the patched dependency alongside both the Aspire 13.4.4 baseline and the 13.4.6 override.
 
 Aspire 13.4.4 does not expose or dispose the partial root service provider when host construction fails after provider creation. Immediately before building, this package decorates the verified singleton `IHost` factory so it can capture that provider and dispose it on a non-process-fatal build failure. A successful build transfers ownership unchanged to the returned `DistributedApplication`. If a consumer-selected Aspire version changes that registration shape, AppSurface emits a `System.Diagnostics.Trace` warning and continues through Aspire without the additional failed-build cleanup. This preserves potentially compatible builds while making the cleanup limitation explicit.
 
@@ -151,7 +151,65 @@ The declaration order is deliberate: C# disposes `application` before `builder`.
 
 The marker, module, and profile must be public, closed types in the same AppHost assembly. The marker must be the generated `Projects.*` type with one public static readable `string ProjectPath`; the module must be a concrete `IAppSurfaceHostModule`; and the profile must be a concrete `AspireProfile` with CliFx `[Command]` metadata.
 
-Typed tests support constructor-injected services, `PassThroughArgs`, `GetDependencies()`, and `GetComponents()`. They intentionally reject profiles containing `[CommandOption]` or `[CommandParameter]` properties because no CliFx binding phase runs. Move test-varying graph choices into constructor services or known Aspire pass-through arguments. String profile selection, cross-assembly profile discovery, readiness policy, and a higher-level owned fixture are deferred.
+Typed tests support constructor-injected services, `PassThroughArgs`, `GetDependencies()`, and `GetComponents()`. They intentionally reject profiles containing `[CommandOption]` or `[CommandParameter]` properties because no CliFx binding phase runs. Move test-varying graph choices into constructor services or known Aspire pass-through arguments. String profile selection and cross-assembly profile discovery remain deferred. For one awaited startup, native-health, endpoint, and HTTP-status operation, use the opt-in [HTTP readiness fixture](#http-readiness-fixture).
+
+## HTTP Readiness Fixture
+
+Use `AppSurfaceAspireTestFixture.StartAsync(...)` when the test needs the package's typed profile composition and wants application build, start, native health, explicit endpoint selection, and an HTTP status condition under one startup budget. It composes the existing `CreateAsync` or `CreateConfiguredAsync` path; it does not introduce another generic profile factory. For an already-running application and client, use the neutral [`ForgeTrust.AppSurface.Evidence.Readiness` probe](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md) directly. If native resource health or an Aspire HTTP health check already expresses the complete precondition, keep using the [native Aspire testing API](https://learn.microsoft.com/dotnet/aspire/testing/overview).
+
+The public entry point is:
+
+```csharp
+Task<AppSurfaceAspireTestFixture> AppSurfaceAspireTestFixture.StartAsync(
+    Func<CancellationToken, Task<AppSurfaceAspireProfileTestingBuilder>> createBuilder,
+    AspireHttpReadinessTarget target,
+    AppSurfaceAspireStartupOptions? options = null,
+    CancellationToken cancellationToken = default);
+```
+
+`AspireHttpReadinessTarget` is the positional record `AspireHttpReadinessTarget(string ResourceName, string EndpointName, string ProbePath)`. It selects one existing Aspire resource, one named endpoint on that resource, and one relative or root-relative HTTP probe path. There is no resource or endpoint discovery. `AppSurfaceAspireStartupOptions` contains `StartupTimeout` (two minutes by default), `Http` (a new default [`HttpReadinessOptions`](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#httpreadinessoptions) instance), and optional `Func<Uri, HttpClient> CreateProbeClient`. The HTTP options default to a three-second request timeout, 250 ms retry delay, exact HTTP 200, and no attempt cap (`MaxAttempts = null`, so the total deadline bounds attempts). A configured `MaxAttempts` must be positive.
+
+Compose the existing configured factory when a per-call immutable scenario must reach profile constructors. The complete [.NET 10 typed readiness consumer](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-typed-consumer) is the canonical executable quickstart and owns the full AppHost marker, module, profile, scenario, setup, commands, and expected output; use it as the copyable program rather than maintaining a second complete sample here.
+
+```csharp
+await using var fixture = await AppSurfaceAspireTestFixture.StartAsync(
+    createBuilder: token => AppSurfaceAspireTestingBuilder.CreateConfiguredAsync<
+        Projects.MyApp_AppHost, MyAppModule, QaProfile>(
+            new AppSurfaceAspireTestingOptions
+            {
+                ConfigureActivationServices = services =>
+                    services.AddSingleton(testScenario)
+            },
+            token),
+    target: new AspireHttpReadinessTarget("web", "http", "/healthz"),
+    options: new AppSurfaceAspireStartupOptions
+    {
+        StartupTimeout = TimeSpan.FromMinutes(2),
+        Http = new()
+    },
+    cancellationToken: cancellationToken);
+
+await AssertProductStateAsync(fixture.Application, cancellationToken);
+var baseEndpoint = fixture.Endpoint;
+```
+
+The fixture owns the returned, active, unbuilt builder and its application lifecycle. `Application` and `Endpoint` are borrowed values for resource access and assertions; do not call `BuildAsync` or dispose the application independently. Declare the fixture with `await using`. Browser and business assertions remain in the test, after readiness succeeds.
+
+One monotonic deadline starts before `createBuilder` and covers builder creation, build, application start, native resource health, endpoint allocation, HTTP requests, and retry delays. The factory is invoked once, or zero times for a pre-cancelled call. Once it returns a builder, ownership transfers immediately so any later cancellation or failure cleans it up. If a custom factory allocates a builder but fails before returning it, that factory remains responsible for cleanup. Startup failure preserves the original failure when secondary cleanup fails nonfatally; cleanup is awaited and a secondary cleanup problem does not imply readiness. Process-fatal cleanup or diagnostic-storage failures (`OutOfMemoryException`, `StackOverflowException`, or `AccessViolationException`) propagate unchanged and can interrupt best-effort cleanup, matching the builder's [build cleanup policy](#builder-lifecycle).
+
+The default transport uses Aspire's endpoint/client configuration. `CreateProbeClient` is called once with the selected base endpoint when a custom client is needed; return a fresh `HttpClient` and transfer its ownership to the fixture. The fixture disposes that client after the probe settles, including failure and cancellation. It does not mutate or own any client supplied to the standalone neutral probe.
+
+The probe uses GET with headers-only completion, applies the status predicate without reading the body, and disposes each response. It retries a rejected status, `HttpRequestException`, or an identifiable request timeout within the remaining startup budget. It does not retry caller cancellation, an expired overall deadline, a throwing predicate, or configuration/programming errors. `MaxAttempts` stops before another request and adds no trailing delay. A shorter `HttpClient.Timeout` still applies; redirect, proxy, certificate, and handler policy stay with the selected client. Initial URI validation preserves HTTP(S) scheme, IDN host, and effective port; redirects remain controlled by the client.
+
+The deadline is cooperative. Synchronous factory/build/callback work, a transport that ignores cancellation, and cleanup can outlast it. Do not describe deadline expiry as proof that cleanup has completed. See the neutral package's [safe diagnostics and troubleshooting reference](https://github.com/forge-trust/AppSurface/blob/main/Evidence/ForgeTrust.AppSurface.Evidence.Readiness/README.md#troubleshooting) for exception categories, field combinations, and recovery steps.
+
+Client disposal, startup builder cleanup, and secondary diagnostic storage inspect nested `AggregateException` failures before applying the safe cleanup contract. The first original process-fatal leaf propagates with its identity intact, including after an earlier ordinary failure. Aggregate traversal retains this fixture's existing fatal-type policy; it does not change the [builder lifecycle](#builder-lifecycle) policy or add another application owner.
+
+### Migrating an existing typed test
+
+Replace the test's independent create/build/start/health/endpoint/probe sequence with one `await using` fixture call. Remove the separate application owner because the fixture owns that lifecycle, and keep assertions after the returned endpoint passes readiness. For equivalence with the two pinned Skoolit gates, explicitly retain their three-minute startup budget, 30-attempt limit, three-second request timeout, 250 ms retry delay, `UseProxy = false`, and two-second `ConnectTimeout`. These settings are consumer migration policy, not package defaults. The fixtures are version-bound equivalence proofs; they do not establish actual Skoolit adoption or a measured reliability/latency improvement. Headers-only completion also does not buffer response bodies as a body-reading legacy probe may have done.
+
+Read the canonical [Skoolit gate equivalence and consumer proof notes](https://github.com/forge-trust/AppSurface/tree/main/tests/evidence-readiness-typed-consumer) together with the [unreleased entry](https://github.com/forge-trust/AppSurface/blob/main/releases/unreleased.entries/2026-10-15-evidence-readiness.md). This package remains compiled and tested against Aspire 13.4.4; a later consumer-selected Aspire version is not automatically verified by this readiness API.
 
 ## Builder Lifecycle
 

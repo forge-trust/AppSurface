@@ -12,14 +12,14 @@ public sealed class CoverageArtifactWarningsTests
     {
         using var fixture = new WarningFixture(repositoryWarningBytes: 1_000_000, domainWarningBytes: 1_000_000);
         var diagnostic = Diagnostic("persistent warning");
-        var firstErrors = new StringWriter();
+        using var firstErrors = new StringWriter();
         using (var firstStore = fixture.OpenStore())
         {
             var first = new CoverageArtifactWarnings(fixture.RepositoryPath, firstStore, fixture.Clock, firstErrors);
             await first.EmitAsync(diagnostic, "same-condition", 1024);
         }
 
-        var secondErrors = new StringWriter();
+        using var secondErrors = new StringWriter();
         using (var secondStore = fixture.OpenStore())
         {
             var second = new CoverageArtifactWarnings(fixture.RepositoryPath, secondStore, fixture.Clock, secondErrors);
@@ -43,7 +43,7 @@ public sealed class CoverageArtifactWarningsTests
     {
         using var fixture = new WarningFixture(repositoryWarningBytes: 1_000_000, domainWarningBytes: 1_000_000);
         using var store = fixture.OpenStore();
-        var errors = new StringWriter();
+        using var errors = new StringWriter();
         var warnings = new CoverageArtifactWarnings(fixture.RepositoryPath, store, fixture.Clock, errors);
 
         await warnings.EmitAsync(Diagnostic("byte-threshold", 2_000 * Mebibyte), "byte-threshold", 2_000 * Mebibyte);
@@ -71,7 +71,7 @@ public sealed class CoverageArtifactWarningsTests
         using var store = fixture.OpenStore();
         var statePath = fixture.CreateInvalidWarningState(store);
         var originalState = File.ReadAllBytes(statePath);
-        var errors = new StringWriter();
+        using var errors = new StringWriter();
         var warnings = new CoverageArtifactWarnings(fixture.RepositoryPath, store, fixture.Clock, errors);
 
         await warnings.EmitAsync(Diagnostic("original growth warning"), "growth", 2048);
@@ -89,7 +89,7 @@ public sealed class CoverageArtifactWarningsTests
         Directory.CreateDirectory(Path.Join(fixture.RepositoryPath, "TestResults"));
         File.WriteAllText(Path.Join(fixture.RepositoryPath, "TestResults", "coverage.xml"), "small");
         using var store = fixture.OpenStore();
-        var errors = new StringWriter();
+        using var errors = new StringWriter();
         var warnings = new CoverageArtifactWarnings(fixture.RepositoryPath, store, fixture.Clock, errors);
 
         await warnings.ObserveAsync(terminal: true, inventory: null, CancellationToken.None);
@@ -98,7 +98,7 @@ public sealed class CoverageArtifactWarningsTests
 
         using var thresholdFixture = new WarningFixture(repositoryWarningBytes: 1_000_000, domainWarningBytes: 1);
         using var thresholdStore = thresholdFixture.OpenStore();
-        var thresholdErrors = new StringWriter();
+        using var thresholdErrors = new StringWriter();
         var thresholdWarnings = new CoverageArtifactWarnings(thresholdFixture.RepositoryPath, thresholdStore, thresholdFixture.Clock, thresholdErrors);
         await thresholdWarnings.ObserveAsync(terminal: true, inventory: null, CancellationToken.None);
 
@@ -112,7 +112,7 @@ public sealed class CoverageArtifactWarningsTests
         using var fixture = new WarningFixture(repositoryWarningBytes: 1, domainWarningBytes: 1_000_000);
         var inventory = new CoverageArtifactInventoryEntry("coverage.xml", 512, new string('a', 64));
         using var store = fixture.OpenStore();
-        var errors = new StringWriter();
+        using var errors = new StringWriter();
         var warnings = new CoverageArtifactWarnings(Path.Join(fixture.RepositoryPath, "missing"), store, fixture.Clock, errors);
 
         await warnings.ObserveAsync(terminal: true, inventory: [inventory], CancellationToken.None);

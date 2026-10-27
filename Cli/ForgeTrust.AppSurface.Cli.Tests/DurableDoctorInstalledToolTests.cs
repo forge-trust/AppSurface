@@ -21,6 +21,10 @@ public sealed class DurableDoctorInstalledToolTests
     private static readonly TimeSpan DoctorTimeout = TimeSpan.FromSeconds(25);
     private static readonly TimeSpan KillWaitTimeout = TimeSpan.FromSeconds(5);
 
+    // Value: protects=installed doctor classifies independently bracketed ages and a synchronized live D04 observation;
+    // fails_when=reported clock/age chooses its own expectation or a fresh live heartbeat is misclassified;
+    // why_new=the two merged proofs cover distinct near-boundary and definitely-current child observations;
+    // seam=none; no_claim=real PostgreSQL and the installed candidate prove this fixture, not arbitrary deployment timing.
     [Fact(Timeout = 600_000)]
     public async Task Installed_candidate_matches_exact_package_bytes_and_runs_the_real_diagnosis_matrix()
     {
@@ -83,8 +87,9 @@ public sealed class DurableDoctorInstalledToolTests
                 new InstalledScenario("D01", null, null, null, false),
                 new InstalledScenario("D02", DurableDoctorFixture.RuntimeWorkerId, null, null, false),
                 new InstalledScenario("D03", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(5), null, false),
-                // The pure matrix owns exact 15-second equality; the installed fixture uses the existing 12-second live margin.
-                new InstalledScenario("D04", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(12), null, false),
+                // Value: D04 proves both a 14-second seeded heartbeat bracketed by PostgreSQL's clock and a synchronized
+                // fresh-heartbeat observation after the child starts; exact equality remains the pure-matrix boundary.
+                new InstalledScenario("D04", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(14), null, false),
                 new InstalledScenario("D05", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.FromSeconds(17), null, false),
                 new InstalledScenario("D06", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.Zero, null, true),
                 new InstalledScenario("D07", DurableDoctorFixture.RuntimeWorkerId, TimeSpan.Zero, OtherEpoch, false, OtherEpoch),
@@ -102,16 +107,46 @@ public sealed class DurableDoctorInstalledToolTests
                 testDeadline.Token.ThrowIfCancellationRequested();
                 var row = Assert.Single(matrixRows, candidate => candidate.Id == scenario.MatrixId);
                 await ConfigureScenarioAsync(fixture, scenario, testDeadline.Token);
-                var before = scenario.MatrixId == "D04"
-                    ? string.Empty
-                    : await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
+                var before = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
                 var connectionString = scenario.Unavailable
                     ? CreateUnavailableConnectionString(fixture.RuntimeConnectionString)
                     : fixture.RuntimeConnectionString;
-                ProcessResult run;
+                // Exact 15s equality belongs to the pure matrix. A real child can cross the
+                // boundary after seeding; bracket its observation with the same database clock.
+                var boundaryHeartbeat = scenario.MatrixId == "D04"
+                    ? await fixture.ReadHeartbeatAsync(cancellationToken: testDeadline.Token)
+                    : null;
+                DateTimeOffset? earliestObservation = scenario.MatrixId == "D04"
+                    ? await fixture.ReadDatabaseTimeAsync(testDeadline.Token)
+                    : null;
+                var run = await RunDoctorAsync(
+                    installedExecutable,
+                    toolPath,
+                    processEnvironment,
+                    customConnectionName,
+                    customEpochName,
+                    connectionString,
+                    fixture.RuntimeEpoch,
+                    scenario.WorkerId,
+                    json: true,
+                    extraArguments: [],
+                    testDeadline.Token);
+
                 if (scenario.MatrixId == "D04")
                 {
-                    (run, before, connectionString) = await RunFreshBoundaryDoctorAsync(
+                    var latestObservation = await fixture.ReadDatabaseTimeAsync(testDeadline.Token);
+                    row = AssertBoundaryHeartbeatOutput(
+                        run, matrixRows, Assert.IsType<DurableDoctorHeartbeat>(boundaryHeartbeat),
+                        earliestObservation!.Value, latestObservation);
+                }
+                AssertDoctorProcessOutput(run, row, connectionString, "json", customConnectionName, customEpochName,
+                    scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
+                var after = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
+                Assert.Equal(before, after);
+
+                if (scenario.MatrixId == "D04")
+                {
+                    var synchronized = await RunFreshBoundaryDoctorAsync(
                         fixture,
                         installedExecutable,
                         toolPath,
@@ -122,28 +157,19 @@ public sealed class DurableDoctorInstalledToolTests
                         fixture.RuntimeEpoch,
                         scenario.WorkerId!,
                         testDeadline.Token);
-                }
-                else
-                {
-                    run = await RunDoctorAsync(
-                        installedExecutable,
-                        toolPath,
-                        processEnvironment,
+                    var exactBoundaryRow = Assert.Single(matrixRows, static candidate => candidate.Id == "D04");
+                    AssertDoctorProcessOutput(
+                        synchronized.Run,
+                        exactBoundaryRow,
+                        synchronized.ConnectionString,
+                        "json",
                         customConnectionName,
                         customEpochName,
-                        connectionString,
-                        fixture.RuntimeEpoch,
-                        scenario.WorkerId,
-                        json: true,
-                        extraArguments: [],
-                        testDeadline.Token);
-
+                        TimeSpan.FromSeconds(15));
+                    Assert.Equal(
+                        synchronized.Before,
+                        await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token));
                 }
-
-                AssertDoctorProcessOutput(run, row, connectionString, "json", customConnectionName, customEpochName,
-                    scenario.WorkerId is null ? null : TimeSpan.FromSeconds(15));
-                var after = await fixture.ReadDurableStateFingerprintAsync(testDeadline.Token);
-                Assert.Equal(before, after);
 
                 if (scenario.MatrixId is "D01" or "D06")
                 {
@@ -866,64 +892,6 @@ public sealed class DurableDoctorInstalledToolTests
         }
     }
 
-    private static string CreateUnavailableConnectionString(string baseConnectionString) =>
-        new NpgsqlConnectionStringBuilder(baseConnectionString)
-        {
-            Host = "127.0.0.1",
-            Port = 1,
-            Pooling = false,
-            Timeout = 1,
-            CommandTimeout = 1,
-        }.ConnectionString;
-
-    private static async Task<ProcessResult> RunDoctorAsync(
-        string executable,
-        string workingDirectory,
-        IReadOnlyDictionary<string, string> baseEnvironment,
-        string connectionEnvironmentName,
-        string epochEnvironmentName,
-        string connectionString,
-        Guid runtimeEpoch,
-        string? workerId,
-        bool json,
-        IReadOnlyList<string> extraArguments,
-        CancellationToken cancellationToken)
-    {
-        var startInfo = new ProcessStartInfo(executable)
-        {
-            WorkingDirectory = workingDirectory,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
-        foreach (var (name, value) in baseEnvironment)
-        {
-            startInfo.Environment[name] = value;
-        }
-
-        startInfo.Environment.Remove("APPSURFACE_DURABLE_CONNECTION");
-        startInfo.Environment.Remove("APPSURFACE_DURABLE_RUNTIME_EPOCH");
-        startInfo.Environment[connectionEnvironmentName] = connectionString;
-        startInfo.Environment[epochEnvironmentName] = runtimeEpoch.ToString("D");
-
-        AddArguments(startInfo,
-            "durable", "doctor",
-            "--connection-env", connectionEnvironmentName,
-            "--runtime-epoch-env", epochEnvironmentName,
-            "--format", json ? "json" : "text",
-            "--timeout", "10s");
-        if (workerId is not null)
-        {
-            AddArguments(startInfo, "--worker-id", workerId, "--stale-after", "15s");
-        }
-        AddArguments(startInfo, extraArguments.ToArray());
-
-        Assert.DoesNotContain(connectionString, startInfo.ArgumentList, StringComparer.Ordinal);
-        Assert.DoesNotContain(ConnectionSecret, startInfo.ArgumentList, StringComparer.Ordinal);
-        return await RunProcessAsync(startInfo, DoctorTimeout, cancellationToken);
-    }
-
     /// <summary>Arranges a live heartbeat after process startup, before the doctor's read-only snapshot.</summary>
     /// <remarks>The existing ten-second work deadline is shorter than the unchanged fifteen-second freshness
     /// threshold. Exact equality remains covered by the pure D04 matrix, independent of process scheduling.</remarks>
@@ -1015,6 +983,96 @@ public sealed class DurableDoctorInstalledToolTests
         {
             await connection.CloseAsync();
         }
+    }
+
+    /// <summary>Checks the actual child observation, then selects the exact current/stale matrix expectations.</summary>
+    /// <remarks>
+    /// The seeded row and independent PostgreSQL clock bracket prevent a reported age or status from choosing its own
+    /// expectation. The pure matrix separately requires success at 15 seconds and failure one tick later.
+    /// </remarks>
+    private static DurableDoctorMatrixRow AssertBoundaryHeartbeatOutput(
+        ProcessResult run,
+        IReadOnlyList<DurableDoctorMatrixRow> matrixRows,
+        DurableDoctorHeartbeat heartbeat,
+        DateTimeOffset earliestObservation,
+        DateTimeOffset latestObservation)
+    {
+        Assert.False(run.TimedOut, "The installed boundary doctor exceeded its finite timeout.");
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var root = document.RootElement;
+        var observedAt = root.GetProperty("observedAtUtc").GetDateTimeOffset();
+        Assert.InRange(observedAt, earliestObservation, latestObservation);
+        var worker = root.GetProperty("worker");
+        Assert.True(worker.GetProperty("found").GetBoolean());
+        Assert.Equal(DurableDoctorFixture.RuntimeWorkerId, worker.GetProperty("workerId").GetString());
+        Assert.Equal(heartbeat.RuntimeEpoch, worker.GetProperty("runtimeEpoch").GetGuid());
+        Assert.False(worker.GetProperty("isDraining").GetBoolean());
+        Assert.Equal(heartbeat.LastHeartbeatAtUtc, worker.GetProperty("lastHeartbeatAtUtc").GetDateTimeOffset());
+        var age = Math.Max(0L, (observedAt - heartbeat.LastHeartbeatAtUtc!.Value).Ticks);
+        Assert.Equal(age, worker.GetProperty("ageTicks").GetInt64());
+        var staleAfter = DurableDoctorFixture.ReferenceStaleAfter.Ticks;
+        Assert.Equal(staleAfter, worker.GetProperty("staleAfterTicks").GetInt64());
+        var stale = age > staleAfter;
+        Assert.Equal(stale ? "stale" : "current", worker.GetProperty("state").GetString());
+        return Assert.Single(matrixRows, candidate => candidate.Id == (stale ? "D05" : "D04"));
+    }
+
+    private static string CreateUnavailableConnectionString(string baseConnectionString) =>
+        new NpgsqlConnectionStringBuilder(baseConnectionString)
+        {
+            Host = "127.0.0.1",
+            Port = 1,
+            Pooling = false,
+            Timeout = 1,
+            CommandTimeout = 1,
+        }.ConnectionString;
+
+    private static async Task<ProcessResult> RunDoctorAsync(
+        string executable,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string> baseEnvironment,
+        string connectionEnvironmentName,
+        string epochEnvironmentName,
+        string connectionString,
+        Guid runtimeEpoch,
+        string? workerId,
+        bool json,
+        IReadOnlyList<string> extraArguments,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var (name, value) in baseEnvironment)
+        {
+            startInfo.Environment[name] = value;
+        }
+
+        startInfo.Environment.Remove("APPSURFACE_DURABLE_CONNECTION");
+        startInfo.Environment.Remove("APPSURFACE_DURABLE_RUNTIME_EPOCH");
+        startInfo.Environment[connectionEnvironmentName] = connectionString;
+        startInfo.Environment[epochEnvironmentName] = runtimeEpoch.ToString("D");
+
+        AddArguments(startInfo,
+            "durable", "doctor",
+            "--connection-env", connectionEnvironmentName,
+            "--runtime-epoch-env", epochEnvironmentName,
+            "--format", json ? "json" : "text",
+            "--timeout", "10s");
+        if (workerId is not null)
+        {
+            AddArguments(startInfo, "--worker-id", workerId, "--stale-after", "15s");
+        }
+        AddArguments(startInfo, extraArguments.ToArray());
+
+        Assert.DoesNotContain(connectionString, startInfo.ArgumentList, StringComparer.Ordinal);
+        Assert.DoesNotContain(ConnectionSecret, startInfo.ArgumentList, StringComparer.Ordinal);
+        return await RunProcessAsync(startInfo, DoctorTimeout, cancellationToken);
     }
 
     private static void AssertDoctorProcessOutput(

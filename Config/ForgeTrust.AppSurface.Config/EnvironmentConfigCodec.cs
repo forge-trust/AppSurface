@@ -1,8 +1,12 @@
+using System.Collections.Immutable;
+
 namespace ForgeTrust.AppSurface.Config;
 
 /// <summary>Encodes logical keys and generates the bounded train-1 environment aliases.</summary>
 internal static class EnvironmentConfigCodec
 {
+    /// <summary>The existing native generation failure message, used to bound inspection enrichment.</summary>
+    internal const string UnencodableMessage = "The logical key is not representable by the canonical environment grammar.";
     /// <summary>Encodes portable ASCII segments with double underscores only at logical boundaries.</summary>
     internal static string Encode(AppSurfaceConfigKey key) =>
         TryEncode(key, out var encoded)
@@ -41,40 +45,64 @@ internal static class EnvironmentConfigCodec
     /// <remarks>Typed requests have no aliases. Explicit mappings replace all convention candidates.</remarks>
     internal static IEnumerable<(string Layer, string Name, bool Legacy)> Candidates(
         ConfigProviderRequest request, IReadOnlyDictionary<AppSurfaceConfigKey, string> mappings)
+        => GetCandidates(request.Environment, request.Key, request.InputOrigin, request.OriginalInput, mappings)
+            .Select(candidate => (candidate.Scope == EnvironmentCandidateScope.Scoped ? "scoped" : "unscoped",
+                candidate.Name, candidate.IsLegacyAlias));
+
+    /// <summary>Materializes native names with producer metadata without resolving values or claims.</summary>
+    /// <remarks>Mapping replacement and strict/translated compatibility aliases retain resolver precedence.</remarks>
+    /// <param name="environment">Non-null environment spelling; uses native normalization.</param>
+    /// <param name="key">Validated logical identity.</param>
+    /// <param name="inputOrigin">Actual resolver origin, or explicitly typed/strict for public inspection.</param>
+    /// <param name="originalInput">Compatibility spelling for strict/translated origins; null adds no aliases.</param>
+    /// <param name="mappings">Frozen exact-key replacements; suffix casing is preserved.</param>
+    /// <returns>Immutable scoped/unscoped canonical or mapped names, followed by distinct aliases.</returns>
+    /// <exception cref="InvalidOperationException">An unmapped key has no supported canonical encoding.</exception>
+    internal static ImmutableArray<EnvironmentNativeCandidate> GetCandidates(
+        string environment, AppSurfaceConfigKey key, ConfigKeyInputOrigin inputOrigin, string? originalInput,
+        IReadOnlyDictionary<AppSurfaceConfigKey, string> mappings)
     {
         string suffix;
-        if (mappings.TryGetValue(request.Key, out var explicitSuffix))
+        if (mappings.TryGetValue(key, out var explicitSuffix))
         {
             suffix = explicitSuffix;
         }
-        else if (TryEncode(request.Key, out var canonical))
+        else if (TryEncode(key, out var canonical))
         {
             suffix = canonical;
         }
         else
         {
-            throw new InvalidOperationException("The logical key is not representable by the canonical environment grammar.");
+            throw new InvalidOperationException(UnencodableMessage);
         }
 
-        var scoped = EncodeEnvironment(request.Environment) + "__" + suffix;
-        var emitted = new HashSet<string>([scoped, suffix], StringComparer.Ordinal);
-        yield return ("scoped", scoped, false);
-        yield return ("unscoped", suffix, false);
+        var scoped = EncodeEnvironment(environment) + "__" + suffix;
+        var emitted = new HashSet<string>(StringComparer.Ordinal);
+        var candidates = ImmutableArray.CreateBuilder<EnvironmentNativeCandidate>();
+        Add(scoped, EnvironmentCandidateScope.Scoped, false);
+        Add(suffix, EnvironmentCandidateScope.Unscoped, false);
 
         if (explicitSuffix is not null)
         {
-            yield break;
+            return candidates.ToImmutable();
         }
 
-        if (request.InputOrigin is ConfigKeyInputOrigin.StrictString or ConfigKeyInputOrigin.TranslatedDot
-            && request.OriginalInput is { } original)
+        if (inputOrigin is ConfigKeyInputOrigin.StrictString or ConfigKeyInputOrigin.TranslatedDot
+            && originalInput is { } original)
         {
-            foreach (var (layer, alias) in LegacyAliases(request.Environment, original, request.InputOrigin))
+            foreach (var (layer, alias) in LegacyAliases(environment, original, inputOrigin))
             {
-                if (emitted.Add(alias))
-                {
-                    yield return (layer, alias, true);
-                }
+                Add(alias, layer == "scoped" ? EnvironmentCandidateScope.Scoped : EnvironmentCandidateScope.Unscoped, true);
+            }
+        }
+
+        return candidates.ToImmutable();
+
+        void Add(string name, EnvironmentCandidateScope scope, bool legacy)
+        {
+            if (emitted.Add(name))
+            {
+                candidates.Add(new(name, scope, legacy, explicitSuffix is not null));
             }
         }
     }

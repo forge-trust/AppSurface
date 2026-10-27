@@ -128,7 +128,7 @@ public sealed class CoverageArtifactInspectionFinalPathsTests
         Assert.Equal("settings-file-not-regular-or-unavailable", result.Cause);
     }
 
-    [CoverageUnixFact]
+    [CoverageUnixPermissionFact]
     public void ReadCollectorRisk_ReportsASettingsOpenFailure()
     {
         if (OperatingSystem.IsWindows())
@@ -141,23 +141,6 @@ public sealed class CoverageArtifactInspectionFinalPathsTests
         try
         {
             File.SetUnixFileMode(settings, UnixFileMode.None);
-            var accessDenied = false;
-            try
-            {
-                using var readable = File.OpenRead(settings);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                accessDenied = true;
-            }
-            catch (IOException)
-            {
-                accessDenied = true;
-            }
-
-            if (!accessDenied)
-                throw Xunit.Sdk.SkipException.ForSkip("The current test identity can read mode-000 files.");
-
             var result = CoverageArtifactInspector.ReadCollectorRisk(settings);
 
             Assert.Equal("unknown", result.State);

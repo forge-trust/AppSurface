@@ -54,6 +54,22 @@ public sealed class CoverageArtifactSettingsBoundaryTests
         else Assert.Equal(expectedCause, result.Cause);
     }
 
+    [Fact]
+    public void RepeatedSettingsAliasesMayResolveToTheSameInputWithoutBecomingAConflict()
+    {
+        using var temp = TestDirectory.Create();
+        Directory.CreateDirectory(Path.Join(temp.Path, "settings"));
+        var settings = Path.Join(temp.Path, "settings", "same.runsettings");
+        File.WriteAllText(settings, Enabled);
+
+        var result = Observe(Project(temp.Path), "net10.0", Capability("Debug", "net10.0"), "Debug",
+            ["--settings", "settings/same.runsettings", "-s", "settings/../settings/same.runsettings"]);
+
+        Assert.Equal("enabled", result.State);
+        Assert.Equal(Path.GetFullPath(settings), result.EffectivePath);
+        Assert.Equal(Enabled, File.ReadAllText(settings));
+    }
+
     [Theory]
     [InlineData("{\"Properties\":{\"Configuration\":\"Debug\",\"Configuration\":\"Release\",\"TargetFramework\":\"net10.0\"}}", "configuration-evaluation-unavailable")]
     [InlineData("{\"Properties\":{\"Configuration\":null,\"TargetFramework\":\"net10.0\"}}", "configuration-evaluation-unavailable")]

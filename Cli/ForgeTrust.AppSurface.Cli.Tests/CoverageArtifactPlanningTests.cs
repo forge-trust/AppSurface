@@ -26,7 +26,7 @@ public sealed class CoverageArtifactPlanningTests
     public void InvalidRetentionIsRejectedBeforeAnEvidencePlanCanBeExecuted(string retention)
     {
         var exception = Assert.Throws<EvidencePlanningException>(() => EvidencePlanner.ValidatePolicy(Policy(retention)));
-        Assert.Equal("ASEVD127", exception.Code);
+        Assert.Equal("ASEVD132", exception.Code);
         Assert.Contains("coverageArtifactRetention", exception.Message, StringComparison.Ordinal);
     }
 
