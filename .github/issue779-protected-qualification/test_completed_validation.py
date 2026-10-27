@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 import io
 import json
 import os
@@ -102,7 +103,9 @@ class CompletedValidationTests(unittest.TestCase):
                             'partial-qualification.json': _json(receipt)})
                 self.partial_body = _json(receipt)
             else:
-                members = {'source.json': self.capture}
+                source_member = (validation.COVERAGE_SOURCE_MEMBER if name.startswith(
+                    'issue779-checkpoint4-coverage-') else 'source.json')
+                members = {source_member: self.capture}
                 if name.startswith('issue779-c1-measured-None-'):
                     members['native/commands/00-stdout.log'] = b''
                 raw = _zip(members)
@@ -166,6 +169,25 @@ class CompletedValidationTests(unittest.TestCase):
     def test_rejects_capture_bytes_that_differ_from_every_archive(self):
         with self.assertRaisesRegex(ValueError, 'completed-validation-source-capture-hash'):
             self.inspect(self.capture + b' ')
+
+    def test_coverage_capture_requires_the_exact_multi_path_upload_member(self):
+        name = f'issue779-checkpoint4-coverage-{self.run_id}-{self.attempt}'
+        original = self.stage
+        binding = next(row for row in original.artifacts if row.name == name)
+        for members, reason in (
+                ({'source.json': self.capture}, 'artifact-source-member'),
+                ({validation.COVERAGE_SOURCE_MEMBER: self.capture, 'source.json': self.capture},
+                 'coverage-source-alias'),
+                ({validation.COVERAGE_SOURCE_MEMBER: self.capture + b' '}, 'artifact-source-binding')):
+            with self.subTest(reason=reason):
+                raw = _zip(members)
+                (self.stage_root / binding.staged_filename).write_bytes(raw)
+                updated = replace(binding, size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
+                artifacts = tuple(updated if row.name == name else row for row in original.artifacts)
+                self.stage = replace(original, artifacts=artifacts,
+                                     total_archive_bytes=sum(row.size for row in artifacts))
+                with self.assertRaisesRegex(ValueError, 'completed-validation-' + reason):
+                    self.inspect()
 
     def test_rejects_partial_receipt_claim_before_returning_projection(self):
         receipt = json.loads(self.partial_body)

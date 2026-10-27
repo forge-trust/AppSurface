@@ -30,6 +30,7 @@ MAX_CENTRAL_DIRECTORY_BYTES = 8 * MIB
 MAX_EXPANDED_ARCHIVE_BYTES = 512 * MIB
 MAX_PATH_BYTES = 4095
 MAX_SOURCE_BYTES = 1024 * 1024
+COVERAGE_SOURCE_MEMBER = '_temp/checkpoint4-evidence/source.json'
 MAX_AGGREGATE_BYTES = entrypoint.MAX_DOCUMENT
 MAX_AGGREGATE_ARCHIVE_BYTES = entrypoint.MAX_ARCHIVE
 MAX_PARTIAL_RECEIPT_BYTES = 64 * 1024
@@ -218,7 +219,7 @@ def _member_bodies(raw, rows, wanted, deadline):
             for name in wanted:
                 _check(deadline)
                 info = by_name[name]
-                maximum = (MAX_SOURCE_BYTES if name == 'source.json' else
+                maximum = (MAX_SOURCE_BYTES if name in ('source.json', COVERAGE_SOURCE_MEMBER) else
                            MAX_AGGREGATE_BYTES if name == 'aggregate.json' else
                            MAX_AGGREGATE_ARCHIVE_BYTES if name == 'aggregate.zip' else
                            MAX_PARTIAL_RECEIPT_BYTES if name == 'partial-qualification.json' else
@@ -425,10 +426,14 @@ def inspect_completed_run(stage, stage_directory, source_capture, *, deadline):
                                                aggregate_binding, bodies['aggregate.json'])
             source_digest = _sha(bodies['source.json'])
         else:
-            _need('source.json' in ordinary_names, 'artifact-source-member')
-            bodies = _member_bodies(raw, rows, {'source.json'}, deadline)
-            _need(bodies['source.json'] == source_capture, 'artifact-source-binding')
-            source_digest = _sha(bodies['source.json'])
+            source_member = (COVERAGE_SOURCE_MEMBER if binding.name ==
+                             f'issue779-checkpoint4-coverage-{stage.run_id}-{stage.run_attempt}' else 'source.json')
+            _need(source_member in ordinary_names, 'artifact-source-member')
+            if source_member == COVERAGE_SOURCE_MEMBER:
+                _need('source.json' not in ordinary_names, 'coverage-source-alias')
+            bodies = _member_bodies(raw, rows, {source_member}, deadline)
+            _need(bodies[source_member] == source_capture, 'artifact-source-binding')
+            source_digest = _sha(bodies[source_member])
         projections.append(ArchiveProjection(binding.artifact_id, binding.name, binding.sha256, binding.size,
                                              expanded, tuple(MemberProjection(row[0], row[3], row[4], row[6])
                                                              for row in rows), source_digest))
