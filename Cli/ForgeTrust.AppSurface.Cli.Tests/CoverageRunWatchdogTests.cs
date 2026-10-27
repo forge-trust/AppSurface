@@ -467,7 +467,10 @@ public sealed class CoverageRunWatchdogTests
         using var process = Process.Start(CreateLongRunningProcess())!;
         lease.Attach(process);
         Assert.Same(process, await processKilled.Task.WaitAsync(TimeSpan.FromSeconds(2)));
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        // Join the supervisor's cached drain instead of registering a concurrent exit waiter on its Process.
+        var drain = await supervisor.TerminateAndDrainProcessesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(drain.Confirmed);
+        Assert.Equal("complete", drain.Status);
         lease.Complete();
         await WaitForFileAsync(Path.Join(output.Path, "coverage-watchdog.json"));
 
