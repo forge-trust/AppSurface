@@ -1666,6 +1666,7 @@ public sealed class DurableSchemaPreflightIntegrationTests
                 .WithDatabase("appsurface_durable")
                 .WithUsername("appsurface")
                 .WithPassword("appsurface-test-password")
+                .WithCreateParameterModifier(PostgreSqlTestPortBindings.BindLocalDaemonToLoopback)
                 .WithResourceMapping(recipe, "/tmp")
                 .Build();
             await container.StartAsync();

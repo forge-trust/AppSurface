@@ -1462,6 +1462,13 @@ Migration map for repo-owned AppSurface Docs export:
 
 ## Development
 
+The CLI's PostgreSQL integration fixtures apply their port-binding policy before container startup.
+With a Unix-socket Docker daemon, published PostgreSQL ports bind to `127.0.0.1`;
+Docker still chooses the host port. This prevents a wildcard binding from sharing a port with an existing
+loopback binding and sending fixture credentials to another server. TCP and named-pipe Docker endpoints
+retain their configured bindings so remote daemon access remains available. This policy changes only test
+container networking; authentication, readiness assertions, and timeout limits still apply.
+
 Run the tool from source while developing:
 
 ```bash
