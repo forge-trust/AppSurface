@@ -108,6 +108,14 @@ the same exact zero-skip row set. It is an early filesystem regression check; it
 does not replace this checkpoint's authenticated owners, consumers or standard
 collector measurement.
 
+## Actual peer-credential controls
+
+The separate [actual peer-credential controls](peer-credentials-README.md) use a real nonroot
+UNIX-socket peer under root and retain their own four-row TRX. They neither replace the original
+root filesystem partitions nor authenticate an application or admission. The full measurement
+workflow merges only the pinned collector's actual report and revalidates the separate TRX before
+the unchanged gate consumes that report.
+
 ## Native workspace rejection controls
 
 The [finite workspace fixture](workspace_guards.py) runs six additional controls only after all seven original application consumers pass. It uses the same fixed [C# owner request and launch recipe](run-native.py), compiled registration and unit policy, under one separate fixed 900-second orchestration partition. Python only prepares immutable inputs and observes the C# runtime. Every new case must fail with its expected original closed diagnostic, retain account quarantine, observe empty generated groups before fixture containment, and leave an outside root-owned sentinel unchanged. A failed setup, incomplete case list or failed final group check fails the lane. Each new control reserves 60 seconds for actual containment inside the shared guard-partition clock and refuses to launch without that reserve. A failed or timed-out manager stop cannot skip the separate whole-unit KILL attempt; killing only the systemd-run client is insufficient.

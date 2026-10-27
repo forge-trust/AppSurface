@@ -28,3 +28,20 @@ publication sequence. The result is a data decision only, not proof of physical 
 Tests use copied booleans only and cover each one-field rejection with an adjacent valid control. They do not
 claim a native owner, cgroup emptiness, output authority, or worker custody. Final-settlement controls use only
 copied join flags and constructed pending-start snapshots; they do not construct a worker or native owner.
+
+
+## Ordered original observations
+
+[`SupervisionWorkerSettlementObservation.WaitAsync`](SupervisionWorkerSettlementObservation.cs) orders the
+finalizer's existing cleanup guard, asynchronous unit/group observation, conditional 25 ms wait and local
+publication. Its callbacks are fixed methods/closures from the authentic private worker in production.
+The compound observation keeps the original retained backend read, stopped-unit comparison, optional
+worker PID match and short-circuited kernel group read together. A false observation joins the original
+wait before the next guard; true records the existing milestone and join flags once. Any exception
+propagates into the existing [`SupervisionWorkerCleanup`](SupervisionWorkerCleanup.cs) catch boundary
+without retry or publication.
+
+This internal procedure owns no timer, token or native object. The owner supplies its original cleanup
+token and deadline; it cannot renew them. Its ordinary task/barrier tests check procedure ordering only,
+including pending inspections, pending waits and original failures. They cannot authenticate a unit,
+establish an empty cgroup or issue physical-settlement authority.

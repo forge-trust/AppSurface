@@ -76,6 +76,8 @@ public sealed class NativeMeasurementTests
         var sdkCoverage = Read(directory, "native-sdk.json", 32L * 1024 * 1024);
         var rootTrx = Read(directory, "root-files.trx");
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"), rootTrx);
+        PeerCredentialsMeasurement.Validate(binding.RootElement.GetProperty("peer_credentials_tests"),
+            Read(TestPathUtils.PathUnder(directory, "root-file-tests"), "peer-credentials.trx", 1024 * 1024));
         RootSupplementMeasurement.Validate(binding.RootElement.GetProperty("root_supplement_tests"),
             Read(directory, "root-supplement.trx", 1024 * 1024));
         ApplicationBundleMeasurement.Validate(

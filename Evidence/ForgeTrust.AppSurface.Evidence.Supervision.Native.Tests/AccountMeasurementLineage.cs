@@ -15,6 +15,8 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 internal static class AccountMeasurementLineage
 {
     private const int Mib = 1024 * 1024;
+    // The original four-class root partition, excluding separately measured supplementary controls.
+    private const int CurrentC3RootFileTestCount = 43;
     private static readonly string[] Modules = ["ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Evidence.Contracts",
         "ForgeTrust.AppSurface.Evidence.Planner", "ForgeTrust.AppSurface.Evidence.Coverage",
         "ForgeTrust.AppSurface.Evidence.Aspire", "ForgeTrust.AppSurface.Evidence.Supervision", "ForgeTrust.AppSurface.Evidence.Cli"];
@@ -77,8 +79,8 @@ internal static class AccountMeasurementLineage
         Cases(native.GetProperty("cases"), ["normal", "sdk-normal", "readiness", "factory-stall", "cancel", "stuck-descendant", "disposal-failure"]);
         Cases(native.GetProperty("workspace_guards"), ["bundle-extra-directory", "bundle-input-bytes", "bundle-input-mode", "scratch-fifo", "scratch-hardlink", "scratch-oversize"]);
         var rootTests = binding.GetProperty("root_file_tests");
-        Assert.Equal(41, rootTests.GetProperty("executed").GetInt32());
-        Assert.Equal(41, rootTests.GetProperty("passed").GetInt32());
+        Assert.Equal(CurrentC3RootFileTestCount, rootTests.GetProperty("executed").GetInt32());
+        Assert.Equal(CurrentC3RootFileTestCount, rootTests.GetProperty("passed").GetInt32());
         RootFilesystemMeasurement.Validate(rootTests, c3RootTrxBytes);
         var first = creation.RootElement;
         var second = rollback.RootElement;

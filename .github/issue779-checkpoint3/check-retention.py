@@ -18,8 +18,8 @@ for path in root.rglob('*'):
     count += 1
     path.chmod(0o600)
 # Three separately bounded files retain the supplementary root TRX, collector log,
-# and its portable retention-control log.
+# and its portable retention-control log. The distinct peer-credential TRX adds one fixed leaf.
 # Three additional fixed leaves retain the application-bundle TRX, collector log and parser-control log.
 # Product limits, per-file limits and the total retained byte budget stay unchanged.
-assert count <= 134 and total <= 96 * 1024 * 1024
+assert count <= 135 and total <= 96 * 1024 * 1024
 root.chmod(0o700)

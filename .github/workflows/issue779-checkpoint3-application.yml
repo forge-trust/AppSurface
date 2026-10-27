@@ -350,7 +350,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Keep the original 39-case TRX and account-lineage ABI intact. This separate pass
+          # Keep the original root-files TRX and account-lineage ABI intact. This separate pass
           # uses the same hash-verified C3 image restored by the preceding standard collector.
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-supplement-tests" <<'PY_ARGS'
@@ -396,6 +396,44 @@ jobs:
           binding['root_supplement_tests'] = {'trx_sha256': hashlib.sha256(trx.read_bytes()).hexdigest(), 'executed': 44, 'passed': 44, 'native_acceptance': False}
           for suffix in ('json', 'cobertura.xml'):
               combined = root / ('native-supervision-supplement.' + suffix)
+              assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
+              combined.replace(root / ('native-supervision.' + suffix))
+          binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
+          binding_path.write_text(json.dumps(binding, sort_keys=True))
+          PY_BIND
+
+      - name: Measure four actual peer-credential controls separately with the pinned collector
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This partition exercises only the real SO_PEERCRED helper; it creates no protected owner/connection proof.
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/root-file-tests" <<'PY_ARGS'
+          import sys
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxPeerCredentialsNativeTests', '--logger:trx;LogFileName=peer-credentials.trx', '--ResultsDirectory:' + sys.argv[2]]
+          assert all(not any(c in value for c in '\n\r"\\') for value in values)
+          print(' '.join('"' + value + '"' for value in values))
+          PY_ARGS
+          )"
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$test_image" \
+            --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --merge-with "$CHECKPOINT3_EVIDENCE/native-supervision.json" \
+            --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision-peer-credentials-combined" \
+            >> "$CHECKPOINT3_EVIDENCE/root-file-driver.log" 2>&1
+          sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH="$GITHUB_WORKSPACE/.github/issue779-checkpoint3" \
+            python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY_BIND'
+          import hashlib, json, pathlib, sys
+          from peer_credentials_measurement import read_trx
+          root = pathlib.Path(sys.argv[1])
+          trx = root / 'root-file-tests/peer-credentials.trx'
+          receipt = read_trx(trx)
+          binding_path = root / 'measurement-binding.json'
+          binding = json.loads(binding_path.read_bytes())
+          binding['peer_credentials_tests'] = receipt
+          for suffix in ('json', 'cobertura.xml'):
+              combined = root / ('native-supervision-peer-credentials-combined.' + suffix)
               assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
               combined.replace(root / ('native-supervision.' + suffix))
           binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()

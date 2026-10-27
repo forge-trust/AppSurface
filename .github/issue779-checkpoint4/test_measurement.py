@@ -143,5 +143,61 @@ class ImageBindingControls(unittest.TestCase):
                     self.exercise(mutation)
 
 
+class OrdinaryBuildMeasurementIntegrationControls(unittest.TestCase):
+    """Source-owned workflow dependency and retained-input contracts, never native evidence."""
+
+    @staticmethod
+    def job(text, name):
+        match = re.search(r'^  ' + re.escape(name) + r':\n.*?(?=^  [A-Za-z0-9_-]+:\n|\Z)',
+                          text, re.MULTILINE | re.DOTALL)
+        if match is None:
+            raise AssertionError('missing-fixed-measurement-job:' + name)
+        return match.group(0)
+
+    def test_ordinary_build_joins_the_same_original_native_measurement_chain(self):
+        workflows = Path(__file__).resolve().parents[1] / 'workflows'
+        current = (workflows / 'build.yml').read_text()
+        runtime = (workflows / 'evidencehost-runtime-proof.yml').read_text()
+        selectors = ('none', *(f'n{index:02d}' for index in range(4, 17)))
+        shared = ('packaged-producer', 'worker-controls', 'account-creation', 'account-rollback',
+                  *(f'worker-measurement-{selector}' for selector in selectors))
+        for name in shared:
+            with self.subTest(job=name):
+                expected = self.job(runtime, name).replace('needs: application-consumers',
+                                                          'needs: evidence-native-measurement')
+                self.assertEqual(expected, self.job(current, name))
+        build = self.job(current, 'build')
+        line = next(row.strip() for row in build.splitlines() if row.strip().startswith('needs:'))
+        required = {'worker-controls', 'evidence-native-measurement', 'account-creation',
+                    'account-rollback', 'packaged-producer',
+                    *(f'worker-measurement-{selector}' for selector in selectors)}
+        self.assertEqual(required, set(part.strip() for part in line.removeprefix('needs: [').removesuffix(']').split(',')))
+        self.assertIn('/usr/bin/bash ./scripts/coverage-solution.sh', build)
+        self.assertIn("COVERAGE_GATE_DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}", build)
+
+    def test_ordinary_build_stages_all_fixed_validator_inputs_before_enabling_the_test(self):
+        workflows = Path(__file__).resolve().parents[1] / 'workflows'
+        current = self.job((workflows / 'build.yml').read_text(), 'build')
+        runtime = self.job((workflows / 'evidencehost-runtime-proof.yml').read_text(), 'solution-coverage')
+        first = '      - name: Download current native measurement from the successful application lane\n'
+        last = "          printf 'EVIDENCEHOST_NATIVE_MEASUREMENT=1\\n' >> \"$GITHUB_ENV\"\n"
+        def staging(text):
+            start = text.index(first)
+            end = text.index(last, start) + len(last)
+            return text[start:end]
+        self.assertEqual(staging(runtime), staging(current))
+        section = staging(current)
+        for leaf in ('native-sdk.json', 'native-sdk-failure.json', 'native/sdk-test-failure.json',
+                     'root-file-tests/peer-credentials.trx', 'root-supplement-tests/root-supplement.trx',
+                     'application-bundle-tests/application-bundle.trx', 'native-accounts-receipt.json',
+                     'native-producer-roots.json', 'native-producer-roots-c2.json'):
+            with self.subTest(input=leaf):
+                self.assertIn(leaf, section)
+        self.assertIn('for variant in creation rollback', section)
+        self.assertIn('from measurement_chain import validate_final', section)
+        self.assertIn("chain_data['predecessor']['report_sha256'] == prior_sha", section)
+        self.assertLess(section.index('validate_final(source_raw'), section.index('EVIDENCEHOST_NATIVE_MEASUREMENT=1'))
+
+
 if __name__ == '__main__':
     unittest.main()

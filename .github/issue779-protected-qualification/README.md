@@ -88,3 +88,25 @@ The reviewed collector passed twelve detached boundary controls in the isolated 
 These use synthetic provider metadata and local archive bytes; no live API or native workflow ran.
 The workflow has not run on protected `main`. These tests do not establish qualification, acceptance,
 coverage gain or a Trusted result.
+
+## Completed-run archive staging
+
+The separate [completed-run resolver](completed-run-README.md) prepares original artifacts only after
+the protected qualification attempt has completed successfully. It requires the fixed successful job
+inventory, both immutable workflow bodies, the current verified source capture and the exact 37
+run/attempt-bound artifact names. Downloads are streamed into fresh private files, compared with
+provider digests and rehashed through the retained file descriptors. It rejects changed named inodes
+and cleans up only files still owned by that staging attempt. Its independent finite transport budget
+does not change a workload, cleanup, output or shared-parent transport limit.
+
+The returned staging record contains comparison data, never a qualified support record. A later
+source-owned validator must inspect the bounded original archives and run all original callback,
+consumer, account and coverage validators. No completed-run finalizer workflow or automatic
+registration is enabled by this resolver; the protected-main and runtime Trusted obligations above
+remain required.
+
+The [inventory projection](completed-validation-README.md) is the next bounded data step. It checks
+archive structure before allocating ZIP entry objects, compares embedded source captures, binds the
+original C1 aggregate and partial receipt, and returns immutable metadata only. It deliberately
+does not certify the nested native controls or gate. In particular, successful archive parsing is
+never a substitute for the original validators or protected runtime admission.

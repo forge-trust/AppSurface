@@ -44,6 +44,7 @@ jobs:
           printf 'PARENT_CONTROL_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
           (cd .github/issue779-protected-consumer && timeout --signal=KILL 60 python3 -B -m unittest -v test_provenance test_github_parent test_dispatch test_entrypoint) > "$evidence/transport-controls.log" 2>&1
+          (cd .github/issue779-protected-qualification && timeout --signal=KILL 30 python3 -B -m unittest -v test_entrypoint test_completed_run test_completed_validation) > "$evidence/qualification-data-controls.log" 2>&1
       - name: Compile the ordinary semantic consumer and exercise the actual fixed child
         shell: bash
         run: |
@@ -351,6 +352,8 @@ jobs:
           cp "$RUNNER_TEMP/checkpoint4-native-input/source.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/native/native-receipt.json" TestResults/issue779-native-measurement/
           cp "$RUNNER_TEMP/checkpoint4-native-input/root-file-tests/root-files.trx" TestResults/issue779-native-measurement/
+          mkdir -m 0700 TestResults/issue779-native-measurement/root-file-tests
+          cp "$RUNNER_TEMP/checkpoint4-native-input/root-file-tests/peer-credentials.trx" TestResults/issue779-native-measurement/root-file-tests/
           cp "$RUNNER_TEMP/checkpoint4-native-input/root-supplement-tests/root-supplement.trx" TestResults/issue779-native-measurement/
           mkdir -m 0700 TestResults/issue779-native-measurement/application-bundle-tests
           cp "$RUNNER_TEMP/checkpoint4-native-input/application-bundle-tests/application-bundle.trx" TestResults/issue779-native-measurement/application-bundle-tests/

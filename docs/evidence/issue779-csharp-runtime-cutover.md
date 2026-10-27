@@ -2,7 +2,39 @@
 
 <a id="latest-verified-consumer-checkpoint--2026-10-26"></a>
 
-## Latest verified consumer checkpoint — revision 91 — 2026-10-26
+## Latest verified consumer artifacts — revision 101 — 2026-10-27
+
+[Run 40445212390, attempt 1](https://github.com/forge-trust/AppSurface/actions/runs/40445212390)
+binds these retained artifacts to source `3fb45d86151262152394405f7d8072c46ea9a1cf`
+and the 3,624-file capture SHA-256 `13db6ee01c0e82d6a898140237c15dac29c8118767480315a401f624468a698b`.
+Independent artifact validation checked the original archive digests and current source bindings;
+the verification itself did not repeat native execution. The full run and its unchanged numerical
+gate were still in progress when this checkpoint was recorded.
+
+| Retained evidence | Verified result | Verification receipt SHA-256 |
+| --- | --- | --- |
+| Original C1 worker controls | All sixteen original callback rows, exactly once across fourteen selectors; fifteen original artifact digests and all source Git blobs/modes checked | `8539a43dd0b4fdd15c9d4ed6eeafa73f1451ab34712de70f1b29d183f07e469d` |
+| C3 application and workspace matrix | Thirteen original records, 43 root-file tests, 44 supplementary tests and seventeen bundle/report-discovery tests; no failed checks | `223c5e32b944f9e8db48b1f80360f2ceea975e169b61d130a418f72d5b9ca683` |
+| Separate SDK lifecycle cases | Configure stall, registered disposer stall and post-stop guards retained their expected failures, joined output, final empty groups and account absence | `e0aeed1d1f0a5d9b4844413dd049cb2278024894f20199f48dde0b7cb191860d` |
+| Packaged C2 and account chain | Seven producer/artifact cases with both paired EOFs, 118 physical checks, 28 raw package-smoke leaves, and creation/rollback validation without failed checks | `e86c69faaf332133cce6ba1622df2989a58b4ba014a144abb2eacfa3e1752b28` |
+
+The source-103 [focused Linux file-custody run](https://github.com/forge-trust/AppSurface/actions/runs/40452614282)
+separately passed all 29 actual root bundle-audit, report-discovery and selected-results-root cases,
+with zero skipped/failed rows. Its source is `d34330e9f0885f4ba7d0a683e986e0ddcc2bcc36`, capture
+SHA-256 `a0a86aaddc5b2c824dd0b8614662a99b47d157e55bb8cab4958239133a5ea3eb`;
+artifact `12711470047` is 268,640 bytes with SHA-256
+`73f4a15e40786b0ee3310039eba63b2358694545faa2f1b2d8bfc5a12a0599c1`.
+Those focused filesystem controls do not replace the complete consumer chain or numerical coverage
+gate on that source.
+
+The next prepared integration adds four separate actual Linux peer-credential controls and keeps their fixed four-row TRX apart from the existing 29 filesystem controls. Local supervision validation passed 3,098 tests, with 91 Linux/root-only cases skipped on macOS. Its protected support-record v3 parser/matcher passed all 55 focused data cases; it removes the impossible stored self-commit comparison while retaining the protected workflow content digest and separately resolved current commit. The [support-record reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/protected-support.md) explains that distinction. The [completed-run staging](../../.github/issue779-protected-qualification/completed-run-README.md) and [archive inventory](../../.github/issue779-protected-qualification/completed-validation-README.md) remain non-authorizing prerequisites; neither registers support or enables Trusted execution. The same preparation corrects the account-lineage data validator's obsolete 41-row expectation to the actual original 43-row root partition; the 43-row regression failed before that correction, and obsolete/different inventories remain rejected. The ordinary PR/main workflow also now requires and stages the complete existing measurement chain before enabling its native validator; its coverage command and threshold inputs remain unchanged. These prepared changes still require their own source-bound Linux run.
+
+These candidate-branch results do not establish [protected qualification](../../.github/issue779-protected-qualification/README.md),
+populate the production catalogue or accepted-proof registry, or enable Trusted execution. The latest
+completed numerical gate below remains revision 91's failed result until a newer exact-source gate
+finishes. Production limits, comparison base, coverage thresholds and exclusions are unchanged.
+
+## Previous verified consumer checkpoint — revision 91 — 2026-10-26
 
 [Run 40266921255, attempt 1](https://github.com/forge-trust/AppSurface/actions/runs/40266921255) binds the source-91 consumer evidence to `4b70e5dc228cdc3cea6c28bab2787668b9796c2e` and the 3,579-file capture SHA-256 `464aa36327a3efa2665538317ad1caff6f85dcdcd1418ed6981fa2c09ce34efb`. The terminal observation SHA-256 is `9abd83d04e5b6f36c08494ac351db5f37e53a44ac814a6113d610e18e638a2e4`; it records 12 bounded commands, all exit 0, joined and log-hash matched. C1 verified all 16 original callbacks across 14 selectors (receipt SHA-256 `1b9972cfac33ec976642e867ee2358099da93d0f2236255d36d3b8b9f8cf811f`), while keeping native-acceptance and gate-pass claims false. C3 records all 13 original native cases closed and empty, plus separate 41/41 root and 41/41 supplementary test results (verification SHA-256 `f977b520725cc4d3ea7738a0dd43caf598f3376a48ef9e84399f6bdaa8f8c14f`). Account and rollback verifications report 15,098 and 15,108 checks with no failures.
 

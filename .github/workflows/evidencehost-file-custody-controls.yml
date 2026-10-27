@@ -44,9 +44,13 @@ jobs:
           evidence="$RUNNER_TEMP/issue779-audit-focused-evidence"
           mkdir -m 0700 "$evidence"
           mkdir -m 0700 "$evidence/test-results"
+          mkdir -m 0700 "$evidence/peer-credentials" "$evidence/peer-credentials/test-results"
           printf 'AUDIT_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           cat > "$evidence/commands.json" <<'JSON'
           {"schema":"issue779-focused-audit-commands-v1","native_acceptance":false,"commands":{"source_capture":{"exit_code":null},"restore":{"exit_code":null},"build":{"exit_code":null},"application_audit":{"exit_code":null},"trx_validation":{"exit_code":null},"source_verify":{"exit_code":null}}}
+          JSON
+          cat > "$evidence/peer-credentials/commands.json" <<'JSON'
+          {"schema":"issue779-focused-peer-credentials-commands-v1","native_acceptance":false,"peer_audit_exit":null,"trx_validation_exit":null}
           JSON
           set +e
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json" \
@@ -147,6 +151,70 @@ jobs:
           PY
           exit "$result"
 
+      - name: Run the separate four actual-peer credential controls on native Linux
+        id: peer-credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          test_args=(vstest "$test_image"
+            '--TestCaseFilter:FullyQualifiedName~LinuxPeerCredentialsNativeTests'
+            '--logger:trx;LogFileName=peer-credentials.trx'
+            "--ResultsDirectory:$AUDIT_EVIDENCE/peer-credentials/test-results")
+          set +e
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i \
+            PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_ROOT="$AUDIT_SDK_ROOT" DOTNET_CLI_HOME=/tmp \
+            DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+            /usr/bin/bash -c 'umask 077; exec "$@"' _ "$AUDIT_SDK_ROOT/dotnet" "${test_args[@]}" \
+            > "$AUDIT_EVIDENCE/peer-credentials/peer-credentials.log" 2>&1
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/peer-credentials/commands.json" "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, code = sys.argv[1], int(sys.argv[2])
+          value = json.load(open(path, encoding='utf-8'))
+          value['peer_audit_exit'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
+      - name: Validate the exact four-row actual-peer TRX separately
+        id: peer-trx-validation
+        if: always() && steps.peer-credentials.outcome != 'skipped'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin PYTHONPATH="$GITHUB_WORKSPACE/.github/issue779-checkpoint3" \
+            /usr/bin/python3 -B - "$AUDIT_EVIDENCE/peer-credentials/test-results/peer-credentials.trx" \
+            "$AUDIT_EVIDENCE/peer-credentials/peer-credentials-trx-check.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          from peer_credentials_measurement import read_trx
+          value = read_trx(Path(sys.argv[1]))
+          with open(sys.argv[2], 'x', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          PY
+          result=$?
+          set -e
+          python3 -B - "$AUDIT_EVIDENCE/peer-credentials/commands.json" "$result" <<'PY'
+          import json, os, sys, tempfile
+          path, code = sys.argv[1], int(sys.argv[2])
+          value = json.load(open(path, encoding='utf-8'))
+          value['trx_validation_exit'] = code
+          fd, temporary = tempfile.mkstemp(prefix='.commands-', dir=os.path.dirname(path))
+          with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+              json.dump(value, stream, sort_keys=True, separators=(',', ':'))
+              stream.write('\n')
+          os.replace(temporary, path)
+          PY
+          exit "$result"
+
       - name: Require the exact twenty-nine-row TRX without changing outcomes
         id: trx-validation
         if: always() && steps.application-audit.outcome != 'skipped'
@@ -220,7 +288,9 @@ jobs:
           root = Path(sys.argv[1])
           allowed = {'source.json', 'source.log', 'commands.json', 'restore.log', 'build.log',
                      'application-audit.log', 'application-audit-trx-check.json',
-                     'test-results/application-bundle.trx'}
+                     'test-results/application-bundle.trx', 'peer-credentials/commands.json',
+                     'peer-credentials/peer-credentials.log', 'peer-credentials/peer-credentials-trx-check.json',
+                     'peer-credentials/test-results/peer-credentials.trx'}
           observed = set()
           total = 0
           for directory, names, leaves in os.walk(root, topdown=True, followlinks=False):
@@ -248,7 +318,7 @@ jobs:
                       raise SystemExit('source-capture-size-rejected')
                   if path.suffix == '.trx' and metadata.st_size > 1024 * 1024:
                       raise SystemExit('trx-size-rejected')
-          if len(observed) > 8 or total > 20 * 1024 * 1024:
+          if len(observed) > 12 or total > 20 * 1024 * 1024:
               raise SystemExit('evidence-total-bound-rejected')
           PY
 
@@ -257,7 +327,25 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: issue779-audit-focused-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/issue779-audit-focused-evidence
+          path: |
+            ${{ runner.temp }}/issue779-audit-focused-evidence/source.json
+            ${{ runner.temp }}/issue779-audit-focused-evidence/source.log
+            ${{ runner.temp }}/issue779-audit-focused-evidence/commands.json
+            ${{ runner.temp }}/issue779-audit-focused-evidence/restore.log
+            ${{ runner.temp }}/issue779-audit-focused-evidence/build.log
+            ${{ runner.temp }}/issue779-audit-focused-evidence/application-audit.log
+            ${{ runner.temp }}/issue779-audit-focused-evidence/application-audit-trx-check.json
+            ${{ runner.temp }}/issue779-audit-focused-evidence/test-results/application-bundle.trx
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Retain the separate four-row peer-credentials measurement
+        if: always() && steps.retention.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-peer-credentials-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/issue779-audit-focused-evidence/peer-credentials
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

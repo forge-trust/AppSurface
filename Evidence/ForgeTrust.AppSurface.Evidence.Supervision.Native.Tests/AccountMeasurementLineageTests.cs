@@ -9,9 +9,9 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests;
 /// <summary>Hash-chain and witness metadata only; no row starts an owner, manufactures admission or proves cleanup.</summary>
 public sealed class AccountMeasurementLineageTests
 {
-    /// <summary>A consistent detached chain is accepted as data while its physical-result claims remain unproven here.</summary>
+    /// <summary>The current 43-row C3 root partition binds a consistent detached chain without proving physical results.</summary>
     [Fact]
-    public void ConsistentDetachedChainBindsTheSameOriginalAncestor()
+    public void CurrentFortyThreeRowRootInventoryBindsTheSameOriginalAncestor()
     {
         var fixture = new Fixture();
         fixture.Validate();
@@ -105,7 +105,9 @@ public sealed class AccountMeasurementLineageTests
     [Theory]
     [InlineData(39)]
     [InlineData(40)]
+    [InlineData(41)]
     [InlineData(42)]
+    [InlineData(44)]
     public void ObsoleteOrDifferentRootInventoryCannotEnrollTheAccountChain(int count)
     {
         var fixture = new Fixture(count);
@@ -122,7 +124,7 @@ public sealed class AccountMeasurementLineageTests
         private readonly JsonObject _c3Report;
         private readonly byte[] _trx;
 
-        internal Fixture(int rootCount = 41)
+        internal Fixture(int rootCount = 43)
         {
             Creation.ConfigureMerged(); Rollback.ConfigureMerged();
             _c3Report = Creation.Report.DeepClone().AsObject();

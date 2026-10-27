@@ -90,10 +90,14 @@ public sealed class EvidenceProtectedSupportRecordTests
         var fixture = DataShapeOnly();
         Assert.NotEqual(fixture.Qualification.WorkflowPath, fixture.CurrentWorkflowPath);
         Assert.NotEqual(fixture.Qualification.WorkflowSha256, fixture.CurrentWorkflowSha256);
-        Assert.NotEqual(fixture.Qualification.WorkflowCommit, fixture.CurrentWorkflowCommit);
+        Assert.Equal(40, fixture.Qualification.WorkflowCommit.Length);
         var parsed = Parse(CanonicalDataBytes());
         Assert.Equal(EvidenceProtectedSupportRecord.QualificationWorkflowPath, parsed.Data.Qualification.WorkflowPath);
         Assert.Equal(fixture.CurrentWorkflowPath, parsed.Data.CurrentWorkflowPath);
+
+        var wrongCurrentWorkflow = JsonNode.Parse(CanonicalDataBytes())!.AsObject();
+        wrongCurrentWorkflow["CurrentWorkflowPath"] = ".github/workflows/other.yml";
+        Reject(EvidenceCanonicalJson.Serialize(wrongCurrentWorkflow));
     }
 
     [Fact]
@@ -121,7 +125,7 @@ public sealed class EvidenceProtectedSupportRecordTests
         var raw = Encoding.UTF8.GetString(EvidenceCanonicalJson.Serialize(DataShapeOnly()));
         Reject(Encoding.UTF8.GetBytes(raw.Insert(1, "\"Unknown\":0,")));
         Reject(Encoding.UTF8.GetBytes(raw.Insert(1, "\"provider\":\"github-actions\",")));
-        Reject(Encoding.UTF8.GetBytes(raw.Insert(1, "\"Schema\":\"evidence-protected-support-v2\",")));
+        Reject(Encoding.UTF8.GetBytes(raw.Insert(1, "\"Schema\":\"evidence-protected-support-v3\",")));
         Reject(Encoding.UTF8.GetBytes(raw.Replace("\"Length\":3", "\"Length\":3,\"Unknown\":1", StringComparison.Ordinal)));
         var digestDrift = JsonNode.Parse(raw)!.AsObject();
         digestDrift["Tool"]!.AsObject()["Sha256"] = Hex('9');
@@ -164,7 +168,7 @@ public sealed class EvidenceProtectedSupportRecordTests
             "BaseRevision" => facts with { BaseRevision = Hex40('b') },
             "Tool" => facts with { Tool = Changed(facts.Tool) },
             "Runtime" => facts with { Runtime = Changed(facts.Runtime) },
-            "CurrentWorkflowCommit" => facts with { CurrentWorkflowCommit = Hex40('c') },
+            "CurrentWorkflowCommit" => facts with { CurrentWorkflowCommit = "not-a-commit" },
             "ApplicationId" => facts with { Application = facts.Application with { Id = "other-app" } },
             "Bundle" => facts with { Application = facts.Application with { Bundle = Changed(facts.Application.Bundle) } },
             "ProfileIds" => facts with { ProfileIds = ["unreviewed-profile"] },
@@ -186,6 +190,35 @@ public sealed class EvidenceProtectedSupportRecordTests
         var (record, facts) = DataShapeOnlyAndFacts();
         Assert.True(EvidenceProtectedSupportMatcher.Matches(record, facts));
         // This is only the data equality branch. The fixture's run, completion fields and hashes are fabricated.
+    }
+
+    [Fact]
+    public void MatcherAllowsDifferentValidCurrentCommitWhenReviewedWorkflowBytesMatch()
+    {
+        var (record, facts) = DataShapeOnlyAndFacts();
+        var laterCurrentCommit = facts with { CurrentWorkflowCommit = Hex40('c') };
+
+        Assert.True(EvidenceProtectedSupportMatcher.Matches(record, laterCurrentCommit));
+    }
+
+    [Fact]
+    public void ParserRejectsV2RecordSchema()
+    {
+        var bytes = CanonicalDataBytes();
+        _ = Parse(bytes);
+        var oldSchema = JsonNode.Parse(bytes)!.AsObject();
+        oldSchema["Schema"] = "evidence-protected-support-v2";
+        Reject(EvidenceCanonicalJson.Serialize(oldSchema));
+    }
+
+    [Fact]
+    public void ParserRejectsRemovedStoredCurrentWorkflowCommitField()
+    {
+        var bytes = CanonicalDataBytes();
+        _ = Parse(bytes);
+        var oldStoredField = JsonNode.Parse(bytes)!.AsObject();
+        oldStoredField["CurrentWorkflowCommit"] = Hex40('d');
+        Reject(EvidenceCanonicalJson.Serialize(oldStoredField));
     }
 
     [Fact]
@@ -429,7 +462,6 @@ public sealed class EvidenceProtectedSupportRecordTests
             ProtectedBaseRevision = Hex40('7'),
             CurrentWorkflowPath = ".github/workflows/evidencehost-protected-parent.yml",
             CurrentWorkflowSha256 = Hex('6'),
-            CurrentWorkflowCommit = Hex40('d'),
             Tool = tool,
             Runtime = runtime,
             RuntimeHostPath = "dotnet",
@@ -458,7 +490,7 @@ public sealed class EvidenceProtectedSupportRecordTests
         var facts = new EvidenceProtectedSupportFacts("github-actions", "linux-x64", "evidence-worker-linux-v2",
             EvidenceProtectedSupportRecord.ProtectedRepository, 42, "push", EvidenceProtectedSupportRecord.ProtectedRef,
             true, record.Data.CurrentWorkflowPath, record.Data.CurrentWorkflowSha256, record.Data.ProtectedBaseRevision,
-            100, 2, record.Data.CurrentWorkflowCommit, Hex40('f'), record.Data.Tool, record.Data.Runtime, record.Data.RuntimeHostPath,
+            100, 2, Hex40('d'), Hex40('f'), record.Data.Tool, record.Data.Runtime, record.Data.RuntimeHostPath,
             record.Data.RuntimeHostSha256, record.Data.EntryAssemblyPath, record.Data.EntryAssemblySha256, app,
             record.Data.ProfileIds, record.Data.ProducerIds, record.Data.CapabilityIds);
         return (record, facts);

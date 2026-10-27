@@ -123,7 +123,7 @@ The supplementary [producer file-copy controls](../ForgeTrust.AppSurface.Evidenc
 The three additional [retained-report boundary controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxCustodySupplementNativeTests.cs) reject a nested directory symlink without altering its outside file, read a genuine report at the existing 1 MiB limit before rejecting one extra byte, and reject replacement of the selected root's parent through two independent retained sets. Every failed operation stays closed; the original file bytes remain unchanged. Their fixed names are required alongside the larger count. Local compilation cannot establish that these Linux-only controls passed; fresh current-source root execution is required.
 
 The supplemental `root-supplement.trx` and `root_supplement_tests` binding are
-separate from the original 41-case `root-files.trx` consumed by the account lineage.
+separate from the original 43-case `root-files.trx` consumed by the account lineage.
 The binding requires exact SHA-256, 44 executed/passed rows with no skips or failures,
 and exactly the three fixed classes. The same already verified C3 dependency image
 is measured, its DLL/PDB bytes are rechecked after collector restoration, and its
@@ -247,6 +247,12 @@ The selected root-filesystem class also includes five [producer copy component c
 
 The separate negative report remains independently inspectable. The later `native-sdk.json` is aggregate SDK coverage once its supported merge includes that report; only the normal control's retained v1 witness independently attributes its original worker handoff. JSON consistency is not admission or OS authentication. The [constructed receipt controls](SdkFailureMeasurementTests.cs) deliberately run without workers, pidfds, accounts or an accepted proof, and therefore supply no native coverage or qualification claim themselves. Every new input is mandatory in the genuine native measurement test before the unchanged solution gate consumes the merged report.
 
+### Ordinary build measurement dependencies
+
+The [PR/main build](../../.github/workflows/build.yml) now stages the same fixed measurement inputs as the [cutover workflow](../../.github/workflows/evidencehost-runtime-proof.yml) before enabling `EVIDENCEHOST_NATIVE_MEASUREMENT`. Its dependency graph requires the original C1 controls, C3 application result, account creation, rollback, packaged producer root measurement, and all fourteen ordered C1 measurement segments. Each reusable job retains its original limits and policy. The ordinary coverage command, comparison-base selection, thresholds and exclusions are unchanged.
+
+Both workflows preserve the separate original C3, SDK-negative, root supplement, bundle/report, peer-credential, account and producer inputs consumed by `NativeMeasurementTests`. The fixed `measurement_chain.validate_final` callback verifies the segment chain and checks its C2 predecessor report against the staged producer report before selecting the standard final report for `MergeWith`. A five-file C3-only staging directory cannot satisfy this validator. The [workflow contract controls](../../.github/issue779-checkpoint4/test_measurement.py) compare the complete job graph and staging block so a new mandatory input cannot be added to only one caller. These source/data controls do not execute Linux jobs or establish coverage.
+
 ### Account mechanism data validation
 
 [`AccountMeasurement.Validate`](AccountMeasurement.cs) compares six detached inputs:
@@ -262,7 +268,7 @@ variant-specific utility/cleanup outcomes, and real account/owner document hits.
 also invokes [`AccountMeasurementLineage.Validate`](AccountMeasurementLineage.cs)
 with the original C3 binding/report/native/root-TRX and both account packets. It checks
 the complete C3 → creation → rollback lineage, hashes, run/attempt identity and each
-stage's source-bound current-method witness. Its eleven byte inputs are bounded at
+stage's source-bound current-method witness. The original four-class C3 root partition must contain exactly 43 passing rows, matching the current [account driver](../../.github/issue779-checkpoint4/run-accounts.py). The separately measured root supplement, bundle/report audit and peer-credential rows do not increase that original count. The detached fixture now uses 43; obsolete 39–42 and different 44-row inventories reject even after descendant hashes are rebound. Its eleven byte inputs are bounded at
 160 MiB in total. The two account reports are connected through standard collector
 merges, but their successful local data tests do not establish a native merged run.
 
@@ -363,3 +369,15 @@ The original 43-row root TRX and 44-row supplement remain separate. The pinned s
 merges the new actual report into the existing measured report; no hit values or denominators are
 rewritten by this validator. [`NativeMeasurementTests`](NativeMeasurementTests.cs) reads the new fixed
 subdirectory only after staging from the same run's source-bound application artifact.
+
+### Separate peer-credential measurement
+
+The [C3 peer-credential measurement guide](../../.github/issue779-checkpoint3/peer-credentials-README.md)
+documents the separate four-case Linux `SO_PEERCRED` partition, artifact binding, and limits on what it
+proves. [`PeerCredentialsMeasurement.Validate`](PeerCredentialsMeasurement.cs) requires the exact four
+test names and theory parameters, passing outcomes, complete zero counters, a matching raw TRX digest,
+and `native_acceptance: false`. Its detached [parser controls](PeerCredentialsMeasurementTests.cs)
+reject missing or duplicate rows, altered theory data, non-passing outcomes, counter changes, foreign
+counters, DTDs, oversized input, and inconsistent bindings. Synthetic parser controls do not establish
+kernel execution, protected ownership, admission, or Trusted qualification; only the separately retained
+current-run native TRX is consumed by the measurement test.

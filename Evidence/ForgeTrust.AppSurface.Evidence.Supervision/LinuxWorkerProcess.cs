@@ -179,21 +179,23 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
         {
             if (!groupJoined)
             {
-                while (true)
-                {
-                    _owner.RequireCleanup(_cleanupDeadline!.Token);
-                    // Read on the retained original start connection. Cancellation/error here loses
-                    // retention and cannot publish settlement. A job path and empty group are insufficient.
-                    var stopped = await _backend!.ReadUnitAsync(Unit, _cleanupDeadline.Token).ConfigureAwait(false);
-                    if (_recipe!.HasStopped(stopped)
-                        && (_worker is null || stopped.ExecMainPid == _worker.Pid)
-                        && LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, _cleanupDeadline.Token)))
+                await SupervisionWorkerSettlementObservation.WaitAsync(
+                    requireCleanup: () => _owner.RequireCleanup(_cleanupDeadline!.Token),
+                    inspectSelectedUnitAndGroup: async () =>
+                    {
+                        // Keep the original connection, short-circuited PID check and native group read.
+                        // A failed read cannot publish settlement; the outer cleanup still owns failure.
+                        var stopped = await _backend!.ReadUnitAsync(Unit, _cleanupDeadline!.Token).ConfigureAwait(false);
+                        return _recipe!.HasStopped(stopped)
+                            && (_worker is null || stopped.ExecMainPid == _worker.Pid)
+                            && LinuxAccountUtility.GroupEmpty(LinuxCgroupProbe.Read(Unit, _cleanupDeadline.Token));
+                    },
+                    waitForNextObservation: () => Task.Delay(TimeSpan.FromMilliseconds(25), _cleanupDeadline!.Token),
+                    recordStopped: () =>
                     {
                         _qualification.ObserveUnitAndGroupStopped();
-                        groupJoined = true; unitJoined = true; break;
-                    }
-                    await Task.Delay(TimeSpan.FromMilliseconds(25), _cleanupDeadline.Token).ConfigureAwait(false);
-                }
+                        groupJoined = true; unitJoined = true;
+                    }).ConfigureAwait(false);
             }
         },
         JoinMonitor: _exit is null ? null : async () =>

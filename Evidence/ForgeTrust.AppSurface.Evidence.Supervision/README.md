@@ -386,6 +386,16 @@ read/write rechecks the retained process and kernel peer, using that operation's
 private socket factory constructs an authenticated connection. The owner retains the process identity until
 all connection users join. Procedure selection, admission and physical cgroup exit remain separate work.
 
+The internal [`LinuxPeerCredentials`](LinuxPeerCredentials.cs) utility reads only root UID state and the exact
+12-byte kernel `SO_PEERCRED` tuple from an already-owned safe socket handle. `Require` compares the retained
+worker PID, UID and GID and returns the same fixed `ASEVD402` rejection for any mismatch. `RequirePeer` keeps
+the disposed-socket guard before this syscall, and preserves its owner checks and original cancellation token
+around it. The utility does not create a connection, owner or admission capability. The root-only
+[`LinuxPeerCredentialsNativeTests`](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxPeerCredentialsNativeTests.cs)
+uses a real UNIX stream and a child dropped to UID/GID 65534 by `setpriv`; on other hosts these tests skip.
+Passing this utility test proves only the helper's kernel tuple comparison, not `Accept`, worker ownership,
+request authorization or protected operation completion.
+
 ### Retained listener ownership
 
 `LinuxRunWorkspace.ClaimListenerParent` claims one listener attempt before opening the fixed broker parent,

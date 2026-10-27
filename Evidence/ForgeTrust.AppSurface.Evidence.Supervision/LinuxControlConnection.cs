@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using Microsoft.Win32.SafeHandles;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
@@ -83,7 +82,7 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
         {
             if (!OperatingSystem.IsLinux() || RuntimeInformation.ProcessArchitecture != Architecture.X64
                 || RuntimeInformation.OSArchitecture != Architecture.X64
-                || GetUid() != 0 || GetEffectiveUid() != 0 || owner is null || worker is null
+                || !LinuxPeerCredentials.IsCurrentProcessRoot() || owner is null || worker is null
                 || worker.Role != LinuxProcessSamplingRole.Worker || worker.Pid is 0 or > int.MaxValue
                 || worker.Uid == 0 || worker.Gid == 0 || !socket.Connected
                 || socket.AddressFamily != AddressFamily.Unix || socket.SocketType != SocketType.Stream)
@@ -153,12 +152,9 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
         token.ThrowIfCancellationRequested();
         _owner.RequireControlIdentity(default);
         _worker.Recheck(default);
-        uint length = 12;
-        if (Volatile.Read(ref _socketDisposed) != 0 || GetUid() != 0 || GetEffectiveUid() != 0
-            || GetPeerCredentials(_socket.SafeHandle, 1, 17, out var peer, ref length) != 0
-            || length != 12 || peer.Pid <= 0 || peer.Uid == 0 || peer.Gid == 0
-            || peer.Pid != _pid || peer.Uid != _uid || peer.Gid != _gid)
+        if (Volatile.Read(ref _socketDisposed) != 0)
             throw PeerRejected();
+        LinuxPeerCredentials.Require(_socket.SafeHandle, _pid, _uid, _gid);
         _owner.RequireControlIdentity(default);
         token.ThrowIfCancellationRequested();
     }
@@ -167,22 +163,6 @@ internal sealed partial class LinuxControlConnection : IDisposable, IAsyncDispos
         new("ASEVD402", "The protected control peer could not be authenticated.");
 
     private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct PeerCredentials
-    {
-        internal int Pid;
-        internal uint Uid;
-        internal uint Gid;
-    }
-
-    [LibraryImport("libc", EntryPoint = "getuid")]
-    private static partial uint GetUid();
-    [LibraryImport("libc", EntryPoint = "geteuid")]
-    private static partial uint GetEffectiveUid();
-    [LibraryImport("libc", EntryPoint = "getsockopt", SetLastError = true)]
-    private static partial int GetPeerCredentials(SafeSocketHandle socket, int level, int option,
-        out PeerCredentials credentials, ref uint length);
 
     private sealed class AuthenticatedStream : Stream
     {

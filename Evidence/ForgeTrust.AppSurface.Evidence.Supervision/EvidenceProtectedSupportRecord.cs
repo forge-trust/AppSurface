@@ -12,6 +12,7 @@ internal sealed class EvidenceProtectedSupportRecord
     public const string RecordSchema = EvidenceProtectedSupportRecordData.RecordSchema;
     public const int MaximumRecordBytes = EvidenceProtectedSupportRecordData.MaximumRecordBytes;
     public const string QualificationWorkflowPath = EvidenceProtectedSupportRecordData.QualificationWorkflowPath;
+    public const string CurrentWorkflowPath = EvidenceProtectedSupportRecordData.ProtectedCurrentWorkflowPath;
     public const string ProtectedRepository = EvidenceProtectedSupportRecordData.ProtectedRepository;
     public const string ProtectedRef = EvidenceProtectedSupportRecordData.ProtectedRef;
 
@@ -32,7 +33,7 @@ internal sealed class EvidenceProtectedSupportRecord
             using var document = JsonDocument.Parse(utf8Json.ToArray(), new JsonDocumentOptions { MaxDepth = 12 });
             EvidenceProtectedSupportRecordData.RequireObject(document.RootElement,
             ["Schema", "Provider", "Platform", "Protocol", "RepositoryName", "RepositoryId", "ProtectedBaseRevision",
-             "CurrentWorkflowSha256", "CurrentWorkflowCommit", "CurrentWorkflowPath", "Tool", "Runtime", "RuntimeHostPath",
+             "CurrentWorkflowSha256", "CurrentWorkflowPath", "Tool", "Runtime", "RuntimeHostPath",
              "RuntimeHostSha256", "EntryAssemblyPath", "EntryAssemblySha256", "Applications", "ProfileIds", "ProducerIds",
              "CapabilityIds", "Qualification"]);
             var root = document.RootElement;
@@ -70,9 +71,10 @@ internal sealed class EvidenceProtectedSupportRecord
 /// <summary>Internal serialization data; only the private parsed wrapper is accepted by the matcher.</summary>
 internal sealed record EvidenceProtectedSupportRecordData
 {
-    public const string RecordSchema = "evidence-protected-support-v2";
+    public const string RecordSchema = "evidence-protected-support-v3";
     public const int MaximumRecordBytes = 1024 * 1024;
     public const string QualificationWorkflowPath = ".github/workflows/evidencehost-protected-qualification.yml";
+    public const string ProtectedCurrentWorkflowPath = ".github/workflows/evidencehost-protected-parent.yml";
     public const string ProtectedRepository = "forge-trust/AppSurface";
     public const string ProtectedRef = "refs/heads/main";
 
@@ -87,7 +89,6 @@ internal sealed record EvidenceProtectedSupportRecordData
     public long RepositoryId { get; init; }
     public string ProtectedBaseRevision { get; init; } = string.Empty;
     public string CurrentWorkflowSha256 { get; init; } = string.Empty;
-    public string CurrentWorkflowCommit { get; init; } = string.Empty;
     public string CurrentWorkflowPath { get; init; } = string.Empty;
     public EvidenceSupportManifest Tool { get; init; } = new(string.Empty, Array.Empty<EvidenceSupportFile>());
     public EvidenceSupportManifest Runtime { get; init; } = new(string.Empty, Array.Empty<EvidenceSupportFile>());
@@ -113,8 +114,7 @@ internal sealed record EvidenceProtectedSupportRecordData
         Need(value.Schema == RecordSchema && value.Provider == "github-actions" && value.Platform == "linux-x64"
             && value.Protocol == "evidence-worker-linux-v2" && value.RepositoryName == ProtectedRepository
             && value.RepositoryId > 0 && Hash40(value.ProtectedBaseRevision)
-            && Hash(value.CurrentWorkflowSha256) && Hash40(value.CurrentWorkflowCommit)
-            && SafeWorkflowPath(value.CurrentWorkflowPath)
+            && Hash(value.CurrentWorkflowSha256) && value.CurrentWorkflowPath == ProtectedCurrentWorkflowPath
             && value.Tool is not null && value.Runtime is not null && value.Applications is not null
             && value.ProfileIds is not null && value.ProducerIds is not null && value.CapabilityIds is not null
             && value.Qualification is not null);
@@ -278,13 +278,13 @@ internal static class EvidenceProtectedSupportMatcher
                 && facts.Protocol == "evidence-worker-linux-v2" && facts.RepositoryName == EvidenceProtectedSupportRecord.ProtectedRepository
                 && facts.RepositoryId > 0 && (facts.Event is "push" or "workflow_dispatch")
                 && facts.Ref == EvidenceProtectedSupportRecord.ProtectedRef && facts.RefProtected
-                && SafeWorkflowPath(facts.CurrentWorkflowPath) && Hash(facts.CurrentWorkflowSha256)
+                && facts.CurrentWorkflowPath == EvidenceProtectedSupportRecord.CurrentWorkflowPath
+                && Hash(facts.CurrentWorkflowSha256)
                 && facts.CurrentRunId > 0 && facts.CurrentRunAttempt > 0 && Hash40(facts.CurrentWorkflowCommit)
                 && Hash40(facts.CurrentSubjectRevision) && Hash40(facts.BaseRevision)
                 && recordData.Provider == facts.Provider && recordData.Platform == facts.Platform && recordData.Protocol == facts.Protocol
                 && recordData.RepositoryName == facts.RepositoryName && recordData.RepositoryId == facts.RepositoryId
                 && recordData.CurrentWorkflowSha256 == facts.CurrentWorkflowSha256
-                && recordData.CurrentWorkflowCommit == facts.CurrentWorkflowCommit
                 && recordData.CurrentWorkflowPath == facts.CurrentWorkflowPath && recordData.ProtectedBaseRevision == facts.BaseRevision
                 && Same(recordData.Tool, facts.Tool) && Same(recordData.Runtime, facts.Runtime)
                 && recordData.RuntimeHostPath == facts.RuntimeHostPath && recordData.RuntimeHostSha256 == facts.RuntimeHostSha256
@@ -308,5 +308,4 @@ internal static class EvidenceProtectedSupportMatcher
             .SequenceEqual(right.OrderBy(value => value, StringComparer.Ordinal), StringComparer.Ordinal);
     internal static bool Hash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
     private static bool Hash40(string? value) => value is { Length: 40 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
-    private static bool SafeWorkflowPath(string? value) => EvidenceProtectedSupportRecordData.SafeWorkflowPath(value);
 }
