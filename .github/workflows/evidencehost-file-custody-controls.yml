@@ -116,14 +116,14 @@ jobs:
           PY
           exit "$result"
 
-      - name: Run exactly the two root filesystem test classes on native Linux
+      - name: Run exactly the three root filesystem test classes on native Linux
         id: application-audit
         shell: bash
         run: |
           set -euo pipefail
           test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
           test_args=(vstest "$test_image"
-            '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests|FullyQualifiedName~LinuxProducerReportDiscoveryNativeTests'
+            '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests|FullyQualifiedName~LinuxProducerReportDiscoveryNativeTests|FullyQualifiedName~LinuxSelectedProducerResultsRootNativeTests'
             '--logger:trx;LogFileName=application-bundle.trx'
             "--ResultsDirectory:$AUDIT_EVIDENCE/test-results")
           set +e
@@ -147,7 +147,7 @@ jobs:
           PY
           exit "$result"
 
-      - name: Require the exact seventeen-row TRX without changing outcomes
+      - name: Require the exact twenty-nine-row TRX without changing outcomes
         id: trx-validation
         if: always() && steps.application-audit.outcome != 'skipped'
         shell: bash

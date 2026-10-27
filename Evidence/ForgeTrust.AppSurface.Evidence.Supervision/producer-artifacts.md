@@ -79,3 +79,23 @@ Do not close or release accounts while a handler/read may still be active. Do no
 - The inventory digest and immutable data shape do not create admission, proof, or successful-run status.
 - Report custody depends on real producer readiness, root filesystem checks, original deadlines, joined handlers/readers, and final account/workspace custody. Portable tests or detached metadata cannot establish those Linux facts.
 - Do not describe this internal wrapper as a public API. The authenticated control protocol owns the external inventory and read operations; callers cannot provide a root or choose a different token after selection.
+
+
+## Selected results descriptor chain
+
+[`LinuxSelectedProducerResultsRoot`](LinuxSelectedProducerResultsRoot.cs) retains the existing
+component-by-component `openat2` chain used after the authentic `Capture` factory has validated the
+input, owner, accounts, workspace and settled producer. It compares the selected 0700 subject UID/GID
+root with the workspace's kernel metadata and requires its immediate results parent to remain root-owned
+0711. Every recheck compares retained descriptors and their original parent names; renamed or replaced
+ancestors, symlinks, changed owners, unsafe modes and expired original deadlines reject. Disposal closes
+the acquired descriptors in reverse order and is idempotent. Callers must join readers before disposal.
+
+This internal holder exposes actual filesystem descriptors for the existing custody procedure and its
+[native Linux controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSelectedProducerResultsRootNativeTests.cs).
+It cannot authenticate a producer, create a workspace or grant artifact custody. The outer factory still
+selects the actual token directory only after the original readiness and ownership checks. Use the holder
+only for that descriptor-chain responsibility; use the authentic `Capture` path for producer artifacts.
+The twelve new root-only controls require a fresh Linux run. Compilation or skipped macOS rows are not
+native evidence. The existing measurement partition requires all twenty-nine audit/discovery/selected-root
+cases and exact test names; it retains its original byte, time and coverage bounds.

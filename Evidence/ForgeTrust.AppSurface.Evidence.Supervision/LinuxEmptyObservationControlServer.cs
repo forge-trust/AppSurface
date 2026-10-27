@@ -231,63 +231,28 @@ internal sealed class LinuxEmptyObservationControlServer
                         case EvidenceApplicationStartControlRequest app:
                             if (_application is null) throw Rejected();
                             var started = await _application.StartAsync(app, jobOperation.Token).ConfigureAwait(false);
-                            coverageResponse = EvidenceCanonicalJson.Serialize(new
-                            {
-                                ok = true,
-                                lease_id = started.LeaseId,
-                                apphost_pid = started.AppHostPid,
-                                application_uid = started.ApplicationUid,
-                                application_gid = started.ApplicationGid,
-                                cgroup = started.Cgroup,
-                                owned = true
-                            });
+                            coverageResponse = SupervisionControlReplyData.ApplicationStart(started);
                             break;
                         case EvidenceResourceWaitControlRequest readiness:
                             if (_application is null) throw Rejected();
                             var ready = await _application.WaitAsync(readiness, jobOperation.Token).ConfigureAwait(false);
-                            coverageResponse = EvidenceCanonicalJson.Serialize(new
-                            {
-                                ok = true,
-                                lease_id = ready.LeaseId,
-                                resource_id = ready.ResourceId,
-                                application_uid = ready.ApplicationUid,
-                                cgroup = ready.Cgroup,
-                                kernel_peer_checked = true,
-                                http_status = ready.HttpStatus,
-                                healthy = true,
-                                received_bytes = ready.ReceivedBytes
-                            });
+                            coverageResponse = SupervisionControlReplyData.ApplicationReadiness(ready);
                             break;
                         case EvidenceRunControlRequest run:
                             _application?.RequireReady(jobOperation.Token);
                             var result = await _coverage.RunAsync(run, jobOperation.Token).ConfigureAwait(false);
                             ObserveQualificationProducerResult(result, jobOperation.Token);
-                            coverageResponse = EvidenceCanonicalJson.Serialize(new
-                            {
-                                ok = true,
-                                exit_code = result.ExitCode,
-                                stdout = result.Stdout,
-                                stderr = result.Stderr,
-                                output_truncated = result.OutputTruncated,
-                                received_bytes = result.ReceivedBytes
-                            });
+                            coverageResponse = SupervisionControlReplyData.Run(result);
                             break;
                         case EvidenceArtifactsControlRequest inventory:
                             var reports = _coverage.Inventory(inventory.RelativeRoot, jobOperation.Token);
-                            coverageResponse = EvidenceCanonicalJson.Serialize(new
-                            {
-                                ok = true,
-                                artifacts = reports.Select(static item => new { path = item.RelativePath, length_bytes = item.Length }).ToArray()
-                            });
+                            coverageResponse = SupervisionControlReplyData.Inventory(reports);
                             break;
                         case EvidenceArtifactControlRequest read:
                             var bytes = _coverage.Read(read, jobOperation.Token);
-                            coverageResponse = EvidenceCanonicalJson.Serialize(new
-                            {
-                                ok = true,
-                                bytes_base64 = Convert.ToBase64String(bytes),
-                                end = _coverage.IsEnd(read.Path, read.Offset + bytes.Length, jobOperation.Token)
-                            });
+                            var bytesBase64 = SupervisionControlReplyData.EncodeArtifactBytes(bytes);
+                            var end = _coverage.IsEnd(read.Path, read.Offset + bytes.Length, jobOperation.Token);
+                            coverageResponse = SupervisionControlReplyData.Artifact(bytesBase64, end);
                             break;
                     }
                     _owner.RequireActive(jobOperation.Token);

@@ -12,6 +12,7 @@ public sealed class ApplicationBundleMeasurementTests
 {
     private const string AuditTestPrefix = "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxApplicationBundleAuditNativeTests.";
     private const string DiscoveryTestPrefix = "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxProducerReportDiscoveryNativeTests.";
+    private const string ResultsRootPrefix = "ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxSelectedProducerResultsRootNativeTests.";
     private static readonly string[] TestNames =
     [
         AuditTestPrefix + "ActualRootTreeInventoryAcceptsSelectedBytesAndRetainsOnlyBorrowedNodes",
@@ -31,10 +32,22 @@ public sealed class ApplicationBundleMeasurementTests
         DiscoveryTestPrefix + "SixtyFourthReportIsAcceptedAndTheNextActualReportIsRejected",
         DiscoveryTestPrefix + "ThirtySecondPathComponentIsAcceptedAndThirtyThirdIsRejected",
         DiscoveryTestPrefix + "PreCancelledDiscoveryStopsBeforeNativeEnumeration",
+        ResultsRootPrefix + "ActualSelectedDirectoryRechecksAndRepeatedDisposeClosesTheRetainedDescriptor",
+        ResultsRootPrefix + "ASelectedRootWithAnotherKernelInodeRejectsBeforeAdoptingTheActualDirectory",
+        ResultsRootPrefix + "SelectedDirectoryRequiresExactPrivateModeEvenWhenTheSampleMatchesTheKernel",
+        ResultsRootPrefix + "SelectedDirectoryRequiresTheOriginalSubjectOwner",
+        ResultsRootPrefix + "ResultsParentRequiresTheExactRootOwnedSearchableMode",
+        ResultsRootPrefix + "WritableAncestorRejectsWithoutOpeningAReplacementOrChangingItsBytes",
+        ResultsRootPrefix + "RenamedSelectedDirectoryCannotBeReplacedBehindItsRetainedDescriptor",
+        ResultsRootPrefix + "RenamedResultsParentCannotBeReplacedBehindTheRetainedChain",
+        ResultsRootPrefix + "ChangedSelectedOwnerAfterOpenRejectsTheNextKernelRecheck",
+        ResultsRootPrefix + "SelectedSymlinkCannotAdoptAnOtherwiseValidOutsideDirectory",
+        ResultsRootPrefix + "PreCancelledOpenAndRecheckKeepTheOriginalTokenAndNeverChangeTheTree",
+        ResultsRootPrefix + "ExpiredOriginalDeadlineRejectsOpenAndRecheckWithoutRenewingTheAllowance",
     ];
 
     [Fact]
-    public void ExactSeventeenAuditAndDiscoveryRowsAreAcceptedAsNonAcceptanceMeasurement()
+    public void ExactTwentyNineAuditDiscoveryAndSelectedRootRowsAreAcceptedAsNonAcceptanceMeasurement()
     {
         var bytes = Data();
         using var binding = Binding(bytes);
@@ -48,7 +61,7 @@ public sealed class ApplicationBundleMeasurementTests
     [InlineData("executed")]
     [InlineData("passed")]
     [InlineData("native-acceptance")]
-    public void BindingMustDescribeOnlyTheExactSeventeenRowNonAcceptanceTrx(string fault)
+    public void BindingMustDescribeOnlyTheExactTwentyNineRowNonAcceptanceTrx(string fault)
     {
         var bytes = Data();
         using var binding = Binding(bytes, fault);
@@ -98,8 +111,8 @@ public sealed class ApplicationBundleMeasurementTests
             DiscoveryTestPrefix + "SpecialOrUnsafeActualEntriesRejectWithoutChangingReportBytes(kind: \"not-symlink\")");
         if (fault == "not-passed") rows[^1].SetAttributeValue("outcome", "NotExecuted");
         var counters = new XElement(ns + "Counters",
-            new XAttribute("total", 17), new XAttribute("executed", 17),
-            new XAttribute("passed", 17),
+            new XAttribute("total", 29), new XAttribute("executed", 29),
+            new XAttribute("passed", 29),
             new XAttribute("failed", fault == "counter-mismatch" ? 1 : 0),
             new XAttribute("error", 0), new XAttribute("notExecuted", fault == "nonzero-skip-counter" ? 1 : 0),
             new XAttribute("warning", 0), new XAttribute("aborted", 0), new XAttribute("inconclusive", 0),
@@ -119,8 +132,8 @@ public sealed class ApplicationBundleMeasurementTests
         var binding = new JsonObject
         {
             ["trx_sha256"] = Convert.ToHexStringLower(SHA256.HashData(bytes)),
-            ["executed"] = 17,
-            ["passed"] = 17,
+            ["executed"] = 29,
+            ["passed"] = 29,
             ["native_acceptance"] = false,
         };
         if (fault == "missing-binding-field") binding.Remove("passed");

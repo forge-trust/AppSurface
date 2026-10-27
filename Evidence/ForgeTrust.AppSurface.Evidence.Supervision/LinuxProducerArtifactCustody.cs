@@ -1,6 +1,4 @@
 using ForgeTrust.AppSurface.Evidence.Contracts;
-using Microsoft.Win32.SafeHandles;
-using static ForgeTrust.AppSurface.Evidence.Contracts.EvidenceLinuxFileSystem;
 
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
@@ -14,10 +12,6 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision;
 internal sealed class LinuxProducerArtifactCustody : IDisposable
 {
     internal const int MaximumRequestedChunkBytes = 128 * 1024;
-    private const uint DirectoryMode = 0x41c0; // 0700.
-    private const ulong PathFlags = 0x200000 | 0x80000; // O_PATH | O_CLOEXEC.
-    private const ulong DirectoryFlags = 0x10000 | 0x80000; // O_DIRECTORY | O_CLOEXEC.
-    private const ulong AncestorResolution = 0x02 | 0x04 | 0x08;
     private const string ReportName = "coverage.cobertura.xml";
 
     private readonly object _gate = new();
@@ -89,7 +83,7 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
             if (!StringComparer.Ordinal.Equals(selected.Path, expectedPath)) throw Invalid();
             var uid = accounts.SubjectUid;
             var gid = accounts.SubjectGid;
-            using var discovery = SelectedResultsRoot.Open(selected.Path, selected.Metadata, uid, gid,
+            using var discovery = LinuxSelectedProducerResultsRoot.Open(selected.Path, selected.Metadata, uid, gid,
                 input.Deadline, token);
             var paths = LinuxProducerReportDiscovery.Discover(discovery.Root, uid, gid, input.Deadline, token);
             var inventoryPaths = ValidateReportPaths(paths);
@@ -229,117 +223,8 @@ internal sealed class LinuxProducerArtifactCustody : IDisposable
         if (_failed) throw Invalid();
     }
 
-    private static void RequireResultsParent(LinuxProtectedMetadata metadata) =>
-        LinuxReportCustodyMetadata.RequireResultsParent(metadata);
-
-    private static void RequireSelectedRoot(LinuxProtectedMetadata metadata, LinuxProtectedMetadata expected,
-        uint uid, uint gid) => LinuxReportCustodyMetadata.RequireSelectedRoot(metadata, expected, uid, gid);
-
     /// <summary>Creates the original fixed custody failure without selecting any native object.</summary>
     internal static IOException Invalid() => new("The producer report set is unavailable or changed.");
     private static bool Recoverable(Exception error) => SupervisionExceptionPolicy.IsRecoverable(error);
 
-    private sealed class SelectedResultsRoot : IDisposable
-    {
-        private readonly List<DirectoryIdentity> _chain;
-        private readonly uint _uid;
-        private readonly uint _gid;
-        private bool _closed;
-
-        private SelectedResultsRoot(List<DirectoryIdentity> chain, uint uid, uint gid)
-        { _chain = chain; _uid = uid; _gid = gid; }
-
-        internal SafeFileHandle Root => _chain[^1].Handle;
-        internal LinuxProtectedMetadata Metadata => _chain[^1].Metadata;
-
-        internal static SelectedResultsRoot Open(string path, LinuxProtectedMetadata expectedRoot,
-            uint uid, uint gid, LinuxInputDeadline deadline, CancellationToken token)
-        {
-            LinuxProtectedDeployment.ValidateAbsolute(path);
-            LinuxRetainedReportSet.RequireRootIdentity(expectedRoot, expectedRoot, uid, gid);
-            if (expectedRoot.Mode != DirectoryMode) throw Invalid();
-            var chain = new List<DirectoryIdentity>();
-            SafeFileHandle? pending = null;
-            try
-            {
-                deadline.Check(token);
-                pending = OpenAt2(-100, "/", DirectoryFlags, 0, 0);
-                var rootMetadata = LinuxProtectedMetadata.From(StatFd(pending));
-                deadline.Check(token);
-                rootMetadata.RequireAncestor(false);
-                chain.Add(new(pending, null, "/", rootMetadata, IsSelectedRoot: false));
-                pending = null;
-                var parts = path[1..].Split('/');
-                if (parts.Length < 2) throw Invalid();
-                for (var index = 0; index < parts.Length; index++)
-                {
-                    deadline.Check(token);
-                    var parent = chain[^1];
-                    pending = OpenAt2(Fd(parent.Handle), parts[index], DirectoryFlags, 0, AncestorResolution);
-                    var metadata = LinuxProtectedMetadata.From(StatFd(pending));
-                    deadline.Check(token);
-                    if (index == parts.Length - 1)
-                    {
-                        RequireSelectedRoot(metadata, expectedRoot, uid, gid);
-                    }
-                    else if (index == parts.Length - 2)
-                    {
-                        RequireResultsParent(metadata);
-                    }
-                    else
-                    {
-                        metadata.RequireAncestor(false);
-                    }
-                    chain.Add(new(pending, parent, parts[index], metadata, index == parts.Length - 1));
-                    pending = null;
-                }
-                var result = new SelectedResultsRoot(chain, uid, gid);
-                result.Recheck(deadline, token);
-                return result;
-            }
-            catch
-            {
-                pending?.Dispose();
-                foreach (var node in chain.AsEnumerable().Reverse()) node.Handle.Dispose();
-                throw;
-            }
-        }
-
-        internal void Recheck(LinuxInputDeadline deadline, CancellationToken token)
-        {
-            ObjectDisposedException.ThrowIf(_closed, this);
-            foreach (var node in _chain)
-            {
-                deadline.Check(token);
-                var current = LinuxProtectedMetadata.From(StatFd(node.Handle));
-                deadline.Check(token);
-                if (node.IsSelectedRoot)
-                {
-                    RequireSelectedRoot(current, node.Metadata, _uid, _gid);
-                }
-                else
-                {
-                    current.RequireAncestor(false);
-                    if (!current.SameAncestorAs(node.Metadata)) throw Invalid();
-                }
-                if (node.Parent is not null)
-                {
-                    using var named = OpenAt2(Fd(node.Parent.Handle), node.Name, PathFlags, 0, AncestorResolution);
-                    var namedMetadata = LinuxProtectedMetadata.From(StatFd(named));
-                    deadline.Check(token);
-                    if (!namedMetadata.SameAncestorAs(node.Metadata)) throw Invalid();
-                }
-            }
-        }
-
-        public void Dispose()
-        {
-            if (_closed) return;
-            _closed = true;
-            foreach (var node in _chain.AsEnumerable().Reverse()) node.Handle.Dispose();
-        }
-
-        private sealed record DirectoryIdentity(SafeFileHandle Handle, DirectoryIdentity? Parent,
-            string Name, LinuxProtectedMetadata Metadata, bool IsSelectedRoot);
-    }
 }

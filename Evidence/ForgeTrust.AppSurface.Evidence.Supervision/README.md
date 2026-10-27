@@ -468,6 +468,14 @@ and awaits the original I/O even if it ignores cancellation. Close initiation is
 termination. The current reply bound covers checkpoint one; artifact chunks require the explicitly bounded
 checkpoint-two response shape. No server/dispatcher composition is inferred from this transport.
 
+### Root work reply encoding
+
+The internal [root control reply codec](SupervisionControlReplyData.md) serializes the existing
+application-start, readiness, process-output, report-inventory and artifact-chunk fields. The
+control server retains its operation, owner and cancellation checks and its original response write.
+Artifact bytes are base64-encoded before the retained end-of-file check, preserving evaluation order.
+These data methods create no owner, readiness or admission authority.
+
 ## Root owner activation and process lifetime
 
 `LinuxSystemdBackend.ReadOwnerAsync` reads the current process's service through the already

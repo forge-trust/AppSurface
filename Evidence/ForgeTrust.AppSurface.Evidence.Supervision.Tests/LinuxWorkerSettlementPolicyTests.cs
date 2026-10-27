@@ -99,6 +99,67 @@ public sealed class LinuxWorkerSettlementPolicyTests
         LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(ReadyForFailedCapture());
     }
 
+    [Fact]
+    public void FinalSettlementAcceptsTheUnreservedAndCompletedReservedStartNeighbors()
+    {
+        var unreserved = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(
+            FinalSettlementFacts(new(false, false, false, true, true, SupervisionPendingStartFailure.None)));
+        Assert.True(unreserved.GroupJoined);
+        Assert.False(unreserved.Failed);
+
+        var reservedAndJoined = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(
+            FinalSettlementFacts(new(true, true, true, true, true, SupervisionPendingStartFailure.None)));
+        Assert.True(reservedAndJoined.GroupJoined);
+        Assert.False(reservedAndJoined.Failed);
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("unit")]
+    [InlineData("group")]
+    [InlineData("pipes")]
+    [InlineData("monitor")]
+    [InlineData("pending-stop")]
+    [InlineData("pending-failure")]
+    public void FinalSettlementRejectsEachObservedFailureAndRetainsPendingGroupFailure(string field)
+    {
+        var pending = new SupervisionPendingStartSnapshot(true, true, true, true, true,
+            SupervisionPendingStartFailure.None);
+        var facts = FinalSettlementFacts(pending) with
+        {
+            Failed = field == "failed",
+            UnitJoined = field != "unit",
+            GroupJoined = field != "group",
+            PipesClosed = field != "pipes",
+            MonitorJoined = field != "monitor",
+            Pending = field switch
+            {
+                "pending-stop" => pending with { StopJoined = false },
+                "pending-failure" => pending with { FirstFailure = SupervisionPendingStartFailure.StopFailed },
+                _ => pending,
+            },
+        };
+
+        var result = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(facts);
+
+        Assert.True(result.Failed);
+        Assert.Equal(field is not ("group" or "pending-stop" or "pending-failure"), result.GroupJoined);
+        var adjacent = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(FinalSettlementFacts(pending));
+        Assert.True(adjacent.GroupJoined);
+        Assert.False(adjacent.Failed);
+    }
+
+    [Fact]
+    public void FinalSettlementRejectsAnOutstandingReservedStart()
+    {
+        var pending = new SupervisionPendingStartSnapshot(true, false, false, true, false,
+            SupervisionPendingStartFailure.None);
+        var result = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(FinalSettlementFacts(pending));
+
+        Assert.False(result.GroupJoined);
+        Assert.True(result.Failed);
+    }
+
     private static void AssertInvalid(Action action)
     {
         var error = Assert.Throws<EvidenceAdmissionException>(action);
@@ -108,6 +169,9 @@ public sealed class LinuxWorkerSettlementPolicyTests
 
     private static LinuxFailedCaptureReadiness ReadyForFailedCapture() =>
         new(true, true, true, true, true, true, true);
+
+    private static LinuxWorkerFinalSettlementFacts FinalSettlementFacts(SupervisionPendingStartSnapshot pending) =>
+        new(false, true, true, true, true, pending);
 
     private static LinuxUnitProperties Terminal(int code = 1, int status = 0) =>
         new("appsurface-evidence-worker-00000000000000000000000000000001.service", "loaded", "inactive", "dead",

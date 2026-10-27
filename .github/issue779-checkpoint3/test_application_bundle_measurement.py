@@ -11,7 +11,7 @@ import application_bundle_measurement as subject
 def data(changed=None):
     root = ET.Element(subject.NS + 'TestRun')
     counters = {key: '0' for key in subject.ZERO_COUNTERS}
-    counters.update(total='17', executed='17', passed='17')
+    counters.update(total='29', executed='29', passed='29')
     if changed in counters:
         counters[changed] = '1'
     if changed == 'unknown-counter':
@@ -57,7 +57,7 @@ class ApplicationBundleMeasurementControls(unittest.TestCase):
             root = Path(directory)
             selected = root / 'application-bundle.trx'
             selected.write_bytes(data())
-            self.assertEqual(17, subject.read_trx(selected)['passed'])
+            self.assertEqual(29, subject.read_trx(selected)['passed'])
             original = selected.read_bytes()
             alias = root / 'alias'
             os.link(selected, alias)
@@ -72,7 +72,7 @@ class ApplicationBundleMeasurementControls(unittest.TestCase):
                 subject.read_trx(selected)
             parser.assert_not_called()
             selected.write_bytes(original)
-            self.assertEqual(17, subject.read_trx(selected)['executed'])
+            self.assertEqual(29, subject.read_trx(selected)['executed'])
 
 
 if __name__ == '__main__':

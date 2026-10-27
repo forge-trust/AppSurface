@@ -1,4 +1,4 @@
-"""Bound the separate 17-row application audit and report-discovery TRX; data grants no native authority."""
+"""Bound the separate 29-row application audit and report-discovery TRX; data grants no native authority."""
 from pathlib import Path
 import hashlib
 import os
@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 MAXIMUM_BYTES = 1024 * 1024
 AUDIT_PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxApplicationBundleAuditNativeTests.'
 DISCOVERY_PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxProducerReportDiscoveryNativeTests.'
+RESULTS_PREFIX = 'ForgeTrust.AppSurface.Evidence.Supervision.Tests.LinuxSelectedProducerResultsRootNativeTests.'
 METHODS = (
     AUDIT_PREFIX + 'ActualRootTreeInventoryAcceptsSelectedBytesAndRetainsOnlyBorrowedNodes',
     AUDIT_PREFIX + 'ActualExtraFileIsRejectedAfterItsDescriptorJoinsTheCallersQuarantineSet',
@@ -26,6 +27,18 @@ METHODS = (
     DISCOVERY_PREFIX + 'SixtyFourthReportIsAcceptedAndTheNextActualReportIsRejected',
     DISCOVERY_PREFIX + 'ThirtySecondPathComponentIsAcceptedAndThirtyThirdIsRejected',
     DISCOVERY_PREFIX + 'PreCancelledDiscoveryStopsBeforeNativeEnumeration',
+    RESULTS_PREFIX + 'ActualSelectedDirectoryRechecksAndRepeatedDisposeClosesTheRetainedDescriptor',
+    RESULTS_PREFIX + 'ASelectedRootWithAnotherKernelInodeRejectsBeforeAdoptingTheActualDirectory',
+    RESULTS_PREFIX + 'SelectedDirectoryRequiresExactPrivateModeEvenWhenTheSampleMatchesTheKernel',
+    RESULTS_PREFIX + 'SelectedDirectoryRequiresTheOriginalSubjectOwner',
+    RESULTS_PREFIX + 'ResultsParentRequiresTheExactRootOwnedSearchableMode',
+    RESULTS_PREFIX + 'WritableAncestorRejectsWithoutOpeningAReplacementOrChangingItsBytes',
+    RESULTS_PREFIX + 'RenamedSelectedDirectoryCannotBeReplacedBehindItsRetainedDescriptor',
+    RESULTS_PREFIX + 'RenamedResultsParentCannotBeReplacedBehindTheRetainedChain',
+    RESULTS_PREFIX + 'ChangedSelectedOwnerAfterOpenRejectsTheNextKernelRecheck',
+    RESULTS_PREFIX + 'SelectedSymlinkCannotAdoptAnOtherwiseValidOutsideDirectory',
+    RESULTS_PREFIX + 'PreCancelledOpenAndRecheckKeepTheOriginalTokenAndNeverChangeTheTree',
+    RESULTS_PREFIX + 'ExpiredOriginalDeadlineRejectsOpenAndRecheckWithoutRenewingTheAllowance',
 )
 ZERO_COUNTERS = ('failed', 'error', 'notExecuted', 'warning', 'aborted', 'inconclusive',
                  'timeout', 'notRunnable', 'disconnected', 'completed', 'inProgress',
@@ -49,12 +62,12 @@ def parse_trx(raw):
     require(len(counters) == 1)
     counter = counters[0].attrib
     require(set(counter) == set(ZERO_COUNTERS) | {'total', 'executed', 'passed'})
-    require(all(counter.get(key) == '17' for key in ('total', 'executed', 'passed')))
+    require(all(counter.get(key) == '29' for key in ('total', 'executed', 'passed')))
     require(all(counter.get(key) == '0' for key in ZERO_COUNTERS))
     rows = document.findall('.//' + NS + 'UnitTestResult')
-    require(len(rows) == 17 and all(row.get('outcome') == 'Passed' for row in rows))
+    require(len(rows) == 29 and all(row.get('outcome') == 'Passed' for row in rows))
     require({row.get('testName') for row in rows} == set(METHODS))
-    return {'trx_sha256': hashlib.sha256(raw).hexdigest(), 'executed': 17, 'passed': 17,
+    return {'trx_sha256': hashlib.sha256(raw).hexdigest(), 'executed': 29, 'passed': 29,
             'native_acceptance': False}
 
 

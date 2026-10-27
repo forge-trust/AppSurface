@@ -229,9 +229,10 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
             }
             _backend?.Dispose();
             var pending = _pending.Snapshot;
-            if (!pending.StopJoined || pending.IsFailed || (pending.StartReserved && !pending.StartJoined))
-                groupJoined = false;
-            if (failed || !unitJoined || !groupJoined || !pipesClosed || !monitorJoined) failed = true;
+            var finalSettlement = LinuxWorkerSettlementPolicy.EvaluateFinalSettlement(
+                new(failed, unitJoined, groupJoined, pipesClosed, monitorJoined, pending));
+            groupJoined = finalSettlement.GroupJoined;
+            if (finalSettlement.Failed) failed = true;
             _owner.RequireCleanup(default);
         },
         // Even a failed inspection must attempt the original connection close, after all real task joins.

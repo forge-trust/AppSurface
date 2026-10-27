@@ -23,6 +23,29 @@ the build reported zero warnings and errors. These are actual root Linux file co
 full consumer, coverage or Trusted result. The focused verification receipt has SHA-256
 `a3434121117f0ede28ca65c091091c8ceeb89f67b7d2439a5f98769b9f070d9d`.
 
+The same revision's application job has since completed successfully. Independent verification of
+artifact `12710686457` (3,419,277 bytes, SHA-256
+`e287e90c60bbd1b9b4b116423b44a5bf4eaf2ff0d0f61b4cd28a072ea772aa97`) checked the
+complete source capture, all thirteen original application/workspace records, the expected SDK
+failed-test result, 43 root-file rows, 44 supplementary rows and all seventeen exact audit/discovery
+test identities. Its verification receipt has SHA-256
+`223c5e32b944f9e8db48b1f80360f2ceea975e169b61d130a418f72d5b9ca683`.
+The separate lifecycle artifact `12710526990` (516,045 bytes, SHA-256
+`831d7bf2ecf299f653946cc55612e0d0aad1b6cb4cfb3631895982d55b4cd482`) passed the
+three fixed SDK lifecycle controls and their terminal group/path/account checks; its verification
+receipt has SHA-256 `e0aeed1d1f0a5d9b4844413dd049cb2278024894f20199f48dde0b7cb191860d`.
+The consumer chain and numerical gate remain in progress. These source-bound results do not enable Trusted.
+
+The next isolated preparation preserves the control server's five existing work replies through a
+[serialization-only codec](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/SupervisionControlReplyData.md)
+and directly checks the original [final worker-settlement decision](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/worker-settlement.md).
+The integrated local supervision suite passed 3,081 cases with 77 Linux/root-only skips. Twelve new
+[selected-results directory controls](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxSelectedProducerResultsRootNativeTests.cs)
+exercise the original mandatory-openat2 descriptor chain, separately from producer authentication.
+They are source-compiled on macOS and require fresh Linux execution; the combined audit/discovery/selected-root
+measurement now requires all twenty-nine exact methods. Production limits, original deadlines, the
+comparison base, exclusions and coverage thresholds are unchanged. No numerical coverage gain is claimed.
+
 The reviewed [protected qualification prerequisite](../../.github/issue779-protected-qualification/README.md)
 now calls the complete runtime-proof graph. Its data-only collector requires the protected context
 and all thirty-five runtime leaf jobs to succeed for the exact current head and attempt before

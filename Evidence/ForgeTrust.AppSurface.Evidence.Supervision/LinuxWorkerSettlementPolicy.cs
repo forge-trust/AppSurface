@@ -17,9 +17,37 @@ internal readonly record struct LinuxFailedCaptureReadiness(
     bool PendingStopJoined,
     bool ExitCompleted);
 
+/// <summary>Copied final-worker observations and the one atomic pending-start snapshot.</summary>
+/// <remarks>This record is detached data; it cannot prove or create any observation or native completion.</remarks>
+internal readonly record struct LinuxWorkerFinalSettlementFacts(
+    bool Failed,
+    bool UnitJoined,
+    bool GroupJoined,
+    bool PipesClosed,
+    bool MonitorJoined,
+    SupervisionPendingStartSnapshot Pending);
+
+/// <summary>Final local settlement decision, preserving the pending-adjusted group result for failure capture.</summary>
+internal readonly record struct LinuxWorkerFinalSettlementResult(bool GroupJoined, bool Failed);
+
 /// <summary>Data-only worker settlement predicates; no owner, lifecycle or native authority is created.</summary>
 internal static class LinuxWorkerSettlementPolicy
 {
+    /// <summary>Combines final copied joins with the exact original pending-start settlement predicate.</summary>
+    /// <remarks>
+    /// This does not add a <c>Closed</c> requirement: the original finalizer checks pending stop, failure,
+    /// and a reserved-start join only. Native observations and the caller's sticky failure/publication remain
+    /// owned by <c>LinuxWorkerProcess.FinalizeAsync</c>.
+    /// </remarks>
+    internal static LinuxWorkerFinalSettlementResult EvaluateFinalSettlement(LinuxWorkerFinalSettlementFacts facts)
+    {
+        var pending = facts.Pending;
+        var groupJoined = facts.GroupJoined && pending.StopJoined && !pending.IsFailed
+            && (!pending.StartReserved || pending.StartJoined);
+        return new(groupJoined, facts.Failed || !facts.UnitJoined || !groupJoined
+            || !facts.PipesClosed || !facts.MonitorJoined);
+    }
+
     /// <summary>Matches the original successful natural terminal and successful joined output receipts.</summary>
     internal static bool HasSuccessfulTerminalAndOutput(LinuxWorkerCompletionFacts facts) =>
         facts.NaturalTerminal is { ExecMainCode: 1, ExecMainStatus: 0 }
