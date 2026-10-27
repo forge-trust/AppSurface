@@ -1,0 +1,66 @@
+name: EvidenceHost protected qualification prerequisite
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: evidencehost-protected-qualification-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  protected-context:
+    name: Check the protected qualification source
+    if: github.repository == 'forge-trust/AppSurface' && github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Compare the immutable protected workflow context before native dispatch
+        run: timeout --signal=KILL 10 python3 -B .github/issue779-protected-qualification/entrypoint.py guard
+      - name: Exercise detached qualification boundary controls without API access
+        run: timeout --signal=KILL 30 python3 -B .github/issue779-protected-qualification/test_entrypoint.py -v
+
+  worker-controls:
+    name: Protected qualification worker controls
+    needs: protected-context
+    uses: ./.github/workflows/issue779-checkpoint1-worker.yml
+
+  retain-partial-qualification:
+    name: Retain partial qualification provenance without acceptance
+    needs: worker-controls
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Bind the protected checkout and collect the fixed current aggregate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          output="$RUNNER_TEMP/protected-qualification"
+          mkdir -m 0700 "$output"
+          printf 'QUALIFICATION_EVIDENCE=%s\n' "$output" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$output/source.json"
+          QUALIFICATION_EVIDENCE="$output" timeout --signal=KILL 130 python3 -B .github/issue779-protected-qualification/entrypoint.py collect
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$output/source.json" --verify
+      - name: Retain exact bounded qualification material
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-protected-qualification-partial-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/protected-qualification
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

@@ -308,6 +308,7 @@ class ProducerRootsPredecessorTests(unittest.TestCase):
                 'generation': 'c' * 32, 'managed_entry_sha256': 'b' * 64,
                 'native_acceptance': False, 'consumer_started': False, 'creation_succeeded': False,
                 'shared_close_task': None, 'closed_holder_rejected': None,
+                'cleanup_identity_guards_checked': None,
                 'names_absent': True, 'numeric_ids_absent': True, 'utilities': 7, 'settled_utilities': 7,
                 'failed_utilities': 1, 'close_completed': True, 'quarantined': False,
                 'reservation_failed': True, 'identities_published': False, 'original_handles_closed': True,
@@ -337,6 +338,25 @@ class ProducerRootsPredecessorTests(unittest.TestCase):
 
     def check(self):
         return subject.predecessor(self.args, self.source_body, self.capture)
+
+    def test_current_rollback_shape_requires_explicit_null_cleanup_identity_guard(self):
+        self.publish_prior()
+        self.check()
+        for kind in ('missing', 'wrong-positive', 'wrong-negative'):
+            with self.subTest(kind=kind):
+                original = self.native['receipt'].copy()
+                try:
+                    if kind == 'missing':
+                        self.native['receipt'].pop('cleanup_identity_guards_checked')
+                    else:
+                        self.native['receipt']['cleanup_identity_guards_checked'] = kind == 'wrong-positive'
+                    self.publish_prior()
+                    with self.assertRaisesRegex(RuntimeError, '^account-control-receipt-'):
+                        self.check()
+                finally:
+                    self.native['receipt'] = original
+        self.publish_prior()
+        self.check()
 
     def reject(self):
         with self.assertRaises((ValueError, RuntimeError, KeyError)):

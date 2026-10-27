@@ -31,6 +31,31 @@ existing shared testing helper reference; no package version changed. These loca
 the six native outcomes or reduce the revision-91 measured coverage deficit. Fresh source-bound Linux
 execution and the unchanged full coverage gate remain required.
 
+### Revision 97 portable predecessor correction
+
+Revision 97 passed the C1 reconciliation, application consumers, account creation and rollback jobs.
+Independent verification of the fifteen C1 artifacts reproduced all sixteen original callback rows
+(receipt SHA-256 `037192ad449c30a9f216cd9ffc5cbf32ec38a95022aeecb0429a160365caedc4`). Its original
+C3 and separate lifecycle artifacts also verified the thirteen native records, 43 root rows, 44
+supplementary rows and three lifecycle cases (receipt SHA-256
+`d064107f36094ddb72f1eb4e2d5888bfc60b0d8b81b1cb32040e86a474877e58`).
+
+The packaged consumer then stopped in its portable preflight, before native execution: nine of the
+31 predecessor controls used an obsolete rollback receipt missing `cleanup_identity_guards_checked`.
+The current [validator](../../.github/issue779-checkpoint4/run-accounts.py) correctly rejects missing
+fields; the [fixture](../../.github/issue779-checkpoint4/test_producer_roots.py) now supplies explicit
+`null` for rollback and separately rejects missing, true and false neighbors. All 32 portable controls
+passed after this fixture-only correction. No production validator, process limit or threshold changed.
+The downstream segmented measurements and full gate were skipped, so revision 97 establishes no new
+numerical coverage result. Revision 98 was published before this failure was diagnosed and does not
+include the fixture correction; its new native audit results remain separate.
+
+The [protected qualification prerequisite](../../.github/issue779-protected-qualification/README.md)
+is now source-prepared with ten offline boundary controls. Its protected-main review/merge, genuine
+dispatch, independent completed-run and selector-artifact verification, required consumer/gate results,
+support registration and ordinary Trusted runtime wiring remain outstanding. Its partial receipt
+explicitly claims none of those outcomes. The production accepted-proof and record registries remain empty.
+
 ## Revision 93/94 follow-up and protected-parent qualification — 2026-10-26
 
 [Revision 93](https://github.com/forge-trust/AppSurface/actions/runs/40407960173), source `d69899a521400305c201a122fd18b5f3e9d84d9c`, has independent verification of all 15 C1 artifacts: the 14 original selector callbacks cover exactly 16 case rows and the recomputed aggregate matches the CI aggregate. The verification receipt SHA-256 is `e6eb24d1be066c499f8d45aa0f80a883bececd3f7625d4348f6bcf874929f74c`. This is C1 evidence only; the application consumer failed before full acceptance. Its private post-stop fixture has since been corrected to keep the original single coverage slot.

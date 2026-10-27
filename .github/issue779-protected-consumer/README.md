@@ -2,6 +2,12 @@
 
 The [protected workflow entry point](entrypoint-README.md) selects only reviewed records from protected default-branch source, then uses the [GitHub resolver](github-parent-README.md), [bounded dispatcher](dispatch-README.md) and [semantic consumer](semantic-gate/README.md). The registry is currently empty, production Trusted remains closed, and candidate-branch tests do not establish protected acceptance.
 
+The [protected qualification prerequisite](../issue779-protected-qualification/README.md) is a separate,
+manual protected-main workflow with no dispatch inputs. It executes the existing worker controls and
+retains partial provenance for later independent review. Its own run is still in progress when it writes
+that receipt; it neither certifies completed qualification nor populates this registry. Review and merge
+of the workflow and all its fixed dependencies must precede an actual protected dispatch.
+
 `provenance.py` is a validation-only parser for the exact protected parent-run artifact required before the downstream Evidence gate can inspect its documents. It has no network client, token reader, process launcher, runtime capability, policy resolver, admission call, `Trusted` result, or gate verdict. Its frozen `ProtectedParentDocuments` result contains only the selected `plan.json` and `manifest.json` bytes.
 
 ## Candidate branch controls

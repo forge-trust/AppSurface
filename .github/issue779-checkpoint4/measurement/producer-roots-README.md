@@ -152,7 +152,11 @@ wrapper exit zero, settled groups and strict rollback receipt. The existing
 [`run-accounts.py`](../run-accounts.py) **data-only** image, receipt and source-witness
 validators enforce the original failure stage/code, utility settlement, original-handle
 closure and five NSS IDs (distinct within UID/GID domains; equality across domains is
-valid). They do not create holders or run the account driver. The rollback's unique
+valid). The closed receipt includes `cleanup_identity_guards_checked`: it must be
+explicitly `null` for rollback and `true` for successful creation. A missing member,
+`false`, or a rollback `true` rejects. The [portable predecessor controls](../test_producer_roots.py)
+use that current shape and check each invalid neighbor without relaxing the validator.
+They do not create holders or run the account driver. The rollback's unique
 current-source collision `MoveNext` witness must be positive and exactly bound to the
 private and production partial source hashes. Its immediate ancestor must be C4Accounts,
 from the same run/attempt and full source; required ancestor hashes must be well formed.

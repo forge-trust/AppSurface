@@ -96,9 +96,10 @@ internal static class LinuxAccountMeasurement
                 .ConfigureAwait(false);
             if (snapshot != independent) throw Rejected();
             var created = accounts.CaptureAccountMeasurementState(owner);
-            if (created.Utilities != 3 || created.SettledUtilities != 3 || created.FailedUtilities != 0
-                || created.CloseCompleted || created.Quarantined || created.ReservationFailed
-                || !created.IdentitiesPublished || created.FirstFailure is not null)
+            if (!SupervisionAccountStatePolicy.IsSuccessfulCreationState(new(
+                created.Utilities, created.SettledUtilities, created.FailedUtilities, created.CloseCompleted,
+                created.Quarantined, created.ReservationFailed, created.IdentitiesPublished,
+                created.FirstFailure is not null)))
                 throw Rejected();
             owner.RequireActive(job.Token); // Successful local utility settlement has not closed admission.
             var names = LinuxRunAccountNames.Create(owner.RunId);
@@ -124,10 +125,11 @@ internal static class LinuxAccountMeasurement
             await first.ConfigureAwait(false); // Always join the original task before interpreting observations.
             if (sharedClose != true) throw Rejected();
             terminal = accounts.CaptureAccountMeasurementState(owner);
-            if (!terminal.Value.CloseCompleted || terminal.Value.Quarantined || terminal.Value.ReservationFailed
-                || terminal.Value.FirstFailure is not null || terminal.Value.FailedUtilities != 0
-                || terminal.Value.Utilities is < 6 or > 8
-                || terminal.Value.SettledUtilities != terminal.Value.Utilities)
+            var closedState = terminal.Value;
+            if (!SupervisionAccountStatePolicy.IsSuccessfulClosedState(new(
+                closedState.Utilities, closedState.SettledUtilities, closedState.FailedUtilities,
+                closedState.CloseCompleted, closedState.Quarantined, closedState.ReservationFailed,
+                closedState.IdentitiesPublished, closedState.FirstFailure is not null)))
                 throw Rejected();
             var ownedRejected = false;
             try { accounts.RequireOwnedBy(owner, default); }

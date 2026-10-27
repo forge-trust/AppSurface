@@ -1838,6 +1838,14 @@ the original failure and cleanup must remain observable. Both values remain unpa
 their fixture types and calls out of ordinary `None` images. Local compilation alone is not a native
 result; the complete protected Linux controls and source-bound measurement must still be verified.
 
+The linked C4 measurement delegates its successful-create and joined-close state predicates to the
+ordinary-build [data-only account state policy](LinuxAccountMeasurementPolicy.cs). The policy accepts
+an immutable copy of eight primitive state fields and returns a decision; it has no account-holder type,
+native operation, ownership check, or admission capability. The private measurement copies fields only
+after its original owner and NSS checks, and keeps its close-task join, ordering, and fixed rejection.
+The detached one-field-neighbor tests therefore run in ordinary builds without constructing an
+account holder. They do not establish account creation, cleanup, native custody, or acceptance.
+
 The N04 and N07 rendezvous implementations in
 [`LinuxN04CheckpointOwner`](LinuxN04CheckpointOwner.cs) and
 [`LinuxN07CheckpointOwner`](LinuxN07CheckpointOwner.cs) are compiled only into
