@@ -547,15 +547,15 @@ internal sealed class LinuxProducerWorkspace : IDisposable
         var totalBytes = 0L;
         foreach (var entry in entries)
         {
-            if (entries.Count > LinuxProducerWorkspaceLayout.MaximumNodes)
+            if (LinuxProducerSealLimits.CollectedNodeCountExceeded(entries.Count))
             { EmitSealGuard(new { reason = "node-count", count = entries.Count }); throw LinuxProducerWorkspaceLayout.Invalid(); }
-            if (entry.Directory) continue;
-            if (entry.Original.Length > (ulong)(LinuxProducerWorkspaceLayout.MaximumTreeBytes - totalBytes))
+            if (!LinuxProducerSealLimits.TryAccumulateBytes(totalBytes, entry.Directory,
+                entry.Original.Length, out var nextTotalBytes))
             {
                 EmitSealGuard(new { reason = "aggregate-bytes", bytes = totalBytes, next_bytes = entry.Original.Length });
                 throw LinuxProducerWorkspaceLayout.Invalid();
             }
-            totalBytes += checked((long)entry.Original.Length);
+            totalBytes = nextTotalBytes;
         }
     }
 
@@ -572,14 +572,14 @@ internal sealed class LinuxProducerWorkspace : IDisposable
     private void CollectChildren(SafeFileHandle parent, string parentName, List<SealEntry> entries,
         CancellationToken token, bool sealedTree, int depth)
     {
-        if (depth > 32)
+        if (LinuxProducerSealLimits.DepthExceeded(depth))
         { EmitSealGuard(new { reason = "depth", depth }); throw LinuxProducerWorkspaceLayout.Invalid(); }
         var expectedUid = sealedTree ? 0u : _layout.Accounts.SubjectUid;
         var expectedGid = sealedTree ? 0u : _layout.Accounts.SubjectGid;
         foreach (var name in ReadNames(parent, token))
         {
             token.ThrowIfCancellationRequested();
-            if (entries.Count >= LinuxProducerWorkspaceLayout.MaximumNodes)
+            if (LinuxProducerSealLimits.NodeCapacityReachedBeforeAdd(entries.Count))
             { EmitSealGuard(new { reason = "node-count", count = entries.Count }); throw LinuxProducerWorkspaceLayout.Invalid(); }
             SafeFileHandle? probe = null;
             SafeFileHandle? opened = null;

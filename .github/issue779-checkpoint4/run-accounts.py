@@ -25,6 +25,8 @@ from measurement_arguments import MODULES
 
 VARIANTS = ('C4Accounts', 'C4AccountRollback')
 BASE = '416b30919e6c4d03b634d9d3fe558884b02f0b91'
+# Current C3 root-files.trx count for the four selected root test classes.
+C3_ROOT_FILE_TEST_COUNT = 43
 NAMES = tuple(module + suffix for module in MODULES for suffix in ('.dll', '.pdb'))
 LIMIT = 1200
 MAX_LOG = 8 * 1024 * 1024
@@ -293,15 +295,15 @@ def prior_binding(args):
         root_trx_sha = digest(trx)
         root_tests = value['root_file_tests']
         require(root_tests['trx_sha256'] == root_trx_sha and type(root_tests['executed']) is int
-                and root_tests['executed'] == 41 and type(root_tests['passed']) is int
-                and root_tests['passed'] == 41 and root_tests['native_acceptance'] is False, 'prior-root')
+                and root_tests['executed'] == C3_ROOT_FILE_TEST_COUNT and type(root_tests['passed']) is int
+                and root_tests['passed'] == C3_ROOT_FILE_TEST_COUNT and root_tests['native_acceptance'] is False, 'prior-root')
         ns = '{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}'
         document = ElementTree.fromstring(trx)
         counters = document.find('.//' + ns + 'Counters')
         rows = document.findall('.//' + ns + 'UnitTestResult')
-        require(counters is not None and all(counters.get(key) == '41' for key in ('total', 'executed', 'passed'))
+        require(counters is not None and all(counters.get(key) == str(C3_ROOT_FILE_TEST_COUNT) for key in ('total', 'executed', 'passed'))
                 and all(counters.get(key, '0') == '0' for key in ('failed', 'error', 'notExecuted', 'warning'))
-                and len(rows) == 41 and all(row.get('outcome') == 'Passed' for row in rows), 'prior-root')
+                and len(rows) == C3_ROOT_FILE_TEST_COUNT and all(row.get('outcome') == 'Passed' for row in rows), 'prior-root')
         prior_variant = 'C3'
     else:
         require(args.merge_root_trx is None and value['schema'] == LINEAGE_SCHEMA

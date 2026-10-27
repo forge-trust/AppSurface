@@ -6,6 +6,17 @@ internal readonly record struct LinuxWorkerCompletionFacts(
     LinuxUnitProperties? NaturalTerminal,
     SupervisionOutputReceipt? Output);
 
+/// <summary>Copied prerequisite values for the two original joined-failure capture paths.</summary>
+/// <remarks>This data cannot create a worker, owner, task join, native observation or custody authority.</remarks>
+internal readonly record struct LinuxFailedCaptureReadiness(
+    bool LifetimeStartJoined,
+    bool LifetimeStopJoined,
+    bool PendingStartReserved,
+    bool PendingStartJoined,
+    bool PendingClosed,
+    bool PendingStopJoined,
+    bool ExitCompleted);
+
 /// <summary>Data-only worker settlement predicates; no owner, lifecycle or native authority is created.</summary>
 internal static class LinuxWorkerSettlementPolicy
 {
@@ -27,6 +38,16 @@ internal static class LinuxWorkerSettlementPolicy
     internal static void RequireOutputDrain(bool outputDrained)
     {
         if (!outputDrained)
+            throw LinuxSystemdBackend.InvalidControl();
+    }
+
+    /// <summary>Requires the exact joined holder prerequisites shared by N07 and later failure-only capture.</summary>
+    /// <remarks>Callers retain their original token/reference, descriptor, and native-owner checks around this data policy.</remarks>
+    internal static void RequireFailedCaptureReadiness(LinuxFailedCaptureReadiness facts)
+    {
+        if (!facts.LifetimeStartJoined || !facts.LifetimeStopJoined || !facts.PendingStartReserved
+            || !facts.PendingStartJoined || !facts.PendingClosed || !facts.PendingStopJoined
+            || !facts.ExitCompleted)
             throw LinuxSystemdBackend.InvalidControl();
     }
 }

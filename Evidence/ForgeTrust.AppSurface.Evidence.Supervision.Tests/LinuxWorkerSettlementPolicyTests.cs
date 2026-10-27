@@ -68,12 +68,46 @@ public sealed class LinuxWorkerSettlementPolicyTests
         AssertInvalid(() => LinuxWorkerSettlementPolicy.RequireOutputDrain(false));
     }
 
+    [Fact]
+    public void FailedCaptureReadinessAcceptsTheCompleteCopiedPrerequisiteNeighbor()
+    {
+        LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(ReadyForFailedCapture());
+    }
+
+    [Theory]
+    [InlineData("lifetime-start")]
+    [InlineData("lifetime-stop")]
+    [InlineData("pending-reserved")]
+    [InlineData("pending-start")]
+    [InlineData("pending-closed")]
+    [InlineData("pending-stop")]
+    [InlineData("exit")]
+    public void FailedCaptureReadinessRejectsEachMissingCopiedPrerequisite(string field)
+    {
+        var facts = ReadyForFailedCapture() with
+        {
+            LifetimeStartJoined = field != "lifetime-start",
+            LifetimeStopJoined = field != "lifetime-stop",
+            PendingStartReserved = field != "pending-reserved",
+            PendingStartJoined = field != "pending-start",
+            PendingClosed = field != "pending-closed",
+            PendingStopJoined = field != "pending-stop",
+            ExitCompleted = field != "exit",
+        };
+
+        AssertInvalid(() => LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(facts));
+        LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(ReadyForFailedCapture());
+    }
+
     private static void AssertInvalid(Action action)
     {
         var error = Assert.Throws<EvidenceAdmissionException>(action);
         Assert.Equal("ASEVD410", error.Code);
         Assert.Null(error.InnerException);
     }
+
+    private static LinuxFailedCaptureReadiness ReadyForFailedCapture() =>
+        new(true, true, true, true, true, true, true);
 
     private static LinuxUnitProperties Terminal(int code = 1, int status = 0) =>
         new("appsurface-evidence-worker-00000000000000000000000000000001.service", "loaded", "inactive", "dead",

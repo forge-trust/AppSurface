@@ -2125,6 +2125,14 @@ data comparison, then performs the original owner cleanup check. The detached
 [focused policy controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxWorkerSettlementPolicyTests.cs)
 cannot establish task joins, process exit, custody or authorization on their own.
 
+The N07 rejected-frame capture and the later failure-only capture share
+`LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness` for their copied lifetime, pending-start,
+and completed-exit-task prerequisites. Each native caller keeps its explicit null checks for the actual
+exit task, output receipt and worker, performs its own cancellation/reference checks and acquires its own
+descriptor before this comparison, then retains
+the original control-identity checks and capture order. The policy tests check only the boolean decision;
+they do not construct the holder, prove any join, or establish native custody or acceptance.
+
 
 ### Application cleanup procedure
 
@@ -2316,3 +2324,15 @@ recheck. A 4 KiB scratch buffer copies each actual segment into the bounded
 result array; partial data never escapes if reading, hashing or rechecking
 fails. This procedure borrows the original descriptor and cannot acquire or
 release custody.
+
+### Producer seal-tree limits
+
+[`LinuxProducerSealLimits`](LinuxProducerSealLimits.cs) is a data-only decision policy for the existing seal traversal. It keeps the pre-add
+node-count check distinct from the completed-collection count check, accepts depth 32 but rejects 33, sums only
+regular-file lengths, accepts an aggregate exactly at `MaximumTreeBytes`, and rejects the next byte before any
+narrowing cast. `CollectMutableTrees` and `CollectChildren` must continue to obtain names, metadata, and lengths
+from their real retained descriptors and emit the same closed `node-count`, `depth`, or `aggregate-bytes`
+diagnostic before the existing invalid-workspace exception. The policy does not create or verify a workspace and
+its [tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerSealLimitsTests.cs) are decision-only; native ownership, descriptor-relative traversal, type/metadata checks, cancellation,
+entry sealing, and quarantine stay in the production caller. Keep this separate from `LinuxProducerCopyBudget`:
+copy-time source reservations and seal-time observations protect different phases of the same lifecycle.

@@ -477,10 +477,11 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
             throw LinuxSystemdBackend.InvalidControl();
         var descriptor = server.RequireN07FailedReadyDescriptor(input, owner, accounts, workspace, this, token);
         var pending = _pending.Snapshot;
-        if (!_lifetime.StartJoined || !_lifetime.StopJoined || !pending.StartReserved
-            || !pending.StartJoined || !pending.Closed || !pending.StopJoined
-            || _exit?.IsCompleted != true || _output is null || _worker is null)
+        if (_exit is null || _output is null || _worker is null)
             throw LinuxSystemdBackend.InvalidControl();
+        LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(new(
+            _lifetime.StartJoined, _lifetime.StopJoined, pending.StartReserved, pending.StartJoined,
+            pending.Closed, pending.StopJoined, _exit.IsCompleted));
         var state = new LinuxFailedSettlementState(_lifetime.StartJoined, _lifetime.StopJoined,
             _lifetime.Failed, PhysicallySettled, LinuxFailedSettlementObservation.ClosedTaskState(_exit),
             _failedSettlementGroupAfterPumps);
@@ -691,10 +692,11 @@ internal sealed partial class LinuxWorkerProcess : IAsyncDisposable
             throw LinuxSystemdBackend.InvalidControl();
         var descriptor = server.RequireNegativeReadyDescriptor(input, owner, accounts, workspace, this, token);
         var pending = _pending.Snapshot;
-        if (!_lifetime.StartJoined || !_lifetime.StopJoined || !pending.StartReserved
-            || !pending.StartJoined || !pending.Closed || !pending.StopJoined
-            || _exit?.IsCompleted != true || _output is null || _worker is null)
+        if (_exit is null || _output is null || _worker is null)
             throw LinuxSystemdBackend.InvalidControl();
+        LinuxWorkerSettlementPolicy.RequireFailedCaptureReadiness(new(
+            _lifetime.StartJoined, _lifetime.StopJoined, pending.StartReserved, pending.StartJoined,
+            pending.Closed, pending.StopJoined, _exit.IsCompleted));
         var state = new LinuxFailedSettlementState(_lifetime.StartJoined, _lifetime.StopJoined,
             _lifetime.Failed, PhysicallySettled, LinuxFailedSettlementObservation.ClosedTaskState(_exit),
             _failedSettlementGroupAfterPumps);

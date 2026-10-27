@@ -76,16 +76,27 @@ class LineageDataTests(unittest.TestCase):
         native_body = subject.canonical(native)
         (self.prior / 'native-receipt.json').write_bytes(native_body)
         ns = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
-        trx = ('<TestRun xmlns="' + ns + '"><ResultSummary><Counters total="41" executed="41" passed="41" failed="0" /></ResultSummary><Results>'
-               + '<UnitTestResult outcome="Passed" />' * 41 + '</Results></TestRun>').encode()
+        root_count = subject.C3_ROOT_FILE_TEST_COUNT
+        trx = (
+            f'<TestRun xmlns="{ns}"><ResultSummary><Counters total="{root_count}" '
+            f'executed="{root_count}" passed="{root_count}" failed="0" />'
+            '</ResultSummary><Results>'
+            + '<UnitTestResult outcome="Passed" />' * root_count
+            + '</Results></TestRun>'
+        ).encode()
         (self.prior / 'root-files.trx').write_bytes(trx)
         original = {name: 'a' * 64 for name in subject.NAMES}
         instrumented = {name: ('b' if name.endswith('.dll') else 'a') * 64 for name in subject.NAMES}
-        self.binding = {'schema': 'issue779-native-instrumentation-v1', 'source': self.source,
-                        'collector': 'coverlet.console/10.0.1', 'source_capture_sha256': sha(body),
-                        'coverage_sha256': sha(report), 'native_receipt_sha256': sha(native_body),
-                        'original': original, 'instrumented': instrumented,
-                        'root_file_tests': {'trx_sha256': sha(trx), 'executed': 41, 'passed': 41, 'native_acceptance': False}}
+        self.binding = {
+            'schema': 'issue779-native-instrumentation-v1', 'source': self.source,
+            'collector': 'coverlet.console/10.0.1', 'source_capture_sha256': sha(body),
+            'coverage_sha256': sha(report), 'native_receipt_sha256': sha(native_body),
+            'original': original, 'instrumented': instrumented,
+            'root_file_tests': {
+                'trx_sha256': sha(trx), 'executed': root_count, 'passed': root_count,
+                'native_acceptance': False,
+            },
+        }
         self.save_binding()
         self.args = SimpleNamespace(variant='C4Accounts', prior_kind='c3', source=self.source,
                     prior_artifact_name='issue779-checkpoint3-application-123-1', evidence=self.evidence,
@@ -97,7 +108,7 @@ class LineageDataTests(unittest.TestCase):
         (self.prior / 'measurement-binding.json').write_bytes(subject.canonical(self.binding))
 
     def test_obsolete_or_other_consistent_root_counts_reject(self):
-        for count in (39, 40, 42):
+        for count in (39, 40, 41, 42, subject.C3_ROOT_FILE_TEST_COUNT + 1):
             ns = 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'
             body = (f'<TestRun xmlns="{ns}"><ResultSummary><Counters total="{count}" executed="{count}" passed="{count}" failed="0" /></ResultSummary><Results>'
                     + '<UnitTestResult outcome="Passed" />' * count + '</Results></TestRun>').encode()
