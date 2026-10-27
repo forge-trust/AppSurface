@@ -218,12 +218,16 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 
             Assert.Equal(CloudTasksPackageConsumerProof.BaselineCommit, report.BaselineCommit);
             Assert.Equal(4, report.NeutralPackageFiles.Count);
+            Assert.NotEmpty(report.NeutralSourceSha256);
+            Assert.Contains("baseline/Directory.Build.props", report.NeutralSourceSha256.Keys);
             Assert.Equal(4, report.BaselineGraph.Nodes.Count);
             Assert.Equal(4, report.CandidateGraph.Nodes.Count);
             Assert.Equal(ReadLockedPackageCount(fixture.LockFilePath) + 2, report.CloudTasksGraph.Nodes.Count);
             Assert.True(File.Exists(report.ReportPath));
             var evidence = await File.ReadAllTextAsync(report.ReportPath);
             Assert.Contains("Provider SDK API leaks: none", evidence, StringComparison.Ordinal);
+            Assert.Contains("Both raw hashes are retained", evidence, StringComparison.Ordinal);
+            Assert.Contains("Baseline SHA-256", evidence, StringComparison.Ordinal);
             Assert.Contains("Google.Cloud.Tasks.V2", evidence, StringComparison.Ordinal);
             Assert.All(runner.ConsumerRestoreRequests, command =>
             {
@@ -389,6 +393,24 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.False(Directory.Exists(Directory.GetParent(runner.ConsumerRestoreRequests[0].WorkingDirectory)!.FullName));
         }
 
+        // protects=source parity gates the normalization path in the complete workflow; fails_when=authored drift reaches baseline packing; no_claim=does not invoke real compilation.
+        [Fact]
+        public async Task RunAsync_RejectsAuthoredSourceDriftBeforeBaselinePack()
+        {
+            using var fixture = new PackedProofFixture();
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
+            async Task ExtractWithDrift(string root, string target, CancellationToken token)
+            {
+                await fixture.CreatePinnedSourceAsync(root, target, token);
+                File.AppendAllText(Path.Combine(target, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj"), "<!-- drift -->");
+            }
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+                new CloudTasksPackageConsumerProof(runner, ExtractWithDrift).RunAsync(fixture.Request, fixture.Artifacts));
+            Assert.Contains("authored file", error.Message, StringComparison.Ordinal);
+            Assert.Empty(runner.BaselinePackRequests);
+            Assert.False(Directory.Exists(Directory.GetParent(runner.ConsumerRestoreRequests[0].WorkingDirectory)!.FullName));
+        }
+
         private static CloudTasksPackageGraph Graph(params CloudTasksPackageGraphNode[] nodes)
         {
             var map = new SortedDictionary<string, CloudTasksPackageGraphNode>(StringComparer.OrdinalIgnoreCase);
@@ -465,6 +487,10 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 var lockTarget = Path.Combine(root, "Durable", CloudTasksPackageConsumerProof.PackageId);
                 Directory.CreateDirectory(lockTarget);
                 File.Copy(LockFilePath, Path.Combine(lockTarget, "packages.lock.json"));
+                foreach (var relative in CloudTasksNeutralSourceProof.SourceDirectories)
+                    CopyAuthoredTree(TestPathUtils.PathUnder(sourceRoot, relative), TestPathUtils.PathUnder(root, relative));
+                foreach (var relative in CloudTasksNeutralSourceProof.SharedFiles)
+                    if (File.Exists(TestPathUtils.PathUnder(sourceRoot, relative))) File.Copy(TestPathUtils.PathUnder(sourceRoot, relative), TestPathUtils.PathUnder(root, relative));
                 var directory = Path.Combine(root, "Durable", "packed-consumers", "Adopter");
                 Directory.CreateDirectory(directory);
                 File.WriteAllText(Path.Combine(directory, "Adopter.csproj"), "<Project><ItemGroup><PackageReference Include=\"Google.Cloud.Tasks.V2\" /></ItemGroup></Project>");
@@ -483,24 +509,33 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 }
             }
 
-            internal Task CreatePinnedSourceAsync(string _, string target, CancellationToken cancellationToken)
+            internal Task CreatePinnedSourceAsync(string repositoryRoot, string target, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Directory.CreateDirectory(target);
-                File.WriteAllText(Path.Combine(target, "NuGet.package-gate.config"), "<configuration />");
-                foreach (var id in FirstPartyPackages)
+                foreach (var relative in CloudTasksNeutralSourceProof.SourceDirectories)
+                    CopyAuthoredTree(TestPathUtils.PathUnder(repositoryRoot, relative), TestPathUtils.PathUnder(target, relative));
+                foreach (var relative in CloudTasksNeutralSourceProof.SharedFiles)
+                    if (File.Exists(TestPathUtils.PathUnder(repositoryRoot, relative))) File.Copy(TestPathUtils.PathUnder(repositoryRoot, relative), TestPathUtils.PathUnder(target, relative));
+                var centralPath = Path.Combine(target, "Directory.Packages.props");
+                var central = System.Xml.Linq.XDocument.Load(centralPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                foreach (var pin in central.Descendants().Where(element => element.Name.LocalName == "PackageVersion"
+                             && (string?)element.Attribute("Include") is "Google.Cloud.Tasks.V2" or "Grpc.Net.Client").ToArray())
                 {
-                    var projectPath = id switch
-                    {
-                        "ForgeTrust.AppSurface.Core" => Path.Combine(target, id, id + ".csproj"),
-                        "ForgeTrust.AppSurface.Flow" => Path.Combine(target, "Flow", id, id + ".csproj"),
-                        "ForgeTrust.AppSurface.Workers" => Path.Combine(target, "Workers", id, id + ".csproj"),
-                        _ => Path.Combine(target, "Durable", id, id + ".csproj"),
-                    };
-                    Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
-                    File.WriteAllText(projectPath, "<Project />");
+                    if (pin.PreviousNode is System.Xml.Linq.XText text && string.IsNullOrWhiteSpace(text.Value)) text.Remove();
+                    pin.Remove();
                 }
+                File.WriteAllText(centralPath, central.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
                 return Task.CompletedTask;
+            }
+
+            private static void CopyAuthoredTree(string source, string target)
+            {
+                Directory.CreateDirectory(target);
+                foreach (var file in Directory.EnumerateFiles(source)) File.Copy(file, TestPathUtils.PathUnder(target, Path.GetFileName(file)));
+                foreach (var directory in Directory.EnumerateDirectories(source))
+                    if (Path.GetFileName(directory) is not ("bin" or "obj" or ".git"))
+                        CopyAuthoredTree(directory, TestPathUtils.PathUnder(target, Path.GetFileName(directory)));
             }
 
             public void Dispose()
@@ -517,6 +552,9 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     using var writer = new StreamWriter(assembly.Open(), Encoding.UTF8);
                     writer.Write("stable-neutral-package-bytes");
                 }
+                var nuspec = archive.CreateEntry("fixture.nuspec");
+                using (var writer = new StreamWriter(nuspec.Open(), Encoding.UTF8))
+                    writer.Write("<package><metadata><dependencies><group targetFramework=\"net10.0\" /></dependencies></metadata></package>");
                 var docs = archive.CreateEntry("lib/net10.0/README.xml");
                 using var docsWriter = new StreamWriter(docs.Open(), Encoding.UTF8);
                 docsWriter.Write("<doc><members><member name=\"P:Fixture.Value\" /></members></doc>");

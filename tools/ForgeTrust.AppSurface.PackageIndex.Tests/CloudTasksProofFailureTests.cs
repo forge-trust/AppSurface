@@ -118,32 +118,40 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             finally { if (File.Exists(package)) File.Delete(package); }
         }
 
-        // protects=neutral package archives and assemblies remain byte-identical; fails_when=archive-only metadata change is ignored; no_claim=does not establish baseline package build inputs.
+        // protects=owner-approved first-party byte differences remain observable; fails_when=matching contracts and entry sets are rejected merely for hash drift; no_claim=source proof is a separate required RunAsync gate.
         [Fact]
-        public void AssertNeutralArchiveHashes_RejectsChangedPackageBytesEvenWhenAssemblyHashesMatch()
+        public void AssertNeutralPackageContracts_AllowsRecordedBuildByteDifferences()
         {
             var identity = new CloudTasksPackageFileIdentity(
                 "ForgeTrust.AppSurface.Durable", "baseline-nupkg", "candidate-nupkg",
                 new Dictionary<string, string> { ["net10.0/Durable.dll"] = "same-assembly" },
-                new Dictionary<string, string> { ["net10.0/Durable.dll"] = "same-assembly" });
+                new Dictionary<string, string> { ["net10.0/Durable.dll"] = "changed-assembly" }, "same-contract", "same-contract");
 
-            var error = Assert.Throws<PackageIndexException>(() => CloudTasksPackageConsumerProof.AssertNeutralArchiveHashes([identity]));
-
-            Assert.Contains("nupkg content hash changed", error.Message, StringComparison.Ordinal);
+            CloudTasksPackageConsumerProof.AssertNeutralPackageContracts([identity]);
         }
 
-        // protects=neutral assembly set and bytes remain stable; fails_when=removed/added/changed DLL passes; no_claim=does not independently hash real NuGet artifacts.
+        // protects=neutral library entry sets remain exact; fails_when=removed/added DLL passes; no_claim=does not independently hash real NuGet artifacts.
         [Fact]
-        public void AssertNeutralArchiveHashes_RejectsMissingOrChangedAssemblyEntries()
+        public void AssertNeutralPackageContracts_RejectsChangedAssemblyEntrySets()
         {
             var identity = new CloudTasksPackageFileIdentity(
                 "ForgeTrust.AppSurface.Durable", "same-nupkg", "same-nupkg",
                 new Dictionary<string, string> { ["net10.0/Durable.dll"] = "before" },
-                new Dictionary<string, string> { ["net10.0/Durable.dll"] = "after", ["net10.0/Extra.dll"] = "extra" });
+                new Dictionary<string, string> { ["net10.0/Durable.dll"] = "after", ["net10.0/Extra.dll"] = "extra" }, "same-contract", "same-contract");
 
-            var error = Assert.Throws<PackageIndexException>(() => CloudTasksPackageConsumerProof.AssertNeutralArchiveHashes([identity]));
+            var error = Assert.Throws<PackageIndexException>(() => CloudTasksPackageConsumerProof.AssertNeutralPackageContracts([identity]));
 
-            Assert.Contains("assembly content hashes changed", error.Message, StringComparison.Ordinal);
+            Assert.Contains("library assembly entry set changed", error.Message, StringComparison.Ordinal);
+        }
+
+        // protects=packed contracts remain exact even when resolved packages coincide; fails_when=changed dependency ranges pass; no_claim=does not run NuGet.
+        [Fact]
+        public void AssertNeutralPackageContracts_RejectsDependencyContractDrift()
+        {
+            var hashes = new Dictionary<string, string> { ["net10.0/Durable.dll"] = "hash" };
+            var identity = new CloudTasksPackageFileIdentity("ForgeTrust.AppSurface.Durable", "before", "after", hashes, hashes, "before-range", "after-range");
+            var error = Assert.Throws<PackageIndexException>(() => CloudTasksPackageConsumerProof.AssertNeutralPackageContracts([identity]));
+            Assert.Contains("packed dependency contract changed", error.Message, StringComparison.Ordinal);
         }
 
         // protects=pinned source extraction uses exact reviewed revision with bounded commands; fails_when=wrong git/archive options or unbounded runner timing reaches tar; no_claim=does not execute Git or tar binaries.

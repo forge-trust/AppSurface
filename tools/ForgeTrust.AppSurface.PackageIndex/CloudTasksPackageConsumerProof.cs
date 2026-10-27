@@ -80,6 +80,7 @@ internal sealed class CloudTasksPackageConsumerProof
             }
 
             await _baselineExtractor(request.RepositoryRoot, baselineRoot, cancellationToken);
+            var sourceHashes = CloudTasksNeutralSourceProof.Verify(baselineRoot, request.RepositoryRoot);
             await PackBaselineNeutralClosureAsync(request, workspace, baselineRoot, baselineFeed, cancellationToken);
             var assemblyIdentity = CompareNeutralAssemblyIdentity(candidateNeutral, baselineFeed, request.PackageVersion);
             var baselineGraph = await RestoreNeutralConsumerAsync(request, workspace, baselineFeed, "neutral-baseline", request.PackageVersion, cancellationToken);
@@ -89,7 +90,7 @@ internal sealed class CloudTasksPackageConsumerProof
             AssertNeutralGraph(baseline, candidate);
             AssertGraphArtifacts(candidate, candidateNeutral, baseline: false);
             AssertGraphArtifacts(baseline, CompareBaselineArtifacts(baselineFeed, request.PackageVersion), baseline: true);
-            AssertNeutralArchiveHashes(assemblyIdentity);
+            AssertNeutralPackageContracts(assemblyIdentity);
             var cloudTasksGraph = ReadGraph(Path.Combine(workspace, "cloudtasks-consumer", "obj", "project.assets.json"));
             AssertGraphArtifacts(cloudTasksGraph, new Dictionary<string, CloudTasksPackageArtifact>(StringComparer.OrdinalIgnoreCase)
             {
@@ -108,6 +109,7 @@ internal sealed class CloudTasksPackageConsumerProof
                 candidate,
                 cloudTasksGraph,
                 assemblyIdentity,
+                sourceHashes,
                 proofPath);
             Directory.CreateDirectory(Path.GetDirectoryName(proofPath)!);
             await File.WriteAllTextAsync(proofPath, Render(report), cancellationToken);
@@ -524,7 +526,9 @@ internal sealed class CloudTasksPackageConsumerProof
             var baselineAssembly = ReadPackageAssemblyHashes(baselinePath);
             var candidateAssembly = ReadPackageAssemblyHashes(candidate.Path);
             var baselineNupkgSha512 = HashFileSha512(baselinePath);
-            identities.Add(new CloudTasksPackageFileIdentity(packageId, baselineNupkgSha512, candidate.Sha512, baselineAssembly, candidateAssembly));
+            identities.Add(new CloudTasksPackageFileIdentity(packageId, baselineNupkgSha512, candidate.Sha512, baselineAssembly, candidateAssembly,
+                CloudTasksNeutralPackageContract.Read(baselinePath, candidateVersion),
+                CloudTasksNeutralPackageContract.Read(candidate.Path, candidateVersion)));
         }
         return identities;
     }
@@ -563,16 +567,15 @@ internal sealed class CloudTasksPackageConsumerProof
             ? dependency.Key.ToLowerInvariant() + ":<coordinated>"
             : dependency.Key.ToLowerInvariant() + ":" + dependency.Value.ToLowerInvariant();
 
-    internal static void AssertNeutralArchiveHashes(IReadOnlyList<CloudTasksPackageFileIdentity> identities)
+    /// <summary>Preserves packed contracts and library entry sets after the required unchanged-source proof.</summary>
+    internal static void AssertNeutralPackageContracts(IReadOnlyList<CloudTasksPackageFileIdentity> identities)
     {
         foreach (var file in identities)
         {
-            if (!string.Equals(file.BaselineNupkgSha512, file.CandidateNupkgSha512, StringComparison.Ordinal))
-                throw new PackageIndexException($"Neutral package '{file.PackageId}' nupkg content hash changed after baseline packaging with normalized source/version properties.");
-            if (!file.BaselineAssemblySha256.Keys.SequenceEqual(file.CandidateAssemblySha256.Keys, StringComparer.OrdinalIgnoreCase)
-                || file.BaselineAssemblySha256.Any(pair => !file.CandidateAssemblySha256.TryGetValue(pair.Key, out var hash)
-                    || !string.Equals(pair.Value, hash, StringComparison.Ordinal)))
-                throw new PackageIndexException($"Neutral package '{file.PackageId}' assembly content hashes changed from the pinned baseline.");
+            if (!string.Equals(file.BaselineDependencyContract, file.CandidateDependencyContract, StringComparison.Ordinal))
+                throw new PackageIndexException($"Neutral package '{file.PackageId}' packed dependency contract changed from the pinned baseline.");
+            if (!file.BaselineAssemblySha256.Keys.Order(StringComparer.Ordinal).SequenceEqual(file.CandidateAssemblySha256.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal))
+                throw new PackageIndexException($"Neutral package '{file.PackageId}' library assembly entry set changed from the pinned baseline.");
         }
     }
 
@@ -634,11 +637,23 @@ internal sealed class CloudTasksPackageConsumerProof
 
         ## Neutral package archive hashes
 
-        Baseline and candidate packs use the same coordinated package version, source revision, repository commit and normalized source path. Their complete nupkg SHA-512 and library assembly hashes must therefore match exactly.
+        Authored neutral sources, their generator, and shared build inputs are unchanged from the pinned baseline. Only the two approved GCP SDK central declarations are excluded from the shared-input comparison. Packed framework/dependency contracts and library entry sets match. First-party archive and DLL byte differences are permitted by the owner-approved build normalization because logging-generator declaration order is not reproducible. Both raw hashes are retained below; differing binaries are not described as byte-identical. Every restored first-party package hash is bound to its exact local archive. External versions, hashes and edges remain exact.
 
-        | Package | Baseline SHA-512 | Candidate SHA-512 | Library assemblies SHA-256 |
-        | --- | --- | --- | --- |
-        {string.Join(Environment.NewLine, report.NeutralPackageFiles.Select(file => $"| `{file.PackageId}` | `{file.BaselineNupkgSha512}` | `{file.CandidateNupkgSha512}` | {file.CandidateAssemblySha256.Count} identical |"))}
+        | Package | Baseline SHA-512 | Candidate SHA-512 |
+        | --- | --- | --- |
+        {string.Join(Environment.NewLine, report.NeutralPackageFiles.Select(file => $"| `{file.PackageId}` | `{file.BaselineNupkgSha512}` | `{file.CandidateNupkgSha512}` |"))}
+
+        | Package / library | Baseline SHA-256 | Candidate SHA-256 |
+        | --- | --- | --- |
+        {string.Join(Environment.NewLine, report.NeutralPackageFiles.SelectMany(file => file.BaselineAssemblySha256.Select(assembly => $"| `{file.PackageId}/{assembly.Key}` | `{assembly.Value}` | `{file.CandidateAssemblySha256[assembly.Key]}` |")))}
+
+        ## Unchanged neutral source and build inputs
+
+        Source hashes cover both baseline and candidate as raw file hashes. The central package file is compared as exact XML after removing only the two approved GCP declarations from the candidate; its two raw hashes may therefore differ.
+
+        | Authored input | SHA-256 |
+        | --- | --- |
+        {string.Join(Environment.NewLine, report.NeutralSourceSha256.Select(file => $"| `{file.Key}` | `{file.Value}` |"))}
 
         ## Cloud Tasks package dependency closure
 
@@ -666,5 +681,5 @@ internal sealed record CloudTasksPackageConsumerProofRequest(string RepositoryRo
 internal sealed record CloudTasksPackageArtifact(string Id, string Path, string Sha512);
 internal sealed record CloudTasksPackageGraph(SortedDictionary<string, CloudTasksPackageGraphNode> Nodes, SortedDictionary<string, string> DirectDependencies);
 internal sealed record CloudTasksPackageGraphNode(string Id, string Version, string Sha512, IReadOnlyList<string> Dependencies);
-internal sealed record CloudTasksPackageFileIdentity(string PackageId, string BaselineNupkgSha512, string CandidateNupkgSha512, IReadOnlyDictionary<string, string> BaselineAssemblySha256, IReadOnlyDictionary<string, string> CandidateAssemblySha256);
-internal sealed record CloudTasksPackageConsumerProofReport(string CloudTasksPackageSha512, string BaselineCommit, string BaselineAssetsPath, string CandidateAssetsPath, CloudTasksPackageGraph BaselineGraph, CloudTasksPackageGraph CandidateGraph, CloudTasksPackageGraph CloudTasksGraph, IReadOnlyList<CloudTasksPackageFileIdentity> NeutralPackageFiles, string ReportPath);
+internal sealed record CloudTasksPackageFileIdentity(string PackageId, string BaselineNupkgSha512, string CandidateNupkgSha512, IReadOnlyDictionary<string, string> BaselineAssemblySha256, IReadOnlyDictionary<string, string> CandidateAssemblySha256, string BaselineDependencyContract, string CandidateDependencyContract);
+internal sealed record CloudTasksPackageConsumerProofReport(string CloudTasksPackageSha512, string BaselineCommit, string BaselineAssetsPath, string CandidateAssetsPath, CloudTasksPackageGraph BaselineGraph, CloudTasksPackageGraph CandidateGraph, CloudTasksPackageGraph CloudTasksGraph, IReadOnlyList<CloudTasksPackageFileIdentity> NeutralPackageFiles, IReadOnlyDictionary<string, string> NeutralSourceSha256, string ReportPath);
