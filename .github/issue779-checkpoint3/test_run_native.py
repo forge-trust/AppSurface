@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
+from unittest.mock import Mock
 
 spec = importlib.util.spec_from_file_location("checkpoint3_runner", Path(__file__).with_name("run-native.py"))
 runner = importlib.util.module_from_spec(spec)
@@ -215,6 +216,7 @@ class MatrixPartitionOrderingTests(unittest.TestCase):
         original_end = clock[0] + 1800
         order, guard_bounds = [], []
         tools, runtime = object(), object()
+        retained_validation = Mock()
         names = ("bundle-extra-directory", "bundle-input-bytes", "bundle-input-mode",
                  "scratch-fifo", "scratch-hardlink", "scratch-oversize")
         rows = ([{"case": name, "passed": True} for name in names]
@@ -251,10 +253,14 @@ class MatrixPartitionOrderingTests(unittest.TestCase):
         with patch.object(runner, "stage", side_effect=stage) as staged, \
              patch.object(runner, "execute", side_effect=execute) as executed, \
              patch.object(runner.time, "monotonic", side_effect=lambda: clock[0]) as monotonic, \
-             patch.dict(runner.sys.modules, {"workspace_guards": SimpleNamespace(run=guards)}):
+             patch.dict(runner.sys.modules, {"workspace_guards": SimpleNamespace(
+                 run=guards, APPLICATION_CASES=("bundle-extra-directory", "bundle-input-bytes", "bundle-input-mode"),
+                 PRODUCER_CASES=("scratch-fifo", "scratch-hardlink", "scratch-oversize")),
+                                             "retained_application": SimpleNamespace(validate=retained_validation)}):
             yield SimpleNamespace(args=args, end=original_end, clock=clock, order=order,
                                   guard_bounds=guard_bounds, rows=rows, staged=staged,
-                                  executed=executed, monotonic=monotonic)
+                                  executed=executed, monotonic=monotonic,
+                                  retained_validation=retained_validation)
 
     @staticmethod
     def receipt(data):
@@ -263,6 +269,7 @@ class MatrixPartitionOrderingTests(unittest.TestCase):
     def test_original_seven_precede_one_fresh_shared_guard_partition_with_the_same_schema(self):
         with tempfile.TemporaryDirectory() as directory, self.data_fixture(directory) as data:
             self.assertEqual(0, runner.run_partitions(data.args, data.end))
+            data.retained_validation.assert_called_once()
             self.assertEqual(["stage", *runner.CASES, "guards"], [row[0] for row in data.order])
             self.assertEqual([data.end] * 8, [row[1] for row in data.order[:-1]])
             guard = data.order[-1]

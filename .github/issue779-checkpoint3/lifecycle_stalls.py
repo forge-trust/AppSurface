@@ -17,6 +17,7 @@ _DIRECTORY = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _LEAF = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
 _MARKER_SCHEMA = "evidence-worker-lifecycle-stall-v1"
 _CASES = ("configure-sync-stall", "registered-application-disposer-stall")
+LIFECYCLE_CASES = ("configure-sync-stall", "registered-disposer-stall", "post-stop-guards")
 
 
 def require(value, reason):
@@ -222,6 +223,107 @@ def require_joined_output(value, leaves, expected_case):
             and pairs[0]["stdout_bytes"] >= len(leaves["stdout.prefix"])
             and pairs[0]["stderr_bytes"] >= len(leaves["stderr.prefix"]), "lifecycle-output-reconciliation")
     return value
+
+
+def validate_retained_receipt(receipt, files, *, source, base, deadline):
+    """Validate the fixed three-case lifecycle receipt from retained bytes only.
+
+    This shares the existing marker, fatal-reason, application-settlement and
+    stream parsers with the live runner. It checks serialized observations; it
+    does not reacquire process, cgroup, account or filesystem state.
+    """
+    require(type(receipt) is dict and receipt.get("schema") == "issue779-c3sdk-lifecycle-stalls-v1"
+            and receipt.get("source") == source and receipt.get("base") == base
+            and type(receipt.get("exit")) is int and receipt["exit"] == 0
+            and receipt.get("native_acceptance") is False, "lifecycle-receipt-header")
+    rows = receipt.get("cases")
+    require(type(rows) is list and all(type(row) is dict for row in rows)
+            and tuple(row.get("case") for row in rows) == LIFECYCLE_CASES,
+            "lifecycle-receipt-order")
+    for row in rows:
+        _check_deadline(deadline)
+        case = row["case"]
+        generation = row.get("generation")
+        require(type(generation) is str and len(generation) == 32
+                and all(c in "0123456789abcdef" for c in generation)
+                and row.get("passed") is True and row.get("native_acceptance") is False
+                and row.get("groups_empty") is True and row.get("final_groups_empty") is True
+                and row.get("fixture_paths_absent") is True, "lifecycle-case-settlement")
+        owner_stdout = files.get(case + "-owner.stdout")
+        owner_stderr = files.get(case + "-owner.stderr")
+        worker_stdout = files.get(case + "-worker-stdout.prefix")
+        worker_stderr = files.get(case + "-worker-stderr.prefix")
+        state = files.get(case + "-worker-state.json")
+        require(type(owner_stdout) is bytes and owner_stdout == b""
+                and type(owner_stderr) is bytes and len(owner_stderr) <= 8 * 1024 * 1024
+                and type(worker_stdout) is bytes and len(worker_stdout) <= PREFIX_LIMIT
+                and type(worker_stderr) is bytes and len(worker_stderr) <= PREFIX_LIMIT
+                and type(state) is bytes and 0 < len(state) <= 4096,
+                "lifecycle-retained-files")
+        state_value = json.loads(state, object_pairs_hook=_object)
+        require(state_value == {"schema": "evidence-worker-failure-output-v1"},
+                "lifecycle-retained-state")
+        owner_events = []
+        output_events = []
+        for line in owner_stderr.splitlines():
+            try:
+                event = json.loads(line, object_pairs_hook=_object)
+            except (ValueError, UnicodeError):
+                continue
+            if type(event) is dict and event.get("schema") == "evidence-application-native-v1":
+                owner_events.append(event)
+            if type(event) is dict and event.get("schema") == "evidence-coverage-output-v1":
+                output_events.append(event)
+        require(owner_events == row.get("application_observations"), "lifecycle-owner-observations")
+        prefix_digests = row.get("worker_prefix_sha256")
+        require(type(prefix_digests) is dict and prefix_digests == {
+            "stdout.prefix": hashlib.sha256(worker_stdout).hexdigest(),
+            "stderr.prefix": hashlib.sha256(worker_stderr).hexdigest(),
+            "state.json": hashlib.sha256(state).hexdigest()}, "lifecycle-prefix-hashes")
+        leaves = {"stdout.prefix": worker_stdout, "stderr.prefix": worker_stderr, "state.json": state}
+        if case == "post-stop-guards":
+            marker = post_stop_marker_from_prefix(worker_stderr)
+            fatal = require_post_stop_terminal(worker_stderr)
+        else:
+            expected_marker = ("configure-sync-stall" if case == "configure-sync-stall"
+                               else "registered-application-disposer-stall")
+            marker = marker_from_prefix(worker_stderr, expected_marker)
+            fatal = require_fatal_reason(worker_stderr, expected_marker)
+        require(row.get("lifecycle_stall") == marker and row.get("fatal_reason") == fatal,
+                "lifecycle-marker-binding")
+        output = row.get("output")
+        expected_output_case = ("configure-sync-stall" if case == "configure-sync-stall"
+                                else "registered-application-disposer-stall" if case == "registered-disposer-stall"
+                                else "post-stop-guards")
+        require(type(output) is dict and len(output_events) == 1
+                and output_events[0] == output
+                and require_joined_output(output_events[0], leaves, expected_output_case) == output,
+                "lifecycle-output")
+        observations = row.get("application_observations")
+        require(type(observations) is list and all(type(event) is dict for event in observations),
+                "lifecycle-observation-shape")
+        if case == "configure-sync-stall":
+            require_configure_before_application_start(observations, row.get("application_seen"), generation)
+        else:
+            settled = [event for event in observations if event.get("phase") == "settled"]
+            require(row.get("application_seen") is True and len(settled) == 1
+                    and settled[0].get("group_empty_twice") is True and settled[0].get("pumps_joined") is True
+                    and settled[0].get("pending_start_joined") is True,
+                    "lifecycle-application-settlement")
+        require(row.get("root_exit") != 0 and type(row.get("root_exit")) is int,
+                "lifecycle-expected-root-failure")
+        accounts = row.get("accounts")
+        require(type(accounts) is list and len(accounts) == 8
+                and all(type(item) is dict for item in accounts)
+                and all(item.get("present") is False for item in accounts), "lifecycle-accounts")
+        case_raw = files.get(case + ".json")
+        require(type(case_raw) is bytes and json.loads(case_raw, object_pairs_hook=_object) == row,
+                "lifecycle-case-file")
+    require(type(receipt.get("staging_path_absent")) is bool and receipt["staging_path_absent"] is True,
+            "lifecycle-staging-cleanup")
+    _check_deadline(deadline)
+    return {"schema": receipt["schema"], "source": source, "base": base,
+            "cases": LIFECYCLE_CASES, "native_acceptance": False}
 
 
 def read_worker_marker(generation, expected_case, *, deadline):

@@ -26,6 +26,16 @@ The seven-case matrix has a 30-minute orchestration bound, including protected S
 
 The workflow retains `source.json`, the generated registration source and its SHA-256, `payload-preparation.json`, `registration-digests.json`, the native receipts, and bounded logs. The final source capture rechecks the original committed source bytes and modes. Artifacts are uploaded only after the retention bound checks pass and are kept for one day.
 
+The application and separate SDK lifecycle closeouts also invoke the shared
+[retained application predicates](retained_application.py) and
+[lifecycle receipt predicates](lifecycle_stalls.py) after their existing native checks. These
+bounded data functions reconcile the serialized case records with retained owner logs, stream
+EOF/accounting, markers and recorded cleanup facts. They acquire no new process, account or
+filesystem authority. The [completed C3 replay](../issue779-protected-qualification/completed-c3-README.md)
+calls those same source-captured functions after verifying the entire original checkout and both
+artifact bindings. Historical receipts whose source predates these callbacks supply adapter
+regression data only; they cannot establish captured callback execution.
+
 The workflow is triggered by pushes to `codex/issue779-checkpoint3-application-20261017`. Source preparation alone does not establish native acceptance; only a successful run of the complete seven-control workflow against its captured source revision can do that.
 
 ## Verified checkpoint result

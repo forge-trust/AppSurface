@@ -40,10 +40,14 @@ OWNER_REFERENCE_GUARDS=(
 )
 
 def events(path,schema):
- if not path.is_file():return []
- require(path.stat().st_size<=MAX_LOG,'root-log-bound')
+ if isinstance(path,bytes):
+  data=path
+  require(len(data)<=MAX_LOG,'root-log-bound')
+ else:
+  if not path.is_file():return []
+  require(path.stat().st_size<=MAX_LOG,'root-log-bound');data=path.read_bytes()
  result=[]
- for row in path.read_bytes().splitlines():
+ for row in data.splitlines():
   try:value=json.loads(row)
   except (ValueError,UnicodeError):continue
   if type(value) is dict and value.get('schema')==schema:result.append(value)
@@ -157,6 +161,10 @@ def output_accounting(stderr):
  require(sum(pair['received_bytes'] for pair in pairs)==row['received_bytes'],'actual-byte-reconciliation')
  require(all(p['stdout_eof'] and p['stderr_eof'] and p['failure']=='None' for p in pairs),'actual-all-eof')
  return row
+
+def retained_validation_error(error):
+ value=str(error)
+ return value if re.fullmatch(r'(?:c3-application|lifecycle-[a-z-]+|actual-[a-z-]+|configure-[a-z-]+|post-stop-[a-z-]+)',value) else 'retained-data-rejected'
 
 def stage(args,end,*,sdk_only=False,lifecycle_only=False):
  require(type(sdk_only) is bool,'closed-staging-selector')
@@ -564,6 +572,18 @@ def run_lifecycle_stalls(args,end):
    require(not os.path.lexists(parent),'lifecycle-staging-absence')
    receipt['staging_path_absent']=True
    receipt['exit']=0
+   retained={}
+   for case in LIFECYCLE_STALL_CASES:
+    for name in (case+'.json',case+'-owner.stdout',case+'-owner.stderr',
+                 case+'-worker-stdout.prefix',case+'-worker-stderr.prefix',case+'-worker-state.json'):
+     path=args.output/name
+     if path.is_file():
+      require(path.stat().st_size<=MAX_LOG,'retained-lifecycle-file-bound')
+      retained[name]=path.read_bytes()
+   import lifecycle_stalls
+   try:lifecycle_stalls.validate_retained_receipt(receipt,retained,source=args.source,base=args.base,deadline=end)
+   except (ValueError,RuntimeError) as failure:
+    receipt['exit']=1;receipt['retained_validation_failure']=retained_validation_error(failure)
  finally:
   write(args.output/'lifecycle-stall-receipt.json',canonical(receipt))
  return receipt['exit']
@@ -592,6 +612,28 @@ def run_partitions(args,end):
    import workspace_guards
    receipt['workspace_guards']=workspace_guards.run(args,tools,runtime,guard_end)
    receipt['exit']=0 if len(receipt['workspace_guards'])==6 and all(c['passed'] for c in receipt['workspace_guards']) else 1
+   if receipt['exit']==0:
+    import retained_application
+    retained={}
+    for case in CASES:
+     for name in (case+'.json',case+'-owner.stdout',case+'-owner.stderr',case+'-manifest.json'):
+      path=args.output/name
+      if path.is_file():
+       require(path.stat().st_size<=MAX_LOG,'retained-c3-file-bound')
+       retained['native/'+name]=path.read_bytes()
+    for case in workspace_guards.APPLICATION_CASES + workspace_guards.PRODUCER_CASES:
+     for name in (case+'.json',case+'-owner.stdout',case+'-owner.stderr'):
+      path=args.output/name
+      if path.is_file():
+       require(path.stat().st_size<=MAX_LOG,'retained-c3-file-bound')
+       retained['native/'+name]=path.read_bytes()
+    try:
+     retained_application.validate(receipt,source=args.source,base=args.base,files=retained,
+                                   events=events,
+                                   output_accounting=output_accounting,
+                                   owner_reference_guards=owner_reference_guards,deadline=guard_end)
+    except (ValueError,RuntimeError) as failure:
+     receipt['exit']=1;receipt['retained_validation_failure']=retained_validation_error(failure)
  finally:write(args.output/'native-receipt.json',canonical(receipt))
  return receipt['exit']
 

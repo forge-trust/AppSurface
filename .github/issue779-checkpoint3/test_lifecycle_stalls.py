@@ -357,5 +357,109 @@ class ConfigurePendingApplicationControls(unittest.TestCase):
                 subject.require_configure_before_application_start(rows, seen, generation)
 
 
+def retained_fixture():
+    import hashlib
+    generation = "a" * 32
+    source = "b" * 40
+    rows = []
+    files = {}
+    for case in subject.LIFECYCLE_CASES:
+        marker_value = (subject.post_stop_marker_from_prefix(
+            json.dumps({"schema": "evidence-worker-post-stop-guards-v1", "case": "post-stop-guards",
+                        "phase": "completed", "active_admission": True, "current_worker": True,
+                        "owned_work_joined": True, "new_work_rejected": True, "write_rejected": True,
+                        "artifacts_unchanged": True, "native_acceptance": False}).encode())
+            if case == "post-stop-guards" else marker(
+                "configure-sync-stall" if case == "configure-sync-stall"
+                else "registered-application-disposer-stall"))
+        worker_stderr = json.dumps(marker_value, sort_keys=True).encode() + b"\n"
+        if case == "post-stop-guards":
+            worker_stderr += b"ASEVD410: Private post-stop admission guards completed.\n"
+            fatal = "post-stop-guards-completed-unsuccessfully"
+        else:
+            reason = (b"Owned Evidence callback or write remained active after its bounded grace."
+                      if case == "configure-sync-stall"
+                      else b"Evidence cleanup did not settle within its budget.")
+            worker_stderr += b"Process terminated. " + reason + b"\n"
+            fatal = "callback-unsettled" if case == "configure-sync-stall" else "registered-disposer-unsettled"
+        worker_stdout = b""
+        state = b'{"schema":"evidence-worker-failure-output-v1"}'
+        app_event = ({"schema": "evidence-application-native-v1", "phase": "settled",
+                      "lease_id": generation,
+                      "unit": "appsurface-evidence-application-" + generation + ".service",
+                      "main_code": None, "main_status": None, "group_empty_twice": True,
+                      "pumps_joined": True, "pending_start_joined": True, "received_bytes": 0,
+                      "ledger_failure": "None", "monitor_failed": False}
+                     if case == "configure-sync-stall" else
+                     {"schema": "evidence-application-native-v1", "phase": "settled",
+                      "group_empty_twice": True, "pumps_joined": True, "pending_start_joined": True})
+        pair_count = 1 if case == "configure-sync-stall" else 3
+        pairs = [{"received_bytes": len(worker_stderr), "stdout_bytes": 0,
+                  "stderr_bytes": len(worker_stderr), "stdout_eof": True, "stderr_eof": True,
+                  "failure": "None", "quota_exceeded": False}]
+        pairs.extend({"received_bytes": 0, "stdout_bytes": 0, "stderr_bytes": 0,
+                      "stdout_eof": True, "stderr_eof": True, "failure": "None",
+                      "quota_exceeded": False} for _ in range(pair_count - 1))
+        output = {"schema": "evidence-coverage-output-v1", "registered_pairs": pair_count,
+                  "received_bytes": len(worker_stderr), "received_byte_limit": 16 * 1024 * 1024,
+                  "failure": "None", "quota_exceeded": False, "stop_signal_failed": False,
+                  "pairs": pairs}
+        owner_stderr = b"\n".join((json.dumps(app_event, sort_keys=True).encode(),
+                                   json.dumps(output, sort_keys=True).encode())) + b"\n"
+        hashes = {"stdout.prefix": hashlib.sha256(worker_stdout).hexdigest(),
+                  "stderr.prefix": hashlib.sha256(worker_stderr).hexdigest(),
+                  "state.json": hashlib.sha256(state).hexdigest()}
+        row = {"case": case, "generation": generation, "passed": True, "native_acceptance": False,
+               "groups_empty": True, "final_groups_empty": True, "fixture_paths_absent": True,
+               "root_exit": 1, "lifecycle_stall": marker_value, "fatal_reason": fatal,
+               "application_seen": case != "configure-sync-stall",
+               "application_observations": [app_event], "worker_prefix_sha256": hashes,
+               "output": output, "accounts": [{"present": False} for _ in range(8)]}
+        if case == "configure-sync-stall":
+            row["application_seen"] = False
+        files.update({case + ".json": json.dumps(row, sort_keys=True).encode(),
+                      case + "-owner.stdout": b"", case + "-owner.stderr": owner_stderr,
+                      case + "-worker-stdout.prefix": worker_stdout,
+                      case + "-worker-stderr.prefix": worker_stderr,
+                      case + "-worker-state.json": state})
+        rows.append(row)
+    receipt = {"schema": "issue779-c3sdk-lifecycle-stalls-v1", "source": source,
+               "base": "416b30919e6c4d03b634d9d3fe558884b02f0b91", "exit": 0,
+               "native_acceptance": False, "cases": rows, "staging_path_absent": True}
+    return receipt, files, source
+
+
+class RetainedLifecycleReceiptTests(unittest.TestCase):
+    def test_fixed_three_case_receipt_projects_only_observed_data(self):
+        receipt, files, source = retained_fixture()
+        result = subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
+                                                   deadline=time.monotonic() + 10)
+        self.assertEqual(subject.LIFECYCLE_CASES, result["cases"])
+        self.assertIs(result["native_acceptance"], False)
+
+    def test_rebound_receipt_does_not_hide_missing_original_eof(self):
+        receipt, files, source = retained_fixture()
+        case = "configure-sync-stall"
+        rows = [json.loads(line) for line in files[case + "-owner.stderr"].splitlines()]
+        rows[-1]["pairs"][0]["stdout_eof"] = False
+        files[case + "-owner.stderr"] = b"\n".join(json.dumps(row, sort_keys=True).encode() for row in rows)
+        receipt["cases"][0]["output"] = rows[-1]
+        files[case + ".json"] = json.dumps(receipt["cases"][0], sort_keys=True).encode()
+        with self.assertRaisesRegex(RuntimeError, "^lifecycle-output-pair$"):
+            subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
+                                              deadline=time.monotonic() + 10)
+
+    def test_wrong_case_order_or_changed_prefix_digest_rejects(self):
+        for fault in ("order", "prefix"):
+            receipt, files, source = retained_fixture()
+            if fault == "order":
+                receipt["cases"][1]["case"] = "configure-sync-stall"
+            else:
+                receipt["cases"][0]["worker_prefix_sha256"]["stderr.prefix"] = "0" * 64
+            with self.subTest(fault=fault), self.assertRaises(RuntimeError):
+                subject.validate_retained_receipt(receipt, files, source=source, base=receipt["base"],
+                                                  deadline=time.monotonic() + 10)
+
+
 if __name__ == "__main__":
     unittest.main()

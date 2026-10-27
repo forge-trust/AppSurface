@@ -50,6 +50,16 @@ they cannot satisfy the completed successful protected-run resolver. C3/account 
 the full gate replay, fixed orchestration, provider/support anchoring and actual Trusted/downstream
 acceptance remain separate required work. No projection grants admission or registers support.
 
+The next [C3 application/lifecycle replay](../../.github/issue779-protected-qualification/completed-c3-README.md)
+shares pure retained-data callbacks with native closeout. Its current adapter accepted the seven
+original run-109 application cases and three lifecycle rows, and rejected coherently rebound EOF
+loss in both streams. Those artifacts predate the new APIs, so this is adapter regression only.
+The portable C3 selection passes 51 tests; the two-artifact wrapper tests exercise real bounded
+ZIP staging and inode-owned cleanup with the final callback boundary isolated. A new source-bound
+Linux run is required for these callbacks. The coverage artifact upload now preserves the existing
+JUnit result XML alongside timings and logs, so later validators can inspect exact public data-test
+identities; this adds retention only and changes no collection, execution or numerical policy.
+
 ## Local integration with current main — 2026-10-27
 
 The prepared revision-104 files were preserved in local commit `6402d8edc64aca84523b94132afaa153749640c3`
