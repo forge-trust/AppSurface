@@ -295,13 +295,15 @@ public sealed class CoverageEvidenceProducerTests
                 TestResults: EvidenceCoverageTestResultFormat.Junit,
                 Parallelism: 2),
         };
+        using var standardOutput = new StringWriter();
+        using var standardError = new StringWriter();
 
         var result = await producer.RunAsync(
             declaration,
             solutionPath,
             Path.Join(directory.Path, "output"),
             null,
-            CoverageTextWriters.Create(new StringWriter(), new StringWriter()),
+            CoverageTextWriters.Create(standardOutput, standardError),
             CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);
@@ -330,13 +332,15 @@ public sealed class CoverageEvidenceProducerTests
         await File.WriteAllTextAsync(projectPath, "<Project />");
         var processRunner = new PassingCoverageRunProcessRunner();
         var producer = CreateProducer(processRunner);
+        using var legacyStandardOutput = new StringWriter();
+        using var legacyStandardError = new StringWriter();
 
         var result = await producer.RunAsync(
             CreateDeclaration(),
             solutionPath,
             Path.Join(directory.Path, "output"),
             null,
-            CoverageTextWriters.Create(new StringWriter(), new StringWriter()),
+            CoverageTextWriters.Create(legacyStandardOutput, legacyStandardError),
             CancellationToken.None);
 
         Assert.Equal(EvidenceProducerOutcome.Passed, result.Outcome);

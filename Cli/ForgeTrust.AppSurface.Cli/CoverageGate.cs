@@ -163,6 +163,7 @@ internal sealed partial class CoverageGateCommand : ICommand
         CoverageGateResult result;
         try
         {
+            CoverageGateEvaluator.ValidateRequest(request);
             using var coordination = await CoverageArtifactGateContext.AcquireAsync(request, console.Error, cancellationToken);
             result = await CoverageGateEvaluator.EvaluateAsync(request, cancellationToken);
             await CoverageGateReportWriter.WriteAsync(result, request, cancellationToken);
@@ -993,7 +994,10 @@ internal static class CoverageGateEvaluator
     /// <returns>The threshold after tolerance, never lower than <c>0</c>.</returns>
     public static decimal GetEffectiveThreshold(decimal threshold, decimal tolerance) => Math.Max(0m, threshold - tolerance);
 
-    private static void ValidateRequest(CoverageGateRequest request)
+    /// <summary>Rejects missing inputs and unsafe report destinations before output coordination can create directories.</summary>
+    /// <param name="request">The same request subsequently evaluated under the retained coordination context.</param>
+    /// <remarks>Evaluation repeats validation because filesystem inputs can change after preflight.</remarks>
+    internal static void ValidateRequest(CoverageGateRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.CoveragePath))
         {

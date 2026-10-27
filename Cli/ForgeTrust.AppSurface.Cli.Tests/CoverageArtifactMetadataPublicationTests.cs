@@ -53,7 +53,7 @@ public sealed class CoverageArtifactMetadataPublicationTests
                 stream.Write(new byte[fault == "oversized" ? 33 : 3]);
             if (fault == "broad") File.SetUnixFileMode(slot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherRead);
         }
-        var error = Record.Exception(() => CoverageArtifactMetadataPublication.Write(directory, "state.json", "new"u8.ToArray(), 32));
+        var error = Assert.ThrowsAny<Exception>(() => CoverageArtifactMetadataPublication.Write(directory, "state.json", "new"u8.ToArray(), 32));
         Assert.True(error is IOException or InvalidDataException);
         Assert.Equal("old", File.ReadAllText(Path.Join(directory.ArtifactDirectoryPath, "state.json")));
         Assert.True(File.Exists(slot) || Directory.Exists(slot));

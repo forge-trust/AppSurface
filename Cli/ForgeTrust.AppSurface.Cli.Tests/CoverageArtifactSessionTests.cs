@@ -6,6 +6,49 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 public sealed class CoverageArtifactSessionTests
 {
     [Fact]
+    public void PublishSidecar_RepeatedFailuresPreserveCurrentBytesWithoutStagingRemnants()
+    {
+        using var fixture = TestDirectory.Create();
+        using var output = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Path, false, false)!;
+        using var operation = CoverageArtifactOperationLease.Acquire(fixture.Path, true);
+        File.WriteAllText(Path.Join(fixture.Path, CoverageArtifactSession.SidecarName), "current");
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var failure = new IOException("injected publication failure");
+            Assert.Same(failure, Assert.Throws<IOException>(() => CoverageArtifactSession.PublishSidecar(
+                output, "next"u8.ToArray(), () => throw failure)));
+            Assert.Equal("current", File.ReadAllText(Path.Join(fixture.Path, CoverageArtifactSession.SidecarName)));
+            Assert.Empty(Directory.EnumerateFiles(fixture.Path, ".artifact-sidecar-*"));
+        }
+
+        CoverageArtifactSession.PublishSidecar(output, "next"u8.ToArray());
+        Assert.Equal("next", File.ReadAllText(Path.Join(fixture.Path, CoverageArtifactSession.SidecarName)));
+        Assert.Empty(Directory.EnumerateFiles(fixture.Path, ".artifact-sidecar-*"));
+    }
+
+    [CoverageUnixFact]
+    public void PublishSidecar_FailedPublicationPreservesAReplacedStagingEntry()
+    {
+        using var fixture = TestDirectory.Create();
+        using var output = CoverageRunOutputLease.AcquireArtifactDirectory(fixture.Path, false, false)!;
+        using var operation = CoverageArtifactOperationLease.Acquire(fixture.Path, true);
+        string? stagedPath = null;
+
+        Assert.Throws<IOException>(() => CoverageArtifactSession.PublishSidecar(output, "ours"u8.ToArray(), () =>
+        {
+            stagedPath = Assert.Single(Directory.EnumerateFiles(fixture.Path, ".artifact-sidecar-*"));
+            File.Move(stagedPath, stagedPath + ".moved");
+            File.WriteAllText(stagedPath, "replacement");
+            throw new IOException("interrupted after replacement");
+        }));
+
+        Assert.Equal("replacement", File.ReadAllText(stagedPath!));
+        Assert.Equal("ours", File.ReadAllText(stagedPath + ".moved"));
+        Assert.False(File.Exists(Path.Join(fixture.Path, CoverageArtifactSession.SidecarName)));
+    }
+
+    [Fact]
     public async Task BeginAsync_WithCleanEnabled_SnapshotsRegisteredInventoryBeforeCleanup()
     {
         using var fixture = TestDirectory.Create();

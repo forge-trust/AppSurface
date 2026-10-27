@@ -126,7 +126,8 @@ public sealed class CoverageArtifactGateContextTests
         using var reader = CoverageArtifactOperationLease.Acquire(output, exclusive: false);
         var command = new CoverageGateCommand
         {
-            CoveragePath = Path.Join(fixture.Path, "missing-coverage.xml"),
+            CoveragePath = fixture.WriteFile("coverage.xml",
+                "<coverage lines-covered=\"1\" lines-valid=\"1\" branches-covered=\"1\" branches-valid=\"1\" />"),
             OutputDirectory = output,
             NoGithubSummary = true
         };

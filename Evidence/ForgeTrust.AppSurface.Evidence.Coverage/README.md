@@ -35,6 +35,10 @@ primary coverage outcome. See the [storage recovery guide](../../guides/coverage
 
 The CLI's internal storage-command base renders schema-v1 operation data into human
 and JSON results using the [storage result contract](../../guides/coverage-storage.md#status-json-and-exit-behavior).
+Its optional domain identifier observation returns `domain-unknown` for nonfatal
+failures so rendering retains the primary result and safe diagnostic. Gate commands
+validate input and destination policy before acquiring output coordination; invalid
+inputs therefore do not create report directories or contend with active writers.
 Human numeric fields accept JSON numbers only; absent, differently typed, or
 unrepresentable values use the field's documented zero or unknown fallback. This
 keeps presentation of partial results from throwing after the operation has
@@ -42,12 +46,29 @@ already recorded its outcome and side effects. Operation implementations still
 validate their own metadata before producing this result; presentation fallbacks
 do not certify an unknown inventory or make an incomplete result successful.
 
+Current-run sidecar publication cleans up its own staging file on failure in both
+collection and independent gate publication. Cleanup requires the staged object's
+identity to match; a replaced entry is preserved and cleanup failure retains the
+original diagnostic. This is separate from private observation-state staging above.
+
 Secure Unix opens share an internal native-flag selector for Darwin, Linux x64,
 and Linux ARM64. [Linux ARM64 native open flags](https://github.com/torvalds/linux/blob/master/arch/arm64/include/uapi/asm/fcntl.h) use different directory-only and no-follow bits
 from x64; output traversal, collector artifact reads, and storage inspection must
 use the matching pair. Unverified Linux architectures fail before opening a
 candidate. The selector has decision tests, while the native no-follow tests in
 the [platform matrix](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/build.yml) verify actual host behavior.
+
+Unix metadata calls select libc symbols for the process ABI because callers read
+native `stat` and `statfs` structures at fixed offsets. Intel Darwin dispatches both
+`fstat` and `fstatfs` to their `$INODE64` symbols; Darwin arm64 and Linux use the
+unsuffixed symbols. Dispatch follows the current OS and process architecture. Callers
+must still provide a sufficiently large writable buffer and interpret only the layout
+for that host. The [XNU `stat.h` declarations](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/stat.h)
+define Darwin's inode-versioned symbol mapping; [XNU `mount.h`](https://github.com/apple/darwin-xnu/blob/main/bsd/sys/mount.h)
+defines the 64-bit-inode `statfs` structure, and [XNU's syscall table](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/syscalls.master)
+distinguishes the legacy and 64-bit `fstatfs` interfaces. Injected dispatch tests cover
+Intel and arm64 routing on any host; native tests validate the running host's call and
+layout. They do not replace native Intel Darwin validation.
 
 Recovery invoked by an existing coverage session reuses that session's live exclusive output lease only when its physical identity matches the stored registration. Shared, disposed or unrelated leases grant no recovery authority. The manager keeps ownership of any separately acquired leases and never releases a borrowed session lease. See the [storage lifecycle and recovery guide](../../guides/coverage-storage.md#recovery-recipes).
 

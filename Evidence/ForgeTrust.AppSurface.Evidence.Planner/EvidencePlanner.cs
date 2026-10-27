@@ -190,7 +190,7 @@ public sealed class EvidencePlanner
             if (string.Equals(producer.Kind, "coverage", StringComparison.Ordinal)
                 && producer.CoverageArtifactRetention is not ("managed" or "full"))
             {
-                throw new EvidencePlanningException("ASEVD127", $"Coverage producer '{producer.Id}' has invalid coverageArtifactRetention.", "Use managed (the default) or full without changing coverage gate requirements.");
+                throw new EvidencePlanningException("ASEVD132", $"Coverage producer '{producer.Id}' has invalid coverageArtifactRetention.", "Use managed (the default) or full without changing coverage gate requirements.");
             }
             if (producer.TimeoutSeconds <= 0)
             {

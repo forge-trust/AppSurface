@@ -112,13 +112,13 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         {
             return Failure($"The installed-consumer command journey did not complete/{exception.Code}.", stopwatch.ElapsedMilliseconds);
         }
-        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException)
+        catch (Exception exception) when (IsContractFailure(exception))
         {
             var exitDetail = _lastExitCode is { } exitCode ? $"/exit-{exitCode}" : "";
             if (context.Artifacts is not null)
             {
                 var root = _workspace?.RootPath ?? "";
-                string Safe(string value) => root.Length > 0 ? value.Replace(root, "<workspace>", StringComparison.Ordinal) : value;
+                string Safe(string value) => RedactAndBoundDiagnostic(value, root);
                 await context.Artifacts.WriteAsync("result", "proof/result.json", JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     completed = false,
@@ -163,7 +163,9 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
             throw new InvalidOperationException();
         }
         var originalCommit = await GitOutputAsync(sourceDirectory, ["rev-parse", "HEAD"], budget, cancellationToken, allowMissing: true).ConfigureAwait(false);
-        var expectedCommit = options.ExpectedCommit ?? (options.SourceDirectory is null ? null : _settings.ExpectedSourceCommit);
+        if (options.SourceDirectory is not null && string.IsNullOrWhiteSpace(options.ExpectedCommit))
+            throw new InvalidOperationException("External consumer profiles must pin expectedCommit.");
+        var expectedCommit = options.ExpectedCommit;
         if (expectedCommit is not null && expectedCommit.Length > 0 && !string.Equals(originalCommit, expectedCommit, StringComparison.Ordinal))
         {
             throw new InvalidOperationException();
@@ -265,8 +267,7 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
 
         var archiveAssemblyHash = GetArchiveAssemblyHash(packagePath);
-        var installedAssembly = Directory.EnumerateFiles(_workspace.RootPath, CliAssembly, SearchOption.AllDirectories).FirstOrDefault();
-        if (installedAssembly is null || !string.Equals(archiveAssemblyHash, await HashFileAsync(installedAssembly, cancellationToken).ConfigureAwait(false), StringComparison.Ordinal))
+        if (!await VerifyInstalledAssembliesAsync(Path.Join(toolPath, ".store"), archiveAssemblyHash, cancellationToken).ConfigureAwait(false))
         {
             throw new InvalidDataException();
         }
@@ -282,6 +283,42 @@ internal sealed class InstalledConsumerProducer : IEvidenceProducer, IAsyncDispo
         }
         var consumerEnvironment = BuildEnvironment(cliHome, sharedNuGetCache);
         return new PackageSnapshot(packageHash, archiveAssemblyHash, executable, consumerEnvironment);
+    }
+
+    /// <summary>Redacts the owned workspace path and retains a UTF-8-safe trailing diagnostic bounded to 16 KiB.</summary>
+    /// <param name="value">Captured command output.</param>
+    /// <param name="root">Owned workspace path to redact before truncation.</param>
+    /// <returns>A redacted string whose UTF-8 encoding is at most 16 KiB.</returns>
+    internal static string RedactAndBoundDiagnostic(string value, string root)
+    {
+        var redacted = root.Length > 0 ? value.Replace(root, "<workspace>", StringComparison.Ordinal) : value;
+        const int maximumBytes = 16 * 1024;
+        var bytes = Encoding.UTF8.GetBytes(redacted);
+        if (bytes.Length <= maximumBytes) return redacted;
+        var start = bytes.Length - maximumBytes;
+        while ((bytes[start] & 0xC0) == 0x80) start++;
+        return Encoding.UTF8.GetString(bytes, start, bytes.Length - start);
+    }
+
+    /// <summary>Identifies malformed or inaccessible evidence errors that must become a stable failed result.</summary>
+    /// <param name="exception">Failure raised while validating the consumer journey.</param>
+    /// <returns><see langword="true"/> for expected input and contract failures.</returns>
+    internal static bool IsContractFailure(Exception exception) =>
+        exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException or System.Xml.XmlException or JsonException or KeyNotFoundException or FormatException;
+
+    /// <summary>Verifies every CLI assembly materialized in the installed tool's private package store.</summary>
+    /// <param name="storePath">The tool path's `.store` directory; workspace decoys are intentionally excluded.</param>
+    /// <param name="expectedHash">SHA-256 digest from the verified package archive.</param>
+    /// <param name="cancellationToken">Cancellation for hashing each candidate.</param>
+    /// <returns><see langword="true"/> only when at least one store assembly exists and every candidate matches.</returns>
+    internal static async Task<bool> VerifyInstalledAssembliesAsync(string storePath, string expectedHash, CancellationToken cancellationToken)
+    {
+        if (!Directory.Exists(storePath)) return false;
+        var assemblies = Directory.EnumerateFiles(storePath, CliAssembly, SearchOption.AllDirectories).ToArray();
+        if (assemblies.Length == 0) return false;
+        foreach (var assembly in assemblies)
+            if (!string.Equals(expectedHash, await HashFileAsync(assembly, cancellationToken).ConfigureAwait(false), StringComparison.Ordinal)) return false;
+        return true;
     }
 
     private async Task<CoverageSnapshot> RunCoverageAsync(SourceSnapshot source, PackageSnapshot package, ConsumerValidationOptions options, Func<CancellationToken, ValueTask> budget, CancellationToken cancellationToken)

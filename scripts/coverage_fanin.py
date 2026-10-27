@@ -33,15 +33,18 @@ NATIVE_FILTER = (
 )
 PLATFORMS = {"Linux", "Windows", "Darwin"}
 MAX_REPORT_BYTES = 512 * 1024 * 1024
+IDENTITY_COMMAND_TIMEOUT_SECONDS = 30
 
 
 def command(root: Path, *args: str) -> str:
-    return subprocess.check_output(args, cwd=root, text=True).strip()
+    return subprocess.check_output(args, cwd=root, text=True,
+                                   timeout=IDENTITY_COMMAND_TIMEOUT_SECONDS).strip()
 
 
 def source_identity(root: Path) -> dict:
     """Bind a clean tracked tree to its exact commit and SDK, including test sources."""
-    subprocess.run(["git", "diff", "--exit-code", "--quiet", "HEAD", "--"], cwd=root, check=True)
+    subprocess.run(["git", "diff", "--exit-code", "--quiet", "HEAD", "--"], cwd=root, check=True,
+                   timeout=IDENTITY_COMMAND_TIMEOUT_SECONDS)
     if command(root, "git", "ls-files", "--others", "--exclude-standard"):
         raise ValueError("Untracked files prevent source attestation; commit source changes first")
     return {
@@ -477,6 +480,6 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, KeyError, OSError, ET.ParseError, subprocess.CalledProcessError) as error:
+    except (ValueError, KeyError, OSError, ET.ParseError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         print(f"Coverage fan-in rejected: {error}", file=sys.stderr)
         sys.exit(1)

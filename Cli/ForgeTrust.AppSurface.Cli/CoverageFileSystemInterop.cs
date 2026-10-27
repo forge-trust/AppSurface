@@ -65,14 +65,36 @@ internal static partial class CoverageFileSystemInterop
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
     internal static partial int UnixOpenAt(int directoryDescriptor, string path, int flags, uint mode);
 
-    /// <summary>
-    /// Reads native metadata for an open Unix descriptor into a caller-owned buffer.
-    /// </summary>
-    /// <param name="descriptor">The open descriptor to inspect.</param>
-    /// <param name="buffer">A caller-owned buffer large enough for the platform's native stat structure.</param>
-    /// <returns>Zero on success; otherwise <c>-1</c>.</returns>
+    /// <summary>Reads metadata using the native stat layout selected for the current Unix ABI.</summary>
+    /// <param name="descriptor">An open Unix file descriptor.</param>
+    /// <param name="buffer">Caller-owned storage for the platform's native stat structure.</param>
+    /// <returns>Zero on success; otherwise <c>-1</c> with the native error available.</returns>
+    internal static int UnixFStat(int descriptor, nint buffer) => InvokeUnixFStat(
+        OperatingSystem.IsMacOS() ? "macos" : "unix", RuntimeInformation.ProcessArchitecture,
+        descriptor, buffer, UnixFStatNative, DarwinX64FStatNative);
+
+    /// <summary>Dispatches fstat to the ABI-compatible libc symbol.</summary>
+    /// <remarks>Intel Darwin's 64-bit inode structure is exposed as <c>fstat$INODE64</c>; arm64 uses <c>fstat</c>.</remarks>
+    internal static int InvokeUnixFStat(
+        string platform,
+        Architecture architecture,
+        int descriptor,
+        nint buffer,
+        Func<int, nint, int> unixFStat,
+        Func<int, nint, int> darwinX64FStat)
+    {
+        ArgumentNullException.ThrowIfNull(unixFStat);
+        ArgumentNullException.ThrowIfNull(darwinX64FStat);
+        return platform.Equals("macos", StringComparison.OrdinalIgnoreCase) && architecture == Architecture.X64
+            ? darwinX64FStat(descriptor, buffer)
+            : unixFStat(descriptor, buffer);
+    }
+
     [LibraryImport("libc", EntryPoint = "fstat", SetLastError = true)]
-    internal static partial int UnixFStat(int descriptor, nint buffer);
+    private static partial int UnixFStatNative(int descriptor, nint buffer);
+
+    [LibraryImport("libc", EntryPoint = "fstat$INODE64", SetLastError = true)]
+    private static partial int DarwinX64FStatNative(int descriptor, nint buffer);
 
     /// <summary>
     /// Changes the permissions of an open Unix descriptor.

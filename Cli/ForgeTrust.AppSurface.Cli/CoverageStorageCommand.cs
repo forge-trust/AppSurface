@@ -346,14 +346,16 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
     };
 
     /// <summary>Hashes the effective domain path so machine-local prefixes are never emitted.</summary>
-    protected static string DomainId()
+    /// <param name="openStore">Optional per-call observation seam; production opens the configured read-only store.</param>
+    /// <remarks>Every nonfatal observation failure returns domain-unknown so envelope rendering preserves the primary diagnostic.</remarks>
+    internal static string DomainId(Func<CoverageArtifactStore>? openStore = null)
     {
         try
         {
-            using var store = CoverageArtifactStore.OpenReadOnly();
+            using var store = openStore is null ? CoverageArtifactStore.OpenReadOnly() : openStore();
             return "domain-" + Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(store.RootPath))))[..16].ToLowerInvariant();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or InvalidDataException or NotSupportedException)
+        catch (Exception exception) when (exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException))
         {
             return "domain-unknown";
         }

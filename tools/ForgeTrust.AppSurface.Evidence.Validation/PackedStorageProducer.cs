@@ -21,6 +21,30 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
     /// <inheritdoc />
     public async ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(context);
+        try
+        {
+            return await RunJourneyAsync(context, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            var diagnostic = exception.Message.StartsWith("Native validation contract failed: ", StringComparison.Ordinal)
+                ? exception.Message
+                : "Packed storage validation contract failed.";
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], diagnostic);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or KeyNotFoundException or JsonException or System.Xml.XmlException or UnauthorizedAccessException)
+        {
+            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], "Packed storage validation contract failed.");
+        }
+        finally
+        {
+            if (_workspace is not null) await _workspace.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async ValueTask<EvidenceProducerResult> RunJourneyAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
+    {
         _workspace = EvidenceWorkspace.Create(settings.ScratchParent,
             new EvidenceWorkspaceOptions(settings.MaximumScratchBytes, settings.MinimumFreeBytes));
         var root = _workspace.RootPath;
@@ -138,10 +162,6 @@ internal sealed class PackedStorageProducer(ValidationSettings settings) : IEvid
             }), cancellationToken);
             return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed,
                 ["storage/published-cli@1", "storage/byte-preservation@1", "storage/explicit-retirement@1"]);
-        }
-        catch (InvalidOperationException exception) when (exception.Message.StartsWith("Native validation contract failed: ", StringComparison.Ordinal))
-        {
-            return new EvidenceProducerResult(Id, EvidenceProducerOutcome.Failed, [], exception.Message);
         }
         catch (EvidenceCommandException exception)
         {

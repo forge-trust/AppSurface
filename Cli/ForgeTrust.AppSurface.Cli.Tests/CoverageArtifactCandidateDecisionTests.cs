@@ -53,7 +53,7 @@ public sealed class CoverageArtifactCandidateDecisionTests
     [Fact]
     public void WindowsInvalidHandleFailsWithoutReturningAStream()
     {
-        var handle = new SafeFileHandle(-1, false);
+        using var handle = new SafeFileHandle(-1, false);
         Assert.Throws<IOException>(() => CoverageArtifactInspector.TryOpenRegularFile("unused", out _, out _,
             new CoverageArtifactCandidateCalls { IsWindows = true, WindowsOpen = _ => handle }));
         Assert.True(handle.IsClosed);

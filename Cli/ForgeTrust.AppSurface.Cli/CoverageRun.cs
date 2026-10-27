@@ -1087,27 +1087,7 @@ internal sealed class CoverageRunWorkflow
 
             if (request.Clean && request.ArtifactRetention == "managed")
             {
-                try
-                {
-                    using var rawParent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(merge.CoberturaPath)!, false, false)!;
-                    using var currentParent = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, false, false)!;
-                    string rawIdentity;
-                    using (var raw = rawParent.OpenArtifactFile(Path.GetFileName(merge.CoberturaPath), false, false))
-                    using (var current = currentParent.OpenArtifactFile("coverage.cobertura.xml", false, false))
-                    {
-                        rawIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(raw.SafeFileHandle);
-                        var rawHash = await System.Security.Cryptography.SHA256.HashDataAsync(raw, supervisedCancellationToken);
-                        var currentHash = await System.Security.Cryptography.SHA256.HashDataAsync(current, supervisedCancellationToken);
-                        if (raw.Length != current.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(rawHash, currentHash))
-                            throw new IOException("Generated and canonical coverage bytes differ.");
-                    }
-                    supervisedCancellationToken.ThrowIfCancellationRequested();
-                    rawParent.DeleteArtifactEntry(Path.GetFileName(merge.CoberturaPath), 1, rawIdentity);
-                }
-                catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
-                {
-                    await CoverageArtifactDiagnostic.Failure("ASCOV201", "duplicate-cleanup", exception).WriteAsync(console.Error);
-                }
+                await RemoveRedundantMergedCoverageAsync(merge.CoberturaPath, outputDirectory, console.Error, supervisedCancellationToken);
             }
 
             using (supervisor.Start("artifacts"))
@@ -1233,6 +1213,41 @@ internal sealed class CoverageRunWorkflow
                     terminalResolution?.Projects.Select(project => project.RelativePath) ?? [], request.IncludeFilter, request.ExcludeFilter));
             }
             if (ownsArtifactSession) artifactSession?.Dispose();
+        }
+    }
+
+    /// <summary>Retires generated merged XML only after matching the published canonical bytes.</summary>
+    /// <param name="generatedPath">Exact report emitted by the current merge invocation.</param>
+    /// <param name="outputDirectory">Current canonical output root.</param>
+    /// <param name="errors">Diagnostic stream for optional failures.</param>
+    /// <param name="token">Original supervised cancellation.</param>
+    /// <remarks>Missing roots and other optional filesystem failures warn without replacing collection success.
+    /// Cancellation still propagates; deletion requires the opened generated object's identity.</remarks>
+    internal static async Task RemoveRedundantMergedCoverageAsync(string generatedPath, string outputDirectory,
+        TextWriter errors, CancellationToken token)
+    {
+        try
+        {
+            using var rawParent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(generatedPath)!, false, false)
+                ?? throw new IOException("Generated coverage directory disappeared before optional duplicate cleanup.");
+            using var currentParent = CoverageRunOutputLease.AcquireArtifactDirectory(outputDirectory, false, false)
+                ?? throw new IOException("Canonical coverage directory disappeared before optional duplicate cleanup.");
+            string rawIdentity;
+            using (var raw = rawParent.OpenArtifactFile(Path.GetFileName(generatedPath), false, false))
+            using (var current = currentParent.OpenArtifactFile("coverage.cobertura.xml", false, false))
+            {
+                rawIdentity = CoverageRunOutputLease.GetArtifactObjectIdentity(raw.SafeFileHandle);
+                var rawHash = await System.Security.Cryptography.SHA256.HashDataAsync(raw, token);
+                var currentHash = await System.Security.Cryptography.SHA256.HashDataAsync(current, token);
+                if (raw.Length != current.Length || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(rawHash, currentHash))
+                    throw new IOException("Generated and canonical coverage bytes differ.");
+            }
+            token.ThrowIfCancellationRequested();
+            rawParent.DeleteArtifactEntry(Path.GetFileName(generatedPath), 1, rawIdentity);
+        }
+        catch (Exception exception) when (CoverageArtifactSession.IsOptionalFailure(exception))
+        {
+            await CoverageArtifactDiagnostic.Failure("ASCOV201", "duplicate-cleanup", exception).WriteAsync(errors);
         }
     }
 

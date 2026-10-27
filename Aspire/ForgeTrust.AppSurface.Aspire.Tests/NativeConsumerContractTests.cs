@@ -101,6 +101,37 @@ public sealed class NativeConsumerContractTests
     }
 
     [Fact]
+    public async Task ExternalProfile_RequiresExplicitCommitPin()
+    {
+        var root = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var parent = Directory.CreateTempSubdirectory("appsurface-native-missing-pin-").FullName;
+        var source = Path.Join(parent, "consumer");
+        try
+        {
+            Directory.CreateDirectory(source);
+            await File.WriteAllTextAsync(Path.Join(source, "Consumer.slnx"), "<Solution />");
+            await RunGit(source, "init", "--quiet");
+            await RunGit(source, "config", "user.name", "Native consumer test");
+            await RunGit(source, "config", "user.email", "native-consumer@example.invalid");
+            await RunGit(source, "add", ".");
+            await RunGit(source, "commit", "--quiet", "-m", "fixture");
+
+            var settings = Settings(root, parent) with
+            {
+                PackagePath = Path.Join(parent, "must-not-be-read.nupkg"),
+                Consumer = new ConsumerValidationOptions(SourceDirectory: source),
+            };
+            await using var producer = new InstalledConsumerProducer(settings);
+            var result = await producer.ProduceAsync(Context(Declaration(producer.Id)), CancellationToken.None);
+
+            Assert.Equal(EvidenceProducerOutcome.Failed, result.Outcome);
+            Assert.Contains("source", result.Diagnostic, StringComparison.Ordinal);
+            Assert.False(File.Exists(settings.PackagePath));
+        }
+        finally { Directory.Delete(parent, recursive: true); }
+    }
+
+    [Fact]
     public void SourcePathContract_RejectsRootedTraversalAndDriveLikePaths()
     {
         var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "consumer-root"));
