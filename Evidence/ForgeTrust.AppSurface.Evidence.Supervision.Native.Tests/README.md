@@ -330,3 +330,19 @@ The refresh binds the previously reviewed NSS and directory-reader refactors
 outside those witnesses. Checkout fingerprint tests, exact method/span matching,
 original image hashes and positive current-source hit requirements remain in force.
 A source fingerprint alone cannot establish native execution or coverage hits.
+
+### Separate application bundle audit measurement
+
+The [C3 workflow](../../.github/workflows/issue779-checkpoint3-application.yml) retains a separate
+`application-bundle-tests/application-bundle.trx` and `application_bundle_tests` binding for the
+[six real root filesystem audit controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs).
+[`ApplicationBundleMeasurement.Validate`](ApplicationBundleMeasurement.cs) requires its exact raw SHA-256,
+six executed and passed rows, all six fixed method names once, zero failed/skipped/error counters, and
+`native_acceptance: false`. The TRX is bounded to 1 MiB and prohibits DTDs.
+The [detached parser controls](ApplicationBundleMeasurementTests.cs) check malformed, missing, extra,
+duplicate and mismatched inputs; they provide no native or acceptance credit.
+
+The original 43-row root TRX and 44-row supplement remain separate. The pinned standard collector alone
+merges the new actual report into the existing measured report; no hit values or denominators are
+rewritten by this validator. [`NativeMeasurementTests`](NativeMeasurementTests.cs) reads the new fixed
+subdirectory only after staging from the same run's source-bound application artifact.

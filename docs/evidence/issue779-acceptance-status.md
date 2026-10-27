@@ -3,6 +3,34 @@
 <a id="latest-verified-consumer-checkpoint--2026-10-26"></a>
 
 
+## Revision 96 verified results and revision 97 correction — 2026-10-27
+
+[Revision 96](https://github.com/forge-trust/AppSurface/actions/runs/40418448002), source `3a650e86eafc1553e54aad0b0d2c12713a2c27f1`, has independently verified C1 and C3 artifacts. All 15 C1 archives matched their API digests, the complete 3,603-file source capture, immutable Git blobs and modes; the original selector callbacks returned exactly 16 unique passing, unskipped controls and reproduced the aggregate. The C1 verification receipt is SHA-256 `21f675f819ecb8b99707e475e98ef65494fd9277391c927f0f27b1b8f694e9e9`.
+
+The application artifact `12699233184` (SHA-256 `c76b756ad20405c5a08341177567d822efa0214c93ef373bd83882adbf2ea48c`) passed independent source/receipt checks for 13 original records (seven application/lifecycle cases and six bundle/scratch cases), 43/43 root tests and the separate 44/44 supplementary root tests. The intended SDK failed-test control retained five passed tests and one expected failed test, with cleanup and account absence. The separate lifecycle artifact `12699308275` (SHA-256 `adfdb7f9c464fb2558fc6c53cc57595d9d22db8a9be159ca47af398cb2d894ad`) verified all three fixed lifecycle cases and their final group/path/account absence. Verification receipts are SHA-256 `6880cf6427d2b4de0c7bec9c49d5691871262f607ff06c6c33294245f1930591` and `56f70f10509536e78224d6bc00284d21e80284bb92472d3cdfb5a2f893c1db14`. These are retained source-bound mechanism and consumer results, not Trusted acceptance.
+
+The account job published its image successfully, then rejected its C3 predecessor with `account-control-prior-root`: its [lineage validator](../../.github/issue779-checkpoint4/run-accounts.py) still required 41 results instead of the current 43. Revision 97 pins the current exact count and preserves the hash-bound TRX, complete passing rows, failure-counter checks and separate supplementary receipt. Its 19 portable lineage controls passed, including coherent obsolete/adjacent-count rejection. The full ordinary supervision suite passed 3,010 tests on macOS; 65 Linux/root-only cases were skipped and remain native obligations. Four private qualification builds passed with warnings as errors. No limit, threshold, base or exclusion changed.
+
+[Revision 97](https://github.com/forge-trust/AppSurface/actions/runs/40433493800), source `fb3e6e24c8c7f3ea3668985825ae4bfab7e3e052`, is the in-progress Linux validation for that correction; no terminal result is recorded in this section. It also validates the reviewed worker-settlement and producer-seal decision controls. Revision 96's account failure prevented rollback, packaged-consumer, segmented measurement and full coverage jobs, so it supplies no new numerical gate result. Revision 91 below remains the last fully analyzed patch result; a proposed test does not reduce its measured deficit.
+
+### Protected Trusted work still required
+
+The [protected parent entry point](../../.github/issue779-protected-consumer/entrypoint-README.md) has verified Linux transport and actual semantic-child controls, but its registry is empty and it has not run as a protected-main consumer. Its semantic result checks an existing Trusted manifest; it issues no runtime admission. The [root launch request](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceSupervisorRequest.cs) currently accepts Observation only, the [root descriptor](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceWorkerDescriptorData.cs) emits Observation with no acceptance proof, and [Planner's accepted-proof decision](../../Evidence/ForgeTrust.AppSurface.Evidence.Planner/EvidenceProtectedWorkerInputs.cs) remains false. Closing this gap requires a reviewed protected qualification/bootstrap, actual immutable build/deployment and workflow facts, a separately reviewed exact support registration, an ordinary production Trusted CLI/SDK run, and protected downstream acceptance of that completed run. Candidate green jobs, serialized assertions and matching hashes alone cannot supply those facts. The catalogue and production Trusted registry remain closed.
+
+### Prepared application inventory measurement
+
+The [application bundle audit](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#application-bundle-source-audit)
+now shares the workspace's existing retained-descriptor inventory and recheck code without granting another
+owner or workspace capability. Six [root-native filesystem controls](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs)
+cover real selected bytes, substitution, unexpected or unsafe entries, cancellation and depth boundaries.
+Their [separate collector and exact TRX validator](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#separate-application-bundle-audit-measurement)
+preserve the original 43-row root suite and 44-row supplementary suite and merge only actual collector output.
+Local ordinary supervision validation passed 3,010 cases with 71 Linux/root skips; the measurement parser
+suite passed 389 cases with one native skip. The repository fixture-path policy passed after adding the
+existing shared testing helper reference; no package version changed. These local results do not establish
+the six native outcomes or reduce the revision-91 measured coverage deficit. Fresh source-bound Linux
+execution and the unchanged full coverage gate remain required.
+
 ## Revision 93/94 follow-up and protected-parent qualification — 2026-10-26
 
 [Revision 93](https://github.com/forge-trust/AppSurface/actions/runs/40407960173), source `d69899a521400305c201a122fd18b5f3e9d84d9c`, has independent verification of all 15 C1 artifacts: the 14 original selector callbacks cover exactly 16 case rows and the recomputed aggregate matches the CI aggregate. The verification receipt SHA-256 is `e6eb24d1be066c499f8d45aa0f80a883bececd3f7625d4348f6bcf874929f74c`. This is C1 evidence only; the application consumer failed before full acceptance. Its private post-stop fixture has since been corrected to keep the original single coverage slot.

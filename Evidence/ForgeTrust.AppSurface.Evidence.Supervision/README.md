@@ -2336,3 +2336,25 @@ diagnostic before the existing invalid-workspace exception. The policy does not 
 its [tests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxProducerSealLimitsTests.cs) are decision-only; native ownership, descriptor-relative traversal, type/metadata checks, cancellation,
 entry sealing, and quarantine stay in the production caller. Keep this separate from `LinuxProducerCopyBudget`:
 copy-time source reservations and seal-time observations protect different phases of the same lifecycle.
+
+### Application bundle source audit
+
+[`LinuxApplicationBundleAudit`](LinuxApplicationBundleAudit.cs) groups the descriptor-based source inventory
+and its initial exact comparison against the selected application file rows. The application workspace
+continues to authenticate the actual owner, accounts and compiled definition, open the protected tool probe
+and source root, and retain every acquired child in its own quarantine list. The utility borrows that root,
+existing inventory maps, retained-node list, original deadline and token. It never closes those descriptors or
+issues workspace, admission or account-release authority. A child is retained before name, depth, selection,
+metadata and hash checks, so a failed walk cannot lose the original descriptor.
+
+`Inventory` preserves the existing depth, node-count, path, owner, mode, link, length and hash checks.
+`BuildRows` is shared by the initial audit and later workspace rechecks; it reads original retained metadata
+and actual file hashes. The [root-native controls](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxApplicationBundleAuditNativeTests.cs)
+use real root-owned Linux files to test selected bytes, changed bytes, unexpected or unsafe entries,
+cancellation and depth boundaries. They exercise this inventory utility without constructing an application
+owner or proving application/Trusted acceptance. A skipped non-Linux run provides no native proof. The separate C3 collector pass preserves the original
+43-row root and 44-row supplementary TRXs, requires all six fixed bundle-test names with zero skipped or
+failed rows, and lets the pinned standard collector merge its real report. Its exact TRX hash and counts
+travel in `application_bundle_tests`; the downstream native-measurement test revalidates those bytes.
+Only three bounded private retention leaves are added; product byte quotas and the 96 MiB retention total
+remain unchanged.

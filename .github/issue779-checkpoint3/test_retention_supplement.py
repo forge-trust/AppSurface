@@ -15,7 +15,7 @@ class SupplementRetentionTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 runpy.run_path(str(Path(__file__).with_name('check-retention.py')), run_name='__main__')
 
-    def test_three_supplement_files_fit_but_a_further_leaf_rejects(self):
+    def test_six_supplement_files_fit_but_a_further_leaf_rejects(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             for index in range(128):
@@ -24,6 +24,9 @@ class SupplementRetentionTests(unittest.TestCase):
             (root / 'root-supplement.trx').write_bytes(b'bounded fixture data')
             (root / 'root-supplement-driver.log').write_bytes(b'')
             (root / 'retention-supplement-controls.log').write_bytes(b'')
+            (root / 'application-bundle.trx').write_bytes(b'bounded fixture data')
+            (root / 'application-bundle-driver.log').write_bytes(b'')
+            (root / 'application-bundle-controls.log').write_bytes(b'')
             self.check(root)
             self.assertEqual(0o700, root.stat().st_mode & 0o777)
             self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in root.iterdir()))

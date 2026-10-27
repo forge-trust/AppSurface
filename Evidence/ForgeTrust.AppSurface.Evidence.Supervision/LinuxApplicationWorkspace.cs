@@ -607,46 +607,11 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
         var expectedProbeHash = _layout.BundleFiles.Single(static file => file.Role == LinuxApplicationBundleRole.Resource).Sha256;
         if (_toolProbe.Metadata.Mode != (ushort)(0x8000 | 0x124)) throw LinuxApplicationWorkspaceLayout.Invalid();
         RequireManagedToolProbe(_toolProbe.ReadManagedProbeBytes(token, _deadline), expectedProbeHash);
-        var sourceRoot = _layout.ToolRoot + "/application";
-        _sourceDirectories[string.Empty] = null!;
-        var root = LinuxProtectedNode.OpenAbsolute(sourceRoot, true, true, 0, _sourceNodes, token, _deadline);
-        Inventory(root, string.Empty, 0);
-        var rows = BuildSourceRows(token);
-        LinuxApplicationWorkspaceLayout.RequireExactInventory(_layout.BundleFiles, rows);
-
-        void Inventory(LinuxProtectedNode directory, string relative, int depth)
-        {
-            _deadline.Check(token);
-            RequireProtectedDirectory(directory.Metadata);
-            if (relative.Length != 0 && _sourceDirectories.ContainsKey(relative)) throw LinuxApplicationWorkspaceLayout.Invalid();
-            _sourceDirectories[relative] = directory;
-            _sourceDirectoryHandles[relative] = directory;
-            if (_sourceNodes.Count > LinuxApplicationWorkspaceLayout.MaximumTreeEntries) throw LinuxApplicationWorkspaceLayout.Invalid();
-            foreach (var name in directory.ReadNames(token))
-            {
-                _deadline.Check(token);
-                var childPath = relative.Length == 0 ? name : relative + "/" + name;
-                var isDirectory = directory.IsChildDirectory(name);
-                var child = directory.OpenChild(name, isDirectory, token);
-                _sourceNodes.Add(child);
-                if (isDirectory)
-                {
-                    if (depth >= 32) throw LinuxApplicationWorkspaceLayout.Invalid();
-                    Inventory(child, childPath, depth + 1);
-                }
-                else
-                {
-                    ValidateSourcePath(childPath);
-                    if (!_sourceFiles.TryAdd(childPath, child)) throw LinuxApplicationWorkspaceLayout.Invalid();
-                    var expected = _files.GetValueOrDefault(childPath);
-                    if (expected is null || child.Metadata.Length != (ulong)expected.LengthBytes
-                        || child.Metadata.Mode != (ushort)(0x8000 | expected.Mode)
-                        || child.Metadata.Uid != 0 || child.Metadata.Gid != 0 || child.Metadata.LinkCount != 1
-                        || child.Hash(token, _deadline) != expected.Sha256) throw LinuxApplicationWorkspaceLayout.Invalid();
-                }
-                if (_sourceNodes.Count > LinuxApplicationWorkspaceLayout.MaximumTreeEntries) throw LinuxApplicationWorkspaceLayout.Invalid();
-            }
-        }
+        var audit = new LinuxApplicationBundleAudit(_layout.BundleFiles, _files, _sourceNodes, _deadline,
+            _sourceDirectories, _sourceFiles, _sourceDirectoryHandles);
+        var root = LinuxProtectedNode.OpenAbsolute(_layout.ToolRoot + "/application", true, true, 0,
+            _sourceNodes, token, _deadline);
+        audit.Inventory(root, token);
     }
 
     private void CopyBundle(CancellationToken token)
@@ -852,23 +817,7 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     private readonly Dictionary<string, LinuxProtectedNode> _sourceDirectoryHandles = new(StringComparer.Ordinal);
 
     private IReadOnlyList<LinuxApplicationObservedEntry> BuildSourceRows(CancellationToken token)
-    {
-        var rows = new List<LinuxApplicationObservedEntry>();
-        foreach (var pair in _sourceDirectoryHandles)
-        {
-            var metadata = pair.Value.Metadata;
-            rows.Add(new(pair.Key, true, metadata.Uid, metadata.Gid, metadata.Mode, metadata.LinkCount,
-                metadata.Inode, checked((long)metadata.Length), null));
-        }
-        foreach (var pair in _sourceFiles)
-        {
-            token.ThrowIfCancellationRequested();
-            var metadata = pair.Value.Metadata;
-            rows.Add(new(pair.Key, false, metadata.Uid, metadata.Gid, metadata.Mode, metadata.LinkCount,
-                metadata.Inode, checked((long)metadata.Length), pair.Value.Hash(token, _deadline)));
-        }
-        return Array.AsReadOnly(rows.ToArray());
-    }
+        => LinuxApplicationBundleAudit.BuildRows(_sourceDirectoryHandles, _sourceFiles, _deadline, token);
 
     private IReadOnlyList<LinuxApplicationObservedEntry> BuildBundleRows(CancellationToken token)
     {
@@ -1196,13 +1145,6 @@ internal sealed class LinuxApplicationWorkspace : IDisposable
     }
 
     private static int PathDepth(string path) => path.Length == 0 ? 0 : path.Count(static character => character == '/') + 1;
-
-    private static void ValidateSourcePath(string path)
-    {
-        if (string.IsNullOrEmpty(path) || path.Any(static character => !char.IsAsciiLetterOrDigit(character)
-            && character is not ('-' or '_' or '.' or '/')) || path.Split('/').Any(static part => part.Length is < 1 or > 255
-                || part is "." or "..")) throw LinuxApplicationWorkspaceLayout.Invalid();
-    }
 
     private static LinuxApplicationBundleRole ToWorkspaceRole(EvidenceClosedBundleRole role) => role switch
     {

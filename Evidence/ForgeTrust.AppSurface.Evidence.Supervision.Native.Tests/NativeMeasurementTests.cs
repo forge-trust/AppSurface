@@ -78,6 +78,9 @@ public sealed class NativeMeasurementTests
         RootFilesystemMeasurement.Validate(binding.RootElement.GetProperty("root_file_tests"), rootTrx);
         RootSupplementMeasurement.Validate(binding.RootElement.GetProperty("root_supplement_tests"),
             Read(directory, "root-supplement.trx", 1024 * 1024));
+        ApplicationBundleMeasurement.Validate(
+            binding.RootElement.GetProperty("application_bundle_tests"),
+            Read(TestPathUtils.PathUnder(directory, "application-bundle-tests"), "application-bundle.trx", 1024 * 1024));
         Validate(binding.RootElement, head.Trim(), source, native, coverage, sdkCoverage);
         const string producerPath = "Evidence/ForgeTrust.AppSurface.Evidence.Coverage/EvidenceRestrictedCoverageProducer.cs";
         var producerSource = File.ReadAllBytes(TestPathUtils.PathUnder(repo, producerPath));
@@ -131,21 +134,21 @@ public sealed class NativeMeasurementTests
             Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(item.Item2)), binding.GetProperty(item.Item1 + "_sha256").GetString());
         var imageNames = Modules.SelectMany(static name => new[] { name, Path.ChangeExtension(name, ".pdb") }).Order(StringComparer.Ordinal);
         foreach (var prefix in new[] { string.Empty, "sdk_" })
-        foreach (var kind in new[] { "original", "instrumented" })
-            Assert.Equal(imageNames, binding.GetProperty(prefix + kind).EnumerateObject()
-                .Select(static row => row.Name).Order(StringComparer.Ordinal));
+            foreach (var kind in new[] { "original", "instrumented" })
+                Assert.Equal(imageNames, binding.GetProperty(prefix + kind).EnumerateObject()
+                    .Select(static row => row.Name).Order(StringComparer.Ordinal));
         foreach (var prefix in new[] { string.Empty, "sdk_" })
-        foreach (var name in Modules)
-        {
-            var original = binding.GetProperty(prefix + "original").GetProperty(name).GetString();
-            var instrumented = binding.GetProperty(prefix + "instrumented").GetProperty(name).GetString();
-            Assert.Matches("^[0-9a-f]{64}$", original!);
-            Assert.Matches("^[0-9a-f]{64}$", instrumented!);
-            Assert.NotEqual(original, instrumented);
-            var pdb = Path.ChangeExtension(name, ".pdb");
-            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "original").GetProperty(pdb).GetString()!);
-            Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "instrumented").GetProperty(pdb).GetString()!);
-        }
+            foreach (var name in Modules)
+            {
+                var original = binding.GetProperty(prefix + "original").GetProperty(name).GetString();
+                var instrumented = binding.GetProperty(prefix + "instrumented").GetProperty(name).GetString();
+                Assert.Matches("^[0-9a-f]{64}$", original!);
+                Assert.Matches("^[0-9a-f]{64}$", instrumented!);
+                Assert.NotEqual(original, instrumented);
+                var pdb = Path.ChangeExtension(name, ".pdb");
+                Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "original").GetProperty(pdb).GetString()!);
+                Assert.Matches("^[0-9a-f]{64}$", binding.GetProperty(prefix + "instrumented").GetProperty(pdb).GetString()!);
+            }
         using var sourceDocument = JsonDocument.Parse(source);
         Assert.Equal(head, sourceDocument.RootElement.GetProperty("source").GetString());
         using var actual = JsonDocument.Parse(native);
@@ -225,16 +228,16 @@ public sealed class NativeMeasurementTests
         var observedNativeRoot = false;
         var observedNativeWorker = false;
         foreach (var module in modules)
-        foreach (var document in module.Value.EnumerateObject())
-        {
-            if (Path.GetFileName(document.Name) == "LinuxEmptyObservationExecution.cs")
-                observedNativeRoot |= HasHits(document.Value);
-            if (Path.GetFileName(document.Name) == "EvidenceLinuxWorkerSupervisor.cs")
-                observedNativeWorker |= document.Value.EnumerateObject().SelectMany(static type => type.Value.EnumerateObject())
-                    .Where(static method => method.Name.Contains("ConnectAsync", StringComparison.Ordinal))
-                    .SelectMany(static method => method.Value.GetProperty("Lines").EnumerateObject())
-                    .Any(static line => line.Value.GetInt32() > 0);
-        }
+            foreach (var document in module.Value.EnumerateObject())
+            {
+                if (Path.GetFileName(document.Name) == "LinuxEmptyObservationExecution.cs")
+                    observedNativeRoot |= HasHits(document.Value);
+                if (Path.GetFileName(document.Name) == "EvidenceLinuxWorkerSupervisor.cs")
+                    observedNativeWorker |= document.Value.EnumerateObject().SelectMany(static type => type.Value.EnumerateObject())
+                        .Where(static method => method.Name.Contains("ConnectAsync", StringComparison.Ordinal))
+                        .SelectMany(static method => method.Value.GetProperty("Lines").EnumerateObject())
+                        .Any(static line => line.Value.GetInt32() > 0);
+            }
         Assert.True(observedNativeRoot, "The report must contain actual guarded native root execution hits.");
         Assert.True(observedNativeWorker, "The report must contain the actual authenticated worker connection, not presumed visibility across PrivateTmp.");
     }

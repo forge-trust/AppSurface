@@ -402,6 +402,43 @@ jobs:
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
 
+      - name: Measure the application bundle audit against real root-owned files
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 30 python3 -B .github/issue779-checkpoint3/test_application_bundle_measurement.py -v > "$CHECKPOINT3_EVIDENCE/application-bundle-controls.log" 2>&1
+          test_image="$GITHUB_WORKSPACE/Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Tests/bin/Release/net10.0/ForgeTrust.AppSurface.Evidence.Supervision.Tests.dll"
+          target_args="$(python3 -B - "$test_image" "$CHECKPOINT3_EVIDENCE/application-bundle-tests" <<'PY_ARGS'
+          import subprocess, sys
+          values = ['vstest', sys.argv[1], '--TestCaseFilter:FullyQualifiedName~LinuxApplicationBundleAuditNativeTests', '--logger:trx;LogFileName=application-bundle.trx', '--ResultsDirectory:' + sys.argv[2]]
+          assert all(not any(c in value for c in '\n\r"\\') for value in values)
+          print(subprocess.list2cmdline(values))
+          PY_ARGS
+          )"
+          timeout --signal=KILL 180 sudo --non-interactive /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 DOTNET_CLI_HOME=/tmp XDG_RUNTIME_DIR=/tmp \
+            "$CHECKPOINT3_SDK_ROOT/dotnet" "$CHECKPOINT3_COVERLET" "$test_image" \
+            --target "$CHECKPOINT3_SDK_ROOT/dotnet" --targetargs "$target_args" \
+            --include '[ForgeTrust.AppSurface.Evidence.Supervision]*' \
+            --merge-with "$CHECKPOINT3_EVIDENCE/native-supervision.json" \
+            --format json --format cobertura --output "$CHECKPOINT3_EVIDENCE/native-supervision-application-bundle" > "$CHECKPOINT3_EVIDENCE/application-bundle-driver.log" 2>&1
+          sudo --non-interactive python3 -B - "$CHECKPOINT3_EVIDENCE" <<'PY_BIND'
+          import hashlib, json, pathlib, sys, xml.etree.ElementTree as ET
+          root = pathlib.Path(sys.argv[1])
+          trx = root / 'application-bundle-tests/application-bundle.trx'
+          sys.path.insert(0, str(pathlib.Path.cwd() / '.github/issue779-checkpoint3'))
+          from application_bundle_measurement import read_trx
+          measurement = read_trx(trx)
+          binding_path = root / 'measurement-binding.json'
+          binding = json.loads(binding_path.read_bytes())
+          binding['application_bundle_tests'] = measurement
+          for suffix in ('json', 'cobertura.xml'):
+              combined = root / ('native-supervision-application-bundle.' + suffix)
+              assert 0 < combined.stat().st_size <= (32 if suffix == 'json' else 40) * 1024 * 1024
+              combined.replace(root / ('native-supervision.' + suffix))
+          binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
+          binding_path.write_text(json.dumps(binding, sort_keys=True))
+          PY_BIND
+
       - name: Build the three fixed SDK lifecycle images without changing the original image set
         shell: bash
         run: |
