@@ -1,35 +1,41 @@
-# Native EvidenceHost acceptance
+# Native Evidence validation procedure
 
-**Current integration status:** this tool's production journey is pending migration to the
-[explicit protected admission contract](../../docs/evidence/evidencehost-migration.md).
-Its legacy host entry point fails before producer callbacks.
-The [native workflow](../../.github/workflows/native-evidence-validation.yml) therefore cannot
-produce accepted evidence on this branch. The producer implementations and unit controls remain
-available for integration work; matching data, a test supervisor, or Observation cannot grant a
-complete claim. See the [current cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md#local-integration-with-current-main--2026-10-27).
+**Status:** the executable runs a portable validation procedure. Its output is not protected Evidence, native acceptance, or gate input. The [native workflow](../../.github/workflows/native-evidence-validation.yml) labels and checks it accordingly. The [migration design](../../docs/designs/native-evidence-validation.md) records which procedure assertions exist and which protected acceptance work remains open. This follows the current [EvidenceHost support contract](../../docs/evidence/evidencehost-migration.md): public legacy host entry points fail closed, and this tool has no registered protected producer path.
 
-This repository tool uses the public [EvidenceHost lifecycle](../../start-here/evidencehost.md) to validate AppSurface itself. It runs explicit producers against a supplied CLI package, checks published behavior independently, and emits a canonical plan and manifest. Use it when changing [coverage storage](../../guides/coverage-storage.md), package installation, or the native Evidence execution facilities.
+Use this tool to run local package, storage, installed-consumer, and verified fan-in procedure checks against a supplied candidate CLI package. It can report that those explicit checks passed. It cannot create an EvidenceHost or manifest, assert native acceptance, or make a gate-eligible claim.
 
-## Run the acceptance journeys
+## Operation selection
 
-Build a candidate CLI package with its real source commit in NuGet repository metadata. Select an absolute .NET SDK host path. Invoke the tool from the checkout:
+`--operation` is required. Its value selects a deliberately narrow execution boundary:
+
+| Operation | Result | When to use it |
+| --- | --- | --- |
+| `procedure` | Runs the portable package/storage/consumer/fan-in checks and writes a procedure plan plus procedure report. It creates no EvidenceHost and no Evidence manifest. | Local development and the cross-platform procedure workflow. Exit zero means only that the declared local procedure and cleanup passed. |
+| `protected` | Rejected with `ASEVD404` before input or output I/O because no protected native operation is registered. | Do not select until a separately reviewed implementation registers the actual protected operation. |
+| Missing or unsupported value | Rejected with `ASEVD401` before input or output I/O. | Supply `--operation procedure` for the supported local workflow. |
+
+This option is mandatory for execution and has no implicit default. An empty invocation prints usage and returns exit 2; `--help` prints usage and returns exit 0. Neither reads inputs or starts a procedure. Other invocations without an operation return `ASEVD401`. A matching package, run identity, verifier result, or successful procedure report cannot grant admission.
+
+## Run the portable procedure
+
+Pack a candidate CLI package with its source commit in NuGet repository metadata. Choose an absolute .NET host path and a fresh output directory:
 
 ```bash
 dotnet run --project tools/ForgeTrust.AppSurface.Evidence.Validation --configuration Release -- \
+  --operation procedure \
   --package /absolute/feed/ForgeTrust.AppSurface.Cli.VERSION.nupkg \
   --version VERSION --source-commit COMMIT \
-  --dotnet /absolute/dotnet --output /absolute/fresh-evidence
+  --dotnet /absolute/dotnet --output /absolute/fresh-procedure \
+  --scratch-parent /absolute/existing-scratch-parent
 ```
 
-On Windows, supply absolute Windows paths to the same options. The tool passes arguments directly to processes and does not interpolate a shell command. `--help` lists all options. `--mode storage` selects the packed storage journey, `--mode consumer` selects the installed consumer, and the default `all` requires both to pass.
+On Windows, provide absolute Windows paths. Arguments are passed directly to child processes; the tool does not interpolate a shell command. `--scratch-parent` must already exist. `--output` must be fresh, outside scratch, and remains caller-owned. Each procedure owns a fresh random scratch child and removes only its own child after checking its ownership and rejecting links. Use trusted local workspaces: path checks and capacity sampling are not an adversarial filesystem sandbox or an operating-system disk quota.
 
-The storage producer extracts the package into an owned workspace and verifies its package ID, exact version and source metadata. It then runs read-only status, first and repeated merge, invalid input, maintenance preview, pin, restore, overwrite refusal, unpin, and explicit expiry. Hashes of the published original-file inventory must match restored bytes; current and restored outputs must survive maintenance. Regenerated metadata is checked under its documented contract rather than treated as an original archived file.
+The packed-storage procedure checks package identity, source metadata, read-only status, first and repeated merge behavior, invalid input, maintenance preview, pin/restore, overwrite refusal, unpin, and explicit expiry. It compares published original-file inventories and restored bytes independently. Regenerated metadata is evaluated under its documented contract rather than treated as an archived original file.
 
-The consumer producer installs the supplied package in an isolated tool directory and cache, verifies installed bytes, and collects fresh Release coverage and JUnit results from the checked-in two-project consumer. Every required project and test fragment must execute successfully. Overall coverage must pass 95% line and 85% branch with zero tolerance. Report, manifest, log and timing readers must still work, and source/settings integrity must remain unchanged. This fixture proves the repeatable consumer recipe; it does not claim to have executed an arbitrary external application's tests.
+The installed-consumer procedure installs the supplied package in an isolated tool directory and cache, checks installed bytes, then runs the checked-in two-project consumer in Release. It requires the declared projects and test fragments to pass, and checks report readers, source/settings integrity, and the existing 95% line and 85% branch gates with zero tolerance. This fixture validates the repeatable recipe; it does not execute an arbitrary external application's tests.
 
-## External consumer profile
-
-Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A profile supplies these fields:
+An external consumer profile is supplied with `--consumer-profile /absolute/profile.json`:
 
 ```json
 {
@@ -46,28 +52,43 @@ Pass `--consumer-profile /absolute/profile.json` to run a consumer you own. A pr
 }
 ```
 
-The source repository is read for identity/integrity and cloned into scratch. The original remains caller-owned. External profiles must provide a nonblank `expectedCommit`; the producer compares source HEAD with this explicit pin before cloning. The built-in fixture does not require this field. An explicit project list must contain the complete intended acceptance inventory; otherwise the solution determines it. `testProjects` is a scoped acceptance declaration, so it must list every intended test project for that profile; it does not silently claim full repository coverage. `.sln` and `.slnx` inputs are parsed before execution and must resolve to at least one test project. When `diffBase` is supplied, the consumer also requires 95/85 patch coverage with zero tolerance. Provide required test fragments so a successful exit cannot hide a missing critical suite; required fragments must be present in non-skipped, passing JUnit cases. Skips are rejected by default. External profiles may explicitly allow a skip only when `permittedSkipPatterns` contains a matching testcase attribute fragment and a nonempty rationale; those skips remain part of the declared profile scope. The checked-in fixture has no permitted skips. JUnit acceptance reads exactly one top-level `junit-*.xml` report per declared project, capped at 16 MiB per report, 64 MiB total and 100,000 testcases. Oversized evidence fails acceptance; it never silently drops tests. DTDs are prohibited, and retained testcase summaries omit output bodies and parent-document references to bound memory. For larger applications, compose separate Evidence obligations that together retain the full intended test inventory. These report bounds never waive the repository coverage gate or allow a missing required suite to pass. Resource-backed applications should compose explicit readiness probes through the [Aspire Evidence package](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md); this tool does not infer or provision their databases. Keep secrets out of profile files and durable evidence.
+The original source repository is read for identity and integrity, then cloned into scratch; the original stays caller-owned. External profiles require a nonblank `expectedCommit`, and source HEAD must match it before cloning. A project list declares the scope of local checks and must enumerate every intended project for that profile. Without one, the solution determines projects. `.sln` and `.slnx` inputs must resolve to at least one test project. Required fragments must appear in passing, non-skipped JUnit cases. Skips fail by default; an explicit matching `permittedSkipPatterns` entry with a nonempty rationale permits only that declared skip and keeps it in scope. With `diffBase`, the consumer also requires 95/85 patch coverage with zero tolerance. Do not put secrets in profiles or durable procedure output.
 
-## Storage and lifetime
+## Plans and reports
 
-`--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` to 1 GiB. The native [workspace budget](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#owned-workspaces-and-command-budgets) checks before commands and during execution. Measurements are sampled, so a child can allocate between checks; this is not an operating-system disk quota. A budget failure must stop the command and prevent a complete claim. Entry/depth limits also bound filesystem inspection.
+A settled `procedure` operation writes these files into the fresh output directory, including when selected checks fail:
 
-Candidate JSON readers also enforce cumulative byte limits: 1 MiB for the consumer's `coverage-gate.json` and 16 MiB for the storage run's `.appsurface-coverage-run.json`. Missing, empty, linked, oversized or invalid JSON fails acceptance. These bounds apply before parsing and throughout reading, with cancellation checks; they do not trim evidence or relax coverage requirements.
+- `procedure-plan.json` records the portable procedure's declared local work.
+- `native-validation-procedure.json` is a bounded report using schema `appsurface-native-validation-procedure-v1`. Its JSON property names use camel case. It reports `procedurePassed`, `cleanupCompleted`, and `producerResults` for the procedure checks. `protectedAdmission`, `nativeAcceptance`, and `gateEligible` are always `false`.
 
-`--scratch-parent` must already exist and defaults to the platform temporary directory. Each producer owns a fresh random child. Cleanup removes only that child after checking its ownership and rejecting links. Durable `--output` must be fresh and outside scratch, and remains caller-owned. If cleanup cannot complete, EvidenceHost records an incomplete result. Use trusted local workspaces; path checks do not provide an adversarial filesystem sandbox.
+`planDigest` links the report to the canonical procedure plan for local diagnosis. Each `producerResults`
+entry records `producerId`, numeric `outcome` (`0` for passed, `1` for failed), `satisfiedAssertionIds`,
+`diagnostic`, `artifacts`, and `elapsedMilliseconds`. Failed results retain no satisfied assertions.
+Artifact metadata carries the logical slot, producer-relative path, media type, byte length, and lower-case
+SHA-256 digest; bytes are rechecked after cleanup. The shared [artifact contract](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md)
+defines validation of this metadata. None of these data bindings grants admission.
 
-## Evidence and claims
+The report is structurally bounded by the closed procedure catalogue: at most three producer results (`packed-storage`, `installed-consumer`, and optional `native-fan-in`), at most four declared artifact metadata records, and diagnostics capped at 1,024 characters per producer. The tool does not accept caller-selected producer declarations. It is not an Evidence manifest and is not accepted by `appsurface evidence verify` as one. Procedure mode must not write `evidence-manifest.json`. A successful process exit and `procedurePassed: true` mean the declared local checks and cleanup passed; they do not mean protected admission, native qualification, a consumer proof, or a gate passed. Keep the procedure plan/report in the CI artifact for diagnostics, not as gate evidence.
 
-The output contains `evidence-plan.json`, `evidence-manifest.json` and bounded declared artifacts beneath `artifacts/PRODUCER/`. The manifest includes artifact hashes, producer assertions, lifecycle timing and cleanup status. Verify it through [the native contracts](../../Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) or `appsurface evidence verify`. Verification detects internal inconsistency; obtain artifacts and trusted inputs through an appropriate CI channel because hashes are not independent attestation.
+The CI workflow uses read-only repository permissions and runs storage and consumer as separate, parallel matrix entries on each of Linux, Windows, and macOS. Each entry checks these exact files and flags after its procedure command and fails if an Evidence manifest appears. The original 25-minute outer job deadline applies to each entry; it may abort a long consumer run, which then cannot pass. Producer deadlines are unchanged. The unchanged lifecycle, tamper, and fan-in contract tests run separately. A passing workflow check is not native accepted evidence.
 
-Only `TargetedComplete` returns exit zero. Missing prerequisites, failed assertions, incomplete output capture, timeouts and failed cleanup prevent success. Cancellation returns a nonzero exit. Each journey retains its scope: passing the fixture is not a replacement for the full solution or an external consumer's required gates.
+## Bounds and unchanged policy
 
-## Verified native coverage fan-in
+`--maximum-scratch-bytes` defaults to 2 GiB per producer and `--minimum-free-bytes` defaults to 1 GiB. Workspace capacity is checked before commands and while work runs. Measurements are sampled; a child can allocate between checks. Entry and depth limits also bound inspection. These checks stop local work that exceeds its declared budget; they do not authorize changing a production limit or claim.
 
-`--fan-in-request /absolute/trusted-request.json` adds a required producer using [native fan-in verification](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md#verified-coverage-fan-in). Supply the trusted expected source commit/tree, SDK, Release/Debug configuration, workflow run and attempt, full solution project inventory, primary capture, exactly three native captures, composed reports and gate JSON. The request is trusted configuration, not an automatically authenticated attestation.
+Candidate JSON inputs remain bounded: 1 MiB for the consumer's `coverage-gate.json` and 16 MiB for the storage run's `.appsurface-coverage-run.json`. Missing, empty, linked, oversized, or invalid JSON fails the procedure before it can be accepted. JUnit reads exactly one top-level `junit-*.xml` per declared project, capped at 16 MiB per report, 64 MiB total, and 100,000 testcases. DTDs are prohibited. Testcase summaries omit output bodies and parent-document references. These limits do not trim evidence to manufacture success or waive source scope and coverage gates.
 
-The verifier checks every input hash and recomputes composition. The independently required full-solution 95/85 aggregate gate and 95/85 patch gate retain the repository's 0.5-point tolerance, Codecov patch mode and nonempty, nondecreasing measurable patch denominators. Native-only points cannot be discarded. Restored or historical reports cannot be relabeled as current evidence. The existing [coverage fan-in collection workflow](../../guides/coverage-fan-in.md) remains the producer of these inputs.
+The existing full-solution and patch gate policy remains 95% line and 85% branch. Verified coverage fan-in retains the established source, SDK, configuration, project-inventory, capture, report, and run binding. Its full-solution aggregate and patch gates, repository tolerance, Codecov patch mode, and measurable denominators remain unchanged. See the [coverage fan-in workflow](../../guides/coverage-fan-in.md). These checks are portable procedure assertions until a protected operation is implemented and independently accepted.
 
-The packed-storage fixture writes its explicit retention policy with owner-only access: mode `0600` on Unix and a protected current-user ACL on Windows. This satisfies the existing [private storage contract](../../guides/coverage-storage.md); it does not relax policy-file access validation. Failure artifacts redact the owned workspace path and retain at most 16 KiB of UTF-8 bytes per captured output stream, keeping the most recent complete UTF-8 text. External consumer output remains withheld. A size cap is not general secret redaction: do not pass secrets to fixture commands, because other failure details can appear in CI logs. Installed CLI assembly identity is checked only beneath the installed tool path private `.store`; at least one candidate must exist and every matching assembly must match the package archive hash, so workspace decoys cannot mask a mismatch.
+For resource-backed applications, compose explicit readiness checks through the [Aspire Evidence package](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md); this procedure does not infer or provision databases. Preserve the separate [protected EvidenceHost migration requirements](../../docs/evidence/evidencehost-migration.md) and the [Issue 779 cutover record](../../docs/evidence/issue779-csharp-runtime-cutover.md#local-integration-with-current-main--2026-10-27). Neither a local pass nor this workflow replaces that work. The protected controls in the [runtime proof workflow](../../.github/workflows/evidencehost-runtime-proof.yml), [protected qualification workflow](../../.github/workflows/evidencehost-protected-qualification.yml), and [protected parent workflow](../../.github/workflows/evidencehost-protected-parent.yml) remain separate and unchanged by the portable procedure.
 
-The internal `PackedStorageProducer.WritePrivateRetentionPolicyAsync` seam writes that policy only inside freshly owned journey scratch, before maintenance reads it; it is not a consumer-policy repair API. The [native coverage regression](../../Cli/ForgeTrust.AppSurface.Cli.Tests/CoverageArtifactFixturePolicyTests.cs) checks policy bytes, Unix permissions or Windows ownership and protected access rules, cancellation, and unrelated-file preservation. Its CLI test-project reference and friend access let the existing [native coverage selection](../../guides/coverage-fan-in.md) instrument the same implementation as the acceptance journey without changing filters or coverage policy.
+## Cancellation and publication
+
+The tool joins each original procedure and disposes its source-owned producers before verifying artifact bytes
+and returning a report. Each operation keeps its declared cancellation deadline: 600 seconds for storage,
+1,800 seconds for the consumer, and 300 seconds for optional fan-in. Those tokens are cooperative for
+in-process code; the command runner retains its independent process termination and output bounds.
+The tool never publishes a passing result while an original procedure or cleanup task remains unjoined.
+Caller cancellation returns exit 130 after joined cleanup and publishes no report. Cancellation after output
+creation can leave partial artifacts for diagnosis; their presence is neither a completed procedure nor an
+Evidence claim. The final plan/report are written only after the procedure returns and artifacts are checked.

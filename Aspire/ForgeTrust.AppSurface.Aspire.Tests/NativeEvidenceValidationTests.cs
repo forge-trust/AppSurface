@@ -11,9 +11,10 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class NativeEvidenceValidationTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NativeJourneys_ShouldVerifyPackedAndInstalledBehaviorAndCleanOnlyOwnedScratch(bool external)
+    [InlineData("storage", false)]
+    [InlineData("consumer", false)]
+    [InlineData("consumer", true)]
+    public async Task Journeys_ShouldVerifyPackedOrInstalledBehaviorAndCleanOnlyOwnedScratchWithoutProtectedClaims(string mode, bool external)
     {
         var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var parent = Directory.CreateTempSubdirectory("appsurface-native-validation-tests-").FullName;
@@ -47,9 +48,9 @@ public sealed class NativeEvidenceValidationTests
             var hostPath = await runner.RunAsync(new EvidenceCommandRequest(dotnet, ["--list-sdks"], repository, TimeSpan.FromSeconds(30)));
             Assert.Equal(0, hostPath.ExitCode);
             var resolvedHost = Path.IsPathFullyQualified(dotnet) ? dotnet : ResolveDotnetHost();
-            var arguments = new List<string> { "--package", Path.Join(feed, "ForgeTrust.AppSurface.Cli.0.0.0-native-evidence-tests.nupkg"),
+            var arguments = new List<string> { "--operation", "procedure", "--package", Path.Join(feed, "ForgeTrust.AppSurface.Cli.0.0.0-native-evidence-tests.nupkg"),
                 "--version", "0.0.0-native-evidence-tests", "--source-commit", identity.StandardOutput.Trim(), "--dotnet", resolvedHost,
-                "--repository", repository, "--scratch-parent", parent, "--output", output };
+                "--repository", repository, "--scratch-parent", parent, "--output", output, "--mode", mode };
             if (external)
             {
                 var consumer = Path.Join(parent, "external-consumer");
@@ -88,20 +89,38 @@ public sealed class NativeEvidenceValidationTests
                 arguments.AddRange(["--consumer-profile", profile]);
             }
             var exitCode = await Program.RunAsync(arguments.ToArray());
-            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-plan.json")));
-            var manifest = EvidenceCanonicalJson.Deserialize<EvidenceManifest>(await File.ReadAllBytesAsync(Path.Join(output, "evidence-manifest.json")));
+            var plan = EvidenceCanonicalJson.Deserialize<EvidencePlan>(await File.ReadAllBytesAsync(Path.Join(output, "procedure-plan.json")));
+            var report = JsonSerializer.Deserialize<NativeValidationProcedureReport>(
+                await File.ReadAllBytesAsync(Path.Join(output, "native-validation-procedure.json")), Program.JsonOptions)!;
 
-            Assert.True(exitCode == 0, "Native acceptance failed; retained evidence: " + parent);
-            Assert.All(manifest.ProducerResults, result => Assert.True(result.Outcome == EvidenceProducerOutcome.Passed, result.Diagnostic + "; retained evidence: " + parent));
-            Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
-            Assert.True(EvidenceManifestBuilder.Verify(plan, manifest));
-            Assert.True(manifest.Metrics.CleanupCompleted);
+            Assert.True(exitCode == 0, "Local procedure failed; retained evidence: " + parent);
+            Assert.All(report.ProducerResults, result => Assert.True(result.Outcome == EvidenceProducerOutcome.Passed, result.Diagnostic + "; retained evidence: " + parent));
+            Assert.True(report.ProcedurePassed);
+            Assert.True(report.CleanupCompleted);
+            Assert.Equal(plan.PlanDigest, report.PlanDigest);
+            Assert.False(report.ProtectedAdmission);
+            Assert.False(report.NativeAcceptance);
+            Assert.False(report.GateEligible);
+            Assert.False(File.Exists(Path.Join(output, "evidence-manifest.json")));
             Assert.Empty(Directory.EnumerateDirectories(parent, "evidence-workspace-*"));
             Assert.Equal("preserve caller bytes", await File.ReadAllTextAsync(sentinel));
-            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts/installed-consumer/proof/result.json")));
-            Assert.True(result.RootElement.GetProperty("CoverageGatePassed").GetBoolean());
-            Assert.Equal(2, result.RootElement.GetProperty("ProjectCount").GetInt32());
-            Assert.Equal(5, result.RootElement.GetProperty("TestCaseCount").GetInt32());
+            var producer = Assert.Single(report.ProducerResults);
+            Assert.Equal(mode == "storage" ? "packed-storage" : "installed-consumer", producer.ProducerId);
+            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(output, "artifacts", producer.ProducerId, "proof/result.json")));
+            if (mode == "consumer")
+            {
+                Assert.True(result.RootElement.GetProperty("CoverageGatePassed").GetBoolean());
+                Assert.Equal(2, result.RootElement.GetProperty("ProjectCount").GetInt32());
+                Assert.Equal(5, result.RootElement.GetProperty("TestCaseCount").GetInt32());
+            }
+            else
+            {
+                Assert.True(result.RootElement.GetProperty("currentPreserved").GetBoolean());
+                Assert.True(result.RootElement.GetProperty("restoredPreserved").GetBoolean());
+                Assert.True(result.RootElement.GetProperty("commands").GetInt32() > 0);
+                Assert.True(result.RootElement.GetProperty("originalFiles").EnumerateObject().Any());
+                Assert.True(File.Exists(Path.Join(output, "artifacts/packed-storage/proof/transcript.json")));
+            }
             completed = true;
         }
         finally

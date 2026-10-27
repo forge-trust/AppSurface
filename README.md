@@ -132,7 +132,7 @@ The Durable packages are coordinated public previews. The [Durable operational-a
 ### [EvidenceHost](./start-here/evidencehost.md)
 
 - [**EvidenceHost guide**](./start-here/evidencehost.md) – Contract-first changed-risk planning so CI can require meaningful coverage or E2E evidence without turning an intentionally low-risk change or an incomplete test profile into a misleading coverage claim.
-- [**Native EvidenceHost acceptance**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's own packed CLI and installed-consumer journeys, with bounded commands, owned scratch budgets, independent assertions and verifiable manifests.
+- [**Native validation procedure**](./tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) – AppSurface's packed CLI and installed-consumer checks, with bounded commands, owned scratch budgets, and independent assertions. Procedure reports do not grant protected admission, native acceptance, or gate eligibility.
 - [**ForgeTrust.AppSurface.Evidence.Contracts**](./Evidence/ForgeTrust.AppSurface.Evidence.Contracts/README.md) – Versioned plans, producers, manifests, claims, and canonical digest verification.
 - [**ForgeTrust.AppSurface.Evidence.Planner**](./Evidence/ForgeTrust.AppSurface.Evidence.Planner/README.md) – Deterministic explicit-diff policy resolution with conservative fallback and ambiguity rejection.
 - [**ForgeTrust.AppSurface.Evidence.Aspire**](./Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) – Separate, explicit consumer-owned lifecycle for Aspire readiness and browser/E2E producers; it is never mixed into normal application startup.

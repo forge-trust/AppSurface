@@ -18,16 +18,29 @@ only its existing Debug, serial, no-managed-results command with managed retenti
 remain available to the ordinary producer. The integration needs its own source-bound Linux
 and numerical gate results; previous receipts continue to describe their original source.
 
-**Additional open migration:** main's [native validation tool](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md)
-and [workflow](../../.github/workflows/native-evidence-validation.yml) invoke the legacy host
-entry point and expect complete evidence on all three operating systems. That entry point
-fails closed under the [explicit admission contract](evidencehost-migration.md).
-These journeys therefore do not run successfully on this integration. Migrating their
-production execution requires genuine protected admission and supported consumer evidence;
+**Native-validation migration:** the [tool](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md)
+and [workflow](../../.github/workflows/native-evidence-validation.yml) now explicitly select ordinary
+`--operation procedure` execution rather than calling the legacy host. The local runner joins
+the original procedures and cleanup, verifies retained artifact bytes, and writes
+`procedure-plan.json` plus `native-validation-procedure.json`, without an Evidence manifest.
+Admission, native acceptance, and gate eligibility remain fixed false. Missing/unknown operations
+fail with `ASEVD401`, and `--operation protected` fails with `ASEVD404` before input/output access.
+The three-OS workflow has separate storage/consumer entries under its existing 25-minute job cap;
+the [procedure design](../designs/native-evidence-validation.md) records its checks and unchanged policy.
+Protected execution remains open and requires genuine admission and supported consumer evidence;
 using a test supervisor or relabeling Observation would not satisfy that requirement.
 The incoming HTTP readiness host unit fixtures now use the existing internal admission test
 seam; their simulated results provide no native acceptance. None of this local merge enables Trusted mode, accepts a platform proof or publishes
 a completed acceptance record.
+
+The local migration selection passed 393 tests with zero failures or skips on SDK 10.0.402,
+including actual packed-storage and built-in/external installed-consumer procedure checks.
+A focused collector measured 100% lines and branches in the tool's `Program.cs` and
+`NativeValidationProcedure.cs`. That collector is diagnostic only, with a tool-specific include;
+it is not a solution/patch gate result or protected native acceptance. The admission implementation,
+production catalogue, protected gate, full coverage script and protected workflows are unchanged
+by this procedure migration. The merged source still needs its complete actual Linux chain and
+unchanged numerical gate before current coverage gaps can be recalculated.
 
 Revision 101's existing observer subsequently recorded [run 40445212390](https://github.com/forge-trust/AppSurface/actions/runs/40445212390)
 terminal failure at 2026-10-27 07:02:45 UTC. All prerequisite jobs succeeded; the gate

@@ -2,6 +2,8 @@
 
 This page is the canonical #779 migration reference for the shared admission, protected worker, claim, and downstream gate contracts. For the short adoption path, start with the [EvidenceHost guide](../../start-here/evidencehost.md); for policy recipes, see the [cookbook](../../guides/evidencehost-cookbook.md). The [coordinated release links guide](../../releases/coordinated-release-links.md#evidencehost-migration) points package and release readers here.
 
+The repository's [native validation tool](../../tools/ForgeTrust.AppSurface.Evidence.Validation/README.md) now requires explicit `--operation procedure` for ordinary package checks. It emits a procedure plan/report with admission, native acceptance, and gate eligibility fixed false, and no Evidence manifest. `--operation protected` fails with `ASEVD404` until a real protected implementation is registered. This migration preserves the admission boundary and the separate numerical coverage gates.
+
 ## Support status
 
 As of October 18, 2026, the supported consumer workflow remains **policy planning and structural verification**. The production Trusted proof allowlist is empty, so Trusted PR and release admission is closed on every provider and platform until the full consumer, production-broker, and CI proof set is accepted. The [consumer acceptance record](./issue779-consumer-acceptance.md) is the source of truth for those proof entries.

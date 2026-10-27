@@ -659,6 +659,7 @@ public sealed partial class EvidenceHostBootstrapTests
     }
 
     [LinuxArtifactFact]
+    [System.Runtime.Versioning.SupportedOSPlatform("linux")]
     public async Task ProtectedWriter_StreamWriteUsesRetainedRootAndSharedArtifactQuota()
     {
 
