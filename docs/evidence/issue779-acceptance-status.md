@@ -2,6 +2,15 @@
 
 ## Native-validation migration and current continuation — 2026-10-27
 
+The [latest completed-validator preparation](issue779-csharp-runtime-cutover.md#completed-validator-preparation-and-n05-timing-repair--2026-10-27)
+adds fixed native input/custody and single-method TRX contracts plus original gate archive/report
+checks. The public C# data validator passed once against revision 109's exact captured source and
+authentic four-role inputs using SDK 10.0.401; that mechanism fixture does not satisfy the protected
+completed-run resolver. The later revision-113 runtime N05 failed the unchanged time guard with
+245 seconds remaining where more than 246 is required. A batching preparation preserves every
+file check and original bound; a fresh Linux run must verify its effect. Full orchestration,
+original-success proof, numerical gates and protected Trusted/downstream acceptance remain open.
+
 The [current revision-109/110 record](issue779-csharp-runtime-cutover.md#revision-109-validation-and-revision-110-repair--2026-10-27)
 supersedes the continuation results below. Revision 109 passed all original selectors,
 consumer/account/C2 jobs and fourteen ordered measurements, then failed the unchanged gate on

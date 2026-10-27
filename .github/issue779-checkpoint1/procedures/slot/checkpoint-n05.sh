@@ -716,7 +716,7 @@ ordinary_os_batch_snapshot() {
  done
  while ((i<${#osb_node_paths[@]})); do
   remaining >/dev/null; chunk=(); arg_bytes=0
-  while ((i<${#osb_node_paths[@]} && ${#chunk[@]}<32)); do
+  while ((i<${#osb_node_paths[@]})); do
    row_bytes=$((${#osb_node_paths[$i]}+1))
    ((arg_bytes+row_bytes<=16384)) || break
    chunk+=("${osb_node_paths[$i]}"); ((arg_bytes+=row_bytes)); ((i+=1))

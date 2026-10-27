@@ -173,6 +173,56 @@ class CompletedC1Tests(unittest.TestCase):
         self.assertTrue(c1._cleanup_invocation(self.target, invocation, identity, owned))
         self.assertFalse(invocation.exists())
 
+    def test_mkdir_post_create_open_failure_records_and_cleans_only_created_node(self):
+        invocation = self.target / 'owned'
+        owned = {}
+        original_open = c1.os.open
+        failure = OSError('injected post-create directory open failure')
+        injected = False
+
+        def fail_child_open(path, flags, *args, **kwargs):
+            nonlocal injected
+            if path == 'owned' and kwargs.get('dir_fd') is not None and not injected:
+                injected = True
+                raise failure
+            return original_open(path, flags, *args, **kwargs)
+
+        c1.os.open = fail_child_open
+        try:
+            with self.assertRaises(OSError) as caught:
+                c1._mkdir(invocation, owned=owned, ownership_root=invocation)
+        finally:
+            c1.os.open = original_open
+        self.assertIs(failure, caught.exception)
+        self.assertNotIn((), owned)
+        self.assertFalse(invocation.exists())
+        self.assertTrue(self.target.exists())
+
+    def test_mkdir_open_substitution_preserves_replacement_and_original_error(self):
+        invocation = self.target / 'owned'
+        owned = {}
+        detached = self.target / 'detached-original'
+        original_open = c1.os.open
+
+        def substitute_before_child_open(path, flags, *args, **kwargs):
+            if path == 'owned' and kwargs.get('dir_fd') is not None and not detached.exists():
+                invocation.rename(detached)
+                invocation.mkdir(mode=0o700)
+            return original_open(path, flags, *args, **kwargs)
+
+        c1.os.open = substitute_before_child_open
+        try:
+            with self.assertRaisesRegex(ValueError, 'completed-c1-directory-open-binding') as caught:
+                c1._mkdir(invocation, owned=owned, ownership_root=invocation)
+        finally:
+            c1.os.open = original_open
+        self.assertTrue(getattr(caught.exception, 'completed_c1_cleanup_failed', False)
+                        or 'completed-c1-cleanup-failed' in getattr(caught.exception, '__notes__', []))
+        self.assertTrue(detached.is_dir())
+        self.assertTrue(invocation.is_dir())
+        self.assertIn((), owned)
+        self.assertTrue(self.target.exists())
+
     def test_cleanup_refuses_substituted_file_and_retains_invocation(self):
         invocation = self.target / 'owned'
         invocation.mkdir(mode=0o700)

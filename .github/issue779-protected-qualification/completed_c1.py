@@ -67,7 +67,8 @@ def _decode(raw, maximum, code):
     return result
 
 
-def _open_bound_file(path, expected_size, expected_sha, *, deadline, maximum, required_mode=None):
+def _open_bound_file(path, expected_size, expected_sha, *, deadline, maximum, required_mode=None,
+                     expected_identity=None):
     path = Path(path)
     _need(path.is_absolute() and path.resolve(strict=True) == path, 'file-path')
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
@@ -75,7 +76,8 @@ def _open_bound_file(path, expected_size, expected_sha, *, deadline, maximum, re
         before = os.fstat(fd)
         _need(stat.S_ISREG(before.st_mode) and before.st_nlink == 1 and before.st_uid == os.geteuid()
               and before.st_size == expected_size and 0 < before.st_size <= maximum
-              and (required_mode is None or stat.S_IMODE(before.st_mode) == required_mode), 'file-shape')
+              and (required_mode is None or stat.S_IMODE(before.st_mode) == required_mode)
+              and (expected_identity is None or _node_identity(before) == expected_identity), 'file-shape')
         data = bytearray()
         while True:
             _remaining(deadline)
@@ -149,22 +151,33 @@ def _mkdir(path, *, owned=None, ownership_root=None):
     path = Path(path)
     _need(path.is_absolute() and path.parent.resolve(strict=True) == path.parent, 'directory-path')
     parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    made = False
+    created = None
+    key = None
+    fd = None
     try:
         os.mkdir(path.name, 0o700, dir_fd=parent_fd)
+        made = True
+        key = tuple(path.relative_to(ownership_root).parts) if owned is not None else None
+        created = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        if owned is not None:
+            # Record the exclusively-created node before opening it. If open fails,
+            # the caller can still clean this exact inode without adopting a later
+            # replacement. The parent descriptor pins the namespace for both reads.
+            _remember_info(key, created, owned)
         fd = os.open(path.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                      dir_fd=parent_fd)
         try:
             info = os.fstat(fd)
-            key = tuple(path.relative_to(ownership_root).parts) if owned is not None else None
-            if owned is not None:
-                _remember_info(key, info, owned)
+            _need(stat.S_ISDIR(info.st_mode)
+                  and _node_identity(info) == _node_identity(created), 'directory-open-binding')
             try:
                 os.fchmod(fd, 0o700)
             except BaseException:
                 if owned is not None:
                     current = os.fstat(fd)
                     if (current.st_dev, current.st_ino, stat.S_IFMT(current.st_mode)) == \
-                            (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)):
+                            (created.st_dev, created.st_ino, stat.S_IFMT(created.st_mode)):
                         owned[key] = _node_identity(current)
                 raise
             info, named = os.fstat(fd), os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
@@ -174,7 +187,40 @@ def _mkdir(path, *, owned=None, ownership_root=None):
             if owned is not None:
                 owned[key] = _node_identity(info)
         finally:
-            os.close(fd)
+            opened_fd, fd = fd, None
+            os.close(opened_fd)
+    except BaseException as error:
+        if made:
+            cleaned = False
+            try:
+                if created is not None:
+                    named = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                    same_node = (named.st_dev, named.st_ino, stat.S_IFMT(named.st_mode)) == \
+                                (created.st_dev, created.st_ino, stat.S_IFMT(created.st_mode))
+                    if stat.S_ISDIR(named.st_mode) and same_node:
+                        os.rmdir(path.name, dir_fd=parent_fd)
+                        cleaned = True
+            except BaseException:
+                cleaned = False
+            if cleaned and owned is not None:
+                recorded = owned.get(key)
+                if recorded is not None and recorded[:3] == \
+                        (created.st_dev, created.st_ino, stat.S_IFMT(created.st_mode)):
+                    owned.pop(key, None)
+            if not cleaned:
+                if hasattr(error, 'add_note'):
+                    error.add_note('completed-c1-cleanup-failed')
+                else:
+                    error.completed_c1_cleanup_failed = True
+        if fd is not None:
+            try:
+                os.close(fd)
+            except BaseException:
+                if hasattr(error, 'add_note'):
+                    error.add_note('completed-c1-cleanup-failed')
+                else:
+                    error.completed_c1_cleanup_failed = True
+        raise
     finally:
         os.close(parent_fd)
 

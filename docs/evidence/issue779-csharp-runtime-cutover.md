@@ -1,5 +1,49 @@
 # EvidenceHost C# runtime cutover
 
+## Completed validator preparation and N05 timing repair — 2026-10-27
+
+The [fixed native input adapter](../../.github/issue779-protected-qualification/completed-native-inputs-README.md)
+now selects the public C# measurement validator's exact 24 input leaves from the four original
+consumer/account/producer archives. It checks the full typed stage/inventory, provider-bound ZIP
+bytes, role retention, declared expansion before allocation, source capture equality, private
+inode custody and content readback. Its [result contract](../../.github/issue779-protected-qualification/completed-native-result-README.md)
+accepts only the one public method's passing TRX and supplies a fixed VSTest argument tuple.
+Neither API executes a completed-run controller or grants authority.
+
+A separate feasibility run used the four authentic revision-109 role archives with their provider
+sizes and SHA-256 values, verified the complete exact source before and after, and built the public
+test using SDK 10.0.401 with zero warnings/errors and native opt-in absent. Direct filtered VSTest,
+with native opt-in only for that process and no collector/runsettings, returned exactly one pass
+and zero skips. The TRX SHA-256 is
+`3cb75724f423d2987bf0e1b69a663f125cfb82e5275faf0b64130fff3c7bf1ae`.
+This used a four-role mechanism fixture, not the full protected 37-artifact resolver; failed
+candidate run 109 cannot satisfy that resolver's protected-main and completed-success requirements.
+
+The [gate data preflight and comparison](../../.github/issue779-protected-qualification/completed-gate-README.md)
+binds the exact original coverage archive and five fixed retained members, rejects a missing gate
+JSON before Cobertura extraction, and compares report fields with exact decimal values. It retains
+the fixed Git base, thresholds, tolerance and Codecov mode and performs no coverage arithmetic.
+The isolated public-CLI execution controller and proof of original successful test/merge/gate
+completion still remain required. Run 109 has no original gate JSON and remains rejected.
+
+The [revision-113 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40524812444)
+failed N05's existing prelaunch time guard: retained stage observations show 82 seconds for the
+initial ordinary OS pass, 93 for ELF closure, 12 for sealed trees and 93 for the final OS pass.
+The native launch checkpoint had 245 seconds remaining and requires more than 246. The preparation
+removes the redundant 32-path limit from N05/N06/N12's existing `stat` snapshots while retaining
+their 16,384-byte argument bound, every path, full before/after metadata and hash checks, alias
+verification, scratch custody and original deadline/cleanup reserves. Detached controls require
+every path exactly once, larger short-path batches and bounded splitting of long paths. A fresh
+source-bound Linux run must establish whether this reduces cost enough; the guard is unchanged.
+
+Local verification passed all 305 checkpoint-one portable controls and 138 qualification-data
+controls with five existing explicit fixture opt-in skips. The gate parser selection covers all
+its executable lines under the standard-library trace; this is diagnostic line coverage, not
+branch coverage or the solution/patch gate. The new suites are included in the existing bounded
+qualification-data workflow step. Review also closes post-creation directory-open cleanup and
+pins native input readback to the original opened inode and stage attribution. No admission,
+production catalogue, numerical gate command, threshold, exclusion or native clock changes.
+
 ## Revision 109 validation and revision 110 repair — 2026-10-27
 
 The [revision-109 runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40483696166)

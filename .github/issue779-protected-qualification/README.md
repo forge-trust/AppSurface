@@ -113,4 +113,14 @@ never a substitute for the original validators or protected runtime admission.
 
 The [fixed C1 callback step](completed-c1-README.md) reopens the original selector archives and invokes only the checked-out source's existing aggregate and retained-evidence callbacks. The [C2 receipt step](completed-c2-README.md) replays the seven fixed producer cases and original paired-output observations. The [measurement-chain step](completed-measurement-chain-README.md) invokes every original measured segment in its fixed order and compares raw predecessor and C2 seed bytes while cleaning each segment before the next extraction.
 
-The [C3 application and lifecycle step](completed-c3-README.md) invokes shared retained-data callbacks also called by native closeout. A completed run must capture those callbacks in its own source; old artifacts supply adapter regression data only. The [account step](completed-accounts-README.md) invokes the original receipt, instrumentation, witness and raw predecessor validators for creation and rollback. Every projection remains non-authorizing. The original C# Native.Tests measurement validators, numerical gate replay, fixed completed-run orchestration, protected finalizer and reviewed support registration remain required. No successfully parsed projection may fill those gaps or enable runtime Trusted admission.
+The [C3 application and lifecycle step](completed-c3-README.md) invokes shared retained-data callbacks also called by native closeout. A completed run must capture those callbacks in its own source; old artifacts supply adapter regression data only. The [account step](completed-accounts-README.md) invokes the original receipt, instrumentation, witness and raw predecessor validators for creation and rollback. Every projection remains non-authorizing.
+
+The [fixed native input adapter](completed-native-inputs-README.md) stages the existing public
+C# validator's 24 data leaves and verifies their inventory, content and owned inodes. The
+[native result contract](completed-native-result-README.md) checks the exact single-method TRX
+and supplies the fixed VSTest argument shape. The [gate input and report comparison](completed-gate-README.md)
+checks retained original inputs and compares strict JSON data without coverage arithmetic.
+These pieces do not execute a completed-run replay controller. Its isolated exact-source
+build/test/gate execution, successful original workflow binding, fixed orchestration, protected
+finalizer and reviewed support registration remain required. No successfully parsed projection
+may fill those gaps or enable runtime Trusted admission.

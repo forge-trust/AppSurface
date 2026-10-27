@@ -180,6 +180,69 @@ if [[ -n $POST ]]; then exec 3<"$POST"; ordinary_os_batch_parse_snapshot post 3;
         self.assertEqual(b"OS-batch-partial-row\n", self.run_parser(program,[root], truncated=True).stderr)
         self.assertEqual(b"fixture-deadline\n", self.run_parser(program,[outer,root,leaf],clock_fail=1).stderr)
 
+    def test_snapshot_groups_more_than_32_short_paths_but_splits_at_argv_byte_bound(self):
+        source = SCRIPT.read_text()
+        snapshot = function(source, "ordinary_os_batch_snapshot")
+        program = "set -euo pipefail\n" + snapshot + r'''
+fail() { printf '%s\n' "$1" >&2; exit 1; }
+remaining() { :; }
+batch_scratch_pin() { :; }
+bounded() {
+ if [[ $1 == stat && $2 == --printf ]]; then
+  shift 2; local fmt=$1; shift; [[ $1 == -- ]] || exit 91; shift
+  local count=$# bytes=0 path
+  for path in "$@"; do ((bytes+=${#path}+1)); done
+  printf '%s\t%s\n' "$count" "$bytes" >>"$CALLS"
+  printf '%s\0' "$@" >>"$DISPATCHED"
+  ((bytes<=16384)) || exit 92
+  printf 'synthesized\0'
+ elif [[ $1 == stat && $2 == -c && $3 == %s ]]; then printf '1\n'
+ else exit 93; fi
+}
+osb_pre_records=(); osb_leaf_paths=(); osb_leaf_hashes=(); osb_node_paths=()
+if [[ $KIND == short ]]; then
+ for ((i=0;i<100;i++)); do osb_node_paths+=("/x/$i"); done
+else
+ for ((i=0;i<200;i++)); do printf -v path '/deep/%04d/%03000d' "$i" "$i"; osb_node_paths+=("$path"); done
+fi
+exec 9>"$SINK"
+ordinary_os_batch_snapshot "$SINK" 9
+'''
+        for relative in ("procedures/slot/checkpoint-n06.sh",
+                         "procedures/slot/checkpoint-n05.sh",
+                         "procedures/n12/checkpoint-n12-data-integration.sh"):
+            source = (ROOT / relative).read_text()
+            snapshot = function(source, "ordinary_os_batch_snapshot")
+            selected_program = program.replace(function(SCRIPT.read_text(), "ordinary_os_batch_snapshot"), snapshot)
+            with tempfile.TemporaryDirectory(prefix="c1-stat-batch-bound-") as temporary:
+                calls = Path(temporary) / "calls.tsv"
+                dispatched = Path(temporary) / "dispatched.bin"
+                sink = Path(temporary) / "sink"
+                dispatches_by_kind = {}
+                for kind in ("short", "long"):
+                    calls.unlink(missing_ok=True)
+                    dispatched.unlink(missing_ok=True)
+                    result = subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c", selected_program],
+                        env={"PATH": os.environ["PATH"], "LC_ALL": "C", "CALLS": str(calls),
+                             "DISPATCHED": str(dispatched), "SINK": str(sink), "KIND": kind},
+                        capture_output=True, timeout=3)
+                    self.assertEqual((0, b"", b""), (result.returncode, result.stdout, result.stderr), relative)
+                    dispatches_by_kind[kind] = (
+                        [tuple(map(int, line.split("\t"))) for line in calls.read_text().splitlines()],
+                        dispatched.read_bytes().split(b"\0")[:-1])
+                short_dispatches, short_paths = dispatches_by_kind["short"]
+                self.assertEqual(1, len(short_dispatches), relative)
+                self.assertEqual(100, short_dispatches[0][0], relative)
+                self.assertGreater(short_dispatches[0][0], 32, relative)
+                self.assertEqual([f"/x/{i}".encode() for i in range(100)], short_paths, relative)
+                long_dispatches, long_paths = dispatches_by_kind["long"]
+                self.assertGreater(len(long_dispatches), 1, relative)
+                self.assertTrue(all(0 < size <= 16384 for _, size in long_dispatches), relative)
+                self.assertTrue(all(count < 32 for count, _ in long_dispatches), relative)
+                self.assertEqual(200, sum(count for count, _ in long_dispatches), relative)
+                expected_long_paths = [f"/deep/{i:04d}/{i:03000d}".encode() for i in range(200)]
+                self.assertEqual(expected_long_paths, long_paths, relative)
+
     def run_parser(self, program, rows, post=None, *, truncated=False, clock_fail=0):
         with tempfile.TemporaryDirectory(prefix="c1-none-stat-fd-") as temporary:
             def write(name, values, cut=False):
@@ -238,7 +301,12 @@ printf 'returned\n'
         reference = (ROOT / "procedures/slot/checkpoint-n06.sh").read_text()
         start, end = "# BEGIN ordinary-os-batch candidate definitions", "# END ordinary-os-batch candidate definitions"
         block = lambda text: text[text.index(start):text.index(end) + len(end)]
-        self.assertEqual(block(reference), block(source))
+        normalized = lambda text: text.replace("while ((i<${#osb_node_paths[@]} && ${#chunk[@]}<32)); do",
+                                                "while ((i<${#osb_node_paths[@]})); do")
+        self.assertEqual(normalized(block(reference)), normalized(block(source)))
+        for relative in ("procedures/slot/checkpoint-n05.sh",
+                         "procedures/n12/checkpoint-n12-data-integration.sh"):
+            self.assertEqual(block(reference), block((ROOT / relative).read_text()))
         self.assertEqual(1, source.count("\nordinary_os_batch_full_pass initial\n"))
         self.assertEqual(1, source.count("\nordinary_os_batch_full_pass final\n"))
         self.assertLess(source.index("fixture_stage_observation end elf-closure\n"),
