@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests;
@@ -1616,14 +1617,20 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         // Keep PostgreSQL's socket path short even when the test runner uses a deeply nested TMPDIR.
         var testRoot = OperatingSystem.IsLinux() ? CreatePrivateTestRoot("/tmp") : _root;
         var ownsTestRoot = !StringComparer.Ordinal.Equals(testRoot, _root);
+        var parentPath = Path.Join(testRoot, "owned-parent");
         try
         {
-            var parentPath = Path.Join(testRoot, "owned-parent");
             Directory.CreateDirectory(parentPath);
             using (var fixture = new NativeClusterFixture(parentPath))
             {
                 var cluster = await fixture.StartAsync();
-                var relocatedParent = Path.Join(_root, "relocated-parent");
+                foreach (var port in new[] { 5432, 65535 })
+                {
+                    var socketPath = Path.Join(cluster.OwnedRoot, "socket", $".s.PGSQL.{port}");
+                    Assert.True(Encoding.UTF8.GetByteCount(socketPath) <= 103,
+                        $"Socket path is {Encoding.UTF8.GetByteCount(socketPath)} bytes: {socketPath}");
+                }
+                var relocatedParent = Path.Join(testRoot, "relocated-parent");
                 Directory.Move(parentPath, relocatedParent);
                 try
                 {
@@ -1647,6 +1654,11 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         }
         finally
         {
+            if (ownsTestRoot && Directory.Exists(parentPath)
+                && !Directory.EnumerateFileSystemEntries(parentPath).Any())
+            {
+                Directory.Delete(parentPath);
+            }
             if (ownsTestRoot && Directory.Exists(testRoot)
                 && !Directory.EnumerateFileSystemEntries(testRoot).Any())
             {
