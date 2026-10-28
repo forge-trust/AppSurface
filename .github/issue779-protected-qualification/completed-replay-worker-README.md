@@ -36,6 +36,14 @@ Replay invokes source-owned validators and native/build procedures that process 
 
 The worker is not a provider resolver, support registration, Trusted admission path, qualification decision, original CI acceptance, or gate authorization. Its output is comparison data with fixed false claims. Do not convert successful process exit or a decoded result into any of those decisions. The protected validation workflow is not created or enabled by this module.
 
+## Outer execution prerequisite
+
+The [preparation and closeout controller](completed-controller-README.md) requires its validator, archive, completed-source and native-source directories to be owned by the calling effective UID. Preparation records each directory's device, inode, file type, mode, UID and GID. This worker requires those same actual directory identities and caller ownership before replay. The [wire codec](completed-wire-README.md) transports these comparison values; it does not transfer an open handle or confer access to the corresponding node.
+
+Consequently, moving the prepared trees through an artifact download to another hosted job does not preserve the required identities. Changing ownership for a different-UID child also invalidates the preparation. Keeping the original UID is insufficient when another process of that UID still holds provider credentials. An environment-only launch cannot meet all three requirements.
+
+The future protected caller must provide a reviewed owner for the same filesystem nodes, exclude credentials and unrelated same-UID processes for the whole replay interval, contain filesystem access and all descendants, and observe terminal settlement before credentialed closeout resumes. The current APIs do not implement an ownership bridge, credential revocation, or that outer owner. Do not relax their ownership or inode checks to make a proposed job layout run. Keep the finalizer disabled until the actual boundary and its failure controls have been reviewed and executed.
+
 ## Pitfalls
 
 - Keep preparation/result files in the same private handoff directory; the result path must not exist already.

@@ -8,7 +8,7 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed partial class EvidenceHostBootstrapTests
 {
     [Fact]
-    public async Task EvidenceAspireApplication_ShouldDisposePartialApplicationWhenAspireStartupFails()
+    public async Task EvidenceAspireApplication_RejectsConsumerBuilderWithoutStartingIt()
     {
         var repoRoot = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
@@ -19,10 +19,10 @@ public sealed partial class EvidenceHostBootstrapTests
             DisableDashboard = true,
         });
 
-        var exception = await Record.ExceptionAsync(() => EvidenceAspireApplication.StartAsync(builder));
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceAspireApplication.StartAsync(builder));
 
-        Assert.NotNull(exception);
-        Assert.IsNotType<ObjectDisposedException>(exception);
+        Assert.Equal("ASEVD400", exception.Code);
     }
 
     [Fact]

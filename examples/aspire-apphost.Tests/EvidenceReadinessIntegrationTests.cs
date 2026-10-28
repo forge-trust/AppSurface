@@ -10,9 +10,10 @@ public sealed class EvidenceReadinessIntegrationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task EvidenceHost_NativeHttpReadinessRunsProducerAndDisposesItsSingleLease(bool customClient)
+    public async Task PreconfiguredEvidenceApplication_RejectsBeforeStartupAndEndpointAllocation(bool canceled)
     {
-        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        if (canceled) timeout.Cancel();
         var builder = DistributedApplication.CreateBuilder(new DistributedApplicationOptions
         {
             Args = [],
@@ -20,65 +21,20 @@ public sealed class EvidenceReadinessIntegrationTests
             ProjectDirectory = Projects.AspireAppHostExample.ProjectPath,
             DisableDashboard = true,
         });
-        builder.AddProject<Projects.WebAppExample>("web").WithHttpEndpoint();
-        await using var application = await EvidenceAspireApplication.StartAsync(builder, timeout.Token);
-        var createdClients = 0;
-        var disposedClients = 0;
-        var options = customClient ? new EvidenceAspireHttpReadinessOptions
+        var web = builder.AddProject<Projects.WebAppExample>("web").WithHttpEndpoint();
+        var starts = 0;
+        builder.OnBeforeStart((_, _) =>
         {
-            CreateProbeClient = endpoint =>
-            {
-                createdClients++;
-                return new HttpClient(new ObservedClientHandler(() => disposedClients++)) { BaseAddress = endpoint };
-            },
-        } : null;
-        var readiness = application.CreateHttpReadiness("web", "web", "http", "/", TimeSpan.FromMinutes(1), options);
-        var producer = new HttpConditionProducer();
-        var plan = new EvidencePlan(
-            "1.0", "readiness-example", "policy-digest", "diff-digest",
-            new EvidenceProfile(
-                "http-condition", EvidenceProfileScope.Targeted,
-                [new EvidenceResourceDeclaration("web", "aspire_http", 90, [])],
-                [new EvidenceProducerDeclaration("http-condition", "assertion", "1.0.0", ["web"], ["http-condition@1"], [], 30)],
-                [new EvidenceObligation("http-condition", "example", "Verify the declared HTTP condition.", ["http-condition"], "http-condition@1")]),
-            [new NormalizedDiffPath("examples/web-app/Program.cs")], ["http-condition"], "plan-digest");
-        await using var host = EvidenceHostBootstrap.Create(plan, registration =>
-        {
-            registration.AddResource(readiness);
-            registration.AddProducer(producer);
+            starts++;
+            throw new InvalidOperationException("The rejected Evidence application must not start.");
         });
 
-        var manifest = await host.RunAsync(cancellationToken: timeout.Token);
+        var exception = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceAspireApplication.StartAsync(builder, timeout.Token));
 
-        Assert.Equal(EvidenceResourceOutcome.Ready, Assert.Single(manifest.ResourceResults).Outcome);
-        Assert.Equal(EvidenceProducerOutcome.Passed, Assert.Single(manifest.ProducerResults).Outcome);
-        Assert.Equal(EvidenceClaimKind.TargetedComplete, manifest.ClaimKind);
-        Assert.True(manifest.Metrics.CleanupCompleted);
-        Assert.Equal(1, producer.Runs);
-        Assert.Equal(customClient ? 1 : 0, createdClients);
-        Assert.Equal(createdClients, disposedClients);
-        Assert.Throws<ObjectDisposedException>(() => application.CreateHealthReadiness("web", "web"));
-    }
-
-    private sealed class ObservedClientHandler(Action disposed) : DelegatingHandler(new SocketsHttpHandler())
-    {
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing) disposed();
-            base.Dispose(disposing);
-        }
-    }
-
-    private sealed class HttpConditionProducer : IEvidenceProducer
-    {
-        public string Id => "http-condition";
-        public int Runs { get; private set; }
-
-        public ValueTask<EvidenceProducerResult> ProduceAsync(EvidenceProducerContext context, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            Runs++;
-            return ValueTask.FromResult(new EvidenceProducerResult(Id, EvidenceProducerOutcome.Passed, ["http-condition@1"]));
-        }
+        Assert.Equal("ASEVD400", exception.Code);
+        Assert.Equal(0, starts);
+        Assert.False(web.GetEndpoint("http").IsAllocated);
+        Assert.Contains(web.Resource, builder.Resources);
     }
 }

@@ -42,6 +42,8 @@ Open the `web` endpoint and inspect the dashboard's logs, traces, and metrics ta
 
 The paired [`aspire-apphost.Tests`](../aspire-apphost.Tests/TypedProfileIntegrationTests.cs) project selects `QaProfile` by type, builds and starts the graph, waits for the `web` resource to become healthy, performs an HTTP request, and disposes the application before the testing builder. See the canonical [`ForgeTrust.AppSurface.Aspire.Testing` guide](../../Aspire/ForgeTrust.AppSurface.Aspire.Testing/README.md) for lifecycle and compatibility constraints.
 
+The separate [Evidence application regression](../aspire-apphost.Tests/EvidenceReadinessIntegrationTests.cs) checks that a preconfigured builder is rejected with `ASEVD400` before startup or endpoint allocation, including when its caller token is already canceled. The [Evidence Aspire guide](../../Evidence/ForgeTrust.AppSurface.Evidence.Aspire/README.md) explains the required host-owned admitted application path and its current closed registration. This example's ordinary HTTP profile tests establish application behavior; they grant no Evidence admission or complete claim.
+
 ## Project Reference Shape
 
 Aspire AppHost projects generate the `Projects` namespace from project references. Keep library references out of the Aspire resource graph:
