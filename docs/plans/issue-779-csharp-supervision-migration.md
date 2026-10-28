@@ -128,7 +128,6 @@ source-file hashes/modes were independently verified. See the [seven-case valida
 The earlier failed attempts remain historical evidence. This checkpoint establishes neither full-repository
 coverage nor Trusted eligibility; the complete cutover and verification work below remains required.
 
-
 **Scope:** the existing compiled restricted application contract, actual AppHost/DCP/resource startup, readiness, and joined shutdown. Use a compiled test registration to validate mechanics; production catalogue and proof registry remain closed.
 
 ### Work
@@ -279,7 +278,6 @@ start, actual cgroup/pump joins, authenticated ready/stop/wait server and root f
 supervisor role is still closed. All 16 native cases, checkpoints 2–4, full acceptance, package QA,
 unchanged solution/patch coverage and draft PR update remain required.
 
-
 ### 2026-10-06: account utilities, root workspace and kernel/output custody
 
 The core now implements actual fixed root account utilities over the authenticated D-Bus backend,
@@ -318,7 +316,6 @@ completion, and final artifact/workspace/account custody. Then run all N01–N16
 opening the supervisor role. Checkpoints 2–4, genuine producer/AppHost/DCP and SDK consumer proof, the
 unchanged coverage gate, full acceptance, package QA and draft PR update remain required. Production
 catalogue/proof tables remain closed; no Python runtime cutover or Trusted qualification is claimed.
-
 
 ### 2026-10-06: retained control listener and bounded descriptor publication
 
@@ -558,7 +555,6 @@ source-bound Linux checkpoint-one fixture, then execute every N01–N16 control.
 or application dispatch to work around that checkpoint. Checkpoints 2–4, Python runtime cutover, complete
 consumer/platform proof, CLI/SDK QA, unchanged coverage gate and the validated draft PR remain required.
 
-
 ### 2026-10-06: guarded same-image CLI candidate and worker bootstrap
 
 The reserved supervisor entry now invokes the [actual empty Observation composition](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#empty-observation-root-execution-and-final-files)
@@ -608,7 +604,6 @@ Prepared the closed N12 same-image output-holder procedure on the integrated C# 
 
 The private intermediate record explicitly precedes custody/account closure. Native N12 completion requires the actual post-stop group/EOF evidence **and** final root success/cleanup and complete source/deployment binding. This source-preparation entry is not a Linux result, a numerical coverage result or checkpoint completion.
 
-
 ## Private cancellation failure visibility
 
 The N08/N09 failure-only [joined output diagnostic](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/README.md#private-pre-ready-worker-failure-diagnostics) preserves the actual worker stderr already retained by the original collector when READY/kernel/custody capture is unavailable. Its detached record establishes no native checkpoint or physical settlement. The unchanged first failure and native validators remain authoritative; the next cancellation attempt must diagnose any retained worker error before an evidence-supported execution fix or control credit.
@@ -628,7 +623,6 @@ failed/false settlement data after the original lifetime and pumps join. Focused
 executions with zero compiler warnings/errors. The deliberate stall and actual Linux containment/custody
 remain required; no native checkpoint or Linux result is claimed.
 
-
 ### 2026-10-10: cancellation fallback finalization evidence
 
 The latest private N08 run retained the actual caller and lifecycle cancellation plus owned-work join,
@@ -644,7 +638,6 @@ unchanged. Local codec/build checks and the next genuine Linux result must be re
 #### N08 capture-stage diagnosis
 
 The fifth private cancellation run retained original physical settlement, joined monitor/pumps and normal nonzero worker exit, but rejected its cancellation capture. That evidence does not identify the failed kernel, signal or encoding guard. A separate [closed projection checkpoint](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxCancellationProjectionFailure.cs) now records the original failing operation without changing its guard or replacing the [first execution failure](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/EvidenceNativeObservationFailure.cs). This is diagnostic preparation; N08/N09 remain unqualified until the genuine Linux cases satisfy their full original records, custody and strict account cleanup.
-
 
 ### 2026-10-10: N16 accepted blocked-work source preparation
 
@@ -767,7 +760,6 @@ original cleanup procedure and source close completed without fault. The native 
 requires final physical settlement before local disposal and root custody. No execution failure flag,
 unit/PID/group/pump check or account-release guard is cleared.
 
-
 ### 2026-10-19: distinguish failed callback work from physical settlement
 
 The current [N11 data contract](../../.github/issue779-checkpoint1/procedures/n11/README.md#native-behavior-and-clocks)
@@ -780,7 +772,6 @@ bytes and all existing quarantine/output/NSS observations. It does not claim tha
 the root stop request caused the worker exit. This is a verifier correction,
 not a C# runtime, timeout, capability, admission or coverage-policy change. A
 fresh complete N11 Linux capture is still required before crediting the control.
-
 
 ### Revision 56 retained verification and the next measurement candidate — 2026-10-21
 
@@ -825,7 +816,6 @@ and Codecov patch gates remain mandatory. The fixed comparison commit
 `1991280e8af049db592ebcb705cbf66f4b4c6e8b`, gate thresholds and
 [`coverage-solution.sh`](../../scripts/coverage-solution.sh) remain unchanged.
 
-
 ### Revision 57 CLI fixture clock correction
 
 The revision 56 full CLI log retained a lifecycle fatal-stop diagnostic:
@@ -847,7 +837,6 @@ unchanged. Exact-file formatting and the full factory test class passed 46/46
 with zero compiler diagnostics in 32.764 seconds under a 180-second bound. The
 full Linux gate remains required.
 
-
 The cumulative measurement artifact has a dedicated 192 MiB/1,024-file retention
 contract; the ordinary all-sixteen C1 artifact remains 96 MiB/512 files.
 Observed revision 56 raw-lineage and standard-report sizes project about 106 MiB
@@ -857,3 +846,9 @@ private artifact contract, not an increase to production output or execution
 budgets. Both modes retain unchanged leaf/archive bounds and reject unsafe nodes
 before applying private upload permissions. Actual revision 57 sizes and all
 standard Linux measurement results remain pending.
+
+### 2026-10-28: normal CI completed-run isolation implementation
+
+The user approved the private [C# outer owner](../../.github/issue779-protected-qualification/outer-owner/README.md) and its [Linux CI controls](../../.github/workflows/evidencehost-completed-isolation-controls.yml), including a dedicated per-run identity, the narrow two-disposable-tree write grant, fixed phase commands, credential-free replay, actual mount/process/quota checks, and whole-cgroup settlement before closeout. This is validation infrastructure outside product roles and registration. No admission boundary, native interval, gate threshold, comparison base, exclusion, or coverage arithmetic is changed.
+
+Portable path, phase-order and protected-context controls are preparation evidence. Real host controls and the original measurement/solution/patch gates must still pass at the final source before completion. Feature-branch CI cannot establish protected-main provenance; the protected completed-run caller remains subject to the existing source/provider guards and independent support requirements.

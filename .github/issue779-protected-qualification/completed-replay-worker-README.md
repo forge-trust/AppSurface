@@ -42,7 +42,7 @@ The [preparation and closeout controller](completed-controller-README.md) requir
 
 Consequently, moving the prepared trees through an artifact download to another hosted job does not preserve the required identities. Changing ownership for a different-UID child also invalidates the preparation. Keeping the original UID is insufficient when another process of that UID still holds provider credentials. An environment-only launch cannot meet all three requirements.
 
-The future protected caller must provide a reviewed owner for the same filesystem nodes, exclude credentials and unrelated same-UID processes for the whole replay interval, contain filesystem access and all descendants, and observe terminal settlement before credentialed closeout resumes. The current APIs do not implement an ownership bridge, credential revocation, or that outer owner. Do not relax their ownership or inode checks to make a proposed job layout run. Keep the finalizer disabled until the actual boundary and its failure controls have been reviewed and executed.
+The protected caller must use a reviewed owner for the same filesystem nodes, exclude credentials and unrelated same-UID processes for the whole replay interval, contain filesystem access and all descendants, and observe terminal settlement before credentialed closeout resumes. The data APIs do not implement an ownership bridge or credential revocation; the private C# outer owner supplies the separately tested host boundary. Do not relax their ownership or inode checks to make a proposed job layout run. Keep the finalizer disabled until the actual boundary and its failure controls have been reviewed and executed.
 
 ## Pitfalls
 
@@ -52,3 +52,5 @@ The future protected caller must provide a reviewed owner for the same filesyste
 - Preserve the four-path command contract. Extra flags or relative paths are rejected.
 - Do not launch the worker with inherited tokens, runtime credentials, loader overrides, Git overrides, or unrelated descriptors. The worker fails closed if the environment/process checks see them.
 - Keep the source-capture and preparation inputs immutable until the worker returns. It holds and rechecks their descriptors, but those checks do not replace an outer execution boundary.
+
+The private [C# outer owner](outer-owner/README.md) and its [normal Linux CI controls](../workflows/evidencehost-completed-isolation-controls.yml) now implement the isolated phase launch path for verification. Their host controls must pass at the current source before any protected workflow enablement; adding the owner does not establish protected provenance or admission.

@@ -1,0 +1,122 @@
+namespace EvidenceHost.CompletedIsolation;
+
+/// <summary>Portable one-use state and path controls; actual containment remains a real Linux CI obligation.</summary>
+internal static class PolicyControls
+{
+    internal static int Run()
+    {
+        var count = 0;
+        var good = new PhaseResult(0, true, false, false, "fixed.service", 1, "/out", "/err");
+        var transition = new OwnerTransition();
+        transition.Prepared(good); transition.Replayed(good); transition.CustodyVerified();
+        transition.RequireCloseAllowed(); transition.Closed(good); count++;
+        foreach (var failed in new[] { good with { Settled = false }, good with { ExitCode = 1 },
+            good with { TimedOut = true }, good with { OutputOverflow = true } })
+        {
+            var candidate = new OwnerTransition();
+            candidate.Prepared(good);
+            Reject(() => candidate.Replayed(failed));
+            Reject(candidate.RequireCloseAllowed);
+            Reject(candidate.CustodyVerified); count += 3;
+        }
+        var beforeReplay = new OwnerTransition();
+        Reject(beforeReplay.RequireCloseAllowed);
+        Reject(() => beforeReplay.Prepared(good)); count += 2;
+        var beforeVerification = new OwnerTransition();
+        beforeVerification.Prepared(good); beforeVerification.Replayed(good);
+        Reject(beforeVerification.RequireCloseAllowed);
+        Reject(beforeVerification.CustodyVerified); count += 2;
+        var duplicate = new OwnerTransition(); duplicate.Prepared(good);
+        Reject(() => duplicate.Prepared(good)); Reject(() => duplicate.Replayed(good)); count += 2;
+        var layout = new OwnerLayout("/owned", "/owned/fs", 62000, 62000, OwnerPaths.Assembly, "/evidence");
+        if (layout.Host(OwnerPaths.Source) != "/owned/fs" + OwnerPaths.Source) throw new IsolationException("path-control");
+        count++;
+        foreach (var invalid in new[] { "/", "relative", "/a/../b", "/a/./b", "/a//b", "/a/", "/a\nb", "" })
+        {
+            try { _ = layout.Host(invalid); }
+            catch (InvalidDataException) { count++; continue; }
+            throw new IsolationException("path-rejection-control");
+        }
+        var context = new Dictionary<string, string>
+        {
+            ["GITHUB_ACTIONS"] = "true",
+            ["GITHUB_EVENT_NAME"] = "workflow_run",
+            ["GITHUB_REPOSITORY"] = "forge-trust/AppSurface",
+            ["GITHUB_REF"] = "refs/heads/main",
+            ["GITHUB_REF_PROTECTED"] = "true",
+            ["GITHUB_WORKFLOW_REF"] =
+                "forge-trust/AppSurface/.github/workflows/evidencehost-completed-validation.yml@refs/heads/main",
+            ["GITHUB_REPOSITORY_ID"] = "1035215851",
+            ["GITHUB_SHA"] = new string('a', 40),
+            ["GITHUB_WORKFLOW_SHA"] = new string('a', 40),
+        };
+        var validated = OwnerCompletionPolicy.Validate(context);
+        if (validated.Count != OwnerCompletionPolicy.ContextNames.Length) throw new IsolationException("event-policy-control");
+        count++;
+        foreach (var name in OwnerCompletionPolicy.ContextNames)
+        {
+            var missing = new Dictionary<string, string>(context); missing.Remove(name);
+            Reject(() => OwnerCompletionPolicy.Validate(missing)); count++;
+            var wrong = new Dictionary<string, string>(context) { [name] = "canary-invalid" };
+            Reject(() => OwnerCompletionPolicy.Validate(wrong)); count++;
+        }
+        count += ReleaseControls();
+        Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
+        return 0;
+    }
+
+    private static int ReleaseControls()
+    {
+        var context = "\"context\":{" + string.Join(',', OwnerCompletionPolicy.ContextNames
+            .Select(name => System.Text.Json.JsonSerializer.Serialize(name) + ":\"valid\"")) + "}";
+        var prepare = "{\"phase\":\"prepare\",\"token\":\"synthetic-token\",\"control\":null," + context + "}\n";
+        var close = prepare.Replace("prepare", "close", StringComparison.Ordinal);
+        var replay = "{\"phase\":\"replay\",\"token\":null,\"control\":null,\"context\":null}\n";
+        var control = "{\"phase\":\"control\",\"token\":null,\"control\":\"baseline\",\"context\":null}\n";
+        Accept(prepare, OwnerPhase.Prepare, token: "synthetic-token");
+        Accept(close, OwnerPhase.Close, token: "synthetic-token");
+        Accept(replay, OwnerPhase.Replay);
+        Accept(control, OwnerPhase.Control, control: "baseline");
+
+        RejectRelease(prepare.Replace("\"phase\":\"prepare\",", "\"phase\":\"prepare\",\"phase\":\"prepare\",", StringComparison.Ordinal), OwnerPhase.Prepare);
+        RejectRelease(prepare.Replace("\"context\":{", "\"unknown\":null,\"context\":{", StringComparison.Ordinal), OwnerPhase.Prepare);
+        RejectRelease("{\"phase\":\"prepare\",\"token\":\"synthetic-token\",\"control\":null}\n", OwnerPhase.Prepare);
+        RejectRelease(replay.Replace("\"token\":null", "\"token\":\"leak\"", StringComparison.Ordinal), OwnerPhase.Replay);
+        RejectRelease(control.Replace("\"context\":null", context, StringComparison.Ordinal), OwnerPhase.Control);
+        RejectRelease(control.Replace("baseline", "arbitrary-command", StringComparison.Ordinal), OwnerPhase.Control);
+        RejectRelease(prepare, OwnerPhase.Close);
+        RejectRelease(replay[..^1] + "x\n", OwnerPhase.Replay);
+        RejectRelease(replay.Replace("}\n", "}\r\n", StringComparison.Ordinal), OwnerPhase.Replay);
+        RejectRelease(replay.Replace("\"token\":null", "\"token\":7", StringComparison.Ordinal), OwnerPhase.Replay);
+        RejectRelease(replay + new string(' ', 32 * 1024), OwnerPhase.Replay);
+        RejectRelease(prepare.Replace("synthetic-token", new string('x', 8193), StringComparison.Ordinal), OwnerPhase.Prepare);
+        RejectRelease(prepare.Replace("\"context\":{", "\"context\":{\"EXTRA\":\"invalid\",", StringComparison.Ordinal), OwnerPhase.Prepare);
+        RejectRelease(prepare.Replace(",\"GITHUB_SHA\":\"valid\"", "", StringComparison.Ordinal), OwnerPhase.Prepare);
+        return 18;
+
+        static void Accept(string frame, OwnerPhase phase, string? token = null, string? control = null)
+        {
+#pragma warning disable CA1416 // ParseRelease is a pure wire parser; the platform annotation comes from its containing launcher.
+            var parsed = PhaseLauncher.ParseRelease(System.Text.Encoding.UTF8.GetBytes(frame), phase);
+#pragma warning restore CA1416
+            if (parsed.Phase != phase.ToString().ToLowerInvariant() || parsed.Token != token || parsed.Control != control)
+                throw new IsolationException("release-positive-control");
+        }
+
+        static void RejectRelease(string frame, OwnerPhase phase)
+        {
+#pragma warning disable CA1416 // ParseRelease is a pure wire parser; the platform annotation comes from its containing launcher.
+            try { _ = PhaseLauncher.ParseRelease(System.Text.Encoding.UTF8.GetBytes(frame), phase); }
+            catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { return; }
+#pragma warning restore CA1416
+            throw new IsolationException("release-negative-control");
+        }
+    }
+
+    private static void Reject(Action action)
+    {
+        try { action(); }
+        catch (IsolationException) { return; }
+        throw new IsolationException("transition-negative-control");
+    }
+}

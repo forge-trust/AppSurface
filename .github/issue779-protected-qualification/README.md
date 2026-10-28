@@ -142,3 +142,7 @@ now publish bounded [wire handoffs](completed-wire-README.md) for a separate
 and invokes the fixed replay sequence; an independent caller must still provide containment and
 settlement. No finalizer workflow is enabled. Reviewed execution/credential separation and a genuine
 protected full-stage run remain required.
+
+## Normal CI isolation owner
+
+The private [C# isolation owner](outer-owner/README.md) supplies fixed phase execution and real host containment controls in the [Linux isolation workflow](../workflows/evidencehost-completed-isolation-controls.yml). This adds no product role, support registration, gate exception, or protected acceptance. The original full measurement chain and numerical gates remain mandatory.

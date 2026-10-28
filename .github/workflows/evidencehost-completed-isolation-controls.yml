@@ -1,0 +1,121 @@
+name: EvidenceHost completed-run Linux isolation controls
+
+on:
+  push:
+    branches: [codex/issue779-completed-isolation-20261028, codex/issue779-checkpoint4-cutover-20261018]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidencehost-completed-isolation-${{ github.ref }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  linux-isolation:
+    name: Real credential-free replay containment controls (no admission)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      MSBUILDDISABLENODEREUSE: '1'
+      DOTNET_CLI_USE_MSBUILD_SERVER: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: 10.0.401
+      - name: Bind current source and prepare fixed build paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          evidence="$RUNNER_TEMP/completed-isolation-evidence"
+          mkdir -m 0700 "$evidence"
+          printf 'ISOLATION_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          test "$(uname -m)" = x86_64
+          test "$(cat /proc/1/comm)" = systemd
+          test -f /sys/fs/cgroup/cgroup.controllers
+          test "$(dotnet --version)" = 10.0.401
+          for tool in systemd-run systemctl unshare setpriv mkfs.ext4 losetup mount umount getent ldd; do
+            command -v "$tool" > /dev/null
+          done
+      - name: Build the private CSharp owner with warnings as errors
+        shell: bash
+        run: |
+          set -euo pipefail
+          project=.github/issue779-protected-qualification/outer-owner/OuterOwner.csproj
+          timeout --signal=KILL 120 dotnet restore "$project" --locked-mode --disable-parallel -warnaserror \
+            > "$ISOLATION_EVIDENCE/restore.log" 2>&1
+          timeout --signal=KILL 120 dotnet publish "$project" --configuration Release --no-restore \
+            --output "$RUNNER_TEMP/completed-isolation-owner" -m:1 -nr:false -p:UseSharedCompilation=false -warnaserror \
+            > "$ISOLATION_EVIDENCE/build.log" 2>&1
+          dotnet "$RUNNER_TEMP/completed-isolation-owner/EvidenceHost.CompletedIsolation.dll" policy-controls \
+            > "$ISOLATION_EVIDENCE/policy-controls.log" 2>&1
+      - name: Execute actual Linux isolation and failure controls with synthetic credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          # No GitHub token is supplied to this command. The owner uses only a random synthetic canary.
+          # Parent scope is independently systemd-owned; timeout/cancellation kills its whole process tree.
+          owner="$RUNNER_TEMP/completed-isolation-owner/EvidenceHost.CompletedIsolation.dll"
+          sdk="$(readlink -f "$(command -v dotnet)")"
+          sudo -n install -d -m 0700 -o root -g root "$ISOLATION_EVIDENCE/root-owned"
+          # Root receives a fresh no-follow copy before any untrusted phase exists.
+          sudo -n python3 -I -S -B - "$ISOLATION_EVIDENCE/source.json" \
+            "$ISOLATION_EVIDENCE/root-owned/source.json" "$(id -u)" <<'PY'
+          import os, stat, sys
+          source, destination, caller = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          def fact(item):
+              return (item.st_dev, item.st_ino, item.st_uid, item.st_gid, item.st_mode,
+                      item.st_nlink, item.st_size, item.st_mtime_ns, item.st_ctime_ns)
+          before = os.lstat(source)
+          if not (stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                  and before.st_uid == caller and stat.S_IMODE(before.st_mode) == 0o600
+                  and 0 < before.st_size <= 1024 * 1024):
+              raise SystemExit('ISOLATION_CAPTURE_REJECTED')
+          fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+          with os.fdopen(fd, 'rb') as stream:
+              if fact(os.fstat(stream.fileno())) != fact(before):
+                  raise SystemExit('ISOLATION_CAPTURE_REJECTED')
+              body = stream.read(1024 * 1024 + 1)
+              if (len(body) != before.st_size or fact(os.fstat(stream.fileno())) != fact(before)
+                      or fact(os.lstat(source)) != fact(before)):
+                  raise SystemExit('ISOLATION_CAPTURE_REJECTED')
+          fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+          with os.fdopen(fd, 'wb') as stream:
+              os.fchown(stream.fileno(), 0, 0)
+              os.fchmod(stream.fileno(), 0o600)
+              stream.write(body)
+              stream.flush()
+              os.fsync(stream.fileno())
+          PY
+          set +e
+          sudo -n systemd-run --quiet --wait --pipe --service-type=exec \
+            --unit="appsurface-isolation-controls-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --property=KillMode=control-group --property=RuntimeMaxSec=1800 \
+            --property=TimeoutStopSec=30 --property=SendSIGKILL=yes --property=LimitCORE=0 \
+            /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/nonexistent LANG=C.UTF-8 LC_ALL=C \
+            "$sdk" "$owner" controls "$GITHUB_WORKSPACE" "$ISOLATION_EVIDENCE/root-owned/source.json" \
+            "$ISOLATION_EVIDENCE/root-owned/controls" > "$ISOLATION_EVIDENCE/owner.log" 2>&1
+          result=$?
+          set -e
+          # Only synthetic-control evidence is handed back after the whole owner unit has joined.
+          sudo -n chown -R "$(id -u):$(id -g)" "$ISOLATION_EVIDENCE/root-owned"
+          test "$result" = 0
+          python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$ISOLATION_EVIDENCE/source.json" --verify
+      - name: Retain bounded source-bound controls without protected acceptance
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-completed-isolation-controls-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/completed-isolation-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

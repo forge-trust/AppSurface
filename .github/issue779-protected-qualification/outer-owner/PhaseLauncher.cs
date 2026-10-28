@@ -160,7 +160,7 @@ internal static class PhaseLauncher
         }
     }
 
-    private static PhaseRelease ParseRelease(ReadOnlySpan<byte> bytes, OwnerPhase phase)
+    internal static PhaseRelease ParseRelease(ReadOnlySpan<byte> bytes, OwnerPhase phase)
     {
         if (bytes.Length is < 2 or > MaximumReleaseBytes || bytes[^1] != (byte)'\n'
             || bytes[..^1].Contains((byte)'\n') || bytes.Contains((byte)'\r')) throw new InvalidDataException();

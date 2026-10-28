@@ -11,6 +11,9 @@ namespace EvidenceHost.CompletedIsolation;
 /// <remarks>This is private infrastructure. Its filesystem facts do not grant workflow, native, or product authority.</remarks>
 internal static class OwnerWorkspace
 {
+    /// <summary>Finite setup checkpoint for diagnostics; never includes paths, provider text or credentials.</summary>
+    internal static string SetupStage { get; private set; } = "host";
+
     private const long ImageBytes = 8L * 1024 * 1024 * 1024;
     private const int MaximumProcessOutput = 16 * 1024 * 1024;
     private const int MaximumCaptureBytes = 1024 * 1024;
@@ -29,11 +32,13 @@ internal static class OwnerWorkspace
     internal static async Task<OwnerLayout> CreateAsync(string repository, string sourceCapture,
         string? validatorCapture, string? eventPath, string evidenceRoot, CancellationToken token)
     {
+        SetupStage = "host";
         RequireSupportedHost();
         var repo = CanonicalExistingDirectory(repository, "repository");
         var evidenceParent = CanonicalExistingDirectory(Path.GetDirectoryName(evidenceRoot) ?? "", "evidence-parent");
         Require(Path.IsPathFullyQualified(evidenceRoot) && Path.GetFullPath(evidenceRoot) == evidenceRoot
             && StringComparer.Ordinal.Equals(Path.GetDirectoryName(evidenceRoot), evidenceParent), "evidence-path");
+        SetupStage = "inputs";
         var sourceBytes = await OwnerCustody.ReadBoundedInputAsync(sourceCapture, MaximumCaptureBytes, token)
             .ConfigureAwait(false);
         var source = OwnerCustody.ParseCapture(sourceBytes);
@@ -46,7 +51,9 @@ internal static class OwnerWorkspace
             : await OwnerCustody.ReadBoundedInputAsync(eventPath, 128 * 1024, token).ConfigureAwait(false);
         ValidateEvent(eventBytes);
 
+        SetupStage = "sdk";
         var sdk = await ResolveSdkAsync(token).ConfigureAwait(false);
+        SetupStage = "commits";
         await RequireLocalCommitAsync(repo, validator.Source, token).ConfigureAwait(false);
         await RequireLocalCommitAsync(repo, source.Source, token).ConfigureAwait(false);
         var ancestry = await RunFixedAsync("/usr/bin/git",
@@ -61,11 +68,13 @@ internal static class OwnerWorkspace
         var mounted = false;
         try
         {
+            SetupStage = "identity";
             reservation = ReserveIdentity(token);
             Require(Reservations.TryAdd(reservation.MarkerPath, reservation.Marker), "uid-marker-state");
             hostRoot = HostRootPrefix + Guid.NewGuid().ToString("N");
             CreateRoot(hostRoot);
             WriteRootMarker(hostRoot, reservation);
+            SetupStage = "filesystem";
             var image = Path.Combine(hostRoot, "rootfs.img");
             var mountpoint = Path.Combine(hostRoot, "fs");
             Directory.CreateDirectory(mountpoint);
@@ -90,8 +99,10 @@ internal static class OwnerWorkspace
             var layout = new OwnerLayout(hostRoot, mountpoint, reservation.Id, reservation.Id,
                 OwnerPaths.Assembly, evidence);
             CreateRootFilesystem(layout);
+            SetupStage = "tool-closure";
             await InstallRootFilesystemAsync(layout, sdk, token).ConfigureAwait(false);
 
+            SetupStage = "checkouts";
             await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Validator), validator, token).ConfigureAwait(false);
             await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Source), source, token).ConfigureAwait(false);
             await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Native), source, token).ConfigureAwait(false);
@@ -108,9 +119,11 @@ internal static class OwnerWorkspace
             await SetCheckoutOwnerAsync(layout.Host(OwnerPaths.Native), reservation.Id, reservation.Id, token).ConfigureAwait(false);
             foreach (var path in new[] { OwnerPaths.Stage, OwnerPaths.Input, OwnerPaths.Handoff, OwnerPaths.Output, OwnerPaths.Report })
                 SetTreeOwner(layout.Host(path), reservation.Id, reservation.Id);
+            SetupStage = "custody";
             await OwnerCustody.InitializeAsync(layout, sourceBytes, validatorBytes, eventBytes, token).ConfigureAwait(false);
             OwnerCustody.VerifyExt4Image(layout.RootFileSystem);
             OwnerCustody.VerifyRootHost(layout.HostRoot);
+            SetupStage = "prepared";
             return layout;
         }
         catch
