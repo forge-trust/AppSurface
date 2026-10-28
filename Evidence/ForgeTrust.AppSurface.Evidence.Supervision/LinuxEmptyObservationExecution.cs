@@ -126,6 +126,9 @@ internal static partial class LinuxEmptyObservationExecution
             phase = EvidenceNativeObservationPhase.ServerLifetime;
             serverLifetime = CancellationTokenSource.CreateLinkedTokenSource(job.Token);
             phase = EvidenceNativeObservationPhase.ServerRun;
+#if EVIDENCE_PRIVATE_C3_SDK
+            LinuxWorkerMeasurement.ObserveStartupTiming(WorkerMeasurementStartup.ServerDispatch);
+#endif
             serverTask = server.RunAsync(serverLifetime.Token);
             await serverTask.ConfigureAwait(false);
             phase = EvidenceNativeObservationPhase.ServerCompletion;

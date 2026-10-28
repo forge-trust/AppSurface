@@ -73,13 +73,21 @@ Its source preparation and local builds are separate from required fresh Linux
 execution; native event observation and cache provenance must be checked before
 claiming measurement success.
 
-Private SDK startup also emits a best-effort closed `evidence-worker-measurement-startup-v1`
-milestone before/after the original native start, kernel capture, measurement preparation
-and descriptor publication. The ten enum labels contain no exception, path or native
-success claim; an optional nullable measurement call returning is not proof it captured
-anything. Diagnostic I/O failure is discarded, and every original token, startup
-allowance, unit property and lifecycle guard remains authoritative. These milestones
-locate an early startup cancellation separately from the later exit-cache protocol.
+Private SDK startup continues to emit the same best-effort closed
+`evidence-worker-measurement-startup-v1` milestones before/after the original native
+start, kernel capture, measurement preparation and descriptor publication. The existing
+ten labels and record shape are unchanged. Separate
+`evidence-worker-measurement-startup-timing-v1` records report bounded elapsed milliseconds
+from the first `NativeDispatch` using the process monotonic stopwatch; the origin is captured
+once and is not reset by later milestones. Timing is capped at 600,000 ms, and an invalid,
+backwards or over-limit timestamp pair omits the timing record without clamping it. A
+timing-only `ServerDispatch` point is emitted after owner-reference guards and immediately
+before the original control-server call, without adding a new `startup-v1` milestone. Records
+contain only a fixed stage, elapsed value and `native_acceptance=false`; they carry no
+exception, path or identity. Optional timing serialization and output failures are discarded.
+The observations add no timeout or stage allowance and do not alter tokens, unit properties,
+owner guards, the original 30-second startup handshake or exit-cache protocol. A timing record
+does not prove worker readiness or acceptance.
 
 
 ## SDK startup worker diagnostics

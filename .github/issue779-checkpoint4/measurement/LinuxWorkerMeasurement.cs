@@ -27,6 +27,9 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
     private const ulong DirectoryFlags = 0x10000 | 0x80000;
     private const ulong FileFlags = 0x80000 | 0x20000 | 0x800;
     private const int MaximumHits = 4 * 1024 * 1024;
+    private const long NoStartupTimestamp = long.MinValue;
+    internal const long MaximumStartupElapsedMilliseconds = 600_000;
+    private static long _startupDispatchTimestamp = NoStartupTimestamp;
     private readonly LinuxProcessIdentity _worker;
     private readonly SafeFileHandle _temporary;
     private readonly SafeFileHandle _hostTemporary;
@@ -138,17 +141,65 @@ internal sealed partial class LinuxWorkerMeasurement : IDisposable
     }
 
     /// <summary>Writes one closed private startup milestone; it is not startup or acceptance authority.</summary>
-    internal static void ObserveStartup(WorkerMeasurementStartup stage)
+    internal static void ObserveStartup(WorkerMeasurementStartup stage) => ObserveStartupCore(stage, writeMilestone: true);
+
+    /// <summary>Writes only the separate timing observation, without extending the startup-v1 milestone set.</summary>
+    internal static void ObserveStartupTiming(WorkerMeasurementStartup stage) => ObserveStartupCore(stage, writeMilestone: false);
+
+    private static void ObserveStartupCore(WorkerMeasurementStartup stage, bool writeMilestone)
     {
+        var observedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        var dispatchTimestamp = stage == WorkerMeasurementStartup.NativeDispatch
+            ? CaptureStartupOrigin(ref _startupDispatchTimestamp, observedTimestamp)
+            : Volatile.Read(ref _startupDispatchTimestamp);
+        if (writeMilestone)
+        {
+            try
+            {
+                Console.Error.WriteLine(JsonSerializer.Serialize(new
+                {
+                    schema = "evidence-worker-measurement-startup-v1",
+                    stage = stage.ToString(),
+                    native_acceptance = false
+                }));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
+            { } // An optional diagnostic write cannot replace the original startup outcome.
+        }
+
+        if (dispatchTimestamp == NoStartupTimestamp) return;
         try
         {
-            Console.Error.WriteLine(JsonSerializer.Serialize(new
-            {
-                schema = "evidence-worker-measurement-startup-v1", stage = stage.ToString(), native_acceptance = false
-            }));
+            var record = FormatStartupTiming(stage, dispatchTimestamp, observedTimestamp,
+                System.Diagnostics.Stopwatch.Frequency);
+            if (record is not null) Console.Error.WriteLine(record);
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
-        { } // An optional diagnostic write cannot replace the original startup outcome.
+        catch (Exception)
+        { } // Timing is best-effort and must not replace the original startup outcome.
+    }
+
+    /// <summary>Captures the first dispatch timestamp once; later milestones cannot reset the origin.</summary>
+    internal static long CaptureStartupOrigin(ref long originTimestamp, long observedTimestamp)
+    {
+        var previous = Interlocked.CompareExchange(ref originTimestamp, observedTimestamp, NoStartupTimestamp);
+        return previous == NoStartupTimestamp ? observedTimestamp : previous;
+    }
+
+    /// <summary>Builds a fixed timing-only record from a detached monotonic timestamp pair.</summary>
+    internal static string? FormatStartupTiming(WorkerMeasurementStartup stage, long dispatchTimestamp,
+        long observedTimestamp, long frequency)
+    {
+        if (!Enum.IsDefined(stage) || frequency <= 0 || observedTimestamp < dispatchTimestamp) return null;
+        var elapsedMilliseconds = ((decimal)observedTimestamp - dispatchTimestamp) * 1000m / frequency;
+        if (elapsedMilliseconds > MaximumStartupElapsedMilliseconds) return null;
+
+        return JsonSerializer.Serialize(new
+        {
+            schema = "evidence-worker-measurement-startup-timing-v1",
+            stage = stage.ToString(),
+            elapsed_ms = decimal.ToInt64(decimal.Truncate(elapsedMilliseconds)),
+            native_acceptance = false
+        });
     }
 
     /// <summary>Closes measurement-only handles after the original monitor joins, attempting every close.</summary>
@@ -366,5 +417,7 @@ internal enum WorkerMeasurementStartup
     /// <summary>The original descriptor write returned.</summary>
     DescriptorJoined,
     /// <summary>The original monitor task was retained and its dispatch released.</summary>
-    MonitorRegistered
+    MonitorRegistered,
+    /// <summary>The root is about to run the control server after owner-reference guards have joined.</summary>
+    ServerDispatch
 }
