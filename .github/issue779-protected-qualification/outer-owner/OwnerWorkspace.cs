@@ -50,7 +50,8 @@ internal static class OwnerWorkspace
         await RequireLocalCommitAsync(repo, validator.Source, token).ConfigureAwait(false);
         await RequireLocalCommitAsync(repo, source.Source, token).ConfigureAwait(false);
         var ancestry = await RunFixedAsync("/usr/bin/git",
-            ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", repo, "merge-base", "--is-ancestor", source.Source, validator.Source],
+            ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "safe.directory=" + repo,
+                "-C", repo, "merge-base", "--is-ancestor", source.Source, validator.Source],
             4096, 4096, TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
         Require(ancestry.ExitCode == 0, "source-not-validator-ancestor");
         var evidence = CreateEvidenceRoot(evidenceRoot);
@@ -288,7 +289,8 @@ internal static class OwnerWorkspace
     private static async Task RequireLocalCommitAsync(string repository, string commit, CancellationToken token)
     {
         var result = await RunFixedAsync("/usr/bin/git",
-            ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", repository, "cat-file", "-e", commit + "^{commit}"],
+            ["--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "safe.directory=" + repository,
+                "-C", repository, "cat-file", "-e", commit + "^{commit}"],
             4096, 4096, TimeSpan.FromSeconds(20), token).ConfigureAwait(false);
         Require(result.ExitCode == 0, "capture-commit-unavailable");
     }
@@ -299,10 +301,12 @@ internal static class OwnerWorkspace
         var parent = Path.GetDirectoryName(destination)!;
         Directory.CreateDirectory(parent);
         var clone = await RunFixedAsync("/usr/bin/git", ["--no-optional-locks", "-c", "core.fsmonitor=false",
+            "-c", "safe.directory=" + repository,
             "clone", "--no-hardlinks", "--no-checkout", "--local", repository, destination],
             16 * 1024, 16 * 1024, TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
         Require(clone.ExitCode == 0, "source-clone");
         var checkout = await RunFixedAsync("/usr/bin/git", ["--no-optional-locks", "-c", "core.fsmonitor=false",
+            "-c", "safe.directory=" + destination,
             "-c", "core.hooksPath=/dev/null", "-C", destination, "checkout", "--detach", capture.Source],
             16 * 1024, 16 * 1024, TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
         Require(checkout.ExitCode == 0, "source-checkout");
@@ -450,7 +454,11 @@ internal static class OwnerWorkspace
             var path = layout.Host(item);
             Directory.CreateDirectory(path);
             SetOwner(path, 0, 0);
-            SetMode(path, item is "/root" ? 0x1c0u : item is "/tmp" ? 0x3ffu : 0x1edu);
+            var mode = item is "/root" ? 0x1c0u
+                : item is "/tmp" ? 0x3ffu
+                : item is OwnerPaths.Native or OwnerPaths.Stage or OwnerPaths.Input or OwnerPaths.Handoff or OwnerPaths.Output or OwnerPaths.Report
+                    ? 0x1c0u : 0x1edu;
+            SetMode(path, mode);
         }
     }
 
@@ -461,6 +469,7 @@ internal static class OwnerWorkspace
             "touch", "stat", "sha256sum", "timeout", "uname", "readlink", "dirname", "basename", "date", "sort",
             "cut", "tr", "wc", "tar", "gzip", "curl"], token).ConfigureAwait(false);
         await CopyPythonStandardLibraryAsync(layout, token).ConfigureAwait(false);
+        await CopyDotnetRuntimeClosureAsync(layout, sdkDirectory, token).ConfigureAwait(false);
         CopyPublicConfiguration(layout);
         CopyNssLibraries(layout);
         var sdkPathFile = Path.Combine(layout.HostRoot, "sdk.hostpath");
@@ -530,6 +539,62 @@ internal static class OwnerWorkspace
         {
             token.ThrowIfCancellationRequested();
             CopyRootFile(dependency, layout.Host(dependency), executable: true);
+        }
+    }
+
+    private static async Task CopyDotnetRuntimeClosureAsync(OwnerLayout layout, string sdkDirectory,
+        CancellationToken token)
+    {
+        var sdkRoot = Path.GetFullPath(sdkDirectory);
+        Require(sdkRoot is "/usr/share/dotnet" or "/usr/local/share/dotnet", "sdk-root-path");
+        var runtimeObjects = new HashSet<string>(StringComparer.Ordinal) { Path.Combine(sdkRoot, "dotnet") };
+        foreach (var relativeDirectory in new[] { "host/fxr", "shared/Microsoft.NETCore.App" })
+        {
+            var directory = Path.Combine(sdkRoot, relativeDirectory);
+            Require(Directory.Exists(directory), "dotnet-runtime-directory");
+            foreach (var filename in new[] { "libhostfxr.so", "libhostpolicy.so", "libcoreclr.so", "libclrjit.so" })
+            foreach (var path in Directory.EnumerateFiles(directory, filename, SearchOption.AllDirectories))
+            {
+                var fullPath = Path.GetFullPath(path);
+                Require(fullPath.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                    && !File.GetAttributes(fullPath).HasFlag(FileAttributes.ReparsePoint), "dotnet-runtime-path");
+                runtimeObjects.Add(fullPath);
+            }
+        }
+
+        var dependencies = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in runtimeObjects)
+        {
+            token.ThrowIfCancellationRequested();
+            Require(File.Exists(path), "dotnet-runtime-object");
+            var ldd = await RunFixedAsync("/usr/bin/ldd", [path], 64 * 1024, 64 * 1024,
+                TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
+            Require(ldd.ExitCode == 0, "dotnet-runtime-dependencies");
+            AddDependencies(Encoding.UTF8.GetString(ldd.StandardOutput), dependencies);
+        }
+
+        // The .NET 10 runtime loads these by name with dlopen rather than declaring DT_NEEDED.
+        foreach (var name in new[] { "libicuuc.so.74", "libicui18n.so.74", "libicudata.so.74", "libssl.so.3", "libcrypto.so.3" })
+        {
+            var path = new[] { "/usr/lib/x86_64-linux-gnu/" + name, "/lib/x86_64-linux-gnu/" + name }
+                .FirstOrDefault(File.Exists);
+            Require(path is not null, "dotnet-dlopen-library");
+            dependencies.Add(Path.GetFullPath(path!));
+        }
+
+        var expanded = new HashSet<string>(dependencies, StringComparer.Ordinal);
+        foreach (var path in dependencies)
+        {
+            token.ThrowIfCancellationRequested();
+            var ldd = await RunFixedAsync("/usr/bin/ldd", [path], 64 * 1024, 64 * 1024,
+                TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
+            Require(ldd.ExitCode == 0, "dotnet-dlopen-dependencies");
+            AddDependencies(Encoding.UTF8.GetString(ldd.StandardOutput), expanded);
+        }
+        foreach (var path in expanded)
+        {
+            token.ThrowIfCancellationRequested();
+            CopyRootFile(path, layout.Host(path), executable: true);
         }
     }
 
@@ -638,9 +703,40 @@ internal static class OwnerWorkspace
     {
         Require(File.Exists(source), "rootfs-source");
         var original = Path.GetFullPath(new FileInfo(source).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? source);
-        Require(original.StartsWith("/usr/", StringComparison.Ordinal) || original.StartsWith("/bin/", StringComparison.Ordinal)
+        var isCaBundle = source == "/etc/ssl/certs/ca-certificates.crt"
+            && (original.StartsWith("/etc/ssl/certs/", StringComparison.Ordinal)
+                || original.StartsWith("/usr/share/ca-certificates/", StringComparison.Ordinal));
+        Require(isCaBundle || original.StartsWith("/usr/", StringComparison.Ordinal) || original.StartsWith("/bin/", StringComparison.Ordinal)
             || original.StartsWith("/sbin/", StringComparison.Ordinal) || original.StartsWith("/lib/", StringComparison.Ordinal)
             || original.StartsWith("/lib64/", StringComparison.Ordinal), "rootfs-source-path");
+        var sourceFact = OwnerCustody.StatPath(original);
+        var expectedMode = executable ? 0x1edu : 0x1a4u;
+        Require(sourceFact.Type == OwnerCustody.RegularType && sourceFact.Links >= 1
+            && sourceFact.Size is > 0 and <= 512UL * 1024 * 1024, "rootfs-source-shape");
+        if (File.Exists(destination))
+        {
+            var destinationFact = OwnerCustody.StatPath(destination);
+            Require(destinationFact.Type == OwnerCustody.RegularType && destinationFact.Uid == 0
+                && destinationFact.Gid == 0 && destinationFact.Mode == expectedMode && destinationFact.Links == 1,
+                "rootfs-duplicate-shape");
+            var existing = OwnerCustody.ReadRootFile(destination, 0, expectedMode, 512 * 1024 * 1024);
+            using var input = new FileStream(original, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer = new byte[64 * 1024];
+            long total = 0;
+            while (true)
+            {
+                var count = input.Read(buffer, 0, buffer.Length);
+                if (count == 0) break;
+                total += count;
+                Require(total <= (long)sourceFact.Size, "rootfs-source-growth");
+                digest.AppendData(buffer, 0, count);
+            }
+            Require(total == (long)sourceFact.Size
+                && CryptographicOperations.FixedTimeEquals(SHA256.HashData(existing), digest.GetHashAndReset()),
+                "rootfs-duplicate-content");
+            return;
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
         using (var input = new FileStream(original, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
