@@ -1,5 +1,6 @@
 """Portable fixture ordering only: pipe FDs and mocked signaling issue no native ownership."""
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -448,8 +449,10 @@ class FailedLifecycleDiagnosticsTests(unittest.TestCase):
                 process.poll.return_value = -9 if terminal else None
                 leaves = {'stdout.prefix': b'', 'stderr.prefix': b'original fatal prefix',
                           'state.json': b'{"schema":"evidence-worker-failure-output-v1"}'}
+                digests = {name: hashlib.sha256(raw).hexdigest()
+                           for name, raw in leaves.items()}
                 with patch.object(lifecycle_stalls, 'read_worker_prefixes', create=True,
-                                  return_value=(leaves, {'stderr.prefix': 'd' * 64})) as read:
+                                  return_value=(leaves, digests)) as read:
                     runner.retain_failed_lifecycle_worker(
                         result, Path(directory), 'configure-sync-stall', 'a' * 32,
                         process, time.monotonic() + 30)
@@ -459,6 +462,7 @@ class FailedLifecycleDiagnosticsTests(unittest.TestCase):
                 if not passed and empty and terminal:
                     read.assert_called_once()
                     self.assertTrue(result['worker_diagnostics_retained'])
+                    self.assertEqual(digests, result['worker_prefix_sha256'])
                     self.assertEqual(-9, result['owner_process_returncode'])
                     for name, raw in leaves.items():
                         self.assertEqual(raw, (Path(directory) / ('configure-sync-stall-worker-' + name)).read_bytes())
@@ -487,6 +491,80 @@ class FailedLifecycleDiagnosticsTests(unittest.TestCase):
             self.assertFalse(result['worker_diagnostics_retained'])
             self.assertEqual('RuntimeError', result['worker_diagnostic_error_kind'])
             self.assertNotIn('private-path-canary', json.dumps(result))
+
+    def test_late_failure_preserves_complete_original_prefix_retention(self):
+        import lifecycle_stalls
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            leaves = {'stdout.prefix': b'worker output', 'stderr.prefix': b'original fatal prefix',
+                      'state.json': b'{"schema":"evidence-worker-failure-output-v1"}'}
+            digests = {name: hashlib.sha256(raw).hexdigest() for name, raw in leaves.items()}
+            result = {'passed': False, 'final_groups_empty': True,
+                      'failure_category': 'original-account-custody-failure',
+                      'native_acceptance': False, 'worker_diagnostics_retained': False}
+            runner._retain_worker_prefixes(result, output, 'post-stop-guards', leaves, digests)
+            snapshots = {path.name: path.read_bytes() for path in output.iterdir()}
+            result['failure_category'] = 'original-account-custody-failure'
+            process = Mock(returncode=-9)
+            process.poll.return_value = -9
+            with patch.object(lifecycle_stalls, 'read_worker_prefixes', create=True,
+                              side_effect=AssertionError('must not reread completed retention')) as read, \
+                    patch.object(runner, 'write', side_effect=AssertionError('must not rewrite completed retention')):
+                runner.retain_failed_lifecycle_worker(
+                    result, output, 'post-stop-guards', 'a' * 32, process, time.monotonic() + 30)
+            read.assert_not_called()
+            self.assertTrue(result['worker_diagnostics_retained'])
+            self.assertEqual(digests, result['worker_prefix_sha256'])
+            self.assertEqual(-9, result['owner_process_returncode'])
+            self.assertEqual('original-account-custody-failure', result['failure_category'])
+            self.assertFalse(result['passed'])
+            self.assertIs(False, result['native_acceptance'])
+            self.assertEqual(snapshots, {path.name: path.read_bytes() for path in output.iterdir()})
+
+    def test_partial_or_foreign_prefix_files_are_preserved_and_never_credited(self):
+        import lifecycle_stalls
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            leaves = {'stdout.prefix': b'new stdout', 'stderr.prefix': b'new stderr',
+                      'state.json': b'{"schema":"evidence-worker-failure-output-v1"}'}
+            digests = {name: hashlib.sha256(raw).hexdigest() for name, raw in leaves.items()}
+            partial = output / 'configure-sync-stall-worker-stdout.prefix'
+            foreign = output / 'configure-sync-stall-worker-state.json'
+            foreign.write_bytes(b'foreign existing bytes')
+            result = {'passed': False, 'final_groups_empty': True,
+                      'failure_category': 'original-timeout', 'native_acceptance': False,
+                      'worker_diagnostics_retained': False}
+            def fail_after_partial_write(path, data):
+                if path == partial:
+                    path.write_bytes(data)
+                    return
+                raise FileExistsError(path)
+
+            # A prior retention attempt stopped after its first exclusive output.
+            # That incomplete set must leave diagnostics uncredited.
+            with patch.object(runner, 'write', side_effect=fail_after_partial_write):
+                with self.assertRaises(FileExistsError):
+                    runner._retain_worker_prefixes(
+                        result, output, 'configure-sync-stall', leaves, digests)
+            self.assertFalse(result['worker_diagnostics_retained'])
+            self.assertNotIn('worker_prefix_sha256', result)
+            process = Mock(returncode=-9)
+            process.poll.return_value = -9
+            with patch.object(lifecycle_stalls, 'read_worker_prefixes', create=True,
+                              return_value=(leaves, digests)) as read:
+                runner.retain_failed_lifecycle_worker(
+                    result, output, 'configure-sync-stall', 'a' * 32,
+                    process, time.monotonic() + 30)
+            read.assert_called_once()
+            self.assertFalse(result['worker_diagnostics_retained'])
+            self.assertNotIn('worker_prefix_sha256', result)
+            self.assertEqual('FileExistsError', result['worker_diagnostic_error_kind'])
+            self.assertEqual('original-timeout', result['failure_category'])
+            self.assertFalse(result['passed'])
+            self.assertIs(False, result['native_acceptance'])
+            self.assertEqual(leaves['stdout.prefix'], partial.read_bytes())
+            self.assertEqual(b'foreign existing bytes', foreign.read_bytes())
+            self.assertEqual({partial.name, foreign.name}, {path.name for path in output.iterdir()})
 
 
 if __name__ == "__main__":

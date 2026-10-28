@@ -1007,7 +1007,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
         }
 
 #if EVIDENCE_PRIVATE_C3SDK_POST_STOP_GUARDS
-        await ObservePrivateC3SdkPostStopGuardsAsync(stopAndDisposeSucceeded, lifecycle, admission, root, worker, postStopWriter)
+        await ObservePrivateC3SdkPostStopGuardsAsync(stopAndDisposeSucceeded, lifecycle, admission, root, worker, postStopWriter,
+            timeBudget, completeWorker)
             .ConfigureAwait(false);
 #endif
 
@@ -1187,7 +1188,8 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
 
     private async Task ObservePrivateC3SdkPostStopGuardsAsync(bool stopAndDisposeSucceeded,
         EvidenceWorkerExecution lifecycle, EvidenceAdmissionResult admission, EvidenceLinuxArtifactRoot? root,
-        EvidenceLinuxWorkerSupervisor? worker, EvidenceArtifactWriter writer)
+        EvidenceLinuxWorkerSupervisor? worker, EvidenceArtifactWriter writer,
+        EvidenceRunTimeBudget timeBudget, Func<CancellationToken, ValueTask>? completeWorker)
     {
         if (!stopAndDisposeSucceeded || root is null || worker is null || root.Identity.Inode == 0
             || root.Identity.Uid != worker.Descriptor.WorkerUid || root.Identity.Gid != worker.Descriptor.WorkerGid
@@ -1248,9 +1250,49 @@ public sealed class EvidenceHostBootstrap : IAsyncDisposable
             artifacts_unchanged = true,
             native_acceptance = false,
         }));
+        if (completeWorker is null)
+            throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
+        // This recoverable negative control must finish its protocol while the authenticated worker
+        // is still alive. No manifest is collected or published, and its deliberate failure remains.
+        await CompleteUnpublishedWorkerAsync(timeBudget, lifecycle, root, completeWorker).ConfigureAwait(false);
         throw new EvidenceAdmissionException("ASEVD410", "Private post-stop admission guards completed.");
     }
 #endif
+
+    /// <summary>Closes retained output and completes worker protocol within the original collection reserve.</summary>
+    /// <param name="timeBudget">Original host budget after stopping and cleanup, never a renewed allowance.</param>
+    /// <param name="lifecycle">Original lifecycle whose owned work and disposers must already have joined.</param>
+    /// <param name="output">Original retained output owner; its disposal precedes the completion request.</param>
+    /// <param name="completeWorker">Existing authenticated completion operation, or a deterministic internal test seam.</param>
+    /// <remarks>
+    /// Used by the compile-owned post-stop negative control. This procedure writes no artifact or manifest,
+    /// completes no admission, and cannot establish native custody, successful execution or eligibility.
+    /// The caller still throws its deliberate failure after this returns. Ordinary execution has no route
+    /// to this control; the internal seam permits deterministic ordering/failure/deadline verification.
+    /// </remarks>
+    /// <exception cref="EvidenceAdmissionException">Collection cannot begin or output/completion does not settle successfully.</exception>
+    internal static async Task CompleteUnpublishedWorkerAsync(EvidenceRunTimeBudget timeBudget,
+        EvidenceWorkerExecution lifecycle, IAsyncDisposable output, Func<CancellationToken, ValueTask> completeWorker)
+    {
+        ArgumentNullException.ThrowIfNull(timeBudget);
+        ArgumentNullException.ThrowIfNull(lifecycle);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(completeWorker);
+        if (!timeBudget.TryBeginCollection())
+            throw new EvidenceAdmissionException("ASEVD410", "Unpublished worker completion reserve is unavailable.");
+        var completion = await lifecycle.CollectAsync(timeBudget.CollectionRemaining, async token =>
+        {
+            await output.DisposeAsync().ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (timeBudget.CollectionRemaining <= TimeSpan.Zero)
+                throw new EvidenceAdmissionException("ASEVD410", "Unpublished worker completion reserve expired.");
+            await completeWorker(token).ConfigureAwait(false);
+            return true;
+        }, CancellationToken.None).ConfigureAwait(false);
+        _ = timeBudget.CompleteCollection();
+        if (completion.Outcome != EvidenceWorkerStageOutcome.Passed)
+            throw new EvidenceAdmissionException("ASEVD410", "Unpublished worker completion did not settle.");
+    }
 
     private async Task<IReadOnlyList<EvidenceProducerResult>> ProduceAsync(
         CancellationToken cancellationToken,

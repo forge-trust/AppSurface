@@ -35,6 +35,13 @@ remain unchanged. Missing or rejected diagnostics record only a fixed exception 
 new worker reader, journal fallback, cleanup credit or deadline renewal; the existing artifact file
 and byte caps remain unchanged.
 
+When the original lifecycle path has already validated and retained the complete three-file prefix
+set, it records those hashes and the retained flag immediately after the exclusive writes succeed. A
+later custody or account check failure therefore keeps the original retained bytes and digests; the
+terminal failure fallback does not reread or write those names again. If the original write stops
+partway, the incomplete set stays uncredited, and any existing or foreign output node remains
+protected by exclusive creation during fallback.
+
 The private C3Sdk [root cleanup hooks](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.Qualification.cs)
 also emit `evidence-sdk-root-cleanup-progress-v1` before and after the existing custody, account-close,
 worker-close and remaining local-close attempts. Records contain only a closed phase, `entered` or

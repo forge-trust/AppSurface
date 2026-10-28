@@ -1,5 +1,19 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Revision 120 failure and current local repair — 2026-10-28
+
+The [current validation record](issue779-csharp-runtime-cutover.md#revision-120-validation-and-unpublished-worker-completion--2026-10-28)
+retains revision 120's focused success and runtime failure: 16 jobs passed, the application job
+failed the post-stop original account-custody predicate, and 18 dependent jobs were skipped.
+The first two lifecycle stall controls passed. The post-stop guard marker and physical application/output
+joins succeeded, but worker termination preceded its EXIT handshake and the root retained
+`ProcessNamedStatus` / `ASEVD402`. The local private correction completes only that protocol under
+the original collection reserve before preserving the deliberate failure, with no manifest or
+admission completion. A fresh Linux run must verify its effect; revision 120 remains failed.
+The diagnostic retention and obsolete public example expectations are corrected separately.
+No current numerical gate pass, protected full-stage replay, outer isolation, support registration
+or Trusted/downstream acceptance is established. All existing coverage and admission gates remain.
+
 ## Protected entrypoint continuation — 2026-10-28
 
 The [current command and replay preparation](issue779-csharp-runtime-cutover.md#protected-commands-and-credential-free-replay-preparation--2026-10-28)

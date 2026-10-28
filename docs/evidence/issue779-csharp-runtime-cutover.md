@@ -1,5 +1,47 @@
 # EvidenceHost C# runtime cutover
 
+## Revision 120 validation and unpublished worker completion — 2026-10-28
+
+Revision 120's [focused run](https://github.com/forge-trust/AppSurface/actions/runs/40631127682)
+passed. Its [runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40631127475)
+finished with 16 successful jobs, one failed application job and 18 skipped dependent jobs.
+All original worker selectors and reconciliation passed. The application job passed the seven
+application cases, six workspace controls and retained-file, supplementary root, peer-credential
+and bundle-audit partitions. The configure-stall and registered-disposer lifecycle controls passed;
+the post-stop control failed its original account-absence predicate. No numerical gate was reached.
+
+The original lifecycle archive `12793901567` is 546,698 bytes with SHA-256
+`4270109ccf3b62e46a7f0df3e097046125ae20bfac7ba16ab1c9b02f51439771`.
+Application archive `12793617541` is 3,816,112 bytes with SHA-256
+`c532c024cc70632cb506c02f96647f2b2881f5722e3927fa46f0c23847b3331f`.
+Both source captures match `85571de719e0524b5b9232aa5b2f42955c2db494`, tree
+`b57d099b600b2c547995902a8659cd108a3a702a`, all 4,040 paths, capture SHA-256
+`8ce18b11b803561a59a4fa1cbab5772d5b580d840fbadc91cc59c2b0501f992f`.
+
+The post-stop marker's six rejection/join facts were true, the application settled and every output
+pair joined to EOF. All four new cleanup boundaries returned. The root retained
+`ProcessNamedStatus` / `ASEVD402` during `ServerRun`, then failed closed with `ASEVD410`; the
+fixture found a remaining original account name. The private probe previously threw its deliberate
+failure before collection and the worker's only EXIT call. That sequence permits worker termination
+to race the listener's required live `/proc` check. The [private completion correction](../../.github/issue779-checkpoint3/post-stop-guards-source-preparation.md)
+closes the original retained artifact root and sends the existing authenticated EXIT within the
+original collection reserve before preserving the deliberate failure. It publishes no manifest,
+completes no admission and relaxes no peer, custody, account, group or deadline check. Its internal
+procedure tests verify ordering, failures, expiry, pending cleanup and repeated completion; these
+are not Linux race or native acceptance proof. A fresh native run remains required.
+
+The [diagnostic retention correction](../../.github/issue779-checkpoint3/lifecycle-stalls-source-preparation.md)
+also preserves an already completed original prefix copy when a later predicate fails. Revision
+120's fallback attempted to create the same three files again and reported `FileExistsError`.
+Partial copies and foreign existing files remain uncredited and are never overwritten. The original
+case failure is preserved. The separate [example regression](../../examples/aspire-apphost.Tests/EvidenceReadinessIntegrationTests.cs)
+now requires the published `ASEVD400` rejection for a preconfigured builder instead of expecting
+legacy public execution to succeed. Its unchanged ordinary HTTP profile tests still execute.
+
+The production catalogue and admission boundary remain closed. Full solution/patch coverage,
+same-filesystem outer credential isolation and settlement, protected-main completed replay,
+reviewed support registration and actual Trusted/downstream acceptance remain required.
+
 ## Protected commands and credential-free replay preparation — 2026-10-28
 
 Revision 119's [focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40624851637)

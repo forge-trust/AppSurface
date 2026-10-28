@@ -454,14 +454,30 @@ def retain_failed_lifecycle_worker(result,output,case,generation,process,end):
   return
  if process.poll() is None:return
  result['owner_process_returncode']=process.returncode
+ if result.get('worker_diagnostics_retained') is True:
+  return
  result['worker_diagnostics_retained']=False
  try:
   import lifecycle_stalls
   leaves,digests=lifecycle_stalls.read_worker_prefixes(generation,deadline=min(end,time.monotonic()+5))
-  for name,data in leaves.items():write(output/(case+'-worker-'+name),data)
-  result['worker_prefix_sha256']=digests;result['worker_diagnostics_retained']=True
+  _retain_worker_prefixes(result,output,case,leaves,digests)
  except (OSError,RuntimeError,ValueError) as failure:
   result['worker_diagnostic_error_kind']=type(failure).__name__
+
+def _retain_worker_prefixes(result,output,case,leaves,digests):
+ """Publish and record one complete prefix set; exclusive writes preserve prior nodes."""
+ import lifecycle_stalls
+ names=('stdout.prefix','stderr.prefix','state.json')
+ require(type(leaves) is dict and set(leaves)==set(names)
+         and type(digests) is dict and set(digests)==set(names),'lifecycle-retained-prefix-shape')
+ require(all(type(leaves[name]) is bytes
+             and len(leaves[name]) <= (4096 if name=='state.json' else lifecycle_stalls.PREFIX_LIMIT)
+             and digests[name]==hashlib.sha256(leaves[name]).hexdigest() for name in names),
+         'lifecycle-retained-prefix-digests')
+ for name in names:
+  write(output/(case+'-worker-'+name),leaves[name])
+ result['worker_prefix_sha256']={name:digests[name] for name in names}
+ result['worker_diagnostics_retained']=True
 
 def execute_lifecycle_stall(args,case,tools,runtime,end):
  """Run one fixed compile-owned C3Sdk stall through the original authenticated owner recipe."""
@@ -481,7 +497,8 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
  marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
  stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;descriptor=None;app_seen=False
  observed_at=time.monotonic();deadline=min(end,observed_at+480)
- result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
+ result={'case':case,'generation':generation,'passed':False,'native_acceptance':False,
+         'worker_diagnostics_retained':False}
  expected_marker=('configure-sync-stall' if case=='configure-sync-stall'
                   else 'post-stop-guards' if case=='post-stop-guards' else 'registered-application-disposer-stall')
  launch=owner_command(runtime,tool,owner,marker/'armed',request_path)
@@ -512,7 +529,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   require(len(output_rows)==1,'lifecycle-output-receipt-count')
   joined_output=lifecycle_stalls.require_joined_output(output_rows[0],worker_prefixes,expected_marker)
   # Preserve the original root-retained bytes privately. Owner stderr is not a worker reader.
-  for name,data in worker_prefixes.items():write(args.output/(case+'-worker-'+name),data)
+  _retain_worker_prefixes(result,args.output,case,worker_prefixes,prefix_digests)
   output_root=Path('/run/appsurface-evidence-'+generation+'/output/evidence')
   require(not (output_root/'evidence-manifest.json').exists()
           and not (output_root/'manifest.json').exists(),'lifecycle-stall-no-final-manifest')
