@@ -96,6 +96,19 @@ missing-LF rejection. They test record framing only and issue no native credit.
 
 ## N04 joined-outcome diagnostic
 
+N04 keeps its early lifetime-fit check and repeats the same predicate after the
+complete Python stdlib audit, immediately before the owner launch. The original
+work end must still have more than 246 seconds and the request's existing UTC
+deadline more than 245 seconds. These reserves fit the unchanged 240-second
+owner runtime and five-second stop allowance; the second sample never creates
+a new deadline. Insufficient time rejects as `native-life-outside-fixture`
+without launching an owner. The [prelaunch controls](../../test_n04_prelaunch_lifetime.py)
+force each clock to cross its original boundary during the audit and exercise
+the sufficient neighbor. They use detached clocks and establish no native
+owner result. A later `OwnerActivation / ASEVD402` can also reflect metadata,
+identity or guard failures; this check does not identify which predicate caused
+an earlier native failure.
+
 Before the unchanged `N04-owned-outcomes` rejection, the fixed shell now emits
 `N04_JOINED_OUTCOMES` with the helper and root launch join statuses, whether each
 registration was retired, and whether root stdout was empty. These are existing

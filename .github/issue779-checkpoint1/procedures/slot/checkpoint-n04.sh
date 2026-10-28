@@ -1335,6 +1335,9 @@ monotonic_ms() { local up rest frac; IFS=" " read -r up rest </proc/uptime || re
 n04_root_start_ms=$(monotonic_ms) || fail N04-clock
 n04_end_ms=$((n04_root_start_ms+240000)); ((n04_end_ms<work_end*1000)) || fail N04-original-root-bound
 readonly n04_root_start_ms n04_end_ms
+# The complete stdlib audit can consume the fit sampled before it. Recheck the
+# same original work/job ends immediately before launch; never renew either end.
+(( $(remaining)>246 && job_deadline_epoch-$(bounded date -u +%s)>245 )) || fail native-life-outside-fixture
 diagnostic_stage=n01
 launched=1
 (ulimit -f 8192; exec setsid timeout --signal=KILL "$(remaining)" systemd-run --quiet --wait --pipe --unit="$owner" "${props[@]}" /usr/bin/env -i "${fixed_env[@]}" "$host" "$managed" evidence supervise --request "$request" >"$log/n01.stdout" 2>"$log/n01.stderr") & launch_pid=$!
