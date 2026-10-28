@@ -97,6 +97,52 @@ public sealed class EvidenceAspireApplicationOwnershipTests
         Assert.Equal(["build", "own", "start-failed", "dispose"], events);
     }
 
+    [Fact]
+    public async Task StartOwned_AdmissionFailureAfterStartRetainsLeaseUntilOrdinaryCleanup()
+    {
+        var plan = EvidenceHostAdmissionTestRun.CreateObservationPlan();
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan);
+        var admission = await AdmitAsync(run, plan);
+        admission.Activate("test-output");
+        var events = new List<string>();
+        var application = new TestApplication(() => events.Add("dispose"));
+        TestApplication? owned = null;
+        var startCount = 0;
+        var lifecycle = new EvidenceWorkerExecution(
+            run.Supervisor, TimeProvider.System, TimeSpan.FromHours(1),
+            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(1));
+        Assert.True(lifecycle.RegisterDisposer(_ => owned?.DisposeAsync() ?? ValueTask.CompletedTask));
+
+        var result = await lifecycle.ExecuteAsync(
+            EvidenceRunStage.Start,
+            TimeSpan.FromSeconds(2),
+            token => EvidenceAspireApplication.StartOwnedAsync(
+                admission, plan,
+                () => { events.Add("build"); return application; },
+                lease => { events.Add("own"); owned = lease; },
+                (_, _) =>
+                {
+                    startCount++;
+                    events.Add("start");
+                    admission.LatchFailure();
+                    return Task.CompletedTask;
+                }, token));
+
+        Assert.Equal(EvidenceWorkerStageOutcome.Failed, result.Outcome);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, lifecycle.TerminalCode);
+        Assert.Equal("ASEVD410", Assert.IsType<EvidenceAdmissionException>(lifecycle.TerminalException).Code);
+        Assert.Equal(["build", "own", "start"], events);
+        Assert.Equal(1, startCount);
+        Assert.Same(application, owned);
+        Assert.Equal(0, application.DisposeCount);
+
+        Assert.False(await lifecycle.StopAndDisposeAsync());
+        Assert.True(lifecycle.CleanupCompleted);
+        Assert.Equal(["build", "own", "start", "dispose"], events);
+        Assert.Equal(1, startCount);
+        Assert.Equal(1, application.DisposeCount);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -156,6 +202,28 @@ public sealed class EvidenceAspireApplicationOwnershipTests
         else Assert.IsType<ArgumentNullException>(exception);
         Assert.False(registered);
         Assert.False(started);
+    }
+
+    [Fact]
+    public async Task StartAdmitted_NullBuilderFailsBeforeRegisteringOwnershipOrStarting()
+    {
+        var plan = EvidenceHostAdmissionTestRun.CreateObservationPlan();
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation, plan);
+        var admission = await AdmitAsync(run, plan);
+        admission.Activate("test-output");
+        var builderFactoryCalls = 0;
+        var ownershipCalls = 0;
+
+        var exception = await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+            await EvidenceAspireApplication.StartAdmittedAsync(
+                admission,
+                plan,
+                () => { builderFactoryCalls++; return null!; },
+                _ => ownershipCalls++));
+
+        Assert.Equal("builder", exception.ParamName);
+        Assert.Equal(1, builderFactoryCalls);
+        Assert.Equal(0, ownershipCalls);
     }
 
     private static ValueTask<EvidenceAdmissionResult> AdmitAsync(EvidenceHostAdmissionTestRun run, EvidencePlan plan) =>
