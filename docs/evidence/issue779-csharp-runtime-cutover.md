@@ -1,5 +1,46 @@
 # EvidenceHost C# runtime cutover
 
+## Protected completed-run source and provider checks — 2026-10-27
+
+Revision 118's [focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40561328664)
+passed. Its [runtime validation](https://github.com/forge-trust/AppSurface/actions/runs/40561328793)
+completed with 32 successful jobs, one failed job and two skipped jobs. All fourteen standard root
+measurements passed, including the previously failing measured N06. The only failure was the
+original N08 worker's prerequisite download: its existing 600-second bound killed `apt-get` before
+the native procedure ran. The same run's N06 measurement downloaded the identical 148 MB package
+set under the same configuration in five seconds. The original N08 failure is retained; there is
+no demonstrated source defect justifying an APT policy change. Reconciliation and the unchanged
+solution/Codecov gates were skipped, so revision 118 does not establish a numerical gate pass.
+
+The [provider resolver](../../.github/issue779-protected-qualification/completed-run-README.md)
+now retains the exact top-level completed-run facts and rechecks them before orchestration opens
+archives. A separate six-query, 60-second revalidation compares the same repository, immutable run
+attempt, both workflow bodies, all required jobs and all 37 original artifact identities and hashes.
+It downloads no archives and grants no authority.
+
+The [source preflight](../../.github/issue779-protected-qualification/completed-source-README.md)
+separates the protected validator's source from the completed source and native replay checkout.
+It uses the independent current complete-source verifier on all three, requires the completed
+revision in the validator's history, rejects ambient Git redirects/configuration, and verifies the
+fixed future protected workflow context. Its real-Git fixtures exercise ancestry, capture drift,
+hidden untracked inputs and post-build source checks. The future workflow remains absent.
+
+The [preparation and closeout APIs](../../.github/issue779-protected-qualification/completed-controller-README.md)
+combine those comparisons around a separately contained replay. They never execute target callbacks
+or builds while handling a provider token. Closeout checks each phase's canonical typed projection,
+source/run bindings, result semantics and false claims, keeps original archive/root descriptors
+open across provider reads, then rechecks sources and archive bytes before returning immutable
+comparison digests. Credential separation, outer execution settlement, a genuine eligible protected
+full-stage run, support registration and actual Trusted/downstream acceptance remain required.
+No admission, catalogue, numerical coverage policy, native clock or retention limit is changed.
+
+Verification ran all 237 qualification tests successfully on detached nonroot Linux under
+umask `0077`, with five existing original-fixture opt-in skips; local macOS ran the same 237 with
+eleven skips. All 307 checkpoint-one portable tests also passed. Source preflight tests use real
+temporary Git commits and the complete current verifier; controller tests use the real synthetic
+37-archive parser with source/provider seams mocked. The ARM64 Python/Git test container is
+mechanism evidence only and supplies no SDK, original x64 native, or protected execution proof.
+
 ## Fixed completed-run sequence — 2026-10-27
 
 The [revision-117 focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40537833743)

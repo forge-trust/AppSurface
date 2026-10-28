@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import base64
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -46,6 +47,8 @@ MAX_REQUESTS = 7 + MAX_ARTIFACTS * (transport.MAX_REDIRECTS + 1)
 MAX_TOTAL_SECONDS = 1200.0
 REQUEST_SECONDS = 15.0
 MAX_REDIRECTS = 3
+MAX_REVALIDATION_SECONDS = 60.0
+MAX_REVALIDATION_REQUESTS = 6
 SHA1 = re.compile(r'[0-9a-f]{40}\Z')
 SHA256 = re.compile(r'[0-9a-f]{64}\Z')
 SELECTORS = ('None', 'N04', 'N05', 'N06', 'N07', 'N08', 'N09', 'N10', 'N11', 'N12', 'N13', 'N14', 'N15', 'N16')
@@ -80,6 +83,24 @@ class CompletedJob:
 
 
 @dataclass(frozen=True)
+class ProviderRunConclusion:
+    """Top-level provider run facts validated by the resolver; provenance only."""
+
+    repository_id: int
+    repository_full_name: str
+    run_id: int
+    run_attempt: int
+    head_sha: str
+    workflow_id: int
+    workflow_path: str
+    workflow_name: str
+    event: str
+    head_branch: str
+    status: str
+    conclusion: str
+
+
+@dataclass(frozen=True)
 class CompletedRunStage:
     """Non-authorizing evidence staging metadata for one completed workflow attempt."""
 
@@ -95,6 +116,42 @@ class CompletedRunStage:
     artifacts: tuple[ArtifactBinding, ...]
     total_archive_bytes: int
     jobs: tuple[CompletedJob, ...] = ()
+    provider_run: ProviderRunConclusion | None = None
+
+
+@dataclass(frozen=True)
+class ProviderRevalidation:
+    """Current provider metadata matching one stage; not an authority signal."""
+
+    repository_id: int
+    run_id: int
+    run_attempt: int
+    head_sha: str
+    workflow_id: int
+    provider_run: ProviderRunConclusion
+    jobs: tuple[CompletedJob, ...]
+    job_ids: tuple[int, ...]
+    artifact_ids: tuple[tuple[str, int, int, str], ...]
+    workflow_sha256s: tuple[tuple[str, str], ...]
+
+
+class _RevalidationBudget:
+    def __init__(self, deadline):
+        now = time.monotonic()
+        _need(type(deadline) in (int, float) and math.isfinite(deadline)
+              and 0 < deadline - now <= MAX_REVALIDATION_SECONDS,
+              'completed-run-revalidation-deadline')
+        self.deadline = deadline
+        self.requests = 0
+
+    def timeout(self):
+        remaining = self.deadline - time.monotonic()
+        _need(remaining > 0, 'completed-run-revalidation-deadline')
+        return min(REQUEST_SECONDS, remaining)
+
+    def count(self):
+        self.requests += 1
+        _need(self.requests <= MAX_REVALIDATION_REQUESTS, 'completed-run-revalidation-request-limit')
 
 
 class _Budget:
@@ -326,6 +383,141 @@ def require_closed_jobs(stage):
     return tuple(sorted(stage.jobs, key=lambda job: job.name))
 
 
+def _provider_conclusion(run):
+    repository = run.get('repository') if type(run) is dict else None
+    return ProviderRunConclusion(
+        repository['id'], repository['full_name'], run['id'], run['run_attempt'], run['head_sha'],
+        run['workflow_id'], run['path'], run['name'], run['event'], run['head_branch'],
+        run['status'], run['conclusion'])
+
+
+def require_completed_provider_run(stage):
+    """Revalidate retained top-level run facts and the complete staged job/archive shape."""
+    _need(type(stage) is CompletedRunStage and type(stage.provider_run) is ProviderRunConclusion,
+          'completed-run-provider-conclusion-missing')
+    provider = stage.provider_run
+    _need(type(stage.repository_id) is int and 0 < stage.repository_id < 2**63
+          and type(stage.run_id) is int and 0 < stage.run_id < 2**63
+          and type(stage.run_attempt) is int and 0 < stage.run_attempt < 2**31
+          and type(stage.head_sha) is str and SHA1.fullmatch(stage.head_sha) is not None
+          and type(stage.source_tree) is str and SHA1.fullmatch(stage.source_tree) is not None
+          and type(stage.source_capture_sha256) is str
+          and SHA256.fullmatch(stage.source_capture_sha256) is not None,
+          'completed-run-provider-stage-identity')
+    _need(type(provider.repository_id) is int and 0 < provider.repository_id < 2**63
+          and provider.repository_id == stage.repository_id
+          and provider.repository_full_name == REPOSITORY
+          and type(provider.run_id) is int and 0 < provider.run_id < 2**63
+          and provider.run_id == stage.run_id
+          and type(provider.run_attempt) is int and 0 < provider.run_attempt < 2**31
+          and provider.run_attempt == stage.run_attempt
+          and type(provider.head_sha) is str and SHA1.fullmatch(provider.head_sha) is not None
+          and provider.head_sha == stage.head_sha
+          and type(provider.workflow_id) is int and 0 < provider.workflow_id < 2**63
+          and type(provider.workflow_path) is str
+          and provider.workflow_path in (WORKFLOW, WORKFLOW + '@refs/heads/main')
+          and type(provider.workflow_name) is str
+          and provider.workflow_name == QUALIFICATION_WORKFLOW_NAME
+          and stage.workflow_path == WORKFLOW
+          and type(provider.event) is str and provider.event == 'workflow_dispatch'
+          and type(provider.head_branch) is str and provider.head_branch == 'main'
+          and type(provider.status) is str and provider.status == 'completed'
+          and type(provider.conclusion) is str and provider.conclusion == 'success',
+          'completed-run-provider-conclusion-fields')
+    _need(type(stage.workflow_sha256s) is tuple
+          and len(stage.workflow_sha256s) == 2
+          and all(type(row) is tuple and len(row) == 2 for row in stage.workflow_sha256s)
+          and {path for path, _digest in stage.workflow_sha256s} == {WORKFLOW, RUNTIME_WORKFLOW}
+          and all(type(path) is str and type(digest) is str and SHA256.fullmatch(digest) is not None
+                  for path, digest in stage.workflow_sha256s), 'completed-run-stage-workflow-shape')
+    require_closed_jobs(stage)
+    _need(type(stage.artifacts) is tuple and len(stage.artifacts) == MAX_ARTIFACTS
+          and all(type(item) is ArtifactBinding for item in stage.artifacts),
+          'completed-run-stage-artifact-shape')
+    _need(all(type(item.name) is str and type(item.artifact_id) is int and item.artifact_id > 0
+              for item in stage.artifacts), 'completed-run-stage-artifact-identity-types')
+    names = expected_artifact_names(stage.run_id, stage.run_attempt)
+    _need({item.name for item in stage.artifacts} == set(names)
+          and len({item.name for item in stage.artifacts}) == len(names)
+          and len({item.artifact_id for item in stage.artifacts}) == len(names),
+          'completed-run-stage-artifact-set')
+    for item in stage.artifacts:
+        _need(type(item.artifact_id) is int and item.artifact_id > 0
+              and type(item.size) is int and 0 < item.size <= _artifact_limit(item.name)
+              and type(item.sha256) is str and SHA256.fullmatch(item.sha256) is not None
+              and item.staged_filename == item.name + '.zip', 'completed-run-stage-artifact-fields')
+    _need(type(stage.total_archive_bytes) is int
+          and stage.total_archive_bytes == sum(item.size for item in stage.artifacts)
+          and stage.total_archive_bytes <= MAX_TOTAL_ARCHIVE_BYTES,
+          'completed-run-stage-artifact-total')
+    return provider
+
+
+def revalidate_completed_run(stage, token, *, deadline):
+    """Requery fixed provider endpoints and compare them with an already staged run.
+
+    Performs six metadata-only API reads (repository, exact run attempt, two workflow files,
+    jobs, artifacts). Raw archive bytes are never downloaded again.
+    """
+    now = time.monotonic()
+    _need(type(deadline) in (int, float) and math.isfinite(deadline)
+          and 0 < deadline - now <= MAX_REVALIDATION_SECONDS,
+          'completed-run-revalidation-deadline')
+    provider = require_completed_provider_run(stage)
+    _need(type(token) is str and 0 < len(token) <= 4096
+          and not any(character.isspace() for character in token),
+          'completed-run-revalidation-token')
+    budget = _RevalidationBudget(deadline)
+
+    def get(suffix):
+        budget.timeout()
+        return transport._api_json(_url(suffix), token, budget)
+
+    repository = get('')
+    _need(type(repository) is dict and repository.get('full_name') == REPOSITORY
+          and type(repository.get('id')) is int and repository['id'] == stage.repository_id
+          and repository.get('default_branch') == 'main',
+          'completed-run-revalidation-repository')
+    run = get('/actions/runs/' + str(stage.run_id) + '/attempts/' + str(stage.run_attempt))
+    _need(_api_run_matches(run, provider.repository_id, provider.run_id, provider.run_attempt,
+                           provider.head_sha, provider.workflow_id)
+          and run.get('path') == provider.workflow_path
+          and run.get('name') == provider.workflow_name
+          and run.get('event') == provider.event and run.get('head_branch') == provider.head_branch
+          and run.get('status') == provider.status and run.get('conclusion') == provider.conclusion,
+          'completed-run-revalidation-run')
+    stage_workflows = dict(stage.workflow_sha256s)
+    for path in (WORKFLOW, RUNTIME_WORKFLOW):
+        content = get('/contents/' + path + '?ref=' + stage.head_sha)
+        raw = _decode_workflow_content(content)
+        _need(hashlib.sha256(raw).hexdigest() == stage_workflows[path],
+              'completed-run-revalidation-workflow')
+    jobs = get('/actions/runs/' + str(stage.run_id) + '/attempts/' + str(stage.run_attempt)
+               + '/jobs?per_page=100')
+    job_rows = jobs.get('jobs') if type(jobs) is dict else None
+    _need(type(jobs.get('total_count')) is int and type(job_rows) is list
+          and jobs['total_count'] == len(job_rows) <= 100 and all(type(row) is dict for row in job_rows),
+          'completed-run-revalidation-jobs-page')
+    facts = _required_job_facts(job_rows, stage.head_sha, stage.run_attempt)
+    _need(facts == require_closed_jobs(stage), 'completed-run-revalidation-jobs')
+    artifacts = get('/actions/runs/' + str(stage.run_id) + '/artifacts?per_page=100')
+    rows = artifacts.get('artifacts') if type(artifacts) is dict else None
+    _need(type(artifacts.get('total_count')) is int and type(rows) is list
+          and artifacts['total_count'] == len(rows) <= 100 and all(type(row) is dict for row in rows),
+          'completed-run-revalidation-artifacts-page')
+    current = _artifact_inventory(rows, stage.run_id, stage.run_attempt, stage.head_sha)
+    current_ids = tuple(sorted((name, metadata['id'], size, digest)
+                               for metadata, name, size, digest in current))
+    staged_ids = tuple(sorted((item.name, item.artifact_id, item.size, item.sha256)
+                              for item in stage.artifacts))
+    _need(current_ids == staged_ids, 'completed-run-revalidation-artifacts')
+    budget.timeout()
+    closed_jobs = require_closed_jobs(stage)
+    return ProviderRevalidation(stage.repository_id, stage.run_id, stage.run_attempt, stage.head_sha,
+        provider.workflow_id, provider, facts, tuple(item.id for item in closed_jobs), current_ids,
+        tuple(sorted(stage.workflow_sha256s)))
+
+
 def _api_run_matches(run, repository_id, run_id, attempt, head_sha, workflow_id):
     return (type(run) is dict and type(run.get('id')) is int and run['id'] == run_id
             and type(run.get('run_attempt')) is int and run['run_attempt'] == attempt
@@ -369,7 +561,8 @@ def _artifact_inventory(rows, run_id, attempt, head_sha):
 
 
 def _url(suffix):
-    return transport.API_ORIGIN + '/repos/' + quote(REPOSITORY.split('/')[0], safe='') + '/' + quote(REPOSITORY.split('/')[1], safe='') + suffix
+    owner, name = REPOSITORY.split('/')
+    return transport.API_ORIGIN + '/repos/' + quote(owner, safe='') + '/' + quote(name, safe='') + suffix
 
 
 def _archive_url(url, token, budget, destination, expected_size, archive_limit):
@@ -506,8 +699,6 @@ def resolve_completed_run(event_raw, environment, checkout_head, current_capture
     run = transport._api_json(_url('/actions/runs/' + str(run_id) + '/attempts/' + str(attempt)), token, budget)
     _need(_api_run_matches(run, repository_id, run_id, attempt, head_sha, workflow_id),
           'completed-run-api-identity')
-    _need(_api_run_matches(run, repository_id, run_id, attempt, head_sha, workflow_id),
-          'completed-run-api-identity')
     for path in (WORKFLOW, RUNTIME_WORKFLOW):
         content = transport._api_json(_url('/contents/' + path + '?ref=' + head_sha), token, budget)
         _need(_decode_workflow_content(content) == workflow_bytes[path], 'completed-run-workflow-api-bytes')
@@ -551,4 +742,5 @@ def resolve_completed_run(event_raw, environment, checkout_head, current_capture
                              tuple((path, hashlib.sha256(workflow_bytes[path]).hexdigest())
                                    for path in (WORKFLOW, RUNTIME_WORKFLOW)), capture['tree'],
                              hashlib.sha256(current_capture).hexdigest(),
-                             job_ids, tuple(bindings), budget.archive_bytes, job_facts)
+                             job_ids, tuple(bindings), budget.archive_bytes, job_facts,
+                             _provider_conclusion(run))

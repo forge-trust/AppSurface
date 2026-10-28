@@ -41,7 +41,12 @@ class CompletedRunOrchestrationTests(unittest.TestCase):
             self.fixture.stage,
             jobs=tuple(completed_run.CompletedJob(
                 name, job_id, self.fixture.head, self.fixture.attempt, 'completed', 'success')
-                for job_id, name in enumerate(required_names, 1)))
+                for job_id, name in enumerate(required_names, 1)),
+            provider_run=completed_run.ProviderRunConclusion(
+                self.fixture.stage.repository_id, completed_run.REPOSITORY,
+                self.fixture.run_id, self.fixture.attempt, self.fixture.head, 99,
+                completed_run.WORKFLOW, completed_run.QUALIFICATION_WORKFLOW_NAME,
+                'workflow_dispatch', 'main', 'completed', 'success'))
         self.root = Path(self.fixture.temp.name).resolve()
         self.source = self.root / 'source'
         self.native_source = self.root / 'native-source'
@@ -338,6 +343,19 @@ class CompletedRunOrchestrationTests(unittest.TestCase):
                         self.native_source, self.private, deadline=self.deadline)
                 inspect.assert_not_called()
             self._reset_private()
+
+    def test_provider_run_is_required_before_archive_inventory_inspection(self):
+        self._patch_source()
+        self._patch_inputs()
+        for provider in (None, replace(self.fixture.stage.provider_run, conclusion='failure'),
+                         replace(self.fixture.stage.provider_run, head_branch='feature')):
+            stage = replace(self.fixture.stage, provider_run=provider)
+            with patch.object(completed_validation, 'inspect_completed_run') as inspect:
+                with self.assertRaises(ValueError):
+                    subject.replay_completed_run(
+                        stage, self.fixture.stage_root, self.fixture.capture, self.source,
+                        self.native_source, self.private, deadline=self.deadline)
+                inspect.assert_not_called()
 
     def test_unexpected_parent_sibling_is_preserved_and_rejected(self):
         self._patch_source()

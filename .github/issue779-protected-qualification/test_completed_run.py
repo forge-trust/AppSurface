@@ -2,7 +2,9 @@
 import hashlib
 import json
 import base64
+import copy
 from dataclasses import replace
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -114,6 +116,55 @@ class CompletedRunDataTests(unittest.TestCase):
                  'head_sha': self.head, 'run_attempt': self.attempt}
                 for index, name in enumerate(sorted(required))]
 
+    def _provider_stage(self):
+        workflows = {WORKFLOW: b'protected workflow', RUNTIME_WORKFLOW: b'runtime workflow'}
+        facts = completed._required_job_facts(self._job_rows(), self.head, self.attempt)
+        names = completed.expected_artifact_names(self.run_id, self.attempt)
+        artifacts = tuple(completed.ArtifactBinding(index + 100, name, 3, '0' * 64, name + '.zip')
+                          for index, name in enumerate(names))
+        provider = completed._provider_conclusion(self.event['workflow_run'])
+        stage = completed.CompletedRunStage(self.repo_id, self.run_id, self.attempt, self.head, WORKFLOW,
+            tuple((path, hashlib.sha256(raw).hexdigest()) for path, raw in workflows.items()),
+            'b' * 40, 'c' * 64, tuple(row.id for row in facts), artifacts, 3 * len(artifacts), facts, provider)
+        artifact_rows = [{'id': item.artifact_id, 'name': item.name, 'expired': False, 'size_in_bytes': item.size,
+            'digest': 'sha256:' + item.sha256,
+            'workflow_run': {'id': self.run_id, 'head_sha': self.head}}
+            for item in artifacts]
+        run = copy.deepcopy(self.event['workflow_run'])
+        replies = {
+            'repo': {'id': self.repo_id, 'full_name': REPOSITORY, 'default_branch': 'main'},
+            'run': run,
+            'workflows': {path: {'encoding': 'base64', 'content': base64.b64encode(raw).decode()}
+                          for path, raw in workflows.items()},
+            'jobs': {'total_count': len(facts), 'jobs': self._job_rows()},
+            'artifacts': {'total_count': len(artifact_rows), 'artifacts': artifact_rows},
+        }
+        return stage, replies
+
+    @staticmethod
+    def _revalidation_api(replies):
+        calls = []
+        def api(url, token, budget):
+            if token != 'fixture-token':
+                raise AssertionError('unexpected token')
+            budget.count()
+            calls.append(url)
+            if url.endswith('/repos/' + REPOSITORY):
+                return replies['repo']
+            if '/attempts/' in url and '/jobs?' not in url:
+                return replies['run']
+            if '/contents/' in url:
+                path = next(path for path in (WORKFLOW, RUNTIME_WORKFLOW)
+                            if '/contents/' + path + '?' in url)
+                return replies['workflows'][path]
+            if '/jobs?' in url:
+                return replies['jobs']
+            if '/artifacts?' in url:
+                return replies['artifacts']
+            raise AssertionError('unexpected endpoint')
+        api.calls = calls
+        return api
+
     def test_required_job_facts_preserve_each_validated_field_and_bind_closed_stage(self):
         rows = self._job_rows()
         facts = completed._required_job_facts(rows, self.head, self.attempt)
@@ -128,6 +179,113 @@ class CompletedRunDataTests(unittest.TestCase):
             self.repo_id, self.run_id, self.attempt, self.head, WORKFLOW, (), 'b' * 40, 'c' * 64,
             tuple(sorted(row.id for row in facts)), (), 0, facts)
         self.assertEqual(facts, completed.require_closed_jobs(stage))
+
+    def test_provider_conclusion_is_retained_by_resolver_and_required_for_new_checks(self):
+        provider = completed._provider_conclusion(self.event['workflow_run'])
+        self.assertEqual(completed.ProviderRunConclusion(self.repo_id, REPOSITORY, self.run_id,
+            self.attempt, self.head, 12345, WORKFLOW, completed.QUALIFICATION_WORKFLOW_NAME,
+            'workflow_dispatch', 'main', 'completed', 'success'),
+            provider)
+        stage, _replies = self._provider_stage()
+        self.assertEqual(provider, completed.require_completed_provider_run(stage))
+        legacy = replace(stage, provider_run=None)
+        with self.assertRaisesRegex(ValueError, 'provider-conclusion-missing'):
+            completed.require_completed_provider_run(legacy)
+
+    def test_provider_conclusion_stage_identity_and_terminal_fields_are_strict(self):
+        stage, _replies = self._provider_stage()
+        provider = stage.provider_run
+        for field, value in (
+            ('repository_id', self.repo_id + 1), ('repository_full_name', 'fork/AppSurface'),
+            ('run_id', self.run_id + 1), ('run_attempt', self.attempt + 1),
+            ('head_sha', 'f' * 40), ('workflow_id', 0), ('workflow_path', 'other.yml'),
+            ('workflow_name', 'other workflow'),
+            ('event', 'push'), ('head_branch', 'feature'), ('status', 'in_progress'),
+            ('conclusion', 'failure'), ('run_id', True), ('workflow_id', True),
+        ):
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                completed.require_completed_provider_run(replace(stage,
+                    provider_run=replace(provider, **{field: value})))
+        for changed in (replace(stage, workflow_path='other.yml'),
+                        replace(stage, source_tree='not-a-git-tree'),
+                        replace(stage, source_capture_sha256='not-a-digest'),
+                        replace(stage, total_archive_bytes=0)):
+            with self.subTest(stage=changed), self.assertRaises(ValueError):
+                completed.require_completed_provider_run(changed)
+
+    def test_revalidation_rechecks_six_fixed_metadata_endpoints(self):
+        stage, replies = self._provider_stage()
+        api = self._revalidation_api(replies)
+        with patch.object(transport, '_api_json', side_effect=api):
+            result = completed.revalidate_completed_run(stage, 'fixture-token',
+                deadline=time.monotonic() + 10)
+        self.assertEqual(6, len(api.calls))
+        self.assertEqual(self.run_id, result.run_id)
+        self.assertEqual(stage.job_ids, result.job_ids)
+        self.assertEqual(stage.provider_run, result.provider_run)
+        self.assertEqual(stage.jobs, result.jobs)
+        self.assertEqual(37, len(result.artifact_ids))
+        self.assertEqual(tuple(sorted(stage.workflow_sha256s)), result.workflow_sha256s)
+        self.assertFalse(set(result.__dataclass_fields__) & {'qualification_complete', 'admission_created',
+                                                             'trusted', 'gate_eligible'})
+
+    def test_revalidation_fails_closed_on_run_job_artifact_and_workflow_drift(self):
+        stage, original = self._provider_stage()
+        mutations = (
+            ('repo', lambda data: data['repo'].__setitem__('id', self.repo_id + 1)),
+            ('repo-name', lambda data: data['repo'].__setitem__('full_name', 'fork/AppSurface')),
+            ('run-status', lambda data: data['run'].__setitem__('status', 'in_progress')),
+            ('run-conclusion', lambda data: data['run'].__setitem__('conclusion', 'failure')),
+            ('run-event', lambda data: data['run'].__setitem__('event', 'push')),
+            ('run-ref', lambda data: data['run'].__setitem__('head_branch', 'feature')),
+            ('run-workflow', lambda data: data['run'].__setitem__('workflow_id', 12346)),
+            ('run-head', lambda data: data['run'].__setitem__('head_sha', 'f' * 40)),
+            ('run-id', lambda data: data['run'].__setitem__('id', self.run_id + 1)),
+            ('run-attempt', lambda data: data['run'].__setitem__('run_attempt', self.attempt + 1)),
+            ('run-path', lambda data: data['run'].__setitem__('path', 'other.yml')),
+            ('run-name', lambda data: data['run'].__setitem__('name', 'other workflow')),
+            ('run-repository', lambda data: data['run']['repository'].__setitem__('id', self.repo_id + 1)),
+            ('head-repository', lambda data: data['run']['head_repository'].__setitem__('id', self.repo_id + 1)),
+            ('workflow', lambda data: data['workflows'][WORKFLOW].update(
+                {'content': base64.b64encode(b'different workflow').decode()})),
+            ('jobs', lambda data: data['jobs']['jobs'][0].__setitem__('conclusion', 'failure')),
+            ('job-head', lambda data: data['jobs']['jobs'][0].__setitem__('head_sha', 'f' * 40)),
+            ('job-attempt', lambda data: data['jobs']['jobs'][0].__setitem__('run_attempt', self.attempt + 1)),
+            ('job-id', lambda data: data['jobs']['jobs'][0].__setitem__(
+                'id', data['jobs']['jobs'][1]['id'])),
+            ('artifacts', lambda data: data['artifacts']['artifacts'][0].__setitem__('id', 999999)),
+            ('artifact-size', lambda data: data['artifacts']['artifacts'][0].__setitem__('size_in_bytes', 4)),
+            ('artifact-digest', lambda data: data['artifacts']['artifacts'][0].__setitem__(
+                'digest', 'sha256:' + 'f' * 64)),
+            ('artifact-run', lambda data: data['artifacts']['artifacts'][0]['workflow_run'].__setitem__(
+                'id', self.run_id + 1)),
+            ('artifact-head', lambda data: data['artifacts']['artifacts'][0]['workflow_run'].__setitem__(
+                'head_sha', 'f' * 40)),
+            ('artifact-expired', lambda data: data['artifacts']['artifacts'][0].__setitem__('expired', True)),
+            ('artifact-attempt-set', lambda data: data['artifacts']['artifacts'].pop()),
+        )
+        for name, mutate in mutations:
+            replies = copy.deepcopy(original)
+            mutate(replies)
+            with patch.object(transport, '_api_json', side_effect=self._revalidation_api(replies)), \
+                    self.subTest(name=name), self.assertRaises(ValueError):
+                completed.revalidate_completed_run(stage, 'fixture-token',
+                    deadline=time.monotonic() + 10)
+
+    def test_revalidation_rejects_invalid_deadline_token_and_stage_before_api(self):
+        stage, _replies = self._provider_stage()
+        with patch.object(transport, '_api_json') as api:
+            for token, deadline in (
+                ('bad token', time.monotonic() + 5),
+                ('fixture-token', time.monotonic() - 1),
+                ('fixture-token', time.monotonic() + 61),
+            ):
+                with self.subTest(token=token, deadline=deadline), self.assertRaises(ValueError):
+                    completed.revalidate_completed_run(stage, token, deadline=deadline)
+            with self.assertRaisesRegex(ValueError, 'provider-conclusion-missing'):
+                completed.revalidate_completed_run(replace(stage, provider_run=None), 'fixture-token',
+                    deadline=time.monotonic() + 5)
+            api.assert_not_called()
 
     def test_required_job_facts_reject_wrong_status_name_head_attempt_and_duplicate_id(self):
         rows = self._job_rows()
@@ -442,6 +600,8 @@ class CompletedRunDataTests(unittest.TestCase):
             self.assertEqual(completed.MAX_ARTIFACTS, len(list(stage.iterdir())))
             self.assertEqual(self.run_id, result.run_id)
             self.assertEqual(self.attempt, result.run_attempt)
+            self.assertEqual(completed._provider_conclusion(run), result.provider_run)
+            self.assertEqual(result.provider_run, completed.require_completed_provider_run(result))
             self.assertEqual(len(REQUIRED_RUNTIME_JOBS | completed.EXPECTED_TERMINAL_JOBS), len(result.jobs))
             self.assertEqual(tuple(sorted(result.job_ids)), tuple(sorted(row.id for row in result.jobs)))
             self.assertEqual(result.jobs, completed.require_closed_jobs(result))

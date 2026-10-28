@@ -29,7 +29,8 @@ The fixed sequence is:
 7. [The existing public native data test](completed-native-replay-README.md).
 8. [The existing public coverage CLI](completed-gate-replay-README.md).
 
-Before archive inspection, the orchestrator requires all fixed successful provider job facts,
+Before archive inspection, the orchestrator requires the retained terminal provider-run conclusion
+and all fixed successful provider job facts,
 including name-to-ID attribution for the coverage job. It then checks the full archive inventory,
 verifies both checkouts against the complete source capture, and rejects existing untracked or
 ignored outputs. Every phase receives the same typed inventory, stage, run identity and deadline.
@@ -76,6 +77,10 @@ The job ID is provider comparison metadata, not a credential. A retained passing
 matching replay do not independently establish original workflow success. This module adds no
 protected finalizer, support registration, production catalogue entry, or runtime Trusted admission.
 Those obligations remain in the [qualification boundary](README.md).
+
+The separate [preparation and closeout APIs](completed-controller-README.md) provide source and
+provider comparisons around a caller-contained replay. They do not combine the credentialed
+provider reads with callback or build execution.
 
 Run its portable wiring and custody tests with:
 

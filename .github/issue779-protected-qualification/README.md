@@ -131,3 +131,10 @@ workflow mount. Its wiring and custody tests do not establish a successful prote
 execution. Successful original workflow/test completion binding, the protected finalizer and
 reviewed support registration remain required. No successfully parsed projection may fill those
 gaps or enable runtime Trusted admission.
+
+The [source preflight](completed-source-README.md) now checks the validator checkout independently
+from the completed-source checkouts and requires the completed revision in the validator's history.
+The [preparation and closeout APIs](completed-controller-README.md) bind that preflight to the
+resolver and recheck provider run, workflow, job and archive facts after separate replay. Their
+credentialed phases never execute target code. No workflow or command enables those APIs yet;
+reviewed execution/credential separation and a genuine protected full-stage run remain required.

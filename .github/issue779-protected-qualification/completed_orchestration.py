@@ -249,6 +249,7 @@ def replay_completed_run(stage, stage_directory, source_capture, source_root,
     _need(all(not completed_c1._paths_overlap(left, right)
               for index, left in enumerate(roots) for right in roots[index + 1:]), 'root-overlap')
     jobs = completed_run.require_closed_jobs(stage)
+    completed_run.require_completed_provider_run(stage)
     inventory = completed_validation.inspect_completed_run(stage, stage_root, source_capture, deadline=deadline)
     gate_job = next(row for row in jobs if row.name ==
         'Full current runtime proof and unchanged gates / Unchanged solution and codecov patch gates')

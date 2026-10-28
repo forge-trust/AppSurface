@@ -2,6 +2,14 @@
 
 ## Native-validation migration and current continuation — 2026-10-27
 
+The [current completed-run preparation](issue779-csharp-runtime-cutover.md#protected-completed-run-source-and-provider-checks--2026-10-27)
+adds separate validator/completed-source anchoring and provider revalidation around the fixed replay
+sequence. The credentialed comparison APIs never execute target callbacks or builds; no finalizer
+workflow is enabled. Revision 118 passed every standard root measurement, including N06, but failed
+original N08 prerequisite acquisition before native execution. Its solution/patch gates were
+skipped. Source/support anchoring preparation does not establish protected execution, admission,
+native acceptance, numerical gate success or Trusted/downstream acceptance.
+
 The [fixed replay-controller preparation](issue779-csharp-runtime-cutover.md#fixed-public-replay-controllers--2026-10-27)
 adds exact-source isolated build/test and public CLI replay controllers with bounded output,
 deadline and process-group checks. Detached Linux validation passes 163 tests with five explicit
