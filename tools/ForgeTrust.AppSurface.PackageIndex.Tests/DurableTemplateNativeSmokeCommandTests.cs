@@ -211,6 +211,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         NativeSmokeFixture fixture,
         DurableTemplateNativePostgreSql cluster)
     {
+        Assert.Equal(fixture.IncomingOwnedRoot, cluster.OwnedRoot);
         Assert.Contains(fixture.Runner.Requests, request => Path.GetFileNameWithoutExtension(request.FileName) == "pg_ctl"
             && request.Arguments.LastOrDefault() == "stop");
         Assert.False(Directory.Exists(cluster.OwnedRoot));
@@ -219,11 +220,22 @@ public sealed class DurableTemplateNativeSmokeCommandTests
 
     private sealed class NativeSmokeFixture : IDisposable
     {
-        private readonly string _root = Path.Join(Path.GetTempPath(), "appsurface-native-smoke-command-" + Guid.NewGuid().ToString("N"));
+        private readonly string _root = Path.Join(TemporaryRoot, "pgsmoke-" + Guid.NewGuid().ToString("N"));
 
         internal NativeSmokeFixture()
         {
             Root = _root;
+            if (Directory.Exists(Root))
+            {
+                throw new IOException("The private smoke-test root already exists.");
+            }
+
+            Directory.CreateDirectory(Root);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
             BinDirectory = Path.Join(Root, "bin");
             Directory.CreateDirectory(BinDirectory);
             foreach (var tool in new[] { "initdb", "postgres", "pg_ctl", "psql" })
@@ -235,6 +247,7 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         }
 
         internal string Root { get; }
+        internal string? IncomingOwnedRoot { get; private set; }
         internal string BinDirectory { get; }
         internal FakeRuntime Runtime { get; } = new();
         internal FakeCommandRunner Runner { get; }
@@ -245,6 +258,9 @@ public sealed class DurableTemplateNativeSmokeCommandTests
         internal DurableTemplateNativePostgreSql? StartedCluster { get; private set; }
         internal NativePostgreSqlToolIdentity? ReceivedIdentity { get; set; }
         internal List<int> CleanupBudgets { get; } = [];
+
+        private static string TemporaryRoot => Path.GetFullPath(OperatingSystem.IsLinux() ? "/tmp" :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath());
 
         internal async ValueTask DisposeClusterAsync(DurableTemplateNativePostgreSql cluster, int remainingMilliseconds)
         {
@@ -262,6 +278,13 @@ public sealed class DurableTemplateNativeSmokeCommandTests
             CancellationToken cancellationToken)
         {
             Assert.Same(Runner, runner);
+            IncomingOwnedRoot = ownedRoot;
+            Assert.Equal(TemporaryRoot, Path.GetDirectoryName(Path.GetFullPath(ownedRoot)));
+            const string ownedRootPrefix = "appsurface-native-template-";
+            var ownedRootName = Path.GetFileName(ownedRoot);
+            Assert.StartsWith(ownedRootPrefix, ownedRootName, StringComparison.Ordinal);
+            Assert.True(Guid.TryParseExact(ownedRootName[ownedRootPrefix.Length..], "N", out _));
+            Assert.False(Directory.Exists(ownedRoot));
             StartedCluster = await DurableTemplateNativePostgreSql.StartAsync(
                 ownedRoot,
                 runner,

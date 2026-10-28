@@ -24,7 +24,7 @@ public sealed class DurableTemplateNativePostgreSqlRuntimeTests
             return;
         }
 
-        var root = Path.Join(Path.GetTempPath(), $"apg-native-runtime-{Guid.NewGuid():N}");
+        var root = Path.Join(PrivateTestDirectory.TemporaryRoot, $"apg-native-runtime-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
         {
@@ -77,7 +77,7 @@ public sealed class DurableTemplateNativePostgreSqlRuntimeTests
     [Fact]
     public void FindOwnedPostmasterRejectsNonPositiveProcessId()
     {
-        var root = Path.Join(Path.GetTempPath(), $"apg-native-runtime-{Guid.NewGuid():N}");
+        var root = Path.Join(PrivateTestDirectory.TemporaryRoot, $"apg-native-runtime-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
         try
         {
@@ -388,14 +388,16 @@ public sealed class DurableTemplateNativePostgreSqlRuntimeTests
     {
         internal PrivateTestDirectory()
         {
-            var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
-            Root = Path.Join(temporary, $"apg-native-runtime-{Guid.NewGuid():N}");
+            Root = Path.Join(TemporaryRoot, $"apg-native-runtime-{Guid.NewGuid():N}");
             Directory.CreateDirectory(Root);
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(Root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
             }
         }
+
+        internal static string TemporaryRoot => Path.GetFullPath(OperatingSystem.IsLinux() ? "/tmp" :
+            OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetTempPath());
 
         internal string Root { get; }
 
