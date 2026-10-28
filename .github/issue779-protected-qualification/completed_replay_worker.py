@@ -222,14 +222,22 @@ def _write_result(path, raw, *, deadline):
     primary = None
 
     def remove_created(error):
-        if created is None:
+        if fd is None:
             return
         try:
+            # If the initial fstat failed after O_EXCL creation, recover identity only
+            # from the still-open descriptor and compare it with the no-follow name.
+            candidate = created if created is not None else os.fstat(fd)
             current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
             if stat.S_ISREG(current.st_mode) and current.st_nlink == 1 \
-                    and (current.st_dev, current.st_ino) == (created.st_dev, created.st_ino):
+                    and current.st_uid == os.geteuid() and stat.S_IMODE(current.st_mode) == 0o600 \
+                    and stat.S_ISREG(candidate.st_mode) and candidate.st_nlink == 1 \
+                    and candidate.st_uid == os.geteuid() and stat.S_IMODE(candidate.st_mode) == 0o600 \
+                    and (current.st_dev, current.st_ino) == (candidate.st_dev, candidate.st_ino):
                 os.unlink(path.name, dir_fd=parent_fd)
                 os.fsync(parent_fd)
+            else:
+                raise OSError('result pathname no longer names the created inode')
         except FileNotFoundError:
             pass
         except BaseException:

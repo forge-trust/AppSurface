@@ -289,6 +289,55 @@ class CompletedReplayWorkerTests(unittest.TestCase):
                 subject._write_result(partial, b'{}', deadline=self.deadline)
         self.assertFalse(partial.exists())
 
+    def test_postcreate_fstat_failure_cleans_only_reacquired_owned_result(self):
+        for mode in ("transient", "persistent", "substituted"):
+            with self.subTest(mode=mode):
+                path = self.handoff / f"postcreate-{mode}.json"
+                displaced = self.handoff / f"postcreate-{mode}.displaced"
+                real_open, real_fstat = os.open, os.fstat
+                output_fds = []
+                attempts = [0]
+
+                def tracked_open(name, *args, **kwargs):
+                    fd = real_open(name, *args, **kwargs)
+                    if name == path.name and kwargs.get("dir_fd") is not None:
+                        output_fds.append(fd)
+                    return fd
+
+                def fail_first_output_fstat(fd):
+                    if fd in output_fds:
+                        attempts[0] += 1
+                        if attempts[0] == 1:
+                            if mode == "substituted":
+                                os.replace(path, displaced)
+                                path.write_bytes(b"foreign replacement")
+                                os.chmod(path, 0o600)
+                            raise OSError("primary postcreate fstat failure")
+                        if mode == "persistent":
+                            raise OSError("reacquire fstat failure")
+                    return real_fstat(fd)
+
+                with patch.object(subject.os, "open", side_effect=tracked_open), \
+                        patch.object(subject.os, "fstat", side_effect=fail_first_output_fstat):
+                    with self.assertRaisesRegex(OSError, "primary postcreate fstat failure") as caught:
+                        subject._write_result(path, b"{}", deadline=self.deadline)
+
+                if mode == "transient":
+                    self.assertFalse(path.exists())
+                    self.assertEqual(2, attempts[0])
+                elif mode == "persistent":
+                    self.assertTrue(path.exists())
+                    self.assertEqual(b"", path.read_bytes())
+                    if hasattr(caught.exception, "add_note"):
+                        self.assertTrue(any("cleanup-failed" in note
+                                            for note in caught.exception.__notes__))
+                else:
+                    self.assertEqual(b"foreign replacement", path.read_bytes())
+                    self.assertTrue(displaced.exists())
+                    if hasattr(caught.exception, "add_note"):
+                        self.assertTrue(any("cleanup-failed" in note
+                                            for note in caught.exception.__notes__))
+
     def test_result_fd_close_failure_removes_owned_result_and_closes_parent(self):
         path = self.handoff / 'close-failure.json'
         real_open, real_close = os.open, os.close

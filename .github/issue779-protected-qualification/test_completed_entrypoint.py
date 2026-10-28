@@ -366,6 +366,56 @@ class CompletedEntrypointTests(unittest.TestCase):
         with self.assertRaises(OSError):
             real_fstat(parent_fds[0])
 
+    def test_postcreate_fstat_failure_cleans_only_reacquired_owned_output(self):
+        for mode in ("transient", "persistent", "substituted"):
+            with self.subTest(mode=mode):
+                output = self.output / f"postcreate-{mode}.json"
+                displaced = self.output / f"postcreate-{mode}.displaced"
+                real_open, real_fstat = os.open, os.fstat
+                output_fds = []
+                attempts = [0]
+
+                def tracked_open(name, *args, **kwargs):
+                    fd = real_open(name, *args, **kwargs)
+                    if name == output.name and kwargs.get("dir_fd") is not None:
+                        output_fds.append(fd)
+                    return fd
+
+                def fail_first_output_fstat(fd):
+                    if fd in output_fds:
+                        attempts[0] += 1
+                        if attempts[0] == 1:
+                            if mode == "substituted":
+                                os.replace(output, displaced)
+                                output.write_bytes(b"foreign replacement")
+                                os.chmod(output, 0o600)
+                            raise OSError("primary postcreate fstat failure")
+                        if mode == "persistent":
+                            raise OSError("reacquire fstat failure")
+                    return real_fstat(fd)
+
+                with patch.object(subject.os, "open", side_effect=tracked_open), \
+                        patch.object(subject.os, "fstat", side_effect=fail_first_output_fstat):
+                    with self.assertRaisesRegex(OSError, "primary postcreate fstat failure") as caught:
+                        with subject._publication(output, self.deadline) as publish:
+                            publish(b"{}")
+
+                if mode == "transient":
+                    self.assertFalse(output.exists())
+                    self.assertEqual(2, attempts[0])
+                elif mode == "persistent":
+                    self.assertTrue(output.exists())
+                    self.assertEqual(b"", output.read_bytes())
+                    if hasattr(caught.exception, "add_note"):
+                        self.assertTrue(any("cleanup-failed" in note
+                                            for note in caught.exception.__notes__))
+                else:
+                    self.assertEqual(b"foreign replacement", output.read_bytes())
+                    self.assertTrue(displaced.exists())
+                    if hasattr(caught.exception, "add_note"):
+                        self.assertTrue(any("cleanup-failed" in note
+                                            for note in caught.exception.__notes__))
+
     def test_main_error_is_fixed_and_does_not_disclose_token_or_paths(self):
         output = io.StringIO()
         environment = dict(self.environment, GITHUB_EVENT_PATH=str(self.event_path))

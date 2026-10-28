@@ -71,10 +71,14 @@ controller's exact observation fields. These include the fixed false authority a
 The internal input context checks initial read metadata and final content under pinned descriptors.
 The publication context creates one exclusive `0600` output, flushes file and directory metadata,
 holds its descriptor through the enclosing root checks, and checks named identity and bytes again
-before returning. A failure removes only its still-owned regular single-link output. A substituted
-file or symlink is preserved. Staged archives, native/gate diagnostics and other files remain under
-the existing controller and caller cleanup policies. Publication is not an execution-settlement
-receipt, and a partial file observed before command success is not a usable handoff.
+before returning. If the first output metadata read fails after exclusive creation, cleanup retries
+identity acquisition from the still-open descriptor. It removes only a regular, single-link output
+whose no-follow name, mode and owner still match that descriptor. If identity cannot be reacquired
+or the output name was substituted, the publisher preserves the uncertain node and, on runtimes
+that support exception notes, adds a fixed cleanup-failure note to the original error. Staged
+archives, native/gate diagnostics and other files remain under the existing controller and caller
+cleanup policies. Publication is not an execution-settlement receipt, and a partial file observed
+before command success is not a usable handoff.
 
 The CLI returns zero and emits only `EVIDENCE_COMPLETED_COMPARISON_RETAINED` on success. Expected
 input, source, provider, I/O and subprocess failures return two with only

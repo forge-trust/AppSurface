@@ -183,14 +183,26 @@ def _publication(path, deadline):
         os.fsync(parent_fd)
 
     def remove_owned(error):
-        if identity is None:
+        if fd is None:
             return
         try:
+            # If the first metadata read failed after O_EXCL creation, reacquire identity
+            # from the still-open descriptor. Never infer ownership from the pathname.
+            candidate_identity = identity
+            if candidate_identity is None:
+                info = os.fstat(fd)
+                candidate_identity = completed_c1._node_identity(info)
+                if not (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                        and stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1):
+                    raise OSError('output descriptor identity is not safely cleanable')
             named = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
-            if stat.S_ISREG(named.st_mode) and named.st_nlink == 1 \
-                    and completed_c1._node_identity(named) == identity:
+            if (stat.S_ISREG(named.st_mode) and named.st_uid == os.geteuid()
+                    and stat.S_IMODE(named.st_mode) == 0o600 and named.st_nlink == 1
+                    and completed_c1._node_identity(named) == candidate_identity):
                 os.unlink(path.name, dir_fd=parent_fd)
                 os.fsync(parent_fd)
+            else:
+                raise OSError('output pathname no longer names the created inode')
         except FileNotFoundError:
             pass
         except BaseException:
