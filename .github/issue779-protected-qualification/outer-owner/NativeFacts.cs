@@ -36,7 +36,7 @@ internal static class NativeFacts
             || GetGid() != GetEgid()) throw new IsolationException("launcher-identity");
 
         var status = ReadBounded("/proc/self/status", MaximumStatusBytes);
-        var fields = ParseFields(status);
+        var fields = ParseProcStatusFields(status);
         if (!fields.TryGetValue("Uid", out var uid) || !fields.TryGetValue("Gid", out var gid)
             || !fields.TryGetValue("Groups", out var groups) || !fields.TryGetValue("NSpid", out var nsPid)
             || uid.Length != 4 || gid.Length != 4 || groups.Length != 1 || nsPid.Length < 1
@@ -53,7 +53,7 @@ internal static class NativeFacts
 
     internal static void RequireSelfCapabilitiesAndDescriptors()
     {
-        var fields = ParseFields(ReadBounded("/proc/self/status", MaximumStatusBytes));
+        var fields = ParseProcStatusFields(ReadBounded("/proc/self/status", MaximumStatusBytes));
         foreach (var name in new[] { "CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb" })
             if (!fields.TryGetValue(name, out var value) || value.Length != 1
                 || !ulong.TryParse(value[0], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var bits)
@@ -91,7 +91,7 @@ internal static class NativeFacts
         foreach (var pid in pids)
         {
             var proc = $"/proc/{pid.ToString(CultureInfo.InvariantCulture)}";
-            var status = ParseFields(ReadBounded(proc + "/status", MaximumStatusBytes));
+            var status = ParseProcStatusFields(ReadBounded(proc + "/status", MaximumStatusBytes));
             if (!status.TryGetValue("NSpid", out var nsPids) || !status.TryGetValue("Uid", out var uids)
                 || !status.TryGetValue("Gid", out var gids)) throw new IsolationException("unit-process-facts");
             var args = ParseNul(ReadBounded(proc + "/cmdline", 16 * 1024));
@@ -108,7 +108,7 @@ internal static class NativeFacts
             || !target.Args.Any(arg => arg == "phase") || !target.Args.Any(arg => arg == PhaseName(phase)))
             throw new IsolationException("unit-launcher-facts");
 
-        var nnp = ParseFields(ReadBounded($"/proc/{target.Pid.ToString(CultureInfo.InvariantCulture)}/status", MaximumStatusBytes));
+        var nnp = ParseProcStatusFields(ReadBounded($"/proc/{target.Pid.ToString(CultureInfo.InvariantCulture)}/status", MaximumStatusBytes));
         if (!nnp.TryGetValue("NoNewPrivs", out var nnpValue) || nnpValue.Length != 1 || nnpValue[0] != "1"
             || !nnp.TryGetValue("CapEff", out var caps) || caps.Length != 1 || caps[0] != "0000000000000000"
             || !nnp.TryGetValue("Groups", out var groups) || groups.Length != 1
@@ -116,7 +116,7 @@ internal static class NativeFacts
             throw new IsolationException("unit-launcher-security");
         var bootstrap = pids.Single(pid => pid != target.Pid);
         var bootstrapProc = $"/proc/{bootstrap.ToString(CultureInfo.InvariantCulture)}";
-        var bootstrapStatus = ParseFields(ReadBounded(bootstrapProc + "/status", MaximumStatusBytes));
+        var bootstrapStatus = ParseProcStatusFields(ReadBounded(bootstrapProc + "/status", MaximumStatusBytes));
         if (!bootstrapStatus.TryGetValue("Uid", out var bootstrapUids) || !AllEqual(bootstrapUids, 0)
             || !bootstrapStatus.TryGetValue("CapEff", out var bootstrapCaps) || bootstrapCaps.Length != 1
             || !ulong.TryParse(bootstrapCaps[0], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var effectiveCaps)
@@ -141,7 +141,7 @@ internal static class NativeFacts
         {
             if (!witness.LauncherExited || !CgroupIdentityMatches(witness)) return false;
             var path = witness.HostPath;
-            var events = ParseFields(witness.ReadEvents());
+            var events = ParseCgroupEvents(witness.ReadEvents());
             var procs = ParsePidList(witness.ReadProcesses());
             if (Directory.Exists(path)) procs.AddRange(ReadRecursivePids(path, path, 0, 256));
             var stillSame = CgroupIdentityMatches(witness);
@@ -170,7 +170,7 @@ internal static class NativeFacts
             if (pid == witness.LauncherPid) continue;
             try
             {
-                var status = ParseFields(ReadBounded($"/proc/{pid.ToString(CultureInfo.InvariantCulture)}/status", MaximumStatusBytes));
+                var status = ParseProcStatusFields(ReadBounded($"/proc/{pid.ToString(CultureInfo.InvariantCulture)}/status", MaximumStatusBytes));
                 if (status.TryGetValue("NSpid", out var nsPids) && nsPids.Length >= 2
                     && uint.TryParse(nsPids[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var inner)
                     && inner == namespacePid) return true;
@@ -294,7 +294,7 @@ internal static class NativeFacts
             stat.Device, stat.Inode, stat.MountId);
         try
         {
-            var initialEvents = ParseFields(witness.ReadEvents());
+            var initialEvents = ParseCgroupEvents(witness.ReadEvents());
             var initialPids = ReadRecursivePids(hostPath, hostPath, 0, 256);
             if (witness.LauncherExited || !witness.CgroupIdentityVerified || !initialPids.Contains(launcherPid)
                 || Directory.EnumerateDirectories(hostPath).Any()
@@ -408,17 +408,33 @@ internal static class NativeFacts
         return result;
     }
 
-    private static Dictionary<string, string[]> ParseFields(byte[] bytes)
+    internal static Dictionary<string, string[]> ParseProcStatusFields(ReadOnlySpan<byte> bytes)
     {
         var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
         foreach (var line in Encoding.ASCII.GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var colon = line.IndexOf(':');
-            if (colon <= 0) continue;
+            if (colon <= 0) throw new IsolationException("proc-fields-format");
             var name = line[..colon];
-            var values = line[(colon + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (name.Length == 0 || name.Any(static character => !char.IsAsciiLetterOrDigit(character) && character != '_'))
+                throw new IsolationException("proc-fields-format");
+            var values = line[(colon + 1)..].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (!result.TryAdd(name, values)) throw new IsolationException("proc-fields");
         }
+        return result;
+    }
+
+    internal static Dictionary<string, string[]> ParseCgroupEvents(ReadOnlySpan<byte> bytes)
+    {
+        var result = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var line in Encoding.ASCII.GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (fields.Length != 2 || fields[0] is not ("populated" or "frozen")
+                || fields[1] is not ("0" or "1") || !result.TryAdd(fields[0], [fields[1]]))
+                throw new IsolationException("cgroup-events-format");
+        }
+        if (result.Count != 2) throw new IsolationException("cgroup-events-format");
         return result;
     }
 

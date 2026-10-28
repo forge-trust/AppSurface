@@ -60,9 +60,58 @@ internal static class PolicyControls
             var wrong = new Dictionary<string, string>(context) { [name] = "canary-invalid" };
             Reject(() => OwnerCompletionPolicy.Validate(wrong)); count++;
         }
+        count += NativeParserControls();
         count += ReleaseControls();
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
+    }
+
+    private static int NativeParserControls()
+    {
+        const string status = "Name:\tdotnet\nNSpid:\t41237\t1\nUid:\t62000\t62000\t62000\t62000\n"
+            + "Gid:\t62000\t62000\t62000\t62000\nGroups:\t62000\nNoNewPrivs:\t1\n"
+            + "CapEff:\t0000000000000000\n";
+#pragma warning disable CA1416 // These parser seams are pure wire parsers and run in portable policy controls.
+        var parsed = NativeFacts.ParseProcStatusFields(System.Text.Encoding.ASCII.GetBytes(status));
+#pragma warning restore CA1416
+        if (!parsed.TryGetValue("NSpid", out var nspid) || !nspid.SequenceEqual(["41237", "1"])
+            || !parsed.TryGetValue("Uid", out var uid) || uid.Length != 4 || uid[0] != "62000"
+            || !parsed.TryGetValue("NoNewPrivs", out var nnp) || !nnp.SequenceEqual(["1"]))
+            throw new IsolationException("proc-status-positive-control");
+
+        var events = System.Text.Encoding.ASCII.GetBytes("populated 0\nfrozen 0\n");
+#pragma warning disable CA1416 // This parser seam validates fixed cgroup.events text without touching Linux state.
+        var cgroup = NativeFacts.ParseCgroupEvents(events);
+#pragma warning restore CA1416
+        if (!cgroup.TryGetValue("populated", out var populated) || !populated.SequenceEqual(["0"])
+            || !cgroup.TryGetValue("frozen", out var frozen) || !frozen.SequenceEqual(["0"]))
+            throw new IsolationException("cgroup-events-positive-control");
+
+        RejectProc("Name: dotnet\nNSpid: 12 1\nNSpid: 13 1\n");
+        RejectProc("Name: dotnet\nnot-a-status-field\n");
+        RejectEvents("populated 0\nfrozen 0\npopulated 0\n");
+        RejectEvents("populated 0\nfrozen 2\n");
+        RejectEvents("populated 0\nunknown 0\n");
+        RejectEvents("populated 0\n");
+        return 8;
+
+        static void RejectProc(string value)
+        {
+#pragma warning disable CA1416 // Pure status parser negative control.
+            try { _ = NativeFacts.ParseProcStatusFields(System.Text.Encoding.ASCII.GetBytes(value)); }
+            catch (IsolationException) { return; }
+#pragma warning restore CA1416
+            throw new IsolationException("proc-status-negative-control");
+        }
+
+        static void RejectEvents(string value)
+        {
+#pragma warning disable CA1416 // Pure cgroup-events parser negative control.
+            try { _ = NativeFacts.ParseCgroupEvents(System.Text.Encoding.ASCII.GetBytes(value)); }
+            catch (IsolationException) { return; }
+#pragma warning restore CA1416
+            throw new IsolationException("cgroup-events-negative-control");
+        }
     }
 
     private static int ReleaseControls()
