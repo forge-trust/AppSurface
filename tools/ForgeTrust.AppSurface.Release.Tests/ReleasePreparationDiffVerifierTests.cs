@@ -543,12 +543,52 @@ public sealed class ReleasePreparationDiffVerifierTests
         Assert.Contains(unsafeResult.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unsupported-status"
             && diagnostic.Problem == "Release preparation reports one path more than once.");
 
-        var renameResult = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("R100\0old.md\0new.md\0C100\0source.md\0copy.md\0")).VerifyAsync(
+        var renameResult = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff("R100\0CHANGELOG.md\0docs/old-changelog.md\0C100\0source.md\0copy.md\0")).VerifyAsync(
             Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
 
         Assert.Contains(renameResult.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
         Assert.Contains(renameResult.Diagnostics, diagnostic => diagnostic.Code == "release-prep-unsupported-status"
             && diagnostic.Problem == "Release preparation may not copy files.");
+    }
+
+    [Theory]
+    [InlineData("src/Old.cs", "src/New.cs")]
+    [InlineData("docs/old.md", "docs/new.md")]
+    [InlineData("Durable/consumers/Consumer.csproj", "Durable/consumers/Consumer.csproj.template")]
+    public async Task VerifyPrepDiffAllowsOrdinaryProductRenamesWithoutAReleaseManifest(string originalPath, string path)
+    {
+        var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff($"R090\0{originalPath}\0{path}\0")).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    [Theory]
+    [InlineData("CHANGELOG.md", "docs/changelog.md")]
+    [InlineData("docs/changelog.md", "CHANGELOG.md")]
+    [InlineData("releases/unreleased.entries/entry.md", "docs/entry.md")]
+    [InlineData("docs/entry.md", "releases/unreleased.entries/entry.md")]
+    [InlineData("releases/v1.2.3.md", "docs/release.md")]
+    [InlineData("docs/release.md", "releases/v1.2.3.md")]
+    [InlineData("releases/current.md.yml", "docs/sidecar.yml")]
+    [InlineData("docs/sidecar.yml", "releases/current.md.yml")]
+    public async Task VerifyPrepDiffRejectsRenamesTouchingEitherReleaseOwnedEndpoint(string originalPath, string path)
+    {
+        var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff($"R090\0{originalPath}\0{path}\0")).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
+    }
+
+    [Fact]
+    public async Task VerifyPrepDiffRejectsProductRenamesInAReleasePreparationCandidate()
+    {
+        var result = await new ReleasePreparationDiffVerifier(CreateRunnerForNoFetchDiff(
+            "A\0releases/v1.2.3.release.json\0R090\0src/Old.cs\0src/New.cs\0")).VerifyAsync(
+            Directory.GetCurrentDirectory(), "main", noFetch: true, witnessPath: null, CancellationToken.None);
+
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.Code == "release-prep-rename-forbidden");
     }
 
     [Fact]
