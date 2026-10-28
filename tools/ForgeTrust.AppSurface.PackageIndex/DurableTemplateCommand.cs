@@ -73,12 +73,13 @@ internal static class DurableTemplateCommand
             var childEnvironment = environment.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_ADMIN_CONNECTION"] = cluster.ConnectionString;
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PG_BIN"] = bin;
-            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] = cluster.SetupBudgetRemainingMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var setupRemaining = cluster.SetupBudgetRemainingMilliseconds;
+            childEnvironment["APPSURFACE_TEMPLATE_NATIVE_SETUP_REMAINING_MS"] = setupRemaining.ToString(System.Globalization.CultureInfo.InvariantCulture);
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MIN"] = "50000";
             childEnvironment["APPSURFACE_TEMPLATE_NATIVE_PORT_MAX"] = "60000";
             result = await runner.RunAsync(new ExternalCommandRequest("dotnet",
                 ["test", root, "--no-build", "--no-restore", "--filter", "FullyQualifiedName~NativePostgreSqlSmoke", "--logger", "console;verbosity=detailed"],
-                root, "native-smoke", "verifying ordinary generated host startup", cluster.SetupBudgetRemainingMilliseconds + 35_000, childEnvironment,
+                root, "native-smoke", "verifying ordinary generated host startup", setupRemaining + 35_000, childEnvironment,
                 ExternalCapturePolicy.ReleaseProof), cancellationToken);
             // A completed child result cannot renew cleanup when its observation fails validation.
             // Preserve the initial allowance only for runner failures before a result exists.

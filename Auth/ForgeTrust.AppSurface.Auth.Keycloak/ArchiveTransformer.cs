@@ -258,7 +258,7 @@ internal static class ArchiveTransformer
         var bytes = ReadSmall(entry!, bounds, token);
         var text = StrictUtf8.GetString(bytes);
         var logical = new List<string>();
-        var current = "";
+        var current = new StringBuilder();
         using var reader = new StringReader(text);
         string? line;
         while ((line = reader.ReadLine()) is not null)
@@ -267,18 +267,19 @@ internal static class ArchiveTransformer
             if (line.StartsWith(' '))
             {
                 Require(current.Length > 0, "Manifest continuation without attribute");
-                current += line[1..];
+                current.Append(line.AsSpan(1));
             }
             else
             {
                 if (current.Length > 0)
-                    logical.Add(current);
-                current = line;
+                    logical.Add(current.ToString());
+                current.Clear();
+                current.Append(line);
             }
         }
 
         if (current.Length > 0)
-            logical.Add(current);
+            logical.Add(current.ToString());
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in logical)
         {
@@ -499,13 +500,19 @@ internal static class ArchiveTransformer
             throw new InvalidDataException(message);
     }
 
-    private static void TryDelete(string path)
+    /// <summary>Deletes an engine-owned archive staging file, tolerating expected I/O and access failures.</summary>
+    /// <param name="path">An engine-created staging-file path owned by the current operation.</param>
+    /// <remarks>Internal visibility permits real filesystem failure tests; unexpected path or programming errors propagate.</remarks>
+    internal static void TryDelete(string path)
     {
         try
         {
             File.Delete(path);
         }
-        catch
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
         {
         }
     }

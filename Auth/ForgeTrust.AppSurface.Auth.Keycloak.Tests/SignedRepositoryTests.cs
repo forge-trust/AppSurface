@@ -156,8 +156,10 @@ public sealed class SignedRepositoryTests
     {
         var fixture = SignedRepositoryFixture.Create();
         AssertInvalidMessage("release digest mismatch", () => Verify(fixture, new string('0', 64), fixture.Fingerprint, fixture.Policy(Clock, true)));
+        using var release = fixture.Release();
+        using var wrongKeyring = new MemoryStream(Encoding.UTF8.GetBytes("wrong"));
         AssertInvalidMessage("keyring digest mismatch", () => SignedRepository.VerifyRelease(
-            fixture.Release(), new MemoryStream(Encoding.UTF8.GetBytes("wrong")), fixture.ReleaseSha256, fixture.KeyringSha256,
+            release, wrongKeyring, fixture.ReleaseSha256, fixture.KeyringSha256,
             fixture.Fingerprint, fixture.Policy(Clock, true), fixture.Requested(), fixture.Indexes()));
     }
 

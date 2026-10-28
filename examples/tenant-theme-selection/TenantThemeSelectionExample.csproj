@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ForgeTrust.AppSurface.Web.Tests" />
     <ProjectReference Include="../../Web/ForgeTrust.AppSurface.Web/ForgeTrust.AppSurface.Web.csproj" />
   </ItemGroup>
 </Project>

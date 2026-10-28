@@ -172,7 +172,7 @@ internal sealed class SecurityRecipeFixture : IDisposable
     {
         var control = TarBytes(new Dictionary<string, byte[]> { ["control"] = Encoding.UTF8.GetBytes($"Package: {name}\nVersion: {version}\nArchitecture: amd64\n") });
         var data = TarBytes(new Dictionary<string, byte[]> { [$"usr/lib/{name}.so"] = Encoding.UTF8.GetBytes(name) });
-        var output = new MemoryStream(); output.Write(Encoding.ASCII.GetBytes("!<arch>\n"));
+        using var output = new MemoryStream(); output.Write(Encoding.ASCII.GetBytes("!<arch>\n"));
         Member(output, "debian-binary", Encoding.ASCII.GetBytes("2.0\n")); Member(output, "control.tar.gz", Gzip(control)); Member(output, "data.tar.gz", Gzip(data));
         output.Position = 0; return output.ToArray();
     }

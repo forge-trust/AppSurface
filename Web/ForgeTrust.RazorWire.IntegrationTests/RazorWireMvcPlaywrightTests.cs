@@ -673,6 +673,136 @@ public sealed class RazorWireMvcPlaywrightTests
         await AssertNoPageRefreshAsync(actorPage, _fixture.ReactivityUrl);
     }
 
+    [Theory]
+    [InlineData(1, false)]
+    [InlineData(8, false)]
+    [InlineData(1, true)]
+    [InlineData(8, true)]
+    public async Task UserList_RevalidationCannotEraseConcurrentRegistrationStreams(int writerCount, bool pauseAtRender)
+    {
+        var unique = Guid.NewGuid().ToString("N")[..8];
+        var usernames = Enumerable.Range(0, writerCount).Select(index => $"swr-{index}-{unique}").ToArray();
+        await using var observerContext = await _fixture.Browser.NewContextAsync();
+        var observerPage = await observerContext.NewPageAsync();
+        await observerPage.GotoAsync(_fixture.ReactivityUrl);
+        await WaitForStreamConnectedAsync(observerPage);
+        await WaitForUserListReadyAsync(observerPage);
+
+        await observerPage.EvaluateAsync("""
+            pauseAtRender => {
+                if (!pauseAtRender) return;
+                document.addEventListener('turbo:before-frame-render', event => {
+                    if (event.target.id !== 'user-list' || window.__heldListResume) return;
+                    event.preventDefault();
+                    window.__heldListResume = event.detail.resume;
+                });
+            }
+            """, pauseAtRender);
+
+        var captured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = 0;
+        await observerPage.RouteAsync("**/Reactivity/UserList", async route =>
+        {
+            if (Interlocked.Exchange(ref held, 1) != 0)
+            {
+                await route.ContinueAsync();
+                return;
+            }
+
+            var response = await route.FetchAsync();
+            try
+            {
+                var html = await response.TextAsync();
+                Assert.All(usernames, username => Assert.DoesNotContain(username, html, StringComparison.Ordinal));
+                captured.TrySetResult();
+                if (!pauseAtRender) await release.Task;
+                await route.FulfillAsync(new RouteFulfillOptions { Response = response });
+            }
+            catch (Exception exception)
+            {
+                captured.TrySetException(exception);
+                throw;
+            }
+            finally
+            {
+                await response.DisposeAsync();
+            }
+        });
+
+        try
+        {
+            await observerPage.EvaluateAsync("""
+                () => {
+                    window.__controlledListLoaded = false;
+                    document.querySelector('#user-list').reload().then(() => { window.__controlledListLoaded = true; });
+                }
+                """);
+            await captured.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            if (pauseAtRender)
+            {
+                await observerPage.WaitForFunctionAsync("() => typeof window.__heldListResume === 'function'",
+                    null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            }
+            await observerPage.EvaluateAsync("""
+                () => {
+                    window.__controlledCountCommits = 0;
+                    document.addEventListener('turbo:before-stream-render', event => {
+                        if (event.target.getAttribute('target') !== 'user-count') return;
+                        const render = event.detail.render;
+                        event.detail.render = async element => {
+                            await render(element);
+                            window.__controlledCountCommits++;
+                        };
+                    });
+                }
+                """);
+            await Task.WhenAll(usernames.Select(async username =>
+            {
+                await using var actorContext = await _fixture.Browser.NewContextAsync();
+                var actorPage = await actorContext.NewPageAsync();
+                await actorPage.GotoAsync(_fixture.ReactivityUrl);
+                var response = await RegisterUserAndWaitForPostAsync(actorPage, username);
+                Assert.True(response.Ok);
+                Assert.Contains("username=" + username, response.Request.PostData, StringComparison.Ordinal);
+            }));
+            foreach (var username in usernames)
+            {
+                await WaitForUserInListAsync(observerPage, username);
+            }
+
+            // Every registration sends an append followed by a count update. The
+            // fresh-snapshot control begins only after all controlled writes settle.
+            await observerPage.WaitForFunctionAsync("count => window.__controlledCountCommits >= count",
+                writerCount, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            release.TrySetResult();
+            if (pauseAtRender) await observerPage.EvaluateAsync("() => window.__heldListResume()");
+            await observerPage.WaitForFunctionAsync("() => window.__controlledListLoaded === true",
+                null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            var rendered = await observerPage.Locator("#user-list-items").InnerTextAsync();
+            Assert.All(usernames, username => Assert.Contains(username, rendered, StringComparison.Ordinal));
+
+            // A rejected old snapshot must not poison a subsequent authoritative refresh.
+            await observerPage.EvaluateAsync("""
+                () => {
+                    document.querySelector('#user-count').textContent = 'local-only sentinel';
+                    window.__controlledListLoaded = false;
+                    document.querySelector('#user-list').reload().then(() => { window.__controlledListLoaded = true; });
+                }
+                """);
+            await observerPage.WaitForFunctionAsync("() => window.__controlledListLoaded === true",
+                null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            Assert.DoesNotContain("local-only sentinel", await observerPage.Locator("#user-count").InnerTextAsync(), StringComparison.Ordinal);
+            var refreshed = await observerPage.Locator("#user-list-items").InnerTextAsync();
+            Assert.All(usernames, username => Assert.Contains(username, refreshed, StringComparison.Ordinal));
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (pauseAtRender) await observerPage.EvaluateAsync("() => window.__heldListResume?.()");
+        }
+    }
+
     [Fact]
     public async Task RegisterUser_WithoutAntiforgeryToken_IsRejected()
     {

@@ -11,6 +11,44 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 public sealed class ArchiveTests
 {
     [Fact]
+    public void OwnedArchiveCleanupRemovesFilesAndToleratesMissingPaths()
+    {
+        using var root = new TempDirectory();
+        var path = Path.Combine(root.Path, "owned-stage");
+        File.WriteAllText(path, "temporary");
+        ArchiveTransformer.TryDelete(path);
+        Assert.False(File.Exists(path));
+        ArchiveTransformer.TryDelete(path);
+    }
+
+    [Fact]
+    public void OwnedArchiveCleanupToleratesAccessFailuresWithoutDeletingDirectories()
+    {
+        using var root = new TempDirectory();
+        var directory = Path.Combine(root.Path, "owned-directory");
+        Directory.CreateDirectory(directory);
+        Assert.Throws<UnauthorizedAccessException>(() => File.Delete(directory));
+        ArchiveTransformer.TryDelete(directory);
+        Assert.True(Directory.Exists(directory));
+    }
+
+    [Fact]
+    public void OwnedArchiveCleanupToleratesIoFailures()
+    {
+        using var root = new TempDirectory();
+        var overlongName = Path.Combine(root.Path, new string('x', 256));
+        Assert.ThrowsAny<IOException>(() => File.Delete(overlongName));
+        ArchiveTransformer.TryDelete(overlongName);
+        Assert.Empty(Directory.GetFileSystemEntries(root.Path));
+    }
+
+    [Fact]
+    public void OwnedArchiveCleanupPropagatesUnexpectedPathErrors()
+    {
+        Assert.Throws<ArgumentException>(() => ArchiveTransformer.TryDelete("\0"));
+    }
+
+    [Fact]
     public async Task Transforms_module_while_preserving_manifest_and_unrelated_entries()
     {
         using var root = new TempDirectory();
@@ -19,6 +57,50 @@ public sealed class ArchiveTests
         var result = await ArchiveTransformer.TransformAsync(new ArchiveTransformSpec(source, output, Hash(source), [new("com.example", "jackson-core", "1", "2", "com/example/", "example", Hash(replacement))], new()));
         Assert.Equal(Hash(source), result.SourceSha256); Assert.Equal(Hash(output), result.OutputSha256); Assert.True(result.ManifestPreserved); Assert.True(result.UnrelatedPayloadsPreserved);
         using var zip = ZipFile.OpenRead(output); Assert.Equal("new", Read(zip, "com/example/Main.class")); Assert.Equal("keep", Read(zip, "unrelated.txt"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("\r\n\r\n")]
+    public async Task FoldedManifestAttributesPreserveExactBytesAcrossAttributeBoundaries(string ending)
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source.jar");
+        var replacement = Path.Combine(root.Path, "jackson-core-2.jar");
+        var output = Path.Combine(root.Path, "out.jar");
+        var manifest = "Manifest-Version: 1.0\r\nCreated-By: fixture\r\n"
+            + string.Concat(Enumerable.Repeat(" continuation\r\n", 1024))
+            + "Java-Version: 21\r\nBuild-Jdk-Spec: 21" + ending;
+        WriteJar(source, "1", "old", manifest: manifest);
+        WriteJar(replacement, "2", "new", includeUnrelated: false);
+        var module = new ArchiveModuleSpec("com.example", "jackson-core", "1", "2", "com/example/", "example", Hash(replacement));
+
+        var result = await ArchiveTransformer.TransformAsync(new(source, output, Hash(source), [module], new()));
+
+        Assert.True(result.ManifestPreserved);
+        using var zip = ZipFile.OpenRead(output);
+        Assert.Equal(manifest, Read(zip, "META-INF/MANIFEST.MF"));
+        Assert.Equal("new", Read(zip, "com/example/Main.class"));
+    }
+
+    [Theory]
+    [InlineData(" orphan\r\nManifest-Version: 1.0\r\n", "Manifest continuation without attribute")]
+    [InlineData("Manifest-Version: 1.0\r\n\r\n orphan\r\n", "Manifest continuation without attribute")]
+    [InlineData("Manifest-Version: 1.0\r\nCreated-By: one\r\n continuation\r\nCreated-By: two\r\n", "Duplicate manifest attribute")]
+    public async Task FoldedManifestAttributesStillRejectOrphanedContinuationsAndDuplicates(string manifest, string message)
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source.jar");
+        var replacement = Path.Combine(root.Path, "jackson-core-2.jar");
+        var output = Path.Combine(root.Path, "out.jar");
+        WriteJar(source, "1", "old", manifest: manifest);
+        WriteJar(replacement, "2", "new", includeUnrelated: false);
+        var module = new ArchiveModuleSpec("com.example", "jackson-core", "1", "2", "com/example/", "example", Hash(replacement));
+
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ArchiveTransformer.TransformAsync(new(source, output, Hash(source), [module], new())));
+
+        Assert.Contains(message, failure.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(output));
     }
 
     [Fact]
