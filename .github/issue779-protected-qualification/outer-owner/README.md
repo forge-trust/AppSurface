@@ -53,7 +53,13 @@ LC_ALL, with no token or provider context.
 
 Every phase deadline starts before dispatch and includes startup, stop, independent
 KILL, cgroup observation and stream/process join. No grace interval is added after
-expiry. Process exit, unit-client success, or a JSON cleanup flag alone cannot
+expiry. The owner requires two consecutive observations of the retained original
+cgroup as empty, or kernel removal of that exact retained node after launcher exit.
+The latter requires a zero-link retained inode with matching device/inode/mount
+identity and `ENOENT` for the original name; a replacement or ambiguous error
+rejects. [Kernel cgroup deletion rules](https://docs.kernel.org/admin-guide/cgroup-v2.html#organizing-processes-and-threads)
+permit removal only after all live processes and child groups are gone. The
+launcher PID handle, command client and streams must still join independently. Process exit, unit-client success, or a JSON cleanup flag alone cannot
 advance the sequence. The existing inner deadlines, coverage thresholds,
 comparison base and admission table are unchanged.
 
@@ -63,10 +69,10 @@ The [Linux isolation workflow](../../workflows/evidencehost-completed-isolation-
 builds this owner and runs fixed probes for writable build/result roots, immutable
 validator/archive/capture/preparation files, inaccessible credentials and host
 processes, fixed SDK, session-changing descendants observed live before bounded teardown, ignored stop, output overflow,
-real byte/inode exhaustion, and source drift before closeout. The same owner and
+real byte/inode exhaustion, and source drift before closeout. The SDK version probe puts first-use state in `/tmp` through its fixed child environment; the replay worker itself retains its exact four-variable environment. The same owner and
 phase-launch path are used for probes and completed-run execution. Synthetic
 canaries are never provider tokens. Source captures and bounded original logs are
-retained with the result. The workflow makes a fresh root-owned, no-follow source-capture copy before invocation and the owner keeps its strict current-UID input check. Setup failures expose only a finite checkpoint name; they never expose exception messages, provider text or token bytes.
+retained with the result. The workflow makes a fresh root-owned, no-follow source-capture copy before invocation and the owner keeps its strict current-UID input check. Empty Python standard-library package markers are retained as regular data files; executable inputs remain nonempty. Setup failures expose only a finite checkpoint name and an allowlisted category; they never expose exception messages, provider text or token bytes.
 
 A successful controls report proves only its named host controls at the captured
 source. It does not establish a genuine protected predecessor, successful full

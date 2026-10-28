@@ -64,6 +64,11 @@ internal static class PolicyControls
         count += ProcessIdentityParserControls();
         count += CgroupSettlementControls();
         count += ReleaseControls();
+        if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
+            || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
+            || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
+            throw new IsolationException("diagnostic-redaction-control");
+        count += 3;
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
     }

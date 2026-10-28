@@ -1,8 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
-using System.Collections.Concurrent;
 using Microsoft.Win32.SafeHandles;
 
 namespace EvidenceHost.CompletedIsolation;
@@ -466,13 +466,58 @@ internal static class OwnerWorkspace
         foreach (var item in directories)
         {
             var path = layout.Host(item);
-            Directory.CreateDirectory(path);
-            SetOwner(path, 0, 0);
             var mode = item is "/root" ? 0x1c0u
                 : item is "/tmp" ? 0x3ffu
                 : item is OwnerPaths.Native or OwnerPaths.Stage or OwnerPaths.Input or OwnerPaths.Handoff or OwnerPaths.Output or OwnerPaths.Report
                     ? 0x1c0u : 0x1edu;
-            SetMode(path, mode);
+            EnsureRootDirectory(layout, item, mode);
+        }
+    }
+
+    /// <summary>Creates or validates one fixed rootfs directory without following or changing existing nodes.</summary>
+    private static void EnsureRootDirectory(OwnerLayout layout, string insidePath, uint expectedMode)
+    {
+        var path = layout.Host(insidePath);
+        var created = !Directory.Exists(path);
+        if (created) Directory.CreateDirectory(path);
+        var node = OwnerCustody.StatPath(path);
+        Require(node.Type == OwnerCustody.DirectoryType, "rootfs-directory-shape");
+        if (created)
+        {
+            SetOwner(path, 0, 0);
+            SetMode(path, expectedMode);
+        }
+        else Require(node.Uid == 0 && node.Gid == 0 && node.Mode == expectedMode, "rootfs-directory-shape");
+    }
+
+    /// <summary>Creates only immutable tool-closure ancestors, with root-owned traversable permissions.</summary>
+    private static void EnsureToolParents(OwnerLayout layout, string destination)
+    {
+        var relative = Path.GetRelativePath(layout.RootFileSystem, destination);
+        Require(!Path.IsPathFullyQualified(relative) && relative != ".."
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal), "tool-parent-path");
+        var current = string.Empty;
+        var parts = Path.GetDirectoryName(relative)!.Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            current = current.Length == 0 ? part : Path.Combine(current, part);
+            var fullPath = Path.Combine(layout.RootFileSystem, current);
+            var insidePath = "/" + current.Replace(Path.DirectorySeparatorChar, '/');
+            if (!Directory.Exists(fullPath)) Directory.CreateDirectory(fullPath);
+            var node = OwnerCustody.StatPath(fullPath);
+            Require(node.Type == OwnerCustody.DirectoryType && node.Uid == 0 && node.Gid == 0
+                && (node.Mode & 0x12) == 0, "tool-parent-shape");
+            if (node.Mode != 0x1edu)
+            {
+                Require(insidePath is "/opt" or "/opt/appsurface" or "/opt/appsurface/owner"
+                    or "/usr" or "/usr/bin" or "/usr/sbin" or "/usr/lib"
+                    || insidePath.StartsWith("/usr/lib/", StringComparison.Ordinal)
+                    || insidePath is "/usr/share" or "/bin" or "/sbin" or "/lib" or "/lib64"
+                    || insidePath.StartsWith("/lib/", StringComparison.Ordinal)
+                    || insidePath.StartsWith("/lib64/", StringComparison.Ordinal)
+                    || insidePath is "/etc" or "/etc/ssl" or "/etc/ssl/certs", "tool-parent-private-path");
+                OwnerWorkspace.SetMode(fullPath, 0x1edu);
+            }
         }
     }
 
@@ -517,7 +562,7 @@ internal static class OwnerWorkspace
         foreach (var binary in binaries)
         {
             token.ThrowIfCancellationRequested();
-            CopyRootFile(binary, layout.Host(binary), executable: true);
+            CopyRootFile(layout, binary, layout.Host(binary), executable: true);
         }
     }
 
@@ -534,7 +579,7 @@ internal static class OwnerWorkspace
             if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint)) continue;
             var destination = layout.Host("/usr/lib/python3.12/" + relative.Replace(Path.DirectorySeparatorChar, '/'));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            CopyRootFile(path, destination, executable: path.EndsWith(".so", StringComparison.Ordinal));
+            CopyRootFile(layout, path, destination, executable: path.EndsWith(".so", StringComparison.Ordinal), allowEmpty: true);
             if (path.EndsWith(".so", StringComparison.Ordinal)) extensions.Add(path);
         }
         foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
@@ -557,7 +602,7 @@ internal static class OwnerWorkspace
         foreach (var dependency in dependencies)
         {
             token.ThrowIfCancellationRequested();
-            CopyRootFile(dependency, layout.Host(dependency), executable: true);
+            CopyRootFile(layout, dependency, layout.Host(dependency), executable: true);
         }
     }
 
@@ -613,7 +658,7 @@ internal static class OwnerWorkspace
         foreach (var path in expanded)
         {
             token.ThrowIfCancellationRequested();
-            CopyRootFile(path, layout.Host(path), executable: true);
+            CopyRootFile(layout, path, layout.Host(path), executable: true);
         }
     }
 
@@ -637,7 +682,7 @@ internal static class OwnerWorkspace
             if (pair.Key.EndsWith("ca-certificates.crt", StringComparison.Ordinal))
             {
                 var ca = "/etc/ssl/certs/ca-certificates.crt";
-                if (File.Exists(ca)) CopyRootFile(ca, path, executable: false);
+                if (File.Exists(ca)) CopyRootFile(layout, ca, path, executable: false);
                 continue;
             }
             File.WriteAllText(path, pair.Value, new UTF8Encoding(false, true));
@@ -658,7 +703,7 @@ internal static class OwnerWorkspace
             };
             var path = candidates.FirstOrDefault(File.Exists);
             Require(path is not null, "nss-library-missing");
-            CopyRootFile(path!, layout.Host(path!), executable: true);
+            CopyRootFile(layout, path!, layout.Host(path!), executable: true);
         }
     }
 
@@ -674,7 +719,7 @@ internal static class OwnerWorkspace
         {
             token.ThrowIfCancellationRequested();
             var destination = layout.Host(OwnerPaths.Assembly.Replace("EvidenceHost.CompletedIsolation.dll", Path.GetFileName(source), StringComparison.Ordinal));
-            await CopyFileBoundedAsync(source, destination, 16 * 1024 * 1024, token).ConfigureAwait(false);
+            await CopyFileBoundedAsync(layout, source, destination, 16 * 1024 * 1024, token).ConfigureAwait(false);
             SetOwner(destination, 0, 0);
             SetMode(destination, 0x1a4);
         }
@@ -694,12 +739,12 @@ internal static class OwnerWorkspace
         SetMode(path, 0x180);
     }
 
-    private static async Task CopyFileBoundedAsync(string source, string destination, int limit, CancellationToken token)
+    private static async Task CopyFileBoundedAsync(OwnerLayout layout, string source, string destination, int limit, CancellationToken token)
     {
         var info = new FileInfo(source);
         Require(info.Exists && info.Length is > 0 && info.Length <= limit && !info.Attributes.HasFlag(FileAttributes.ReparsePoint),
             "copy-source-shape");
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        EnsureToolParents(layout, destination);
         await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
         await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 65536,
             FileOptions.Asynchronous | FileOptions.WriteThrough);
@@ -718,7 +763,7 @@ internal static class OwnerWorkspace
         output.Flush(true);
     }
 
-    private static void CopyRootFile(string source, string destination, bool executable)
+    private static void CopyRootFile(OwnerLayout layout, string source, string destination, bool executable, bool allowEmpty = false)
     {
         Require(File.Exists(source), "rootfs-source");
         var original = Path.GetFullPath(new FileInfo(source).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? source);
@@ -731,7 +776,9 @@ internal static class OwnerWorkspace
         var sourceFact = OwnerCustody.StatPath(original);
         var expectedMode = executable ? 0x1edu : 0x1a4u;
         Require(sourceFact.Type == OwnerCustody.RegularType && sourceFact.Links >= 1
-            && sourceFact.Size is > 0 and <= 512UL * 1024 * 1024, "rootfs-source-shape");
+            && sourceFact.Uid == 0 && (sourceFact.Mode & 0x12) == 0
+            && (sourceFact.Size > 0 || allowEmpty && !executable)
+            && sourceFact.Size <= 512UL * 1024 * 1024, "rootfs-source-shape");
         if (File.Exists(destination))
         {
             var destinationFact = OwnerCustody.StatPath(destination);
@@ -756,13 +803,14 @@ internal static class OwnerWorkspace
                 "rootfs-duplicate-content");
             return;
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        EnsureToolParents(layout, destination);
         using (var input = new FileStream(original, FileMode.Open, FileAccess.Read, FileShare.Read))
         using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             input.CopyTo(output);
         SetOwner(destination, 0, 0);
         SetMode(destination, executable ? 0x1edu : 0x1a4u);
     }
+
 
     private static void AddDependencies(string lddOutput, ISet<string> dependencies)
     {
