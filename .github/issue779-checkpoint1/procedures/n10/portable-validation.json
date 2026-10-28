@@ -1,43 +1,70 @@
 {
   "argv": [
-    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "python3",
     "-B",
     "-m",
     "unittest",
     "-v",
-    "test_n10"
+    "test_n10",
+    "test_n10_stdlib_declarations"
   ],
+  "c1_portable_suite": {
+    "argv": [
+      "timeout",
+      "--signal=KILL",
+      "60",
+      "python3",
+      "-B",
+      "-",
+      "(workflow discovery plus procedures/n15/test_data.py)"
+    ],
+    "elapsed_seconds": 7.395,
+    "exit": 0,
+    "native_executed": false,
+    "stderr_bytes": 38137,
+    "stderr_sha256": "146dcb4088f93809db01b569d582ae4ba2449b7adbd5fadfba79d43a94c63307",
+    "test_methods": 325,
+    "timeout_seconds": 60
+  },
   "dotnet_executed": false,
-  "elapsed_seconds": 0.051142583000000005,
+  "elapsed_seconds": 0.242,
   "exit": 0,
+  "focused_elapsed_seconds": 0.242,
   "native_executed": false,
   "schema": "issue779-n10-portable-source-validation-v1",
   "source_after": {
-    "procedures/n10/README.md": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
-    "procedures/n10/adapter.py": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628",
-    "procedures/n10/checkpoint-n10-pending-start.sh": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
-    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "14b93b679cf813154e591c265874d05884d72d54e001a41ec96d929b0b1a2b32",
+    "procedures/n10/README.md": "56b7dc8d227cb7fad43e4ff1a96f86828c093c6d278d1116cec1dd9ac50834da",
+    "procedures/n10/adapter.py": "4838518a6e07f2ef2b2195a79a10a98b52b4a42b443c373ab021300bb98c935d",
+    "procedures/n10/checkpoint-n10-pending-start.sh": "0a8a4acea577ee24fb8a8ffbb454f5dabc14136b990cbfa9c3df77936db9f314",
+    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "45a09eab4321aa9943598476e685527111958889ca8986bdc18464b519959d29",
     "procedures/n10/dispatch.sh": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f",
     "procedures/n10/process.py": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38",
     "procedures/n10/records.py": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591",
     "procedures/n10/retain-native.sh": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024",
-    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5"
+    "test_n04_stdlib_declarations.py": "26ea0e314cd4c02b97a96db4b10b038cc1a10283ee338d84743baf68fcda4b65",
+    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5",
+    "test_n10_stdlib_declarations.py": "82ad4f361237d95ec962a2b375d6c765fac425fe43e066a405d21533019e3c06"
   },
   "source_before": {
-    "procedures/n10/README.md": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
-    "procedures/n10/adapter.py": "0cbd6b3a659767839499b5cf31eb853aae0495f568ba1321334f125aede23628",
-    "procedures/n10/checkpoint-n10-pending-start.sh": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
-    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "14b93b679cf813154e591c265874d05884d72d54e001a41ec96d929b0b1a2b32",
+    "procedures/n10/README.md": "56b7dc8d227cb7fad43e4ff1a96f86828c093c6d278d1116cec1dd9ac50834da",
+    "procedures/n10/adapter.py": "4838518a6e07f2ef2b2195a79a10a98b52b4a42b443c373ab021300bb98c935d",
+    "procedures/n10/checkpoint-n10-pending-start.sh": "0a8a4acea577ee24fb8a8ffbb454f5dabc14136b990cbfa9c3df77936db9f314",
+    "procedures/n10/checkpoint-n10-pending-start.sh.patch": "45a09eab4321aa9943598476e685527111958889ca8986bdc18464b519959d29",
     "procedures/n10/dispatch.sh": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f",
     "procedures/n10/process.py": "c0cf2afe8cd275586422cabe4520db56d6a9c0307ab980c336d6e13cb7bd6b38",
     "procedures/n10/records.py": "1f86313e484ccba3257e90b3e805008b76f341b9feaccc08b1c455e63da2b591",
     "procedures/n10/retain-native.sh": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024",
-    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5"
+    "test_n04_stdlib_declarations.py": "26ea0e314cd4c02b97a96db4b10b038cc1a10283ee338d84743baf68fcda4b65",
+    "test_n10.py": "cb5c1873978d5241865f074ab99525e7ae74912b9c9618d62419b0d3739723f5",
+    "test_n10_stdlib_declarations.py": "82ad4f361237d95ec962a2b375d6c765fac425fe43e066a405d21533019e3c06"
   },
   "source_unchanged": true,
-  "stderr_bytes": 803,
-  "stderr_sha256": "ae017c4200de2aec325bfd6f44d3521e2244d0fd18ba5d85e2ec6878f7e9f8f0",
+  "stderr_bytes": 1472,
+  "stderr_sha256": "b631d5c3a5ddf7c00d8c9fa2f2d115f7f31b91f5816f2add8fac5060e0667a34",
   "stdout_bytes": 0,
   "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "test_harness_sha256": "26ea0e314cd4c02b97a96db4b10b038cc1a10283ee338d84743baf68fcda4b65",
+  "test_methods": 12,
+  "test_module_sha256": "82ad4f361237d95ec962a2b375d6c765fac425fe43e066a405d21533019e3c06",
   "timeout_seconds": 30
 }

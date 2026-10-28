@@ -51,10 +51,12 @@ def file_alias():
 
 
 class N04StdlibDeclarationTests(unittest.TestCase):
+    script = SCRIPT
+
     def setUp(self):
         if subprocess.run(["/usr/bin/jq", "--version"], capture_output=True).returncode != 0:
             self.skipTest("jq is required by the production audit parser")
-        self.source = SCRIPT.read_text(encoding="utf-8")
+        self.source = self.script.read_text(encoding="utf-8")
         self.loop = self.source[
             self.source.index('stdlib_expected=$(bounded jq -er'):
             self.source.index("stdlib_after=$(negative_stdlib_inventory)")

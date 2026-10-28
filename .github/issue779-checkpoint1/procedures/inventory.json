@@ -71,12 +71,12 @@
       "sha256": "504bed99afcb6faf1aac03f245bc7520afa88c02aebea116f9dcf1ec4ccbc98d"
     },
     {
-      "bytes": 88969,
+      "bytes": 88978,
       "historical_path": "packet/cases/N10/tooling/.github/issue779-csharp-native/checkpoint-n10-pending-start.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/n10/checkpoint-n10-pending-start.sh",
-      "ported_sha256": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a",
-      "sha256": "134ec927222349b1ea506153574b5950be2d0372c622b9f2ee905dd583386b48"
+      "ported_sha256": "0a8a4acea577ee24fb8a8ffbb454f5dabc14136b990cbfa9c3df77936db9f314",
+      "sha256": "0a8a4acea577ee24fb8a8ffbb454f5dabc14136b990cbfa9c3df77936db9f314"
     },
     {
       "bytes": 99944,
@@ -629,13 +629,13 @@
       "sha256": "427a3b1f9698b930a4cc556c58c766b9e98c919de95b34f00546ac4d67015b59"
     },
     {
-      "bytes": 7290,
+      "bytes": 8595,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n10/README.md",
-      "ported_sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6",
-      "sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6"
+      "ported_sha256": "56b7dc8d227cb7fad43e4ff1a96f86828c093c6d278d1116cec1dd9ac50834da",
+      "sha256": "56b7dc8d227cb7fad43e4ff1a96f86828c093c6d278d1116cec1dd9ac50834da"
     },
     {
       "bytes": 17377,
@@ -665,22 +665,22 @@
       "sha256": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f"
     },
     {
-      "bytes": 5625,
+      "bytes": 6968,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n10/port-manifest.json",
-      "ported_sha256": "bb422b127c9086c15985fb45e9d907f3229a0b95228de9726e045a0dc6befcda",
-      "sha256": "bb422b127c9086c15985fb45e9d907f3229a0b95228de9726e045a0dc6befcda"
+      "ported_sha256": "44ff947ada932d4772ed18a9051c1291ed7956d8144f55f87baccbc47cd3228b",
+      "sha256": "44ff947ada932d4772ed18a9051c1291ed7956d8144f55f87baccbc47cd3228b"
     },
     {
-      "bytes": 2528,
+      "bytes": 3624,
       "historical_path": null,
       "native_execution": false,
       "port_status": "current-source-adapter-parser-custody-or-provenance-data",
       "ported_path": "procedures/n10/portable-validation.json",
-      "ported_sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295",
-      "sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295"
+      "ported_sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d",
+      "sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d"
     },
     {
       "bytes": 18212,

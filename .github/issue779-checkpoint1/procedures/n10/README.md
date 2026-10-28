@@ -111,13 +111,15 @@ procedure; detached metadata never grants runtime authority.
 [`port-manifest.json`](port-manifest.json) records relative historical paths,
 historical/current hashes, and mechanical preservation checks.
 [`checkpoint-n10-pending-start.sh.patch`](checkpoint-n10-pending-start.sh.patch)
-shows the shell delta: current provenance replaces the retired packed reader,
+shows the initial shell-port delta: current provenance replaces the retired packed reader,
 while the fixed bootstrap adds `XDG_RUNTIME_DIR=/tmp` as the sixth environment
 entry. The original native suffix is otherwise unchanged apart from removal of
 the retired source-review-file pin. The dispatch literal, retainer, and
 [strict N10 parser](../parsers/check_n10_pending_start.py) remain byte-identical.
 Record-function changes only make actual source, parent, capture, and parser
-hashes explicit parameters.
+hashes explicit parameters. The stdlib declaration-cache and repeated root-fit
+guard follow-up is listed separately in the port manifest; it is not represented
+by that historical port patch.
 
 [`test_n10.py`](../../test_n10.py) defines detached data controls for Stop/join
 failure precedence, fixture identity and custody, closed diagnostics, all twelve
@@ -126,3 +128,21 @@ complete request/summary/fixture model with one-field negative neighbors. These
 tests create no owner, worker, lease, unit, or admission. Fresh Linux execution
 with the actual published N10 image and retained artifact verification is still
 required before any native acceptance claim.
+
+## Stdlib declaration lookup follow-up
+
+The stdlib audit loop obtains each declared digest from the already initialized
+immutable OS-audit lookup table. It still runs the physical `verify_os_path`
+check for every member, verifies ELF dependencies and alias chains, and checks
+the complete stdlib membership both before and after the per-file scan. The
+same original root-start fit check (`remaining > 246` and at least 246 seconds
+until the request deadline) runs again after the scan immediately before the
+240-second owner interval is computed. Neither the 240-second owner limit nor
+the 30-second reply/cleanup bounds are extended. The earlier N10 timeout does
+not establish that the repeated lookup caused or would prevent that failure.
+
+[`test_n10_stdlib_declarations.py`](../../test_n10_stdlib_declarations.py)
+reuses the detached declaration-loop harness from N04 against this N10 shell.
+It checks that N10 consumes only the initialized digest cache, retains physical
+verification and before/after membership checks, and rejects both root-fit
+boundary values. These portable controls do not execute the native procedure.

@@ -1234,7 +1234,7 @@ negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib
 # Literal file aliases use the exact recorded root-owned chain; directory aliases reject.
 while IFS= read -r python_file; do
  [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
- python_hash=$(bounded jq -er --arg p "$python_file" '[.files[]|select(.path==$p)] as $rows | if ($rows|length)==1 then $rows[0].sha256 else error("missing-fixed-pin") end' "$os_audit")
+ python_hash=$(negative_os_file_hash "$python_file") || fail negative-stdlib-file-unpinned
  verify_os_path "$python_file" "$python_hash"
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
@@ -1281,6 +1281,7 @@ negative_python_trust_recheck() {
 
 # The outer owner and the original request retain their existing 240s/30s limits.
 monotonic_ms() { local up rest frac; IFS=" " read -r up rest </proc/uptime || return 1; [[ $up =~ ^[0-9]+\.[0-9]+$ ]] || return 1; frac=${up#*.}000; frac=${frac:0:3}; printf "%s" "$((10#${up%%.*}*1000+10#$frac))"; }
+(( $(remaining)>246 && job_deadline_epoch-$(bounded date -u +%s)>245 )) || fail n10-original-root-bound
 n10_root_start_ms=$(monotonic_ms) || fail n10-clock
 n10_root_end_ms=$((n10_root_start_ms+240000)); ((n10_root_end_ms<work_end*1000)) || fail n10-original-root-bound
 n10_reply_deadline=$((n10_root_start_ms+30000))

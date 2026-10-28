@@ -1,4 +1,11 @@
 {
+  "additional_declaration_test": ".github/issue779-checkpoint1/test_n10_stdlib_declarations.py",
+  "additional_declaration_test_record": {
+    "bytes": 2738,
+    "mode": "0644",
+    "path": "test_n10_stdlib_declarations.py",
+    "sha256": "82ad4f361237d95ec962a2b375d6c765fac425fe43e066a405d21533019e3c06"
+  },
   "additional_owned_test": ".github/issue779-checkpoint1/test_n10.py",
   "additional_test": {
     "bytes": 14450,
@@ -11,7 +18,10 @@
     "current source,parent,capture,parser SHA supplied explicitly to original record predicates",
     "sixth fixed XDG_RUNTIME_DIR=/tmp bootstrap entry",
     "actual root receipt bytes/hash remain root projection",
-    "current copied source/tool/runtime nodes determine exact original stdout inventory expectations"
+    "current copied source/tool/runtime nodes determine exact original stdout inventory expectations",
+    "stdlib file digests now come from the already initialized immutable OS-audit lookup table; per-file physical verification, alias and ELF checks, and complete before/after membership checks remain",
+    "repeat the unchanged >246 remaining and >245 deadline-fit check after the stdlib scan immediately before computing the original 240-second owner interval",
+    "detached test_n10_stdlib_declarations.py reuses the N04 declaration-loop harness against the N10 shell and checks cache, verifier, membership, ELF, and root-fit boundaries"
   ],
   "coverage_credit": false,
   "dotnet_executed": false,
@@ -21,9 +31,10 @@
   },
   "files": {
     "README.md": {
-      "bytes": 7290,
+      "bytes": 8595,
       "mode": "0644",
-      "sha256": "d2a434e61e7777011c0f26ccbc80e622e07d66d888a3f5dc8dbe9bf70905b1a6"
+      "path": "README.md",
+      "sha256": "56b7dc8d227cb7fad43e4ff1a96f86828c093c6d278d1116cec1dd9ac50834da"
     },
     "adapter.py": {
       "bytes": 17377,
@@ -31,9 +42,10 @@
       "sha256": "4838518a6e07f2ef2b2195a79a10a98b52b4a42b443c373ab021300bb98c935d"
     },
     "checkpoint-n10-pending-start.sh": {
-      "bytes": 88969,
+      "bytes": 88978,
       "mode": "0644",
-      "sha256": "a3b83047bad125a8af6b8b121b3555ec800e20a284808e320f4578d76efd264a"
+      "path": "checkpoint-n10-pending-start.sh",
+      "sha256": "0a8a4acea577ee24fb8a8ffbb454f5dabc14136b990cbfa9c3df77936db9f314"
     },
     "checkpoint-n10-pending-start.sh.patch": {
       "bytes": 15383,
@@ -46,9 +58,10 @@
       "sha256": "529606af45fa486d0bbc2fd7fcc0de7a28bb34d5e96914e6fb35b48969feff9f"
     },
     "portable-validation.json": {
-      "bytes": 2528,
+      "bytes": 3624,
       "mode": "0644",
-      "sha256": "d432e5e59f36493818c1827e5774f325ea9dbee511267715a9554528fb5a7295"
+      "path": "portable-validation.json",
+      "sha256": "ce78489a4db23ada217eb779bce145afb1cbb75692c179384c2c0e1619f8ba6d"
     },
     "process.py": {
       "bytes": 18212,
@@ -69,6 +82,11 @@
       "bytes": 11724,
       "mode": "0644",
       "sha256": "2f4defe92bb4dd97b51435d456b8cbfb10a6c5c90afca8bf782f8a6500144024"
+    },
+    "test_n10_stdlib_declarations.py": {
+      "bytes": 2738,
+      "mode": "0644",
+      "sha256": "82ad4f361237d95ec962a2b375d6c765fac425fe43e066a405d21533019e3c06"
     }
   },
   "historical_case_root": "packet/cases/N10/tooling/.github/issue779-csharp-native/",
@@ -108,12 +126,13 @@
   },
   "ownership_prefix": ".github/issue779-checkpoint1/procedures/n10/",
   "portable_validation": {
-    "elapsed_seconds": 0.051142583000000005,
+    "coverage_credit": false,
+    "elapsed_seconds": 0.242,
     "exit": 0,
+    "native_executed": false,
     "receipt": "portable-validation.json",
     "source_unchanged": true,
-    "stderr_sha256": "ae017c4200de2aec325bfd6f44d3521e2244d0fd18ba5d85e2ec6878f7e9f8f0",
-    "test_methods": 7
+    "test_methods": 12
   },
   "preservation": {
     "canonical_ustar_exact_repack_unchanged": true,
@@ -148,6 +167,11 @@
   },
   "required_helpers": [],
   "schema": "issue779-n10-current-native-port-v1",
+  "shared_harness": {
+    "path": "test_n04_stdlib_declarations.py",
+    "role": "reused detached N04 stdlib declaration-loop harness; no native facts",
+    "sha256": "26ea0e314cd4c02b97a96db4b10b038cc1a10283ee338d84743baf68fcda4b65"
+  },
   "source44_followup": {
     "fresh_linux_required": true,
     "native_execution": false,
@@ -157,7 +181,7 @@
     ]
   },
   "static_validation": {
-    "defined_portable_test_methods": 7,
+    "defined_portable_test_methods": 12,
     "python_ast_sources": 4,
     "shell_syntax_exit": 0,
     "shell_syntax_sources": 3
