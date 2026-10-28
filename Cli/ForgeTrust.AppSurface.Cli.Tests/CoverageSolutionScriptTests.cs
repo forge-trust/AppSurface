@@ -83,13 +83,45 @@ public sealed class CoverageSolutionScriptTests
         Assert.Contains("Download the \\`test-result-diagnostics\\` artifact for the complete report.", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("render-junit-test-summary.py", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("TEST_RESULT_SUMMARY", workflow, StringComparison.Ordinal);
-        Assert.Contains(
-            "files: 'TestResults/coverage-merged/coverage.cobertura.xml'\n          disable_search: true",
-            workflow,
-            StringComparison.Ordinal);
         Assert.DoesNotContain("coverage run \\", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate PR coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
         Assert.DoesNotContain("Gate baseline coverage with AppSurface CLI", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildWorkflow_ShouldUploadVerifiedFaninOnlyAfterTheCoverageGateSucceeds()
+    {
+        var yaml = new YamlStream();
+        using var reader = new StringReader(ReadWorkflow());
+        yaml.Load(reader);
+
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
+        var steps = (YamlSequenceNode)build.Children[new YamlScalarNode("steps")];
+        var coverage = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Run solution coverage and gate");
+        Assert.Equal("solution-coverage", ((YamlScalarNode)coverage.Children[new YamlScalarNode("id")]).Value);
+        Assert.Equal("./scripts/coverage-solution.sh", ((YamlScalarNode)coverage.Children[new YamlScalarNode("run")]).Value!.Trim());
+        Assert.False(coverage.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        var environment = (YamlMappingNode)coverage.Children[new YamlScalarNode("env")];
+        Assert.Equal("${{ runner.temp }}/coverage-native-inputs", ((YamlScalarNode)environment.Children[new YamlScalarNode("COVERAGE_FANIN_NATIVE")]).Value);
+
+        var upload = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload coverage reports to Codecov");
+        Assert.True(steps.Children.IndexOf(coverage) < steps.Children.IndexOf(upload));
+        Assert.Equal(
+            "${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}",
+            ((YamlScalarNode)upload.Children[new YamlScalarNode("if")]).Value);
+        var uploadWith = (YamlMappingNode)upload.Children[new YamlScalarNode("with")];
+        Assert.Equal("TestResults/coverage-fanin/coverage.cobertura.xml", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("files")]).Value);
+        Assert.Equal("true", ((YamlScalarNode)uploadWith.Children[new YamlScalarNode("disable_search")]).Value);
+
+        var testResults = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Upload test results to Codecov");
+        Assert.Equal(
+            "${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}",
+            ((YamlScalarNode)testResults.Children[new YamlScalarNode("if")]).Value);
     }
 
     [Fact]

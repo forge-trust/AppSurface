@@ -523,6 +523,7 @@ jobs:
           path: ${{ runner.temp }}/coverage-native-inputs
 
       - name: Run solution coverage and gate
+        id: solution-coverage
         env:
           BUILD_CONFIGURATION: Release
           BUILD_NO_RESTORE: true
@@ -597,9 +598,9 @@ jobs:
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        if: ${{ always() && !cancelled() && env.CODECOV_TOKEN_PRESENT == 'true' }}
+        if: ${{ success() && steps.solution-coverage.outcome == 'success' && env.CODECOV_TOKEN_PRESENT == 'true' }}
         with:
-          files: 'TestResults/coverage-merged/coverage.cobertura.xml'
+          files: 'TestResults/coverage-fanin/coverage.cobertura.xml'
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
