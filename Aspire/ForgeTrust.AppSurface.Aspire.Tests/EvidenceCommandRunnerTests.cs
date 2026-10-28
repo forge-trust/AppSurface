@@ -7,6 +7,42 @@ namespace ForgeTrust.AppSurface.Aspire.Tests;
 public sealed class EvidenceCommandRunnerTests
 {
     [Fact]
+    public async Task ForegroundDescendantPid_IsPublishedOnlyAfterItsWriterCloses()
+    {
+        var parent = Directory.CreateTempSubdirectory("evidence-command-pid-publication-").FullName;
+        var pidPath = Path.Join(parent, "child.pid");
+        using var cancellation = new CancellationTokenSource();
+        var request = CreateForegroundDescendantRequest(parent, pidPath, gatePublication: true);
+        var running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
+        try
+        {
+            var readiness = Stopwatch.StartNew();
+            while (!File.Exists(pidPath + ".written") && !running.IsCompleted && readiness.Elapsed < request.Timeout)
+                await Task.Delay(10);
+            Assert.True(File.Exists(pidPath + ".written"), "The fixture must reach the publication gate.");
+            Assert.True(File.Exists(pidPath + ".pending"));
+            Assert.False(File.Exists(pidPath));
+            await File.WriteAllTextAsync(pidPath + ".release", "publish");
+            while (!File.Exists(pidPath) && !running.IsCompleted && readiness.Elapsed < request.Timeout)
+                await Task.Delay(10);
+            Assert.True(File.Exists(pidPath));
+            Assert.True(int.TryParse(await File.ReadAllTextAsync(pidPath), out var pid));
+            Assert.True(pid > 0);
+            Assert.False(File.Exists(pidPath + ".pending"));
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => running);
+        }
+        finally
+        {
+            cancellation.Cancel();
+            try { await running; }
+            catch (OperationCanceledException) { }
+            catch (EvidenceCommandException) { }
+            Directory.Delete(parent, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RunAsync_UsesArgvWorkingDirectoryAndExplicitEnvironment()
     {
         var runner = new EvidenceCommandRunner();
@@ -477,15 +513,7 @@ public sealed class EvidenceCommandRunnerTests
         Task<EvidenceCommandResult>? running = null;
         try
         {
-            // An absolute marker avoids PowerShell's separate provider location;
-            // -NoNewWindow keeps the child in the foreground process tree under test.
-            var request = CreateShellRequest("sleep 30 & child=$!; printf '%s' \"$child\" > child.pid; wait \"$child\"",
-                "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -NoNewWindow -PassThru; [IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH, [string]$child.Id); $child.WaitForExit()") with
-            {
-                WorkingDirectory = parent,
-                Timeout = OperatingSystem.IsWindows() ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2),
-                Environment = new Dictionary<string, string> { ["EVIDENCE_CHILD_PID_PATH"] = pidPath },
-            };
+            var request = CreateForegroundDescendantRequest(parent, pidPath);
             running = new EvidenceCommandRunner().RunAsync(request, cancellation.Token);
             if (cancel)
             {
@@ -527,6 +555,26 @@ public sealed class EvidenceCommandRunnerTests
             try { using var child = Process.GetProcessById(pid); return !child.HasExited; }
             catch (ArgumentException) { return false; }
         }
+    }
+
+    private static EvidenceCommandRequest CreateForegroundDescendantRequest(string parent, string pidPath, bool gatePublication = false)
+    {
+        // A final marker is a readiness signal only after the writer has closed.
+        // The gate makes an early-publication regression deterministic on every OS.
+        var unixGate = gatePublication
+            ? "touch child.pid.written; while [ ! -f child.pid.release ]; do sleep 0.01; done; "
+            : string.Empty;
+        var windowsGate = gatePublication
+            ? "[IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH + '.written', 'written'); while (-not [IO.File]::Exists($env:EVIDENCE_CHILD_PID_PATH + '.release')) { Start-Sleep -Milliseconds 10 }; "
+            : string.Empty;
+        return CreateShellRequest(
+            "sleep 30 & child=$!; printf '%s' \"$child\" > child.pid.pending; " + unixGate + "mv child.pid.pending child.pid; wait \"$child\"",
+            "$ErrorActionPreference = 'Stop'; $child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -NoNewWindow -PassThru; [IO.File]::WriteAllText($env:EVIDENCE_CHILD_PID_PATH + '.pending', [string]$child.Id); " + windowsGate + "[IO.File]::Move($env:EVIDENCE_CHILD_PID_PATH + '.pending', $env:EVIDENCE_CHILD_PID_PATH); $child.WaitForExit()") with
+        {
+            WorkingDirectory = parent,
+            Timeout = OperatingSystem.IsWindows() ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2),
+            Environment = new Dictionary<string, string> { ["EVIDENCE_CHILD_PID_PATH"] = pidPath },
+        };
     }
 
     private sealed class EofObservingStream(Stream inner, Action completed) : Stream
