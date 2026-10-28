@@ -138,6 +138,16 @@ pin and resolve the complete copied runtime and actual OS libraries before any
 control executes. Package installation and a successful copy alone do not
 qualify the runtime or prove a native control passed.
 
+N04's fixed Python-standard-library membership pass looks up each audited file
+declaration in the read-only OS declaration cache initialized from the complete,
+already pinned audit. The cache returns only the recorded SHA256; it does not
+cache physical file results. Every member still passes the unchanged
+`verify_os_path` checks, including fresh alias-chain sampling and file pinning,
+and the complete stdlib inventory and audit are checked again afterward. This
+avoids reparsing the same JSON declaration for each library member. It is a
+bounded parsing optimization; it does not diagnose or claim to fix any earlier
+N04 incident.
+
 Required helper IDs are `peer` for None, N04–N08, N11 and N12, plus `n04` for N04 and
 `n07` for N07. Other selectors require an empty helper map. Projects and assembly
 entries are fixed in [`binding.py`](binding.py). Each helper phase is named

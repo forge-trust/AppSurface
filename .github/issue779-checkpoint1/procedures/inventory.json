@@ -13,7 +13,7 @@
       "historical_path": "packet/cases/N04/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "port_status": "current-source-provenance-ported-native-predicates-retained",
       "ported_path": "procedures/slot/checkpoint-n04.sh",
-      "ported_sha256": "d40fef03259269a7621baf40e19d199cf8cff2b2799005091bd596fa8617cd41",
+      "ported_sha256": "b66a91d8731c177092c15c622fcb0d2f2625fd7e8faea6e7ed1b813c1bc1326a",
       "sha256": "5bca98a13e5a8a0360e579b15fed05b75d16c1fda4006aa8331e07035513d66d"
     },
     {
