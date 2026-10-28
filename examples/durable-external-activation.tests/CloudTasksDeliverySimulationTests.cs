@@ -43,10 +43,10 @@ public sealed class CloudTasksDeliverySimulationTests
         Assert.True(host.Dependencies.BodyReads.ReadStarted.IsCompleted);
     }
 
-    private static Task<HttpResponseMessage> DeliverAsync(ActivationTestHost host, RecordedTask task, string? bearerToken)
+    private static async Task<HttpResponseMessage> DeliverAsync(ActivationTestHost host, RecordedTask task, string? bearerToken)
     {
         // Simulated delivery deliberately translates only the recorded task intent and uses the host's local test credential.
-        var request = new HttpRequestMessage(new HttpMethod(task.Method), task.EndpointPath)
+        using var request = new HttpRequestMessage(new HttpMethod(task.Method), task.EndpointPath)
         {
             Content = new EmptyUnknownLengthContent(task.Body),
         };
@@ -55,7 +55,7 @@ public sealed class CloudTasksDeliverySimulationTests
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
         }
 
-        return host.Client.SendAsync(request);
+        return await host.Client.SendAsync(request);
     }
 
     private sealed record RecordedTask(

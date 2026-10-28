@@ -43,7 +43,8 @@ public sealed class TransportBoundsTests
         using var encoded = new MemoryStream();
         using (var compressor = provider.CreateCompressionStream(encoded, CompressionLevel.Fastest))
             compressor.Write(new byte[CloudTasksSdkTransport.MessageLimit + 1]);
-        using var decoded = provider.CreateDecompressionStream(new MemoryStream(encoded.ToArray()));
+        using var compressedInput = new MemoryStream(encoded.ToArray());
+        using var decoded = provider.CreateDecompressionStream(compressedInput);
         var buffer = new byte[CloudTasksSdkTransport.MessageLimit];
         decoded.ReadExactly(buffer);
         Assert.Throws<CloudTasksResponseLimitException>(() => decoded.ReadByte());

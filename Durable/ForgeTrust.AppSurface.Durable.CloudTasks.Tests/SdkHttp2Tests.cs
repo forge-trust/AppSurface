@@ -117,7 +117,7 @@ public sealed class SdkHttp2Tests
         server.MapPost("/google.cloud.tasks.v2.CloudTasks/CreateTask", async context =>
         {
             var attempt = Interlocked.Increment(ref wireRequests);
-            var input = new MemoryStream();
+            using var input = new MemoryStream();
             await context.Request.Body.CopyToAsync(input, context.RequestAborted);
             var bytes = input.ToArray();
             if (bytes.Length < 5 || bytes[0] != 0 || BinaryPrimitives.ReadInt32BigEndian(bytes.AsSpan(1, 4)) != bytes.Length - 5)
@@ -230,12 +230,11 @@ public sealed class SdkHttp2Tests
             }
         };
         using var observer = new InvocationObserver(transport);
-        using var sdk = new CloudTasksSdkTransport(new Uri(address), observer);
         int tokenCalls = 0, sdkCalls = 0;
+        using var sdk = new CloudTasksSdkTransport(new Uri(address), observer, () => Interlocked.Increment(ref sdkCalls));
         var started = System.Diagnostics.Stopwatch.StartNew();
         var client = new CloudTasksActivationClient(new FixtureTokenSource(() => { tokenCalls++; return token; }), new(TimeSpan.FromSeconds(5)), sdk, TimeProvider.System);
         var target = new CloudTasksActivationTarget("proof-project", "us-central1", "proof-queue", new Uri("https://worker.example/private/durable/activate"), "worker@proof-project.iam.gserviceaccount.com", "https://worker.example", TimeSpan.FromSeconds(30));
-        sdkCalls++;
         var receipt = await client.DispatchAsync(new CloudTasksActivationRequest(target, "proof-task"));
         Assert.Equal(expectedName, receipt.TaskName);
         Assert.Equal(expectedCode, receipt.DiagnosticCode);

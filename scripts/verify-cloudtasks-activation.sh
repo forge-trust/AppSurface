@@ -4,6 +4,17 @@ set -euo pipefail
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_directory/.." && pwd)"
 proof_output="${1:-$repo_root/artifacts/cloudtasks-activation}"
+# Ordinary verification snapshots the candidate commit. Pass a fetched target ref for strict historical acceptance.
+if [[ "$#" -gt 2 ]]; then
+  printf 'Usage: %s [output-directory] [historical-target-ref]\n' "$0" >&2
+  exit 2
+fi
+if [[ "$#" -eq 2 ]]; then
+  if [[ -z "$2" ]]; then
+    printf 'The historical target ref must be nonempty; omit it for ordinary verification.\n' >&2
+    exit 2
+  fi
+fi
 mkdir -p "$proof_output"
 proof_output="$(cd "$proof_output" && pwd)"
 cd "$repo_root"
@@ -21,7 +32,11 @@ for proof_project in "$cloudtasks_tests" "$host_tests" "$package_tool"; do
 done
 dotnet test "$cloudtasks_tests" --no-restore -p:UseSharedCompilation=false --logger 'console;verbosity=normal'
 dotnet test "$host_tests" --no-restore -p:UseSharedCompilation=false --logger 'console;verbosity=normal'
-dotnet run --project "$package_tool" --no-restore -p:UseSharedCompilation=false -- verify-packages \
-  --package-version 0.2.0-cloudtasksproof.1 --artifacts-output "$proof_output/packages" \
-  --report "$proof_output/package-validation.md" --artifact-manifest "$proof_output/package-artifact-manifest.json"
+package_proof_args=(verify-packages --package-version 0.2.0-cloudtasksproof.1
+  --artifacts-output "$proof_output/packages" --report "$proof_output/package-validation.md"
+  --artifact-manifest "$proof_output/package-artifact-manifest.json")
+if [[ "$#" -eq 2 ]]; then
+  package_proof_args+=(--cloudtasks-baseline-ref "$2")
+fi
+dotnet run --project "$package_tool" --no-restore -p:UseSharedCompilation=false -- "${package_proof_args[@]}"
 printf 'Local Cloud Tasks proof passed: %s\n' "$proof_output"

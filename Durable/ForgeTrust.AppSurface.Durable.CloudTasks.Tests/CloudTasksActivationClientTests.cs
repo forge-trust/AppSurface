@@ -43,7 +43,8 @@ public sealed class CloudTasksActivationClientTests
             Assert.Equal(ExpectedName, receipt.TaskName);
             Assert.Equal(expected.Disposition, receipt.Disposition);
             Assert.Equal(expected.Code, receipt.DiagnosticCode);
-            Assert.DoesNotContain("provider-secret", receipt.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("provider-secret", receipt.TaskName, StringComparison.Ordinal);
+            Assert.DoesNotContain("provider-secret", receipt.DiagnosticCode, StringComparison.Ordinal);
         }
     }
 
@@ -76,7 +77,9 @@ public sealed class CloudTasksActivationClientTests
         var failed = await Client(new FakeTokenSource(() => ValueTask.FromException<string>(new InvalidOperationException("source-secret"))), failingTransport).DispatchAsync(Request());
         Assert.Equal("ASCT101", failed.DiagnosticCode);
         Assert.Equal(0, failingTransport.Calls);
-        Assert.DoesNotContain("source-secret", failed.ToString(), StringComparison.Ordinal);
+        Assert.Equal(ExpectedName, failed.TaskName);
+        Assert.DoesNotContain("source-secret", failed.TaskName, StringComparison.Ordinal);
+        Assert.DoesNotContain("source-secret", failed.DiagnosticCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -131,7 +134,9 @@ public sealed class CloudTasksActivationClientTests
         var after = await Client(new FakeTokenSource("token"), afterTransport, afterClock, TimeSpan.FromSeconds(1)).DispatchAsync(Request());
         Assert.Equal("ASCT301", after.DiagnosticCode);
         Assert.Equal(1, afterTransport.Calls);
-        Assert.DoesNotContain("transport-secret", after.ToString(), StringComparison.Ordinal);
+        Assert.Equal(ExpectedName, after.TaskName);
+        Assert.DoesNotContain("transport-secret", after.TaskName, StringComparison.Ordinal);
+        Assert.DoesNotContain("transport-secret", after.DiagnosticCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -247,7 +252,7 @@ public sealed class CloudTasksActivationClientTests
             using var callerActivity = new Activity(callerName).Start();
             var parentId = callerActivity.Id ?? throw new InvalidOperationException("Caller activity ID was not created.");
             expectedParents[parentId] = callerName;
-            if (Interlocked.Increment(ref readyCount) == 2) ready.TrySetResult();
+            if (Interlocked.Increment(ref readyCount) == 4) ready.TrySetResult();
             await release.Task;
             var receipt = await new CloudTasksActivationClient(
                 source,
@@ -259,52 +264,65 @@ public sealed class CloudTasksActivationClientTests
 
         var callerA = DispatchUnderCallerActivityAsync(
             "caller-a",
-            new FakeTokenSource(() => ValueTask.FromException<string>(new InvalidOperationException("raw-a-secret"))),
-            new FakeTransport((_, _, _, _) => Task.FromResult<string?>(ExpectedName)));
+            new FakeTokenSource("fixture-token-a"),
+            new FakeTransport((_, _, _, _) => Task.FromException<string?>(new HttpRequestException("raw-a-secret"))));
         var callerB = DispatchUnderCallerActivityAsync(
             "caller-b",
             new FakeTokenSource("fixture-token-secret"),
             new FakeTransport((_, _, _, _) => Task.FromException<string?>(new RpcException(new Status(StatusCode.Unknown, "raw-b-secret provider-secret https://worker.example/activate")))));
+        var callerC = DispatchUnderCallerActivityAsync(
+            "caller-c",
+            new FakeTokenSource(() => ValueTask.FromException<string>(new InvalidOperationException("raw-c-secret"))),
+            new FakeTransport((_, _, _, _) => Task.FromResult<string?>(ExpectedName)));
+        var callerD = DispatchUnderCallerActivityAsync(
+            "caller-d",
+            new FakeTokenSource("fixture-token-d"),
+            new FakeTransport((_, _, _, _) => Task.FromException<string?>(new InvalidOperationException("raw-d-secret https://worker.example/activate"))));
         await ready.Task.WaitAsync(TimeSpan.FromSeconds(2));
         release.TrySetResult();
-        var results = await Task.WhenAll(callerA, callerB);
+        var results = await Task.WhenAll(callerA, callerB, callerC, callerD);
         var resultA = results.Single(result => expectedParents[result.ParentId] == "caller-a");
         var resultB = results.Single(result => expectedParents[result.ParentId] == "caller-b");
+        var resultC = results.Single(result => expectedParents[result.ParentId] == "caller-c");
+        var resultD = results.Single(result => expectedParents[result.ParentId] == "caller-d");
 
         Assert.NotEqual(resultA.ParentId, resultB.ParentId);
-        Assert.Equal("ASCT101", resultA.Receipt.DiagnosticCode);
+        Assert.Equal("ASCT302", resultA.Receipt.DiagnosticCode);
         Assert.Equal("ASCT305", resultB.Receipt.DiagnosticCode);
-        Assert.Equal(2, events.Count);
-        var tokenFailure = Assert.Single(events, item => item.ParentId == resultA.ParentId);
-        var createFailure = Assert.Single(events, item => item.ParentId == resultB.ParentId);
-        Assert.Equal("cloudtasks.dispatch.failure", tokenFailure.OperationName);
-        Assert.Equal("cloudtasks.dispatch.failure", createFailure.OperationName);
-        Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", tokenFailure.SourceName);
-        Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", createFailure.SourceName);
+        Assert.Equal("ASCT101", resultC.Receipt.DiagnosticCode);
+        Assert.Equal("ASCT305", resultD.Receipt.DiagnosticCode);
+        Assert.Equal(4, events.Count);
+        var httpFailure = Assert.Single(events, item => item.ParentId == resultA.ParentId);
+        var rpcFailure = Assert.Single(events, item => item.ParentId == resultB.ParentId);
+        var tokenFailure = Assert.Single(events, item => item.ParentId == resultC.ParentId);
+        var unexpectedFailure = Assert.Single(events, item => item.ParentId == resultD.ParentId);
+        Assert.All(events, observed => Assert.Equal("cloudtasks.dispatch.failure", observed.OperationName));
+        Assert.All(events, observed => Assert.Equal("ForgeTrust.AppSurface.Durable.CloudTasks", observed.SourceName));
         var expectedPackageVersion = System.Diagnostics.FileVersionInfo.GetVersionInfo(typeof(ICloudTasksActivationClient).Assembly.Location).ProductVersion!.Split('+', 2)[0];
-        Assert.Equal(expectedPackageVersion, tokenFailure.SourceVersion);
-        Assert.Equal(expectedPackageVersion, createFailure.SourceVersion);
-        Assert.Equal(expectedPackageVersion, tokenFailure.EventTags["package.version"]);
-        Assert.Equal(expectedPackageVersion, createFailure.EventTags["package.version"]);
-        Assert.Equal(ActivityKind.Internal, tokenFailure.Kind);
-        Assert.Equal(ActivityKind.Internal, createFailure.Kind);
-        Assert.NotEmpty(tokenFailure.TraceId);
-        Assert.NotEmpty(tokenFailure.SpanId);
-        Assert.NotEmpty(createFailure.TraceId);
-        Assert.NotEmpty(createFailure.SpanId);
-        Assert.Empty(tokenFailure.ActivityTags);
-        Assert.Empty(createFailure.ActivityTags);
+        Assert.All(events, observed => Assert.Equal(expectedPackageVersion, observed.SourceVersion));
+        Assert.All(events, observed => Assert.Equal(expectedPackageVersion, observed.EventTags["package.version"]));
+        Assert.All(events, observed => Assert.Equal(ActivityKind.Internal, observed.Kind));
+        Assert.All(events, observed => Assert.NotEmpty(observed.TraceId));
+        Assert.All(events, observed => Assert.NotEmpty(observed.SpanId));
+        Assert.All(events, observed => Assert.Empty(observed.ActivityTags));
         var allowedTags = new[] { "cause", "code", "operation", "package.version", "phase.sequence", "stage" };
-        Assert.Equal(allowedTags.Order(StringComparer.Ordinal), tokenFailure.EventTags.Keys.Order(StringComparer.Ordinal));
-        Assert.Equal(allowedTags.Order(StringComparer.Ordinal), createFailure.EventTags.Keys.Order(StringComparer.Ordinal));
+        Assert.All(events, observed => Assert.Equal(allowedTags.Order(StringComparer.Ordinal), observed.EventTags.Keys.Order(StringComparer.Ordinal)));
+        Assert.Equal("create", httpFailure.EventTags["operation"]);
+        Assert.Equal("transport", httpFailure.EventTags["cause"]);
+        Assert.Equal("submission", httpFailure.EventTags["stage"]);
+        Assert.Equal("ASCT302", httpFailure.EventTags["code"]);
+        Assert.Equal("create", rpcFailure.EventTags["operation"]);
+        Assert.Equal("rpc", rpcFailure.EventTags["cause"]);
+        Assert.Equal("submission", rpcFailure.EventTags["stage"]);
+        Assert.Equal("ASCT305", rpcFailure.EventTags["code"]);
+        Assert.Equal("create", unexpectedFailure.EventTags["operation"]);
+        Assert.Equal("transport", unexpectedFailure.EventTags["cause"]);
+        Assert.Equal("submission", unexpectedFailure.EventTags["stage"]);
+        Assert.Equal("ASCT305", unexpectedFailure.EventTags["code"]);
         Assert.Equal("token", tokenFailure.EventTags["operation"]);
         Assert.Equal("source", tokenFailure.EventTags["cause"]);
         Assert.Equal("acquisition", tokenFailure.EventTags["stage"]);
         Assert.Equal("ASCT101", tokenFailure.EventTags["code"]);
-        Assert.Equal("create", createFailure.EventTags["operation"]);
-        Assert.Equal("rpc", createFailure.EventTags["cause"]);
-        Assert.Equal("submission", createFailure.EventTags["stage"]);
-        Assert.Equal("ASCT305", createFailure.EventTags["code"]);
         Assert.All(events, observed =>
         {
             var emittedValues = observed.ActivityTags.Values
@@ -315,7 +333,7 @@ public sealed class CloudTasksActivationClientTests
                 .Append(observed.Kind.ToString())
                 .Append(observed.TraceId)
                 .Append(observed.SpanId);
-            foreach (var secret in new[] { "raw-a-secret", "raw-b-secret", "provider-secret", "fixture-token-secret", "listener-secret", "https://worker.example/activate" })
+            foreach (var secret in new[] { "raw-a-secret", "raw-b-secret", "raw-c-secret", "raw-d-secret", "provider-secret", "fixture-token-a", "fixture-token-secret", "fixture-token-d", "listener-secret", "https://worker.example/activate" })
             {
                 Assert.DoesNotContain(emittedValues, value => value?.Contains(secret, StringComparison.Ordinal) == true);
             }

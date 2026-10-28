@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace ForgeTrust.AppSurface.PackageIndex;
@@ -35,12 +37,11 @@ internal static class CloudTasksNeutralSourceProof
     internal static IReadOnlyList<string> SharedFiles { get; } =
         [.. RequiredSharedFiles, "Directory.Packages.props", .. OptionalSharedFiles];
 
-    private static readonly IReadOnlyDictionary<string, string?> ApprovedCentralPackagePins =
-        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Google.Cloud.Tasks.V2"] = "3.7.0",
-            ["Grpc.Net.Client"] = "2.80.0"
-        };
+    private static readonly IReadOnlyList<string> ApprovedSdkRootIds = ["Google.Cloud.Tasks.V2", "Grpc.Net.Client"];
+    private const int MaximumCloudTasksLockBytes = 1024 * 1024;
+    private static readonly Regex CanonicalVersion = new(
+        @"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
     /// Compares source files and shared build inputs, allowing only the two exact Cloud Tasks central package pins.
@@ -116,12 +117,13 @@ internal static class CloudTasksNeutralSourceProof
             comparableFiles.TryAdd(relativePath, (baselinePath, candidatePath));
         }
 
+        var sdkPins = ReadCloudTasksLockPins(candidateRoot);
         var baselinePackagesPath = Resolve(baselineRoot, "Directory.Packages.props");
         var candidatePackagesPath = Resolve(candidateRoot, "Directory.Packages.props");
         RequireFile(baselinePackagesPath, "baseline Directory.Packages.props");
         RequireFile(candidatePackagesPath, "candidate Directory.Packages.props");
-        var normalizedBaselinePackages = NormalizeCentralPackages(baselinePackagesPath, allowApprovedPins: false);
-        var normalizedCandidatePackages = NormalizeCentralPackages(candidatePackagesPath, allowApprovedPins: true);
+        var normalizedBaselinePackages = NormalizeCentralPackages(baselinePackagesPath, sdkPins, allowMatchingOrNoPins: true);
+        var normalizedCandidatePackages = NormalizeCentralPackages(candidatePackagesPath, sdkPins, allowMatchingOrNoPins: false);
         if (!XNode.DeepEquals(normalizedBaselinePackages, normalizedCandidatePackages))
         {
             throw new PackageIndexException("Neutral source parity failed: Directory.Packages.props changed beyond the two approved Cloud Tasks pins.");
@@ -136,8 +138,104 @@ internal static class CloudTasksNeutralSourceProof
             evidence.Add($"baseline/{relativePath}", HashFile(paths.BaselinePath));
             evidence.Add($"candidate/{relativePath}", HashFile(paths.CandidatePath));
         }
+        evidence.Add("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json",
+            HashFile(Resolve(candidateRoot, "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json")));
 
         return evidence;
+    }
+
+    private static IReadOnlyDictionary<string, string> ReadCloudTasksLockPins(string candidateRoot)
+    {
+        const string relativePath = "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json";
+        var directory = Resolve(candidateRoot, "Durable/ForgeTrust.AppSurface.Durable.CloudTasks");
+        RequireDirectory(directory, "candidate Cloud Tasks SDK lock directory", candidateRoot);
+        var path = Resolve(candidateRoot, relativePath);
+        RequireFile(path, "candidate Cloud Tasks SDK packages.lock.json");
+        byte[] lockBytes;
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var length = stream.Length;
+            if (length is <= 0 or > MaximumCloudTasksLockBytes)
+                throw new PackageIndexException($"Neutral source parity failed: candidate Cloud Tasks SDK lock file is empty or exceeds the {MaximumCloudTasksLockBytes}-byte inspection limit.");
+            lockBytes = new byte[(int)length];
+            stream.ReadExactly(lockBytes);
+            if (stream.ReadByte() != -1)
+                throw new PackageIndexException($"Neutral source parity failed: candidate Cloud Tasks SDK lock file exceeds the {MaximumCloudTasksLockBytes}-byte inspection limit.");
+        }
+        catch (PackageIndexException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new PackageIndexException("Neutral source parity failed: candidate Cloud Tasks SDK lock file is unreadable.", exception);
+        }
+
+        JsonDocument document;
+        try
+        {
+            var offset = lockBytes.AsSpan().StartsWith(new byte[] { 0xEF, 0xBB, 0xBF }) ? 3 : 0;
+            document = JsonDocument.Parse(lockBytes.AsMemory(offset), new JsonDocumentOptions { MaxDepth = 16 });
+        }
+        catch (JsonException exception)
+        {
+            throw new PackageIndexException("Neutral source parity failed: candidate Cloud Tasks SDK lock file is malformed or unreadable.", exception);
+        }
+
+        using (document)
+        {
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                throw InvalidSdkLock("root must be a JSON object");
+            var dependenciesProperties = root.EnumerateObject().Where(static property => property.NameEquals("dependencies")).ToArray();
+            if (dependenciesProperties.Length != 1 || dependenciesProperties[0].Value.ValueKind != JsonValueKind.Object)
+                throw InvalidSdkLock("the dependencies object is missing or duplicated");
+
+            var targetProperties = dependenciesProperties[0].Value.EnumerateObject().Where(static property => property.NameEquals("net10.0")).ToArray();
+            if (targetProperties.Length != 1 || targetProperties[0].Value.ValueKind != JsonValueKind.Object)
+                throw InvalidSdkLock("the net10.0 target closure is missing or duplicated");
+
+            var pins = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var approved in ApprovedSdkRootIds)
+            {
+                var roots = targetProperties[0].Value.EnumerateObject()
+                    .Where(package => string.Equals(package.Name, approved, StringComparison.Ordinal)).ToArray();
+                if (roots.Length != 1 || roots[0].Value.ValueKind != JsonValueKind.Object)
+                    throw InvalidSdkLock($"direct root '{approved}' is missing or duplicated");
+                var fields = roots[0].Value;
+                if (!ReadStringProperty(fields, "type", out var type) || !string.Equals(type, "Direct", StringComparison.Ordinal)
+                    || !ReadStringProperty(fields, "resolved", out var version) || !IsCanonicalVersion(version))
+                    throw InvalidSdkLock($"direct root '{approved}' must have type Direct and a canonical resolved version");
+                pins.Add(approved, version);
+            }
+            return pins;
+        }
+    }
+
+    private static bool ReadStringProperty(JsonElement element, string name, out string value)
+    {
+        var matches = element.EnumerateObject().Where(property => property.NameEquals(name)).ToArray();
+        if (matches.Length == 1 && matches[0].Value.ValueKind == JsonValueKind.String)
+        {
+            value = matches[0].Value.GetString()!;
+            return true;
+        }
+        value = string.Empty;
+        return false;
+    }
+
+    private static PackageIndexException InvalidSdkLock(string detail) =>
+        new($"Neutral source parity failed: candidate Cloud Tasks SDK lock file {detail}.");
+
+    private static bool IsCanonicalVersion(string value)
+    {
+        if (!CanonicalVersion.IsMatch(value)) return false;
+        var separator = value.IndexOf('-');
+        if (separator < 0) return true;
+        return value[(separator + 1)..].Split('.').All(static identifier =>
+            identifier.Any(static character => !char.IsAsciiDigit(character))
+            || identifier.Length == 1 || identifier[0] != '0');
     }
 
     private static IReadOnlyList<string> DiscoverAncestorBuildInputs(string baselineRoot, string candidateRoot)
@@ -201,7 +299,10 @@ internal static class CloudTasksNeutralSourceProof
         return files;
     }
 
-    private static XDocument NormalizeCentralPackages(string path, bool allowApprovedPins)
+    private static XDocument NormalizeCentralPackages(
+        string path,
+        IReadOnlyDictionary<string, string> sdkPins,
+        bool allowMatchingOrNoPins)
     {
         XDocument document;
         try
@@ -221,20 +322,26 @@ internal static class CloudTasksNeutralSourceProof
         var packageNodes = document.Descendants()
             .Where(static element => element.Name.LocalName == "PackageVersion")
             .ToArray();
-        foreach (var approved in ApprovedCentralPackagePins)
+        var presentPins = new Dictionary<string, XElement[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var approved in ApprovedSdkRootIds)
         {
             var matches = packageNodes.Where(node => string.Equals(
-                (string?)node.Attribute("Include"), approved.Key, StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (!allowApprovedPins)
-            {
-                if (matches.Length != 0)
-                    throw new PackageIndexException($"Neutral source parity failed: Directory.Packages.props in the pinned baseline unexpectedly contains approved candidate pin '{approved.Key}'.");
-                continue;
-            }
+                (string?)node.Attribute("Include"), approved, StringComparison.OrdinalIgnoreCase)).ToArray();
+            presentPins.Add(approved, matches);
+            if (matches.Length > 1)
+                throw new PackageIndexException($"Neutral source parity failed: Directory.Packages.props pin '{approved}' is duplicated.");
+        }
 
-            if (matches.Length != 1 || !HasExactApprovedPin(matches[0], approved.Key, approved.Value))
+        if (allowMatchingOrNoPins && presentPins.Values.All(static matches => matches.Length == 0))
+            return document;
+
+        foreach (var approved in ApprovedSdkRootIds)
+        {
+            var matches = presentPins[approved];
+            if (matches.Length != 1 || !HasExactApprovedPin(matches[0], approved, sdkPins[approved]))
             {
-                throw new PackageIndexException($"Neutral source parity failed: candidate Directory.Packages.props pin '{approved.Key}' is missing, duplicated, or differs from its approved version/condition.");
+                var tree = allowMatchingOrNoPins ? "baseline" : "candidate";
+                throw new PackageIndexException($"Neutral source parity failed: Directory.Packages.props {tree} pin '{approved}' is missing, partial, or differs from its Cloud Tasks SDK lock version/condition.");
             }
 
             RemovePackagePinWithIndent(matches[0]);
@@ -243,7 +350,7 @@ internal static class CloudTasksNeutralSourceProof
         return document;
     }
 
-    private static bool HasExactApprovedPin(XElement node, string packageId, string? version)
+    private static bool HasExactApprovedPin(XElement node, string packageId, string version)
     {
         if (node.Attributes().Count() != (packageId == "Grpc.Net.Client" ? 3 : 2)) return false;
         if (!string.Equals((string?)node.Attribute("Include"), packageId, StringComparison.Ordinal)) return false;

@@ -69,8 +69,9 @@ internal sealed class CloudTasksActivationClient(
                 return Receipt(mapped);
             }
             if (exception is OperationCanceledException) return Receipt("ASCT307");
-            CloudTasksDiagnostics.Unexpected("create", "transport", "ASCT305");
-            return Receipt(exception is HttpRequestException ? "ASCT302" : "ASCT305");
+            var transportCode = exception is HttpRequestException ? "ASCT302" : "ASCT305";
+            CloudTasksDiagnostics.Unexpected("create", "transport", transportCode);
+            return Receipt(transportCode);
         }
 
         CloudTasksDispatchReceipt Receipt(string code) => new(request.TaskName, code switch

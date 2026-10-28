@@ -52,7 +52,7 @@ internal sealed class PackageArtifactWorkflow
     /// </param>
     /// <param name="cloudTasksProof">
     /// Optional packed Cloud Tasks consumer proof seam. Production restores and builds public-API consumers from the
-    /// exact validated local archive and compares the packed neutral Durable graph with the pinned baseline.
+    /// exact validated local archive and compares the packed neutral Durable graph with the selected source snapshot.
     /// </param>
     internal PackageArtifactWorkflow(
         PackagePublishPlanResolver planResolver,
@@ -259,7 +259,8 @@ internal sealed class PackageArtifactWorkflow
                         request.ArtifactsOutputPath,
                         request.PackageVersion,
                         request.Source,
-                        request.SourceCommit),
+                        request.SourceCommit,
+                        request.CloudTasksBaselineRef),
                     report,
                     cancellationToken);
             }
@@ -721,6 +722,7 @@ internal sealed class PackageArtifactWorkflow
 /// <param name="ProducerRunId">Optional trusted workflow run ID used to create release producer evidence.</param>
 /// <param name="ProducerAttempt">Optional trusted producer attempt used to create release producer evidence.</param>
 /// <param name="SourceCommit">Optional full source commit bound to the release producer evidence.</param>
+/// <param name="CloudTasksBaselineRef">Optional historical acceptance target ref; the unique merge-base with the candidate is required. Omitted uses the candidate source snapshot.</param>
 internal sealed record PackageArtifactRequest(
     string RepositoryRoot,
     string ManifestPath,
@@ -736,4 +738,5 @@ internal sealed record PackageArtifactRequest(
     string? RepositoryId = null,
     string? ProducerRunId = null,
     string? ProducerAttempt = null,
-    string? SourceCommit = null);
+    string? SourceCommit = null,
+    string? CloudTasksBaselineRef = null);

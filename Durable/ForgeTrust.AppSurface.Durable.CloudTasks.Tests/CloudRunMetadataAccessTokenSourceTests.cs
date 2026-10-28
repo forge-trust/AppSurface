@@ -55,7 +55,8 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
     public async Task Metadata_source_rejects_non_success_transport_timeout_malformed_json_and_deep_json_as_unavailable()
     {
         // protects=source availability classification; fails_when=HTTP/read/JSON availability failure is misclassified as invalid token; no_claim=remote cause details
-        using var forbiddenClient = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden)));
+        using var forbiddenResponse = new HttpResponseMessage(HttpStatusCode.Forbidden);
+        using var forbiddenClient = Client((_, _) => Task.FromResult(forbiddenResponse));
         using var forbidden = Source(forbiddenClient, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         await AssertUnavailable(forbidden.GetAccessTokenAsync());
 
@@ -71,17 +72,19 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
         using var io = Source(ioClient, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         await AssertUnavailable(io.GetAccessTokenAsync());
 
-        using var readFailureClient = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        using var readFailureResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StreamContent(new FailingReadStream()),
-        }));
+        };
+        using var readFailureClient = Client((_, _) => Task.FromResult(readFailureResponse));
         using var readFailure = Source(readFailureClient, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         await AssertUnavailable(readFailure.GetAccessTokenAsync());
 
-        using var chunkedOversizeClient = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        using var chunkedOversizeResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StreamContent(new ChunkedOversizeStream()),
-        }));
+        };
+        using var chunkedOversizeClient = Client((_, _) => Task.FromResult(chunkedOversizeResponse));
         using var chunkedOversize = Source(chunkedOversizeClient, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         await AssertUnavailable(chunkedOversize.GetAccessTokenAsync());
 
@@ -108,8 +111,11 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
             await AssertUnavailable(primitive.GetAccessTokenAsync());
         }
 
-        var oversize = new ByteArrayContent(new byte[16 * 1024 + 1]);
-        using var oversizedClient = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = oversize }));
+        using var oversizedResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[16 * 1024 + 1]),
+        };
+        using var oversizedClient = Client((_, _) => Task.FromResult(oversizedResponse));
         using var oversized = Source(oversizedClient, new FakeTimeProvider(DateTimeOffset.UnixEpoch));
         await AssertUnavailable(oversized.GetAccessTokenAsync());
     }

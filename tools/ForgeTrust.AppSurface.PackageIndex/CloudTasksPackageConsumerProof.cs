@@ -10,7 +10,6 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 internal sealed class CloudTasksPackageConsumerProof
 {
     internal const string PackageId = "ForgeTrust.AppSurface.Durable.CloudTasks";
-    internal const string BaselineCommit = "ebb562be618c2649c1ef0ade12095e56468882c7";
     internal const string DeterministicPackageTimestamp = "2000-01-01T00:00:00Z";
     internal const string NeutralPackageId = "ForgeTrust.AppSurface.Durable";
     private static readonly string[] NeutralPackages =
@@ -31,14 +30,14 @@ internal sealed class CloudTasksPackageConsumerProof
         "ForgeTrust.AppSurface.Web",
     ];
     private readonly ICommandRunner _runner;
-    private readonly Func<string, string, CancellationToken, Task> _baselineExtractor;
+    private readonly Func<string, string, string, CancellationToken, Task> _baselineExtractor;
 
     internal CloudTasksPackageConsumerProof(
         ICommandRunner runner,
-        Func<string, string, CancellationToken, Task>? baselineExtractor = null)
+        Func<string, string, string, CancellationToken, Task>? baselineExtractor = null)
     {
         _runner = runner;
-        _baselineExtractor = baselineExtractor ?? ((root, target, token) => ExtractBaselineAsync(root, target, token, _runner));
+        _baselineExtractor = baselineExtractor ?? ((root, target, commit, token) => ExtractBaselineAsync(root, target, commit, token, _runner));
     }
 
     internal async Task<CloudTasksPackageConsumerProofReport> RunAsync(
@@ -50,6 +49,13 @@ internal sealed class CloudTasksPackageConsumerProof
         ArgumentNullException.ThrowIfNull(artifacts);
         if (!string.Equals(artifacts.PackageVersion, request.PackageVersion, StringComparison.OrdinalIgnoreCase))
             throw new PackageIndexException("Cloud Tasks packed proof package version does not match the validated artifact report.");
+        var candidateCommit = request.SourceCommit is null
+            ? await ReadRepositoryHeadAsync(request.RepositoryRoot, cancellationToken)
+            : RequireCommit(request.SourceCommit, "candidate source commit");
+        var baselineMode = request.BaselineRef is null ? "candidate-source" : "historical-acceptance";
+        var baselineCommit = request.BaselineRef is null
+            ? candidateCommit
+            : await ResolveBaselineMergeBaseAsync(request.RepositoryRoot, request.BaselineRef, candidateCommit, cancellationToken);
         var cloudTasks = RequireArtifact(artifacts, PackageId, request);
         var candidateNeutral = NeutralPackages.ToDictionary(
             id => id,
@@ -79,9 +85,9 @@ internal sealed class CloudTasksPackageConsumerProof
                 throw new PackageIndexException("Cloud Tasks public API exposes provider SDK types: " + string.Join(", ", sdkLeaks));
             }
 
-            await _baselineExtractor(request.RepositoryRoot, baselineRoot, cancellationToken);
+            await _baselineExtractor(request.RepositoryRoot, baselineRoot, baselineCommit, cancellationToken);
             var sourceHashes = CloudTasksNeutralSourceProof.Verify(baselineRoot, request.RepositoryRoot);
-            await PackBaselineNeutralClosureAsync(request, workspace, baselineRoot, baselineFeed, cancellationToken);
+            await PackBaselineNeutralClosureAsync(request, workspace, baselineRoot, baselineFeed, candidateCommit, cancellationToken);
             var assemblyIdentity = CompareNeutralAssemblyIdentity(candidateNeutral, baselineFeed, request.PackageVersion);
             var baselineGraph = await RestoreNeutralConsumerAsync(request, workspace, baselineFeed, "neutral-baseline", request.PackageVersion, cancellationToken);
             var candidateGraph = await RestoreNeutralConsumerAsync(request, workspace, candidateFeed, "neutral-candidate", request.PackageVersion, cancellationToken);
@@ -102,7 +108,8 @@ internal sealed class CloudTasksPackageConsumerProof
             var proofPath = Path.Combine(request.ArtifactsDirectory, "cloudtasks-package-consumer-proof.md");
             var report = new CloudTasksPackageConsumerProofReport(
                 cloudTasks.Sha512,
-                BaselineCommit,
+                baselineCommit,
+                baselineMode,
                 baselineGraph,
                 candidateGraph,
                 baseline,
@@ -239,9 +246,8 @@ internal sealed class CloudTasksPackageConsumerProof
         return assets;
     }
 
-    private async Task PackBaselineNeutralClosureAsync(CloudTasksPackageConsumerProofRequest request, string workspace, string baselineRoot, string baselineFeed, CancellationToken token)
+    private async Task PackBaselineNeutralClosureAsync(CloudTasksPackageConsumerProofRequest request, string workspace, string baselineRoot, string baselineFeed, string candidateCommit, CancellationToken token)
     {
-        var sourceRevisionId = request.SourceCommit ?? await ReadRepositoryHeadAsync(request.RepositoryRoot, token);
         var proofCache = Path.Combine(workspace, "baseline-packages");
         var proofCli = Path.Combine(workspace, "baseline-cli");
         Directory.CreateDirectory(proofCache);
@@ -252,13 +258,13 @@ internal sealed class CloudTasksPackageConsumerProof
             var project = ProjectPath(baselineRoot, id);
             await _runner.RunAsync(new CommandRunRequest("dotnet", ["restore", project, "--configfile", Path.Combine(baselineRoot, "NuGet.package-gate.config"),
                 "-m:1", "-p:Version=" + request.PackageVersion, "-p:PackageVersion=" + request.PackageVersion,
-                "-p:RepositoryCommit=" + (request.SourceCommit ?? string.Empty), "-p:SourceRevisionId=" + sourceRevisionId,
+                "-p:RepositoryCommit=" + (request.SourceCommit ?? string.Empty), "-p:SourceRevisionId=" + candidateCommit,
                 "-p:DeterministicTimestamp=" + DeterministicPackageTimestamp,
                 "-p:PathMap=" + baselineRoot + "=/_/", "-p:ContinuousIntegrationBuild=true", "-p:RestoreLockedMode=false", "-p:UseSharedCompilation=false"], baselineRoot,
                 "Cloud Tasks pinned baseline restore", id, "restore", "restoring the pinned baseline package", 180_000, environment, IncludeStandardOutputOnFailure: true), token);
             await _runner.RunAsync(new CommandRunRequest("dotnet", ["pack", project, "--configuration", "Release", "--no-restore", "--output", baselineFeed,
                 "-m:1", "-p:Version=" + request.PackageVersion, "-p:PackageVersion=" + request.PackageVersion,
-                "-p:RepositoryCommit=" + (request.SourceCommit ?? string.Empty), "-p:SourceRevisionId=" + sourceRevisionId,
+                "-p:RepositoryCommit=" + (request.SourceCommit ?? string.Empty), "-p:SourceRevisionId=" + candidateCommit,
                 "-p:DeterministicTimestamp=" + DeterministicPackageTimestamp,
                 "-p:PathMap=" + baselineRoot + "=/_/", "-p:ContinuousIntegrationBuild=true", "-p:UseSharedCompilation=false"], baselineRoot,
                 "Cloud Tasks pinned baseline pack", id, "pack", "packing the pinned baseline package", 180_000, environment, IncludeStandardOutputOnFailure: true), token);
@@ -272,30 +278,80 @@ internal sealed class CloudTasksPackageConsumerProof
             new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" }), token);
         var revision = result.StandardOutput.Trim();
         if (revision.Length != 40 || revision.Any(static character => !Uri.IsHexDigit(character)))
-            throw new PackageIndexException("Could not resolve a canonical 40-character candidate Git revision for the pinned baseline pack.");
+            throw new PackageIndexException("Could not resolve a canonical 40-character candidate Git revision for the Cloud Tasks package proof.");
         return revision.ToLowerInvariant();
     }
 
-    /// <summary>Extracts the pinned source through the shared bounded, cancellation-cleaned process runner.</summary>
+    private async Task<string> ResolveBaselineMergeBaseAsync(string repositoryRoot, string baselineRef, string candidateCommit, CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(baselineRef) || baselineRef.StartsWith("-", StringComparison.Ordinal)
+            || baselineRef.Any(char.IsControl) || baselineRef.Any(char.IsWhiteSpace)
+            || baselineRef.Contains("..", StringComparison.Ordinal)
+            || baselineRef.Contains("@{", StringComparison.Ordinal)
+            || baselineRef.Contains('\\'))
+            throw new PackageIndexException("Cloud Tasks historical baseline ref must be a nonblank Git ref without whitespace or control characters.");
+
+        CommandRunResult result;
+        try
+        {
+            result = await _runner.RunAsync(new CommandRunRequest(
+                "git", ["merge-base", "--all", baselineRef, candidateCommit], repositoryRoot,
+                "Cloud Tasks baseline merge-base", baselineRef, "resolve", "resolving the historical baseline", 30_000,
+                new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" }), token);
+        }
+        catch (PackageIndexException exception)
+        {
+            throw new PackageIndexException(
+                "Could not resolve the requested Cloud Tasks historical baseline. Fetch the target ref and required Git history (for example, fetch the target branch and use a full-history checkout); historical acceptance never falls back to candidate-source mode.", exception);
+        }
+        var commits = result.StandardOutput.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (commits.Length != 1)
+            throw new PackageIndexException("Cloud Tasks historical baseline ref must have exactly one merge-base with the candidate commit. Fetch the target ref and required Git history; no baseline was selected and there is no fallback.");
+        string baselineCommit;
+        try { baselineCommit = RequireCommit(commits[0], "historical baseline merge-base"); }
+        catch (PackageIndexException exception)
+        {
+            throw new PackageIndexException("Cloud Tasks historical merge-base output is not a canonical commit. Fetch the target ref and required Git history; there is no fallback.", exception);
+        }
+        if (string.Equals(baselineCommit, candidateCommit, StringComparison.Ordinal))
+            throw new PackageIndexException("Cloud Tasks historical acceptance requires an earlier reviewed baseline; omit the option for ordinary candidate-source verification.");
+        return baselineCommit;
+    }
+
+    private static string RequireCommit(string commit, string context)
+    {
+        if (commit.Length != 40 || commit.Any(static character => !Uri.IsHexDigit(character)))
+            throw new PackageIndexException($"Cloud Tasks {context} must be a canonical 40-character Git commit SHA.");
+        return commit.ToLowerInvariant();
+    }
+
+    /// <summary>Extracts the selected source snapshot through the shared bounded, cancellation-cleaned process runner.</summary>
+    /// <param name="repositoryRoot">Repository checkout containing the selected commit object.</param>
+    /// <param name="target">Destination directory for the archived source tree.</param>
+    /// <param name="commit">Canonical 40-character Git commit SHA selected by the proof mode.</param>
+    /// <param name="token">Cancellation token forwarded to archive and extraction commands.</param>
+    /// <param name="runner">Optional command runner seam; production uses the bounded process runner.</param>
     internal static async Task ExtractBaselineAsync(
         string repositoryRoot,
         string target,
+        string commit,
         CancellationToken token,
         ICommandRunner? runner = null)
     {
         token.ThrowIfCancellationRequested();
+        commit = RequireCommit(commit, "baseline commit");
         runner ??= new ProcessCommandRunner();
         Directory.CreateDirectory(target);
         var archivePath = Path.Combine(Path.GetTempPath(), "appsurface-cloudtasks-baseline-" + Guid.NewGuid().ToString("N") + ".tar");
         try
         {
             await runner.RunAsync(new CommandRunRequest(
-                "git", ["archive", BaselineCommit, "--format=tar", "--output", archivePath], repositoryRoot,
-                "Cloud Tasks pinned baseline archive", BaselineCommit, "archive", "archiving the pinned baseline", 30_000,
+                "git", ["archive", commit, "--format=tar", "--output", archivePath], repositoryRoot,
+                "Cloud Tasks baseline archive", commit, "archive", "archiving the selected baseline", 30_000,
                 new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" }), token);
             await runner.RunAsync(new CommandRunRequest(
                 "tar", ["-xf", archivePath, "-C", target], target,
-                "Cloud Tasks pinned baseline extraction", BaselineCommit, "extract", "extracting the pinned baseline", 60_000), token);
+                "Cloud Tasks baseline extraction", commit, "extract", "extracting the selected baseline", 60_000), token);
         }
         finally { if (File.Exists(archivePath)) File.Delete(archivePath); }
     }
@@ -627,7 +683,7 @@ internal sealed class CloudTasksPackageConsumerProof
         Status: **passed**
 
         Candidate package SHA-512: `{report.CloudTasksPackageSha512}`
-        Baseline source: `{report.BaselineCommit}`
+        Baseline source: `{report.BaselineCommit}` (`{report.BaselineMode}`)
         Baseline graph nodes: {report.BaselineGraph.Nodes.Count}
         Candidate graph nodes: {report.CandidateGraph.Nodes.Count}
         Cloud Tasks graph nodes: {report.CloudTasksGraph.Nodes.Count}
@@ -637,7 +693,7 @@ internal sealed class CloudTasksPackageConsumerProof
 
         ## Neutral package archive hashes
 
-        Authored neutral sources, their generator, and shared build inputs are unchanged from the pinned baseline. Only the two approved GCP SDK central declarations are excluded from the shared-input comparison. Packed framework/dependency contracts and library entry sets match. First-party archive and DLL byte differences are permitted by the owner-approved build normalization because logging-generator declaration order is not reproducible. Both raw hashes are retained below; differing binaries are not described as byte-identical. Every restored first-party package hash is bound to its exact local archive. External versions, hashes and edges remain exact.
+        Authored neutral sources, their generator, and shared build inputs match the selected source snapshot. Candidate-source mode uses the candidate commit; historical-acceptance mode uses the unique merge-base of the requested target ref and candidate. The only central package differences allowed are the two Cloud Tasks SDK pins proven against the checked-in lock file. Packed framework/dependency contracts and library entry sets match. First-party archive and DLL byte differences are permitted only after source parity succeeds. Both raw hashes are retained below; differing binaries are not described as byte-identical. Every restored first-party package hash is bound to its exact local archive. External versions, hashes and edges remain exact.
 
         | Package | Baseline SHA-512 | Candidate SHA-512 |
         | --- | --- | --- |
@@ -677,9 +733,28 @@ internal sealed class CloudTasksPackageConsumerProof
     private static string XmlEscape(string value) => System.Security.SecurityElement.Escape(value) ?? string.Empty;
 }
 
-internal sealed record CloudTasksPackageConsumerProofRequest(string RepositoryRoot, string ArtifactsDirectory, string PackageVersion, string Source, string? SourceCommit = null);
+/// <summary>Inputs for validating a packed Cloud Tasks consumer and its paired neutral package graphs.</summary>
+/// <param name="RepositoryRoot">Candidate source checkout root.</param>
+/// <param name="ArtifactsDirectory">Directory containing the exact locally validated package archives.</param>
+/// <param name="PackageVersion">Coordinated package version used by the validated artifacts and isolated consumers.</param>
+/// <param name="Source">Configured package source for consumer restores.</param>
+/// <param name="SourceCommit">Optional canonical candidate commit SHA; omitted resolves checked-out HEAD.</param>
+/// <param name="BaselineRef">Optional fetched historical target ref; the unique merge-base with the candidate commit is required. Omitted uses the candidate source snapshot.</param>
+internal sealed record CloudTasksPackageConsumerProofRequest(string RepositoryRoot, string ArtifactsDirectory, string PackageVersion, string Source, string? SourceCommit = null, string? BaselineRef = null);
 internal sealed record CloudTasksPackageArtifact(string Id, string Path, string Sha512);
 internal sealed record CloudTasksPackageGraph(SortedDictionary<string, CloudTasksPackageGraphNode> Nodes, SortedDictionary<string, string> DirectDependencies);
 internal sealed record CloudTasksPackageGraphNode(string Id, string Version, string Sha512, IReadOnlyList<string> Dependencies);
 internal sealed record CloudTasksPackageFileIdentity(string PackageId, string BaselineNupkgSha512, string CandidateNupkgSha512, IReadOnlyDictionary<string, string> BaselineAssemblySha256, IReadOnlyDictionary<string, string> CandidateAssemblySha256, string BaselineDependencyContract, string CandidateDependencyContract);
-internal sealed record CloudTasksPackageConsumerProofReport(string CloudTasksPackageSha512, string BaselineCommit, string BaselineAssetsPath, string CandidateAssetsPath, CloudTasksPackageGraph BaselineGraph, CloudTasksPackageGraph CandidateGraph, CloudTasksPackageGraph CloudTasksGraph, IReadOnlyList<CloudTasksPackageFileIdentity> NeutralPackageFiles, IReadOnlyDictionary<string, string> NeutralSourceSha256, string ReportPath);
+/// <summary>Evidence generated by the paired Cloud Tasks package consumer proof.</summary>
+/// <param name="CloudTasksPackageSha512">Validated Cloud Tasks archive hash.</param>
+/// <param name="BaselineCommit">Selected candidate snapshot or unique historical merge-base commit.</param>
+/// <param name="BaselineMode">Either <c>candidate-source</c> or <c>historical-acceptance</c>.</param>
+/// <param name="BaselineAssetsPath">Isolated restore assets path for the baseline neutral consumer.</param>
+/// <param name="CandidateAssetsPath">Isolated restore assets path for the candidate neutral consumer.</param>
+/// <param name="BaselineGraph">Resolved baseline neutral package graph.</param>
+/// <param name="CandidateGraph">Resolved candidate neutral package graph.</param>
+/// <param name="CloudTasksGraph">Resolved packed Cloud Tasks consumer graph.</param>
+/// <param name="NeutralPackageFiles">Retained baseline and candidate archive/library hashes and packed contracts.</param>
+/// <param name="NeutralSourceSha256">Raw source/build-input hashes for both sides of source parity.</param>
+/// <param name="ReportPath">Path where the human-readable proof report was written.</param>
+internal sealed record CloudTasksPackageConsumerProofReport(string CloudTasksPackageSha512, string BaselineCommit, string BaselineMode, string BaselineAssetsPath, string CandidateAssetsPath, CloudTasksPackageGraph BaselineGraph, CloudTasksPackageGraph CandidateGraph, CloudTasksPackageGraph CloudTasksGraph, IReadOnlyList<CloudTasksPackageFileIdentity> NeutralPackageFiles, IReadOnlyDictionary<string, string> NeutralSourceSha256, string ReportPath);

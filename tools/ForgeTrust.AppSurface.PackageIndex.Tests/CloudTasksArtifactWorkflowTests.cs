@@ -10,10 +10,12 @@ public sealed partial class PackageArtifactValidationTests
     private const string WebPackage = "ForgeTrust.AppSurface.Web";
 
     // protects=verification includes the blocked Cloud Tasks archive before manifest creation while publication keeps rejecting its blocker; fails_when=proof omits the validated archive or publish workflow accepts readiness-blocked Cloud Tasks; no_claim=does not execute the real packed consumer or publish an artifact.
-    [Fact]
-    public async Task PackageArtifactWorkflow_ProvesReadinessBlockedCloudTasksArchiveBeforeManifestAndKeepsPublicationBlocked()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("origin/main")]
+    public async Task PackageArtifactWorkflow_ProvesReadinessBlockedCloudTasksArchiveBeforeManifestAndKeepsPublicationBlocked(string? baselineRef)
     {
-        var request = await PrepareCloudTasksArtifactWorkflowAsync();
+        var request = (await PrepareCloudTasksArtifactWorkflowAsync()) with { CloudTasksBaselineRef = baselineRef };
         var runner = new CloudTasksArtifactCommandRunner();
         CloudTasksPackageConsumerProofRequest? proofRequest = null;
         PackageArtifactValidationReport? proofArtifacts = null;
@@ -37,6 +39,7 @@ public sealed partial class PackageArtifactValidationTests
         Assert.Equal(request.PackageVersion, observed.PackageVersion);
         Assert.Equal(request.Source, observed.Source);
         Assert.Null(observed.SourceCommit);
+        Assert.Equal(baselineRef, observed.BaselineRef);
         var artifactReport = Assert.IsType<PackageArtifactValidationReport>(proofArtifacts);
         Assert.Equal(2, artifactReport.Entries.Count);
         var archive = Assert.Single(artifactReport.Entries, entry => entry.PackageId == CloudTasksPackage);

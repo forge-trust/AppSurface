@@ -88,6 +88,26 @@ When CloudTasks is in the verification plan, `verify-packages` requires the
 It builds and runs the public GCP consumer from exact validated local archives, checks the complete pinned SDK closure,
 and compares independent packed baseline and candidate neutral consumers in isolated caches. Invalid-token rejection
 before provider I/O, direct/transitive dependency isolation, public SDK-type leak scans and artifact hash bindings remain required.
+
+Ordinary `verify-packages` runs archive the candidate source commit (producer `--source-commit`, or canonical `HEAD`)
+as the neutral baseline. Main pushes and tagged publication use the same snapshot rule, so later committed neutral
+source or package-pin updates do not compare against a permanent historical tree. Dirty neutral source/build-input
+changes still fail parity against the selected committed snapshot. This mode checks current artifact isolation; it
+does not establish historical no-change evidence.
+
+For strict historical acceptance, supply `--cloudtasks-baseline-ref origin/main` after fetching the target ref and
+its full history. The verifier requires one canonical `git merge-base --all` result with the candidate source commit,
+records the resolved SHA and mode, and preserves historical source/build parity. A missing or ambiguous merge-base,
+or a historical ref resolving to the candidate itself, fails with no fallback. Use the reviewed earlier commit/ref
+for post-merge historical replay; omit the option for ordinary verification. The [local orchestration script](../../scripts/verify-cloudtasks-activation.sh)
+accepts this as its second argument: `./scripts/verify-cloudtasks-activation.sh /tmp/cloudtasks-acceptance origin/main`.
+
+Only the two allowlisted central declarations (`Google.Cloud.Tasks.V2` and the project-conditioned `Grpc.Net.Client`)
+are normalized. Their versions must match exactly one direct root each in the candidate CloudTasks `packages.lock.json`;
+the lock hash is recorded. The historical baseline may omit both declarations; a candidate-source baseline contains
+both exact validated declarations. Missing, partial, duplicate, mismatched or differently conditioned declarations
+fail. Every other central policy entry and all neutral source/build inputs remain exact.
+
 The [approved plan](../../docs/plans/issue-892-cloudtasks-activation-transport.md)
 allows binary differences only for Core, Flow, Workers and Durable after unchanged authored sources/projects,
 Flow.Generators and shared build inputs are proved. Packed framework/dependency contracts, library entry sets,

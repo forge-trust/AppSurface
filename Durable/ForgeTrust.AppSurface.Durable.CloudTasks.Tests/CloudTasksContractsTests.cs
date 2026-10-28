@@ -69,7 +69,9 @@ public sealed class CloudTasksContractsTests
         AssertValidation(() => CreateTarget(location: new string('a', 64)), "locationId", "ASCTV003");
         AssertValidation(() => CreateTarget(location: "a_b"), "locationId", "ASCTV002");
         AssertValidation(() => CreateTarget(queue: "queue/name"), "queueId", "ASCTV002");
-        Assert.Equal("_queue", CreateTarget(queue: "_queue").QueueId);
+        AssertValidation(() => CreateTarget(queue: "_queue"), "queueId", "ASCTV002");
+        AssertValidation(() => CreateTarget(queue: "q_queue"), "queueId", "ASCTV002");
+        Assert.Equal("Queue-01", CreateTarget(queue: "Queue-01").QueueId);
         AssertValidation(() => CreateTarget(queue: "q.queue"), "queueId", "ASCTV002");
         AssertValidation(() => new CloudTasksActivationRequest(Target(), "bad.task"), "taskId", "ASCTV002");
         AssertValidation(() => CreateTarget(queue: new string('q', 101)), "queueId", "ASCTV003");

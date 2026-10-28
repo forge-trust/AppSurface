@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -9,6 +10,8 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 {
     public sealed class CloudTasksPackageConsumerProofTests
     {
+        private const string CandidateCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        private const string HistoricalCommit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         // protects=asset graph selection cannot silently omit additional target frameworks; fails_when=multi-TFM restore passes through as the first target; no_claim=does not prove target-specific packages are equivalent.
         [Fact]
         public void ReadGraph_RejectsMultipleTargets()
@@ -71,23 +74,34 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             finally { File.Delete(path); }
         }
 
-        // protects=approved baseline extraction is anchored to its requested commit; fails_when=checkout HEAD or dirty tracked files leak into baseline tree; no_claim=does not prove baseline package hash parity.
+        // protects=baseline extraction is anchored to an explicitly supplied commit; fails_when=checkout HEAD or dirty tracked files leak into the baseline tree; no_claim=does not prove baseline package hash parity.
         [Fact]
-        public async Task ExtractBaselineAsync_UsesPinnedCommitTreeAndHonorsCancellation()
+        public async Task ExtractBaselineAsync_UsesExplicitCommitTreeInAnIndependentGitRepository()
         {
-            var root = PackedProofFixture.FindRepositoryRoot();
+            var root = Path.Combine(Path.GetTempPath(), "cloudtasks-baseline-git-" + Guid.NewGuid().ToString("N"));
             var target = Path.Combine(Path.GetTempPath(), "cloudtasks-baseline-extract-" + Guid.NewGuid().ToString("N"));
             try
             {
-                await CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CancellationToken.None);
+                Directory.CreateDirectory(root);
+                await RunGitAsync(root, "init", "--quiet");
+                await RunGitAsync(root, "config", "user.email", "cloudtasks-test@example.invalid");
+                await RunGitAsync(root, "config", "user.name", "Cloud Tasks test");
+                var baselineFile = Path.Combine(root, "baseline-input.txt");
+                await File.WriteAllTextAsync(baselineFile, "committed baseline");
+                await RunGitAsync(root, "add", "baseline-input.txt");
+                await RunGitAsync(root, "-c", "commit.gpgSign=false", "-c", "core.hooksPath=/dev/null", "commit", "--quiet", "-m", "test baseline");
+                var commit = await RunGitAsync(root, "rev-parse", "HEAD");
+                await File.WriteAllTextAsync(baselineFile, "dirty working tree must not be archived");
 
-                Assert.True(File.Exists(Path.Combine(target, "ForgeTrust.AppSurface.slnx")));
+                await CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, commit, CancellationToken.None);
+
+                Assert.Equal("committed baseline", await File.ReadAllTextAsync(Path.Combine(target, "baseline-input.txt")));
                 Assert.False(Directory.Exists(Path.Combine(target, ".git")));
-                Assert.False(File.Exists(Path.Combine(target, "Durable", "ForgeTrust.AppSurface.Durable.CloudTasks", "ForgeTrust.AppSurface.Durable.CloudTasks.csproj")));
             }
             finally
             {
                 if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
             }
         }
 
@@ -232,9 +246,10 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
             var request = fixture.Request;
-            var report = await new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(request, fixture.Artifacts);
+            var report = await new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(request, fixture.Artifacts);
 
-            Assert.Equal(CloudTasksPackageConsumerProof.BaselineCommit, report.BaselineCommit);
+            Assert.Equal(CandidateCommit, report.BaselineCommit);
+            Assert.Equal("candidate-source", report.BaselineMode);
             Assert.Equal(4, report.NeutralPackageFiles.Count);
             Assert.NotEmpty(report.NeutralSourceSha256);
             Assert.Contains("baseline/Directory.Build.props", report.NeutralSourceSha256.Keys);
@@ -259,6 +274,105 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Equal(6, runner.ConsumerRestoreRequests.Count);
         }
 
+        // protects=historical acceptance binds to the unique target merge-base and records its mode; fails_when=an arbitrary ref or candidate commit is reported as the reviewed baseline; no_claim=does not prove the target branch is protected from later movement.
+        [Fact]
+        public async Task RunAsync_ResolvesAndReportsExplicitHistoricalAcceptanceMergeBase()
+        {
+            using var fixture = new PackedProofFixture();
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, baselineMergeBaseOutput: HistoricalCommit);
+
+            var report = await new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
+                fixture.Request with { BaselineRef = "origin/main" }, fixture.Artifacts);
+
+            Assert.Equal(HistoricalCommit, report.BaselineCommit);
+            Assert.Equal("historical-acceptance", report.BaselineMode);
+            var mergeBase = Assert.Single(runner.BaselineMergeBaseRequests);
+            Assert.Equal(new[] { "merge-base", "--all", "origin/main", CandidateCommit }, mergeBase.Arguments);
+            Assert.Equal(30_000, mergeBase.TimeoutMilliseconds);
+            Assert.Equal("0", mergeBase.Environment!["GIT_TERMINAL_PROMPT"]);
+        }
+
+        // protects=ordinary candidate verification can include later neutral source edits without historical-baseline freeze; fails_when=unchanged historical files are required for candidate-source mode; no_claim=does not permit provider dependencies or graph/contract drift.
+        [Fact]
+        public async Task RunAsync_CandidateSourceModeAllowsLaterNeutralSourceUpdatesAndKeepsPairedGates()
+        {
+            using var fixture = new PackedProofFixture();
+            var repositoryRoot = fixture.CreateRepositoryRootWithForbiddenReference();
+            File.Delete(Path.Combine(repositoryRoot, "Durable", "packed-consumers", "Adopter", "Adopter.csproj"));
+            var updatedProject = Path.Combine(repositoryRoot, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj");
+            File.AppendAllText(updatedProject, Environment.NewLine + "<!-- later neutral source update -->");
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
+
+            var report = await new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
+                fixture.Request with { RepositoryRoot = repositoryRoot }, fixture.Artifacts);
+
+            Assert.Equal("candidate-source", report.BaselineMode);
+            Assert.Equal(4, report.BaselineGraph.Nodes.Count);
+            Assert.Equal(4, report.CandidateGraph.Nodes.Count);
+            Assert.Equal(4, report.NeutralPackageFiles.Count);
+            Assert.Equal(report.NeutralSourceSha256["baseline/ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"],
+                report.NeutralSourceSha256["candidate/ForgeTrust.AppSurface.Core/ForgeTrust.AppSurface.Core.csproj"]);
+            Assert.Empty(runner.BaselineMergeBaseRequests);
+        }
+
+        // protects=historical mode fails closed for missing, ambiguous, malformed, or self baselines; fails_when=it silently falls back to candidate-source mode; no_claim=does not make the requested ref available in a shallow checkout.
+        [Theory]
+        [InlineData("", "exactly one merge-base")]
+        [InlineData("not-a-commit\n", "not a canonical commit")]
+        [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", "exactly one merge-base")]
+        [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", "earlier reviewed baseline")]
+        public async Task RunAsync_RejectsMissingAmbiguousMalformedOrSelfHistoricalMergeBase(string mergeBaseOutput, string expectedMessage)
+        {
+            using var fixture = new PackedProofFixture();
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, baselineMergeBaseOutput: mergeBaseOutput);
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
+                    fixture.Request with { BaselineRef = "origin/main" }, fixture.Artifacts));
+
+            Assert.Contains(expectedMessage, error.Message, StringComparison.Ordinal);
+            Assert.Empty(runner.ConsumerRestoreRequests);
+            Assert.Empty(runner.BaselinePackRequests);
+        }
+
+        // protects=unsafe and empty historical ref values never reach Git; fails_when=option-like input is interpreted as a revision or becomes an implicit default; no_claim=does not validate refs against a remote policy.
+        [Theory]
+        [InlineData("")]
+        [InlineData("-c")]
+        [InlineData("origin/main ref")]
+        public async Task RunAsync_RejectsInvalidHistoricalRefBeforeGit(string baselineRef)
+        {
+            using var fixture = new PackedProofFixture();
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
+                    fixture.Request with { BaselineRef = baselineRef }, fixture.Artifacts));
+
+            Assert.Contains("historical baseline ref", error.Message, StringComparison.Ordinal);
+            Assert.Empty(runner.CandidateRevisionRequests);
+            Assert.Empty(runner.BaselineMergeBaseRequests);
+        }
+
+        // protects=requested candidate commits are canonical before any proof stage starts; fails_when=short/nonhex candidate revisions become baseline inputs; no_claim=does not verify remote authenticity.
+        [Theory]
+        [InlineData("abc")]
+        [InlineData("gggggggggggggggggggggggggggggggggggggggg")]
+        public async Task RunAsync_RejectsInvalidExplicitCandidateCommitBeforeCommands(string candidateCommit)
+        {
+            using var fixture = new PackedProofFixture();
+            var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
+                    fixture.Request with { SourceCommit = candidateCommit }, fixture.Artifacts));
+
+            Assert.Contains("canonical 40-character Git commit SHA", error.Message, StringComparison.Ordinal);
+            Assert.Empty(runner.CandidateRevisionRequests);
+            Assert.Empty(runner.BaselineMergeBaseRequests);
+            Assert.Empty(runner.ConsumerRestoreRequests);
+        }
+
         // protects=provider dependencies are rejected in the neutral graph and temporary proof state is cleaned; fails_when=Google edge survives or workspace remains after failure; no_claim=does not exercise a real restore.
         [Fact]
         public async Task RunAsync_RejectsGoogleEdgeInNeutralGraphAndCleansWorkspace()
@@ -266,7 +380,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, neutralGraphContainsGoogle: true);
             var exception = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
             Assert.Contains("forbidden provider dependency", exception.Message, StringComparison.Ordinal);
             Assert.NotEmpty(runner.ConsumerRestoreRequests);
@@ -281,7 +395,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
                     fixture.Request,
                     fixture.Artifacts with { PackageVersion = "0.9.0" }));
 
@@ -327,7 +441,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, invalidCloudTasksGraph: changedPart);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
             Assert.Contains(changedPart switch
             {
@@ -346,7 +460,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             const string candidateRevision = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, candidateRevisionOutput: candidateRevision);
 
-            await new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(
+            await new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
                 fixture.Request with { SourceCommit = null }, fixture.Artifacts);
 
             var revisionRequest = Assert.Single(runner.CandidateRevisionRequests);
@@ -355,6 +469,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Equal(fixture.Request.RepositoryRoot, revisionRequest.WorkingDirectory);
             Assert.Equal(30_000, revisionRequest.TimeoutMilliseconds);
             Assert.All(runner.BaselinePackRequests, command => Assert.Contains("-p:SourceRevisionId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", command.Arguments));
+            Assert.All(runner.BaselinePackRequests, command => Assert.Contains("-p:RepositoryCommit=", command.Arguments));
         }
 
         // protects=untrusted Git output cannot affect reproducible baseline packaging; fails_when=empty, short, or nonhex revision is accepted; no_claim=does not run a real Git command.
@@ -368,13 +483,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, candidateRevisionOutput: revision);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
                     fixture.Request with { SourceCommit = null }, fixture.Artifacts));
 
             Assert.Contains("canonical 40-character candidate Git revision", error.Message, StringComparison.Ordinal);
             Assert.Single(runner.CandidateRevisionRequests);
+            Assert.Empty(runner.BaselineMergeBaseRequests);
+            Assert.Empty(runner.ConsumerRestoreRequests);
             Assert.Empty(runner.BaselinePackRequests);
-            Assert.False(Directory.Exists(Directory.GetParent(runner.ConsumerRestoreRequests[0].WorkingDirectory)!.FullName));
         }
 
         // protects=packed API execution proves invalid-token rejection before provider I/O; fails_when=the smoke consumer omits ASCT102 but proof proceeds; no_claim=does not make a live provider request.
@@ -385,7 +501,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath, consumerExecutionOutput: "no evidence");
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
             Assert.Contains("did not verify invalid-token rejection", error.Message, StringComparison.Ordinal);
             Assert.Single(runner.ConsumerExecutionRequests);
@@ -401,7 +517,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
             Assert.Contains("public API exposes provider SDK types", error.Message, StringComparison.Ordinal);
             Assert.Empty(runner.BaselinePackRequests);
@@ -419,7 +535,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 neutralGraphIdentityFailure: invalidIdentity);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(fixture.Request, fixture.Artifacts));
 
             Assert.Contains(invalidIdentity == "missing" ? "must resolve validated package" : "content hash different", error.Message, StringComparison.Ordinal);
             Assert.Equal(6, runner.ConsumerRestoreRequests.Count);
@@ -435,7 +551,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
 
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
-                new CloudTasksPackageConsumerProof(runner, fixture.CreatePinnedSourceAsync).RunAsync(
+                new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
                     fixture.Request with { RepositoryRoot = repositoryRoot }, fixture.Artifacts));
 
             Assert.Contains("Neutral Durable projects reference", error.Message, StringComparison.Ordinal);
@@ -449,9 +565,9 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
         {
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
-            async Task ExtractWithDrift(string root, string target, CancellationToken token)
+            async Task ExtractWithDrift(string root, string target, string commit, CancellationToken token)
             {
-                await fixture.CreatePinnedSourceAsync(root, target, token);
+                await fixture.CreateProofSourceAsync(root, target, commit, token);
                 File.AppendAllText(Path.Combine(target, "ForgeTrust.AppSurface.Core", "ForgeTrust.AppSurface.Core.csproj"), "<!-- drift -->");
             }
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
@@ -482,6 +598,15 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             var path = Path.Combine(Path.GetTempPath(), "cloudtasks-assets-" + Guid.NewGuid().ToString("N") + ".json");
             File.WriteAllText(path, JsonSerializer.Serialize(assets));
             return path;
+        }
+
+        private static async Task<string> RunGitAsync(string root, params string[] arguments)
+        {
+            var result = await new ProcessCommandRunner().RunAsync(new CommandRunRequest(
+                "git", arguments, root, "Cloud Tasks temporary Git fixture", "test", "git",
+                "preparing an isolated Git fixture", 30_000,
+                new Dictionary<string, string?> { ["GIT_TERMINAL_PROMPT"] = "0" }), CancellationToken.None);
+            return result.StandardOutput.Trim();
         }
 
         private const string Version = "1.0.0-preview.1";
@@ -515,7 +640,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             internal string ArtifactsDirectory { get; }
             internal Dictionary<string, string> PackageArtifacts { get; } = new(StringComparer.OrdinalIgnoreCase);
             internal PackageArtifactValidationReport Artifacts { get; }
-            internal CloudTasksPackageConsumerProofRequest Request => new(FindRepositoryRoot(), ArtifactsDirectory, Version, "https://api.nuget.org/v3/index.json", CloudTasksPackageConsumerProof.BaselineCommit);
+            internal CloudTasksPackageConsumerProofRequest Request => new(FindRepositoryRoot(), ArtifactsDirectory, Version, "https://api.nuget.org/v3/index.json", CandidateCommit);
             internal string LockFilePath => Path.Combine(Request.RepositoryRoot, "Durable", CloudTasksPackageConsumerProof.PackageId, "packages.lock.json");
 
             internal void AddCloudTasksDocumentationLeak()
@@ -559,7 +684,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 }
             }
 
-            internal Task CreatePinnedSourceAsync(string repositoryRoot, string target, CancellationToken cancellationToken)
+            internal Task CreateProofSourceAsync(string repositoryRoot, string target, string commit, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Directory.CreateDirectory(target);
@@ -567,15 +692,18 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     CopyAuthoredTree(TestPathUtils.PathUnder(repositoryRoot, relative), TestPathUtils.PathUnder(target, relative));
                 foreach (var relative in CloudTasksNeutralSourceProof.SharedFiles)
                     if (File.Exists(TestPathUtils.PathUnder(repositoryRoot, relative))) File.Copy(TestPathUtils.PathUnder(repositoryRoot, relative), TestPathUtils.PathUnder(target, relative));
-                var centralPath = Path.Combine(target, "Directory.Packages.props");
-                var central = System.Xml.Linq.XDocument.Load(centralPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
-                foreach (var pin in central.Descendants().Where(element => element.Name.LocalName == "PackageVersion"
-                             && (string?)element.Attribute("Include") is "Google.Cloud.Tasks.V2" or "Grpc.Net.Client").ToArray())
+                if (commit == HistoricalCommit)
                 {
-                    if (pin.PreviousNode is System.Xml.Linq.XText text && string.IsNullOrWhiteSpace(text.Value)) text.Remove();
-                    pin.Remove();
+                    var centralPath = Path.Combine(target, "Directory.Packages.props");
+                    var central = System.Xml.Linq.XDocument.Load(centralPath, System.Xml.Linq.LoadOptions.PreserveWhitespace);
+                    foreach (var pin in central.Descendants().Where(element => element.Name.LocalName == "PackageVersion"
+                                 && (string?)element.Attribute("Include") is "Google.Cloud.Tasks.V2" or "Grpc.Net.Client").ToArray())
+                    {
+                        if (pin.PreviousNode is System.Xml.Linq.XText text && string.IsNullOrWhiteSpace(text.Value)) text.Remove();
+                        pin.Remove();
+                    }
+                    File.WriteAllText(centralPath, central.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
                 }
-                File.WriteAllText(centralPath, central.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
                 return Task.CompletedTask;
             }
 
@@ -625,12 +753,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             string? invalidCloudTasksGraph = null,
             bool neutralGraphContainsGoogle = false,
             string? candidateRevisionOutput = null,
+            string? baselineMergeBaseOutput = null,
             string? consumerExecutionOutput = null,
             string? neutralGraphIdentityFailure = null) : ICommandRunner
         {
             internal List<CommandRunRequest> ConsumerRestoreRequests { get; } = [];
             internal List<string> EmptyBuildPropsContents { get; } = [];
             internal List<CommandRunRequest> CandidateRevisionRequests { get; } = [];
+            internal List<CommandRunRequest> BaselineMergeBaseRequests { get; } = [];
             internal List<CommandRunRequest> BaselinePackRequests { get; } = [];
             internal List<CommandRunRequest> ConsumerExecutionRequests { get; } = [];
 
@@ -640,7 +770,12 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 if (request.OperationName == "Cloud Tasks candidate source revision")
                 {
                     CandidateRevisionRequests.Add(request);
-                    return Task.FromResult(new CommandRunResult(candidateRevisionOutput ?? CloudTasksPackageConsumerProof.BaselineCommit, string.Empty));
+                    return Task.FromResult(new CommandRunResult(candidateRevisionOutput ?? CandidateCommit, string.Empty));
+                }
+                if (request.OperationName == "Cloud Tasks baseline merge-base")
+                {
+                    BaselineMergeBaseRequests.Add(request);
+                    return Task.FromResult(new CommandRunResult(baselineMergeBaseOutput ?? HistoricalCommit, string.Empty));
                 }
                 if (request.OperationName == "Cloud Tasks pinned baseline pack")
                 {

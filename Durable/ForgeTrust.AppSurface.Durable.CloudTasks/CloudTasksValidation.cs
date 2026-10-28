@@ -94,9 +94,9 @@ internal static class CloudTasksValidation
             throw Range(parameterName, "queue identifier length 1 through 100 characters", "Use a queue identifier of at most 100 characters.");
         }
 
-        if (!All(value, static c => IsAsciiAlphaNumeric(c) || c is '-' or '_'))
+        if (!All(value, static c => IsAsciiAlphaNumeric(c) || c == '-'))
         {
-            throw Syntax(parameterName, "queue ID (ASCII letters/digits, hyphen, or underscore)");
+            throw Syntax(parameterName, "queue ID (ASCII letters/digits or hyphen)");
         }
 
         return value;

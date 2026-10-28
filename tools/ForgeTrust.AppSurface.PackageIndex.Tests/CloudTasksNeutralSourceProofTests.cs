@@ -20,8 +20,30 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Equal(evidence.Keys.Order(StringComparer.Ordinal), evidence.Keys);
         Assert.Contains("baseline/ForgeTrust.AppSurface.Core/Source.cs", evidence.Keys);
         Assert.Contains("candidate/Directory.Packages.props", evidence.Keys);
+        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", evidence.Keys);
         Assert.All(evidence.Values, hash => Assert.Matches("^[a-f0-9]{64}$", hash));
         Assert.Equal(Hash(fixture.CandidatePath("ForgeTrust.AppSurface.Core/Source.cs")), evidence["candidate/ForgeTrust.AppSurface.Core/Source.cs"]);
+        Assert.Equal(Hash(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json")),
+            evidence["candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json"]);
+
+        fixture.WriteCentralPackages(candidate: false, includeApprovedPins: true);
+        _ = CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot);
+    }
+
+    // protects=SDK pin normalization follows the candidate's actual direct resolved roots and permits a baseline already on those same pins; fails_when=versions are hardcoded or drift between source and lock without detection; why_new=default pins alone would not exercise package bumps or the two supported baseline modes; seam=none; no_claim=does not run NuGet restore.
+    [Theory]
+    [InlineData("3.8.1", "2.81.0")]
+    [InlineData("3.8.1-preview.1", "2.81.0-beta")]
+    public void Verify_UsesCandidateLockVersionsAndAcceptsMatchingBaselineSdkPins(string taskVersion, string grpcVersion)
+    {
+        using var fixture = new NeutralSourceFixture();
+        fixture.WriteLock(candidate: true, taskVersion: taskVersion, grpcVersion: grpcVersion);
+        fixture.WriteCentralPackages(candidate: false, includeApprovedPins: true, taskVersion: taskVersion, grpcVersion: grpcVersion);
+        fixture.WriteCentralPackages(candidate: true, includeApprovedPins: true, taskVersion: taskVersion, grpcVersion: grpcVersion);
+
+        var evidence = CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot);
+
+        Assert.Contains("candidate/Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", evidence.Keys);
     }
 
     // protects=generated build outputs cannot hide drift or destabilize authored-source comparison; fails_when=bin or obj contents affect parity; no_claim=does not prove those ignored outputs are safe to package.
@@ -88,7 +110,7 @@ public sealed class CloudTasksNeutralSourceProofTests
         Assert.Contains("Neutral source parity failed", error.Message, StringComparison.Ordinal);
     }
 
-    // protects=central package XML permits only the exact Google Tasks and conditional Grpc pins; fails_when=an unapproved pin, version, condition, attribute, duplicate, or baseline pin is accepted; no_claim=does not resolve the full NuGet graph.
+    // protects=central SDK pins match exact direct roots in the candidate lock and are the only CPM changes normalized; fails_when=an unapproved pin, version, condition, attribute, duplicate, missing root, or invalid baseline mode is accepted; why_new=each lock/CPM disagreement has a distinct source of truth; seam=none; no_claim=does not run NuGet restore.
     [Theory]
     [InlineData("unapproved-version")]
     [InlineData("unapproved-package")]
@@ -96,12 +118,56 @@ public sealed class CloudTasksNeutralSourceProofTests
     [InlineData("wrong-grpc-condition")]
     [InlineData("extra-pin-attribute")]
     [InlineData("duplicate-pin")]
-    [InlineData("baseline-has-pin")]
+    [InlineData("candidate-missing-grpc")]
+    [InlineData("wrong-baseline-pin")]
+    [InlineData("partial-baseline-pins")]
+    [InlineData("lock-missing-task")]
+    [InlineData("lock-missing-grpc")]
+    [InlineData("lock-duplicate-task")]
+    [InlineData("lock-not-direct")]
+    [InlineData("lock-invalid-version")]
+    [InlineData("lock-invalid-prerelease-version")]
+    [InlineData("lock-missing")]
+    [InlineData("lock-malformed")]
+    [InlineData("lock-oversized")]
+    [InlineData("lock-symlink")]
     public void Verify_RejectsCentralPackageChangesOutsideExactApprovedPins(string mutation)
     {
         using var fixture = new NeutralSourceFixture();
-        fixture.WriteCentralPackages(candidate: false, includeApprovedPins: mutation == "baseline-has-pin");
+        fixture.WriteCentralPackages(candidate: false, includeApprovedPins: mutation is "wrong-baseline-pin" or "partial-baseline-pins",
+            taskVersion: mutation == "wrong-baseline-pin" ? "3.7.1" : "3.7.0",
+            includeGrpcPin: mutation != "partial-baseline-pins");
         fixture.WriteCentralPackages(candidate: true, includeApprovedPins: true);
+        if (mutation.StartsWith("lock-", StringComparison.Ordinal))
+        {
+            switch (mutation)
+            {
+                case "lock-missing":
+                    File.Delete(fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json"));
+                    break;
+                case "lock-malformed":
+                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", "{");
+                    break;
+                case "lock-oversized":
+                    fixture.WriteCandidate("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json", new string(' ', 1024 * 1024 + 1));
+                    break;
+                case "lock-symlink":
+                    var lockPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json");
+                    var targetPath = fixture.CandidatePath("Durable/ForgeTrust.AppSurface.Durable.CloudTasks/lock-target.json");
+                    File.WriteAllText(targetPath, "{\"dependencies\":{\"net10.0\":{}}}");
+                    File.Delete(lockPath);
+                    File.CreateSymbolicLink(lockPath, targetPath);
+                    break;
+                default:
+                    fixture.WriteLock(candidate: true,
+                        includeTaskRoot: mutation != "lock-missing-task",
+                        includeGrpcRoot: mutation != "lock-missing-grpc",
+                        duplicateTaskRoot: mutation == "lock-duplicate-task",
+                        taskType: mutation == "lock-not-direct" ? "Transitive" : "Direct",
+                        taskVersion: mutation == "lock-invalid-version" ? "[3.7.0, )" : mutation == "lock-invalid-prerelease-version" ? "3.7.0-preview.01" : "3.7.0");
+                    break;
+            }
+        }
 
         var candidateProps = File.ReadAllText(fixture.CandidatePath("Directory.Packages.props"));
         switch (mutation)
@@ -124,7 +190,21 @@ public sealed class CloudTasksNeutralSourceProofTests
             case "duplicate-pin":
                 candidateProps = candidateProps.Replace("  </ItemGroup>", "    <PackageVersion Include=\"Google.Cloud.Tasks.V2\" Version=\"3.7.0\" />\n  </ItemGroup>", StringComparison.Ordinal);
                 break;
-            case "baseline-has-pin":
+            case "candidate-missing-grpc":
+                candidateProps = candidateProps.Replace("    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"2.80.0\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'\" />\n", string.Empty, StringComparison.Ordinal);
+                break;
+            case "wrong-baseline-pin":
+            case "partial-baseline-pins":
+            case "lock-missing-task":
+            case "lock-missing-grpc":
+            case "lock-duplicate-task":
+            case "lock-not-direct":
+            case "lock-invalid-version":
+            case "lock-invalid-prerelease-version":
+            case "lock-missing":
+            case "lock-malformed":
+            case "lock-oversized":
+            case "lock-symlink":
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(mutation));
@@ -135,7 +215,13 @@ public sealed class CloudTasksNeutralSourceProofTests
         var error = Assert.Throws<PackageIndexException>(
             () => CloudTasksNeutralSourceProof.Verify(fixture.BaselineRoot, fixture.CandidateRoot));
 
-        Assert.Contains("Directory.Packages.props", error.Message, StringComparison.Ordinal);
+        Assert.Contains(mutation switch
+        {
+            "lock-symlink" => "symbolic link",
+            "lock-missing" => "packages.lock.json",
+            _ when mutation.StartsWith("lock-", StringComparison.Ordinal) => "lock file",
+            _ => "Directory.Packages.props"
+        }, error.Message, StringComparison.Ordinal);
     }
 
     // protects=neutral source proof reads regular authored inputs without following file links; fails_when=a linked source file is accepted; no_claim=does not scan directories outside the five declared packages.
@@ -227,10 +313,39 @@ public sealed class CloudTasksNeutralSourceProofTests
                 foreach (var file in SharedFiles) Write(root, file, file == "LICENSE" ? "MIT\n" : "<Project />\n");
                 WriteCentralPackages(root, includeApprovedPins: false);
             }
+            WriteLock(candidate: true);
         }
 
-        internal void WriteCentralPackages(bool candidate, bool includeApprovedPins = false) =>
-            Write(candidate ? CandidateRoot : BaselineRoot, "Directory.Packages.props", CentralPackages(includeApprovedPins));
+        internal void WriteCentralPackages(
+            bool candidate,
+            bool includeApprovedPins = false,
+            string taskVersion = "3.7.0",
+            string grpcVersion = "2.80.0",
+            bool includeTaskPin = true,
+            bool includeGrpcPin = true) =>
+            Write(candidate ? CandidateRoot : BaselineRoot, "Directory.Packages.props",
+                CentralPackages(includeApprovedPins, taskVersion, grpcVersion, includeTaskPin, includeGrpcPin));
+
+        internal void WriteLock(
+            bool candidate,
+            string taskVersion = "3.7.0",
+            string grpcVersion = "2.80.0",
+            bool includeTaskRoot = true,
+            bool includeGrpcRoot = true,
+            bool duplicateTaskRoot = false,
+            string taskType = "Direct")
+        {
+            var roots = new List<string>();
+            if (includeTaskRoot)
+            {
+                roots.Add($"\"Google.Cloud.Tasks.V2\": {{ \"type\": \"{taskType}\", \"resolved\": \"{taskVersion}\" }}");
+                if (duplicateTaskRoot) roots.Add($"\"Google.Cloud.Tasks.V2\": {{ \"type\": \"{taskType}\", \"resolved\": \"{taskVersion}\" }}");
+            }
+            if (includeGrpcRoot) roots.Add($"\"Grpc.Net.Client\": {{ \"type\": \"Direct\", \"resolved\": \"{grpcVersion}\" }}");
+            Write(candidate ? CandidateRoot : BaselineRoot,
+                "Durable/ForgeTrust.AppSurface.Durable.CloudTasks/packages.lock.json",
+                "{\"dependencies\":{\"net10.0\":{" + string.Join(",", roots) + "}}}");
+        }
 
         internal void WritePackageGeneratedFiles()
         {
@@ -250,10 +365,16 @@ public sealed class CloudTasksNeutralSourceProofTests
             if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
         }
 
-        private static string CentralPackages(bool includeApprovedPins)
+        private static string CentralPackages(
+            bool includeApprovedPins,
+            string taskVersion,
+            string grpcVersion,
+            bool includeTaskPin,
+            bool includeGrpcPin)
         {
             var pins = includeApprovedPins
-                ? "    <PackageVersion Include=\"Google.Cloud.Tasks.V2\" Version=\"3.7.0\" />\n    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"2.80.0\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'\" />\n"
+                ? (includeTaskPin ? $"    <PackageVersion Include=\"Google.Cloud.Tasks.V2\" Version=\"{taskVersion}\" />\n" : string.Empty)
+                    + (includeGrpcPin ? $"    <PackageVersion Include=\"Grpc.Net.Client\" Version=\"{grpcVersion}\" Condition=\"'$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks' OR '$(MSBuildProjectName)' == 'ForgeTrust.AppSurface.Durable.CloudTasks.Tests'\" />\n" : string.Empty)
                 : string.Empty;
             return $"<Project>\n  <ItemGroup>\n    <PackageVersion Include=\"Existing\" Version=\"1.0.0\" />\n{pins}  </ItemGroup>\n</Project>\n";
         }
@@ -266,6 +387,6 @@ public sealed class CloudTasksNeutralSourceProofTests
         }
 
         private static void WriteCentralPackages(string root, bool includeApprovedPins) =>
-            Write(root, "Directory.Packages.props", CentralPackages(includeApprovedPins));
+            Write(root, "Directory.Packages.props", CentralPackages(includeApprovedPins, "3.7.0", "2.80.0", true, true));
     }
 }

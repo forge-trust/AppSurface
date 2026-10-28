@@ -24,7 +24,7 @@ var target = new CloudTasksActivationTarget(
     locationId: "us-central1",
     queueId: "worker-wakes",
     workerEndpoint: new Uri("https://worker.example/private/durable/activate"),
-    oidcServiceAccountEmail: "task-dispatcher@123456789.iam.gserviceaccount.com",
+    oidcServiceAccountEmail: "task-dispatcher@worker-project.iam.gserviceaccount.com",
     audience: "https://worker.example",
     dispatchDeadline: TimeSpan.FromSeconds(30));
 
@@ -32,6 +32,8 @@ var request = new CloudTasksActivationRequest(target, taskId: "wake_01JEXAMPLE")
 using var cancellation = new CancellationTokenSource();
 var receipt = await dispatcher.DispatchAsync(request, cancellation.Token);
 ```
+
+Replace the OIDC email with the actual service-account email from your queue project; a [user-managed service-account email](https://docs.cloud.google.com/iam/docs/service-accounts-create) contains the project ID, such as `worker-project`, rather than the numeric project number.
 
 Use a caller-generated task ID and retain it with the application's outbox or recovery record. A `Created` receipt means that Cloud Tasks returned the expected task name. `AlreadyExists` does not establish task equivalence or current queue presence. `Indeterminate` means the task may have been accepted; keep the task ID and use the application's existing authorized recovery process before deciding whether to submit again. No outcome proves delivery, Work selection, or Work completion.
 

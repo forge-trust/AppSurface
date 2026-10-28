@@ -5,6 +5,7 @@ using Google.Api.Gax.Grpc;
 using Google.Cloud.Tasks.V2;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
+using Grpc.Core.Interceptors;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Configuration;
 using Grpc.Net.Compression;
@@ -28,7 +29,10 @@ internal sealed class CloudTasksSdkTransport : ICloudTasksRpcTransport, IDisposa
     internal CloudTasksSdkTransport() : this(new Uri("https://cloudtasks.googleapis.com"), CreateHandler()) { }
 
     /// <summary>Creates a real SDK channel against a local HTTP/2 fixture, owning its handler.</summary>
-    internal CloudTasksSdkTransport(Uri endpoint, HttpMessageHandler handler)
+    /// <param name="endpoint">The fixture HTTPS endpoint.</param>
+    /// <param name="handler">The owned HTTP handler with the production transport bounds.</param>
+    /// <param name="observeSdkCall">Optional internal fixture callback observing SDK RPC calls before HTTP transport.</param>
+    internal CloudTasksSdkTransport(Uri endpoint, HttpMessageHandler handler, Action? observeSdkCall = null)
     {
         _channel = GrpcChannel.ForAddress(endpoint, new Grpc.Net.Client.GrpcChannelOptions
         {
@@ -44,12 +48,24 @@ internal sealed class CloudTasksSdkTransport : ICloudTasksRpcTransport, IDisposa
         });
         _client = new CloudTasksClientBuilder
         {
-            CallInvoker = _channel.CreateCallInvoker(),
+            CallInvoker = observeSdkCall is null ? _channel.CreateCallInvoker() : _channel.CreateCallInvoker().Intercept(new RpcInvocationObserver(observeSdkCall)),
             Settings = new CloudTasksSettings
             {
                 CreateTaskSettings = CallSettings.FromRetry(RetrySettings.FromConstantBackoff(1, TimeSpan.Zero, static _ => false))
             }
         }.Build();
+    }
+
+    /// <summary>Observes generated RPC calls for internal fixtures before transport-level replay.</summary>
+    private sealed class RpcInvocationObserver(Action observeCall) : Interceptor
+    {
+        public override AsyncUnaryCall<TResponse> AsyncUnaryCall<TRequest, TResponse>(
+            TRequest request, ClientInterceptorContext<TRequest, TResponse> context,
+            AsyncUnaryCallContinuation<TRequest, TResponse> continuation)
+        {
+            observeCall();
+            return continuation(request, context);
+        }
     }
 
     /// <summary>Constructs only the supported fixed-policy sockets handler.</summary>

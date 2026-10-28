@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
     public sealed class CloudTasksProofFailureTests
     {
         private const string Version = "1.0.0-preview.1";
+        private const string CandidateCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
         // protects=artifact identity must be authorized by PackageArtifactValidationReport; fails_when=unvalidated/mislocated package reaches restore or SDK proof; no_claim=does not exercise a real NuGet restore.
         [Fact]
@@ -45,6 +46,25 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     new PackageArtifactValidationReport(Version, wrongVersionEntries)));
             Assert.Contains("does not match the local candidate package version", wrongVersion.Message, StringComparison.Ordinal);
             Assert.Empty(runner.Requests);
+        }
+
+        // protects=historical acceptance never substitutes candidate-source mode when its Git baseline is unavailable; fails_when=missing history produces a successful self-baseline; no_claim=does not fetch or mutate the remote.
+        [Fact]
+        public async Task RunAsync_MissingHistoricalRefFailsWithFullHistoryGuidanceAndNoFallback()
+        {
+            using var fixture = new ArtifactFixture();
+            var runner = new CommandRunnerStub(failOnMergeBase: true);
+
+            var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
+                new CloudTasksPackageConsumerProof(runner, fixture.ExtractBaselineAsync).RunAsync(
+                    fixture.Request with { BaselineRef = "origin/main" }, fixture.Artifacts));
+
+            Assert.Contains("Fetch the target ref and required Git history", error.Message, StringComparison.Ordinal);
+            Assert.Contains("never falls back", error.Message, StringComparison.Ordinal);
+            var request = Assert.Single(runner.Requests);
+            Assert.Equal("Cloud Tasks baseline merge-base", request.OperationName);
+            Assert.Equal(30_000, request.TimeoutMilliseconds);
+            Assert.Equal("0", request.Environment!["GIT_TERMINAL_PROMPT"]);
         }
 
 
@@ -154,30 +174,30 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Contains("packed dependency contract changed", error.Message, StringComparison.Ordinal);
         }
 
-        // protects=pinned source extraction uses exact reviewed revision with bounded commands; fails_when=wrong git/archive options or unbounded runner timing reaches tar; no_claim=does not execute Git or tar binaries.
+        // protects=source extraction uses its explicit reviewed revision with bounded commands; fails_when=wrong git/archive options or unbounded runner timing reaches tar; no_claim=does not execute Git or tar binaries.
         [Fact]
-        public async Task ExtractBaselineAsync_UsesPinnedRevisionAndBoundedArchiveAndTarCommands()
+        public async Task ExtractBaselineAsync_UsesExplicitRevisionAndBoundedArchiveAndTarCommands()
         {
             var root = Path.Combine(Path.GetTempPath(), "cloudtasks-extract-success-" + Guid.NewGuid().ToString("N"));
             var target = Path.Combine(root, "baseline");
             var runner = new BaselineCommandRunner((request, _) =>
             {
-                if (request.OperationName == "Cloud Tasks pinned baseline archive")
+                if (request.OperationName == "Cloud Tasks baseline archive")
                     File.WriteAllText(request.Arguments[^1], "fake tar archive");
                 return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
             });
             try
             {
-                await CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CancellationToken.None, runner);
+                await CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CandidateCommit, CancellationToken.None, runner);
 
                 Assert.Equal(2, runner.Requests.Count);
                 Assert.All(runner.Tokens, token => Assert.Equal(CancellationToken.None, token));
                 var archive = runner.Requests[0];
                 Assert.Equal("git", archive.FileName);
-                Assert.Equal(new[] { "archive", CloudTasksPackageConsumerProof.BaselineCommit, "--format=tar", "--output" }, archive.Arguments.Take(4));
+                Assert.Equal(new[] { "archive", CandidateCommit, "--format=tar", "--output" }, archive.Arguments.Take(4));
                 Assert.Equal(5, archive.Arguments.Count);
                 Assert.Equal("0", archive.Environment!["GIT_TERMINAL_PROMPT"]);
-                Assert.Equal(CloudTasksPackageConsumerProof.BaselineCommit, archive.Subject);
+                Assert.Equal(CandidateCommit, archive.Subject);
                 Assert.Equal(30_000, archive.TimeoutMilliseconds);
                 Assert.Equal(root, archive.WorkingDirectory);
                 Assert.StartsWith("appsurface-cloudtasks-baseline-", Path.GetFileName(archive.Arguments[^1]), StringComparison.Ordinal);
@@ -206,11 +226,11 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             try
             {
                 var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CancellationToken.None, runner));
+                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CandidateCommit, CancellationToken.None, runner));
 
                 Assert.Equal("injected git archive failure", error.Message);
                 Assert.Single(runner.Requests);
-                Assert.Equal("Cloud Tasks pinned baseline archive", runner.Requests[0].OperationName);
+                Assert.Equal("Cloud Tasks baseline archive", runner.Requests[0].OperationName);
                 Assert.False(File.Exists(runner.Requests[0].Arguments[^1]));
             }
             finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
@@ -225,7 +245,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             using var source = new CancellationTokenSource();
             var runner = new BaselineCommandRunner((request, token) =>
             {
-                if (request.OperationName == "Cloud Tasks pinned baseline archive")
+                if (request.OperationName == "Cloud Tasks baseline archive")
                 {
                     File.WriteAllText(request.Arguments[^1], "completed archive");
                     return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
@@ -237,11 +257,11 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             try
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, source.Token, runner));
+                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CandidateCommit, source.Token, runner));
 
                 Assert.Equal(2, runner.Requests.Count);
                 Assert.All(runner.Tokens, token => Assert.Equal(source.Token, token));
-                Assert.Equal("Cloud Tasks pinned baseline extraction", runner.Requests[1].OperationName);
+                Assert.Equal("Cloud Tasks baseline extraction", runner.Requests[1].OperationName);
                 Assert.Equal(60_000, runner.Requests[1].TimeoutMilliseconds);
                 Assert.False(File.Exists(runner.Requests[0].Arguments[^1]));
             }
@@ -261,7 +281,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             try
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, source.Token, runner));
+                    CloudTasksPackageConsumerProof.ExtractBaselineAsync(root, target, CandidateCommit, source.Token, runner));
 
                 Assert.Empty(runner.Requests);
                 Assert.False(Directory.Exists(target));
@@ -283,12 +303,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             }
         }
 
-        private sealed class CommandRunnerStub : ICommandRunner
+        private sealed class CommandRunnerStub(bool failOnMergeBase = false) : ICommandRunner
         {
             public List<CommandRunRequest> Requests { get; } = [];
             public Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
             {
                 Requests.Add(request);
+                if (failOnMergeBase && request.OperationName == "Cloud Tasks baseline merge-base")
+                    throw new PackageIndexException("simulated missing baseline commit");
                 return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
             }
         }
@@ -316,10 +338,11 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             internal string Root { get; }
             internal string ArtifactsDirectory { get; }
             internal PackageArtifactValidationReport Artifacts { get; }
-            internal CloudTasksPackageConsumerProofRequest Request => new(Root, ArtifactsDirectory, Version, "https://api.nuget.org/v3/index.json");
-            internal Task ExtractBaselineAsync(string _, string target, CancellationToken token)
+            internal CloudTasksPackageConsumerProofRequest Request => new(Root, ArtifactsDirectory, Version, "https://api.nuget.org/v3/index.json", CandidateCommit);
+            internal Task ExtractBaselineAsync(string _, string target, string commit, CancellationToken token)
             {
                 token.ThrowIfCancellationRequested();
+                Assert.Equal(CandidateCommit, commit);
                 Directory.CreateDirectory(target);
                 return Task.CompletedTask;
             }
