@@ -1,5 +1,16 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Protected entrypoint continuation — 2026-10-28
+
+The [current command and replay preparation](issue779-csharp-runtime-cutover.md#protected-commands-and-credential-free-replay-preparation--2026-10-28)
+adds fixed credentialed preparation/closeout commands, strict comparison-data wire files and a
+separate credential-free replay worker. No finalizer workflow is enabled. Revision 119's focused
+run passed; its runtime failed because the first SDK lifecycle owner remained live at the original
+observation bound. Worker selectors and reconciliation passed, but dependent measurements and
+unchanged numerical gates were skipped. The failure diagnostic gap is corrected for a fresh run;
+neither a root-cause fix nor a repaired native result is claimed. Outer isolation/settlement,
+protected full-stage replay, support registration and Trusted/downstream acceptance remain open.
+
 ## Native-validation migration and current continuation — 2026-10-27
 
 The [current completed-run preparation](issue779-csharp-runtime-cutover.md#protected-completed-run-source-and-provider-checks--2026-10-27)

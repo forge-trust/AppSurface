@@ -38,6 +38,26 @@ internal static partial class LinuxEmptyObservationExecution
 
         internal QualifiedObservation(EvidenceNativeObservationFailureLatch failures) => _failures = failures;
 
+        /// <summary>Emits private SDK cleanup progress only; returning from an attempt does not mean success.</summary>
+        internal void ObserveCleanupPhase(EvidenceNativeObservationPhase phase, bool returned)
+        {
+#if EVIDENCE_PRIVATE_C3_SDK
+            try
+            {
+                Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    schema = "evidence-sdk-root-cleanup-progress-v1",
+                    phase = phase.ToString(),
+                    boundary = returned ? "returned" : "entered",
+                    native_acceptance = false
+                }));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException
+                or InvalidOperationException or System.Text.Json.JsonException)
+            { } // Optional progress never replaces the original attempt, exception or join.
+#endif
+        }
+
         internal Task PrepareSlotAsync(LinuxRunWorkspace workspace, LinuxOwnerActivation owner,
             LinuxRunAccounts accounts, CancellationToken token)
         {

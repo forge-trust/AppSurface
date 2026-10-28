@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import signal
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -432,6 +433,60 @@ class LifecycleStallMarkerTests(unittest.TestCase):
             log.write_text("not-json\n" + json.dumps({"schema": "other", "case": "configure-sync-stall"}) + "\n")
             with self.assertRaises(RuntimeError):
                 runner.lifecycle_stall_events(log, "configure-sync-stall")
+
+
+class FailedLifecycleDiagnosticsTests(unittest.TestCase):
+    def test_only_failed_contained_terminal_cases_retain_existing_worker_bytes(self):
+        import lifecycle_stalls
+        for passed, empty, terminal in ((True, True, True), (False, False, True),
+                                        (False, True, False), (False, True, True)):
+            with self.subTest(passed=passed, empty=empty, terminal=terminal), \
+                    tempfile.TemporaryDirectory() as directory:
+                result = {'passed': passed, 'final_groups_empty': empty,
+                          'failure_category': 'original-failure', 'native_acceptance': False}
+                process = Mock(returncode=-9)
+                process.poll.return_value = -9 if terminal else None
+                leaves = {'stdout.prefix': b'', 'stderr.prefix': b'original fatal prefix',
+                          'state.json': b'{"schema":"evidence-worker-failure-output-v1"}'}
+                with patch.object(lifecycle_stalls, 'read_worker_prefixes', create=True,
+                                  return_value=(leaves, {'stderr.prefix': 'd' * 64})) as read:
+                    runner.retain_failed_lifecycle_worker(
+                        result, Path(directory), 'configure-sync-stall', 'a' * 32,
+                        process, time.monotonic() + 30)
+                self.assertEqual(passed, result['passed'])
+                self.assertEqual('original-failure', result['failure_category'])
+                self.assertIs(False, result['native_acceptance'])
+                if not passed and empty and terminal:
+                    read.assert_called_once()
+                    self.assertTrue(result['worker_diagnostics_retained'])
+                    self.assertEqual(-9, result['owner_process_returncode'])
+                    for name, raw in leaves.items():
+                        self.assertEqual(raw, (Path(directory) / ('configure-sync-stall-worker-' + name)).read_bytes())
+                else:
+                    read.assert_not_called()
+                    self.assertEqual([], list(Path(directory).iterdir()))
+
+    def test_diagnostic_error_and_absent_process_cannot_replace_primary_failure(self):
+        import lifecycle_stalls
+        with tempfile.TemporaryDirectory() as directory:
+            result = {'passed': False, 'final_groups_empty': True,
+                      'failure_category': 'original-timeout', 'native_acceptance': False}
+            process = Mock(returncode=-9)
+            process.poll.return_value = -9
+            with patch.object(lifecycle_stalls, 'read_worker_prefixes', create=True,
+                              side_effect=RuntimeError('private-path-canary')) as read:
+                runner.retain_failed_lifecycle_worker(
+                    result, Path(directory), 'configure-sync-stall', 'a' * 32,
+                    None, time.monotonic() + 30)
+                read.assert_not_called()
+                runner.retain_failed_lifecycle_worker(
+                    result, Path(directory), 'configure-sync-stall', 'a' * 32,
+                    process, time.monotonic() + 30)
+            self.assertEqual('original-timeout', result['failure_category'])
+            self.assertFalse(result['passed'])
+            self.assertFalse(result['worker_diagnostics_retained'])
+            self.assertEqual('RuntimeError', result['worker_diagnostic_error_kind'])
+            self.assertNotIn('private-path-canary', json.dumps(result))
 
 
 if __name__ == "__main__":

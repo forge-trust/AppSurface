@@ -13,6 +13,38 @@ Worker stderr is collected by the original root output pumps and is **not** echo
 
 The original worker prefix must also contain its specific production `EvidenceWorkerExecution` fatal reason: callback work outliving its stopping grace, or a registered disposer outliving cleanup. An unrelated crash or outer watchdog kill after the entry marker is insufficient. Only the closed reason label and byte digests enter the case JSON; private stack and prefix bytes stay in the separately bounded artifact. The fixed-byte parser does not independently prove process identity or fatal termination.
 
+## Failure diagnostics after revision 119
+
+[Revision 119](https://github.com/forge-trust/AppSurface/actions/runs/40624851586/job/122607198072)
+failed the first configure control because its root process remained alive at the original
+480-second observation bound. The final fixture containment found empty groups. The owner had
+emitted the pending application's settled observation and the original worker output receipt with
+both EOFs and 5,433 reconciled stderr bytes. These facts do not establish timely root exit, original
+custody/account cleanup or a successful lifecycle control. The retained source capture matches
+`c8edb2e84ef74947ad050889d64a9ee300697fd6`; the archive did not retain the worker prefix because
+the terminal predicate failed before its success-path read.
+
+The failure path now records the original observation allowance, elapsed time, partition remainder
+and whether the owner process was terminal when the first predicate failed. Only after fixture
+containment and independently empty groups may it read the original retained worker bytes through
+[`read_worker_prefixes`](lifecycle_stalls.py), using at most five seconds of the original partition
+remainder. That API returns the exact three private leaves and their hashes without interpreting a
+marker. It uses the same root ownership, no-follow descriptors, stable names/metadata, state shape
+and byte bounds as successful marker validation. The original failed category and `passed: false`
+remain unchanged. Missing or rejected diagnostics record only a fixed exception type. There is no
+new worker reader, journal fallback, cleanup credit or deadline renewal; the existing artifact file
+and byte caps remain unchanged.
+
+The private C3Sdk [root cleanup hooks](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision/LinuxEmptyObservationExecution.Qualification.cs)
+also emit `evidence-sdk-root-cleanup-progress-v1` before and after the existing custody, account-close,
+worker-close and remaining local-close attempts. Records contain only a closed phase, `entered` or
+`returned`, and `native_acceptance: false`. A `returned` record means the attempt finished or recorded
+its original recoverable failure; it does not mean success or settlement. An unmatched `entered`
+record localizes a pending attempt but supplies no replacement join or timeout decision. These
+diagnostic bodies compile out of ordinary images and add no async state-machine declarations.
+No production failure cause is inferred from revision 119's missing subphase; a fresh native run
+must establish the next result under the same clocks.
+
 ## Workflow integration awaiting fresh Linux execution
 
 The [C3 workflow](../workflows/issue779-checkpoint3-application.yml) builds three additional CLI images after the original measurements, using the same source capture and generated registration table. It passes `-p:EvidencePrivateQualification=C3Sdk` and respectively `-p:EvidencePrivateC3SdkLifecycleStall=ConfigureSync` and `=RegisteredDisposer`, then publishes each full rebuilt graph to a distinct runner-temp directory. All three outputs stay separate from the ordinary C3Sdk image and the seven-case receipt. Existing locked restore, warning-as-error, generated-source and private-package guards remain in force.

@@ -1,5 +1,56 @@
 # EvidenceHost C# runtime cutover
 
+## Protected commands and credential-free replay preparation — 2026-10-28
+
+Revision 119's [focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40624851637)
+passed. Its [runtime validation](https://github.com/forge-trust/AppSurface/actions/runs/40624851586)
+passed the selector workers, including N08, and reconciliation, then failed the first SDK lifecycle
+control in the application job. The root remained alive at the unchanged 480-second observation
+bound. The final fixture containment found empty groups, and retained owner output shows application
+settlement and a single worker output pair with both EOFs and 5,433 reconciled stderr bytes. The
+original worker prefixes were not copied because the terminal predicate failed first. Later
+lifecycle controls, account/measurement jobs and the unchanged numerical gates were skipped.
+
+Both original application archives match their provider SHA-256 values and complete 4,031-file
+source capture for `c8edb2e84ef74947ad050889d64a9ee300697fd6`, tree
+`d7cc117f8a0a14c5aa55ac4919744f450f799692`. Lifecycle artifact `12790567608` is 534,959 bytes,
+SHA-256 `1a5ddbe57c08c9a0706bc1294ce98c92fda2f7e9396103521281173611871922`;
+application artifact `12790308387` is 3,810,179 bytes, SHA-256
+`d68800049cc7c1b58d26ab130ed8e7b33c38597eae79a2734e639dadf99eaa66`.
+The [failure diagnostic correction](../../.github/issue779-checkpoint3/lifecycle-stalls-source-preparation.md#failure-diagnostics-after-revision-119)
+retains bounded original worker prefixes only after terminal containment and empty groups, records
+the original clock facts, and emits private SDK root cleanup boundaries. It preserves the failure,
+every original join and all clocks. The evidence does not establish a production root cause or a
+repaired native result; the next source-bound run must resolve that.
+
+The new [fixed protected entrypoint](../../.github/issue779-protected-qualification/completed-entrypoint-README.md)
+exposes separate preparation and closeout commands. They verify the protected context and local
+input custody, use provider credentials only in the existing metadata transport, and publish
+bounded exclusive comparison files after controller and input readback checks. The
+[strict wire codec](../../.github/issue779-protected-qualification/completed-wire-README.md)
+explicitly reconstructs preparation and eight-phase replay records without arbitrary type imports,
+rejecting noncanonical JSON, schema/identity drift and recursive authority claims.
+
+The [credential-free replay worker](../../.github/issue779-protected-qualification/completed-replay-worker-README.md)
+accepts four fixed paths and an exact environment, checks nonroot identity, capabilities,
+no-new-privileges and descriptor inheritance, revalidates the original inventory and invokes only
+the fixed eight-phase replay. Its local process facts do not prove an outer execution boundary.
+Same-filesystem root identities remain mandatory. Independent credential isolation, filesystem and
+process containment, full descendant settlement and reviewed workflow integration remain required.
+The future finalizer workflow remains absent; no support registration or admission is enabled.
+The fixed coverage base, evaluator, numerical thresholds, tolerance, exclusions, acquisition bounds,
+native clocks and retention limits are unchanged.
+
+The command/wire/replay qualification selection passes 279 tests on detached nonroot Linux with
+five existing original-fixture opt-in skips, and the same selection on macOS with eleven skips.
+The C3 portable suite passes 84 tests on both platforms. A separate Linux process-facts probe uses
+the exact four-variable environment, UID/GID 1000:1000, dropped capabilities and no-new-privileges;
+it verifies the worker's local startup guards without running target validators. Ordinary and private
+C3Sdk Supervision builds pass locked restore and Release warning-as-error compilation, with zero
+warnings/errors, and formatting verification passes. Those compile checks use installed macOS ARM64
+SDK 10.0.102 and the retained generated registration input; they do not replace pinned SDK 10.0.401
+or genuine x64 Linux execution. All authority and eligibility claims remain false.
+
 ## Protected completed-run source and provider checks — 2026-10-27
 
 Revision 118's [focused validation](https://github.com/forge-trust/AppSurface/actions/runs/40561328664)

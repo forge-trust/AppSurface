@@ -136,5 +136,9 @@ The [source preflight](completed-source-README.md) now checks the validator chec
 from the completed-source checkouts and requires the completed revision in the validator's history.
 The [preparation and closeout APIs](completed-controller-README.md) bind that preflight to the
 resolver and recheck provider run, workflow, job and archive facts after separate replay. Their
-credentialed phases never execute target code. No workflow or command enables those APIs yet;
-reviewed execution/credential separation and a genuine protected full-stage run remain required.
+credentialed phases never execute target code. The [fixed prepare/close commands](completed-entrypoint-README.md)
+now publish bounded [wire handoffs](completed-wire-README.md) for a separate
+[credential-free replay worker](completed-replay-worker-README.md). The worker checks process facts
+and invokes the fixed replay sequence; an independent caller must still provide containment and
+settlement. No finalizer workflow is enabled. Reviewed execution/credential separation and a genuine
+protected full-stage run remain required.

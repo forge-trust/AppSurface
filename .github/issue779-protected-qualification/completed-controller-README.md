@@ -39,15 +39,19 @@ containment and settlement remain the caller's responsibility. In particular, Py
 return or removal of a token from an argument list does not establish process isolation. These
 APIs do not implement a Docker containment runtime or a new native ownership guarantee.
 
-The future protected workflow remains absent and disabled. No command-line bridge, workflow
-trigger, support registry entry or admission path is added by this module. A reviewed caller must
+The [fixed command entrypoint](completed-entrypoint-README.md) now bridges preparation and closeout
+using the [strict data-only wire codec](completed-wire-README.md), with replay in a separate
+[credential-free worker](completed-replay-worker-README.md). These are comparison mechanisms;
+the future protected workflow remains absent and disabled. No workflow trigger, support registry
+entry or admission path is added by this module. A reviewed caller must
 establish the credential separation and execution boundary before using these APIs for a real
 protected completed-run validation.
 
 ## Closeout
 
 `close_completed_run(preparation, replay, validator_capture, source_capture, token, *, deadline)`
-accepts the in-process `CompletedPreparation` and a typed `CompletedRunReplay`. It rechecks stage
+accepts a typed `CompletedPreparation` and `CompletedRunReplay`, including values reconstructed
+by the fixed wire codec. Reconstructed values remain untrusted comparison data. It rechecks stage
 and provider-run facts before any API use, requires every fixed phase's canonical JSON/hash,
 exact field schema, source/run attribution and false authority claims, and rechecks the existing
 phase result contracts. The measured report's byte projection binds its recorded size and digest;

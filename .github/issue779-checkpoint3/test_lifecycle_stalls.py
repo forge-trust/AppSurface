@@ -1,5 +1,6 @@
 """Real ordinary-file and marker controls only; no protected owner or native credit."""
 import contextlib
+import hashlib
 import importlib.util
 import json
 import os
@@ -50,6 +51,64 @@ class RetainedWorkerDiagnosticControls(unittest.TestCase):
             self.assertEqual(values, self.read(fd))
             self.assertEqual(marker(), subject.marker_from_prefix(values["stderr.prefix"], "configure-sync-stall"))
             self.assertEqual(values, {leaf: (root / leaf).read_bytes() for leaf in values})
+
+    def test_prefix_reader_binds_generation_and_returns_raw_bytes_and_hashes(self):
+        generation = "a" * 32
+        with diagnostic_tree() as (root, _fd, values):
+            parent = root / "run-root"
+            parent.mkdir(mode=0o700)
+            child = parent / ("appsurface-evidence-worker-diagnostics-" + generation)
+            child.mkdir(mode=0o700)
+            for leaf in values:
+                (root / leaf).rename(child / leaf)
+            leaves, digests = subject._read_worker_prefixes_at(
+                generation, expected_uid=os.getuid(), expected_gid=os.getgid(),
+                deadline=time.monotonic() + 5, parent_path=str(parent))
+            self.assertEqual(values, leaves)
+            self.assertEqual({name: hashlib.sha256(data).hexdigest()
+                              for name, data in values.items()}, digests)
+            for invalid in ("A" * 32, "../" + "a" * 29, "a" * 31, "a" * 33):
+                with self.subTest(generation=invalid), self.assertRaisesRegex(
+                        RuntimeError, "^lifecycle-diagnostic-generation$"):
+                    subject._read_worker_prefixes_at(
+                        invalid, expected_uid=os.getuid(), expected_gid=os.getgid(),
+                        deadline=time.monotonic() + 5, parent_path=str(parent))
+
+    def test_prefix_reader_requires_fixed_leafset_and_owner_metadata(self):
+        generation = "b" * 32
+        with diagnostic_tree() as (root, _fd, _values):
+            parent = root / "run-root"
+            parent.mkdir(mode=0o700)
+            child = parent / ("appsurface-evidence-worker-diagnostics-" + generation)
+            child.mkdir(mode=0o700)
+            for leaf in _values:
+                (root / leaf).rename(child / leaf)
+            with self.assertRaisesRegex(RuntimeError, "^lifecycle-diagnostic-parent$"):
+                subject._read_worker_prefixes_at(
+                    generation, expected_uid=os.getuid() + 1, expected_gid=os.getgid(),
+                    deadline=time.monotonic() + 5, parent_path=str(parent))
+            (child / "extra").write_bytes(b"extra")
+            (child / "extra").chmod(0o600)
+            with self.assertRaisesRegex(RuntimeError, "^lifecycle-diagnostic-inventory$"):
+                subject._read_worker_prefixes_at(
+                    generation, expected_uid=os.getuid(), expected_gid=os.getgid(),
+                    deadline=time.monotonic() + 5, parent_path=str(parent))
+
+    def test_public_prefix_api_is_fixed_to_run_root_and_marker_composes_it(self):
+        generation = "c" * 32
+        values = {"stdout.prefix": b"out", "stderr.prefix": json.dumps(marker()).encode(),
+                  "state.json": b'{"schema":"evidence-worker-failure-output-v1"}'}
+        digests = {name: hashlib.sha256(data).hexdigest() for name, data in values.items()}
+        deadline = time.monotonic() + 5
+        with patch.object(subject, "_read_worker_prefixes_at", return_value=(values, digests)) as read:
+            self.assertEqual((values, digests),
+                             subject.read_worker_prefixes(generation, deadline=deadline))
+            read.assert_called_once_with(generation, expected_uid=0, expected_gid=0,
+                                         deadline=deadline, parent_path="/run")
+        with patch.object(subject, "read_worker_prefixes", return_value=(values, digests)) as read:
+            self.assertEqual((marker(), values, digests), subject.read_worker_marker(
+                generation, "configure-sync-stall", deadline=deadline))
+            read.assert_called_once_with(generation, deadline=deadline)
 
     def test_exact_prefix_limit_is_read_but_the_next_byte_rejects(self):
         with diagnostic_tree() as (root, fd, _):

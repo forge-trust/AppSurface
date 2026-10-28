@@ -7,6 +7,11 @@ The [restricted application owner](application-execution.md) extends the same C#
 
 ## Protected qualification support records
 
+The private SDK [cleanup progress and failed lifecycle retention](../../.github/issue779-checkpoint3/lifecycle-stalls-source-preparation.md#failure-diagnostics-after-revision-119)
+localize original cleanup attempts without granting a successful join, custody transfer or acceptance.
+Ordinary images contain no cleanup progress emitter. A failed native case remains failed even when
+its later fixture containment and diagnostic read complete.
+
 The internal [support-record parser and matcher](protected-support.md) accept canonical, bounded
 record data only when its exact bytes match a separately supplied expected digest. They freeze parsed
 collections and compare current provider/workflow/deployment facts. They do not authenticate those inputs

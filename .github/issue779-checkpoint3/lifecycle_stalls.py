@@ -330,32 +330,22 @@ def validate_retained_receipt(receipt, files, *, source, base, deadline):
             "cases": LIFECYCLE_CASES, "native_acceptance": False}
 
 
-def read_worker_marker(generation, expected_case, *, deadline):
-    """Read only the original root-retained worker prefix for one generated run.
-
-    Call after physical owner termination. Before crediting the case, the native
-    caller must also require both EOFs and reconcile these bytes against the
-    original shared output receipt. Missing diagnostic retention remains a failed
-    control; owner stderr, journal text, and a new worker reader are not fallbacks.
-    Returns private bytes for exclusive fixture retention and a closed marker;
-    neither grants a successful Evidence result or enables Trusted support.
-    """
+def _read_worker_prefixes_at(generation, *, expected_uid, expected_gid, deadline, parent_path):
     require(type(generation) is str and len(generation) == 32
             and all(character in "0123456789abcdef" for character in generation),
             "lifecycle-diagnostic-generation")
     _check_deadline(deadline)
     name = "appsurface-evidence-worker-diagnostics-" + generation
-    parent = os.open("/run", _DIRECTORY)
+    parent = os.open(parent_path, _DIRECTORY)
     try:
         selected_parent = os.fstat(parent)
-        require(selected_parent.st_uid == selected_parent.st_gid == 0
+        require(selected_parent.st_uid == expected_uid and selected_parent.st_gid == expected_gid
                 and selected_parent.st_mode & 0o7022 == 0, "lifecycle-diagnostic-parent")
         directory = os.open(name, _DIRECTORY, dir_fd=parent)
         try:
             selected = os.fstat(directory)
-            leaves = read_prefix_directory(directory, expected_uid=0, expected_gid=0, deadline=deadline)
-            marker = (post_stop_marker_from_prefix(leaves["stderr.prefix"]) if expected_case == "post-stop-guards"
-                      else marker_from_prefix(leaves["stderr.prefix"], expected_case))
+            leaves = read_prefix_directory(directory, expected_uid=expected_uid,
+                                           expected_gid=expected_gid, deadline=deadline)
             require(identity(os.fstat(directory)) == identity(selected)
                     == identity(os.stat(name, dir_fd=parent, follow_symlinks=False)),
                     "lifecycle-diagnostic-root-changed")
@@ -364,4 +354,29 @@ def read_worker_marker(generation, expected_case, *, deadline):
     finally:
         os.close(parent)
     _check_deadline(deadline)
-    return marker, leaves, {name: hashlib.sha256(data).hexdigest() for name, data in leaves.items()}
+    return leaves, {name: hashlib.sha256(data).hexdigest() for name, data in leaves.items()}
+
+
+def read_worker_prefixes(generation, *, deadline):
+    """Read the retained stdout/stderr prefixes and hashes for one generated run.
+
+    Call only after physical owner termination; callers still establish process
+    group settlement and EOF independently. This returns diagnostic bytes and
+    custody-linked hashes only, never a marker interpretation or authority.
+    """
+    return _read_worker_prefixes_at(generation, expected_uid=0, expected_gid=0,
+                                    deadline=deadline, parent_path="/run")
+
+
+def read_worker_marker(generation, expected_case, *, deadline):
+    """Read and interpret a marker from the settled run's retained worker prefix.
+
+    The caller must establish physical termination, empty groups and joined output
+    independently. This composes :func:`read_worker_prefixes` with the unchanged
+    marker rules; bytes and closed labels confer no execution or admission authority.
+    """
+    leaves, digests = read_worker_prefixes(generation, deadline=deadline)
+    marker = (post_stop_marker_from_prefix(leaves["stderr.prefix"])
+              if expected_case == "post-stop-guards"
+              else marker_from_prefix(leaves["stderr.prefix"], expected_case))
+    return marker, leaves, digests

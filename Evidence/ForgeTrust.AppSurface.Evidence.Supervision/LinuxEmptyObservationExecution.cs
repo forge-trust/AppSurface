@@ -200,6 +200,7 @@ internal static partial class LinuxEmptyObservationExecution
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             cleanupFailed = await qualification.CaptureFailureAsync(failed, cleanupFailed, input, owner, accounts,
                 workspace, worker, server, serverTask, cleanupToken, token, Record).ConfigureAwait(false);
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.CleanupCustody, returned: false);
             if (custody is null && input is not null && owner is not null && accounts is not null
                 && workspace is not null && worker is not null && server is not null)
                 try
@@ -209,6 +210,8 @@ internal static partial class LinuxEmptyObservationExecution
                         .ConfigureAwait(false);
                 }
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.CleanupCustody, returned: true);
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.AccountsClose, returned: false);
             if (custody is not null)
                 try
                 {
@@ -219,10 +222,14 @@ internal static partial class LinuxEmptyObservationExecution
                 catch (Exception error) when (Recoverable(error)) { Record(error); cleanupFailed = true; }
             else if (accounts is not null)
                 await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.AccountsClose; await accounts.CloseAsync(cleanupToken).ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.AccountsClose, returned: true);
             // Transfer already closes original owners. Rejoining their same tasks is harmless and ensures
             // earlier setup failures also attempt every local close, without bypassing account custody.
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.WorkerClose, returned: false);
             if (worker is not null)
                 await SupervisionCleanupAttempt.RunAsync(async () => { phase = EvidenceNativeObservationPhase.WorkerClose; await worker.DisposeAsync().ConfigureAwait(false); }, error => { Record(error); cleanupFailed = true; }).ConfigureAwait(false);
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.WorkerClose, returned: true);
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.CustodyClose, returned: false);
             SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.CustodyClose; custody?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             SupervisionCleanupAttempt.Run(() => { applicationWorkspace?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             SupervisionCleanupAttempt.Run(() => { producerWorkspace?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
@@ -244,6 +251,7 @@ internal static partial class LinuxEmptyObservationExecution
             SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.OwnerClose; owner?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.InputClose; input?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
             SupervisionCleanupAttempt.Run(() => { phase = EvidenceNativeObservationPhase.BackendClose; backend?.Dispose(); }, error => { Record(error); cleanupFailed = true; });
+            qualification.ObserveCleanupPhase(EvidenceNativeObservationPhase.CustodyClose, returned: true);
             // Native owners are now closed, so bind the final publication check to the remaining
             // monotonic interval captured immediately before their closes; no new allowance is created.
             // Disposing the owner deliberately cancels borrowers; that expected cancellation is not

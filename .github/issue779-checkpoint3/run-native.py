@@ -448,6 +448,21 @@ def execute(args,case,tools,runtime,end):
   write(args.output/(case+'.json'),canonical(result))
  return result
 
+def retain_failed_lifecycle_worker(result,output,case,generation,process,end):
+ """Retain existing settled diagnostic data without changing a failed case's outcome."""
+ if result.get('passed') is not False or result.get('final_groups_empty') is not True or process is None:
+  return
+ if process.poll() is None:return
+ result['owner_process_returncode']=process.returncode
+ result['worker_diagnostics_retained']=False
+ try:
+  import lifecycle_stalls
+  leaves,digests=lifecycle_stalls.read_worker_prefixes(generation,deadline=min(end,time.monotonic()+5))
+  for name,data in leaves.items():write(output/(case+'-worker-'+name),data)
+  result['worker_prefix_sha256']=digests;result['worker_diagnostics_retained']=True
+ except (OSError,RuntimeError,ValueError) as failure:
+  result['worker_diagnostic_error_kind']=type(failure).__name__
+
 def execute_lifecycle_stall(args,case,tools,runtime,end):
  """Run one fixed compile-owned C3Sdk stall through the original authenticated owner recipe."""
  require(case in LIFECYCLE_STALL_CASES,'closed-lifecycle-stall-case')
@@ -465,7 +480,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
  require(guard.stat().st_uid==0 and stat.S_IMODE(guard.stat().st_mode)==0o700,'guard-parent')
  marker=guard/generation;marker.mkdir(mode=0o700);write(marker/'armed',(generation+'\n').encode())
  stdout=root/'owner.stdout';stderr=root/'owner.stderr';process=None;descriptor=None;app_seen=False
- deadline=min(end,time.monotonic()+480)
+ observed_at=time.monotonic();deadline=min(end,observed_at+480)
  result={'case':case,'generation':generation,'passed':False,'native_acceptance':False}
  expected_marker=('configure-sync-stall' if case=='configure-sync-stall'
                   else 'post-stop-guards' if case=='post-stop-guards' else 'registered-application-disposer-stall')
@@ -526,6 +541,10 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   result['passed']=True
  except BaseException as failure:
   result['failure_category']=str(failure) if isinstance(failure,RuntimeError) else type(failure).__name__
+  result['observation_elapsed_seconds']=round(time.monotonic()-observed_at,6)
+  result['observation_allowance_seconds']=round(deadline-observed_at,6)
+  result['partition_remaining_seconds']=round(max(0,end-time.monotonic()),6)
+  result['owner_process_terminal_at_failure']=process is not None and process.poll() is not None
  finally:
   if process is not None and process.poll() is None:
    for unit in units:
@@ -537,6 +556,7 @@ def execute_lifecycle_stall(args,case,tools,runtime,end):
   result['final_groups_empty']=c2.groups_empty(units)
   if result['final_groups_empty'] is not True:
    result['passed']=False;result['failure_category']='lifecycle-final-groups-not-empty'
+  retain_failed_lifecycle_worker(result,args.output,case,generation,process,end)
   for name in ('owner.stdout','owner.stderr'):
    path=root/name
    if path.is_file() and path.stat().st_size<=MAX_LOG:
