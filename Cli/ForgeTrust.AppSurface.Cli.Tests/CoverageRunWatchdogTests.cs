@@ -532,6 +532,8 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        using var releasePublication = new ManualResetEventSlim();
+        var artifactPublished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
@@ -539,6 +541,11 @@ public sealed class CoverageRunWatchdogTests
             CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
+        supervisor.ArtifactPublished = _ =>
+        {
+            artifactPublished.TrySetResult();
+            releasePublication.Wait();
+        };
         supervisor.BindOutputDirectory(output.Path);
         var operations = Enumerable.Range(0, 40)
             .Select(index => supervisor.Start("project", $"tests/{index}-{new string('x', 10_000)}.csproj", log: $"logs/{new string('y', 10_000)}.log"))
@@ -548,16 +555,22 @@ public sealed class CoverageRunWatchdogTests
         {
             var artifact = Path.Join(output.Path, "coverage-watchdog.json");
             await WaitForFileAsync(artifact);
+            await artifactPublished.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.InRange(new FileInfo(artifact).Length, 1, 64 * 1024);
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
             Assert.InRange(document.RootElement.GetProperty("concurrentlyStale").GetArrayLength(), 0, 32);
             Assert.True(document.RootElement.GetProperty("concurrentlyStaleOmitted").GetInt32() >= 0);
+            // Artifact publication precedes the separately serialized warning write.
+            Assert.Empty(console.ReadErrorString());
+            releasePublication.Set();
+            await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
             Assert.DoesNotContain($"artifact=\"{output.Path}", console.ReadErrorString(), StringComparison.Ordinal);
             Assert.Contains("coverage-watchdog.json", console.ReadErrorString(), StringComparison.Ordinal);
         }
         finally
         {
+            releasePublication.Set();
             foreach (var operation in operations)
             {
                 operation.Dispose();
