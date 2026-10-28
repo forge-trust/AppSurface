@@ -270,8 +270,15 @@ internal sealed class ReleasePreparationDiffVerifier
 
             if (change.Status.StartsWith('R'))
             {
-                Add(diagnostics, "release-prep-rename-forbidden", "Release preparation may not rename files.",
-                    $"Git reported {change.Status}: {change.OriginalPath} -> {change.Path}.", "Commit the intended release artifacts as ordinary additions, modifications, or manifest-declared deletions.");
+                // Ordinary product PRs do not become release preparation solely because Git detects a rename.
+                // Both endpoints still protect release-owned paths, including moves out of those paths.
+                if (manifests.Length != 0
+                    || IsReleasePreparationOwnedPath(change.Path)
+                    || (change.OriginalPath is not null && IsReleasePreparationOwnedPath(change.OriginalPath)))
+                {
+                    Add(diagnostics, "release-prep-rename-forbidden", "Release preparation may not rename files.",
+                        $"Git reported {change.Status}: {change.OriginalPath} -> {change.Path}.", "Commit the intended release artifacts as ordinary additions, modifications, or manifest-declared deletions.");
+                }
                 continue;
             }
 
