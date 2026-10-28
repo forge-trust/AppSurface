@@ -111,8 +111,9 @@ internal sealed partial class CoverageRunOutputLease
     /// <remarks>Existing permissions are validated, never repaired. Callers separately validate store/schema authority.</remarks>
     /// <param name="allowWindowsRenameSharing">Whether a cooperative lease needs compatible writer sharing rather than restore-parent exclusion.</param>
     /// <param name="unixFChmod">Optional per-lease native permission operation for failure tests; defaults to fchmod.</param>
+    /// <param name="beforeWindowsCreate">Optional race seam immediately before creating a missing Windows component; production omits it.</param>
     internal static CoverageRunOutputLease? AcquireArtifactDirectory(string path, bool createMissing, bool requirePrivate, bool allowWindowsRenameSharing = false,
-        Func<int, uint, int>? unixFChmod = null)
+        Func<int, uint, int>? unixFChmod = null, Action<string>? beforeWindowsCreate = null)
     {
         var lease = new CoverageRunOutputLease(NormalizePlatformPath(Path.GetFullPath(path)), unixFChmod);
         try
@@ -120,7 +121,7 @@ internal sealed partial class CoverageRunOutputLease
             if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
                 throw new PlatformNotSupportedException("Private artifact directories require supported native filesystem primitives.");
             var acquired = OperatingSystem.IsWindows()
-                ? lease.AcquirePrivateWindowsDirectory(createMissing, allowWindowsRenameSharing)
+                ? lease.AcquirePrivateWindowsDirectory(createMissing, allowWindowsRenameSharing, beforeWindowsCreate)
                 : lease.AcquirePrivateUnixDirectory(createMissing);
             if (!acquired)
             {
@@ -230,8 +231,9 @@ internal sealed partial class CoverageRunOutputLease
     /// <summary>Creates a private immediate child and retains its complete no-follow path.</summary>
     /// <param name="name">One portable path component.</param>
     /// <param name="beforeCreate">Optional per-call race observation after preflight; native creation still requires a fresh destination.</param>
+    /// <param name="onCreated">Optional observation immediately after native creation, before validation that may fail; never called on a no-replace refusal.</param>
     /// <returns>The privately created child directory.</returns>
-    internal CoverageRunOutputLease CreateArtifactDirectory(string name, Action? beforeCreate = null)
+    internal CoverageRunOutputLease CreateArtifactDirectory(string name, Action? beforeCreate = null, Action? onCreated = null)
     {
         ValidateArtifactComponent(name);
         VerifyBinding();
@@ -242,6 +244,7 @@ internal sealed partial class CoverageRunOutputLease
             beforeCreate?.Invoke();
             VerifyBinding();
             CreatePrivateWindowsDirectory(path);
+            onCreated?.Invoke();
         }
         else
         {
@@ -249,6 +252,7 @@ internal sealed partial class CoverageRunOutputLease
             VerifyBinding();
             if (MkdirAt(_outputHandle!.DangerousGetHandle().ToInt32(), name, 0x1c0) != 0)
                 throw NativeIOException("Unable to create private artifact directory.");
+            onCreated?.Invoke();
             using var created = OpenAt(_outputHandle!, name, directory: true)
                 ?? throw new IOException("Created private artifact directory disappeared.");
             if (_unixFChmod(created.DangerousGetHandle().ToInt32(), 0x1c0) != 0)
@@ -448,7 +452,8 @@ internal sealed partial class CoverageRunOutputLease
         return true;
     }
 
-    private bool AcquirePrivateWindowsDirectory(bool createMissing, bool allowRenameSharing)
+    /// <summary>Retains and validates each Windows path component, reopening a competing creator without repairing its access.</summary>
+    private bool AcquirePrivateWindowsDirectory(bool createMissing, bool allowRenameSharing, Action<string>? beforeCreate)
     {
         var root = Path.GetPathRoot(_outputPath)!;
         var currentPath = root;
@@ -461,7 +466,8 @@ internal sealed partial class CoverageRunOutputLease
             if (!Directory.Exists(currentPath))
             {
                 if (!createMissing) return false;
-                CreatePrivateWindowsDirectory(currentPath);
+                beforeCreate?.Invoke(currentPath);
+                CreateMissingWindowsDirectory(currentPath, CreatePrivateWindowsDirectory);
             }
             current = OpenWindowsFile(currentPath, 0, flags: WindowsBackupSemantics | WindowsOpenReparsePoint,
                 shareMode: WindowsShareRead | WindowsShareWrite | (allowRenameSharing ? WindowsShareDelete : 0));
@@ -473,6 +479,20 @@ internal sealed partial class CoverageRunOutputLease
         return true;
     }
 
+    /// <summary>Accepts only an already-existing-name race during an idempotent Windows component walk.</summary>
+    /// <param name="path">The missing component observed beneath the retained parent.</param>
+    /// <param name="createDirectory">Private native creation operation; injectable for managed error-contract tests.</param>
+    /// <remarks>The caller must reopen and verify kind, no-follow identity and required private access. Fresh destinations never use this helper.</remarks>
+    internal static void CreateMissingWindowsDirectory(string path, Action<string> createDirectory)
+    {
+        try { createDirectory(path); }
+        catch (IOException exception) when (exception.InnerException is Win32Exception { NativeErrorCode: 183 })
+        {
+            // Another creator won the name; admission still depends on the retained handle checks below.
+        }
+    }
+
+    /// <summary>Atomically creates one new directory with the current-user owner and protected private ACL.</summary>
     private static void CreatePrivateWindowsDirectory(string path)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
@@ -502,8 +522,9 @@ internal sealed partial class CoverageRunOutputLease
                 SecurityDescriptor = (nint)descriptorPointer,
                 InheritHandle = 0
             };
-            // Unlike DirectoryInfo.Create, CreateDirectoryW fails atomically if a competing
-            // creator won the pathname. Never adopt or repair that creator's directory.
+            // Unlike DirectoryInfo.Create, CreateDirectoryW reports a competing pathname.
+            // Only the idempotent component walker may reopen and validate that object.
+            // Fresh-destination callers always retain this no-replace refusal.
             if (!(createDirectory ?? WindowsCreateDirectory)(WindowsExtendedPath(path), (nint)(&attributes)))
                 throw new IOException("Unable to create a fresh private artifact directory.", new Win32Exception(Marshal.GetLastPInvokeError()));
         }

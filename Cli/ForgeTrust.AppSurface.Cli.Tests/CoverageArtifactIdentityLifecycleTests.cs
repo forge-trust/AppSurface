@@ -7,6 +7,7 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 /// <summary>Native host lifecycle evidence for live artifact-directory identity checks.</summary>
 public sealed partial class CoverageArtifactIdentityLifecycleTests
 {
+    /// <summary>Observes native current-mount identity stability across handle close and reopen.</summary>
     [Fact]
     public void ArtifactDirectoryIdentity_IsStableAcrossCloseAndReopenOnCurrentMountedVolume()
     {
@@ -24,6 +25,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         reopened.VerifyArtifactBinding();
     }
 
+    /// <summary>Refuses copied ownership metadata and preserves both the source and copy.</summary>
     [Fact]
     public void CopiedSchemaOneStore_IsRefusedAndItsBytesRemainUntouched()
     {
@@ -52,6 +54,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         AssertTreeBytesEqual(copiedBytes, ReadTree(copied));
     }
 
+    /// <summary>Detects replacement of a retained root while preserving both objects' bytes.</summary>
     [Fact]
     public void RetainedRootLease_RejectsPathReplacementAfterRename()
     {
@@ -70,6 +73,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         Assert.Equal("replacement", File.ReadAllText(sentinel));
     }
 
+    /// <summary>Verifies Windows rename prevention and Unix replacement detection without weakening retained binding.</summary>
     [Fact]
     public void RetainedNestedLease_PreservesBindingWhenAncestorReplacementIsAttempted()
     {
@@ -107,6 +111,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         Assert.False(File.Exists(sentinel));
     }
 
+    /// <summary>Refuses a linked artifact root without accessing or changing its target.</summary>
     [Fact]
     public void ArtifactDirectoryAcquisition_RejectsLinkedRoot()
     {
@@ -119,6 +124,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         Assert.True(Directory.Exists(target));
     }
 
+    /// <summary>Uses native clonefile to observe distinct file identity and copy-on-write separation on macOS.</summary>
     [Fact]
     public void MacOsApfsClone_HasDistinctObjectIdentityAndCopyOnWriteData()
     {
@@ -163,8 +169,7 @@ public sealed partial class CoverageArtifactIdentityLifecycleTests
         foreach (var (path, bytes) in expected) Assert.Equal(bytes, actual[path]);
     }
 
-    [DllImport("libc", EntryPoint = "clonefile", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.I4)]
-    private static extern int CloneFile([MarshalAs(UnmanagedType.LPUTF8Str)] string source,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string destination, int flags);
+    /// <summary>Invokes APFS clonefile directly; a managed copy cannot establish clone behavior.</summary>
+    [LibraryImport("libc", EntryPoint = "clonefile", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int CloneFile(string source, string destination, int flags);
 }

@@ -201,6 +201,7 @@ internal static class CoverageArtifactStoreFailure
     /// <summary>Classifies a nonempty unmarked root without changing the existing IOException refusal contract.</summary>
     internal static IOException MarkMissing(IOException exception) => Mark(exception, CoverageArtifactStoreFailureKind.MarkerMissing);
 
+    /// <summary>Attaches only a trusted bounded classification while retaining the original exception type.</summary>
     private static T Mark<T>(T exception, CoverageArtifactStoreFailureKind kind) where T : Exception
     {
         exception.Data[typeof(CoverageArtifactStoreFailureKind)] = kind;
@@ -219,6 +220,7 @@ internal static class CoverageArtifactStoreFailure
             ? CoverageArtifactStoreFailureKind.VolumeIdentityMismatch : CoverageArtifactStoreFailureKind.IdentityMismatch;
     }
 
+    /// <summary>Parses both unsigned tuple fields in the complete schema-v1 record format; unknown formats fail closed.</summary>
     private static bool TryReadIdentity(string value, out ulong volume)
     {
         volume = 0;

@@ -79,6 +79,8 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <param name="apply">False validates a non-mutating preview; true atomically creates the private destination.</param>
     /// <param name="cancellationToken">Cancellation checked before creation and each initialization step.</param>
     /// <param name="beforeRegistryPublication">Optional per-call interruption seam after marker publication; production omits it.</param>
+    /// <param name="onDirectoryCreated">Optional observation immediately after native root creation, including when later validation fails.</param>
+    /// <param name="beforeDestinationInspection">Optional race seam after retaining the parent and before inspecting the destination; production omits it.</param>
     /// <returns>The normalized destination path. No history, registrations, pins or deletion authority are transferred.</returns>
     /// <remarks>
     /// Existing destinations are always refused, including empty or valid stores. Creation uses the retained
@@ -86,15 +88,17 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// metadata for inspection; retry with a different fresh destination rather than adopting a partial result.
     /// This is the safe schema-v1 alternative when independent continuity cannot be established.
     /// </remarks>
-    internal static string CreateNewDomain(string destination, bool apply, CancellationToken cancellationToken, Action? beforeRegistryPublication = null)
+    internal static string CreateNewDomain(string destination, bool apply, CancellationToken cancellationToken, Action? beforeRegistryPublication = null,
+        Action? onDirectoryCreated = null, Action? beforeDestinationInspection = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (!Path.IsPathFullyQualified(destination)) throw new ArgumentException("An absolute new-domain destination is required.", nameof(destination));
-        var root = CoverageRunOutputLease.NormalizePlatformPath(Path.GetFullPath(destination));
+        var root = CoverageRunOutputLease.NormalizePlatformPath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination)));
         RejectBroadStoreRoot(root);
         cancellationToken.ThrowIfCancellationRequested();
         using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(root)!, false, false)
             ?? throw new DirectoryNotFoundException("The fresh domain's parent must already exist.");
+        beforeDestinationInspection?.Invoke();
         // File/directory Exists helpers suppress errors and the Windows directory-only
         // probe reports a regular file as absent. Treat any named entry as occupied.
         FileAttributes? existingAttributes;
@@ -108,7 +112,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         parent.VerifyArtifactBinding();
         if (!apply) return root;
         cancellationToken.ThrowIfCancellationRequested();
-        using var directory = parent.CreateArtifactDirectory(Path.GetFileName(root));
+        using var directory = parent.CreateArtifactDirectory(Path.GetFileName(root), onCreated: onDirectoryCreated);
         using var initialization = CoverageArtifactOperationLease.Acquire(root, exclusive: true);
         initialization.VerifyBinding();
         directory.VerifyArtifactBinding();

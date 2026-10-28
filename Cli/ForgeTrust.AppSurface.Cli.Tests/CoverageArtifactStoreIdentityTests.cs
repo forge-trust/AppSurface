@@ -14,6 +14,7 @@ public sealed class CoverageArtifactStoreIdentityTests
     private const string Persisted = "FileObjectIdentity { DeviceOrVolume = 16777232, FileId = 930550216 }";
     private const string Observed = "FileObjectIdentity { DeviceOrVolume = 16777231, FileId = 930550216 }";
 
+    /// <summary>Rejects the reported device change in both open modes while preserving every store byte.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -34,6 +35,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         fixture.AssertUnchanged(before);
     }
 
+    /// <summary>Keeps malformed or object-only changes diagnostic and never treats them as ownership authority.</summary>
     [Theory]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 16777232, FileId = 1 }", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = 930550216 }", "VolumeIdentityMismatch")]
@@ -46,6 +48,27 @@ public sealed class CoverageArtifactStoreIdentityTests
     public void IdentityComparison_UsesCompleteTuplesOnlyAndNeverGrantsAuthority(string observed, string expected)
         => Assert.Equal(expected, CoverageArtifactStoreFailure.CompareIdentity(Persisted, observed).ToString());
 
+    /// <summary>Guards the diagnostic parser against drift in the real native identity producer's record format.</summary>
+    [Fact]
+    public void IdentityComparison_RecognizesTheActualNativeIdentityFormat()
+    {
+        using var temp = TestDirectory.Create();
+        using var directory = CoverageRunOutputLease.AcquireArtifactDirectory(temp.Path, false, false)!;
+        var identity = directory.ArtifactDirectoryIdentity;
+        var match = System.Text.RegularExpressions.Regex.Match(identity, @"DeviceOrVolume = (\d+), FileId = (\d+)");
+        Assert.True(match.Success);
+        var volume = ulong.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var fileId = ulong.Parse(match.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var changedVolume = identity.Replace($"DeviceOrVolume = {volume}", $"DeviceOrVolume = {volume ^ 1}", StringComparison.Ordinal);
+        var changedFile = identity.Replace($"FileId = {fileId}", $"FileId = {fileId ^ 1}", StringComparison.Ordinal);
+        Assert.NotEqual(identity, changedVolume);
+        Assert.NotEqual(identity, changedFile);
+        Assert.Equal(CoverageArtifactStoreFailureKind.VolumeIdentityMismatch, CoverageArtifactStoreFailure.CompareIdentity(identity, changedVolume));
+        Assert.Equal(CoverageArtifactStoreFailureKind.IdentityMismatch, CoverageArtifactStoreFailure.CompareIdentity(identity, changedFile));
+        directory.VerifyArtifactBinding();
+    }
+
+    /// <summary>Distinguishes invalid marker, registry and policy facts without mutating the private store.</summary>
     [Theory]
     [InlineData("marker-missing", "MarkerMissing")]
     [InlineData("marker-malformed", "MarkerInvalid")]
@@ -84,6 +107,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         fixture.AssertUnchanged(before);
     }
 
+    /// <summary>Uses default retention policy without materializing a policy file during inspection.</summary>
     [Fact]
     public void MissingPolicy_UsesDefaultsAndDoesNotCreateFile()
     {
@@ -94,6 +118,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         fixture.AssertUnchanged(before);
     }
 
+    /// <summary>Preserves old evidence, provenance, pinning and policy while initializing a separate empty domain.</summary>
     [Fact]
     public async Task RefusalAndSeparateNewDomain_PreserveEvidenceHashesProvenancePinsAndPolicy()
     {
@@ -138,6 +163,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         Assert.Equal(0, empty.GetStatus().RegisteredRuns);
     }
 
+    /// <summary>Refuses untrusted permissions and preserves the original access mode.</summary>
     [Fact]
     public void BroadPrivatePermissions_AreDistinguishedWithoutRepair()
     {
@@ -152,6 +178,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         fixture.AssertUnchanged(before);
     }
 
+    /// <summary>Reports identity refusal through command envelopes without inventing zero counts or changing metadata.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -184,6 +211,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         finally { Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", previous); }
     }
 
+    /// <summary>Accepts only the typed failure category and never parses exception messages as authority.</summary>
     [Fact]
     public void TrustedClassification_DoesNotUseAnArbitraryMessageOrDataValue()
     {
@@ -194,6 +222,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         Assert.DoesNotContain("secret", diagnostic.Cause, StringComparison.Ordinal);
     }
 
+    /// <summary>Keeps optional storage failure from changing the primary coverage outcome or historical metadata.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -223,6 +252,7 @@ public sealed class CoverageArtifactStoreIdentityTests
         finally { Environment.SetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME", prior); }
     }
 
+    /// <summary>Renders bounded capability and permission reasons without leaking exception payloads.</summary>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

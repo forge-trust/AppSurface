@@ -129,6 +129,12 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         }
 
         details ??= _partialDetails;
+        if (effects != "none" && status != "complete" && PartialFailureRecovery is { } partialRecovery)
+        {
+            recovery = partialRecovery;
+            reconcile = partialRecovery;
+            for (var i = 0; i < diagnostics.Count; i++) diagnostics[i] = diagnostics[i] with { Recovery = partialRecovery };
+        }
 
         if ((status is "partial" or "cancelled") && diagnostics.Count == 0)
         {
@@ -163,6 +169,7 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         if (status is "partial" or "unsupported") throw new CommandException("Coverage storage could not complete; review the bounded result and diagnostics.", 1);
     }
 
+    /// <summary>Renders trusted result fields and next actions without disclosing a fresh destination path.</summary>
     private async ValueTask WriteHumanResultAsync(IConsole console, CoverageStorageResult envelope)
     {
         await console.Output.WriteLineAsync($"coverage storage {operation}: {envelope.Status}").ConfigureAwait(false);
@@ -196,6 +203,11 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
         else if (operation is "restore" or "pin" or "unpin")
         {
             await console.Output.WriteLineAsync("  operation completed for the requested opaque run identifier").ConfigureAwait(false);
+        }
+        else if (operation == "new-domain")
+        {
+            await console.Output.WriteLineAsync($"  created: {ReadBool(data, "created")}; history transferred: {ReadBool(data, "historyTransferred")}; configuration changed: {ReadBool(data, "configurationChanged")}").ConfigureAwait(false);
+            await console.Output.WriteLineAsync($"  next: {ReadString(data, "nextAction")}").ConfigureAwait(false);
         }
     }
 
@@ -237,6 +249,9 @@ internal abstract class CoverageStorageCommandBase(string operation) : ICommand
 
     /// <summary>Gets whether execution requires the configured existing store. New-domain selection never opens the old domain.</summary>
     protected virtual bool OpensConfiguredDomain => true;
+
+    /// <summary>Gets operation-specific recovery when a failed or cancelled command has already produced side effects.</summary>
+    protected virtual string? PartialFailureRecovery => null;
 
     /// <summary>Validates explicit command inputs before opening or initializing the store.</summary>
     protected virtual void ValidateInput() { }
@@ -540,8 +555,17 @@ internal sealed partial class CoverageStorageUnpinCommand : CoverageStorageComma
 [Command("coverage storage new-domain", Description = "Preview a fresh private --output domain; pass --apply to create it without adopting old history.")]
 internal sealed partial class CoverageStorageNewDomainCommand : CoverageStorageCommandBase
 {
+    private readonly Action? _beforeRegistryPublication;
+
     /// <summary>Creates the noninteractive new-domain command.</summary>
     public CoverageStorageNewDomainCommand() : base("new-domain") { }
+
+    /// <summary>Creates a command with a per-call interruption seam; installed CLI construction omits it.</summary>
+    /// <param name="beforeRegistryPublication">Test callback after root and marker publication, before registry publication.</param>
+    internal CoverageStorageNewDomainCommand(Action beforeRegistryPublication) : this()
+    {
+        _beforeRegistryPublication = beforeRegistryPublication;
+    }
 
     /// <summary>Gets or sets the fresh absolute destination beneath an existing non-linked parent.</summary>
     [CommandOption("output", Description = "Fresh absolute domain path beneath an existing parent. Existing paths are refused.")]
@@ -553,6 +577,9 @@ internal sealed partial class CoverageStorageNewDomainCommand : CoverageStorageC
 
     /// <inheritdoc />
     protected override bool OpensConfiguredDomain => false;
+
+    /// <inheritdoc />
+    protected override string PartialFailureRecovery => "Preserve the partially created private destination for inspection. Choose a different fresh --output path and preview it before applying; never reinitialize or adopt the partial domain. The old domain and configuration are unchanged.";
 
     /// <inheritdoc />
     protected override void ValidateInput()
@@ -568,8 +595,7 @@ internal sealed partial class CoverageStorageNewDomainCommand : CoverageStorageC
     /// <inheritdoc />
     protected override ValueTask<object?> ExecuteOperationAsync(CoverageArtifactStore store, CancellationToken token, Action<string> setEffects, Action<string> setStatus)
     {
-        if (Apply) setEffects("unknown");
-        _ = CoverageArtifactStore.CreateNewDomain(Output, Apply, token);
+        _ = CoverageArtifactStore.CreateNewDomain(Output, Apply, token, _beforeRegistryPublication, () => setEffects("partial"));
         setEffects(Apply ? "complete" : "none");
         return ValueTask.FromResult<object?>(new
         {
