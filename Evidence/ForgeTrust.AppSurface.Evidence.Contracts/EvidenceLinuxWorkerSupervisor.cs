@@ -157,15 +157,51 @@ internal sealed partial class EvidenceLinuxWorkerSupervisor : IEvidenceExecution
         }
         catch (OperationCanceledException) when (handshakeDeadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
+#if EVIDENCE_PRIVATE_C3_SDK
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.InitialAdmissionDeadline, handshakeStarted);
+#endif
             throw new EvidenceAdmissionException("ASEVD402", "Protected worker authentication exceeded its admission deadline.");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+#if EVIDENCE_PRIVATE_C3_SDK
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.PreparationOrAdmissionDeadline, handshakeStarted);
+#endif
             throw new EvidenceAdmissionException("ASEVD402", "Protected worker preparation or admission exceeded its original allowance.");
         }
-        catch (EvidenceAdmissionException error) { throw NormalizeWorkerHandshakeFailure(error); }
+        catch (EvidenceAdmissionException error)
+        {
+#if EVIDENCE_PRIVATE_C3_SDK
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.AdmissionRejected, handshakeStarted);
+#endif
+            throw NormalizeWorkerHandshakeFailure(error);
+        }
+#if EVIDENCE_PRIVATE_C3_SDK
+        catch (SocketException)
+        {
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.TransportFailure, handshakeStarted);
+            throw;
+        }
+        catch (IOException)
+        {
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.TransportFailure, handshakeStarted);
+            throw;
+        }
+#endif
         catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException
-            or FormatException or OverflowException) { throw NormalizeWorkerHandshakeFailure(error); }
+            or FormatException or OverflowException)
+        {
+#if EVIDENCE_PRIVATE_C3_SDK
+            WorkerHandshakeFailureDiagnostic.TryWrite(Console.Error,
+                WorkerHandshakeFailureOutcome.MalformedResponse, handshakeStarted);
+#endif
+            throw NormalizeWorkerHandshakeFailure(error);
+        }
 
         return new EvidenceLinuxWorkerSupervisor(socketPath, brokerPid, descriptor, handshakeStarted, allowance);
     }

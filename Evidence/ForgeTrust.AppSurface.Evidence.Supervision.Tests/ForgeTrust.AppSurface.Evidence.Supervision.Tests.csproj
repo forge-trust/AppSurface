@@ -29,6 +29,11 @@
     <ProjectReference Include="../ForgeTrust.AppSurface.Evidence.Supervision/ForgeTrust.AppSurface.Evidence.Supervision.csproj" />
   </ItemGroup>
 
+  <!-- Exercise the exact private diagnostic formatter without compiling it into ordinary Contracts. -->
+  <ItemGroup Condition="'$(EvidencePrivateQualification)' != 'C3Sdk'">
+    <Compile Include="../ForgeTrust.AppSurface.Evidence.Contracts/WorkerHandshakeFailureDiagnostic.cs" Link="QualificationData/WorkerHandshakeFailureDiagnostic.cs" />
+  </ItemGroup>
+
   <!-- Compile the same private DATA implementation in the tests only when the runtime omits it.
        Existing inner native-owner guards still require their actual private image selection. -->
   <ItemGroup>
