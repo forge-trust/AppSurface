@@ -49,6 +49,7 @@ internal static class PhaseRunner
         NativeFacts.PhaseWitness? witness = null;
         var spawnEscapeObserved = false;
         var phaseStage = PhaseStage.SystemdStart;
+        var failureStage = PhaseStage.SystemdStart;
         void SignalOverflow()
         {
             Interlocked.Exchange(ref outputOverflow, 1);
@@ -101,6 +102,7 @@ internal static class PhaseRunner
                 systemdRunJoined = true;
                 pumpsJoined = true;
                 exitCode = systemdRun.ExitCode;
+                if (exitCode != 0) failureStage = PhaseStage.Child;
                 if (Volatile.Read(ref outputOverflow) != 0) throw new IsolationException("phase-output-overflow");
                 var streams = await output.ConfigureAwait(false);
                 var tokenBytes = release.Token is null ? null : Encoding.UTF8.GetBytes(release.Token);
@@ -125,11 +127,13 @@ internal static class PhaseRunner
         catch (OperationCanceledException error) when (workDeadline.IsCancellationRequested || deadline.IsCancellationRequested)
         {
             timedOut = Volatile.Read(ref outputOverflow) == 0 && !token.IsCancellationRequested && timer.Elapsed >= workBudget;
+            failureStage = phaseStage;
             primaryError = error;
             if (token.IsCancellationRequested) throw;
         }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
+            failureStage = phaseStage;
             primaryError = error;
         }
         finally
@@ -188,7 +192,7 @@ internal static class PhaseRunner
         return new(exitCode, settled, timedOut, Volatile.Read(ref outputOverflow) != 0, unit,
             Math.Max(0, (long)timer.Elapsed.TotalMilliseconds), standardOutputPath, standardErrorPath,
             GetFailureCategory(primaryError, timedOut, Volatile.Read(ref outputOverflow) != 0, exitCode, settled,
-                phaseStage, spawnEscapeObserved), spawnEscapeObserved);
+                failureStage, spawnEscapeObserved), spawnEscapeObserved);
     }
 
     private static ProcessStartInfo BuildSystemdRun(OwnerLayout layout, OwnerPhase phase, string unitName, TimeSpan runtime)
@@ -440,7 +444,10 @@ internal static class PhaseRunner
     }
     private static string PhaseName(OwnerPhase phase) => phase switch
     {
-        OwnerPhase.Prepare => "prepare", OwnerPhase.Replay => "replay", OwnerPhase.Close => "close", OwnerPhase.Control => "control",
+        OwnerPhase.Prepare => "prepare",
+        OwnerPhase.Replay => "replay",
+        OwnerPhase.Close => "close",
+        OwnerPhase.Control => "control",
         _ => throw new IsolationException("phase")
     };
     private sealed record PumpResult(long Count, byte[] Bytes);

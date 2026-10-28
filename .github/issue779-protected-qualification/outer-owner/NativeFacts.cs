@@ -87,18 +87,16 @@ internal static class NativeFacts
         var pids = ParsePidList(ReadBounded(procsPath, 4096));
         if (pids.Count != 2) throw new IsolationException("unit-process-count");
 
-        var launcher = new List<(int Pid, string[] NsPids, string[] Uids, string[] Gids, string Exe, string[] Args)>();
+        var launcher = new List<(int Pid, string[] NsPids, string[] Uids, string[] Gids, string[] Args)>();
         foreach (var pid in pids)
         {
             var proc = $"/proc/{pid.ToString(CultureInfo.InvariantCulture)}";
             var status = ParseFields(ReadBounded(proc + "/status", MaximumStatusBytes));
             if (!status.TryGetValue("NSpid", out var nsPids) || !status.TryGetValue("Uid", out var uids)
                 || !status.TryGetValue("Gid", out var gids)) throw new IsolationException("unit-process-facts");
-            var exe = new FileInfo(proc + "/exe").ResolveLinkTarget(returnFinalTarget: true)?.FullName
-                ?? throw new IsolationException("unit-process-exe");
             var args = ParseNul(ReadBounded(proc + "/cmdline", 16 * 1024));
             if (nsPids.Length >= 2 && uint.TryParse(nsPids[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var inner)
-                && inner == namespacePid) launcher.Add((pid, nsPids, uids, gids, exe, args));
+                && inner == namespacePid) launcher.Add((pid, nsPids, uids, gids, args));
         }
 
         if (launcher.Count != 1) throw new IsolationException("unit-launcher-ambiguous");
@@ -240,8 +238,13 @@ internal static class NativeFacts
     internal static async Task<(int ExitCode, string Text)> RunTextAsync(string executable, IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true,
-            RedirectStandardError = true, CreateNoWindow = true };
+        var start = new ProcessStartInfo(executable)
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
         foreach (var arg in args) start.ArgumentList.Add(arg);
         start.Environment.Clear();
         start.Environment["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin";
@@ -429,7 +432,10 @@ internal static class NativeFacts
     }
     private static string PhaseName(OwnerPhase phase) => phase switch
     {
-        OwnerPhase.Prepare => "prepare", OwnerPhase.Replay => "replay", OwnerPhase.Close => "close", OwnerPhase.Control => "control",
+        OwnerPhase.Prepare => "prepare",
+        OwnerPhase.Replay => "replay",
+        OwnerPhase.Close => "close",
+        OwnerPhase.Control => "control",
         _ => throw new IsolationException("phase")
     };
 
@@ -475,7 +481,8 @@ internal static class NativeFacts
         var left = FileSystemInfoStat.Read(expectedPath);
         var right = FileSystemInfoStat.Read($"/proc/{pid.ToString(CultureInfo.InvariantCulture)}/exe");
         return left.Device == right.Device && left.Inode == right.Inode && left.Mode == right.Mode
-            && (left.Mode & 0xf000) == 0x8000 && (left.Mode & 0x92) == 0 && left.Uid == 0 && left.Links > 0;
+            && (left.Mode & 0xf000) == 0x8000 && (left.Mode & 0x12) == 0 && (left.Mode & 0x1) != 0
+            && left.Uid == 0 && left.Links > 0;
     }
 
     private static void VerifyNamespaceAndMounts(OwnerLayout layout, int launcher, int bootstrap, OwnerPhase phase)
@@ -620,7 +627,8 @@ internal static class NativeFacts
         var sdk = ReadCanonicalSdkPath(layout);
         var binaryPath = sdk + "/dotnet";
         var binary = FileSystemInfoStat.Read(binaryPath);
-        if ((binary.Mode & 0xf000) != 0x8000 || binary.Uid != 0 || (binary.Mode & 0x92) != 0)
+        if ((binary.Mode & 0xf000) != 0x8000 || binary.Uid != 0 || (binary.Mode & 0x12) != 0
+            || (binary.Mode & 0x1) == 0)
             throw new IsolationException("sdk-host-binary");
         var result = await RunTextAsync(binaryPath, ["--version"], cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.Text.Trim() != "10.0.401") throw new IsolationException("sdk-version");
