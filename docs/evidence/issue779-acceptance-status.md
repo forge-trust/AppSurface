@@ -1,5 +1,21 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Revision 122 native lifecycle result — 2026-10-28
+
+The [revision-122 record](issue779-csharp-runtime-cutover.md#revision-122-native-lifecycle-verification--2026-10-28)
+binds the actual Linux worker, application and all three SDK lifecycle successes to source
+`8da3721f0af19fc515e40e6946647c52cc36721d`. Original application/workspace, root, peer, output,
+group and account predicates remain required. The post-stop control preserves its deliberate
+failure and fixed false authority claims after completing the existing EXIT handshake.
+Both authentic artifacts match the complete 4,041-path source capture.
+
+The same source's local solution tests all passed, but its numerical gate failed `ASCOV020`
+without native measurement inputs. Its CI measured chain and final gate were still pending at
+the recorded observation. The complete workflow, protected full-stage replay, outer isolation,
+support registration and Trusted/downstream acceptance are not established. Later local test
+refinements do not inherit revision 122's source binding. Admission and coverage gates remain
+unchanged.
+
 ## Revision 120 failure and current local repair — 2026-10-28
 
 The [current validation record](issue779-csharp-runtime-cutover.md#revision-120-validation-and-unpublished-worker-completion--2026-10-28)

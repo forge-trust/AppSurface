@@ -1,5 +1,47 @@
 # EvidenceHost C# runtime cutover
 
+## Revision 122 native lifecycle verification — 2026-10-28
+
+The [revision-122 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40639310865)
+passed all sixteen worker controls and reconciliation. Its
+[application job](https://github.com/forge-trust/AppSurface/actions/runs/40639310865/job/122653475260)
+passed the seven application cases, six workspace rejection controls, retained-file and supplementary
+root measurements, peer-credential controls, bundle audit, and all three SDK lifecycle controls.
+The post-stop control now completes with its expected deliberate failure, original joined output,
+empty groups and absent account identities. This verifies the unpublished-completion correction
+on its actual Linux source; it does not change the unsuccessful workload into a successful claim.
+
+Both retained source captures match `8da3721f0af19fc515e40e6946647c52cc36721d`, tree
+`e499dedcbb60b1e8ed6a41d0031e5da98ce12afe`, all 4,041 paths, capture SHA-256
+`4375f9958f8396d85d7ee376e18d5094c32f03d4800962701b4c4269bbe5fc3a`.
+Application artifact `12797218195` is 3,816,121 bytes, SHA-256
+`f48eb19a90dc3f5c97cc5d96d03ab2aa5c49e46e5968d42713a09976561e2cc8`.
+Lifecycle artifact `12796804128` is 546,603 bytes, SHA-256
+`b737a722c37539f1ed0f0307cf94a2596931ca8975b0922995bee8e2fd970d24`.
+Each lifecycle row retains `native_acceptance=false`; the two stall controls and the post-stop
+control remain expected negative executions.
+The existing [C3 retained-data callbacks](../../.github/issue779-protected-qualification/completed-c3-README.md)
+also revalidated both original archives locally, preserving their seven application and three
+lifecycle cases and complete source binding before and after replay. That comparison does not
+reacquire live kernel state or revalidate provider metadata.
+
+The same source's ordinary package smoke passed all 23 expected command outcomes, including
+fresh installed CLI behavior and an SDK consumer restore, build and load. That separate local
+check used macOS ARM64 SDK 10.0.102 and supplies no Linux or pinned-SDK measurement.
+Its unchanged local solution command passed all 59 project selections and 25,018 tests, with
+104 explicit skips, then failed `ASCOV020`: aggregate line 91.5356%, branch 85.3093%, patch line
+67.6636% and patch branch 74.2322%. Those local figures lack the source-bound native inputs.
+They are a failed numerical gate, not an exception to the existing
+[coverage policy](issue779-coverage-gate.md).
+
+The runtime workflow's account creation, rollback, packaged producer and measured None through
+N06 jobs had also passed at the 07:40 UTC observation; N07 was active. The complete measured chain
+and final solution/patch gate were not terminal at that observation. No full workflow or numerical
+gate pass follows from these partial results. Later test-only deadline refinements have their own
+source identity and cannot borrow this revision's measurement binding. Production admission and
+support registration remain closed; the [protected replay boundary](../../.github/issue779-protected-qualification/completed-replay-worker-README.md#outer-execution-prerequisite)
+still requires its actual independent owner and protected execution.
+
 ## Revision 120 validation and unpublished worker completion — 2026-10-28
 
 Revision 120's [focused run](https://github.com/forge-trust/AppSurface/actions/runs/40631127682)
