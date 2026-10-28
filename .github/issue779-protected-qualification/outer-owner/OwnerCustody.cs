@@ -237,7 +237,7 @@ internal static class OwnerCustody
         {
             var amount = stream.Read(buffer, 0, buffer.Length);
             if (amount == 0) break;
-        Require((ulong)(output.Length + amount) <= before.Size && output.Length + amount <= maximum, "input-growth");
+            Require((ulong)(output.Length + amount) <= before.Size && output.Length + amount <= maximum, "input-growth");
             output.Write(buffer, 0, amount);
         }
         Require(SameNode(Stat(stream.SafeFileHandle), before) && SameNode(StatPath(path), before)
@@ -291,7 +291,7 @@ internal static class OwnerCustody
         return false;
     }
 
-    private static bool ContainsId(string status, uint id)
+    internal static bool ContainsId(string status, uint id)
     {
         var seenUid = false;
         var seenGid = false;
@@ -324,10 +324,12 @@ internal static class OwnerCustody
 
     private static bool MatchesNumericFields(string fields, uint id, int? exactCount)
     {
-        var values = fields.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var values = fields.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         Require((exactCount is null || values.Length == exactCount.Value)
-            && values.All(static value => uint.TryParse(value, out _)), "proc-numeric-field");
-        return values.Any(value => uint.Parse(value, System.Globalization.CultureInfo.InvariantCulture) == id);
+            && values.All(static value => uint.TryParse(value, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out _)), "proc-numeric-field");
+        return values.Any(value => uint.Parse(value, System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture) == id);
     }
 
     private static string? ReadProcStartTime(string procRoot)

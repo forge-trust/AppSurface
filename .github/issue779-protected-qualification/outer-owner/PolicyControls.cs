@@ -61,6 +61,7 @@ internal static class PolicyControls
             Reject(() => OwnerCompletionPolicy.Validate(wrong)); count++;
         }
         count += NativeParserControls();
+        count += ProcessIdentityParserControls();
         count += ReleaseControls();
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
@@ -111,6 +112,33 @@ internal static class PolicyControls
             catch (IsolationException) { return; }
 #pragma warning restore CA1416
             throw new IsolationException("cgroup-events-negative-control");
+        }
+    }
+
+    private static int ProcessIdentityParserControls()
+    {
+        const string tabSeparated = "Name:\tdotnet\nUid:\t62000\t62000\t62000\t62000\n"
+            + "Gid:\t62000\t62000\t62000\t62000\nGroups:\t62000\t62001\n";
+        if (!OwnerCustody.ContainsId(tabSeparated, 62000) || OwnerCustody.ContainsId(tabSeparated, 62002))
+            throw new IsolationException("process-id-positive-control");
+
+        const string mixedWhitespace = "Uid: 62001\t62002 62003\t62004\n"
+            + "Gid:\t62001 62002\t62003 62004\nGroups:\t62005\t62006\n";
+        if (!OwnerCustody.ContainsId(mixedWhitespace, 62006) || OwnerCustody.ContainsId(mixedWhitespace, 62000))
+            throw new IsolationException("process-id-whitespace-control");
+
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\n");
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t+62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t4294967296\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\tinvalid\n");
+        return 7;
+
+        static void RejectProcessStatus(string status)
+        {
+            try { _ = OwnerCustody.ContainsId(status, 62000); }
+            catch (IsolationException) { return; }
+            throw new IsolationException("process-id-negative-control");
         }
     }
 
