@@ -1,5 +1,39 @@
 # EvidenceHost C# runtime cutover
 
+## Revision 122 terminal coverage failure and local repair — 2026-10-28
+
+The [revision-122 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40639310865)
+finished with 34 successful jobs and one failed job. All worker controls, application and SDK
+lifecycle cases, account creation and rollback, the packaged producer, and fourteen ordered
+measurements passed. The unchanged solution command failed `ASCOV120` in twenty PackageIndex
+tests before its numerical gate ran. The original coverage archive has no final gate JSON.
+
+The PackageIndex smoke command and runtime test fixtures inherited a long Linux temporary path,
+which exceeded the existing 103-byte Unix socket limit. The local correction at `1262feb1`
+selects `/tmp` for Linux cluster roots, following the existing short macOS root. The smoke test
+continues to start and clean the exact production-selected root. With that seam preserved,
+the long-`TMPDIR` Linux reproduction failed 17 of 43 focused tests before the command correction
+and passed all 43 afterward. The local macOS selection also passed all 43. These checks used
+SDK 10.0.403 in a Linux x64 container and SDK 10.0.102 on macOS ARM64; they do not replace
+the required SDK 10.0.401 native root/systemd run. See the
+[native smoke reference](../../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-worker-template-proof-806).
+
+A separate diagnostic evaluation of the original, unchanged source-bound Cobertura report at
+its original Linux repository path returned `ASCOV020`: aggregate line 95.9103%, aggregate
+branch 88.1234%, patch line 89.9962%, and patch branch 86.0179%. Only patch line failed its
+effective 94.5% requirement. The diagnostic used an existing Release evaluator assembly,
+without rebuilding it for this analysis. Failed original tests and absent original gate output
+prevent a successful-workflow or coverage-eligibility claim. These older-source diagnostics
+also cannot clear a later source revision. The [coverage record](issue779-coverage-gate.md)
+retains the unchanged policy and this distinction.
+
+Two further deterministic ownership tests at `ed34a48c` verify post-start admission revocation
+and null-builder rejection through existing internal seams. Their focused suite passed nine
+cases, with no production admission change or native proof. The complete current-source
+solution and native gates, reviewed outer credential isolation and descendant settlement,
+protected completed-run replay, support registration, and Trusted/downstream acceptance remain
+required. The future finalizer remains absent and the production admission boundary stays closed.
+
 ## Revision 122 native lifecycle verification — 2026-10-28
 
 The [revision-122 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40639310865)

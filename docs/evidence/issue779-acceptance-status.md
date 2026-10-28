@@ -1,5 +1,21 @@
 # Issue #779 acceptance map — 2026-10-02
 
+## Revision 122 terminal result and current local corrections — 2026-10-28
+
+The [terminal validation record](issue779-csharp-runtime-cutover.md#revision-122-terminal-coverage-failure-and-local-repair--2026-10-28)
+supersedes the pending observation below. Revision 122 passed 34 jobs, including all fourteen
+measurements, then failed the unchanged solution command with `ASCOV120` in twenty PackageIndex
+tests. A long Linux temporary path tripped the unchanged Unix socket guard before the intended
+assertions. The local short-root correction preserves the exact selected cluster path and cleanup
+checks; its focused Linux and macOS selections each pass 43 tests. Two separate ownership
+regressions pass a nine-case focused suite. These local results require fresh full-source validation.
+
+Diagnostic evaluation of the original native report finds patch line coverage 89.9962%, below
+the unchanged effective 94.5% requirement. Aggregate line/branch and patch branch exceed their
+requirements, but the original test failure and missing original gate JSON prevent gate credit.
+No current numerical gate, protected replay, outer isolation, support registration, or
+Trusted/downstream acceptance is established. Admission and coverage requirements remain unchanged.
+
 ## Revision 122 native lifecycle result — 2026-10-28
 
 The [revision-122 record](issue779-csharp-runtime-cutover.md#revision-122-native-lifecycle-verification--2026-10-28)

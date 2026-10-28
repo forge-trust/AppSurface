@@ -83,3 +83,24 @@ numerators and the latest per-file gaps remain under verification. The
 [consumer checkpoint](issue779-consumer-acceptance.md#current-validation-checkpoint-2026-10-03-1958-utc)
 records focused repairs and immutable run statuses. The current complete gate
 has failed and remains required before the product PR can be updated.
+
+## Revision 122 retained-report diagnostic — 2026-10-28
+
+The [revision-122 runtime](https://github.com/forge-trust/AppSurface/actions/runs/40639310865)
+at `8da3721f0af19fc515e40e6946647c52cc36721d` completed its native measurement chain,
+then failed `ASCOV120` in twenty PackageIndex tests. Its retained coverage archive has no
+original final gate JSON. The [cutover record](issue779-csharp-runtime-cutover.md#revision-122-terminal-coverage-failure-and-local-repair--2026-10-28)
+describes the bounded Linux temporary-path correction and its focused verification.
+
+A separate evaluation of the unchanged retained Cobertura bytes at their original Linux
+repository path used the fixed base `1991280e8af049db592ebcb705cbf66f4b4c6e8b`, existing
+public evaluator, 95/85 thresholds, 0.5 tolerance, and Codecov patch-line mode. It returned
+`ASCOV020`: aggregate **147,067 / 153,338 lines (95.9103%)** and
+**69,332 / 78,676 branches (88.1234%)**; patch **25,963 / 28,849 lines (89.9962%)**
+and **38,653 / 44,936 branches (86.0179%)**. Only patch line fails its effective 94.5%
+requirement, requiring 1,300 further fully covered points at that fixed denominator.
+
+This diagnostic used an existing Release evaluator assembly, which was not rebuilt for
+the analysis. It does not repair the original failed tests, supply the absent original
+gate output, prove successful original execution, or establish coverage for later commits.
+Fresh complete-source collection and the unchanged gate remain required before publication.
