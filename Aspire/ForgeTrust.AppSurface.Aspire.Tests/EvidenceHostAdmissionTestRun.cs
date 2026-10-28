@@ -148,11 +148,16 @@ internal sealed class EvidenceHostAdmissionTestRun : IDisposable
 
     internal sealed class FakeSupervisor(string runId, TimeSpan jobRemaining) : IEvidenceExecutionSupervisor
     {
+        private readonly TaskCompletionSource _ownedExitObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         internal TimeSpan JobRemaining { get; } = jobRemaining;
 
         internal int StopRequests { get; private set; }
 
         internal int ExitAcknowledgements { get; private set; }
+
+        /// <summary>Signals that this fake supervisor's owned-exit callback was invoked; it is not a process-exit proof.</summary>
+        internal Task OwnedExitObserved => _ownedExitObserved.Task;
 
         internal int CompletionAcknowledgements { get; private set; }
 
@@ -178,6 +183,7 @@ internal sealed class EvidenceHostAdmissionTestRun : IDisposable
         public ValueTask WaitForOwnedExitAsync(CancellationToken stoppingToken)
         {
             ExitAcknowledgements++;
+            _ownedExitObserved.TrySetResult();
             return ValueTask.CompletedTask;
         }
 
