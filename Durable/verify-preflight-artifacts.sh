@@ -94,8 +94,14 @@ if not source.is_file():
     raise SystemExit("consumer-template-not-found")
 if target.resolve().is_relative_to(source.parent.resolve()):
     raise SystemExit("consumer-template-destination-overlaps-source")
-shutil.copytree(source.parent, target, ignore=shutil.ignore_patterns("bin", "obj"))
-project = target / source.name.removesuffix(".template")
+project_name = source.name.removesuffix(".template")
+def ignore(directory, names):
+    excluded = {"bin", "obj"}
+    if pathlib.Path(directory) == source.parent:
+        excluded.add(project_name)
+    return [name for name in names if name in excluded]
+shutil.copytree(source.parent, target, ignore=ignore)
+project = target / project_name
 (target / source.name).rename(project)
 print(project)
 PY
