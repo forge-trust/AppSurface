@@ -34,6 +34,7 @@ internal static class OwnerWorkspace
     {
         SetupStage = "host";
         RequireSupportedHost();
+        SetupStage = "repository";
         var repo = CanonicalExistingDirectory(repository, "repository");
         var evidenceParent = CanonicalExistingDirectory(Path.GetDirectoryName(evidenceRoot) ?? "", "evidence-parent");
         Require(Path.IsPathFullyQualified(evidenceRoot) && Path.GetFullPath(evidenceRoot) == evidenceRoot
@@ -330,7 +331,7 @@ internal static class OwnerWorkspace
     private static string CanonicalExistingDirectory(string value, string category)
     {
         Require(Path.IsPathFullyQualified(value) && Path.GetFullPath(value) == value && Directory.Exists(value), category);
-        Require((OwnerCustody.StatPath(value).Mode & 0xf000) == OwnerCustody.DirectoryType, category);
+        Require(OwnerCustody.StatPath(value).Type == OwnerCustody.DirectoryType, category);
         return value;
     }
 
@@ -481,9 +482,13 @@ internal static class OwnerWorkspace
             "grep", "sed", "awk", "find", "rm", "mkdir", "cp", "mv", "chmod", "chown", "cat", "head", "tail",
             "touch", "stat", "sha256sum", "timeout", "uname", "readlink", "dirname", "basename", "date", "sort",
             "cut", "tr", "wc", "tar", "gzip", "curl"], token).ConfigureAwait(false);
+        SetupStage = "python-closure";
         await CopyPythonStandardLibraryAsync(layout, token).ConfigureAwait(false);
+        SetupStage = "dotnet-closure";
         await CopyDotnetRuntimeClosureAsync(layout, sdkDirectory, token).ConfigureAwait(false);
+        SetupStage = "public-configuration";
         CopyPublicConfiguration(layout);
+        SetupStage = "nss-closure";
         CopyNssLibraries(layout);
         var sdkPathFile = Path.Combine(layout.HostRoot, "sdk.hostpath");
         await File.WriteAllTextAsync(sdkPathFile, sdkDirectory + "\n", new UTF8Encoding(false, true), token).ConfigureAwait(false);
@@ -497,6 +502,7 @@ internal static class OwnerWorkspace
         var binaries = new HashSet<string>(StringComparer.Ordinal);
         foreach (var name in names)
         {
+            SetupStage = "fixed-binary-" + name;
             var candidate = new[] { "/usr/bin/" + name, "/bin/" + name, "/usr/sbin/" + name, "/sbin/" + name }
                 .FirstOrDefault(File.Exists);
             if (candidate is null) continue;
@@ -566,13 +572,13 @@ internal static class OwnerWorkspace
             var directory = Path.Combine(sdkRoot, relativeDirectory);
             Require(Directory.Exists(directory), "dotnet-runtime-directory");
             foreach (var filename in new[] { "libhostfxr.so", "libhostpolicy.so", "libcoreclr.so", "libclrjit.so" })
-            foreach (var path in Directory.EnumerateFiles(directory, filename, SearchOption.AllDirectories))
-            {
-                var fullPath = Path.GetFullPath(path);
-                Require(fullPath.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                    && !File.GetAttributes(fullPath).HasFlag(FileAttributes.ReparsePoint), "dotnet-runtime-path");
-                runtimeObjects.Add(fullPath);
-            }
+                foreach (var path in Directory.EnumerateFiles(directory, filename, SearchOption.AllDirectories))
+                {
+                    var fullPath = Path.GetFullPath(path);
+                    Require(fullPath.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                        && !File.GetAttributes(fullPath).HasFlag(FileAttributes.ReparsePoint), "dotnet-runtime-path");
+                    runtimeObjects.Add(fullPath);
+                }
         }
 
         var dependencies = new HashSet<string>(StringComparer.Ordinal);
