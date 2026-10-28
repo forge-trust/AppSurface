@@ -40,13 +40,44 @@ public sealed class CoverageArtifactStoreIdentityTests
     [InlineData("FileObjectIdentity { DeviceOrVolume = 16777232, FileId = 1 }", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = 930550216 }", "VolumeIdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = 2 }", "VolumeIdentityMismatch")]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 0, FileId = 0 }", "VolumeIdentityMismatch")]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 16777232, FileId = 0 }", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = invalid, FileId = 2 }", "IdentityMismatch")]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 18446744073709551616, FileId = 2 }", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = invalid }", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1 }", "IdentityMismatch")]
     [InlineData("unknown", "IdentityMismatch")]
     [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = 2 }suffix", "IdentityMismatch")]
     public void IdentityComparison_UsesCompleteTuplesOnlyAndNeverGrantsAuthority(string observed, string expected)
         => Assert.Equal(expected, CoverageArtifactStoreFailure.CompareIdentity(Persisted, observed).ToString());
+
+    /// <summary>Rejects missing, overlapping or overflowing file identifiers without throwing for either tuple.</summary>
+    [Theory]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = }")]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId =  }")]
+    [InlineData("FileObjectIdentity { DeviceOrVolume = 1, FileId = 18446744073709551616 }")]
+    public void IdentityComparison_MalformedFileIdFailsClosedInEitherTuple(string malformed)
+    {
+        Assert.Equal(CoverageArtifactStoreFailureKind.IdentityMismatch, CoverageArtifactStoreFailure.CompareIdentity(Persisted, malformed));
+        Assert.Equal(CoverageArtifactStoreFailureKind.IdentityMismatch, CoverageArtifactStoreFailure.CompareIdentity(malformed, Observed));
+    }
+
+    /// <summary>Preserves a domain with an overlapping identity field while rendering the ordinary refusal in both open modes.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MalformedMarkerIdentity_RefusesBothOpenModesWithoutChangingAnyBytes(bool readOnly)
+    {
+        using var fixture = new Fixture();
+        fixture.Write("store.json", JsonSerializer.Serialize(new { SchemaVersion = 1, PhysicalIdentity = "FileObjectIdentity { DeviceOrVolume = 1, FileId = }" }));
+        var before = fixture.Capture();
+        var exception = Assert.Throws<InvalidDataException>(() => readOnly
+            ? CoverageArtifactStore.OpenReadOnly(fixture.Root)
+            : CoverageArtifactStore.Open(fixture.Root));
+
+        Assert.Equal("IdentityMismatch", CoverageArtifactDiagnostic.Failure("ASCOV201", "status", exception).Reason);
+        fixture.AssertUnchanged(before);
+    }
 
     /// <summary>Guards the diagnostic parser against drift in the real native identity producer's record format.</summary>
     [Fact]

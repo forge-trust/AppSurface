@@ -220,7 +220,7 @@ internal static class CoverageArtifactStoreFailure
             ? CoverageArtifactStoreFailureKind.VolumeIdentityMismatch : CoverageArtifactStoreFailureKind.IdentityMismatch;
     }
 
-    /// <summary>Parses both unsigned tuple fields in the complete schema-v1 record format; unknown formats fail closed.</summary>
+    /// <summary>Parses nonempty unsigned tuple fields in the complete schema-v1 record format; malformed fields fail closed without slicing outside their bounds.</summary>
     private static bool TryReadIdentity(string value, out ulong volume)
     {
         volume = 0;
@@ -228,9 +228,12 @@ internal static class CoverageArtifactStoreFailure
         const string separator = ", FileId = ";
         if (!value.StartsWith(prefix, StringComparison.Ordinal) || !value.EndsWith(" }", StringComparison.Ordinal)) return false;
         var split = value.IndexOf(separator, prefix.Length, StringComparison.Ordinal);
-        return split >= 0
+        if (split < 0) return false;
+        var fileIdStart = split + separator.Length;
+        var fileIdLength = value.Length - fileIdStart - 2;
+        return fileIdLength > 0
             && ulong.TryParse(value.AsSpan(prefix.Length, split - prefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out volume)
-            && ulong.TryParse(value.AsSpan(split + separator.Length, value.Length - split - separator.Length - 2), NumberStyles.None, CultureInfo.InvariantCulture, out _);
+            && ulong.TryParse(value.AsSpan(fileIdStart, fileIdLength), NumberStyles.None, CultureInfo.InvariantCulture, out _);
     }
 
     /// <summary>Gets actionable trusted text for a known refusal, without raw paths, metadata or native IDs.</summary>
