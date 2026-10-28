@@ -419,7 +419,7 @@ jobs:
   build:
     needs: coverage-security-platform
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CODECOV_TOKEN_PRESENT: ${{ secrets.CODECOV_TOKEN != '' }}
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
