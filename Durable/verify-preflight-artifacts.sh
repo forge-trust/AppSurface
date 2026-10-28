@@ -6,7 +6,7 @@ set -euo pipefail
 # release pack-and-verify job (package-artifact-manifest.json plus .nupkg files).
 
 usage() {
-  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project FILE --receipt FILE [--prepare-only]" >&2
+  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project FILE.csproj[.template] --receipt FILE [--prepare-only]" >&2
 }
 
 fail() {
@@ -76,6 +76,37 @@ cleanup() {
   exit "$status"
 }
 trap cleanup EXIT
+
+# BEGIN preflight consumer materialization helper
+materialize_consumer_project() {
+  local input="$1"
+  local target="$2"
+  if [[ "$input" != *.csproj.template ]]; then
+    printf '%s\n' "$input"
+    return
+  fi
+
+  python3 - "$input" "$target" <<'PY'
+import pathlib, shutil, sys
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+if not source.is_file():
+    raise SystemExit("consumer-template-not-found")
+if target.resolve().is_relative_to(source.parent.resolve()):
+    raise SystemExit("consumer-template-destination-overlaps-source")
+shutil.copytree(source.parent, target, ignore=shutil.ignore_patterns("bin", "obj"))
+project = target / source.name.removesuffix(".template")
+(target / source.name).rename(project)
+print(project)
+PY
+}
+# END preflight consumer materialization helper
+
+# Artifact-dependent consumers remain templates in the source tree. Materialize
+# the complete consumer beside its isolated outputs, retaining the manifest's
+# explicit package version and frozen-feed checks below.
+consumer_project="$(materialize_consumer_project "$consumer_project" "$work_dir/consumer")" \
+  || fail "consumer-materialization"
 
 verified_json="$work_dir/verified-artifacts.json"
 python3 - "$artifact_dir" "$artifact_manifest" "$verified_json" <<'PY'

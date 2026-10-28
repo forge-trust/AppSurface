@@ -871,16 +871,6 @@ packages:
     release_notes_path: releases/unreleased.md
     order: 211
     note: Non-packable ASP.NET Core consumer fixture used by AppSurface Docs HTTP and Playwright regression tests.
-  - project: Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj
-    classification: excluded
-    publish_decision: do_not_publish
-    product_family: internal_support
-    publish_reason: This disposable exact-package consumer verifies PostgreSQL runtime preflight and is not distributed as a package.
-    release_status: excluded
-    commercial_status: not_applicable
-    release_notes_path: releases/unreleased.md
-    order: 212
-    note: Non-packable release proof controller for complete runtime role sets, exact candidate and published package bytes, and guarded lane execution. See the [artifact proof reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845).
   - project: Durable/compatibility/LegacyCoreProviderAbiConsumer/LegacyCoreProviderAbiConsumer.csproj
     classification: excluded
     publish_decision: do_not_publish

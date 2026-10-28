@@ -101,6 +101,16 @@ defines the candidate, published and deployment gates for complete runtime-set p
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
+The consumer's `PostgreSqlPreflightConsumer.csproj.template` is materialized with its complete source directory
+in the verifier's private scratch root. It is not a standalone
+repository project: the verifier supplies `AppSurfacePackageVersion` from the validated artifact manifest and
+uses the frozen feed for every first-party package. No default published version or source-project substitute is
+used. This keeps generic project discovery, including automatic dependency submission, from trying to restore
+an artifact-dependent fixture without its required inputs. The provider and shared third-party dependencies
+remain ordinary repository projects and dependencies. Direct callers of `verify-preflight-artifacts.sh` may pass
+an existing `.csproj` or a `.csproj.template` through `--consumer-project`; only template inputs are copied, with
+`bin` and `obj` omitted, and the generated project keeps its original basename. Use the carrier for candidate or
+published proof so the manifest, receipt and cleanup checks are applied together.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
