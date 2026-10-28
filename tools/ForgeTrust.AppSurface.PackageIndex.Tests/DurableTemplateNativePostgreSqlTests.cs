@@ -582,15 +582,14 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
             return;
         }
 
-        var scriptPath = Path.Join(_root, "cancel-initdb.sh");
-        var startedPath = Path.Join(_root, "cancel-initdb.started");
-        WriteExecutableScript(scriptPath,
-            "#!/bin/sh\n"
-            + "echo started > \"" + startedPath + "\"\n"
-            + "exec \"" + sleepPath + "\" 60\n");
+        // RunAsync starts the real child synchronously before yielding. This test
+        // cancels that live child; shell startup and marker polling are separate
+        // fixture concerns and can complete before the cancellation is exercised.
         var terminationVerified = false;
+        var liveProcessObserved = false;
         var runner = new NativePostgreSqlBootstrapRunner(async process =>
         {
+            liveProcessObserved = !process.HasExited;
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -602,18 +601,17 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         });
         using var cancellation = new CancellationTokenSource();
         var runTask = runner.RunAsync(
-            new NativePostgreSqlBootstrapRequest(scriptPath, [], _root, string.Empty, 3_000),
+            new NativePostgreSqlBootstrapRequest(sleepPath, ["60"], _root, string.Empty, 3_000),
             cancellation.Token);
 
         try
         {
-            Assert.True(
-                await WaitForFileAsync(startedPath, runTask, TimeSpan.FromSeconds(3)),
-                "The bootstrap shim did not start before the test deadline.");
+            Assert.False(runTask.IsCompleted, "The blocking bootstrap child exited before cancellation.");
             cancellation.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runTask);
 
+            Assert.True(liveProcessObserved);
             Assert.True(terminationVerified);
         }
         finally
