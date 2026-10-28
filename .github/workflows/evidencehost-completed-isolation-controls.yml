@@ -27,6 +27,13 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Reserve a fresh fixed SDK directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e /opt/appsurface-completed-dotnet
+          sudo -n install -d -m 0755 -o "$(id -u)" -g "$(id -g)" /opt/appsurface-completed-dotnet
+          printf 'DOTNET_INSTALL_DIR=/opt/appsurface-completed-dotnet\n' >> "$GITHUB_ENV"
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: 10.0.401
@@ -39,6 +46,9 @@ jobs:
           mkdir -m 0700 "$evidence"
           printf 'ISOLATION_EVIDENCE=%s\n' "$evidence" >> "$GITHUB_ENV"
           python3 -B .github/issue779-checkpoint2/capture-source.py "$GITHUB_SHA" "$evidence/source.json"
+          trap 'printf "ISOLATION_PREFLIGHT_FAILED:line-%s\n" "$LINENO"' ERR
+          printf 'ISOLATION_PREFLIGHT:arch=%s,pid1=%s,sdk=%s\n' "$(uname -m)" "$(cat /proc/1/comm)" "$(dotnet --version)"
+          sudo -n chown -R root:root /opt/appsurface-completed-dotnet
           test "$(uname -m)" = x86_64
           test "$(cat /proc/1/comm)" = systemd
           test -f /sys/fs/cgroup/cgroup.controllers

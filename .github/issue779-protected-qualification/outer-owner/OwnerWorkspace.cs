@@ -259,7 +259,7 @@ internal static class OwnerWorkspace
     private static bool FixedExecutable(string executable) => executable is "/usr/bin/git" or "/usr/bin/truncate"
         or "/usr/sbin/mkfs.ext4" or "/usr/sbin/losetup" or "/usr/bin/mount" or "/usr/bin/umount"
         or "/usr/bin/getent" or "/usr/bin/dotnet" or "/usr/share/dotnet/dotnet"
-        or "/usr/local/bin/dotnet" or "/usr/local/share/dotnet/dotnet"
+        or "/usr/local/bin/dotnet" or "/usr/local/share/dotnet/dotnet" or "/opt/appsurface-completed-dotnet/dotnet"
         or "/usr/bin/ldd" or "/usr/bin/which" or "/usr/bin/cp";
 
     private static async Task RunRequiredAsync(string executable, IReadOnlyList<string> args, CancellationToken token,
@@ -286,7 +286,7 @@ internal static class OwnerWorkspace
 
     private static async Task<string> ResolveSdkAsync(CancellationToken token)
     {
-        var candidates = new[] { "/usr/share/dotnet/dotnet", "/usr/local/share/dotnet/dotnet", "/usr/bin/dotnet" };
+        var candidates = new[] { "/opt/appsurface-completed-dotnet/dotnet", "/usr/share/dotnet/dotnet", "/usr/local/share/dotnet/dotnet", "/usr/bin/dotnet" };
         foreach (var path in candidates)
         {
             if (!File.Exists(path)) continue;
@@ -559,7 +559,7 @@ internal static class OwnerWorkspace
         CancellationToken token)
     {
         var sdkRoot = Path.GetFullPath(sdkDirectory);
-        Require(sdkRoot is "/usr/share/dotnet" or "/usr/local/share/dotnet", "sdk-root-path");
+        Require(sdkRoot is "/opt/appsurface-completed-dotnet" or "/usr/share/dotnet" or "/usr/local/share/dotnet", "sdk-root-path");
         var runtimeObjects = new HashSet<string>(StringComparer.Ordinal) { Path.Combine(sdkRoot, "dotnet") };
         foreach (var relativeDirectory in new[] { "host/fxr", "shared/Microsoft.NETCore.App" })
         {

@@ -623,7 +623,7 @@ internal static class NativeFacts
         var text = new UTF8Encoding(false, true).GetString(bytes);
         if (!text.EndsWith('\n') || text[..^1].Contains('\n') || text.Contains('\r')
             || !Path.IsPathFullyQualified(text[..^1]) || Path.GetFullPath(text[..^1]) != text[..^1]
-            || text[..^1] is not ("/usr/share/dotnet" or "/usr/local/share/dotnet"))
+            || text[..^1] is not ("/opt/appsurface-completed-dotnet" or "/usr/share/dotnet" or "/usr/local/share/dotnet"))
             throw new IsolationException("sdk-host-path");
         var sdkPath = text[..^1];
         var directories = new List<string>();

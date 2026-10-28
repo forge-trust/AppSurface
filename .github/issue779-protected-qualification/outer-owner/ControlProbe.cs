@@ -51,7 +51,7 @@ internal static class ControlProbe
                     Denied(() => { using var file = new FileStream(path, FileMode.Open, FileAccess.Write); }, "immutable-write");
                 }
                 foreach (var path in new[] { OwnerPaths.Preparation, OwnerPaths.SourceCapture, OwnerPaths.Stage + "/archive-canary" })
-                    Denied(() => File.Move(path, path + ".replaced"), "immutable-replace");
+                    Denied(() => File.Move(path, path + ".replaced"), "immutable-replace", mountReplacement: true);
                 Denied(() => File.WriteAllText("/etc/unexpected", "deny"), "system-write");
                 break;
             case "credential-denial":
@@ -155,11 +155,12 @@ internal static class ControlProbe
         return 0;
     }
 
-    private static void Denied(Action action, string category)
+    private static void Denied(Action action, string category, bool mountReplacement = false)
     {
         try { action(); }
         catch (UnauthorizedAccessException) { return; }
-        catch (IOException error) when ((error.HResult & 0xffff) is 13 or 30) { return; }
+        catch (IOException error) when ((error.HResult & 0xffff) is 13 or 30
+            || mountReplacement && (error.HResult & 0xffff) == 16) { return; }
         throw new IsolationException(category);
     }
 
