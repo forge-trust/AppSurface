@@ -31,8 +31,9 @@ The internal `EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync` procedure ac
 The [deterministic completion tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceUnpublishedWorkerCompletionTests.cs)
 also distinguish original-budget expiry from lifecycle-token cancellation: separately controlled clocks
 keep the token usable while the original reserve expires, requiring rejection before EXIT. A second
-case acknowledges EXIT and then advances the shared clock past collection expiry; that late
-acknowledgement cannot complete collection or produce evidence. These are procedure controls,
+case holds the completion callback, advances the shared clock past collection expiry, observes
+cancellation, and only then releases a late EXIT acknowledgement. Collection remains incomplete,
+the original timeout remains latched, and the held callback must join before return. These are procedure controls,
 not native timing measurements or a relaxation of either clock.
 
 Revision 120's [runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40631127475) passed the two stall cases, then failed the post-stop case's original account-custody predicate. Its marker and actual application/output settlement succeeded, but the owner recorded `ProcessNamedStatus` during `ServerRun`. The former probe threw before collection and its only EXIT call, allowing worker termination to race the listener's required live process check. The preparation above completes that existing protocol before the deliberate failure; it changes no peer check, root custody, account release or success predicate. Fresh source-bound Linux execution must establish its effect. Revision 120 remains failed.

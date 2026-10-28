@@ -129,19 +129,54 @@ public sealed class EvidenceUnpublishedWorkerCompletionTests
         var lifecycle = Lifecycle(run, clock);
         Assert.True(await lifecycle.StopAndDisposeAsync());
         var output = new Output(() => ValueTask.CompletedTask);
-        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
-            EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync(budget, lifecycle, output, async token =>
-            {
-                await run.Supervisor.CompleteWorkerAsync(token);
-                clock.Advance(TimeSpan.FromSeconds(2));
-            }));
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var completion = EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync(budget, lifecycle, output, async token =>
+        {
+            using var registration = token.Register(() => cancellationObserved.TrySetResult());
+            Assert.False(token.IsCancellationRequested);
+            entered.TrySetResult();
+            await release.Task;
+            // Model a transport reply which arrives after cancellation. The test supervisor
+            // records that late ACK; the real lifecycle must retain its original timeout.
+            Assert.True(token.IsCancellationRequested);
+            await run.Supervisor.CompleteWorkerAsync(token);
+        });
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+            clock.Advance(TimeSpan.FromSeconds(2));
+            await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var original = Assert.IsType<TimeoutException>(lifecycle.TerminalException);
+            Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, lifecycle.TerminalCode);
+            Assert.False(completion.IsCompleted);
+            Assert.False(lifecycle.CollectionCompleted);
+            Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+            release.TrySetResult();
 
-        Assert.Equal("ASEVD410", error.Code);
-        Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, lifecycle.TerminalCode);
-        Assert.Equal(1, output.Closes);
-        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
-        Assert.False(lifecycle.CollectionCompleted);
-        Assert.False(Directory.Exists(run.ArtifactDirectory));
+            var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+                completion.WaitAsync(TimeSpan.FromSeconds(10)));
+
+            Assert.Equal("ASEVD410", error.Code);
+            Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, lifecycle.TerminalCode);
+            Assert.Same(original, lifecycle.TerminalException);
+            Assert.Equal(1, output.Closes);
+            Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+            Assert.True(run.Supervisor.CompletionToken?.IsCancellationRequested);
+            Assert.False(lifecycle.CollectionCompleted);
+            Assert.False(Directory.Exists(run.ArtifactDirectory));
+        }
+        finally
+        {
+            release.TrySetResult();
+            try
+            {
+                await completion.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (EvidenceAdmissionException) { }
+        }
     }
 
     [Theory]
