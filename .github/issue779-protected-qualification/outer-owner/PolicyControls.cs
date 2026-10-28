@@ -62,6 +62,7 @@ internal static class PolicyControls
         }
         count += NativeParserControls();
         count += ProcessIdentityParserControls();
+        count += CgroupSettlementControls();
         count += ReleaseControls();
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
@@ -140,6 +141,43 @@ internal static class PolicyControls
             catch (IsolationException) { return; }
             throw new IsolationException("process-id-negative-control");
         }
+    }
+
+    private static int CgroupSettlementControls()
+    {
+#pragma warning disable CA1416 // The decision function is pure and tests portable representations of Linux cgroup facts.
+        var expected = new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true);
+        var linkedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false, expected);
+        var removedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: true, default);
+        var replacementPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false,
+            new(8, 55, 34, 2, IsDirectory: true));
+        var badPath = new NativeFacts.CgroupPathIdentity(ErrorFree: false, Missing: false, default);
+        if (!NativeFacts.DecideCgroupSettlement(expected, linkedPath, expected, launcherExited: true,
+                eventEmpty: true, noProcesses: true))
+            throw new IsolationException("cgroup-linked-settlement-control");
+        if (!NativeFacts.DecideCgroupSettlement(expected with { Links = 0 }, removedPath, expected,
+                launcherExited: true, eventEmpty: false, noProcesses: false))
+            throw new IsolationException("cgroup-removed-settlement-control");
+
+        RejectSettlement(expected, linkedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: false, noProcesses: true);
+        RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: true, noProcesses: false);
+        RejectSettlement(expected, replacementPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, linkedPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, removedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Inode = 99, Links = 0 }, removedPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, badPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        return 10;
+
+        static void RejectSettlement(NativeFacts.CgroupIdentity held, NativeFacts.CgroupPathIdentity path,
+            bool launcherExited, bool eventEmpty, bool noProcesses)
+        {
+            if (NativeFacts.DecideCgroupSettlement(held, path,
+                    new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true),
+                    launcherExited, eventEmpty, noProcesses))
+                throw new IsolationException("cgroup-settlement-negative-control");
+        }
+#pragma warning restore CA1416
     }
 
     private static int ReleaseControls()
