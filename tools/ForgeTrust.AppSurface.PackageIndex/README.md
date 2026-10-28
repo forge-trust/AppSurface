@@ -98,9 +98,17 @@ The required hosts are exactly `linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64
 The [schema-11 operations guide](../../Durable/heartbeat-retention-operations.md#complete-runtime-set-preflight-and-proof-checklist)
 defines the candidate, published and deployment gates for complete runtime-set preflight. The release carriers use
 [`verify-preflight-artifacts.sh`](https://github.com/forge-trust/AppSurface/blob/main/Durable/verify-preflight-artifacts.sh) and its
-[disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
+[disposable package consumer](https://github.com/forge-trust/AppSurface/blob/main/Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
+The version-parameterized [consumer project template](https://github.com/forge-trust/AppSurface/blob/main/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
+is not a directly restorable checkout project. The shared script copies that template and its adjacent C# source
+files into its owned temporary consumer directory, materializing `PostgreSqlPreflightConsumer.csproj` without
+copying `bin` or `obj` outputs. Restore and both run commands receive the exact package version from the verified
+bundle; there is no fallback version. This keeps automatic project/dependency discovery from attempting an
+unconfigured restore while retaining every package-hash, closure, identity, schema, guard, timeout, and receipt gate.
+The carrier's internal `--consumer-project` input names this source template; the shared script cleans up its
+materialized project with the rest of the proof's owned directory before a successful caller can promote the receipt.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule

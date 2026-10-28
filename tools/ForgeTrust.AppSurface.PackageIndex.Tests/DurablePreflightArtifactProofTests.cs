@@ -316,7 +316,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         Assert.Equal(1, runner.Calls);
         Assert.Contains("--consumer-project", runner.LastRequest!.Arguments);
         Assert.Equal(DurablePreflightArtifactProof.CandidateProofTimeoutMilliseconds, runner.LastRequest.TimeoutMilliseconds);
-        Assert.Equal(TestPathUtils.PathUnder(fixture.Request.RepositoryRoot, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj"),
+        Assert.Equal(TestPathUtils.PathUnder(fixture.Request.RepositoryRoot, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"),
             runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--consumer-project") + 1]);
         Assert.Equal(fixture.Request.SourceCommit, runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--source-commit") + 1]);
         Assert.Equal(fixture.Request.RunId, runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--run-id") + 1]);
@@ -1092,7 +1092,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             case "role-fixture-missing": File.Delete(rolePath); break;
             case "schema-fixture-missing": File.Delete(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/schema10-two-pair.sql")); break;
             case "script-missing": File.Delete(TestPathUtils.PathUnder(repository, "Durable/verify-preflight-artifacts.sh")); break;
-            case "consumer-missing": File.Delete(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj")); break;
+            case "consumer-missing": File.Delete(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template")); break;
             default:
                 var roles = JsonNode.Parse(await File.ReadAllTextAsync(rolePath))!.AsObject();
                 if (mutation == "fixture-version") roles["version"] = 2;
@@ -1130,7 +1130,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         // These files are only existence markers for FakeRunner; no shell or consumer is executed.
         await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/verify-preflight-artifacts.sh"), "test entrypoint marker");
-        await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj"), "test project marker");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"), "test project marker");
         return repository;
     }
 

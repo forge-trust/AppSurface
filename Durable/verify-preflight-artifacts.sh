@@ -252,6 +252,14 @@ if [[ "$prepare_only" != true ]]; then
   [[ -f "$role_pairs_file" ]] || fail "proof-manifest-not-found"
   # The consumer receives the installed tool path and all identity values via
   # environment/arguments only; it remains source-independent of product projects.
+  # The version-parameterized fixture is a template, not an independently
+  # restorable repository project. Materialize only source inputs inside the
+  # owned proof directory; never copy an earlier bin/obj tree.
+  consumer_directory="$work_dir/consumer"
+  mkdir "$consumer_directory"
+  cp "$consumer_project" "$consumer_directory/PostgreSqlPreflightConsumer.csproj"
+  cp "$(dirname "$consumer_project")"/*.cs "$consumer_directory/"
+  consumer_project="$consumer_directory/PostgreSqlPreflightConsumer.csproj"
   consumer_artifacts="$work_dir/consumer-artifacts"
   dotnet restore "$consumer_project" \
     --configfile "$work_dir/NuGet.config" --packages "$NUGET_PACKAGES" --artifacts-path "$consumer_artifacts" \
