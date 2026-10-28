@@ -28,6 +28,13 @@ The deliberate terminal failure keeps the real root in the original failure-pref
 
 The internal `EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync` procedure accepts the original host budget, joined lifecycle, retained output owner and existing completion callback. It claims collection once, joins output disposal before EXIT, suppresses EXIT after a failed close or expired reserve, and requires the original collection to finish successfully. It uses the existing collection, stopping and job bounds. Replay, pending cleanup and an unavailable reserve reject before dispatch. Its ordinary compiled internal test seam verifies ordering and failure behavior; only the compile-owned private probe calls it during execution. It provides no output, admission or native custody authority.
 
+The [deterministic completion tests](../../Aspire/ForgeTrust.AppSurface.Aspire.Tests/EvidenceUnpublishedWorkerCompletionTests.cs)
+also distinguish original-budget expiry from lifecycle-token cancellation: separately controlled clocks
+keep the token usable while the original reserve expires, requiring rejection before EXIT. A second
+case acknowledges EXIT and then advances the shared clock past collection expiry; that late
+acknowledgement cannot complete collection or produce evidence. These are procedure controls,
+not native timing measurements or a relaxation of either clock.
+
 Revision 120's [runtime run](https://github.com/forge-trust/AppSurface/actions/runs/40631127475) passed the two stall cases, then failed the post-stop case's original account-custody predicate. Its marker and actual application/output settlement succeeded, but the owner recorded `ProcessNamedStatus` during `ServerRun`. The former probe threw before collection and its only EXIT call, allowing worker termination to race the listener's required live process check. The preparation above completes that existing protocol before the deliberate failure; it changes no peer check, root custody, account release or success predicate. Fresh source-bound Linux execution must establish its effect. Revision 120 remains failed.
 
 ## Masking and interpretation

@@ -81,6 +81,69 @@ public sealed class EvidenceUnpublishedWorkerCompletionTests
         Assert.False(Directory.Exists(run.ArtifactDirectory));
     }
 
+    [Fact]
+    public async Task OriginalCollectionReserveCanExpireBeforeTheLifecycleToken()
+    {
+        // Separate deterministic clocks keep the lifecycle token usable while the original
+        // host budget expires, so this exercises the original-budget guard independently.
+        var budgetClock = new FakeTimeProvider();
+        var lifecycleClock = new FakeTimeProvider();
+        var budget = Budget(budgetClock);
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation,
+            EvidenceHostAdmissionTestRun.CreateObservationPlan());
+        var lifecycle = Lifecycle(run, lifecycleClock);
+        Assert.True(await lifecycle.StopAndDisposeAsync());
+        var exits = 0;
+        var output = new Output(() =>
+        {
+            budgetClock.Advance(TimeSpan.FromSeconds(1));
+            return ValueTask.CompletedTask;
+        });
+
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync(budget, lifecycle, output, _ =>
+            {
+                exits++;
+                return ValueTask.CompletedTask;
+            }));
+
+        Assert.Equal("ASEVD410", error.Code);
+        var original = Assert.IsType<EvidenceAdmissionException>(lifecycle.TerminalException);
+        Assert.Equal("ASEVD410", original.Code);
+        Assert.Contains("reserve expired", original.Message, StringComparison.Ordinal);
+        Assert.Equal(EvidenceWorkerTerminalCode.StageFailed, lifecycle.TerminalCode);
+        Assert.Equal(1, output.Closes);
+        Assert.Equal(0, exits);
+        Assert.False(lifecycle.CollectionCompleted);
+        Assert.Equal(0, run.Supervisor.CompletionAcknowledgements);
+        Assert.False(Directory.Exists(run.ArtifactDirectory));
+    }
+
+    [Fact]
+    public async Task ExitAcknowledgementAfterCollectionExpiryCannotCompleteCollection()
+    {
+        var clock = new FakeTimeProvider();
+        var budget = Budget(clock);
+        using var run = EvidenceHostAdmissionTestRun.Create(EvidenceExecutionMode.Observation,
+            EvidenceHostAdmissionTestRun.CreateObservationPlan());
+        var lifecycle = Lifecycle(run, clock);
+        Assert.True(await lifecycle.StopAndDisposeAsync());
+        var output = new Output(() => ValueTask.CompletedTask);
+        var error = await Assert.ThrowsAsync<EvidenceAdmissionException>(() =>
+            EvidenceHostBootstrap.CompleteUnpublishedWorkerAsync(budget, lifecycle, output, async token =>
+            {
+                await run.Supervisor.CompleteWorkerAsync(token);
+                clock.Advance(TimeSpan.FromSeconds(2));
+            }));
+
+        Assert.Equal("ASEVD410", error.Code);
+        Assert.Equal(EvidenceWorkerTerminalCode.DeadlineExceeded, lifecycle.TerminalCode);
+        Assert.Equal(1, output.Closes);
+        Assert.Equal(1, run.Supervisor.CompletionAcknowledgements);
+        Assert.False(lifecycle.CollectionCompleted);
+        Assert.False(Directory.Exists(run.ArtifactDirectory));
+    }
+
     [Theory]
     [InlineData("budget-cleanup-pending")]
     [InlineData("budget-expired")]
