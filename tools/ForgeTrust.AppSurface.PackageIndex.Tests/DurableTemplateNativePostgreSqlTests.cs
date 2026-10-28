@@ -1613,30 +1613,46 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
     [Fact]
     public async Task RelocatedOwnedParentRefusesStopUntilTheExactAncestorIsRestored()
     {
-        var parentPath = Path.Join(_root, "owned-parent");
-        Directory.CreateDirectory(parentPath);
-        using var fixture = new NativeClusterFixture(parentPath);
-        var cluster = await fixture.StartAsync();
-        var relocatedParent = Path.Join(_root, "relocated-parent");
-        Directory.Move(parentPath, relocatedParent);
+        // Keep PostgreSQL's socket path short even when the test runner uses a deeply nested TMPDIR.
+        var testRoot = OperatingSystem.IsLinux() ? CreatePrivateTestRoot("/tmp") : _root;
+        var ownsTestRoot = !StringComparer.Ordinal.Equals(testRoot, _root);
         try
         {
-            var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
+            var parentPath = Path.Join(testRoot, "owned-parent");
+            Directory.CreateDirectory(parentPath);
+            using (var fixture = new NativeClusterFixture(parentPath))
+            {
+                var cluster = await fixture.StartAsync();
+                var relocatedParent = Path.Join(_root, "relocated-parent");
+                Directory.Move(parentPath, relocatedParent);
+                try
+                {
+                    var error = await Assert.ThrowsAsync<PackageIndexException>(() => cluster.DisposeWithBudgetAsync(500).AsTask());
 
-            Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
-            Assert.True(fixture.Runtime.ServerRunning);
-            Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
-            Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                    Assert.Equal("Native PostgreSQL owned root has a missing or reparse-point ancestor.", error.Message);
+                    Assert.True(fixture.Runtime.ServerRunning);
+                    Assert.True(Directory.Exists(Path.Join(relocatedParent, Path.GetFileName(cluster.OwnedRoot))));
+                    Assert.DoesNotContain(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+                }
+                finally
+                {
+                    Directory.Move(relocatedParent, parentPath);
+                    await cluster.DisposeWithBudgetAsync(2_000);
+                }
+
+                Assert.False(fixture.Runtime.ServerRunning);
+                Assert.False(Directory.Exists(cluster.OwnedRoot));
+                Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
+            }
         }
         finally
         {
-            Directory.Move(relocatedParent, parentPath);
-            await cluster.DisposeWithBudgetAsync(2_000);
+            if (ownsTestRoot && Directory.Exists(testRoot)
+                && !Directory.EnumerateFileSystemEntries(testRoot).Any())
+            {
+                Directory.Delete(testRoot);
+            }
         }
-
-        Assert.False(fixture.Runtime.ServerRunning);
-        Assert.False(Directory.Exists(cluster.OwnedRoot));
-        Assert.Single(fixture.Runner.Requests, request => request.OperationName == "pg_ctl stop");
     }
 
     [Fact]
@@ -2240,9 +2256,10 @@ public sealed class DurableTemplateNativePostgreSqlTests : IDisposable
         }
     }
 
-    private static string CreatePrivateTestRoot()
+    private static string CreatePrivateTestRoot(string? temporaryOverride = null)
     {
-        var temporary = OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath());
+        var temporary = temporaryOverride
+            ?? (OperatingSystem.IsMacOS() ? "/private/tmp" : Path.GetFullPath(Path.GetTempPath()));
         var root = Path.Join(temporary, "apg" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(root);
         if (!OperatingSystem.IsWindows())
