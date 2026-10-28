@@ -14,26 +14,22 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageStorageCommandNewDomainTests
 {
-    /// <summary>Refuses a moved retained parent on Unix and verifies native rename prevention on Windows without creating a domain.</summary>
-    [Fact]
-    public void NewDomain_ParentDisappearingBeforeInspectionNeverCreatesOrAdopts()
+    /// <summary>Refuses preview and apply after the retained immediate parent is moved, preserving its bytes without creating a domain.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NewDomain_ParentDisappearingBeforeInspectionNeverCreatesOrAdopts(bool apply)
     {
         using var temp = TestDirectory.Create();
         var parent = temp.CreateDirectory("parent");
         var detached = Path.Join(temp.Path, "detached-parent");
         File.WriteAllText(Path.Join(parent, "sentinel"), "preserve parent bytes");
         var destination = Path.Join(parent, "fresh");
-        var error = Record.Exception(() => CoverageArtifactStore.CreateNewDomain(destination, false, CancellationToken.None,
-            beforeDestinationInspection: () =>
-            {
-                if (OperatingSystem.IsWindows()) Assert.Throws<IOException>(() => Directory.Move(parent, detached));
-                else Directory.Move(parent, detached);
-            }));
-        if (OperatingSystem.IsWindows()) Assert.Null(error);
-        else Assert.IsType<IOException>(error);
-        var retainedParent = OperatingSystem.IsWindows() ? parent : detached;
-        Assert.Equal("preserve parent bytes", File.ReadAllText(Path.Join(retainedParent, "sentinel")));
-        Assert.Single(Directory.EnumerateFileSystemEntries(retainedParent));
+        Assert.Throws<IOException>(() => CoverageArtifactStore.CreateNewDomain(destination, apply, CancellationToken.None,
+            beforeDestinationInspection: () => Directory.Move(parent, detached)));
+        Assert.False(Directory.Exists(parent));
+        Assert.Equal("preserve parent bytes", File.ReadAllText(Path.Join(detached, "sentinel")));
+        Assert.Single(Directory.EnumerateFileSystemEntries(detached));
         Assert.False(Directory.Exists(destination));
         Assert.False(Directory.Exists(Path.Join(detached, "fresh")));
     }
