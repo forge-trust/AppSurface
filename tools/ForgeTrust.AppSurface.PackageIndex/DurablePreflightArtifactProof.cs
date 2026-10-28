@@ -16,7 +16,7 @@ internal sealed class DurablePreflightArtifactProof
 {
     internal const int CandidateProofTimeoutMilliseconds = 25 * 60 * 1000;
     internal const int PublishedProofTimeoutMilliseconds = 65 * 60 * 1000;
-    private const string ConsumerProjectRelativePath = "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj";
+    private const string ConsumerProjectRelativePath = "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template";
     private const string ProofScriptRelativePath = "Durable/verify-preflight-artifacts.sh";
     private const string CliPackageId = "ForgeTrust.AppSurface.Cli";
     private const string ProviderPackageId = "ForgeTrust.AppSurface.Durable.PostgreSql";

@@ -6,7 +6,7 @@ set -euo pipefail
 # release pack-and-verify job (package-artifact-manifest.json plus .nupkg files).
 
 usage() {
-  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project FILE --receipt FILE [--prepare-only]" >&2
+  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project PROJECT_OR_TEMPLATE --receipt FILE [--prepare-only]" >&2
 }
 
 fail() {
@@ -252,6 +252,24 @@ if [[ "$prepare_only" != true ]]; then
   [[ -f "$role_pairs_file" ]] || fail "proof-manifest-not-found"
   # The consumer receives the installed tool path and all identity values via
   # environment/arguments only; it remains source-independent of product projects.
+  # Keep the artifact-only project out of repository-wide restore discovery. Copy
+  # its authored sources and build policy into the owned workspace, and supply the
+  # version from the verified manifest on every restore/run; there is no fallback.
+  python3 - "$consumer_project" "$work_dir/consumer" "$repo_root" <<'PY'
+import pathlib, shutil, sys
+source = pathlib.Path(sys.argv[1])
+destination = pathlib.Path(sys.argv[2])
+repository = pathlib.Path(sys.argv[3])
+destination.mkdir()
+project_name = source.name.removesuffix(".template")
+shutil.copyfile(source, destination / project_name)
+for path in source.parent.glob("*.cs"):
+    shutil.copyfile(path, destination / path.name)
+for name in ("Directory.Build.props", "Directory.Build.targets"):
+    shutil.copyfile(repository / name, destination / name)
+print(destination / project_name)
+PY
+  consumer_project="$work_dir/consumer/$(basename "${consumer_project%.template}")"
   consumer_artifacts="$work_dir/consumer-artifacts"
   dotnet restore "$consumer_project" \
     --configfile "$work_dir/NuGet.config" --packages "$NUGET_PACKAGES" --artifacts-path "$consumer_artifacts" \

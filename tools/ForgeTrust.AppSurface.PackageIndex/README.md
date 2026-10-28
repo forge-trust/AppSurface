@@ -135,6 +135,13 @@ defines the candidate, published and deployment gates for complete runtime-set p
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
+Its [project template](../../Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
+is materialized with its C# sources and repository build policy only in the proof's private workspace.
+This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The script's
+`--consumer-project` accepts the template (or an explicitly supplied project) and supplies
+`AppSurfacePackageVersion` from the verified bundle on every restore and run; there is no default feed version.
+Run the carrier rather than restoring the template directly. The owned workspace and generated project are
+removed on success or failure; source files and the template stay in the checkout.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
