@@ -78,13 +78,15 @@ public sealed partial class PackageArtifactValidationTests
         Assert.Empty(publishRunner.Requests);
     }
 
-    // protects=Cloud Tasks proof failure cannot leave a stale or newly written publish manifest; fails_when=the artifact manifest survives the failing proof seam; no_claim=does not simulate failures from the real SDK consumer.
+    // protects=Cloud Tasks proof failure cannot retain stale success evidence or a publish manifest; fails_when=an earlier proof report or artifact manifest survives; no_claim=does not simulate failures from the real SDK consumer.
     [Fact]
-    public async Task PackageArtifactWorkflow_DeletesStaleManifestWhenCloudTasksProofFails()
+    public async Task PackageArtifactWorkflow_DeletesStaleSuccessEvidenceWhenCloudTasksProofFails()
     {
         var request = await PrepareCloudTasksArtifactWorkflowAsync();
         Directory.CreateDirectory(request.ArtifactsOutputPath);
         await File.WriteAllTextAsync(request.ArtifactManifestPath, "stale manifest", Encoding.UTF8);
+        var proofReportPath = Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
+        await File.WriteAllTextAsync(proofReportPath, "Status: **passed**", Encoding.UTF8);
         var runner = new CloudTasksArtifactCommandRunner();
         var coverageProof = new RecordingCoverageCliConsumerProofWorkflow(succeeded: true);
         var docsProof = new RecordingDocsPackageConsumerProofWorkflow(succeeded: true);
@@ -94,6 +96,7 @@ public sealed partial class PackageArtifactValidationTests
                 Assert.Equal(request.PackageVersion, artifacts.PackageVersion);
                 Assert.Contains(artifacts.Entries, entry => entry.PackageId == CloudTasksPackage);
                 Assert.False(File.Exists(request.ArtifactManifestPath));
+                Assert.False(File.Exists(proofReportPath));
                 File.WriteAllText(request.ArtifactManifestPath, "manifest written by a failing proof");
                 throw new InvalidOperationException("simulated Cloud Tasks packed-consumer failure");
             });
@@ -102,9 +105,30 @@ public sealed partial class PackageArtifactValidationTests
 
         Assert.Contains("simulated Cloud Tasks packed-consumer failure", error.Message, StringComparison.Ordinal);
         Assert.False(File.Exists(request.ArtifactManifestPath));
+        Assert.False(File.Exists(proofReportPath));
         Assert.Empty(coverageProof.Requests);
         Assert.Empty(docsProof.Requests);
         Assert.Equal(["dotnet restore", "dotnet build", "dotnet pack", "dotnet pack"], runner.Requests.Select(item => item.OperationName));
+    }
+
+    // protects=pre-proof command failure invalidates evidence from an earlier run; fails_when=a failed restore leaves a passed Cloud Tasks report; no_claim=does not exercise a real NuGet restore.
+    [Fact]
+    public async Task PackageArtifactWorkflow_DeletesStaleCloudTasksReportBeforeRestore()
+    {
+        var request = await PrepareCloudTasksArtifactWorkflowAsync();
+        Directory.CreateDirectory(request.ArtifactsOutputPath);
+        var proofReportPath = Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
+        await File.WriteAllTextAsync(proofReportPath, "Status: **passed**", Encoding.UTF8);
+        var workflow = CreateCloudTasksArtifactWorkflow(
+            new CloudTasksArtifactCommandRunner(failRestore: true),
+            new RecordingCoverageCliConsumerProofWorkflow(succeeded: true),
+            new RecordingDocsPackageConsumerProofWorkflow(succeeded: true),
+            (_, _, _) => throw new InvalidOperationException("The proof must not start after a failed restore."));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => workflow.RunAsync(request));
+
+        Assert.False(File.Exists(proofReportPath));
+        Assert.False(File.Exists(request.ArtifactManifestPath));
     }
 
     private async Task<PackageArtifactRequest> PrepareCloudTasksArtifactWorkflowAsync()
@@ -189,13 +213,15 @@ public sealed partial class PackageArtifactValidationTests
             cloudTasksProof: proof);
     }
 
-    private sealed class CloudTasksArtifactCommandRunner : ICommandRunner
+    private sealed class CloudTasksArtifactCommandRunner(bool failRestore = false) : ICommandRunner
     {
         internal List<CommandRunRequest> Requests { get; } = [];
 
         public Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            if (failRestore && request.OperationName == "dotnet restore")
+                throw new InvalidOperationException("simulated repository restore failure");
             if (request.OperationName == "dotnet pack")
             {
                 var output = request.Arguments[request.Arguments.ToList().IndexOf("--output") + 1];

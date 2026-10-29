@@ -11,6 +11,8 @@ internal sealed class CloudTasksPackageConsumerProof
 {
     internal const string PackageId = "ForgeTrust.AppSurface.Durable.CloudTasks";
     internal const string DeterministicPackageTimestamp = "2000-01-01T00:00:00Z";
+    /// <summary>Names the report file invalidated before every direct packed-proof run.</summary>
+    internal const string ReportFileName = "cloudtasks-package-consumer-proof.md";
     internal const string NeutralPackageId = "ForgeTrust.AppSurface.Durable";
     private static readonly string[] NeutralPackages =
     [
@@ -47,6 +49,8 @@ internal sealed class CloudTasksPackageConsumerProof
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(artifacts);
+        var proofPath = Path.Combine(request.ArtifactsDirectory, ReportFileName);
+        if (File.Exists(proofPath)) File.Delete(proofPath);
         if (!string.Equals(artifacts.PackageVersion, request.PackageVersion, StringComparison.OrdinalIgnoreCase))
             throw new PackageIndexException("Cloud Tasks packed proof package version does not match the validated artifact report.");
         var candidateCommit = request.SourceCommit is null
@@ -105,7 +109,6 @@ internal sealed class CloudTasksPackageConsumerProof
             var isolationViolations = FindNeutralProjectReferenceViolations(request.RepositoryRoot);
             if (isolationViolations.Count != 0)
                 throw new PackageIndexException("Neutral Durable projects reference Cloud Tasks or Google transport packages: " + string.Join(", ", isolationViolations));
-            var proofPath = Path.Combine(request.ArtifactsDirectory, "cloudtasks-package-consumer-proof.md");
             var report = new CloudTasksPackageConsumerProofReport(
                 cloudTasks.Sha512,
                 baselineCommit,
@@ -167,6 +170,13 @@ internal sealed class CloudTasksPackageConsumerProof
                     if (type.GetInterfaces().Any(ContainsSdkType)) docLeaks.Add($"{type.FullName}.interface");
                     foreach (var member in type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
                     {
+                        if (member is MethodInfo genericMethod
+                            && genericMethod.IsGenericMethod
+                            && genericMethod.GetGenericArguments().Any(ContainsSdkType))
+                        {
+                            docLeaks.Add($"{type.FullName}.{member.Name}");
+                        }
+
                         var memberTypes = member switch
                         {
                             MethodInfo method => method.GetParameters().Select(parameter => parameter.ParameterType).Append(method.ReturnType),
@@ -204,12 +214,18 @@ internal sealed class CloudTasksPackageConsumerProof
             : package.ToLowerInvariant() + "/" + version.ToLowerInvariant();
     }
 
-    private static bool ContainsSdkType(Type type)
+    private static bool ContainsSdkType(Type type) => ContainsSdkType(type, new HashSet<Type>());
+
+    private static bool ContainsSdkType(Type type, HashSet<Type> visited)
     {
-        if (type.IsByRef || type.IsPointer || type.IsArray) return ContainsSdkType(type.GetElementType()!);
-        if (type.IsGenericType && type.GetGenericArguments().Any(ContainsSdkType)) return true;
+        if (!visited.Add(type)) return false;
         var ns = type.Namespace ?? string.Empty;
-        return ForbiddenNeutralPrefixes.Any(prefix => ns.StartsWith(prefix, StringComparison.Ordinal));
+        if (ForbiddenNeutralPrefixes.Any(prefix => ns.StartsWith(prefix, StringComparison.Ordinal))) return true;
+        if (type.IsByRef || type.IsPointer || type.IsArray)
+            return ContainsSdkType(type.GetElementType()!, visited);
+        if (type.IsGenericParameter && type.GetGenericParameterConstraints().Any(constraint => ContainsSdkType(constraint, visited)))
+            return true;
+        return type.IsGenericType && type.GetGenericArguments().Any(argument => ContainsSdkType(argument, visited));
     }
 
     private static IEnumerable<string> ReadAllText(ZipArchiveEntry entry)

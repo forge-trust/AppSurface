@@ -102,6 +102,62 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
     }
 
     [Fact]
+    public async Task Metadata_source_classifies_source_timeout_during_stalled_body_read_as_unavailable()
+    {
+        // protects=source-timeout classification after response headers; fails_when=body-read timeout is invalid-token or caller cancellation; no_claim=remote metadata service behavior
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var client = Client((_, _) => Task.FromResult(StalledResponse(readEntered)));
+        using var source = new CloudRunMetadataAccessTokenSource(
+            new CloudRunMetadataAccessTokenOptions(TimeSpan.FromMilliseconds(100)), client, clock);
+        var pending = source.GetAccessTokenAsync(
+            new SubmissionBudget(TimeSpan.FromSeconds(2), clock), CancellationToken.None).AsTask();
+
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
+
+        await AssertUnavailable(new ValueTask<string>(pending.WaitAsync(TimeSpan.FromSeconds(5))));
+    }
+
+    [Fact]
+    public async Task Metadata_source_preserves_caller_cancellation_during_stalled_body_read()
+    {
+        // protects=caller cancellation ownership after response headers; fails_when=body-read cancellation becomes source unavailability or loses the original token; no_claim=remote metadata service behavior
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var client = Client((_, _) => Task.FromResult(StalledResponse(readEntered)));
+        using var source = new CloudRunMetadataAccessTokenSource(
+            new CloudRunMetadataAccessTokenOptions(TimeSpan.FromSeconds(5)), client, clock);
+        using var cancellation = new CancellationTokenSource();
+        var pending = source.GetAccessTokenAsync(
+            new SubmissionBudget(TimeSpan.FromSeconds(10), clock), cancellation.Token).AsTask();
+
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(cancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
+    public async Task Metadata_source_preserves_submission_budget_cancellation_during_stalled_body_read()
+    {
+        // protects=submission-budget cancellation after response headers; fails_when=body-read expiry becomes source unavailability; no_claim=remote metadata service behavior
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var client = Client((_, _) => Task.FromResult(StalledResponse(readEntered)));
+        using var source = new CloudRunMetadataAccessTokenSource(
+            new CloudRunMetadataAccessTokenOptions(TimeSpan.FromSeconds(5)), client, clock);
+        var pending = source.GetAccessTokenAsync(
+            new SubmissionBudget(TimeSpan.FromSeconds(1), clock), CancellationToken.None).AsTask();
+
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public async Task Metadata_source_rejects_non_object_and_declared_oversized_json_without_buffering()
     {
         // protects=JSON object and content-length bounds; fails_when=primitive JSON or declared oversized body is parsed/buffered; no_claim=remote response cause
@@ -331,6 +387,11 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
         Content = new StringContent(json, Encoding.UTF8, "application/json"),
     };
 
+    private static HttpResponseMessage StalledResponse(TaskCompletionSource readEntered) => new(HttpStatusCode.OK)
+    {
+        Content = new StreamContent(new StalledReadStream(readEntered)),
+    };
+
     private static async Task AssertUnavailable(ValueTask<string> pending)
     {
         var exception = await Assert.ThrowsAsync<TokenAcquisitionException>(async () => await pending);
@@ -363,6 +424,27 @@ public sealed class CloudRunMetadataAccessTokenSourceTests
         public override void Flush() => throw new NotSupportedException();
         public override int Read(byte[] buffer, int offset, int count) => throw new IOException("fixture-secret");
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(new IOException("fixture-secret"));
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class StalledReadStream(TaskCompletionSource readEntered) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            readEntered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
         public override void SetLength(long value) => throw new NotSupportedException();
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();

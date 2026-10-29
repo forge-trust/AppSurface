@@ -16,7 +16,7 @@ public sealed class GoAwayHttp2Tests
 {
     // protects=protocol-declared unprocessed streams replay only within the finite SDK invocation bound; fails_when=GOAWAY causes unbounded retry or application-level replay; no_claim=Google acceptance or real delivery.
     [Fact]
-    public async Task Goaway_declaring_stream_unprocessed_is_bounded_below_one_sdk_invocation()
+    public async Task Goaway_declaring_stream_unprocessed_stays_within_one_sdk_invocation()
     {
         using var key = RSA.Create(2048);
         var request = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -25,19 +25,20 @@ public sealed class GoAwayHttp2Tests
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        int completeRequests = 0;
+        int completeRequests = 0, sdkInvocations = 0;
         var peer = ServeAsync();
         using var handler = CloudTasksSdkTransport.CreateHandler();
         handler.SslOptions = new SslClientAuthenticationOptions
         {
             RemoteCertificateValidationCallback = (_, peerCertificate, _, _) => peerCertificate is not null && peerCertificate.GetRawCertData().AsSpan().SequenceEqual(certificate.RawData)
         };
-        using var transport = new CloudTasksSdkTransport(new Uri($"https://127.0.0.1:{port}"), handler);
+        using var transport = new CloudTasksSdkTransport(new Uri($"https://127.0.0.1:{port}"), handler, () => Interlocked.Increment(ref sdkInvocations));
         var target = new CloudTasksActivationTarget("proof-project", "us-central1", "proof-queue", new Uri("https://worker.example/activate"), "worker@proof-project.iam.gserviceaccount.com", "worker", TimeSpan.FromSeconds(30));
         var client = new CloudTasksActivationClient(new FixtureTokenSource(), new(TimeSpan.FromSeconds(5)), transport, TimeProvider.System);
         var receipt = await client.DispatchAsync(new CloudTasksActivationRequest(target, "goaway-task"));
         await peer;
         Assert.Equal(4, completeRequests);
+        Assert.Equal(1, sdkInvocations);
         Assert.Equal(CloudTasksDispatchDisposition.Indeterminate, receipt.Disposition);
         Assert.Equal("ASCT305", receipt.DiagnosticCode);
 

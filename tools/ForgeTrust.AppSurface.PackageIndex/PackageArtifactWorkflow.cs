@@ -131,6 +131,7 @@ internal sealed class PackageArtifactWorkflow
         Directory.CreateDirectory(request.ArtifactsOutputPath);
         CleanPackageArtifacts(request.ArtifactsOutputPath);
         DeleteArtifactManifest(request.ArtifactManifestPath);
+        DeleteFileIfPresent(Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName));
 
         await RunRepositoryCommandAsync(
             request,

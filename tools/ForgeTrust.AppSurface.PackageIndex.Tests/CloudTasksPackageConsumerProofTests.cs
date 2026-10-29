@@ -214,7 +214,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             finally { Directory.Delete(root, recursive: true); }
         }
 
-        // protects=public API leak scanning inspects package assemblies for Google SDK types in member signatures; fails_when=the test assembly's public provider leak returns no result; no_claim=does not validate XML docs or execute SDK methods.
+        // protects=public API leak scanning inspects package assemblies for Google SDK types in signatures and generic constraints; fails_when=the test assembly's public provider leak returns no result; no_claim=does not validate XML docs or execute SDK methods.
         [Fact]
         public void ScanPublicApiForGoogleTypes_DetectsProviderTypesInPublicMemberSignatures()
         {
@@ -232,6 +232,9 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 var leaks = CloudTasksPackageConsumerProof.ScanPublicApiForGoogleTypes(package, Path.Combine(Path.GetTempPath(), "missing-cloudtasks-dependencies"));
 
                 Assert.Contains(leaks, value => value.Contains("Google.Cloud.Tasks.V2", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(typeof(LeakedTypeConstraintFixture<>).Name, StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedMethodConstraintFixture) + ".WithProviderConstraint", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains(nameof(RecursiveGenericConstraintFixture<int>), StringComparison.Ordinal));
             }
             finally
             {
@@ -256,6 +259,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             Assert.Equal(4, report.BaselineGraph.Nodes.Count);
             Assert.Equal(4, report.CandidateGraph.Nodes.Count);
             Assert.Equal(ReadLockedPackageCount(fixture.LockFilePath) + 2, report.CloudTasksGraph.Nodes.Count);
+            Assert.Equal(CloudTasksPackageConsumerProof.ReportFileName, Path.GetFileName(report.ReportPath));
             Assert.True(File.Exists(report.ReportPath));
             var evidence = await File.ReadAllTextAsync(report.ReportPath);
             Assert.Contains("Provider SDK API leaks: none", evidence, StringComparison.Ordinal);
@@ -394,6 +398,8 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
         {
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
+            var oldReport = Path.Combine(fixture.ArtifactsDirectory, CloudTasksPackageConsumerProof.ReportFileName);
+            await File.WriteAllTextAsync(oldReport, "previous passed report");
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
                 new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
                     fixture.Request,
@@ -401,6 +407,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 
             Assert.Contains("does not match the validated artifact report", error.Message, StringComparison.Ordinal);
             Assert.Empty(runner.ConsumerRestoreRequests);
+            Assert.False(File.Exists(oldReport));
         }
 
         // protects=runtime package lock closure is complete, content-bound, and rooted in the exact direct packages; fails_when=a missing target, removed/new node, changed lock hash/edge, or missing root is accepted; why_new=the existing table varies asset-graph mutations across each independent lock invariant; seam=none; no_claim=fixture assets do not replace an actual NuGet restore.
@@ -916,7 +923,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 
 namespace Google.Cloud.Tasks.V2
 {
-    public sealed class LeakedSdkType { }
+    public class LeakedSdkType { }
 }
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests
@@ -924,5 +931,23 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
     public sealed class LeakedPublicApiFixture
     {
         public Google.Cloud.Tasks.V2.LeakedSdkType ProviderType { get; } = new();
+    }
+
+    public sealed class LeakedTypeConstraintFixture<T>
+        where T : Google.Cloud.Tasks.V2.LeakedSdkType, IComparable<T>
+    {
+    }
+
+    public sealed class LeakedMethodConstraintFixture
+    {
+        public void WithProviderConstraint<T>()
+            where T : Google.Cloud.Tasks.V2.LeakedSdkType, IComparable<T>
+        {
+        }
+    }
+
+    public sealed class RecursiveGenericConstraintFixture<T>
+        where T : IComparable<T>
+    {
     }
 }
