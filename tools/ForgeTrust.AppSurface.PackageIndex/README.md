@@ -99,7 +99,7 @@ For strict historical acceptance, supply `--cloudtasks-baseline-ref origin/main`
 its full history. The verifier requires one canonical `git merge-base --all` result with the candidate source commit,
 records the resolved SHA and mode, and preserves historical source/build parity. A missing or ambiguous merge-base,
 or a historical ref resolving to the candidate itself, fails with no fallback. Use the reviewed earlier commit/ref
-for post-merge historical replay; omit the option for ordinary verification. The [local orchestration script](../../scripts/verify-cloudtasks-activation.sh)
+for post-merge historical replay; omit the option for ordinary verification. The [local orchestration script](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/scripts/verify-cloudtasks-activation.sh)
 accepts this as its second argument: `./scripts/verify-cloudtasks-activation.sh /tmp/cloudtasks-acceptance origin/main`.
 
 Only the two allowlisted central declarations (`Google.Cloud.Tasks.V2` and the project-conditioned `Grpc.Net.Client`)
@@ -135,7 +135,7 @@ defines the candidate, published and deployment gates for complete runtime-set p
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
-Its [project template](../../Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
+Its [project template](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
 is materialized with its C# sources and repository build policy only in the proof's private workspace.
 This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The script's
 `--consumer-project` accepts the template (or an explicitly supplied project) and supplies
