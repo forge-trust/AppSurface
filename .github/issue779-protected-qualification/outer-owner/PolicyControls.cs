@@ -65,6 +65,7 @@ internal static class PolicyControls
         count += CgroupSettlementControls();
         count += ReleaseControls();
         count += SourceIndexControls();
+        count += SdkDirectoryControls();
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
@@ -256,6 +257,38 @@ internal static class PolicyControls
             catch (IsolationException) { return; }
             throw new IsolationException("source-index-negative-control");
         }
+    }
+
+    private static int SdkDirectoryControls()
+    {
+#pragma warning disable CA1416 // The SDK directory decision seam consumes synthetic metadata and performs no native calls.
+        var secureRoot = NativeFacts.IsTrustedSdkDirectoryFact("/var/lib", OwnerWorkspace.OwnedSdkDirectory,
+            uid: 0, mode: 0x1ed, isDirectory: true);
+        var oldWritableRoot = NativeFacts.IsTrustedSdkDirectoryFact("/opt", "/opt/appsurface-completed-dotnet",
+            uid: 0, mode: 0x1ff, isDirectory: true);
+        var writableSdkRoot = NativeFacts.IsTrustedSdkDirectoryFact(OwnerWorkspace.OwnedSdkDirectory,
+            OwnerWorkspace.OwnedSdkDirectory, uid: 0, mode: 0x1ff, isDirectory: true);
+        var nonRoot = NativeFacts.IsTrustedSdkDirectoryFact("/var/lib", OwnerWorkspace.OwnedSdkDirectory,
+            uid: 1000, mode: 0x1ed, isDirectory: true);
+        var symlink = NativeFacts.IsTrustedSdkDirectoryFact("/var/lib", OwnerWorkspace.OwnedSdkDirectory,
+            uid: 0, mode: 0x41ed, isDirectory: false);
+        var unrelated = NativeFacts.IsTrustedSdkDirectoryFact("/usr/share", OwnerWorkspace.OwnedSdkDirectory,
+            uid: 0, mode: 0x1ed, isDirectory: true);
+#pragma warning restore CA1416
+        if (!secureRoot || oldWritableRoot || writableSdkRoot || nonRoot || symlink || unrelated)
+            throw new IsolationException("sdk-directory-policy-control");
+
+        OwnerWorkspace.MarkSdkValidationStage("sdk-path-validation");
+        if (OwnerWorkspace.SetupStage != "sdk-path-validation"
+            || Program.SafeFailureCode(new IsolationException("sdk-host-directory")) != "sdk-host-directory"
+            || Program.SafeFailureCode(new IsolationException("sdk-host-path")) != "sdk-host-path"
+            || Program.SafeFailureCode(new IsolationException("private-sdk-path")) != "closed-runtime-failure")
+            throw new IsolationException("sdk-diagnostic-control");
+        var rejectedStage = false;
+        try { OwnerWorkspace.MarkSdkValidationStage("path=" + OwnerWorkspace.OwnedSdkDirectory); }
+        catch (IsolationException) { rejectedStage = true; }
+        if (!rejectedStage) throw new IsolationException("sdk-stage-closed-control");
+        return 4;
     }
 
     private static void Reject(Action action)
