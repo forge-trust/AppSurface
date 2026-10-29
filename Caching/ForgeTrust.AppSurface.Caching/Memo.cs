@@ -14,6 +14,7 @@ public sealed class Memo : IMemo, IDisposable
     private readonly IMemoryCache _cache;
     private readonly ConcurrentDictionary<object, SemaphoreSlim> _locks = new();
     private readonly TimeSpan _failureCacheDuration;
+    private readonly Func<DateTimeOffset> _utcNow;
     private int _disposed;
 
     /// <summary>
@@ -94,8 +95,21 @@ public sealed class Memo : IMemo, IDisposable
     /// Thrown when <paramref name="failureCacheDuration"/> is less than or equal to <see cref="TimeSpan.Zero"/>.
     /// </exception>
     public Memo(IMemoryCache cache, TimeSpan failureCacheDuration)
+        : this(cache, failureCacheDuration, static () => DateTimeOffset.UtcNow)
+    {
+    }
+
+    /// <summary>Creates a memo with an explicit clock for deterministic cache-contract tests.</summary>
+    /// <param name="cache">Storage whose expiration clock must agree with <paramref name="utcNow"/>.</param>
+    /// <param name="failureCacheDuration">Positive duration for caching factory failures.</param>
+    /// <param name="utcNow">Thread-safe UTC clock shared with the backing cache; public constructors use system UTC.</param>
+    /// <exception cref="ArgumentNullException">The cache or clock is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The failure duration is not positive.</exception>
+    /// <remarks>This internal seam changes time observation only, never freshness, stale or failure durations.</remarks>
+    internal Memo(IMemoryCache cache, TimeSpan failureCacheDuration, Func<DateTimeOffset> utcNow)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _utcNow = utcNow ?? throw new ArgumentNullException(nameof(utcNow));
 
         if (failureCacheDuration <= TimeSpan.Zero)
         {
@@ -886,7 +900,7 @@ public sealed class Memo : IMemo, IDisposable
         return !expired;
     }
 
-    private static bool TryReadStaleEntry<TResult>(
+    private bool TryReadStaleEntry<TResult>(
         StaleCacheEntry entry,
         out TResult value,
         out bool shouldRefresh,
@@ -898,7 +912,7 @@ public sealed class Memo : IMemo, IDisposable
             shouldRefresh = false;
             expired = false;
 
-            var now = DateTimeOffset.UtcNow;
+            var now = _utcNow();
             if (now < entry.FreshUntilUtc)
             {
                 return true;
@@ -1004,7 +1018,7 @@ public sealed class Memo : IMemo, IDisposable
             {
                 lock (currentEntry.Gate)
                 {
-                    if (DateTimeOffset.UtcNow < currentEntry.FreshUntilUtc)
+                    if (_utcNow() < currentEntry.FreshUntilUtc)
                     {
                         return;
                     }
@@ -1063,7 +1077,7 @@ public sealed class Memo : IMemo, IDisposable
     {
         var freshDuration = policy.AbsoluteExpiration!.Value;
         var staleDuration = policy.StaleWhileRevalidate!.Value;
-        var now = DateTimeOffset.UtcNow;
+        var now = _utcNow();
         var entry = new StaleCacheEntry(result, now.Add(freshDuration), now.Add(freshDuration).Add(staleDuration));
         var options = CreateEntryOptions(keyLock);
         options.AbsoluteExpirationRelativeToNow = freshDuration.Add(staleDuration);
