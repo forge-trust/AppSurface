@@ -5,20 +5,37 @@ using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 
 // This sample deliberately uses only synthetic fixtures and an injected bounded reader.
 // It never starts gcloud, submits a job, or mutates a cloud resource.
-var logicalJobId = args.FirstOrDefault(argument => !argument.StartsWith("--", StringComparison.Ordinal)) ?? "schema-preparation";
-var swapped = args.Any(argument => string.Equals(argument, "--swapped", StringComparison.Ordinal));
-var outputOption = Array.IndexOf(args, "--bundle-output");
-var requestedBundleOutput = outputOption >= 0 && outputOption + 1 < args.Length ? args[outputOption + 1] : null;
-if (outputOption >= 0 && string.IsNullOrWhiteSpace(requestedBundleOutput))
+string? logicalJobId = null;
+string? requestedBundleOutput = null;
+var bundleOutputProvided = false;
+var swapped = false;
+for (var index = 0; index < args.Length; index++)
 {
-    Console.Error.WriteLine("--bundle-output requires a directory.");
-    return 2;
+    switch (args[index])
+    {
+        case "--swapped" when !swapped:
+            swapped = true;
+            break;
+        case "--bundle-output" when !bundleOutputProvided:
+            bundleOutputProvided = true;
+            if (index + 1 >= args.Length || string.IsNullOrWhiteSpace(args[index + 1]) || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine("--bundle-output requires a directory.");
+                return 2;
+            }
+
+            requestedBundleOutput = args[++index];
+            break;
+        case "schema-preparation" or "catalog-refresh" when logicalJobId is null:
+            logicalJobId = args[index];
+            break;
+        default:
+            Console.Error.WriteLine("Usage: dotnet run -- [schema-preparation|catalog-refresh] [--swapped] [--bundle-output <directory>]");
+            return 2;
+    }
 }
-if (logicalJobId is not ("schema-preparation" or "catalog-refresh"))
-{
-    Console.Error.WriteLine("Usage: dotnet run -- [schema-preparation|catalog-refresh] [--swapped] [--bundle-output <directory>]");
-    return 2;
-}
+
+logicalJobId ??= "schema-preparation";
 
 var project = "demo-project";
 var region = "us-central1";
@@ -75,8 +92,7 @@ try
 }
 finally
 {
-    if (requestedBundleOutput is null && Directory.Exists(root)) Directory.Delete(root, recursive: true);
-    else if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
 }
 
 sealed class FixtureReader(byte[] response) : IBoundedGcloudExecutionReader

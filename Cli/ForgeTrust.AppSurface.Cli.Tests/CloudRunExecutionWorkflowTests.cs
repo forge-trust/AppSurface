@@ -135,20 +135,26 @@ public sealed class CloudRunExecutionWorkflowTests
     }
 
     [Fact]
-    public async Task RunAsync_SymlinkedArtifactAndDirectoryAreRejected()
+    public async Task RunAsync_SymlinkedArtifactIsRejected()
     {
         using var bundle = BundleDirectory.Create(includeMarker: true);
         var link = TestPathUtils.PathUnder(bundle.Path, "deployment-intent.v1.json");
-        var source = TestPathUtils.PathUnder(bundle.Path, "source.json");
+        var source = TestPathUtils.PathUnder(Environment.CurrentDirectory, ".appsurface-link-source-" + Guid.NewGuid().ToString("N") + ".json");
         File.WriteAllText(source, "{}");
-        File.Delete(link);
-        Directory.CreateSymbolicLink(link, source);
         var observer = new RecordingObserver();
-        var result = await new CloudRunExecutionWorkflow(observer, TimeProvider.System).RunAsync(bundle.Path, "job", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "60s", "2s", CancellationToken.None);
+        try
+        {
+            File.Delete(link);
+            File.CreateSymbolicLink(link, source);
+            Assert.Equal(4, Directory.EnumerateFileSystemEntries(bundle.Path).Count());
+            var result = await new CloudRunExecutionWorkflow(observer, TimeProvider.System).RunAsync(bundle.Path, "job", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "60s", "2s", CancellationToken.None);
 
-        // protects=reparse-point denial; fails_when=symlinked artifact is followed; no_claim=adversarial replacement race
-        Assert.Equal("ASDEPLOY171", result.DiagnosticCode);
-        Assert.Null(observer.Request);
+            // protects=artifact reparse-point denial with an otherwise valid entry set; fails_when=symlinked
+            // artifact is followed; no_claim=adversarial replacement race or directory-target handling.
+            Assert.Equal("ASDEPLOY171", result.DiagnosticCode);
+            Assert.Null(observer.Request);
+        }
+        finally { File.Delete(source); }
     }
 
     [Fact]

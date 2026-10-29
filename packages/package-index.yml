@@ -526,7 +526,7 @@ packages:
     release_track: coordinated
     order: 56
     use_when: Add this to an Aspire AppHost that should compile an explicitly annotated run-to-completion migration job into reviewable GCP Cloud Run Job artifacts and verify deployed configuration without mutating GCP.
-    includes: Closed GCP binding profiles, deterministic Cloud Run v2 Job Terraform JSON, safe evidence hashes, shadow and owned parity comparison, bounded read-only gcloud verification, and the existing-package exact execution observer/CLI adapter with versioned evidence diagnostics.
+    includes: Closed GCP binding profiles, deterministic Cloud Run v2 Job Terraform JSON, safe evidence hashes, shadow and owned parity comparison, bounded read-only gcloud verification, and the public exact execution observer with versioned evidence diagnostics. The `appsurface deployment gcp-cloud-run observe-execution` command is provided by [`ForgeTrust.AppSurface.Cli`](../Cli/ForgeTrust.AppSurface.Cli/README.md).
     does_not_include: Cloud account or foundation provisioning, secret values, image builds or pushes, OpenTofu apply or state ownership, migration execution, schedulers, web revisions, traffic, or rollback.
     start_here_path: Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md
     recipe_summary: Add [`ForgeTrust.AppSurface.Deployment.GcpCloudRun`](../Deployment/ForgeTrust.AppSurface.Deployment.GcpCloudRun/README.md) beside the Aspire package when an existing Cloud Run migration job should move from duplicated deployment mapping to deterministic publish artifacts, read-only parity proof, and exact execution observation.

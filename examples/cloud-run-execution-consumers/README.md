@@ -10,6 +10,7 @@ The v1 fixture uses the command's lowercase `all-traffic` egress annotation repr
 dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation
 dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- catalog-refresh
 dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation --swapped
+dotnet run --project examples/cloud-run-execution-consumers/CloudRunExecutionConsumers.csproj -- schema-preparation --bundle-output ./artifacts/schema-preparation
 ```
 
-The two successful modes produce `Succeeded` with `ConfigurationMatched=true`; the swapped mode demonstrates exact execution and captured-image rejection. These are contract proofs using synthetic data, not provider-attested execution results.
+The logical job is optional and defaults to `schema-preparation`. The two successful modes produce `Succeeded` with `ConfigurationMatched=true`; the swapped mode demonstrates exact execution and captured-image rejection. `--bundle-output` is optional and requires a directory operand; the sample writes the rendered bundle there and removes its temporary profile and fixture workspace. Unknown or repeated arguments, including a missing or option-like bundle directory, return a usage error before producing output. These are contract proofs using synthetic data, not provider-attested execution results.

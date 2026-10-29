@@ -90,6 +90,30 @@ public sealed class CloudRunExecutionArgumentAdmissionTests
         Assert.Equal("true", parsed["--json"]);
     }
 
+    [Fact]
+    public void Normalization_PreservesHelpOtherCommandsAndInvalidInput()
+    {
+        Assert.Throws<ArgumentNullException>(() => CloudRunExecutionArgumentAdmission.NormalizeJoinedValueOptions(null!));
+        foreach (var args in new[]
+        {
+            new[] { "deployment", "gcp-cloud-run", "observe-execution", "--help" },
+            new[] { "docs", "--output=docs" },
+            new[] { "deployment", "gcp-cloud-run", "observe-execution", "--bogus=value" },
+        })
+            Assert.Same(args, CloudRunExecutionArgumentAdmission.NormalizeJoinedValueOptions(args));
+    }
+
+    [Fact]
+    public void Normalization_RetainsEmbeddedEqualsAndOptionalJson()
+    {
+        string[] args = ["deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=bundle=one", "--job=job",
+            "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1"];
+
+        Assert.Equal(new[] { "deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir", "bundle=one", "--job", "job",
+            "--execution", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1" },
+            CloudRunExecutionArgumentAdmission.NormalizeJoinedValueOptions(args));
+    }
+
     [Theory]
     [InlineData("--bundle-dir", "bundle")]
     [InlineData("--job", "job")]

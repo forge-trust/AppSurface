@@ -83,7 +83,7 @@ internal static class AppSurfaceCliApp
         var normalizedArguments = CoverageRunArgumentBinding.Normalize(args);
         var cliArguments = doctorAdmission.IsDoctor
             ? DurableDoctorArgumentAdmission.NormalizeJoinedValueOptions(normalizedArguments.Arguments)
-            : normalizedArguments.Arguments;
+            : CloudRunExecutionArgumentAdmission.NormalizeJoinedValueOptions(normalizedArguments.Arguments);
 
         var module = new AppSurfaceCliModule();
         var context = new StartupContext(cliArguments, module)

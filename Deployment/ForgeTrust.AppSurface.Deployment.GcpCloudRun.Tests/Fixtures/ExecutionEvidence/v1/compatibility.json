@@ -81,7 +81,7 @@
     },
     "replayScript": {
       "path": "offline-sdk-replay.py",
-      "sha256": "509afca77681aba6b9f9f53158226d5d177e8db43330264cb0f41b4fd55d2acb"
+      "sha256": "f513df986c85069177bd3c55d83ca66d973d5a39059c0f70dc0bf6abdd160047"
     }
   },
   "worksheets": [

@@ -75,7 +75,7 @@ internal static partial class CloudRunExecutionArgumentAdmission
             }
             if (name is not ("--bundle-dir" or "--job" or "--execution" or "--timeout" or "--poll-interval")) return null;
             var value = pair.Length == 2 ? pair[1] : ++index < args.Length ? args[index] : null;
-            if (string.IsNullOrEmpty(value) || value.StartsWith("--", StringComparison.Ordinal) || !options.TryAdd(name, value)) return null;
+            if (string.IsNullOrEmpty(value) || value.StartsWith('-') || !options.TryAdd(name, value)) return null;
         }
         return TryValidate(options.GetValueOrDefault("--bundle-dir"), options.GetValueOrDefault("--job"), options.GetValueOrDefault("--execution"),
             options.GetValueOrDefault("--timeout", "60s"), options.GetValueOrDefault("--poll-interval", "2s"), out _, out _) ? options : null;
@@ -85,6 +85,24 @@ internal static partial class CloudRunExecutionArgumentAdmission
     {
         ArgumentNullException.ThrowIfNull(args);
         return IsObserveExecution(args) && !IsHelp(args) && Parse(args) is null;
+    }
+
+    /// <summary>Rebuilds admitted value options as separate name/value tokens for CliFx binding.</summary>
+    /// <param name="args">Original argv, including the observe-execution route.</param>
+    /// <returns>Equivalent admitted options, or the original argv for help, another command, or invalid input.</returns>
+    /// <remarks>Call after raw admission so malformed input uses the safe diagnostic path. Values retain embedded equals signs.</remarks>
+    internal static string[] NormalizeJoinedValueOptions(string[] args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        if (IsHelp(args) || Parse(args) is not { } options) return args;
+        var normalized = new List<string>(args.Length + options.Count);
+        normalized.AddRange(args.AsSpan(0, 3).ToArray());
+        foreach (var (name, value) in options)
+        {
+            normalized.Add(name);
+            if (name != "--json") normalized.Add(value);
+        }
+        return normalized.ToArray();
     }
 
     internal static bool IsPathSafe(string path)

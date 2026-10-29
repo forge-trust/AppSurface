@@ -1,6 +1,8 @@
 using System.Text;
+using System.Text.Json;
 using CliFx.Infrastructure;
 using ForgeTrust.AppSurface.Console;
+using ForgeTrust.AppSurface.Deployment.GcpCloudRun;
 using ForgeTrust.AppSurface.Testing;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,6 +12,53 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection(ProgramEntryPointCollection.Name)]
 public sealed class CloudRunExecutionAdmissionIntegrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RunAsync_AdmittedOptionsReachObserverAndDeliverSuccess(bool joined)
+    {
+        var root = TestPathUtils.PathUnder(Environment.CurrentDirectory, ".appsurface-joined=" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        using var console = new FakeInMemoryConsole();
+        var observer = new SuccessfulObserver();
+        var original = Environment.ExitCode;
+        const string execution = "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1";
+        try
+        {
+            foreach (var name in new[] { "deployment-intent.v1.json", "gcp-cloud-run-migration.tf.json", "gcp-cloud-run-migration.plan.json" })
+                File.WriteAllText(TestPathUtils.PathUnder(root, name), "{}");
+            string[] arguments = ["deployment", "gcp-cloud-run", "observe-execution"];
+            foreach (var (name, value) in new[] { ("--bundle-dir", root), ("--job", "job"), ("--execution", execution), ("--timeout", "60s"), ("--poll-interval", "2s") })
+                arguments = [.. arguments, .. (joined ? new[] { name + "=" + value } : new[] { name, value })];
+            arguments = [.. arguments, "--json"];
+            Environment.ExitCode = 23;
+
+            await AppSurfaceCliApp.RunAsync(arguments, options => options.CustomRegistrations.Add(services =>
+            {
+                services.AddSingleton<IConsole>(console);
+                services.AddSingleton<IGcpCloudRunExecutionObserver>(observer);
+            }));
+
+            // protects=joined and separate argv use the real safe command pipeline; fails_when=CliFx rejects
+            // admitted options or binding changes their values; no_claim=live provider configuration proof.
+            Assert.Equal(0, Environment.ExitCode);
+            var request = Assert.IsType<CloudRunExecutionObservationRequest>(observer.Request);
+            Assert.Equal("job", request.LogicalJobId);
+            Assert.Equal(execution, request.ExecutionResourceName);
+            Assert.Equal(TimeSpan.FromSeconds(2), request.PollInterval);
+            Assert.InRange(request.Timeout, TimeSpan.Zero, TimeSpan.FromSeconds(60));
+            using var output = JsonDocument.Parse(console.ReadOutputString());
+            Assert.Equal("Succeeded", output.RootElement.GetProperty("state").GetString());
+            Assert.Equal("ASDEPLOY183", output.RootElement.GetProperty("diagnosticCode").GetString());
+            Assert.Empty(console.ReadErrorString());
+        }
+        finally
+        {
+            Environment.ExitCode = original;
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [MemberData(nameof(MalformedArguments))]
     public async Task RunAsync_RejectsMalformedObserveArgumentsWithoutEchoingRawInput(string[] args)
@@ -59,6 +108,8 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
         [new[] { "deployment", "Gcp-Cloud-Run", "observe-execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
         [new[] { "deployment", "gcp-cloud-run", "Observe-Execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
         [new[] { "Deployment", "Gcp-Cloud-Run", "Observe-Execution", "--bogus=SYNTHETIC_PRIVATE_SENTINEL", "--json" }],
+        [new[] { "deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir=-SYNTHETIC_PRIVATE_SENTINEL", "--job=job", "--execution=projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json" }],
+        [new[] { "deployment", "gcp-cloud-run", "observe-execution", "--bundle-dir", "-SYNTHETIC_PRIVATE_SENTINEL", "--job", "job", "--execution", "projects/sample-project/locations/us-central1/jobs/job-1/executions/execution-1", "--json" }],
     ];
 
     public static IEnumerable<object[]> MalformedArguments =>
@@ -164,5 +215,17 @@ public sealed class CloudRunExecutionAdmissionIntegrationTests
             Assert.Contains("ASDEPLOY186", Encoding.UTF8.GetString(error.ToArray()), StringComparison.Ordinal);
         }
         finally { Environment.ExitCode = original; }
+    }
+
+    private sealed class SuccessfulObserver : IGcpCloudRunExecutionObserver
+    {
+        public CloudRunExecutionObservationRequest? Request { get; private set; }
+
+        public Task<CloudRunExecutionObservation> ObserveAsync(CloudRunExecutionObservationRequest request, CancellationToken cancellationToken = default)
+        {
+            Request = request;
+            return Task.FromResult(new CloudRunExecutionObservation(request.LogicalJobId, request.ExecutionResourceName,
+                CloudRunExecutionState.Succeeded, true, DateTimeOffset.UnixEpoch, "ASDEPLOY183"));
+        }
     }
 }

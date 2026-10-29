@@ -1478,6 +1478,8 @@ appsurface deployment gcp-cloud-run observe-execution \
 
 `--bundle-dir`, `--job`, and `--execution` are required. The execution must be the complete canonical resource `projects/{project-or-number}/locations/{region}/jobs/{physical-job}/executions/{execution}`. The project is matched against the configured project ID or explicitly configured project number; no ID/number inference or alias lookup occurs. `--timeout` defaults to `60s`; `--poll-interval` defaults to `2s`. The API contract itself has no duration defaults.
 
+Value options accept both `--name value` and `--name=value`; embedded equals signs remain part of the value. Prefix a relative bundle directory beginning with `-` with `./` so its value cannot be mistaken for an option. The valueless `--json` switch must appear alone. Unknown, duplicate, missing, or malformed options return the safe `ASDEPLOY170` diagnostic before framework parsing.
+
 The library path receives an existing `DeploymentRenderResult` from the target's `RenderAsync` call. It does not expose a public bundle loader. A trusted published directory can be reconstructed into that same immutable shape with the bounded three-file read below; the exact filenames and `DeploymentArtifact.Create` admission are part of the contract. This example assumes a caller-controlled directory and ancestors containing stable regular files, with no concurrent replacement while the files are read:
 
 ```csharp
