@@ -82,6 +82,11 @@ acceptance, or product admission. Those require the existing protected-main
 original artifacts, fixed validators and unchanged numerical gate. No finalizer is
 enabled merely by adding this tool.
 
+For a failed synthetic control, already bounded stdout/stderr are retained only
+after both capture pumps join and while the original deadline remains. This keeps
+systemd and namespace startup errors available for diagnosis. These control phases
+receive no provider token; the diagnostics never prove settlement or grant authority.
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with

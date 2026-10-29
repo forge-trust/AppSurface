@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Runtime.Versioning;
+using System.Text;
 
 namespace EvidenceHost.CompletedIsolation;
 
@@ -164,7 +164,8 @@ internal static class ControlProbe
         try { action(); }
         catch (UnauthorizedAccessException) { return; }
         catch (IOException error) when ((error.HResult & 0xffff) is 13 or 30
-            || mountReplacement && (error.HResult & 0xffff) == 16) { return; }
+            || mountReplacement && (error.HResult & 0xffff) == 16)
+        { return; }
         throw new IsolationException(category);
     }
 
