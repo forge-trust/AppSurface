@@ -136,6 +136,18 @@ itself has no such bind: the trusted prepare command must first create that file
 This preserves the enrolled file's inode and the existing custody checks across
 phases while rejecting hidden read-only layers beneath a writable visible mount.
 
+The phase's existing read/write path allowlist is passed with systemd's `+` prefix,
+so it applies inside `RootDirectory` rather than naming host paths. Each required
+writable directory also gets an explicit writable bind from its original owner
+filesystem node to the same fixed destination: source, native source, output,
+handoff and temporary storage in replay/controls, plus staged archives in prepare;
+close has only report and temporary storage writable. No new writable destination
+is introduced. Readiness requires the exact visible mount ID at each allowed path
+to carry `rw`; a writable ancestor or hidden writable layer cannot pass. The
+nested Git and preparation read-only binds and checks still apply independently.
+See systemd's [unit-relative access paths](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#ReadWritePaths=)
+and [bind mount semantics](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#BindPaths=).
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with

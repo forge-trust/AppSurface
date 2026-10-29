@@ -63,6 +63,7 @@ internal static class PolicyControls
         count += NativeParserControls();
         count += ProcMountControls();
         count += GitMountControls();
+        count += WritableMountControls();
         count += ProcessIdentityParserControls();
         count += CgroupSettlementControls();
         count += ReleaseControls();
@@ -231,6 +232,60 @@ internal static class PolicyControls
         }
 #pragma warning restore CA1416
         return 37;
+    }
+
+    private static int WritableMountControls()
+    {
+        var count = 0;
+        var layout = new OwnerLayout("/owned", "/owned/fs", 62000, 62000, OwnerPaths.Assembly, "/evidence");
+        var all = new[] { OwnerPaths.Validator, OwnerPaths.Input, OwnerPaths.Source, OwnerPaths.Native,
+            OwnerPaths.Source + "/.git", OwnerPaths.Native + "/.git", OwnerPaths.Stage, OwnerPaths.Handoff,
+            OwnerPaths.Output, OwnerPaths.Report, "/tmp" };
+#pragma warning disable CA1416 // Fixed argument projections and mount parsers exercise no Linux state.
+        foreach (var phase in new[] { OwnerPhase.Prepare, OwnerPhase.Replay, OwnerPhase.Control, OwnerPhase.Close })
+        {
+            var writable = phase == OwnerPhase.Close
+                ? new[] { OwnerPaths.Report, "/tmp" }
+                : phase == OwnerPhase.Prepare
+                    ? new[] { OwnerPaths.Source, OwnerPaths.Native, OwnerPaths.Stage, OwnerPaths.Handoff, OwnerPaths.Output, "/tmp" }
+                    : new[] { OwnerPaths.Source, OwnerPaths.Native, OwnerPaths.Handoff, OwnerPaths.Output, "/tmp" };
+            var readonlyPaths = all.Except(writable).ToList();
+            if (phase != OwnerPhase.Prepare) readonlyPaths.Add(OwnerPaths.Preparation);
+            var start = new System.Diagnostics.ProcessStartInfo("/usr/bin/systemd-run");
+            PhaseRunner.ConfigurePathAccess(start, layout, phase);
+            if (!start.ArgumentList.SequenceEqual([
+                    "--property=ReadWritePaths=" + string.Join(' ', writable.Select(path => "+" + path)),
+                    "--property=ReadOnlyPaths=" + string.Join(' ', readonlyPaths.Select(path => "+" + path)),
+                    "--property=BindPaths=" + string.Join(' ', writable.Select(path => "/owned/fs" + path + ":" + path))]))
+                throw new IsolationException("phase-path-access-control");
+            count++;
+            foreach (var path in writable)
+            {
+                var hidden = "10 9 0:1 / " + path + " ro - ext4 /dev/loop0 rw\n";
+                var visible = "11 10 0:1 / " + path + " rw - ext4 /dev/loop0 rw\n";
+                foreach (var table in new[] { visible, hidden + visible, visible + hidden })
+                {
+                    if (!NativeFacts.HasVisibleReadwriteMount(System.Text.Encoding.ASCII.GetBytes(table), path, 11))
+                        throw new IsolationException("writable-mount-positive-control");
+                    count++;
+                }
+                foreach (var (table, id) in new (string, ulong)[]
+                {
+                    (hidden + visible, 10), (visible, 0), (visible, 12), ("", 11),
+                    (visible.Replace(" rw -", " ro -", StringComparison.Ordinal), 11),
+                    (visible.Replace(path, "/other", StringComparison.Ordinal), 11),
+                    (hidden.Replace(" ro -", " rw -", StringComparison.Ordinal)
+                        + visible.Replace(" rw -", " ro -", StringComparison.Ordinal), 11)
+                })
+                {
+                    if (NativeFacts.HasVisibleReadwriteMount(System.Text.Encoding.ASCII.GetBytes(table), path, id))
+                        throw new IsolationException("writable-mount-negative-control");
+                    count++;
+                }
+            }
+        }
+#pragma warning restore CA1416
+        return count;
     }
 
     private static int ProcessIdentityParserControls()

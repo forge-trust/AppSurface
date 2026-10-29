@@ -586,7 +586,7 @@ internal static class NativeFacts
                 || !VisibleReadonlyMount(proc, entries, OwnerPaths.Native + "/.git")))
             throw new IsolationException("unit-git-mount");
         foreach (var path in writable)
-            if (!PathIsExactMountedWith(entries, path, "rw")) throw new IsolationException("unit-readwrite-mount");
+            if (!VisibleMountWith(proc, entries, path, "rw")) throw new IsolationException("unit-readwrite-mount");
         if (phase is OwnerPhase.Replay or OwnerPhase.Control or OwnerPhase.Close
             && !VisibleReadonlyMount(proc, entries, OwnerPaths.Preparation))
             throw new IsolationException("unit-preparation-mount");
@@ -605,20 +605,28 @@ internal static class NativeFacts
     private static bool PathIsExactMountedWith(IReadOnlyList<MountEntry> entries, string path, string option) =>
         entries.Any(entry => entry.MountPoint == path && entry.Options.Contains(option, StringComparer.Ordinal));
 
-    private static bool VisibleReadonlyMount(string proc, IReadOnlyList<MountEntry> entries, string path)
+    private static bool VisibleReadonlyMount(string proc, IReadOnlyList<MountEntry> entries, string path) =>
+        VisibleMountWith(proc, entries, path, "ro");
+
+    private static bool VisibleMountWith(string proc, IReadOnlyList<MountEntry> entries, string path, string option)
     {
         var visible = ReadStatx(-100, proc + "/root" + path, 0, 0x17ff);
-        return (visible.Mask & 0x1000) != 0 && HasVisibleReadonlyMount(entries, path, visible.MountId);
+        return (visible.Mask & 0x1000) != 0 && HasVisibleMountWith(entries, path, visible.MountId, option);
     }
 
     /// <summary>Requires an exact read-only mount for the supplied visible kernel mount ID and namespace path.</summary>
     /// <remarks>A hidden read-only mount or a read-only ancestor cannot authorize a different visible mount.</remarks>
     internal static bool HasVisibleReadonlyMount(byte[] mountInfo, string path, ulong visibleMountId) =>
-        HasVisibleReadonlyMount(ParseMountInfo(mountInfo), path, visibleMountId);
+        HasVisibleMountWith(ParseMountInfo(mountInfo), path, visibleMountId, "ro");
 
-    private static bool HasVisibleReadonlyMount(IReadOnlyList<MountEntry> entries, string path, ulong visibleMountId) =>
+    /// <summary>Requires an exact writable mount for the supplied visible kernel mount ID and namespace path.</summary>
+    /// <remarks>A hidden writable mount or writable ancestor cannot satisfy this readiness check.</remarks>
+    internal static bool HasVisibleReadwriteMount(byte[] mountInfo, string path, ulong visibleMountId) =>
+        HasVisibleMountWith(ParseMountInfo(mountInfo), path, visibleMountId, "rw");
+
+    private static bool HasVisibleMountWith(IReadOnlyList<MountEntry> entries, string path, ulong visibleMountId, string option) =>
         visibleMountId != 0 && entries.Any(entry => entry.MountId == visibleMountId
-            && entry.MountPoint == path && entry.Options.Contains("ro", StringComparer.Ordinal));
+            && entry.MountPoint == path && entry.Options.Contains(option, StringComparer.Ordinal));
 
     /// <summary>Matches the proc mount visible at the target's root against its kernel mountinfo identity.</summary>
     /// <remarks>Hidden stacked mounts cannot satisfy the check. The caller must obtain the ID from statx with STATX_MNT_ID.</remarks>

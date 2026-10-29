@@ -254,8 +254,7 @@ internal static class PhaseRunner
         AddProperty(start, "KillMode", "control-group");
         AddProperty(start, "Delegate", "no");
         AddProperty(start, "ProtectSystem", "strict");
-        AddProperty(start, "ReadWritePaths", string.Join(' ', NamespacePathsFor(phase, writable: true)));
-        AddProperty(start, "ReadOnlyPaths", string.Join(' ', NamespacePathsFor(phase, writable: false)));
+        ConfigurePathAccess(start, layout, phase);
         var sdkPath = NativeFacts.ReadCanonicalSdkPath(layout);
         if (!Directory.Exists(sdkPath)) throw new IsolationException("sdk-host-path");
         AddProperty(start, "BindReadOnlyPaths", string.Join(' ', ReadOnlyBindings(layout, sdkPath, phase)));
@@ -459,6 +458,16 @@ internal static class PhaseRunner
         _ => TimeSpan.Zero
     };
     private static void AddProperty(ProcessStartInfo start, string key, string value) => start.ArgumentList.Add("--property=" + key + "=" + value);
+
+    /// <summary>Applies the fixed phase allowlist to unit-root paths and binds only its existing writable owner directories.</summary>
+    /// <remarks>The plus prefix makes each access path relative to RootDirectory. Bind sources remain the same owner filesystem nodes.</remarks>
+    internal static void ConfigurePathAccess(ProcessStartInfo start, OwnerLayout layout, OwnerPhase phase)
+    {
+        var writable = NamespacePathsFor(phase, writable: true).ToArray();
+        AddProperty(start, "ReadWritePaths", string.Join(' ', writable.Select(path => "+" + path)));
+        AddProperty(start, "ReadOnlyPaths", string.Join(' ', NamespacePathsFor(phase, writable: false).Select(path => "+" + path)));
+        AddProperty(start, "BindPaths", string.Join(' ', writable.Select(path => layout.Host(path) + ":" + path)));
+    }
 
     /// <summary>Fixed read-only bindings for the validated SDK, Git trees and an existing preparation file.</summary>
     /// <remarks>The caller has validated the SDK and owner layout. Prepare creates its new handoff; later phases bind that same file read-only.</remarks>
