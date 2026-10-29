@@ -31,8 +31,12 @@ internal static class ControlProbe
                     await File.WriteAllTextAsync(path, "owned\n");
                     File.Delete(path);
                 }
-                using (var process = Process.Start(new ProcessStartInfo(OwnerPaths.Dotnet, "--version")
-                { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false })!)
+                var sdkProbe = new ProcessStartInfo(OwnerPaths.Dotnet, "--version")
+                { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+                // The SDK's own first-use state belongs in private scratch. The phase/worker
+                // itself still has exactly the four credential-free environment entries.
+                sdkProbe.Environment["DOTNET_CLI_HOME"] = "/tmp/sdk-control-home";
+                using (var process = Process.Start(sdkProbe)!)
                 {
                     var output = await process.StandardOutput.ReadToEndAsync();
                     await process.WaitForExitAsync();

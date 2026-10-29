@@ -182,6 +182,13 @@ internal static class PhaseRunner
                 }
                 systemdRun.Dispose();
             }
+            if (primaryError is not null && phase == OwnerPhase.Control)
+            {
+                // These bytes are allowlisted diagnostics, never child text or a release-frame value.
+                await File.AppendAllTextAsync(standardErrorPath,
+                    "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n",
+                    CancellationToken.None).ConfigureAwait(false);
+            }
             witness?.Dispose();
         }
 

@@ -139,19 +139,58 @@ internal static class NativeFacts
     {
         try
         {
-            if (!witness.LauncherExited || !CgroupIdentityMatches(witness)) return false;
+            if (!witness.LauncherExited) return false;
+            if (IsRemovedCgroup(witness)) return true;
+            if (!witness.CgroupIdentityMatches()) return IsRemovedCgroup(witness);
             var path = witness.HostPath;
             var events = ParseCgroupEvents(witness.ReadEvents());
             var procs = ParsePidList(witness.ReadProcesses());
-            if (Directory.Exists(path)) procs.AddRange(ReadRecursivePids(path, path, 0, 256));
-            var stillSame = CgroupIdentityMatches(witness);
-            return events.TryGetValue("populated", out var populated) && populated.Length == 1
-                && populated[0] == "0" && procs.Count == 0 && stillSame;
+            procs.AddRange(ReadRecursivePids(path, path, 0, 256));
+            var eventEmpty = events.TryGetValue("populated", out var populated) && populated.Length == 1
+                && populated[0] == "0";
+            return DecideCgroupSettlement(witness.ReadCgroupIdentity(), ReadCgroupPathIdentity(path),
+                witness.ExpectedIdentity, witness.LauncherExited, eventEmpty, procs.Count == 0);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or IsolationException or InvalidOperationException)
         {
-            return false;
+            try { return IsRemovedCgroup(witness); }
+            catch (Exception removalError) when (removalError is IOException or UnauthorizedAccessException or IsolationException or InvalidOperationException)
+            { return false; }
         }
+    }
+
+    private static bool IsRemovedCgroup(PhaseWitness witness) =>
+        DecideCgroupSettlement(witness.ReadCgroupIdentity(), ReadCgroupPathIdentity(witness.HostPath),
+            witness.ExpectedIdentity, witness.LauncherExited, eventEmpty: false, noProcesses: false);
+
+    internal static bool DecideCgroupSettlement(CgroupIdentity held, CgroupPathIdentity path,
+        CgroupIdentity expected, bool launcherExited, bool eventEmpty, bool noProcesses)
+    {
+        if (!launcherExited || !held.SameObject(expected) || !held.IsDirectory || !path.ErrorFree) return false;
+        if (held.Links == 0) return path.Missing;
+        return held.Links > 0 && path.SameNode(expected) && eventEmpty && noProcesses;
+    }
+
+    private static CgroupPathIdentity ReadCgroupPathIdentity(string path)
+    {
+        if (Statx(-100, path, 0x100, 0x17ff, out var stat) == 0)
+            return new(true, false, new(stat.Device, stat.Inode, stat.MountId, stat.Links,
+                (stat.Mode & 0xf000) == 0x4000));
+        var error = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
+        return error == 2
+            ? new(true, true, default)
+            : new(false, false, default);
+    }
+
+    internal readonly record struct CgroupIdentity(ulong Device, ulong Inode, ulong MountId, uint Links, bool IsDirectory)
+    {
+        internal bool SameObject(CgroupIdentity other) => Device == other.Device && Inode == other.Inode
+            && MountId == other.MountId && IsDirectory == other.IsDirectory;
+    }
+
+    internal readonly record struct CgroupPathIdentity(bool ErrorFree, bool Missing, CgroupIdentity Identity)
+    {
+        internal bool SameNode(CgroupIdentity expected) => !Missing && Identity.SameObject(expected);
     }
 
     internal static bool VerifySpawnEscapeMarker(OwnerLayout layout, PhaseWitness witness)
@@ -194,6 +233,7 @@ internal static class NativeFacts
         internal int LauncherPid { get; }
         internal bool LauncherExited => PollExited(_launcherHandle);
         internal bool CgroupIdentityVerified => CgroupIdentityMatches();
+        internal CgroupIdentity ExpectedIdentity => new(_device, _inode, _mountId, 0, IsDirectory: true);
 
         internal PhaseWitness(string hostPath, int launcherPid, SafeFileHandle cgroupHandle, SafeFileHandle launcherHandle,
             SafeFileHandle eventsHandle, SafeFileHandle procsHandle, ulong device, ulong inode, ulong mountId)
@@ -212,16 +252,14 @@ internal static class NativeFacts
         internal bool CgroupIdentityMatches()
         {
             if (_cgroupHandle.IsClosed || _cgroupHandle.IsInvalid) return false;
-            var held = ReadStatx(_cgroupHandle.DangerousGetHandle().ToInt32());
-            var pathMatches = !Directory.Exists(_hostPath);
-            if (!pathMatches)
-            {
-                var path = ReadStatx(-100, _hostPath, 0x100, 0x17ff);
-                pathMatches = path.Device == _device && path.Inode == _inode && path.MountId == _mountId;
-            }
-            return held.Device == _device && held.Inode == _inode && held.MountId == _mountId && pathMatches
+            var held = NativeFacts.ReadIdentity(_cgroupHandle.DangerousGetHandle().ToInt32());
+            var path = ReadCgroupPathIdentity(_hostPath);
+            return held.SameObject(ExpectedIdentity) && held.Links > 0 && path.ErrorFree && path.SameNode(ExpectedIdentity)
                 && !_eventsHandle.IsClosed && !_procsHandle.IsClosed;
         }
+
+        internal CgroupIdentity ReadCgroupIdentity() =>
+            NativeFacts.ReadIdentity(_cgroupHandle.DangerousGetHandle().ToInt32());
 
         internal byte[] ReadEvents() => ReadHandle(_eventsHandle, 4096);
         internal byte[] ReadProcesses() => ReadHandle(_procsHandle, 64 * 1024);
@@ -306,6 +344,12 @@ internal static class NativeFacts
     }
 
     private static bool CgroupIdentityMatches(PhaseWitness witness) => witness.CgroupIdentityVerified;
+
+    private static CgroupIdentity ReadIdentity(int fd)
+    {
+        var stat = ReadStatx(fd);
+        return new(stat.Device, stat.Inode, stat.MountId, stat.Links, (stat.Mode & 0xf000) == 0x4000);
+    }
 
     private static List<int> ReadRecursivePids(string root, string directory, int depth, int maximum)
     {

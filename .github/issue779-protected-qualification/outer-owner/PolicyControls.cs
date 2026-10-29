@@ -61,7 +61,14 @@ internal static class PolicyControls
             Reject(() => OwnerCompletionPolicy.Validate(wrong)); count++;
         }
         count += NativeParserControls();
+        count += ProcessIdentityParserControls();
+        count += CgroupSettlementControls();
         count += ReleaseControls();
+        if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
+            || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
+            || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
+            throw new IsolationException("diagnostic-redaction-control");
+        count += 3;
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
     }
@@ -112,6 +119,70 @@ internal static class PolicyControls
 #pragma warning restore CA1416
             throw new IsolationException("cgroup-events-negative-control");
         }
+    }
+
+    private static int ProcessIdentityParserControls()
+    {
+        const string tabSeparated = "Name:\tdotnet\nUid:\t62000\t62000\t62000\t62000\n"
+            + "Gid:\t62000\t62000\t62000\t62000\nGroups:\t62000\t62001\n";
+        if (!OwnerCustody.ContainsId(tabSeparated, 62000) || OwnerCustody.ContainsId(tabSeparated, 62002))
+            throw new IsolationException("process-id-positive-control");
+
+        const string mixedWhitespace = "Uid: 62001\t62002 62003\t62004\n"
+            + "Gid:\t62001 62002\t62003 62004\nGroups:\t62005\t62006\n";
+        if (!OwnerCustody.ContainsId(mixedWhitespace, 62006) || OwnerCustody.ContainsId(mixedWhitespace, 62000))
+            throw new IsolationException("process-id-whitespace-control");
+
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\n");
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t+62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t4294967296\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\n");
+        RejectProcessStatus("Uid:\t62000\t62000\t62000\t62000\nGid:\t62000\t62000\t62000\t62000\nGroups:\t62000\tinvalid\n");
+        return 7;
+
+        static void RejectProcessStatus(string status)
+        {
+            try { _ = OwnerCustody.ContainsId(status, 62000); }
+            catch (IsolationException) { return; }
+            throw new IsolationException("process-id-negative-control");
+        }
+    }
+
+    private static int CgroupSettlementControls()
+    {
+#pragma warning disable CA1416 // The decision function is pure and tests portable representations of Linux cgroup facts.
+        var expected = new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true);
+        var linkedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false, expected);
+        var removedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: true, default);
+        var replacementPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false,
+            new(8, 55, 34, 2, IsDirectory: true));
+        var badPath = new NativeFacts.CgroupPathIdentity(ErrorFree: false, Missing: false, default);
+        if (!NativeFacts.DecideCgroupSettlement(expected, linkedPath, expected, launcherExited: true,
+                eventEmpty: true, noProcesses: true))
+            throw new IsolationException("cgroup-linked-settlement-control");
+        if (!NativeFacts.DecideCgroupSettlement(expected with { Links = 0 }, removedPath, expected,
+                launcherExited: true, eventEmpty: false, noProcesses: false))
+            throw new IsolationException("cgroup-removed-settlement-control");
+
+        RejectSettlement(expected, linkedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: false, noProcesses: true);
+        RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: true, noProcesses: false);
+        RejectSettlement(expected, replacementPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, linkedPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, removedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Inode = 99, Links = 0 }, removedPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        RejectSettlement(expected with { Links = 0 }, badPath, launcherExited: true, eventEmpty: true, noProcesses: true);
+        return 10;
+
+        static void RejectSettlement(NativeFacts.CgroupIdentity held, NativeFacts.CgroupPathIdentity path,
+            bool launcherExited, bool eventEmpty, bool noProcesses)
+        {
+            if (NativeFacts.DecideCgroupSettlement(held, path,
+                    new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true),
+                    launcherExited, eventEmpty, noProcesses))
+                throw new IsolationException("cgroup-settlement-negative-control");
+        }
+#pragma warning restore CA1416
     }
 
     private static int ReleaseControls()

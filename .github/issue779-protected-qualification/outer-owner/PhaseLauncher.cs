@@ -77,6 +77,7 @@ internal static class PhaseLauncher
         }
         catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException)
         {
+            Console.Error.WriteLine("ISOLATION_PHASE_FAILURE_CODE:" + Program.SafeFailureCode(error));
             return Reject();
         }
         finally
