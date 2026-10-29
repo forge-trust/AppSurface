@@ -104,9 +104,10 @@ internal static class OwnerWorkspace
             await InstallRootFilesystemAsync(layout, sdk, token).ConfigureAwait(false);
 
             SetupStage = "checkouts";
-            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Validator), validator, token).ConfigureAwait(false);
-            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Source), source, token).ConfigureAwait(false);
-            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Native), source, token).ConfigureAwait(false);
+            var gitSourceConfig = await WriteGitSourceConfigAsync(layout, repo, token).ConfigureAwait(false);
+            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Validator), validator, token, gitSourceConfig).ConfigureAwait(false);
+            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Source), source, token, gitSourceConfig).ConfigureAwait(false);
+            await CloneAtCaptureAsync(repo, layout.Host(OwnerPaths.Native), source, token, gitSourceConfig).ConfigureAwait(false);
             await CopyOwnerAssemblyAsync(layout, token).ConfigureAwait(false);
             await WriteInputAsync(layout.Host(OwnerPaths.SourceCapture), sourceBytes, reservation.Id, token).ConfigureAwait(false);
             await WriteInputAsync(layout.Host(OwnerPaths.ValidatorCapture), validatorBytes, reservation.Id, token).ConfigureAwait(false);
@@ -185,10 +186,18 @@ internal static class OwnerWorkspace
     }
 
     /// <summary>Runs a fixed system utility with a closed environment and bounded pipes/deadline.</summary>
+    /// <remarks>Git ignores system and user configuration by default. Only checkout setup may supply
+    /// <paramref name="gitSourceConfig"/>, a verified root-owned private file used by fixed Git clone calls.</remarks>
     internal static async Task<(int ExitCode, byte[] StandardOutput, byte[] StandardError)> RunFixedAsync(
         string executable, IReadOnlyList<string> arguments, int stdoutLimit, int stderrLimit, TimeSpan timeout,
-        CancellationToken token)
+        CancellationToken token, string? gitSourceConfig = null)
     {
+        if (gitSourceConfig is not null)
+        {
+            Require(executable == "/usr/bin/git" && Path.GetFileName(gitSourceConfig) == "git-source.config", "git-source-config");
+            OwnerCustody.VerifyRootHost(Path.GetDirectoryName(gitSourceConfig)!);
+            _ = OwnerCustody.ReadRootFile(gitSourceConfig, 0, 0x180, 16 * 1024);
+        }
         if (timeout <= TimeSpan.Zero || stdoutLimit is < 0 or > MaximumProcessOutput
             || stderrLimit is < 0 or > MaximumProcessOutput || !FixedExecutable(executable))
             throw new IsolationException("utility-contract");
@@ -206,7 +215,7 @@ internal static class OwnerWorkspace
         start.Environment["LANG"] = "C.UTF-8";
         start.Environment["LC_ALL"] = "C";
         start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
-        start.Environment["GIT_CONFIG_GLOBAL"] = "/dev/null";
+        start.Environment["GIT_CONFIG_GLOBAL"] = gitSourceConfig ?? "/dev/null";
         start.Environment["GIT_NO_REPLACE_OBJECTS"] = "1";
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         process.StartInfo = start;
@@ -309,15 +318,34 @@ internal static class OwnerWorkspace
         Require(result.ExitCode == 0, "capture-commit-unavailable");
     }
 
+    /// <summary>Trusts only the captured local source and its Git directory for root's upload-pack subprocess.</summary>
+    /// <remarks>Git removes command-line configuration before spawning upload-pack. This private root-owned
+    /// global file survives that boundary without consulting user configuration or trusting a wildcard.</remarks>
+    private static async Task<string> WriteGitSourceConfigAsync(OwnerLayout layout, string repository, CancellationToken token)
+    {
+        Require(repository.Length <= 4096 && !repository.Any(char.IsControl), "git-source-path");
+        static string Quote(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        var body = "[safe]\n\tdirectory = " + Quote(repository) + "\n\tdirectory = "
+            + Quote(Path.Combine(repository, ".git")) + "\n";
+        var path = Path.Combine(layout.HostRoot, "git-source.config");
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        SetMode(path, 0x180);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(body), token).ConfigureAwait(false);
+        await stream.FlushAsync(token).ConfigureAwait(false);
+        stream.Flush(true);
+        return path;
+    }
+
     private static async Task CloneAtCaptureAsync(string repository, string destination, OwnerCustody.Capture capture,
-        CancellationToken token)
+        CancellationToken token, string gitSourceConfig)
     {
         var parent = Path.GetDirectoryName(destination)!;
         Directory.CreateDirectory(parent);
         var clone = await RunFixedAsync("/usr/bin/git", ["--no-optional-locks", "-c", "core.fsmonitor=false",
             "-c", "safe.directory=" + repository,
-            "clone", "--no-hardlinks", "--no-checkout", "--local", repository, destination],
-            16 * 1024, 16 * 1024, TimeSpan.FromMinutes(3), token).ConfigureAwait(false);
+            "clone", "--no-hardlinks", "--no-checkout", "--no-local", repository, destination],
+            16 * 1024, 16 * 1024, TimeSpan.FromMinutes(3), token, gitSourceConfig).ConfigureAwait(false);
         Require(clone.ExitCode == 0, "source-clone");
         var checkout = await RunFixedAsync("/usr/bin/git", ["--no-optional-locks", "-c", "core.fsmonitor=false",
             "-c", "safe.directory=" + destination,
@@ -330,7 +358,7 @@ internal static class OwnerWorkspace
 
     private static string CanonicalExistingDirectory(string value, string category)
     {
-        Require(Path.IsPathFullyQualified(value) && Path.GetFullPath(value) == value && Directory.Exists(value), category);
+        Require(Path.IsPathFullyQualified(value) && Path.GetFullPath(value) == value && !value.Any(char.IsControl) && Directory.Exists(value), category);
         Require(OwnerCustody.StatPath(value).Type == OwnerCustody.DirectoryType, category);
         return value;
     }

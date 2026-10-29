@@ -82,6 +82,16 @@ acceptance, or product admission. Those require the existing protected-main
 original artifacts, fixed validators and unchanged numerical gate. No finalizer is
 enabled merely by adding this tool.
 
+## Source checkout trust
+
+The root setup reads the runner-owned checkout through Git's local transport with
+local-copy optimizations disabled. A fresh root-owned `0600` configuration inside
+the inaccessible owner root trusts only the canonical source directory and its
+`.git` directory. Git's upload-pack subprocess reads that file directly; client
+command-line overrides alone do not survive its configuration boundary. System
+and user Git configuration, wildcard trust, hooks, credentials and target-selected
+commands remain excluded. The file is setup data and is never exposed to a phase.
+
 ## Pitfalls
 
 - Keep all phases on the same underlying filesystem nodes and dedicated identity.
