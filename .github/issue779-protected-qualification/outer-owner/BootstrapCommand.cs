@@ -5,6 +5,16 @@ namespace EvidenceHost.CompletedIsolation;
 /// the shell execs the same fixed setpriv command and never changes its privileges or arguments.</remarks>
 internal static class BootstrapCommand
 {
+    /// <summary>The existing five bootstrap capabilities; no capability is added to this bounding set.</summary>
+    internal const string BoundingCapabilities = "CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_CHROOT";
+
+    /// <summary>Preserves only the observed missing UID-transition capability across the fixed bootstrap execs.</summary>
+    internal static void ConfigureCapabilities(System.Diagnostics.ProcessStartInfo start)
+    {
+        start.ArgumentList.Add("--property=CapabilityBoundingSet=" + BoundingCapabilities);
+        start.ArgumentList.Add("--property=AmbientCapabilities=CAP_SETUID");
+    }
+
     internal const string DiagnosticScript = "while IFS= read -r line; do case \"$line\" in "
         + "Uid:*|Gid:*|Groups:*|CapInh:*|CapPrm:*|CapEff:*|CapBnd:*|CapAmb:*|NoNewPrivs:*|Seccomp:*|Seccomp_filters:*) "
         + "printf '%s\\n' \"ISOLATION_BOOTSTRAP:$line\" >&2;; esac; done </proc/self/status; "
