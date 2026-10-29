@@ -698,8 +698,9 @@ internal static class OwnerCustody
         return output.ToArray();
     }
 
-    private static (string Blob, string Mode)[] _unused = [];
-    private static Dictionary<string, (string Blob, string Mode)> ParseIndex(byte[] raw)
+    /// <summary>Parses Git's staged index rows and maps only regular-file Git modes to captured permission modes.</summary>
+    /// <remarks>Git uses tree entry modes 100644/100755; source captures record filesystem permissions 0644/0755.</remarks>
+    internal static Dictionary<string, (string Blob, string Mode)> ParseIndex(byte[] raw)
     {
         var result = new Dictionary<string, (string Blob, string Mode)>(StringComparer.Ordinal);
         var offset = 0;
@@ -716,7 +717,7 @@ internal static class OwnerCustody
                 && IsHash40(fields[1]), "git-index-entry");
             var name = StrictUtf8.GetString(row[(tab + 1)..]);
             Require(SafeRelative(name), "git-index-path");
-            result.Add(name, (fields[1], fields[0]));
+            result.Add(name, (fields[1], fields[0] == "100644" ? "0644" : "0755"));
             offset = nul + 1;
         }
         return result;

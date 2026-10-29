@@ -64,6 +64,7 @@ internal static class PolicyControls
         count += ProcessIdentityParserControls();
         count += CgroupSettlementControls();
         count += ReleaseControls();
+        count += SourceIndexControls();
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
@@ -230,6 +231,30 @@ internal static class PolicyControls
             catch (Exception error) when (error is not OutOfMemoryException and not StackOverflowException) { return; }
 #pragma warning restore CA1416
             throw new IsolationException("release-negative-control");
+        }
+    }
+
+    private static int SourceIndexControls()
+    {
+        const string blob = "0123456789abcdef0123456789abcdef01234567";
+        var rows = System.Text.Encoding.ASCII.GetBytes($"100644 {blob} 0\tregular.cs\0"
+            + $"100755 {blob} 0\texecutable.sh\0");
+        var parsed = OwnerCustody.ParseIndex(rows);
+        if (!parsed.TryGetValue("regular.cs", out var regular) || regular.Blob != blob || regular.Mode != "0644"
+            || !parsed.TryGetValue("executable.sh", out var executable) || executable.Blob != blob
+            || executable.Mode != "0755")
+            throw new IsolationException("source-index-mode-control");
+
+        RejectIndex($"120000 {blob} 0\tsymlink\0");
+        RejectIndex($"100644 {blob} 1\tnonzero-stage.cs\0");
+        RejectIndex("malformed-row-without-tab-or-header\0");
+        return 5;
+
+        static void RejectIndex(string row)
+        {
+            try { _ = OwnerCustody.ParseIndex(System.Text.Encoding.ASCII.GetBytes(row)); }
+            catch (IsolationException) { return; }
+            throw new IsolationException("source-index-negative-control");
         }
     }
 

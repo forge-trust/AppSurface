@@ -92,6 +92,13 @@ command-line overrides alone do not survive its configuration boundary. System
 and user Git configuration, wildcard trust, hooks, credentials and target-selected
 commands remain excluded. The file is setup data and is never exposed to a phase.
 
+Source captures record filesystem permission modes (`0644` or `0755`). Git's index
+uses regular-file entry modes (`100644` or `100755`) for the same files. Checkout
+verification maps only those two accepted Git modes to the captured permissions;
+blob hashes, stage number, complete tracked-path set and on-disk ownership/mode
+checks are validated independently. Symlink, submodule, unsupported mode and
+nonzero-stage entries remain rejected.
+
 ## Pitfalls
 
 - Keep all phases on the same underlying filesystem nodes and dedicated identity.
