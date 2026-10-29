@@ -716,6 +716,10 @@ For a bounded local-trust boundary, `--all` rejects a filesystem root and linked
 | `ASTEST103` | A `--all` discovered directory could not be deleted. | Close file handles for the reported path and retry `--apply`; already-removed directories stay removed. |
 | `ASTEST104` | The `--all` worktree could not be enumerated or measured completely. | Restore readable filesystem access and retry before applying cleanup. |
 
+### `appsurface coverage storage new-domain`
+
+When a persisted schema-v1 coverage domain cannot prove continuity with its current native directory identity, the CLI refuses to open it. Preserve the complete old domain and use `coverage storage new-domain --output <absolute-path>` to preview a fresh destination beneath an existing physical parent; trailing directory separators are normalized. Add `--apply` to atomically create the empty private root and initialize its metadata; existing paths are always refused, and no history or pins move to the new domain. Text output distinguishes preview from creation and gives the next action. JSON reports no side effects for pre-creation refusal and partial effects for interrupted initialization after root creation. Multi-file initialization can leave private partial state if interrupted; preserve it and choose another destination. This command does not open the degraded domain, print the raw destination, or change `APPSURFACE_ARTIFACT_HOME`. After successful creation, select the same path you chose for future commands. See the canonical [coverage storage recovery guide](../../guides/coverage-storage.md#replacing-a-domain-whose-identity-no-longer-matches) before making that change.
+
 #### Add Coverlet First
 
 ```bash

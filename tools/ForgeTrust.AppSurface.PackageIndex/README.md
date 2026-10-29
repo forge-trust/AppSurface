@@ -136,10 +136,12 @@ defines the candidate, published and deployment gates for complete runtime-set p
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
 Its [project template](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
-is materialized with its C# sources and repository build policy only in the proof's private workspace.
-This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The script's
-`--consumer-project` accepts the template (or an explicitly supplied project) and supplies
+is materialized with its C# sources and repository build policy only in the proof's private workspace by
+[`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/cc9b4bb910436dd4369fe7ce42f3f1cb547cb93d/Durable/materialize-preflight-consumer.sh).
+This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The carrier's
+`--consumer-project-template` accepts the authored `PostgreSqlPreflightConsumer.csproj.template` and supplies
 `AppSurfacePackageVersion` from the verified bundle on every restore and run; there is no default feed version.
+Restored first-party archive bytes must still match the artifact manifest.
 Run the carrier rather than restoring the template directly. The owned workspace and generated project are
 removed on success or failure; source files and the template stay in the checkout.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
