@@ -13,6 +13,8 @@ namespace ForgeTrust.AppSurface.Release;
 /// This is a maintainer-integrity gate for repository-owned release preparation. It is not a hostile-fork security
 /// boundary: the evaluator and witness generator run from the checked-out pull-request tree. See
 /// <c>tools/ForgeTrust.AppSurface.Release/README.md#verify-prep-diff</c> for the exact local and CI workflow.
+/// Ordinary product renames are allowed only without a versioned release manifest and when neither endpoint is
+/// release-owned. Release candidates and renames touching release-owned paths retain the strict rename refusal.
 /// </remarks>
 internal sealed class ReleasePreparationDiffVerifier
 {
@@ -268,7 +270,10 @@ internal sealed class ReleasePreparationDiffVerifier
                     $"'{change.Path}' appears multiple times in the complete Git diff.", "Resolve the duplicate path operation and rerun verify-prep-diff.");
             }
 
-            if (change.Status.StartsWith('R'))
+            if (change.Status.StartsWith('R')
+                && (manifests.Length > 0
+                    || IsReleasePreparationOwnedPath(change.Path)
+                    || IsReleasePreparationOwnedPath(change.OriginalPath!)))
             {
                 Add(diagnostics, "release-prep-rename-forbidden", "Release preparation may not rename files.",
                     $"Git reported {change.Status}: {change.OriginalPath} -> {change.Path}.", "Commit the intended release artifacts as ordinary additions, modifications, or manifest-declared deletions.");

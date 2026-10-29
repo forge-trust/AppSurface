@@ -6,7 +6,7 @@ set -euo pipefail
 # release pack-and-verify job (package-artifact-manifest.json plus .nupkg files).
 
 usage() {
-  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project FILE --receipt FILE [--prepare-only]" >&2
+  echo "Usage: $0 --artifact-dir DIR --artifact-manifest FILE --source-commit SHA --run-id ID --artifact-id ID --consumer-project-template FILE --receipt FILE [--prepare-only]" >&2
 }
 
 fail() {
@@ -19,7 +19,7 @@ artifact_manifest=""
 source_commit=""
 run_id=""
 artifact_id=""
-consumer_project=""
+consumer_project_template=""
 receipt_path=""
 prepare_only=false
 
@@ -30,7 +30,7 @@ while [[ $# -gt 0 ]]; do
     --source-commit) [[ $# -ge 2 ]] || { usage; exit 2; }; source_commit="$2"; shift 2 ;;
     --run-id) [[ $# -ge 2 ]] || { usage; exit 2; }; run_id="$2"; shift 2 ;;
     --artifact-id) [[ $# -ge 2 ]] || { usage; exit 2; }; artifact_id="$2"; shift 2 ;;
-    --consumer-project) [[ $# -ge 2 ]] || { usage; exit 2; }; consumer_project="$2"; shift 2 ;;
+    --consumer-project-template) [[ $# -ge 2 ]] || { usage; exit 2; }; consumer_project_template="$2"; shift 2 ;;
     --receipt) [[ $# -ge 2 ]] || { usage; exit 2; }; receipt_path="$2"; shift 2 ;;
     --prepare-only) prepare_only=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -39,9 +39,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$artifact_dir" && -n "$artifact_manifest" && -n "$source_commit" \
-  && -n "$run_id" && -n "$artifact_id" && -n "$consumer_project" && -n "$receipt_path" ]] \
+  && -n "$run_id" && -n "$artifact_id" && -n "$consumer_project_template" && -n "$receipt_path" ]] \
   || { usage; fail "missing-input"; }
-[[ -d "$artifact_dir" && -f "$artifact_manifest" && -f "$consumer_project" ]] \
+[[ -d "$artifact_dir" && -f "$artifact_manifest" && -f "$consumer_project_template" ]] \
   || fail "input-not-found"
 [[ ! -e "$receipt_path" && ! -L "$receipt_path" ]] || fail "receipt-already-exists"
 [[ "$source_commit" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ ]] || fail "invalid-source-commit"
@@ -51,7 +51,7 @@ done
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 artifact_dir="$(cd "$artifact_dir" && pwd -P)"
 artifact_manifest="$(cd "$(dirname "$artifact_manifest")" && pwd -P)/$(basename "$artifact_manifest")"
-consumer_project="$(cd "$(dirname "$consumer_project")" && pwd -P)/$(basename "$consumer_project")"
+consumer_project_template="$(cd "$(dirname "$consumer_project_template")" && pwd -P)/$(basename "$consumer_project_template")"
 receipt_parent="$(cd "$(dirname "$receipt_path")" && pwd -P)"
 receipt_path="$receipt_parent/$(basename "$receipt_path")"
 tmp_root="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
@@ -252,6 +252,15 @@ if [[ "$prepare_only" != true ]]; then
   [[ -f "$role_pairs_file" ]] || fail "proof-manifest-not-found"
   # The consumer receives the installed tool path and all identity values via
   # environment/arguments only; it remains source-independent of product projects.
+  # Keep the checked-in exact-artifact project as a template: automatic
+  # dependency submission discovers .csproj files and restores them without
+  # AppSurfacePackageVersion. Materialize authored inputs in this owned
+  # workspace, then restore only with the verified manifest's version.
+  consumer_root="$work_dir/consumer"
+  materializer="$repo_root/Durable/materialize-preflight-consumer.sh"
+  [[ -f "$materializer" && ! -L "$materializer" ]] || fail "consumer-materializer-missing"
+  consumer_project="$(bash "$materializer" "$consumer_project_template" "$repo_root" "$consumer_root")" \
+    || fail "consumer-materialization"
   consumer_artifacts="$work_dir/consumer-artifacts"
   dotnet restore "$consumer_project" \
     --configfile "$work_dir/NuGet.config" --packages "$NUGET_PACKAGES" --artifacts-path "$consumer_artifacts" \
