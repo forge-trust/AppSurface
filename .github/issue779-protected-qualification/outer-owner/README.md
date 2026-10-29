@@ -129,6 +129,12 @@ visible kernel mount ID and requires that exact mount at the exact Git path to
 be read-only. A hidden read-only entry, writable visible entry, read-only ancestor,
 missing ID or different path rejects. The existing negative write and replacement
 controls and post-phase Git/content custody checks remain required.
+Replay, control and close phases also bind the already enrolled preparation file
+read-only and verify its exact visible mount ID. Its handoff parent remains
+writable during replay so the worker can publish its sibling result. Preparation
+itself has no such bind: the trusted prepare command must first create that file.
+This preserves the enrolled file's inode and the existing custody checks across
+phases while rejecting hidden read-only layers beneath a writable visible mount.
 
 ## Source checkout trust
 

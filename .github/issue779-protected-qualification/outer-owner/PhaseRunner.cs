@@ -258,7 +258,7 @@ internal static class PhaseRunner
         AddProperty(start, "ReadOnlyPaths", string.Join(' ', NamespacePathsFor(phase, writable: false)));
         var sdkPath = NativeFacts.ReadCanonicalSdkPath(layout);
         if (!Directory.Exists(sdkPath)) throw new IsolationException("sdk-host-path");
-        AddProperty(start, "BindReadOnlyPaths", string.Join(' ', ReadOnlyBindings(layout, sdkPath)));
+        AddProperty(start, "BindReadOnlyPaths", string.Join(' ', ReadOnlyBindings(layout, sdkPath, phase)));
         AddProperty(start, "NoNewPrivileges", "yes");
         AddProperty(start, "RestrictSUIDSGID", "yes");
         AddProperty(start, "PrivateDevices", "yes");
@@ -460,14 +460,20 @@ internal static class PhaseRunner
     };
     private static void AddProperty(ProcessStartInfo start, string key, string value) => start.ArgumentList.Add("--property=" + key + "=" + value);
 
-    /// <summary>Fixed host-source to namespace-destination bindings for the validated SDK and both Git metadata trees.</summary>
-    /// <remarks>The caller has validated the SDK and owner layout. Explicit Git binds retain read-only metadata below writable build roots.</remarks>
-    internal static IReadOnlyList<string> ReadOnlyBindings(OwnerLayout layout, string sdkPath) =>
-    [
-        sdkPath + ":/usr/share/dotnet",
-        layout.Host(OwnerPaths.Source + "/.git") + ":" + OwnerPaths.Source + "/.git",
-        layout.Host(OwnerPaths.Native + "/.git") + ":" + OwnerPaths.Native + "/.git"
-    ];
+    /// <summary>Fixed read-only bindings for the validated SDK, Git trees and an existing preparation file.</summary>
+    /// <remarks>The caller has validated the SDK and owner layout. Prepare creates its new handoff; later phases bind that same file read-only.</remarks>
+    internal static IReadOnlyList<string> ReadOnlyBindings(OwnerLayout layout, string sdkPath, OwnerPhase phase)
+    {
+        var bindings = new List<string>
+        {
+            sdkPath + ":/usr/share/dotnet",
+            layout.Host(OwnerPaths.Source + "/.git") + ":" + OwnerPaths.Source + "/.git",
+            layout.Host(OwnerPaths.Native + "/.git") + ":" + OwnerPaths.Native + "/.git"
+        };
+        if (phase is OwnerPhase.Replay or OwnerPhase.Control or OwnerPhase.Close)
+            bindings.Add(layout.Host(OwnerPaths.Preparation) + ":" + OwnerPaths.Preparation);
+        return bindings;
+    }
 
     private static IEnumerable<string> NamespacePathsFor(OwnerPhase phase, bool writable)
     {
