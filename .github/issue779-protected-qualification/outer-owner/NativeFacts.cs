@@ -582,8 +582,8 @@ internal static class NativeFacts
             if (!writable.Contains(path) && !PathIsMountedWith(entries, path, "ro"))
                 throw new IsolationException("unit-readonly-mount");
         if (phase is OwnerPhase.Replay or OwnerPhase.Control
-            && (!PathIsMountedWith(entries, OwnerPaths.Source + "/.git", "ro")
-                || !PathIsMountedWith(entries, OwnerPaths.Native + "/.git", "ro")))
+            && (!VisibleReadonlyMount(proc, entries, OwnerPaths.Source + "/.git")
+                || !VisibleReadonlyMount(proc, entries, OwnerPaths.Native + "/.git")))
             throw new IsolationException("unit-git-mount");
         foreach (var path in writable)
             if (!PathIsExactMountedWith(entries, path, "rw")) throw new IsolationException("unit-readwrite-mount");
@@ -604,6 +604,21 @@ internal static class NativeFacts
 
     private static bool PathIsExactMountedWith(IReadOnlyList<MountEntry> entries, string path, string option) =>
         entries.Any(entry => entry.MountPoint == path && entry.Options.Contains(option, StringComparer.Ordinal));
+
+    private static bool VisibleReadonlyMount(string proc, IReadOnlyList<MountEntry> entries, string path)
+    {
+        var visible = ReadStatx(-100, proc + "/root" + path, 0, 0x17ff);
+        return (visible.Mask & 0x1000) != 0 && HasVisibleReadonlyMount(entries, path, visible.MountId);
+    }
+
+    /// <summary>Requires an exact read-only mount for the supplied visible kernel mount ID and namespace path.</summary>
+    /// <remarks>A hidden read-only mount or a read-only ancestor cannot authorize a different visible mount.</remarks>
+    internal static bool HasVisibleReadonlyMount(byte[] mountInfo, string path, ulong visibleMountId) =>
+        HasVisibleReadonlyMount(ParseMountInfo(mountInfo), path, visibleMountId);
+
+    private static bool HasVisibleReadonlyMount(IReadOnlyList<MountEntry> entries, string path, ulong visibleMountId) =>
+        visibleMountId != 0 && entries.Any(entry => entry.MountId == visibleMountId
+            && entry.MountPoint == path && entry.Options.Contains("ro", StringComparer.Ordinal));
 
     /// <summary>Matches the proc mount visible at the target's root against its kernel mountinfo identity.</summary>
     /// <remarks>Hidden stacked mounts cannot satisfy the check. The caller must obtain the ID from statx with STATX_MNT_ID.</remarks>

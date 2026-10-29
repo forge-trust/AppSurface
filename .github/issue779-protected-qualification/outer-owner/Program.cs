@@ -24,7 +24,18 @@ internal static class Program
                 or "input-shape" or "input-path" or "repository" or "evidence-parent" or "host-parent"
                 or "root-required" or "systemd-cgroupv2-required" or "linux-x64-required"
                 or "launcher-environment" or "launcher-identity" or "launcher-capabilities" or "launcher-nnp"
-                or "launcher-descriptor" => issue.Message,
+                or "launcher-descriptor"
+                or "ready-pid" or "unit-cgroup" or "unit-process-count" or "unit-process-facts" or "unit-launcher-ambiguous"
+                or "unit-launcher-facts" or "unit-launcher-security" or "unit-bootstrap-security" or "unit-bootstrap-argv"
+                or "unit-root-identity" or "unit-namespace-identity" or "unit-mount-namespace"
+                or "unit-readonly-mount" or "unit-readwrite-mount" or "unit-git-mount" or "unit-preparation-mount"
+                or "unit-sdk-mount" or "unit-cgroup-open" or "unit-cgroup-type" or "unit-cgroup-files"
+                or "unit-cgroup-initial" or "launcher-pidfd" or "launcher-pidfd-poll"
+                or "proc-link" or "proc-fields" or "proc-fields-format" or "mountinfo-format"
+                or "statx-handle" or "statx-path" or "native-command-start" or "native-input-size"
+                or "cgroup-depth" or "cgroup-path" or "cgroup-process-limit" or "cgroup-proc-duplicate"
+                or "cgroup-procs" or "cgroup-events-format" or "cgroup-read" or "cgroup-seek" or "cgroup-size"
+                => issue.Message,
             _ => "closed-runtime-failure"
         },
         UnauthorizedAccessException => "access-denied",

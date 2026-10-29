@@ -86,6 +86,10 @@ For a failed synthetic control, already bounded stdout/stderr are retained only
 after both capture pumps join and while the original deadline remains. This keeps
 systemd and namespace startup errors available for diagnosis. These control phases
 receive no provider token; the diagnostics never prove settlement or grant authority.
+The parent's native validation failures use an exact allowlist of fixed `unit-*`,
+proc, mount, statx and cgroup categories. Unknown categories, category suffixes and
+ordinary exception text remain redacted. These labels identify the rejected check;
+the last setup-stage label alone does not identify the phase failure's cause.
 
 Synthetic controls also record fixed kernel UID/GID, capability, no-new-privileges
 and seccomp fields immediately before `setpriv`, plus a finite security-label
@@ -114,6 +118,17 @@ An entry for a hidden proc mount cannot vouch for a different visible mount.
 Missing or duplicate IDs, unsupported mount identity, and a visible non-proc
 filesystem remain rejections. This check occurs before any phase release; it
 neither changes namespace requirements nor accepts ambiguous containment.
+
+Both disposable source trees retain explicit read-only bind mounts for their
+`.git` directories, with sources under the owner filesystem and destinations
+inside the unit root. The SDK uses the same fixed `BindReadOnlyPaths` property;
+the source/build parents remain writable. This follows systemd's
+[host-source and unit-root destination semantics](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#BindPaths=).
+Before replay or a control is released, the owner obtains each Git directory's
+visible kernel mount ID and requires that exact mount at the exact Git path to
+be read-only. A hidden read-only entry, writable visible entry, read-only ancestor,
+missing ID or different path rejects. The existing negative write and replacement
+controls and post-phase Git/content custody checks remain required.
 
 ## Source checkout trust
 
