@@ -119,6 +119,17 @@ Missing or duplicate IDs, unsupported mount identity, and a visible non-proc
 filesystem remain rejections. This check occurs before any phase release; it
 neither changes namespace requirements nor accepts ambiguous containment.
 
+Both disposable source trees retain explicit read-only bind mounts for their
+`.git` directories, with sources under the owner filesystem and destinations
+inside the unit root. The SDK uses the same fixed `BindReadOnlyPaths` property;
+the source/build parents remain writable. This follows systemd's
+[host-source and unit-root destination semantics](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html#BindPaths=).
+Before replay or a control is released, the owner obtains each Git directory's
+visible kernel mount ID and requires that exact mount at the exact Git path to
+be read-only. A hidden read-only entry, writable visible entry, read-only ancestor,
+missing ID or different path rejects. The existing negative write and replacement
+controls and post-phase Git/content custody checks remain required.
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with
