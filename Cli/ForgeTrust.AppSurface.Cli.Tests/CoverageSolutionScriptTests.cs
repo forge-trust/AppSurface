@@ -89,6 +89,48 @@ public sealed class CoverageSolutionScriptTests
     }
 
     [Fact]
+    public void BuildWorkflow_ShouldRequirePackedDurableConsumersBeforeCoverageWithoutSharingItsJobBudget()
+    {
+        var yaml = new YamlStream();
+        using var reader = new StringReader(ReadWorkflow());
+        yaml.Load(reader);
+        var root = (YamlMappingNode)yaml.Documents.Single().RootNode;
+        var jobs = (YamlMappingNode)root.Children[new YamlScalarNode("jobs")];
+        var build = (YamlMappingNode)jobs.Children[new YamlScalarNode("build")];
+        var dependencies = (YamlSequenceNode)build.Children[new YamlScalarNode("needs")];
+        Assert.Equal(
+            new[] { "coverage-security-platform", "packed-durable-consumers" },
+            dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
+        Assert.Equal("45", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.False(build.Children.ContainsKey(new YamlScalarNode("if")));
+
+        var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];
+        Assert.Equal("ubuntu-latest", ((YamlScalarNode)packed.Children[new YamlScalarNode("runs-on")]).Value);
+        Assert.Equal("15", ((YamlScalarNode)packed.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.False(packed.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        Assert.False(packed.Children.ContainsKey(new YamlScalarNode("if")));
+        var steps = (YamlSequenceNode)packed.Children[new YamlScalarNode("steps")];
+        var sdk = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Setup .NET SDK");
+        Assert.Equal("${{ env.COVERAGE_SDK_VERSION }}", ((YamlScalarNode)((YamlMappingNode)sdk.Children[new YamlScalarNode("with")]).Children[new YamlScalarNode("dotnet-version")]).Value);
+        var selection = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Select exact coverage SDK");
+        Assert.Contains("rollForward = \"disable\"", ((YamlScalarNode)selection.Children[new YamlScalarNode("run")]).Value!, StringComparison.Ordinal);
+        var restore = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Restore .NET packages (locked)");
+        Assert.Equal("dotnet restore ForgeTrust.AppSurface.slnx --locked-mode", ((YamlScalarNode)restore.Children[new YamlScalarNode("run")]).Value);
+        var proof = Assert.Single(steps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Verify packed Durable consumers");
+        Assert.Equal("./Durable/verify-packed-consumers.sh", ((YamlScalarNode)proof.Children[new YamlScalarNode("run")]).Value);
+        Assert.False(proof.Children.ContainsKey(new YamlScalarNode("continue-on-error")));
+        Assert.False(proof.Children.ContainsKey(new YamlScalarNode("if")));
+        Assert.True(steps.Children.IndexOf(restore) < steps.Children.IndexOf(proof));
+        var buildSteps = (YamlSequenceNode)build.Children[new YamlScalarNode("steps")];
+        Assert.DoesNotContain(buildSteps.Children.OfType<YamlMappingNode>(), step =>
+            ((YamlScalarNode)step.Children[new YamlScalarNode("name")]).Value == "Verify packed Durable consumers");
+    }
+
+    [Fact]
     public void BuildWorkflow_ShouldUploadVerifiedFaninOnlyAfterTheCoverageGateSucceeds()
     {
         var yaml = new YamlStream();

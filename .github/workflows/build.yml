@@ -416,8 +416,43 @@ jobs:
       - name: Run the one-command operational assessment proof
         run: ./examples/durable-postgresql/run-local-proof.sh
 
+  packed-durable-consumers:
+    name: Packed Durable consumers
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ env.COVERAGE_SDK_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            **/packages.lock.json
+            **/packages.*.lock.json
+
+      - name: Select exact coverage SDK
+        shell: pwsh
+        run: |
+          $selection = @{ sdk = @{ version = "${{ env.COVERAGE_SDK_VERSION }}"; rollForward = "disable" } }
+          $selection | ConvertTo-Json | Set-Content -Path (Join-Path (Split-Path -Parent $PWD.Path) "global.json")
+          if ((dotnet --version) -ne "${{ env.COVERAGE_SDK_VERSION }}") { throw "Coverage SDK selection failed" }
+
+      - name: Restore .NET packages (locked)
+        run: dotnet restore ForgeTrust.AppSurface.slnx --locked-mode
+
+      - name: Verify packed Durable consumers
+        run: ./Durable/verify-packed-consumers.sh
+
   build:
-    needs: coverage-security-platform
+    needs: [coverage-security-platform, packed-durable-consumers]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -498,9 +533,6 @@ jobs:
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/migrations/typed-work-definitions-v1.md
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Durable/ForgeTrust.AppSurface.Durable.PostgreSql/README.md
           dotnet run --project tools/ForgeTrust.AppSurface.MarkdownSnippets/ForgeTrust.AppSurface.MarkdownSnippets.csproj --configuration Release --no-restore -- verify --document Web/ForgeTrust.AppSurface.Web/README.md
-
-      - name: Verify packed Durable consumers
-        run: ./Durable/verify-packed-consumers.sh
 
       - name: Verify web assets
         run: |

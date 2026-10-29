@@ -98,6 +98,13 @@ when a contributor needs a focused run or a shard merge.
 
 ### CI test-result diagnostics
 
+The [build workflow](./.github/workflows/build.yml) requires both the native coverage-security matrix
+and a separate packed Durable consumer proof before starting full solution coverage. The consumer
+job runs the same [packed-consumer verification](./Durable/verify-packed-consumers.sh) with the exact
+coverage SDK and locked restore. Its failure blocks the build and downstream documentation export.
+Keeping this proof in its own job preserves the build's 45-minute budget for solution verification;
+it does not reduce the selected tests, change exclusive scheduling, or relax either coverage gate.
+
 The GitHub Actions full-solution coverage lane publishes a bounded, failure-first test summary from
 the AppSurface-managed JUnit output. The CLI owns this report alongside its slow-test diagnostics:
 it names failed projects and test cases, includes safely truncated failure detail, and never exceeds
