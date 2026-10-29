@@ -11,6 +11,35 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 public sealed class ArchiveTests
 {
     [Fact]
+    public async Task ArchiveTransformFitsOneSourceCopyAndRetainsDigestVerification()
+    {
+        using var root = new TempDirectory();
+        var source = Path.Combine(root.Path, "source.jar");
+        var replacement = Path.Combine(root.Path, "jackson-core-2.jar");
+        var output = Path.Combine(root.Path, "out.jar");
+        WriteJar(source, "1", "old");
+        WriteJar(replacement, "2", "new", includeUnrelated: false);
+        var payload = new byte[128 * 1024];
+        new Random(887).NextBytes(payload);
+        AddEntry(source, "bulk.txt", Convert.ToBase64String(payload));
+        var spec = new ArchiveTransformSpec(source, output, Hash(source),
+            [new("com.example", "jackson-core", "1", "2", "com/example/", "example", Hash(replacement))], new());
+        ArchiveResult result;
+        using (TemporaryDiskBudget.BeginInvocation(2 * new FileInfo(source).Length + new FileInfo(replacement).Length + 4096))
+            result = await ArchiveTransformer.TransformAsync(spec);
+
+        Assert.Equal(Hash(source), result.SourceSha256);
+        using (var archive = ZipFile.OpenRead(output)) Assert.Equal(Convert.ToBase64String(payload), Read(archive, "bulk.txt"));
+        Assert.Empty(Directory.GetFiles(root.Path, ".archive-owned-*"));
+        File.Delete(output);
+        var invalid = spec with { ExpectedSourceSha256 = new string('0', 64) };
+        var failure = await Assert.ThrowsAsync<InvalidDataException>(() => ArchiveTransformer.TransformAsync(invalid));
+        Assert.Contains("Input digest mismatch", failure.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(output));
+        Assert.Empty(Directory.GetFiles(root.Path, ".archive-owned-*"));
+    }
+
+    [Fact]
     public void OwnedArchiveCleanupRemovesFilesAndToleratesMissingPaths()
     {
         using var root = new TempDirectory();

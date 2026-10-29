@@ -15,6 +15,92 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests.Tests;
 public sealed class MaterializationTests
 {
     [Fact]
+    public void OwnedContextCleanupDeletesDirectoriesAndToleratesExpectedFilesystemFailures()
+    {
+        var root = NewDirectory();
+        try
+        {
+            var stage = Path.Combine(root, "owned-stage");
+            Directory.CreateDirectory(Path.Combine(stage, "nested"));
+            File.WriteAllText(Path.Combine(stage, "nested", "temporary"), "owned bytes");
+            ContextMaterialization.TryDelete(stage);
+            Assert.False(Directory.Exists(stage));
+            ContextMaterialization.TryDelete(stage);
+            var file = Path.Combine(root, "file");
+            File.WriteAllText(file, "preserve");
+            Assert.ThrowsAny<IOException>(() => Directory.Delete(file, true));
+            ContextMaterialization.TryDelete(file);
+            Assert.Equal("preserve", File.ReadAllText(file));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public void OwnedContextCleanupPropagatesUnexpectedPathErrors()
+    {
+        Assert.Throws<ArgumentException>(() => ContextMaterialization.TryDelete("\0"));
+    }
+
+    [Fact]
+    public void OwnedContextCleanupToleratesDirectoryAccessFailures()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var root = NewDirectory();
+        var parent = Path.Combine(root, "readonly-parent");
+        var stage = Path.Combine(parent, "owned-stage");
+        Directory.CreateDirectory(stage);
+        var mode = File.GetUnixFileMode(parent);
+        try
+        {
+            File.SetUnixFileMode(parent, (UnixFileMode)365);
+            var failure = Record.Exception(() => Directory.Delete(stage, true));
+            Assert.True(failure is IOException or UnauthorizedAccessException);
+            ContextMaterialization.TryDelete(stage);
+            Assert.True(Directory.Exists(stage));
+        }
+        finally
+        {
+            File.SetUnixFileMode(parent, mode);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("/opt/keycloak/bin/kc.sh")]
+    [InlineData("/opt/keycloak/bin/reviewed-entrypoint.sh")]
+    public async Task PublicMaterializationUsesCapturedEntrypointBytesAtDefaultAndCustomPaths(string entrypoint)
+    {
+        using var fixture = TinyImageFixture.Create();
+        var material = fixture.Recipe.MaterialReferences.Single(x => x.Id == "theme-input");
+        var themeMaterial = fixture.Recipe.MaterialReferences.Single(x => x.Id == "theme-baseline");
+        var recipe = fixture.Recipe with
+        {
+            EntrypointPath = entrypoint,
+            ThemeInputs =
+            [
+                new KeycloakThemeInput("entrypoint", material.Sha256, null, null) { LocalInputId = material.Id, DestinationPath = entrypoint },
+                new KeycloakThemeInput("theme", themeMaterial.Sha256, null, null) { LocalInputId = themeMaterial.Id, DestinationPath = "/opt/keycloak/themes/reviewed.txt" }
+            ]
+        };
+        var bindings = fixture.Bindings with { ReviewedRecipeId = KeycloakSecurity.Hash(KeycloakCanonicalJson.Write(recipe)) };
+        using var plan = await KeycloakSecurity.CaptureAsync(recipe, fixture.Policy, bindings, Path.Combine(fixture.Root, "entrypoint-capture"));
+        await File.WriteAllTextAsync(fixture.MaterialPaths[material.Id], "changed after capture");
+
+        var context = await KeycloakSecurity.MaterializeAsync(plan, Path.Combine(fixture.Root, "entrypoint-context"));
+
+        var target = TestPathUtils.PathUnder(context.DirectoryPath, "rootfs", entrypoint.TrimStart('/'));
+        Assert.Equal("theme-input", await File.ReadAllTextAsync(target));
+        Assert.Equal(material.Sha256, context.Result.ExpectedFinalFiles["rootfs" + entrypoint]);
+        Assert.Equal(entrypoint, context.Result.Entrypoint);
+        Assert.Equal("theme-baseline", await File.ReadAllTextAsync(Path.Combine(context.DirectoryPath, "rootfs", "opt", "keycloak", "themes", "reviewed.txt")));
+        if (!OperatingSystem.IsWindows()) Assert.Equal((UnixFileMode)493, File.GetUnixFileMode(target));
+        context.Verify();
+    }
+
+    [Fact]
     public async Task MaterializationRejectsUnexpectedRepairedArchiveDigestBeforePublishing()
     {
         using var fixture = TinyImageFixture.Create();

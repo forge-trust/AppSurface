@@ -14,6 +14,25 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak.Tests;
 // no_claim: this uses independent synthetic OCI bytes and does not prove Docker behavior.
 public sealed class OciReaderBoundaryTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(200000)]
+    public void Selected_output_preserves_empty_and_multiple_buffer_payloads(int length)
+    {
+        var payload = Enumerable.Range(0, length).Select(x => (byte)(x % 251)).ToArray();
+        using var fixture = BoundaryOciFixture.Create(payload: payload);
+        var selected = Path.Combine(fixture.Root, "selected");
+
+        var observed = new OciReader().Read(fixture.Archive, fixture.Expected,
+            new OciReadSelection(new HashSet<string>([BoundaryOciFixture.PayloadPath], StringComparer.Ordinal), selected));
+
+        Assert.Equal(payload, File.ReadAllBytes(TestPathUtils.PathUnder(selected, BoundaryOciFixture.PayloadPath)));
+        var entry = Assert.Single(observed.Entries, x => x.Path == BoundaryOciFixture.PayloadPath);
+        Assert.Equal(length, entry.Length);
+        Assert.Equal(Digest(payload), entry.Sha256);
+        Assert.Empty(Directory.GetDirectories(fixture.Root, "*.owned-*"));
+    }
+
     [Fact]
     public void Valid_graph_reads_and_selected_payload_is_materialized()
     {
@@ -711,13 +730,13 @@ public sealed class OciReaderBoundaryTests
         internal OciExpectedImage Expected { get; }
         internal const string PayloadPath = "etc/payload";
 
-        internal static BoundaryOciFixture Create(BoundaryOciMutation mutation = BoundaryOciMutation.Valid)
+        internal static BoundaryOciFixture Create(BoundaryOciMutation mutation = BoundaryOciMutation.Valid, byte[]? payload = null)
         {
             var root = Path.Combine(Path.GetTempPath(), "oci-boundary-tests-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             try
             {
-                var layer = Layer(mutation);
+                var layer = Layer(mutation, payload);
                 var compressed = Gzip(layer);
                 var layerDigest = Digest(compressed);
                 var diffId = Digest(layer);
@@ -812,7 +831,7 @@ public sealed class OciReaderBoundaryTests
             try { Directory.Delete(Root, true); } catch (DirectoryNotFoundException) { }
         }
 
-        private static byte[] Layer(BoundaryOciMutation mutation)
+        private static byte[] Layer(BoundaryOciMutation mutation, byte[]? contents)
         {
             using var output = new MemoryStream();
             using (var writer = new TarWriter(output, mutation == BoundaryOciMutation.PositiveV7RegularFile ? TarEntryFormat.V7 : TarEntryFormat.Pax, leaveOpen: true))
@@ -825,7 +844,7 @@ public sealed class OciReaderBoundaryTests
                 TarEntry payload = mutation == BoundaryOciMutation.PositiveV7RegularFile
                     ? new V7TarEntry(TarEntryType.V7RegularFile, PayloadPath)
                     : new PaxTarEntry(TarEntryType.RegularFile, PayloadPath);
-                payload.DataStream = new MemoryStream(Encoding.UTF8.GetBytes("payload\n"));
+                payload.DataStream = new MemoryStream(contents ?? Encoding.UTF8.GetBytes("payload\n"));
                 payload.Mode = (UnixFileMode)420; payload.Uid = 0; payload.Gid = 0; payload.ModificationTime = DateTimeOffset.UnixEpoch;
                 writer.WriteEntry(payload);
                 if (mutation == BoundaryOciMutation.PositiveHardlink)

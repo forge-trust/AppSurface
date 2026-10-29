@@ -435,6 +435,7 @@ internal sealed class OciReader
         MemoryStream? copy = capture ? new MemoryStream() : null;
         try
         {
+            using var output = outputPath is null ? null : File.Open(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
             byte[] b = new byte[81920];
             long total = 0;
             int n;
@@ -450,9 +451,8 @@ internal sealed class OciReader
                     targetedAccount?.Invoke(n);
                 if (outputPath is not null)
                     selectedAccount?.Invoke(n);
-                if (outputPath is not null)
+                if (output is not null)
                 {
-                    using var output = File.Open(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
                     TemporaryDiskBudget.Account(n);
                     output.Write(b, 0, n);
                 }
@@ -635,7 +635,7 @@ internal sealed class OciReader
         internal void Check()
         {
             token.ThrowIfCancellationRequested();
-            if (watch.Elapsed > maximumDuration)
+            if (watch.Elapsed >= maximumDuration)
                 throw new TimeoutException("OCI read deadline exceeded.");
         }
 

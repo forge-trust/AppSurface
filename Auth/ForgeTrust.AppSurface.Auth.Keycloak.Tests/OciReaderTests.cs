@@ -86,7 +86,6 @@ public sealed class OciReaderTests
         private static byte[] Tar((string Name, string Value)[] files) { using var ms = new MemoryStream(); using (var tw = new TarWriter(ms, true)) foreach (var f in files) Entry(tw, f.Name, Encoding.UTF8.GetBytes(f.Value)); ms.Write(new byte[1024]); return ms.ToArray(); }
         private static byte[] Gzip(byte[] b) { using var ms = new MemoryStream(); using (var gz = new GZipStream(ms, CompressionLevel.SmallestSize, true)) gz.Write(b); return ms.ToArray(); }
         private static byte[] UnGzip(byte[] b) { using var input = new MemoryStream(b); using var gz = new GZipStream(input, CompressionMode.Decompress); using var output = new MemoryStream(); gz.CopyTo(output); return output.ToArray(); }
-        private static string Digest(byte[] b) => "sha256:" + Convert.ToHexString(SHA256.HashData(b)).ToLowerInvariant();
         private static string Hex(byte[] b) => Convert.ToHexString(b).ToLowerInvariant();
         public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
     }

@@ -27,17 +27,17 @@ internal static class ArchiveTransformer
         var output = Path.GetFullPath(spec.OutputPath);
         Require(!File.Exists(output), "Destination must be absent");
         Require(!PathEquals(source, output), "Source/output alias");
-        var sourceSha = await CopyVerifiedAsync(source, spec.ExpectedSourceSha256, spec.Bounds, cancellationToken).ConfigureAwait(false);
+        var sourceSha = spec.ExpectedSourceSha256;
         var privateInputs = new List<string>();
         string? temporary = null;
         try
         {
-            privateInputs.Add(await CopyVerifiedAsync(source, spec.ExpectedSourceSha256, spec.Bounds, cancellationToken, keepCopy: true).ConfigureAwait(false));
+            privateInputs.Add(await CopyVerifiedAsync(source, spec.ExpectedSourceSha256, spec.Bounds, cancellationToken).ConfigureAwait(false));
             var sourceCopy = privateInputs[^1];
             foreach (var module in spec.ModuleSpecs)
             {
                 var path = ResolveReplacementPath(spec, module);
-                privateInputs.Add(await CopyVerifiedAsync(path, module.ReplacementExpectedSha256, spec.Bounds, cancellationToken, keepCopy: true).ConfigureAwait(false));
+                privateInputs.Add(await CopyVerifiedAsync(path, module.ReplacementExpectedSha256, spec.Bounds, cancellationToken).ConfigureAwait(false));
             }
 
             var original = Preflight(privateInputs[0], spec.Bounds, cancellationToken);
@@ -445,7 +445,7 @@ internal static class ArchiveTransformer
         }
     }
 
-    private static async Task<string> CopyVerifiedAsync(string path, string expected, ArchiveBounds bounds, CancellationToken token, bool keepCopy = false)
+    private static async Task<string> CopyVerifiedAsync(string path, string expected, ArchiveBounds bounds, CancellationToken token)
     {
         var full = Path.GetFullPath(path);
         using var input = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan);
@@ -473,8 +473,8 @@ internal static class ArchiveTransformer
                 Require(Convert.ToHexStringLower(hash.GetHashAndReset()) == expected, "Input digest mismatch");
             }
 
-            retained = keepCopy;
-            return keepCopy ? temp : expected;
+            retained = true;
+            return temp;
         }
         finally
         {

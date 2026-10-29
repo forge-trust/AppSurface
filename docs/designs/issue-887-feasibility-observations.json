@@ -1,4 +1,13 @@
 {
+  "supersession": {
+    "status": "historical-observations-superseded-for-current-disposition",
+    "canonicalSources": {
+      "fixtureCard": "issue-887-feasibility-card.md",
+      "sourceOciBudgetProposal": "issue-887-source-oci-budget-proposal.md",
+      "feasibilityFindings": "issue-887-feasibility-findings.md"
+    },
+    "currentDisposition": "The historical pending 192 MiB source-member proposal is superseded by the approved 256 MiB source-only ceiling; final-image inspection remains 128 MiB and archive replacement remains 64 MiB. The historical local amd64 browser-readiness failure is superseded by the native amd64 retained full-gate pass. Original observations and values below remain unchanged."
+  },
   "schema": "issue-887-private-feasibility-observations-v1",
   "status": "arm64 full retained gate passed; amd64 full retained gate reached upgrade/restore but failed isolated-browser startup readiness under emulation; final feasibility remains incomplete",
   "observedAt": "2026-10-24",

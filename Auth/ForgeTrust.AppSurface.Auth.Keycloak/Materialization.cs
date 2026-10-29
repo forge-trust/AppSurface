@@ -153,7 +153,7 @@ public static partial class KeycloakSecurity
 
         var themes = recipe.ThemeInputs.Where(x => x.DestinationPath != recipe.EntrypointPath).Select(x => new ContextThemeInput(x.DestinationPath!, Material(inputs, x.LocalInputId!), x.Sha256, (UnixFileMode)420)).ToImmutableArray();
         ContextHostInput? entry = null;
-        if (recipe.EntrypointPath != "/opt/keycloak/bin/kc.sh")
+        if (recipe.EntrypointPath != "/opt/keycloak/bin/kc.sh" || recipe.ThemeInputs.Any(x => x.DestinationPath == recipe.EntrypointPath))
         {
             var declared = recipe.ThemeInputs.Single(x => x.DestinationPath == recipe.EntrypointPath);
             entry = new(declared.DestinationPath!, Material(inputs, declared.LocalInputId!), declared.Sha256, (UnixFileMode)493);

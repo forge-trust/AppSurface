@@ -54,7 +54,7 @@ For an existing ASP.NET Core app, the safest adoption path is:
 5. Run the proof for allowed, unauthenticated, forbidden, and setup-failure outcomes.
 6. Add `ForgeTrust.AppSurface.Auth.Testing` in an integration test project for deterministic personas.
 7. Add DevAuth only to Development hosts, or explicit local/proof environments, where a visible fake-persona proof helps manual testing.
-8. Add `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` only to AppHost/dev/test projects when real local OIDC proof is needed.
+8. For local OIDC proof, add a project reference to `ForgeTrust.AppSurface.Auth.Aspire.Keycloak` from the reviewed source checkout. It is publication-held, so do not restore it from a package feed; follow the [held-source migration guidance](../Auth/ForgeTrust.AppSurface.Auth.Keycloak/docs/migration.md#coherent-versions-and-schema-changes).
 9. Remove DevAuth and local Keycloak proof packages from production startup and keep real challenge, forbid, redirect, and sign-in/out behavior host-owned.
 
 ## Copy This / Do Not Copy This

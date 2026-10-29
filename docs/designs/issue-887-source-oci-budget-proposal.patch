@@ -1,3 +1,6 @@
+# Historical private-draft patch; not intended to apply to the current checkout.
+# The source-only 256 MiB ceiling is approved. Default/final-image inspection remains 128 MiB.
+# See issue-887-feasibility-card.md, issue-887-source-oci-budget-proposal.md, and issue-887-feasibility-findings.md.
 --- a/OciReader.cs
 +++ b/OciReader.cs
 @@ -16,7 +16,7 @@
@@ -5,7 +8,7 @@
      long MaxExpandedLayerBytes = 2L * 1024 * 1024 * 1024, long MaxExpandedTotalBytes = 4L * 1024 * 1024 * 1024,
      int MaxJsonBytes = 1 * 1024 * 1024, int MaxLayers = 64, int MaxLayerMembers = 250_000, int MaxTotalMembers = 1_000_000,
 -    int MaxPaths = 1_000_000, int MaxPathLength = 4096, int MaxPayloadBytes = 1 * 1024 * 1024, int MaxPayloadAggregateBytes = 4 * 1024 * 1024, long MaxSelectedOutputBytes = 1L * 1024 * 1024 * 1024);
-+    int MaxPaths = 1_000_000, int MaxPathLength = 4096, int MaxPayloadBytes = 1 * 1024 * 1024, int MaxPayloadAggregateBytes = 4 * 1024 * 1024, long MaxSelectedOutputBytes = 1L * 1024 * 1024 * 1024, long MaxLayerEntryBytes = 256L * 1024 * 1024);
++    int MaxPaths = 1_000_000, int MaxPathLength = 4096, int MaxPayloadBytes = 1 * 1024 * 1024, int MaxPayloadAggregateBytes = 4 * 1024 * 1024, long MaxSelectedOutputBytes = 1L * 1024 * 1024 * 1024, long MaxLayerEntryBytes = 128L * 1024 * 1024);
  internal sealed record ObservedFile(string Path, string Type, string Sha256, long Length, int Mode, long Uid, long Gid, string? LinkTarget, int Layer,
      byte[]? TargetedPayload = null);
  internal sealed record ObservedOciImage(string IndexDigest, string ManifestDigest, string Platform, string ConfigDigest, string ConfigUser,

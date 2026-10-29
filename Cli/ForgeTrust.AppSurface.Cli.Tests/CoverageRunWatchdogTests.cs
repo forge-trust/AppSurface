@@ -72,6 +72,8 @@ public sealed class CoverageRunWatchdogTests
     {
         using var output = TestDirectory.Create();
         using var console = new FakeInMemoryConsole();
+        using var published = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
         await using var supervisor = new CoverageRunWatchdogSupervisor(
             CoverageRunWatchdogMode.Warn,
             TimeSpan.Zero,
@@ -79,11 +81,30 @@ public sealed class CoverageRunWatchdogTests
             CoverageTextWriters.Create(console.Output, console.Error),
             TimeProvider.System,
             CancellationToken.None);
+        supervisor.ArtifactPublished = _ =>
+        {
+            published.Set();
+            release.Wait();
+        };
         supervisor.BindOutputDirectory(output.Path);
         using var operation = supervisor.Start("project", "tests/Quiet.Tests/Quiet.Tests.csproj");
 
         var artifact = Path.Join(output.Path, "coverage-watchdog.json");
-        await WaitForFileAsync(artifact);
+        Task warning;
+        try
+        {
+            Assert.True(published.Wait(TimeSpan.FromSeconds(5)));
+            await WaitForFileAsync(artifact);
+            Assert.Empty(console.ReadErrorString());
+            warning = WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
+            Assert.False(warning.IsCompleted);
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        await warning;
 
         Assert.False(supervisor.CancellationToken.IsCancellationRequested);
         Assert.Contains("\"outcome\": \"warning\"", await File.ReadAllTextAsync(artifact), StringComparison.Ordinal);
@@ -553,6 +574,7 @@ public sealed class CoverageRunWatchdogTests
             using var document = JsonDocument.Parse(await File.ReadAllTextAsync(artifact));
             Assert.InRange(document.RootElement.GetProperty("concurrentlyStale").GetArrayLength(), 0, 32);
             Assert.True(document.RootElement.GetProperty("concurrentlyStaleOmitted").GetInt32() >= 0);
+            await WaitForErrorOccurrencesAsync(console, "Coverage watchdog warning", 1);
             Assert.DoesNotContain($"artifact=\"{output.Path}", console.ReadErrorString(), StringComparison.Ordinal);
             Assert.Contains("coverage-watchdog.json", console.ReadErrorString(), StringComparison.Ordinal);
         }
@@ -938,6 +960,7 @@ public sealed class CoverageRunWatchdogTests
         Assert.All(options.EnumerateArray(), item => Assert.True(item.GetString()!.Length <= 256));
         Assert.Equal(1024, primary.GetProperty("state").GetString()!.Length);
         Assert.Equal(1024, primary.GetProperty("log").GetString()!.Length);
+        await WaitForErrorOccurrencesAsync(console, "operation=discovery", 1);
         Assert.Contains("operation=discovery", console.ReadErrorString(), StringComparison.Ordinal);
     }
 

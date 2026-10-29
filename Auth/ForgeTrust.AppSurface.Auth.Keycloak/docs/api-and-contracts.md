@@ -14,6 +14,8 @@
 
 `recipe.json` contains the entire `KeycloakSecurityRecipe`: schema version 1, source index and platform identity, runtime/frontend identities, ordered operations, `templateBaseline`, mode, Keycloak version, entrypoint, theme inputs, captured material IDs, source profile, every material reference, and resource limits. `templateBaseline` is either `null` or an object with `archivePath`, `archiveSha256`, `entry`, `sha256`, and `materialId`. Security mode requires one reviewed runtime profile. Runtime/frontend and source archives need their exact index, selected manifest, config, and ordered diff IDs. When a theme destination ends in `.ftl`, the baseline object is mandatory and its archive member must match the reviewed captured source material during capture.
 
+A `themeInputs` row whose `destinationPath` equals `entrypointPath` supplies the captured entrypoint bytes, including when that path is the default `/opt/keycloak/bin/kc.sh`. Materialization verifies the captured digest and installs that input with mode `0755`, replacing the source script. With no matching row, the default entrypoint retains its source bytes; a custom entrypoint requires exactly one matching input. Other theme inputs retain mode `0644`. Review the entrypoint as executable material under the same [capture and material-retention contract](material-retention.md); changing the caller's original file after capture does not replace the accepted bytes.
+
 The canonical recipe example for a reviewed `.ftl` theme therefore includes:
 
 ```json

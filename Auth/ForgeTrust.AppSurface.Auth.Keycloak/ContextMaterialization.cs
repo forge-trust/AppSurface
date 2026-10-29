@@ -351,14 +351,17 @@ internal static class ContextMaterialization
             throw new InvalidDataException(message);
     }
 
-    private static void TryDelete(string path)
+    /// <summary>Deletes an owned staging directory, tolerating only expected filesystem cleanup failures.</summary>
+    internal static void TryDelete(string path)
     {
         try
         {
-            if (Directory.Exists(path))
-                Directory.Delete(path, true);
+            Directory.Delete(path, true);
         }
-        catch
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
         {
         }
     }

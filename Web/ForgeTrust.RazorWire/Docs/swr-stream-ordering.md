@@ -27,4 +27,4 @@ The existing dialog stream queue calls the adapter around the final selected str
 
 The [runtime contract pipeline](runtime-contract-pipeline.md#maintainer-quickstart) runs deterministic Node lifecycle tests and verifies generated asset provenance and the existing payload limits. Browser regression cases hold an older response with one or eight concurrent registration writers, both before response delivery and after the frame-render event. They first observe every new user through the live stream, then release the stale snapshot and verify those users remain. A subsequent authoritative refresh must replace a local sentinel, proving that rejection does not leave a sticky dirty flag.
 
-The original same-session registration/antiforgery browser test retains its inputs, assertions, and timeouts. No longer timeout, retry, skip, or baseline update substitutes for stream/frame ordering.
+The original same-session registration/antiforgery browser test retains its inputs, assertions, and timeouts. Increasing a timeout, adding a retry, skipping the test, or updating the baseline does not substitute for correct stream/frame ordering.
