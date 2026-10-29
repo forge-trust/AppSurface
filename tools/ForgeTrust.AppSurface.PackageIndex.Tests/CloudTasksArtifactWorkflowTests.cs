@@ -85,7 +85,7 @@ public sealed partial class PackageArtifactValidationTests
         var request = await PrepareCloudTasksArtifactWorkflowAsync();
         Directory.CreateDirectory(request.ArtifactsOutputPath);
         await File.WriteAllTextAsync(request.ArtifactManifestPath, "stale manifest", Encoding.UTF8);
-        var proofReportPath = Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
+        var proofReportPath = CombineSafeChildPath(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
         await File.WriteAllTextAsync(proofReportPath, "Status: **passed**", Encoding.UTF8);
         var runner = new CloudTasksArtifactCommandRunner();
         var coverageProof = new RecordingCoverageCliConsumerProofWorkflow(succeeded: true);
@@ -117,7 +117,7 @@ public sealed partial class PackageArtifactValidationTests
     {
         var request = await PrepareCloudTasksArtifactWorkflowAsync();
         Directory.CreateDirectory(request.ArtifactsOutputPath);
-        var proofReportPath = Path.Join(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
+        var proofReportPath = CombineSafeChildPath(request.ArtifactsOutputPath, CloudTasksPackageConsumerProof.ReportFileName);
         await File.WriteAllTextAsync(proofReportPath, "Status: **passed**", Encoding.UTF8);
         var workflow = CreateCloudTasksArtifactWorkflow(
             new CloudTasksArtifactCommandRunner(failRestore: true),

@@ -163,12 +163,15 @@ internal sealed class CloudTasksPackageConsumerProof
                     return dependencyPath is null ? null : loadContext.LoadFromAssemblyPath(dependencyPath);
                 };
                 var loaded = loadContext.LoadFromAssemblyPath(tempAssembly);
-                foreach (var type in loaded.GetExportedTypes())
+                foreach (var type in loaded.GetTypes().Where(IsExternallyAccessible))
                 {
                     if (ContainsSdkType(type)) docLeaks.Add(type.FullName ?? type.Name);
                     if (type.BaseType is not null && ContainsSdkType(type.BaseType)) docLeaks.Add($"{type.FullName}.base");
                     if (type.GetInterfaces().Any(ContainsSdkType)) docLeaks.Add($"{type.FullName}.interface");
-                    foreach (var member in type.GetMembers(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+                    if (type.IsGenericType && type.GetGenericArguments().Any(ContainsSdkType))
+                        docLeaks.Add($"{type.FullName}.generic-constraint");
+                    foreach (var member in type.GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                        .Where(IsExternallyAccessible))
                     {
                         if (member is MethodInfo genericMethod
                             && genericMethod.IsGenericMethod
@@ -215,6 +218,34 @@ internal sealed class CloudTasksPackageConsumerProof
     }
 
     private static bool ContainsSdkType(Type type) => ContainsSdkType(type, new HashSet<Type>());
+
+    private static bool IsExternallyAccessible(Type type)
+    {
+        if (type.IsNested)
+        {
+            var visible = type.IsNestedPublic || type.IsNestedFamily || type.IsNestedFamORAssem;
+            return visible && type.DeclaringType is not null && IsExternallyAccessible(type.DeclaringType);
+        }
+        return type.IsPublic;
+    }
+
+    private static bool IsExternallyAccessible(MemberInfo member) => member switch
+    {
+        Type nestedType => IsExternallyAccessible(nestedType),
+        MethodBase method => IsExternallyAccessible(method),
+        FieldInfo field => IsExternallyAccessible(field),
+        PropertyInfo property => IsExternallyAccessible(property.GetGetMethod(nonPublic: true))
+            || IsExternallyAccessible(property.GetSetMethod(nonPublic: true)),
+        EventInfo @event => IsExternallyAccessible(@event.GetAddMethod(nonPublic: true))
+            || IsExternallyAccessible(@event.GetRemoveMethod(nonPublic: true))
+            || IsExternallyAccessible(@event.GetRaiseMethod(nonPublic: true)),
+        _ => false,
+    };
+
+    private static bool IsExternallyAccessible(MethodBase? method) => method is not null
+        && (method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly);
+
+    private static bool IsExternallyAccessible(FieldInfo field) => field.IsPublic || field.IsFamily || field.IsFamilyOrAssembly;
 
     private static bool ContainsSdkType(Type type, HashSet<Type> visited)
     {

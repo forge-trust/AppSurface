@@ -88,8 +88,9 @@ When CloudTasks is in the verification plan, `verify-packages` requires the
 It builds and runs the public GCP consumer from exact validated local archives, checks the complete pinned SDK closure,
 and compares independent packed baseline and candidate neutral consumers in isolated caches. Invalid-token rejection
 before provider I/O, direct/transitive dependency isolation, public SDK-type leak scans and artifact hash bindings remain required.
-The API scan includes generic type and method constraints. Each new verification attempt removes the previous
-Cloud Tasks success report before restoring or packing artifacts, so a failed rerun cannot leave that earlier success beside new artifacts.
+The API scan includes generic type and method constraints and protected members exposed to external subclasses.
+Each new verification attempt removes the previous Cloud Tasks success report before restoring or packing artifacts,
+so a failed rerun cannot leave that earlier success beside new artifacts.
 
 Ordinary `verify-packages` runs archive the candidate source commit (producer `--source-commit`, or canonical `HEAD`)
 as the neutral baseline. Main pushes and tagged publication use the same snapshot rule, so later committed neutral

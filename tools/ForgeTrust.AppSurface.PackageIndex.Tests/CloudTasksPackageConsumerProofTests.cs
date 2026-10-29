@@ -214,7 +214,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             finally { Directory.Delete(root, recursive: true); }
         }
 
-        // protects=public API leak scanning inspects package assemblies for Google SDK types in signatures and generic constraints; fails_when=the test assembly's public provider leak returns no result; no_claim=does not validate XML docs or execute SDK methods.
+        // protects=consumer-accessible API leak scanning inspects Google SDK types in signatures and generic constraints; fails_when=externally callable or subclass-visible SDK types are missed, or hidden members are reported; no_claim=does not validate XML docs or execute SDK methods.
         [Fact]
         public void ScanPublicApiForGoogleTypes_DetectsProviderTypesInPublicMemberSignatures()
         {
@@ -235,6 +235,23 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 Assert.Contains(leaks, value => value.Contains(typeof(LeakedTypeConstraintFixture<>).Name, StringComparison.Ordinal));
                 Assert.Contains(leaks, value => value.Contains(nameof(LeakedMethodConstraintFixture) + ".WithProviderConstraint", StringComparison.Ordinal));
                 Assert.DoesNotContain(leaks, value => value.Contains(nameof(RecursiveGenericConstraintFixture<int>), StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".ProtectedProviderMethod", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".ProtectedInternalProviderMethod", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + "..ctor", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".ProtectedProviderField", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".ProtectedProviderProperty", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".ProtectedProviderEvent", StringComparison.Ordinal));
+                const string protectedNestedType = "ProtectedNestedProviderSurface`1";
+                Assert.Contains(leaks, value => value.Contains(protectedNestedType + ".base", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(protectedNestedType + ".interface", StringComparison.Ordinal));
+                Assert.Contains(leaks, value => value.Contains(protectedNestedType + ".generic-constraint", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains(nameof(LeakedAccessibilityFixture) + ".InternalProviderMethod", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("PrivateProviderMethod", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("PrivateProtectedProviderMethod", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("InternalNestedProviderSurface", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("PrivateNestedProviderSurface", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("PublicNestedInInternalProviderSurface", StringComparison.Ordinal));
+                Assert.DoesNotContain(leaks, value => value.Contains("PublicNestedInPrivateProviderSurface", StringComparison.Ordinal));
             }
             finally
             {
@@ -398,7 +415,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
         {
             using var fixture = new PackedProofFixture();
             var runner = new CloudTasksProofRunner(fixture.PackageArtifacts, Version, fixture.LockFilePath);
-            var oldReport = Path.Combine(fixture.ArtifactsDirectory, CloudTasksPackageConsumerProof.ReportFileName);
+            var oldReport = TestPathUtils.PathUnder(fixture.ArtifactsDirectory, CloudTasksPackageConsumerProof.ReportFileName);
             await File.WriteAllTextAsync(oldReport, "previous passed report");
             var error = await Assert.ThrowsAsync<PackageIndexException>(() =>
                 new CloudTasksPackageConsumerProof(runner, fixture.CreateProofSourceAsync).RunAsync(
@@ -924,6 +941,7 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
 namespace Google.Cloud.Tasks.V2
 {
     public class LeakedSdkType { }
+    public interface ILeakedSdkInterface { }
 }
 
 namespace ForgeTrust.AppSurface.PackageIndex.Tests
@@ -949,5 +967,42 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
     public sealed class RecursiveGenericConstraintFixture<T>
         where T : IComparable<T>
     {
+    }
+
+    public class LeakedAccessibilityFixture
+    {
+        public LeakedAccessibilityFixture() { }
+        protected LeakedAccessibilityFixture(Google.Cloud.Tasks.V2.LeakedSdkType value) { }
+
+        protected void ProtectedProviderMethod(Google.Cloud.Tasks.V2.LeakedSdkType value) { }
+        protected internal Google.Cloud.Tasks.V2.LeakedSdkType ProtectedInternalProviderMethod() => new();
+        internal Google.Cloud.Tasks.V2.LeakedSdkType InternalProviderMethod() => new();
+        private Google.Cloud.Tasks.V2.LeakedSdkType PrivateProviderMethod() => new();
+        private protected Google.Cloud.Tasks.V2.LeakedSdkType PrivateProtectedProviderMethod() => new();
+        protected Google.Cloud.Tasks.V2.LeakedSdkType ProtectedProviderField = new();
+        protected Google.Cloud.Tasks.V2.LeakedSdkType ProtectedProviderProperty { get; private set; } = new();
+        protected event Action<Google.Cloud.Tasks.V2.LeakedSdkType>? ProtectedProviderEvent
+        {
+            add { }
+            remove { }
+        }
+
+        protected class ProtectedNestedProviderSurface<T> : Google.Cloud.Tasks.V2.LeakedSdkType, Google.Cloud.Tasks.V2.ILeakedSdkInterface
+            where T : Google.Cloud.Tasks.V2.LeakedSdkType
+        {
+        }
+
+        internal class InternalNestedProviderSurface : Google.Cloud.Tasks.V2.LeakedSdkType { }
+        private class PrivateNestedProviderSurface : Google.Cloud.Tasks.V2.LeakedSdkType { }
+
+        internal class InternalContainer
+        {
+            public class PublicNestedInInternalProviderSurface : Google.Cloud.Tasks.V2.LeakedSdkType { }
+        }
+
+        private class PrivateContainer
+        {
+            public class PublicNestedInPrivateProviderSurface : Google.Cloud.Tasks.V2.LeakedSdkType { }
+        }
     }
 }
