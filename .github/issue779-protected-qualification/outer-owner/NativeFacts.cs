@@ -1,8 +1,8 @@
-using System.Globalization;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.Versioning;
-using Microsoft.Win32.SafeHandles;
 using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace EvidenceHost.CompletedIsolation;
 
