@@ -61,6 +61,7 @@ internal static class PolicyControls
             Reject(() => OwnerCompletionPolicy.Validate(wrong)); count++;
         }
         count += NativeParserControls();
+        count += ProcMountControls();
         count += ProcessIdentityParserControls();
         count += CgroupSettlementControls();
         count += ReleaseControls();
@@ -138,6 +139,39 @@ internal static class PolicyControls
 #pragma warning restore CA1416
             throw new IsolationException("cgroup-events-negative-control");
         }
+    }
+
+    private static int ProcMountControls()
+    {
+        const string hidden = "403 402 0:146 / /proc rw,nosuid,nodev,noexec - proc proc rw\n";
+        const string visible = "463 403 0:125 / /proc rw,nosuid,nodev,noexec - proc proc rw\n";
+#pragma warning disable CA1416 // This seam parses supplied mountinfo and mount ID facts without touching Linux state.
+        if (!NativeFacts.HasVisibleProcMount(System.Text.Encoding.ASCII.GetBytes(visible), 463)
+            || !NativeFacts.HasVisibleProcMount(System.Text.Encoding.ASCII.GetBytes(hidden + visible), 463)
+            || !NativeFacts.HasVisibleProcMount(System.Text.Encoding.ASCII.GetBytes(visible + hidden), 463))
+            throw new IsolationException("proc-mount-positive-control");
+        foreach (var (table, id) in new (string, ulong)[]
+        {
+            (hidden + visible, 0), (hidden + visible, 999), (hidden, 463), ("", 463),
+            (hidden + visible.Replace("- proc ", "- tmpfs ", StringComparison.Ordinal), 463),
+            (visible.Replace(" /proc ", " /other ", StringComparison.Ordinal), 463),
+        })
+            if (NativeFacts.HasVisibleProcMount(System.Text.Encoding.ASCII.GetBytes(table), id))
+                throw new IsolationException("proc-mount-negative-control");
+        foreach (var table in new[]
+        {
+            hidden + hidden, visible.Replace("463 ", "0 ", StringComparison.Ordinal),
+            visible.Replace("463 ", "+463 ", StringComparison.Ordinal),
+            visible.Replace("463 ", "18446744073709551616 ", StringComparison.Ordinal),
+            "invalid\n"
+        })
+        {
+            try { _ = NativeFacts.HasVisibleProcMount(System.Text.Encoding.ASCII.GetBytes(table), 463); }
+            catch (IsolationException) { continue; }
+            throw new IsolationException("proc-mount-format-control");
+        }
+#pragma warning restore CA1416
+        return 14;
     }
 
     private static int ProcessIdentityParserControls()

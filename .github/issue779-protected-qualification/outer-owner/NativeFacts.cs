@@ -563,9 +563,10 @@ internal static class NativeFacts
 
         var entries = ParseMountInfo(ReadBounded(proc + "/mountinfo", 256 * 1024));
         var rootEntry = entries.Where(entry => entry.MountPoint == "/").OrderByDescending(entry => entry.MountPoint.Length).FirstOrDefault();
-        var procEntry = entries.SingleOrDefault(entry => entry.MountPoint == "/proc");
+        var procMount = ReadStatx(-100, proc + "/root/proc", 0, 0x17ff);
         if (rootEntry is null || !rootEntry.Options.Contains("ro", StringComparer.Ordinal)
-            || procEntry is null || procEntry.FileSystem != "proc") throw new IsolationException("unit-mount-namespace");
+            || (procMount.Mask & 0x1000) == 0 || !HasVisibleProcMount(entries, procMount.MountId))
+            throw new IsolationException("unit-mount-namespace");
 
         var writable = new HashSet<string>(StringComparer.Ordinal);
         writable.Add("/tmp");
@@ -604,15 +605,27 @@ internal static class NativeFacts
     private static bool PathIsExactMountedWith(IReadOnlyList<MountEntry> entries, string path, string option) =>
         entries.Any(entry => entry.MountPoint == path && entry.Options.Contains(option, StringComparer.Ordinal));
 
+    /// <summary>Matches the proc mount visible at the target's root against its kernel mountinfo identity.</summary>
+    /// <remarks>Hidden stacked mounts cannot satisfy the check. The caller must obtain the ID from statx with STATX_MNT_ID.</remarks>
+    internal static bool HasVisibleProcMount(byte[] mountInfo, ulong visibleMountId) =>
+        HasVisibleProcMount(ParseMountInfo(mountInfo), visibleMountId);
+
+    private static bool HasVisibleProcMount(IReadOnlyList<MountEntry> entries, ulong visibleMountId) =>
+        visibleMountId != 0 && entries.Any(entry => entry.MountId == visibleMountId
+            && entry.MountPoint == "/proc" && entry.FileSystem == "proc");
+
     private static List<MountEntry> ParseMountInfo(byte[] bytes)
     {
         var entries = new List<MountEntry>();
+        var mountIds = new HashSet<ulong>();
         foreach (var line in Encoding.ASCII.GetString(bytes).Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             var separator = Array.IndexOf(fields, "-");
-            if (separator < 6 || separator + 2 >= fields.Length) throw new IsolationException("mountinfo-format");
-            entries.Add(new(DecodeMount(fields[4]), fields[5].Split(',').ToHashSet(StringComparer.Ordinal), fields[separator + 1]));
+            if (separator < 6 || separator + 2 >= fields.Length
+                || !ulong.TryParse(fields[0], NumberStyles.None, CultureInfo.InvariantCulture, out var mountId)
+                || mountId == 0 || !mountIds.Add(mountId)) throw new IsolationException("mountinfo-format");
+            entries.Add(new(mountId, DecodeMount(fields[4]), fields[5].Split(',').ToHashSet(StringComparer.Ordinal), fields[separator + 1]));
         }
         return entries;
     }
@@ -620,11 +633,12 @@ internal static class NativeFacts
     private static string DecodeMount(string value) => value.Replace("\\040", " ", StringComparison.Ordinal)
         .Replace("\\011", "\t", StringComparison.Ordinal).Replace("\\012", "\n", StringComparison.Ordinal)
         .Replace("\\134", "\\", StringComparison.Ordinal);
-    private sealed record MountEntry(string MountPoint, HashSet<string> Options, string FileSystem);
+    private sealed record MountEntry(ulong MountId, string MountPoint, HashSet<string> Options, string FileSystem);
 
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 256)]
     private struct StatxBuffer
     {
+        [System.Runtime.InteropServices.FieldOffset(0)] internal uint Mask;
         [System.Runtime.InteropServices.FieldOffset(16)] internal uint Links;
         [System.Runtime.InteropServices.FieldOffset(20)] internal uint Uid;
         [System.Runtime.InteropServices.FieldOffset(24)] internal uint Gid;

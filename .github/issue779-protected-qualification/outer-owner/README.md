@@ -104,6 +104,17 @@ the launcher and the independent root readiness check retain their actual
 credential, zero-capability and no-new-privileges requirements. Ambient retention
 is bootstrap setup only and never grants a target capability or admission.
 
+Readiness also binds `/proc` to the mount ID returned by `statx` for
+`/proc/LAUNCHER_PID/root/proc`, requiring the `STATX_MNT_ID` result bit and the
+same ID at `/proc` with filesystem type `proc` in that launcher's mountinfo.
+[`unshare --mount-proc`](https://man7.org/linux/man-pages/man1/unshare.1.html)
+can stack a new proc mount over an existing one; the kernel reports both in
+[`mountinfo`](https://man7.org/linux/man-pages/man5/proc_pid_mountinfo.5.html).
+An entry for a hidden proc mount cannot vouch for a different visible mount.
+Missing or duplicate IDs, unsupported mount identity, and a visible non-proc
+filesystem remain rejections. This check occurs before any phase release; it
+neither changes namespace requirements nor accepts ambiguous containment.
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with
