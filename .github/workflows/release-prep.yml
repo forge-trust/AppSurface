@@ -121,7 +121,7 @@ jobs:
       # This job executes base-ref-controlled release tooling. It must never receive
       # App credentials; the next job runs on a fresh runner and consumes only these files.
       - name: Upload prepared release artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-prep
           path: |
@@ -146,7 +146,7 @@ jobs:
     steps:
       # Do not check out base-ref-controlled source in this token-bearing job.
       - name: Download prepared release artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-prep
           path: ${{ runner.temp }}/release-prep
@@ -298,7 +298,7 @@ jobs:
 
       - name: Mint release bot installation token
         id: release-bot-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ secrets.RELEASE_BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
