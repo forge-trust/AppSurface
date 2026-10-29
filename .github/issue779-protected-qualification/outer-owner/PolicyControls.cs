@@ -199,12 +199,18 @@ internal static class PolicyControls
     {
         var layout = new OwnerLayout("/owned", "/owned/fs", 62000, 62000, OwnerPaths.Assembly, "/evidence");
 #pragma warning disable CA1416 // Fixed binding projections and mount parsers do not touch native state.
-        if (!PhaseRunner.ReadOnlyBindings(layout, "/var/lib/appsurface-completed-dotnet").SequenceEqual(
+        string[] commonBindings =
             ["/var/lib/appsurface-completed-dotnet:/usr/share/dotnet",
              "/owned/fs" + OwnerPaths.Source + "/.git:" + OwnerPaths.Source + "/.git",
-             "/owned/fs" + OwnerPaths.Native + "/.git:" + OwnerPaths.Native + "/.git"]))
+             "/owned/fs" + OwnerPaths.Native + "/.git:" + OwnerPaths.Native + "/.git"];
+        if (!PhaseRunner.ReadOnlyBindings(layout, "/var/lib/appsurface-completed-dotnet", OwnerPhase.Prepare)
+            .SequenceEqual(commonBindings))
             throw new IsolationException("git-bindings-control");
-        foreach (var path in new[] { OwnerPaths.Source + "/.git", OwnerPaths.Native + "/.git" })
+        foreach (var phase in new[] { OwnerPhase.Replay, OwnerPhase.Control, OwnerPhase.Close })
+            if (!PhaseRunner.ReadOnlyBindings(layout, "/var/lib/appsurface-completed-dotnet", phase)
+                .SequenceEqual(commonBindings.Append("/owned/fs" + OwnerPaths.Preparation + ":" + OwnerPaths.Preparation)))
+                throw new IsolationException("preparation-bindings-control");
+        foreach (var path in new[] { OwnerPaths.Source + "/.git", OwnerPaths.Native + "/.git", OwnerPaths.Preparation })
         {
             var hidden = "10 9 0:1 / " + path + " rw - ext4 /dev/loop0 rw\n";
             var visible = "11 10 0:1 / " + path + " ro - ext4 /dev/loop0 rw\n";
@@ -216,7 +222,7 @@ internal static class PolicyControls
                 (hidden + visible, 10), (visible, 0), (visible, 12), ("", 11),
                 (visible.Replace(" ro ", " rw ", StringComparison.Ordinal), 11),
                 (visible.Replace(path, "/other", StringComparison.Ordinal), 11),
-                (visible.Replace("/.git", "", StringComparison.Ordinal), 11),
+                (visible.Replace(path, path[..path.LastIndexOf('/')], StringComparison.Ordinal), 11),
                 (hidden.Replace(" rw -", " ro -", StringComparison.Ordinal)
                     + visible.Replace(" ro -", " rw -", StringComparison.Ordinal), 11)
             })
@@ -224,7 +230,7 @@ internal static class PolicyControls
                     throw new IsolationException("git-mount-negative-control");
         }
 #pragma warning restore CA1416
-        return 23;
+        return 37;
     }
 
     private static int ProcessIdentityParserControls()

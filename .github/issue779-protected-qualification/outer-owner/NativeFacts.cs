@@ -588,7 +588,7 @@ internal static class NativeFacts
         foreach (var path in writable)
             if (!PathIsExactMountedWith(entries, path, "rw")) throw new IsolationException("unit-readwrite-mount");
         if (phase is OwnerPhase.Replay or OwnerPhase.Control or OwnerPhase.Close
-            && !PathIsMountedWith(entries, OwnerPaths.Preparation, "ro"))
+            && !VisibleReadonlyMount(proc, entries, OwnerPaths.Preparation))
             throw new IsolationException("unit-preparation-mount");
         if (!PathIsExactMountedWith(entries, "/usr/share/dotnet", "ro"))
             throw new IsolationException("unit-sdk-mount");
