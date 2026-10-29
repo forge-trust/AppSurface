@@ -86,6 +86,10 @@ For a failed synthetic control, already bounded stdout/stderr are retained only
 after both capture pumps join and while the original deadline remains. This keeps
 systemd and namespace startup errors available for diagnosis. These control phases
 receive no provider token; the diagnostics never prove settlement or grant authority.
+The parent's native validation failures use an exact allowlist of fixed `unit-*`,
+proc, mount, statx and cgroup categories. Unknown categories, category suffixes and
+ordinary exception text remain redacted. These labels identify the rejected check;
+the last setup-stage label alone does not identify the phase failure's cause.
 
 Synthetic controls also record fixed kernel UID/GID, capability, no-new-privileges
 and seccomp fields immediately before `setpriv`, plus a finite security-label

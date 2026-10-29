@@ -89,6 +89,26 @@ internal static class PolicyControls
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
             throw new IsolationException("diagnostic-redaction-control");
         count += 3;
+        foreach (var code in new[]
+        {
+            "ready-pid", "unit-cgroup", "unit-process-count", "unit-process-facts", "unit-launcher-ambiguous",
+            "unit-launcher-facts", "unit-launcher-security", "unit-bootstrap-security", "unit-bootstrap-argv",
+            "unit-root-identity", "unit-namespace-identity", "unit-mount-namespace",
+            "unit-readonly-mount", "unit-readwrite-mount", "unit-git-mount", "unit-preparation-mount",
+            "unit-sdk-mount", "unit-cgroup-open", "unit-cgroup-type", "unit-cgroup-files",
+            "unit-cgroup-initial", "launcher-pidfd", "launcher-pidfd-poll",
+            "proc-link", "proc-fields", "proc-fields-format", "mountinfo-format",
+            "statx-handle", "statx-path", "native-command-start", "native-input-size",
+            "cgroup-depth", "cgroup-path", "cgroup-process-limit", "cgroup-proc-duplicate",
+            "cgroup-procs", "cgroup-events-format", "cgroup-read", "cgroup-seek", "cgroup-size"
+        })
+        {
+            if (Program.SafeFailureCode(new IsolationException(code)) != code
+                || Program.SafeFailureCode(new IsolationException(code + ":private-credential-canary")) != "closed-runtime-failure"
+                || Program.SafeFailureCode(new Exception(code)) != "runtime-failure")
+                throw new IsolationException("native-diagnostic-control");
+            count += 3;
+        }
         Console.WriteLine("ISOLATION_POLICY_CONTROLS_PASSED:" + count);
         return 0;
     }
