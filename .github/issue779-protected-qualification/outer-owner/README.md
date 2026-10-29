@@ -87,6 +87,14 @@ after both capture pumps join and while the original deadline remains. This keep
 systemd and namespace startup errors available for diagnosis. These control phases
 receive no provider token; the diagnostics never prove settlement or grant authority.
 
+Synthetic controls also record fixed kernel UID/GID, capability, no-new-privileges
+and seccomp fields immediately before `setpriv`, plus a finite security-label
+classification. A fixed root-owned shell then execs the original command with its
+original arguments. This distinguishes a missing bootstrap capability from a host
+filter rejection; it does not change the UID transition or accept a failed probe.
+Prepare, replay and close do not add this diagnostic prefix. No environment,
+credential, arbitrary security-label text or caller-selected command is printed.
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with

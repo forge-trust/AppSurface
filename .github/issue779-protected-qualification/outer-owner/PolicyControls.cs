@@ -66,6 +66,16 @@ internal static class PolicyControls
         count += ReleaseControls();
         count += SourceIndexControls();
         count += SdkDirectoryControls();
+        foreach (var phase in new[] { OwnerPhase.Prepare, OwnerPhase.Replay, OwnerPhase.Close })
+        {
+            if (BootstrapCommand.Prefix(phase).Count != 0) throw new IsolationException("bootstrap-phase-control");
+            count++;
+        }
+        if (!BootstrapCommand.Prefix(OwnerPhase.Control).SequenceEqual(
+                ["/usr/bin/bash", "-c", BootstrapCommand.DiagnosticScript, "isolation-bootstrap"])
+            || !BootstrapCommand.DiagnosticScript.EndsWith("exec \"$@\"", StringComparison.Ordinal))
+            throw new IsolationException("bootstrap-command-control");
+        count++;
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")

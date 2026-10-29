@@ -284,6 +284,7 @@ internal static class PhaseRunner
         start.ArgumentList.Add("--fork");
         start.ArgumentList.Add("--mount-proc");
         start.ArgumentList.Add("--kill-child=KILL");
+        foreach (var argument in BootstrapCommand.Prefix(phase)) start.ArgumentList.Add(argument);
         start.ArgumentList.Add("/usr/bin/setpriv");
         start.ArgumentList.Add("--reuid=" + layout.Uid.ToString(CultureInfo.InvariantCulture));
         start.ArgumentList.Add("--regid=" + layout.Gid.ToString(CultureInfo.InvariantCulture));
