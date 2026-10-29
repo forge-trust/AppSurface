@@ -112,6 +112,10 @@ actual shell cache initialization and stdlib loop with detached physical-check
 stubs, reject a malformed declared digest, and test the unchanged strict
 240-second root interval against its 570-second work end. They do not run Linux
 native work, change the 600/30-second fixture budget, or claim a native result.
+When this wrapper or its directly bound port documentation changes, refresh its
+current-source digest in both [the slot port manifest](port-manifest.json) and
+[the procedure inventory](../inventory.json); the historical source digest stays
+fixed.
 
 ## N04 joined-outcome diagnostic
 

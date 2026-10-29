@@ -1,8 +1,8 @@
 {
   "current_files": {
     "README.md": {
-      "bytes": 12879,
-      "sha256": "f7748b2bfefab810cb1870f1d5586ff171cecc3c80288be0a2e6acec10740bbd"
+      "bytes": 15279,
+      "sha256": "c687dc984765f06be9cad1c8470b12da40180ee8c2d8860e4f7d15fb457cba12"
     },
     "adapter.py": {
       "bytes": 2323,
@@ -217,13 +217,14 @@
         "historical build/source boundary replaced by actual current root-verify",
         "pinned current source capture replaces historical review file",
         "current six-entry bootstrap environment",
-        "readonly current authenticated source snapshot restores surviving N03 comparison guard"
+        "readonly current authenticated source snapshot restores surviving N03 comparison guard",
+        "bounded immutable OS-audit declaration lookup cache; physical per-file, ELF and full-membership checks plus original clocks remain unchanged"
       ],
       "historical_path": "N08/tooling/.github/issue779-csharp-native/checkpoint-n01-n02-v5.sh",
       "historical_sha256": "f6f17cf58811c3093f07b2a39817b45eeebfc5052431c85d4c9cfb29604cc384",
       "native_execution": false,
       "ported_path": "checkpoint-n08.sh",
-      "ported_sha256": "ab81bb23cd1b18afb917b7e22799f5a840c855ceccd3206f8c0b921d9e15f4e4",
+      "ported_sha256": "1079fdddf5cf875d6645eb36260254ecc85289f79cffbbcd94b645d1ba0c3743",
       "selector": "N08"
     }
   ]
