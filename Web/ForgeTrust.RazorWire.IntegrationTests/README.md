@@ -26,6 +26,22 @@ It also includes an AppSurface Docs browser regression test that runs against `W
   - sidebar search works from `/docs`,
   - navigating to `/docs/search` via Turbo keeps both advanced search and sidebar search functional.
 
+## SWR response completion
+
+The [stream-ordering browser cases](RazorWireMvcPlaywrightTests.cs) exercise the
+[SWR rendering contract](../ForgeTrust.RazorWire/Docs/swr-stream-ordering.md) with one or eight writers,
+holding the stale response before delivery or at its selected frame render. Their local Playwright route
+marks the controlled responses with `X-RazorWire-Test-Response` and adds `data-swr-test-response` only to
+the stale incoming frame. The render pause matches that frame marker. The browser observer wraps the
+pinned Turbo response receivers and records completion after the original receiver returns, including
+an intentional stale discard; receiver exceptions remain observable failures.
+
+These markers exist only in the test context. The fresh control uses a unique query URL and must remove
+the local sentinel and retain every streamed user. Do not use a shared `reload().then(...)` flag as a
+response-completion signal: pinned Turbo has one visit resolver per frame, so an overlapping earlier
+response can fulfill a later visit's promise before that later response renders. Keep both response
+completion and the DOM assertions, with the existing deadlines.
+
 ## Form-interactions readiness
 
 The functional form-interactions tests in

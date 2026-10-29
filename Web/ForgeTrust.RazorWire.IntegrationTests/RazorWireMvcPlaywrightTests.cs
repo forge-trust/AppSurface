@@ -688,23 +688,42 @@ public sealed class RazorWireMvcPlaywrightTests
         await WaitForStreamConnectedAsync(observerPage);
         await WaitForUserListReadyAsync(observerPage);
 
+        var staleMarker = $"{unique}-stale";
+        var freshMarker = $"{unique}-fresh";
+        var freshUrl = $"{_fixture.BaseUrl}/Reactivity/UserList?swr-proof={freshMarker}";
         await observerPage.EvaluateAsync("""
-            pauseAtRender => {
+            ({ pauseAtRender, staleMarker }) => {
+                window.__controlledListResponses = {};
+                const delegate = document.querySelector('#user-list').delegate;
+                for (const name of ['requestSucceededWithResponse', 'requestFailedWithResponse']) {
+                    const receive = delegate[name];
+                    delegate[name] = async function (request, response) {
+                        const marker = response.response.headers.get('X-RazorWire-Test-Response');
+                        let error = null;
+                        try { return await receive.call(this, request, response); }
+                        catch (failure) { error = String(failure); throw failure; }
+                        finally {
+                            if (marker) window.__controlledListResponses[marker] = { error };
+                        }
+                    };
+                }
                 if (!pauseAtRender) return;
                 document.addEventListener('turbo:before-frame-render', event => {
-                    if (event.target.id !== 'user-list' || window.__heldListResume) return;
+                    if (event.target.id !== 'user-list' || window.__heldListResume
+                        || event.detail.newFrame.getAttribute('data-swr-test-response') !== staleMarker) return;
                     event.preventDefault();
                     window.__heldListResume = event.detail.resume;
                 });
             }
-            """, pauseAtRender);
+            """, new { pauseAtRender, staleMarker });
 
         var captured = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var held = 0;
-        await observerPage.RouteAsync("**/Reactivity/UserList", async route =>
+        await observerPage.RouteAsync("**/Reactivity/UserList*", async route =>
         {
-            if (Interlocked.Exchange(ref held, 1) != 0)
+            var isFresh = route.Request.Url == freshUrl;
+            if (!isFresh && Interlocked.Exchange(ref held, 1) != 0)
             {
                 await route.ContinueAsync();
                 return;
@@ -713,11 +732,24 @@ public sealed class RazorWireMvcPlaywrightTests
             var response = await route.FetchAsync();
             try
             {
-                var html = await response.TextAsync();
-                Assert.All(usernames, username => Assert.DoesNotContain(username, html, StringComparison.Ordinal));
-                captured.TrySetResult();
-                if (!pauseAtRender) await release.Task;
-                await route.FulfillAsync(new RouteFulfillOptions { Response = response });
+                string? markedHtml = null;
+                if (!isFresh)
+                {
+                    var html = await response.TextAsync();
+                    var frameTag = Regex.Match(html, "<turbo-frame\\b[^>]*\\bid=\"user-list\"[^>]*>", RegexOptions.CultureInvariant);
+                    Assert.True(frameTag.Success, "The controlled response must contain the user-list frame.");
+                    Assert.False(frameTag.NextMatch().Success, "The controlled response must contain exactly one user-list frame.");
+                    markedHtml = html.Insert(frameTag.Index + "<turbo-frame".Length, $" data-swr-test-response=\"{staleMarker}\"");
+                    Assert.All(usernames, username => Assert.DoesNotContain(username, html, StringComparison.Ordinal));
+                    captured.TrySetResult();
+                    if (!pauseAtRender) await release.Task;
+                }
+                var headers = new Dictionary<string, string>(response.Headers, StringComparer.OrdinalIgnoreCase)
+                {
+                    ["X-RazorWire-Test-Response"] = isFresh ? freshMarker : staleMarker
+                };
+                headers.Remove("content-length");
+                await route.FulfillAsync(new RouteFulfillOptions { Response = response, Headers = headers, Body = markedHtml });
             }
             catch (Exception exception)
             {
@@ -734,8 +766,7 @@ public sealed class RazorWireMvcPlaywrightTests
         {
             await observerPage.EvaluateAsync("""
                 () => {
-                    window.__controlledListLoaded = false;
-                    document.querySelector('#user-list').reload().then(() => { window.__controlledListLoaded = true; });
+                    document.querySelector('#user-list').reload();
                 }
                 """);
             await captured.Task.WaitAsync(TimeSpan.FromSeconds(30));
@@ -777,21 +808,24 @@ public sealed class RazorWireMvcPlaywrightTests
                 writerCount, new PageWaitForFunctionOptions { Timeout = 30_000 });
             release.TrySetResult();
             if (pauseAtRender) await observerPage.EvaluateAsync("() => window.__heldListResume()");
-            await observerPage.WaitForFunctionAsync("() => window.__controlledListLoaded === true",
-                null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            // Turbo shares its visit resolver across overlapping requests. Observe
+            // the marked response's receiver completion, including an early discard.
+            await observerPage.WaitForFunctionAsync("marker => Boolean(window.__controlledListResponses[marker])",
+                staleMarker, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            Assert.Null(await observerPage.EvaluateAsync<string?>("marker => window.__controlledListResponses[marker].error", staleMarker));
             var rendered = await observerPage.Locator("#user-list-items").InnerTextAsync();
             Assert.All(usernames, username => Assert.Contains(username, rendered, StringComparison.Ordinal));
 
             // A rejected old snapshot must not poison a subsequent authoritative refresh.
             await observerPage.EvaluateAsync("""
-                () => {
+                url => {
                     document.querySelector('#user-count').textContent = 'local-only sentinel';
-                    window.__controlledListLoaded = false;
-                    document.querySelector('#user-list').reload().then(() => { window.__controlledListLoaded = true; });
+                    document.querySelector('#user-list').src = url;
                 }
-                """);
-            await observerPage.WaitForFunctionAsync("() => window.__controlledListLoaded === true",
-                null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+                """, freshUrl);
+            await observerPage.WaitForFunctionAsync("marker => Boolean(window.__controlledListResponses[marker])",
+                freshMarker, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            Assert.Null(await observerPage.EvaluateAsync<string?>("marker => window.__controlledListResponses[marker].error", freshMarker));
             Assert.DoesNotContain("local-only sentinel", await observerPage.Locator("#user-count").InnerTextAsync(), StringComparison.Ordinal);
             var refreshed = await observerPage.Locator("#user-list-items").InnerTextAsync();
             Assert.All(usernames, username => Assert.Contains(username, refreshed, StringComparison.Ordinal));
