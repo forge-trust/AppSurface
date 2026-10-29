@@ -94,6 +94,25 @@ identity, image, EOF and digest checks remain unchanged. The
 serialization blocks, their partial-write failure path and the strict parser's
 missing-LF rejection. They test record framing only and issue no native credit.
 
+## N08 stdlib declaration lookup
+
+N08 reads each Python stdlib file's SHA256 from the immutable file declaration
+cache built from its already validated, pinned OS audit. It still runs the
+original physical `verify_os_path` check for every member, including fresh
+symlink-chain and resolved-file checks, and performs the same ELF declaration
+check, and compares the complete stdlib membership before and after the scan.
+Only repeated JSON declaration lookup is removed; no filesystem observations are
+cached. A missing cache row rejects as `negative-stdlib-file-unpinned`. This
+bounded parsing optimization does not establish why an earlier N08 run reached
+its original-root time guard. See the [N08 procedure](checkpoint-n08.sh) and
+[source-preparation contract](../../README.md#stdlib-declaration-lookup).
+
+The [N08 declaration controls](../../test_n08_stdlib_declarations.py) exercise the
+actual shell cache initialization and stdlib loop with detached physical-check
+stubs, reject a malformed declared digest, and test the unchanged strict
+240-second root interval against its 570-second work end. They do not run Linux
+native work, change the 600/30-second fixture budget, or claim a native result.
+
 ## N04 joined-outcome diagnostic
 
 N04 keeps its early lifetime-fit check and repeats the same predicate after the

@@ -1330,7 +1330,7 @@ negative_stdlib_exact "$stdlib_expected" "$stdlib_files" || fail negative-stdlib
 # Literal file aliases use the exact recorded root-owned chain; directory aliases reject.
 while IFS= read -r python_file; do
  [[ $python_file == /usr/lib/python3.12/* && $python_file != *$'\t'* && $python_file != *$'\n'* ]] || fail negative-stdlib-name
- python_hash=$(bounded jq -er --arg p "$python_file" '[.files[]|select(.path==$p)] as $rows | if ($rows|length)==1 then $rows[0].sha256 else error("missing-fixed-pin") end' "$os_audit")
+ python_hash=$(negative_os_file_hash "$python_file") || fail negative-stdlib-file-unpinned
  verify_os_path "$python_file" "$python_hash"
  if [[ $(bounded head -c 4 "$python_file" | od -An -tx1 | tr -d ' \n') == 7f454c46 ]]; then
   python_resolved=$python_file
