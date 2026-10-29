@@ -127,7 +127,7 @@ public sealed class PreflightConsumerTemplateTests : IDisposable
             Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)
                 .Select(path => Path.GetRelativePath(sourceDirectory, path))
                 .Order(StringComparer.Ordinal));
-        foreach (var (path, bytes) in sourceFilesBefore) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(sourceDirectory, path)));
+        foreach (var (path, bytes) in sourceFilesBefore) Assert.Equal(bytes, File.ReadAllBytes(TestPathUtils.PathUnder(sourceDirectory, path)));
         Assert.True(File.Exists(sourceBinFile));
         Assert.True(File.Exists(sourceObjFile));
     }

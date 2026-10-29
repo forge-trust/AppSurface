@@ -107,7 +107,7 @@ public sealed class CoverageSolutionScriptTests
         Assert.Equal(
             new[] { "coverage-security-platform", "packed-durable-consumers" },
             dependencies.Children.Cast<YamlScalarNode>().Select(node => node.Value));
-        Assert.Equal("45", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
+        Assert.Equal("60", ((YamlScalarNode)build.Children[new YamlScalarNode("timeout-minutes")]).Value);
         Assert.False(build.Children.ContainsKey(new YamlScalarNode("if")));
 
         var packed = (YamlMappingNode)jobs.Children[new YamlScalarNode("packed-durable-consumers")];

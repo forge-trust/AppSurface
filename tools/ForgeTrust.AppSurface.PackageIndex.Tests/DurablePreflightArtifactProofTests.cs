@@ -341,7 +341,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             EnumerateAuthoredFiles(source)
                 .Select(path => Path.GetRelativePath(source, path))
                 .Order(StringComparer.Ordinal));
-        foreach (var (path, bytes) in sourceBefore) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(source, path)));
+        foreach (var (path, bytes) in sourceBefore) Assert.Equal(bytes, File.ReadAllBytes(TestPathUtils.PathUnder(source, path)));
         Assert.DoesNotContain(stagedFiles.Keys, path => path.Split(Path.DirectorySeparatorChar)
             .Any(segment => segment is "bin" or "obj"));
 
