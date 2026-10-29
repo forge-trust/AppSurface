@@ -16,7 +16,7 @@ internal sealed class DurablePreflightArtifactProof
 {
     internal const int CandidateProofTimeoutMilliseconds = 25 * 60 * 1000;
     internal const int PublishedProofTimeoutMilliseconds = 65 * 60 * 1000;
-    private const string ConsumerProjectRelativePath = "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template";
+    private const string ConsumerProjectTemplateRelativePath = "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template";
     private const string ProofScriptRelativePath = "Durable/verify-preflight-artifacts.sh";
     private const string CliPackageId = "ForgeTrust.AppSurface.Cli";
     private const string ProviderPackageId = "ForgeTrust.AppSurface.Durable.PostgreSql";
@@ -555,10 +555,10 @@ internal sealed class DurablePreflightArtifactProof
         CancellationToken cancellationToken)
     {
         var script = Path.Combine(request.RepositoryRoot, ProofScriptRelativePath);
-        var consumer = Path.Combine(request.RepositoryRoot, ConsumerProjectRelativePath);
-        if (!File.Exists(script) || !File.Exists(consumer))
+        var consumerTemplate = Path.Combine(request.RepositoryRoot, ConsumerProjectTemplateRelativePath);
+        if (!File.Exists(script) || !File.Exists(consumerTemplate))
         {
-            throw new PackageIndexException("The PostgreSQL preflight artifact consumer entrypoint or project is missing.");
+            throw new PackageIndexException("The PostgreSQL preflight artifact consumer entrypoint or project template is missing.");
         }
 
         var result = await _commandRunner.RunAsync(
@@ -571,7 +571,7 @@ internal sealed class DurablePreflightArtifactProof
                     "--source-commit", request.SourceCommit,
                     "--run-id", request.RunId,
                     "--artifact-id", request.ArtifactId,
-                    "--consumer-project", consumer,
+                    "--consumer-project-template", consumerTemplate,
                     "--receipt", receiptPath
                 ],
                 request.RepositoryRoot,

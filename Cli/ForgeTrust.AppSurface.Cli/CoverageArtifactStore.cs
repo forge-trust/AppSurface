@@ -74,12 +74,71 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <summary>Gets the fully validated effective retention policy.</summary>
     internal CoverageArtifactPolicy Policy { get; }
 
+    /// <summary>Previews or explicitly creates a separate, empty private domain without accessing the configured old domain.</summary>
+    /// <param name="destination">Explicit fresh absolute directory beneath an existing non-linked parent.</param>
+    /// <param name="apply">False validates a non-mutating preview; true atomically creates the private destination.</param>
+    /// <param name="cancellationToken">Cancellation checked before creation and each initialization step.</param>
+    /// <param name="beforeRegistryPublication">Optional per-call interruption seam after marker publication; production omits it.</param>
+    /// <param name="onDirectoryCreated">Optional observation immediately after native root creation, including when later validation fails.</param>
+    /// <param name="beforeDestinationInspection">Optional race seam after retaining the parent and before inspecting the destination; production omits it.</param>
+    /// <param name="beforeDestinationReopen">Optional per-call race seam after the attributes probe and before reopening the destination; production omits it.</param>
+    /// <returns>The normalized destination path. No history, registrations, pins or deletion authority are transferred.</returns>
+    /// <remarks>
+    /// Existing destinations are always refused, including empty or valid stores. Creation uses the retained
+    /// parent's no-replace primitive. Cancellation or failure preserves any created private directory and
+    /// metadata for inspection; retry with a different fresh destination rather than adopting a partial result.
+    /// This is the safe schema-v1 alternative when independent continuity cannot be established.
+    /// </remarks>
+    internal static string CreateNewDomain(string destination, bool apply, CancellationToken cancellationToken, Action? beforeRegistryPublication = null,
+        Action? onDirectoryCreated = null, Action? beforeDestinationInspection = null, Action? beforeDestinationReopen = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        if (!Path.IsPathFullyQualified(destination)) throw new ArgumentException("An absolute new-domain destination is required.", nameof(destination));
+        var root = CoverageRunOutputLease.NormalizePlatformPath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination)));
+        RejectBroadStoreRoot(root);
+        cancellationToken.ThrowIfCancellationRequested();
+        using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(Path.GetDirectoryName(root)!, false, false)
+            ?? throw new DirectoryNotFoundException("The fresh domain's parent must already exist.");
+        beforeDestinationInspection?.Invoke();
+        // File/directory Exists helpers suppress errors and the Windows directory-only
+        // probe reports a regular file as absent. Treat any named entry as occupied.
+        FileAttributes? existingAttributes;
+        try { existingAttributes = File.GetAttributes(root); }
+        catch (FileNotFoundException) { existingAttributes = null; }
+        catch (DirectoryNotFoundException) { existingAttributes = null; }
+        if (existingAttributes.HasValue)
+            throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
+        beforeDestinationReopen?.Invoke();
+        using (var existing = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, false))
+            if (existing is not null) throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
+        parent.VerifyArtifactBinding();
+        if (!apply) return root;
+        cancellationToken.ThrowIfCancellationRequested();
+        using var directory = parent.CreateArtifactDirectory(Path.GetFileName(root), onCreated: onDirectoryCreated);
+        using var initialization = CoverageArtifactOperationLease.Acquire(root, exclusive: true);
+        initialization.VerifyBinding();
+        directory.VerifyArtifactBinding();
+        cancellationToken.ThrowIfCancellationRequested();
+        WriteNewJson(directory, MarkerName, new StoreMarker(1, directory.ArtifactDirectoryIdentity));
+        EnsurePrivateChild(directory, ArchivesName);
+        EnsurePrivateChild(directory, StagingName);
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = CoverageArtifactCapability.Verify(Path.Join(root, StagingName));
+        beforeRegistryPublication?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
+        WriteNewJson(directory, RegistryName, StoreRegistry.Empty);
+        directory.VerifyArtifactBinding();
+        return root;
+    }
+
     /// <summary>Opens or creates the current user's private artifact domain.</summary>
     /// <param name="overrideHome">Optional isolated domain root, primarily for explicit local configuration and tests.</param>
     /// <param name="clock">Optional clock for deterministic timestamps and maintenance budgets.</param>
+    /// <param name="observeIdentity">Per-call marker comparison seam; omission observes the retained native directory. It never replaces live binding checks.</param>
     /// <exception cref="IOException">The root is broad, linked, unsupported, or contains unknown store state.</exception>
     /// <exception cref="InvalidDataException">The marker, registry, or policy has an unsupported or invalid schema.</exception>
-    internal static CoverageArtifactStore Open(string? overrideHome = null, TimeProvider? clock = null)
+    internal static CoverageArtifactStore Open(string? overrideHome = null, TimeProvider? clock = null,
+        Func<CoverageRunOutputLease, string>? observeIdentity = null)
     {
         var configuredOverride = overrideHome ?? Environment.GetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME");
         var root = string.IsNullOrWhiteSpace(configuredOverride)
@@ -102,18 +161,15 @@ internal sealed class CoverageArtifactStore : IDisposable
             throw new IOException("The artifact domain contains unknown entries; preserve it for inspection.");
 
         var identity = directory.ArtifactDirectoryIdentity;
-        var marker = ReadOptionalJson<StoreMarker>(directory, MarkerName, 4096);
+        var marker = ReadMarker(directory);
         var initializing = marker is null;
         if (marker is null)
         {
             if (entries.Any(entry => entry.Name != ".appsurface-coverage-operation.lock"))
-                throw new IOException("An unmarked non-empty artifact domain is not owned by AppSurface.");
+                throw CoverageArtifactStoreFailure.MarkMissing(new IOException("An unmarked non-empty artifact domain is not owned by AppSurface."));
             WriteNewJson(directory, MarkerName, new StoreMarker(1, identity));
         }
-        else if (marker.SchemaVersion != 1 || !string.Equals(marker.PhysicalIdentity, identity, StringComparison.Ordinal))
-        {
-            throw new InvalidDataException("The artifact domain marker is invalid or belongs to a different directory identity.");
-        }
+        else ValidateMarker(marker, observeIdentity is null ? identity : observeIdentity(directory));
 
         EnsurePrivateChild(directory, ArchivesName);
         EnsurePrivateChild(directory, StagingName);
@@ -122,7 +178,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         var policy = ReadOptionalPolicy(directory) ?? DefaultPolicy();
         if (ReadOptionalJson<StoreRegistry>(directory, RegistryName, CoverageArtifactLimits.RegistryMaxBytes) is null)
         {
-            if (!initializing) throw new InvalidDataException("The owned store registry is missing; preserve the domain for reconciliation.");
+            if (!initializing) throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.RegistryInvalid);
             WriteNewJson(directory, RegistryName, StoreRegistry.Empty);
         }
         _ = ReadRegistry(directory);
@@ -132,8 +188,10 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <summary>Opens an existing private domain for status reads without creating or repairing any filesystem entry.</summary>
     /// <param name="overrideHome">Optional isolated domain root used by explicit configuration and tests.</param>
     /// <param name="clock">Optional clock retained for API symmetry; reads do not use it.</param>
+    /// <param name="observeIdentity">Per-call marker comparison seam; omission observes the retained native directory. Simulated observations are not native lifecycle evidence.</param>
     /// <returns>A read-only store; an absent domain is represented by an empty in-memory status view.</returns>
-    internal static CoverageArtifactStore OpenReadOnly(string? overrideHome = null, TimeProvider? clock = null)
+    internal static CoverageArtifactStore OpenReadOnly(string? overrideHome = null, TimeProvider? clock = null,
+        Func<CoverageRunOutputLease, string>? observeIdentity = null)
     {
         var configuredOverride = overrideHome ?? Environment.GetEnvironmentVariable("APPSURFACE_ARTIFACT_HOME");
         var root = string.IsNullOrWhiteSpace(configuredOverride)
@@ -151,18 +209,15 @@ internal sealed class CoverageArtifactStore : IDisposable
             if (directory.EnumerateArtifactEntries(16).Any(entry => !allowed.Contains(entry.Name)))
                 throw new IOException("The artifact domain contains unknown entries; preserve it for inspection.");
             var identity = directory.ArtifactDirectoryIdentity;
-            var marker = ReadOptionalJson<StoreMarker>(directory, MarkerName, 4096)
-                ?? throw new InvalidDataException("The existing artifact domain has no valid ownership marker.");
-            if (marker.SchemaVersion != 1 || !string.Equals(marker.PhysicalIdentity, identity, StringComparison.Ordinal))
-                throw new InvalidDataException("The artifact domain marker is invalid or belongs to a different directory identity.");
+            var marker = ReadMarker(directory)
+                ?? throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.MarkerMissing);
+            ValidateMarker(marker, observeIdentity is null ? identity : observeIdentity(directory));
             foreach (var name in new[] { ArchivesName, StagingName })
             {
                 using var child = CoverageRunOutputLease.AcquireArtifactDirectory(Path.Join(root, name), false, true)
                     ?? throw new InvalidDataException("The marked artifact domain is missing a required private directory.");
             }
-            var registry = ReadOptionalJson<StoreRegistry>(directory, RegistryName, CoverageArtifactLimits.RegistryMaxBytes)
-                ?? throw new InvalidDataException("The existing artifact domain has no registry.");
-            ValidateRegistry(registry);
+            _ = ReadRegistry(directory);
             var policy = ReadOptionalPolicy(directory) ?? DefaultPolicy();
             return new CoverageArtifactStore(root, clock ?? TimeProvider.System, policy, readOnly: true);
         }
@@ -993,6 +1048,27 @@ internal sealed class CoverageArtifactStore : IDisposable
         if (_readOnly) throw new InvalidOperationException("This artifact store was opened read-only.");
     }
 
+    /// <summary>Reads bounded schema-v1 ownership metadata; missing is distinguished from malformed bytes.</summary>
+    private static StoreMarker? ReadMarker(CoverageRunOutputLease directory)
+    {
+        try { return ReadOptionalJson<StoreMarker>(directory, MarkerName, 4096); }
+        catch (Exception exception) when (exception is InvalidDataException or JsonException)
+        {
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.MarkerInvalid, exception);
+        }
+    }
+
+    /// <summary>Requires the complete native identity; schema-v1 contains no independent remount continuity proof.</summary>
+    private static void ValidateMarker(StoreMarker marker, string identity)
+    {
+        if (marker.SchemaVersion != 1)
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.MarkerSchemaUnsupported);
+        if (string.IsNullOrWhiteSpace(marker.PhysicalIdentity))
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.MarkerInvalid);
+        if (!string.Equals(marker.PhysicalIdentity, identity, StringComparison.Ordinal))
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailure.CompareIdentity(marker.PhysicalIdentity, identity));
+    }
+
     private sealed record StoreMarker(int SchemaVersion, string PhysicalIdentity);
     private sealed record ExpiryReceipt(string RunId, string Outcome, long StoredBytes, DateTimeOffset ExpiredAtUtc, string Reason);
     private sealed record StoreRegistry(int SchemaVersion, StoreRegistration[] Registrations, StoreReservation[] Reservations,
@@ -1037,14 +1113,22 @@ internal sealed class CoverageArtifactStore : IDisposable
     private static CoverageArtifactPolicy? ReadOptionalPolicy(CoverageRunOutputLease root)
     {
         using var stream = TryOpen(root, PolicyName);
-        return stream is null ? null : CoverageArtifactPolicy.Read(stream);
+        try { return stream is null ? null : CoverageArtifactPolicy.Read(stream); }
+        catch (InvalidDataException exception)
+        {
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.PolicyInvalid, exception);
+        }
     }
 
     private static T? ReadOptionalJson<T>(CoverageRunOutputLease root, string name, long maximumBytes) where T : class
     {
         using var stream = TryOpen(root, name);
         if (stream is null) return null;
-        return CoverageArtifactJson.Read<T>(stream, maximumBytes, JsonOptions);
+        try { return CoverageArtifactJson.Read<T>(stream, maximumBytes, JsonOptions); }
+        catch (Exception exception) when (name == RegistryName && exception is InvalidDataException or JsonException)
+        {
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.RegistryInvalid, exception);
+        }
     }
 
     private static FileStream? TryOpen(CoverageRunOutputLease root, string name)
@@ -1063,10 +1147,17 @@ internal sealed class CoverageArtifactStore : IDisposable
 
     private static StoreRegistry ReadRegistry(CoverageRunOutputLease root)
     {
-        var registry = ReadOptionalJson<StoreRegistry>(root, RegistryName, CoverageArtifactLimits.RegistryMaxBytes)
-            ?? throw new InvalidDataException("The artifact registry is missing; preserve the store for inspection.");
-        ValidateRegistry(registry);
-        return registry;
+        try
+        {
+            var registry = ReadOptionalJson<StoreRegistry>(root, RegistryName, CoverageArtifactLimits.RegistryMaxBytes)
+                ?? throw new InvalidDataException("The artifact registry is missing.");
+            ValidateRegistry(registry);
+            return registry;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or JsonException)
+        {
+            throw CoverageArtifactStoreFailure.Invalid(CoverageArtifactStoreFailureKind.RegistryInvalid, exception);
+        }
     }
 
     private static void ValidateRegistry(StoreRegistry registry)

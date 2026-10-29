@@ -875,12 +875,12 @@ packages:
     classification: excluded
     publish_decision: do_not_publish
     product_family: internal_support
-    publish_reason: This disposable exact-package consumer verifies PostgreSQL runtime preflight and is not distributed as a package.
+    publish_reason: This source-backed PostgreSQL preflight development consumer is not distributed as a package.
     release_status: excluded
     commercial_status: not_applicable
     release_notes_path: releases/unreleased.md
     order: 212
-    note: Non-packable release proof controller for complete runtime role sets, exact candidate and published package bytes, and guarded lane execution. See the [artifact proof reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845).
+    note: Non-packable source-backed consumer for local development and dependency discovery. Its companion package-only template supplies release artifact proof. See the [artifact proof reference](../tools/ForgeTrust.AppSurface.PackageIndex/README.md#durable-preflight-artifact-proof-845).
   - project: Durable/compatibility/LegacyCoreProviderAbiConsumer/LegacyCoreProviderAbiConsumer.csproj
     classification: excluded
     publish_decision: do_not_publish
