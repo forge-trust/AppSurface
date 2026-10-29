@@ -25,7 +25,7 @@ or pinning any phase input. A private ext4 backing filesystem limits storage to
 8 GiB and 131,072 inodes; the phase cannot reach its root-only host parent. The
 namespace contains only the fixed runtime/tool closure, immutable validator and
 inputs, the two disposable build trees, handoff, output, and private temporary
-storage. The workflow installs exactly SDK 10.0.401 into a fresh fixed `/opt/appsurface-completed-dotnet` tree and transfers that tree to root ownership before use; this prevents a newer preinstalled SDK from winning version selection. SDK discovery must select exactly 10.0.401. Fixed runtime ELF dependencies and the Ubuntu 24.04 ICU 74/OpenSSL 3 libraries are copied with verified duplicate bytes; the host filesystem is never mounted wholesale. Unsupported Linux, process,
+storage. The workflow installs exactly SDK 10.0.401 into a fresh fixed `/var/lib/appsurface-completed-dotnet` tree and transfers that tree to root ownership before use; this prevents a newer preinstalled SDK from winning version selection. `/var/lib` is checked as root-owned and not writable by group or other; the selected SDK and every ancestor must also be root-owned directories with no group/other write bits. The runner image makes `/opt` group/other writable, so the pinned SDK stays under `/var/lib`; the namespace still binds the selected tree read-only at `/usr/share/dotnet`. SDK discovery must select exactly 10.0.401. Fixed runtime ELF dependencies and the Ubuntu 24.04 ICU 74/OpenSSL 3 libraries are copied with verified duplicate bytes; the host filesystem is never mounted wholesale. Unsupported Linux, process,
 namespace, mount, cgroup, ownership, or quota facts reject before target release.
 
 The internal `phase prepare|replay|close|control` command is a fixed launcher inside
@@ -81,6 +81,11 @@ acceptance, or product admission. Those require the existing protected-main
 [qualification workflow](../../workflows/evidencehost-protected-qualification.yml),
 original artifacts, fixed validators and unchanged numerical gate. No finalizer is
 enabled merely by adding this tool.
+
+For a failed synthetic control, already bounded stdout/stderr are retained only
+after both capture pumps join and while the original deadline remains. This keeps
+systemd and namespace startup errors available for diagnosis. These control phases
+receive no provider token; the diagnostics never prove settlement or grant authority.
 
 ## Source checkout trust
 

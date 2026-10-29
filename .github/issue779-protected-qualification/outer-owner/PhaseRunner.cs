@@ -45,6 +45,7 @@ internal static class PhaseRunner
         var settled = false;
         var systemdRunJoined = false;
         var pumpsJoined = false;
+        var streamsHandled = false;
         Exception? primaryError = null;
         NativeFacts.PhaseWitness? witness = null;
         var spawnEscapeObserved = false;
@@ -105,6 +106,7 @@ internal static class PhaseRunner
                 if (exitCode != 0) failureStage = PhaseStage.Child;
                 if (Volatile.Read(ref outputOverflow) != 0) throw new IsolationException("phase-output-overflow");
                 var streams = await output.ConfigureAwait(false);
+                streamsHandled = true;
                 var tokenBytes = release.Token is null ? null : Encoding.UTF8.GetBytes(release.Token);
                 try
                 {
@@ -184,6 +186,31 @@ internal static class PhaseRunner
             }
             if (primaryError is not null && phase == OwnerPhase.Control)
             {
+                if (!streamsHandled && stdoutPump?.IsCompletedSuccessfully == true
+                    && stderrPump?.IsCompletedSuccessfully == true && !deadline.IsCancellationRequested)
+                {
+                    // Only synthetic controls use this failure diagnostic. Both bounded pumps
+                    // have joined, and no credential-bearing release can reach this branch.
+                    var streams = await Task.WhenAll(stdoutPump, stderrPump).ConfigureAwait(false);
+                    try
+                    {
+                        await using var stdout = new FileStream(standardOutputPath, FileMode.Open,
+                            FileAccess.Write, FileShare.Read, 4096, FileOptions.Asynchronous);
+                        await using var stderr = new FileStream(standardErrorPath, FileMode.Open,
+                            FileAccess.Write, FileShare.Read, 4096, FileOptions.Asynchronous);
+                        await WriteSanitizedAsync(stdout, streams[0].Bytes, null, deadline.Token).ConfigureAwait(false);
+                        await WriteSanitizedAsync(stderr, streams[1].Bytes, null, deadline.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception error) when (error is IOException or UnauthorizedAccessException or OperationCanceledException)
+                    {
+                        // Diagnostic I/O never replaces the original failure or proves settlement.
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(streams[0].Bytes);
+                        CryptographicOperations.ZeroMemory(streams[1].Bytes);
+                    }
+                }
                 // These bytes are allowlisted diagnostics, never child text or a release-frame value.
                 await File.AppendAllTextAsync(standardErrorPath,
                     "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n",

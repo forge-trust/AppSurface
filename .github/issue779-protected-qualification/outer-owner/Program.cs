@@ -15,6 +15,8 @@ internal static class Program
                 or "dotnet-runtime-dependencies" or "dotnet-dlopen-library" or "dotnet-dlopen-dependencies"
                 or "source-clone" or "source-checkout" or "capture-commit-unavailable" or "git-command"
                 or "rootfs-directory-shape" or "tool-parent-shape" or "tool-parent-private-path"
+                or "sdk-host-path" or "sdk-host-directory" or "sdk-host-binary" or "sdk-version"
+                or "sdk-identity" or "sdk-path-identity" or "sdk-stage"
                 or "custody-file-shape" or "tracked-mode" or "source-file-binding" or "source-index-binding"
                 or "source-not-clean" or "git-metadata-file" or "git-metadata-directory" or "git-config-shape"
                 or "uid-range-exhausted" or "getent-failed" or "uid-marker-open" or "utility-contract"

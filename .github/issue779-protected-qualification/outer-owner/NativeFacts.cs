@@ -650,6 +650,7 @@ internal static class NativeFacts
 
     internal static string ReadCanonicalSdkPath(OwnerLayout layout)
     {
+        OwnerWorkspace.MarkSdkValidationStage("sdk-path-validation");
         var pathFile = Path.Combine(layout.HostRoot, "sdk.hostpath");
         var fd = Open(pathFile, 0x80000 | 0x20000 | 0x800); // O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK
         if (fd < 0) throw new IsolationException("sdk-host-path");
@@ -667,29 +668,43 @@ internal static class NativeFacts
         var text = new UTF8Encoding(false, true).GetString(bytes);
         if (!text.EndsWith('\n') || text[..^1].Contains('\n') || text.Contains('\r')
             || !Path.IsPathFullyQualified(text[..^1]) || Path.GetFullPath(text[..^1]) != text[..^1]
-            || text[..^1] is not ("/opt/appsurface-completed-dotnet" or "/usr/share/dotnet" or "/usr/local/share/dotnet"))
+            || text[..^1] is not (OwnerWorkspace.OwnedSdkDirectory or "/usr/share/dotnet" or "/usr/local/share/dotnet"))
             throw new IsolationException("sdk-host-path");
         var sdkPath = text[..^1];
         var directories = new List<string>();
         for (var current = sdkPath; current != "/"; current = Path.GetDirectoryName(current)!) directories.Add(current);
         directories.Add("/");
+        OwnerWorkspace.MarkSdkValidationStage("sdk-directory-validation");
         foreach (var directory in directories)
         {
             var metadata = FileSystemInfoStat.ReadNoFollow(directory);
-            if ((metadata.Mode & 0xf000) != 0x4000 || metadata.Uid != 0 || (metadata.Mode & 0x12) != 0)
+            if (!IsTrustedSdkDirectoryFact(directory, sdkPath, metadata.Uid, metadata.Mode,
+                    (metadata.Mode & 0xf000) == 0x4000))
                 throw new IsolationException("sdk-host-directory");
         }
         return sdkPath;
     }
 
+    /// <summary>Pure policy for one canonical SDK ancestor fact; write bits, nonroot owners and links fail closed.</summary>
+    internal static bool IsTrustedSdkDirectoryFact(string directory, string sdkPath, uint uid, uint mode, bool isDirectory)
+    {
+        if (!Path.IsPathFullyQualified(directory) || Path.GetFullPath(directory) != directory
+            || !Path.IsPathFullyQualified(sdkPath) || Path.GetFullPath(sdkPath) != sdkPath
+            || !isDirectory || uid != 0 || (mode & 0x12) != 0) return false;
+        return directory == "/" || sdkPath == directory
+            || sdkPath.StartsWith(directory.TrimEnd('/') + "/", StringComparison.Ordinal);
+    }
+
     internal static async Task VerifySdkAsync(OwnerLayout layout, CancellationToken cancellationToken)
     {
         var sdk = ReadCanonicalSdkPath(layout);
+        OwnerWorkspace.MarkSdkValidationStage("sdk-executable-validation");
         var binaryPath = sdk + "/dotnet";
         var binary = FileSystemInfoStat.Read(binaryPath);
         if ((binary.Mode & 0xf000) != 0x8000 || binary.Uid != 0 || (binary.Mode & 0x12) != 0
             || (binary.Mode & 0x1) == 0)
             throw new IsolationException("sdk-host-binary");
+        OwnerWorkspace.MarkSdkValidationStage("sdk-version-validation");
         var result = await RunTextAsync(binaryPath, ["--version"], cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.Text.Trim() != "10.0.401") throw new IsolationException("sdk-version");
     }
