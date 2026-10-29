@@ -302,7 +302,8 @@ internal sealed class CloudTasksPackageConsumerProof
         var environment = ProofEnvironment(proofCache, proofCli);
         foreach (var id in NeutralPackages)
         {
-            var project = ProjectPath(baselineRoot, id);
+            // Keep project-reference identities consistent when the temporary root has a filesystem alias.
+            var project = Path.GetRelativePath(baselineRoot, ProjectPath(baselineRoot, id));
             await _runner.RunAsync(new CommandRunRequest("dotnet", ["restore", project, "--configfile", Path.Combine(baselineRoot, "NuGet.package-gate.config"),
                 "-m:1", "-p:Version=" + request.PackageVersion, "-p:PackageVersion=" + request.PackageVersion,
                 "-p:RepositoryCommit=" + (request.SourceCommit ?? string.Empty), "-p:SourceRevisionId=" + candidateCommit,

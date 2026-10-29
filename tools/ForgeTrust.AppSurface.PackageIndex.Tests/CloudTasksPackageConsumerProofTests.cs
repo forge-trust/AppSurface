@@ -293,6 +293,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                 Assert.Equal("<Project />", runner.EmptyBuildPropsContents[runner.ConsumerRestoreRequests.IndexOf(command)]);
             });
             Assert.Equal(6, runner.ConsumerRestoreRequests.Count);
+            Assert.Equal(4, runner.BaselineRestoreRequests.Count);
+            Assert.Equal(4, runner.BaselinePackRequests.Count);
+            Assert.All(runner.BaselineRestoreRequests.Concat(runner.BaselinePackRequests), command =>
+            {
+                var project = command.Arguments[1];
+                Assert.False(Path.IsPathRooted(project));
+                Assert.DoesNotContain("..", project.Split(Path.DirectorySeparatorChar));
+            });
         }
 
         // protects=historical acceptance binds to the unique target merge-base and records its mode; fails_when=an arbitrary ref or candidate commit is reported as the reviewed baseline; no_claim=does not prove the target branch is protected from later movement.
@@ -786,11 +794,14 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
             internal List<CommandRunRequest> CandidateRevisionRequests { get; } = [];
             internal List<CommandRunRequest> BaselineMergeBaseRequests { get; } = [];
             internal List<CommandRunRequest> BaselinePackRequests { get; } = [];
+            internal List<CommandRunRequest> BaselineRestoreRequests { get; } = [];
             internal List<CommandRunRequest> ConsumerExecutionRequests { get; } = [];
 
             public Task<CommandRunResult> RunAsync(CommandRunRequest request, CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (request.OperationName is "Cloud Tasks pinned baseline restore" or "Cloud Tasks pinned baseline pack")
+                    Assert.True(File.Exists(TestPathUtils.PathUnder(request.WorkingDirectory, request.Arguments[1])));
                 if (request.OperationName == "Cloud Tasks candidate source revision")
                 {
                     CandidateRevisionRequests.Add(request);
@@ -807,6 +818,11 @@ namespace ForgeTrust.AppSurface.PackageIndex.Tests
                     var output = GetArgument(request.Arguments, "--output");
                     Directory.CreateDirectory(output);
                     File.Copy(candidatePackages[request.Subject], Path.Combine(output, $"{request.Subject}.{candidateVersion}.nupkg"));
+                    return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
+                }
+                if (request.OperationName == "Cloud Tasks pinned baseline restore")
+                {
+                    BaselineRestoreRequests.Add(request);
                     return Task.FromResult(new CommandRunResult(string.Empty, string.Empty));
                 }
                 if (request.OperationName.Contains("consumer restore", StringComparison.OrdinalIgnoreCase))
