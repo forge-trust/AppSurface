@@ -76,6 +76,13 @@ internal static class PolicyControls
             || !BootstrapCommand.DiagnosticScript.EndsWith("exec \"$@\"", StringComparison.Ordinal))
             throw new IsolationException("bootstrap-command-control");
         count++;
+        var bootstrapStart = new System.Diagnostics.ProcessStartInfo("/usr/bin/systemd-run");
+        BootstrapCommand.ConfigureCapabilities(bootstrapStart);
+        if (!bootstrapStart.ArgumentList.SequenceEqual([
+                "--property=CapabilityBoundingSet=CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_CHROOT",
+                "--property=AmbientCapabilities=CAP_SETUID"]))
+            throw new IsolationException("bootstrap-capability-control");
+        count++;
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")

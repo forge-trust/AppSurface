@@ -95,6 +95,15 @@ filter rejection; it does not change the UID transition or accept a failed probe
 Prepare, replay and close do not add this diagnostic prefix. No environment,
 credential, arbitrary security-label text or caller-selected command is printed.
 
+The fixed bootstrap explicitly carries only `CAP_SETUID` in systemd's
+[ambient capability set](https://www.freedesktop.org/software/systemd/man/256/systemd.exec.html#AmbientCapabilities=)
+so the intended UID transition survives the `unshare` exec. The existing five-item
+bounding set is unchanged. The original `setpriv` command clears bounding,
+inheritable and ambient capabilities before execing the nonroot launcher; both
+the launcher and the independent root readiness check retain their actual
+credential, zero-capability and no-new-privileges requirements. Ambient retention
+is bootstrap setup only and never grants a target capability or admission.
+
 ## Source checkout trust
 
 The root setup reads the runner-owned checkout through Git's local transport with

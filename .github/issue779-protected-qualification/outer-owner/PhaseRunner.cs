@@ -276,7 +276,7 @@ internal static class PhaseRunner
         AddProperty(start, "UMask", "0077");
         AddProperty(start, "TimeoutStopSec", "1s");
         AddProperty(start, "RuntimeMaxSec", runtime.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + "s");
-        AddProperty(start, "CapabilityBoundingSet", "CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_SYS_CHROOT");
+        BootstrapCommand.ConfigureCapabilities(start);
 
         start.ArgumentList.Add("--");
         start.ArgumentList.Add("/usr/bin/unshare");
