@@ -81,6 +81,7 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// <param name="beforeRegistryPublication">Optional per-call interruption seam after marker publication; production omits it.</param>
     /// <param name="onDirectoryCreated">Optional observation immediately after native root creation, including when later validation fails.</param>
     /// <param name="beforeDestinationInspection">Optional race seam after retaining the parent and before inspecting the destination; production omits it.</param>
+    /// <param name="beforeDestinationReopen">Optional per-call race seam after the attributes probe and before reopening the destination; production omits it.</param>
     /// <returns>The normalized destination path. No history, registrations, pins or deletion authority are transferred.</returns>
     /// <remarks>
     /// Existing destinations are always refused, including empty or valid stores. Creation uses the retained
@@ -89,7 +90,7 @@ internal sealed class CoverageArtifactStore : IDisposable
     /// This is the safe schema-v1 alternative when independent continuity cannot be established.
     /// </remarks>
     internal static string CreateNewDomain(string destination, bool apply, CancellationToken cancellationToken, Action? beforeRegistryPublication = null,
-        Action? onDirectoryCreated = null, Action? beforeDestinationInspection = null)
+        Action? onDirectoryCreated = null, Action? beforeDestinationInspection = null, Action? beforeDestinationReopen = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
         if (!Path.IsPathFullyQualified(destination)) throw new ArgumentException("An absolute new-domain destination is required.", nameof(destination));
@@ -107,6 +108,7 @@ internal sealed class CoverageArtifactStore : IDisposable
         catch (DirectoryNotFoundException) { existingAttributes = null; }
         if (existingAttributes.HasValue)
             throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
+        beforeDestinationReopen?.Invoke();
         using (var existing = CoverageRunOutputLease.AcquireArtifactDirectory(root, false, false))
             if (existing is not null) throw new IOException("The new domain destination already exists; preserve it and choose a fresh path.");
         parent.VerifyArtifactBinding();

@@ -14,6 +14,33 @@ namespace ForgeTrust.AppSurface.Cli.Tests;
 [Collection("CoverageGate process state")]
 public sealed class CoverageStorageCommandNewDomainTests
 {
+    /// <summary>Refuses an entrant between the attributes probe and retained-directory reopen without adopting its bytes.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NewDomain_CompetingDirectoryBeforeReopenNeverCreatesOrAdopts(bool apply)
+    {
+        using var temp = TestDirectory.Create();
+        using var parent = CoverageRunOutputLease.AcquireArtifactDirectory(temp.Path, false, false)!;
+        var destination = Path.Join(temp.Path, "competing-domain");
+        var publications = 0;
+        Assert.Throws<IOException>(() => CoverageArtifactStore.CreateNewDomain(destination, apply, CancellationToken.None,
+            onDirectoryCreated: () => publications++, beforeDestinationReopen: () =>
+            {
+                Assert.False(Directory.Exists(destination));
+                using var competitor = parent.CreateArtifactDirectory("competing-domain");
+                using var sentinel = competitor.OpenArtifactFile("sentinel", createNew: true);
+                sentinel.Write("belongs to the competing creator"u8);
+                sentinel.Flush(true);
+            }));
+
+        Assert.Equal(0, publications);
+        Assert.Equal("belongs to the competing creator", File.ReadAllText(Path.Join(destination, "sentinel")));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
+        Assert.False(File.Exists(Path.Join(destination, "store.json")));
+        Assert.False(File.Exists(Path.Join(destination, "registry.json")));
+    }
+
     /// <summary>Refuses preview and apply after the retained immediate parent is moved, preserving its bytes without creating a domain.</summary>
     [Theory]
     [InlineData(false)]
