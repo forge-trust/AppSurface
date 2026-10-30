@@ -81,6 +81,45 @@ remains authored content; after that, retain the markers exactly.
    paths with Cobertura paths. A fixture nested inside this checkout must use that explicit root: the CLI's
    automatic Git-root detection otherwise selects the outer checkout and cannot match consumer-relative paths.
 
+## Cloud Tasks packed isolation proof (#892)
+
+When CloudTasks is in the verification plan, `verify-packages` requires the
+[packed isolation proof](../../Durable/cloudtasks-activation.md#packed-package-proof-and-first-party-reproducibility) before writing a successful artifact manifest.
+It builds and runs the public GCP consumer from exact validated local archives, checks the complete pinned SDK closure,
+and compares independent packed baseline and candidate neutral consumers in isolated caches. Invalid-token rejection
+before provider I/O, direct/transitive dependency isolation, public SDK-type leak scans and artifact hash bindings remain required.
+The API scan includes generic type and method constraints and protected members exposed to external subclasses.
+Each new verification attempt removes the previous Cloud Tasks success report before restoring or packing artifacts,
+so a failed rerun cannot leave that earlier success beside new artifacts.
+Baseline restore and pack commands resolve project paths relative to their extracted source working directory;
+this preserves transitive project references when the operating system aliases a temporary directory path.
+
+Ordinary `verify-packages` runs archive the candidate source commit (producer `--source-commit`, or canonical `HEAD`)
+as the neutral baseline. Main pushes and tagged publication use the same snapshot rule, so later committed neutral
+source or package-pin updates do not compare against a permanent historical tree. Dirty neutral source/build-input
+changes still fail parity against the selected committed snapshot. This mode checks current artifact isolation; it
+does not establish historical no-change evidence.
+
+For strict historical acceptance, supply `--cloudtasks-baseline-ref origin/main` after fetching the target ref and
+its full history. The verifier requires one canonical `git merge-base --all` result with the candidate source commit,
+records the resolved SHA and mode, and preserves historical source/build parity. A missing or ambiguous merge-base,
+or a historical ref resolving to the candidate itself, fails with no fallback. Use the reviewed earlier commit/ref
+for post-merge historical replay; omit the option for ordinary verification. The [local orchestration script](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/scripts/verify-cloudtasks-activation.sh)
+accepts this as its second argument: `./scripts/verify-cloudtasks-activation.sh /tmp/cloudtasks-acceptance origin/main`.
+
+Only the two allowlisted central declarations (`Google.Cloud.Tasks.V2` and the project-conditioned `Grpc.Net.Client`)
+are normalized. Their versions must match exactly one direct root each in the candidate CloudTasks `packages.lock.json`;
+the lock hash is recorded. The historical baseline may omit both declarations; a candidate-source baseline contains
+both exact validated declarations. Missing, partial, duplicate, mismatched or differently conditioned declarations
+fail. Every other central policy entry and all neutral source/build inputs remain exact.
+
+The [approved plan](../../docs/plans/issue-892-cloudtasks-activation-transport.md)
+allows binary differences only for Core, Flow, Workers and Durable after unchanged authored sources/projects,
+Flow.Generators and shared build inputs are proved. Packed framework/dependency contracts, library entry sets,
+external package IDs/versions/hashes/edges and each restored local archive binding remain exact; both raw archive
+and library hashes are retained. Any failed check withholds the manifest. Normalization approval alone proves
+neither a successful run nor publication authority; use the [package guide](../../Durable/ForgeTrust.AppSurface.Durable.CloudTasks/README.md#local-proof) for local commands and proof limits.
+
 ## Tailwind artifact provenance (#798)
 
 The reusable [native evidence workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/tailwind-native-host-evidence.yml) selects the frozen inventory through `artifact_manifest_file`. Its optional string default is `package-artifact-manifest.json` for manual rehearsal; both release publishers pass `package-artifact-manifest.unapproved.json`. Only those two basenames are accepted, and all native proof, mutation and aggregate commands use the selected file without discovery or aliasing. The [provenance reference](../../docs/tailwind-artifact-provenance.md#shared-bundle-and-producer-identity) explains the stage boundary: native proof validates the original manifest bytes; protected publication still validates the separate PostgreSQL candidate receipt before consuming the byte-identical approved copy.
@@ -101,10 +140,15 @@ defines the candidate, published and deployment gates for complete runtime-set p
 [disposable package consumer](../../Durable/consumers/PostgreSqlPreflightConsumer/Program.cs) for one pair, enrollment
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
-Its project is checked in as a `.csproj.template`, then materialized with its source files and repository build policy
-inside the proof's private scratch workspace. This keeps automatic dependency-submission restores from discovering
-the proof project without its manifest-derived `AppSurfacePackageVersion`; the carrier passes the exact verified
-bundle version and still verifies restored first-party archive bytes against the artifact manifest.
+Its [project template](https://github.com/forge-trust/AppSurface/blob/3e2f8d2833afaf894f5e653530c25f899a8c0326/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
+is materialized with its C# sources and repository build policy only in the proof's private workspace by
+[`materialize-preflight-consumer.sh`](https://github.com/forge-trust/AppSurface/blob/cc9b4bb910436dd4369fe7ce42f3f1cb547cb93d/Durable/materialize-preflight-consumer.sh).
+This keeps the artifact-only consumer out of automatic `.csproj` restore discovery. The carrier's
+`--consumer-project-template` accepts the authored `PostgreSqlPreflightConsumer.csproj.template` and supplies
+`AppSurfacePackageVersion` from the verified bundle on every restore and run; there is no default feed version.
+Restored first-party archive bytes must still match the artifact manifest.
+Run the carrier rather than restoring the template directly. The owned workspace and generated project are
+removed on success or failure; source files and the template stay in the checkout.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule
@@ -280,7 +324,9 @@ For failures after replacement commands return, `FailurePhase` identifies the lo
 
 Test phases additionally carry an optional `TestRun` observation from the TRX logger: `Status` is `observed`, `missing`, or `invalid`; `Total`, `Executed`, `Passed`, and `Failed` are bounded counters; `FailedMethodSha256` contains up to 16 distinct hashes sorted ordinally. Each hash is SHA-256 of UTF-8 `TestMethod.className`, a newline, and `TestMethod.name`, using the exact XML attribute values (including any assembly suffix). Match those hashes against the known generated test methods when a failed phase needs triage. Hashes group theory cases by their method identity rather than retaining display names or arguments. Raw TRX files, failure messages, stack traces and child streams stay in the temporary proof workspace; the results directory permits only its owner on Unix. Owned cleanup deletes the files, but uncertain cleanup can retain the workspace and must be investigated before removal. The reader accepts at most one MiB of regular TRX XML, prohibits DTDs and external entities, and caps counters at 10,000 tests and method attributes at 1,024 characters each. Missing, oversized or malformed diagnostics report zero counters and no method hashes. This observation is diagnostic only: it never replaces the command exit code, truncation checks, checkpoint assertions or publication validation. An exit-one test phase with a missing report remains undiagnosed; `observed` counters can distinguish reported assertion failures from a process failure with no failed test case.
 
-Failed generated `FirstDurableWork` cases can additionally carry `TestRun.FirstWorkFailures`: at most 16 distinct records containing only `Phase`, `Code`, and `Cleanup`. The internal `DurableTemplateFirstWorkDiagnostic` parser accepts the fixture's fixed failure marker only from failed TRX results bound to the exact first-work method and class. Known phase and exception-category values are retained; an unknown code becomes `Other`, an unknown cleanup observation becomes `unknown`, and unknown phases or ambiguous duplicate markers are withheld. It inspects at most one MiB of output and rejects marker lines over 4,096 characters. Arbitrary marker text, exception messages, stack locations, paths, arguments and retry prose are never copied into receipts. This additive field is absent when no valid marker exists, including successful tests. It helps select a reproduction after a failure; it cannot establish a cause by itself or change any command exit, checkpoint, timing, cleanup or publication gate. See the [first-work recipe](../../start-here/durable-worker.md#three-command-first-proof) for the actual execution contract.
+Failed generated `FirstDurableWork` cases can additionally carry `TestRun.FirstWorkFailures`: at most 16 distinct records containing `Phase`, `Code`, and `Cleanup`. The internal `DurableTemplateFirstWorkDiagnostic` parser accepts the fixture's fixed failure marker only from failed TRX results bound to the exact first-work method and class. Known phase and exception-category values are retained; an unknown code becomes `Other`, an unknown cleanup observation becomes `unknown`, and unknown phases or ambiguous duplicate markers are withheld. It inspects at most one MiB of output and rejects marker lines over 4,096 characters. Arbitrary marker text, exception messages, stack locations, paths, arguments and retry prose are never copied into receipts. This additive field is absent when no valid marker exists, including successful tests. It helps select a reproduction after a failure; it cannot establish a cause by itself or change any command exit, checkpoint, timing, cleanup or publication gate. See the [first-work recipe](../../start-here/durable-worker.md#three-command-first-proof) for the actual execution contract.
+
+For `postgresql-fixture-setup` failures, an optional `SetupOperation` projects reviewed async fixture method names to one of three closed labels: `docker-prerequisite`, `pinned-image-acquisition`, or `owned-fixture-setup`. The last label includes both container startup and provisioning. The parser examines at most four method frames of at most 256 characters each and accepts only an exact reviewed state-machine name with an ASCII numeric ordinal and `.MoveNext` suffix. Unrecognized frames are ignored; no reviewed frame, conflicting specific operations, or exceeded frame bounds omit the label. A specific preflight operation takes precedence over its enclosing setup method. No raw frame text is retained. An absent label means the operation is undiagnosed. A label identifies a setup boundary, not its underlying cause or infrastructure ownership; `Cleanup: none` still reports only the outer test's cleanup observation and does not rule out cleanup inside fixture setup.
 
 The [package artifact workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-artifacts.yml) and [package gate workflow](https://github.com/forge-trust/AppSurface/blob/main/.github/workflows/package-gate.yml) retain `durable-template-consumer-proof.json` in their package-validation diagnostic artifacts when the installed consumer proof fails. The artifact workflow always attempts diagnostic upload; the package gate uploads on failure. Inspect the receipt's safe failure phase and any `TestRun.FirstWorkFailures` marker before choosing a reproduction; the failed proof still withholds the package manifest. Only this bounded receipt is uploaded for the Durable proof, so its private child and provider streams remain outside the diagnostic artifact. If execution fails before a receipt is written, the diagnostic upload may contain no Durable receipt.
 

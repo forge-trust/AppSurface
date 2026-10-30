@@ -16,6 +16,7 @@ AppSurface Durable is a public-preview package family for portable durable contr
   for work, Flow, schedules, serialization, registration, and clients.
 - [`ForgeTrust.AppSurface.Durable.Provider`](ForgeTrust.AppSurface.Durable.Provider/README.md) is the runtime-provider and
   operator SPI for claims, pumping, health, drain, recovery, and controlled repair.
+- [`ForgeTrust.AppSurface.Durable.CloudTasks`](ForgeTrust.AppSurface.Durable.CloudTasks/README.md) is an optional GCP-specific creation transport for a named empty wake to an existing activation host. Use the [activation reference](cloudtasks-activation.md) for credentials, receipts, bounds, and recovery; local fixtures do not establish live Google identity or delivery.
 - [`ForgeTrust.AppSurface.Durable.PostgreSql`](ForgeTrust.AppSurface.Durable.PostgreSql/README.md) is the first
   authoritative-store implementation. Slices 3–6 supply explicit schema management, Work, Flow, Schedule, and an
   explicitly opted-in hosted runtime.
@@ -24,11 +25,11 @@ AppSurface Durable is a public-preview package family for portable durable contr
   It does not simulate persistence or replace real-provider conformance tests.
 - [`ForgeTrust.AppSurface.Durable.Templates`](ForgeTrust.AppSurface.Durable.Templates/README.md) provides a native `dotnet new` starter for a standalone external-activation host. The template package is not a runtime dependency; generated projects use coordinated Durable preview package references.
 
-The four runtime/API packages participate in the coordinated prerelease publish plan; the template package is a
-separately installed generation tool whose emitted projects use the coordinated package graph. These surfaces remain
-public previews: adopt them
-only with the reviewed schema, role, recovery, and operational evidence described below, and do not treat the preview
-as production support.
+The core Durable, Provider, PostgreSQL, and Testing packages participate in the coordinated prerelease publish plan;
+the template package is a separately installed generation tool whose emitted projects use that coordinated package
+graph. The optional Cloud Tasks transport is tracked separately behind its package readiness gate. These surfaces remain
+public previews: adopt them only with the reviewed schema, role, recovery, and operational evidence described below, and
+do not treat the preview as production support.
 
 For #765 retry timing choices, start with the [execution-policy v1 reference](execution-policies-v1.md). It compares
 legacy completion-relative backoff, deadline-only execution, and fixed acceptance-relative attempt plans, then links the

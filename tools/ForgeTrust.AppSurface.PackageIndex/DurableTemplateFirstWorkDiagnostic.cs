@@ -10,6 +10,15 @@ namespace ForgeTrust.AppSurface.PackageIndex;
 /// </remarks>
 internal sealed record DurableTemplateFirstWorkDiagnostic(string Phase, string Code, string Cleanup)
 {
+    /// <summary>Gets an optional closed setup-operation label derived from reviewed fixture method names.</summary>
+    /// <remarks>
+    /// Only PostgreSQL fixture setup can carry this label. No reviewed frame or conflicting specific operations omit it.
+    /// Owned setup includes container startup and provisioning; this observation cannot establish the underlying cause.
+    /// No method names, stack frames or arbitrary location text are retained, and the label never authorizes success.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SetupOperation { get; init; }
+
     private const string Prefix = "[FirstDurableWork] failure phase=";
     private static readonly HashSet<string> Phases = new(StringComparer.Ordinal)
     {
@@ -58,8 +67,55 @@ internal sealed record DurableTemplateFirstWorkDiagnostic(string Phase, string C
                 "owned-cleanup-total-budget-exhausted" => "owned-cleanup-total-budget-exhausted",
                 "owned-cleanup-unfinished,owned-cleanup-total-budget-exhausted" => "owned-cleanup-unfinished,owned-cleanup-total-budget-exhausted",
                 _ => "unknown",
-            });
+            })
+            {
+                SetupOperation = phase == "postgresql-fixture-setup"
+                    ? ReadSetupOperation(line[(locationAt + 4)..causeAt])
+                    : null,
+            };
         }
         return result;
+    }
+
+    private static string? ReadSetupOperation(string location)
+    {
+        var frames = location.Split("->", StringSplitOptions.None);
+        if (frames.Length > 4) return null;
+        string? result = null;
+        foreach (var frame in frames)
+        {
+            if (frame.Length > 256) return null;
+            var operation = ReadSetupFrame(frame);
+            if (operation is null) continue;
+            // The enclosing async setup method can occur with its more specific awaited preflight operation.
+            if (operation == "owned-fixture-setup")
+            {
+                result ??= operation;
+                continue;
+            }
+            if (result is not null && result != "owned-fixture-setup" && result != operation) return null;
+            result = operation;
+        }
+        return result;
+    }
+
+    private static string? ReadSetupFrame(string frame)
+    {
+        const string suffix = ".MoveNext";
+        var separator = frame.IndexOf(">d__", StringComparison.Ordinal);
+        if (!frame.StartsWith('<') || separator < 2
+            || !frame.EndsWith(suffix, StringComparison.Ordinal)) return null;
+        var ordinal = frame.AsSpan(separator + 4, frame.Length - separator - 4 - suffix.Length);
+        if (ordinal.Length == 0) return null;
+        foreach (var digit in ordinal)
+            if (!char.IsAsciiDigit(digit)) return null;
+
+        return frame[1..separator] switch
+        {
+            "RequireDockerAsync" => "docker-prerequisite",
+            "AcquirePinnedImageAsync" => "pinned-image-acquisition",
+            "StartDockerAsync" => "owned-fixture-setup",
+            _ => null,
+        };
     }
 }

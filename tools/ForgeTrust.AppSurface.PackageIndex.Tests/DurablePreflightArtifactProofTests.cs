@@ -21,6 +21,16 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         Directory.CreateDirectory(_root);
     }
 
+    [Fact]
+    public void ExactArtifactConsumer_IsNotDiscoveredAsAStandaloneRestoreProject()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var consumerDirectory = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
+
+        Assert.Empty(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly));
+        Assert.True(File.Exists(Path.Combine(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template")));
+    }
+
     [Theory]
     [InlineData("candidate")]
     [InlineData("promote")]
