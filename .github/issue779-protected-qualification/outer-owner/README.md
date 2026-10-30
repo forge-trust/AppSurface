@@ -55,24 +55,84 @@ Every phase deadline starts before dispatch and includes startup, stop, independ
 KILL, cgroup observation and stream/process join. No grace interval is added after
 expiry. The owner requires two consecutive observations of the retained original
 cgroup as empty, or kernel removal of that exact retained node after launcher exit.
-The latter requires a zero-link retained inode with matching device/inode/mount
-identity and `ENOENT` for the original name; a replacement or ambiguous error
-rejects. [Kernel cgroup deletion rules](https://docs.kernel.org/admin-guide/cgroup-v2.html#organizing-processes-and-threads)
+The original removed-node route requires a zero-link retained inode with matching
+device/inode/mount identity and `ENOENT` for the original name; a replacement or
+ambiguous error rejects. [Kernel cgroup deletion rules](https://docs.kernel.org/admin-guide/cgroup-v2.html#organizing-processes-and-threads)
 permit removal only after all live processes and child groups are gone. The
 launcher PID handle, command client and streams must still join independently. Process exit, unit-client success, or a JSON cleanup flag alone cannot
 advance the sequence. The existing inner deadlines, coverage thresholds,
 comparison base and admission table are unchanged.
 
+### Kernel-removed dentry validation candidate
+
+The additional fail-closed route handles a removed kernfs dentry whose held
+inode still reports a positive link count. It was added as a validation
+candidate after the source-bound revision-141 host diagnostic observed the same
+held cgroup identity with positive links, launcher exit, and `ENOENT` at the
+original name after the command client and stream pumps had joined. That
+observation motivated the route; it did not itself establish settlement or
+native acceptance.
+
+The route requires the same pinned directory inode (device, inode, mount ID and
+type), the exact generated host cgroup path recorded at capture, the exact
+proc-fd target for that path plus the kernel ` (deleted)` suffix, `ENOENT` for
+the original name, launcher-pidfd exit, and trusted procfs and cgroup mount
+views. The two proof observations are sequential reads, not an atomic snapshot;
+each independently rechecks the held identity, pathname state, launcher exit,
+descriptor target and mount evidence, and both must complete within the original
+phase deadline. A missing name, positive link count, suffix, or one successful
+observation alone is insufficient. The original zero-link route remains
+supported and unchanged.
+
+Linux v6.8's [`d_path()` implementation](https://github.com/torvalds/linux/blob/v6.8/fs/d_path.c)
+appends ` (deleted)` when the held dentry is unlinked; the
+[`proc/<pid>/fd` implementation](https://github.com/torvalds/linux/blob/v6.8/fs/proc/fd.c)
+exposes the held descriptor's path. The v6.8
+[cgroup v2 contract](https://docs.kernel.org/6.8/admin-guide/cgroup-v2.html)
+requires a cgroup to have no children or live processes before removal. A local
+Linux ARM64 mechanism probe exercised `IsCgroupEmpty` for a
+live cgroup, a linked empty cgroup, a removed positive-link dentry, a replacement
+at the original name, and an invalid proc mount. These mechanism and policy
+checks exercise the decision paths, but are not the protected Linux CI
+qualification run. This locally retained probe does not establish exact-source
+behavior on the protected runner. The route still requires exact-source native
+CI evidence showing its behavior on the runner's kernel and systemd; until then,
+report it as a validation candidate rather than a native pass. The implementation checks
+the original path first and reads the proc-fd target and mount IDs only when the
+path is missing and the held inode still reports positive links.
+
+The decision seam `DecideRemovedCgroupSettlement` takes the captured
+`CgroupIdentity`, original generated host path, capture-time proc-fd path, and
+two `CgroupRemovalObservation` values. Both observations independently require
+the same held device/inode/mount/type, confirmed `STATX_MNT_ID` result, positive
+links, missing original name, exited launcher, exact deleted marker, trusted
+procfs, and visible original cgroup2 mount. Both the held descriptor identity
+and original named path are re-read for the second observation; no path error,
+replaced node, or missing mount-ID mask is treated as absence. The runtime
+adapter `TryReadTrustedDescriptorPath` verifies
+`/proc/self/fd` is on the same captured procfs mount ID and matches an exact
+visible `proc` mount entry before reading only the retained fd's link. The
+capture path is recorded from that same fd at witness creation.
+`HasVisibleCgroup2Mount` requires the statx-visible mount ID to match an exact
+`/sys/fs/cgroup` `cgroup2` entry in the root process's mountinfo. Diagnostics
+expose only finite match labels; paths remain private proof inputs.
+
 When a phase cannot settle, the owner retains a finite settlement observation
 from the same launcher, cgroup, event and process reads already used by the
-decision. It reports only closed labels for launcher exit, held-node identity,
+decision. The removed-dentry route also reads the retained descriptor path and
+mount IDs as proof inputs; they are not diagnostic-only observations. It reports
+only closed labels for launcher exit, held-node identity,
 link count, original-path state, event population, process presence and a
 fixed failure category. It never reports PIDs, cgroup paths, raw proc/cgroup
 contents or exception messages. Diagnostic collection performs no extra
 settlement probe, and its result never participates in `IsCgroupEmpty` or
 credential sequencing. `unknown` means that the corresponding observation was
 not reached or could not be parsed; the labels describe observations, not a
-cause for failure or proof that the phase settled.
+cause for failure or proof that the phase settled. The removed-dentry route
+records only finite descriptor/procfs/mount match labels and never outputs the
+descriptor target path. Synthetic control reports may include only the finite
+proof labels needed to distinguish the named control's result; credentialed
+phases do not emit proof labels.
 
 ## CI controls and interpretation
 

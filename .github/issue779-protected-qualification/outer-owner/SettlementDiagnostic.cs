@@ -12,6 +12,9 @@ internal sealed class SettlementDiagnostic
     private string _path = "unknown";
     private string _events = "unknown";
     private string _processes = "unknown";
+    private string _descriptorPath = "unknown";
+    private string _procfs = "unknown";
+    private string _cgroupRoot = "unknown";
     private string _error = "none";
     private bool _active;
 
@@ -23,6 +26,9 @@ internal sealed class SettlementDiagnostic
         _path = "unknown";
         _events = "unknown";
         _processes = "unknown";
+        _descriptorPath = "unknown";
+        _procfs = "unknown";
+        _cgroupRoot = "unknown";
         _error = "none";
         _active = true;
     }
@@ -50,8 +56,17 @@ internal sealed class SettlementDiagnostic
 
     internal void Events(bool empty) { if (_active) _events = empty ? "empty" : "populated"; }
     internal void Processes(bool empty) { if (_active) _processes = empty ? "empty" : "present"; }
+    internal void RemovalEvidence(bool trustedProcfs, bool capturedPathExact, bool deletedPathExact)
+    {
+        if (!_active) return;
+        _procfs = trustedProcfs ? "trusted" : "untrusted";
+        _descriptorPath = capturedPathExact ? deletedPathExact ? "deleted-exact" : "deleted-mismatch"
+            : "capture-mismatch";
+    }
+    internal void CgroupRoot(bool matches) { if (_active) _cgroupRoot = matches ? "matching" : "mismatch"; }
     internal void Error(Exception error) { if (_active) _error = Program.SafeFailureCode(error); }
 
     internal string Format() =>
-        $"launcher={_launcher};held={_held};links={_links};path={_path};events={_events};processes={_processes};error={_error}";
+        $"launcher={_launcher};held={_held};links={_links};path={_path};events={_events};processes={_processes};"
+        + $"descriptor={_descriptorPath};procfs={_procfs};cgroup-root={_cgroupRoot};error={_error}";
 }

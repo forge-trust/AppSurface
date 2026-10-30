@@ -184,7 +184,7 @@ internal static class PhaseRunner
                 }
                 systemdRun.Dispose();
             }
-            if (primaryError is not null && phase == OwnerPhase.Control)
+            if (phase == OwnerPhase.Control)
             {
                 if (!streamsHandled && stdoutPump?.IsCompletedSuccessfully == true
                     && stderrPump?.IsCompletedSuccessfully == true && !deadline.IsCancellationRequested)
@@ -211,10 +211,13 @@ internal static class PhaseRunner
                         CryptographicOperations.ZeroMemory(streams[1].Bytes);
                     }
                 }
-                // These bytes are allowlisted diagnostics, never child text or a release-frame value.
+                // Only synthetic controls retain these finite proof labels, including successful
+                // settlement. Credential-bearing phases never enter this diagnostic branch.
+                var failureDiagnostic = primaryError is null ? string.Empty
+                    : "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n"
+                        + "ISOLATION_PARENT_FAILURE_STAGE:" + failureStage + "\n";
                 await File.AppendAllTextAsync(standardErrorPath,
-                    "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n"
-                    + "ISOLATION_PARENT_FAILURE_STAGE:" + failureStage + "\n"
+                    failureDiagnostic
                     + "ISOLATION_SETTLEMENT_JOINS:client=" + (systemdRunJoined ? "joined" : "pending")
                     + ";streams=" + (pumpsJoined ? "joined" : "pending") + "\n"
                     + "ISOLATION_SETTLEMENT:" + (witness?.LastSettlementDiagnostic.Format() ?? "witness=missing") + "\n",

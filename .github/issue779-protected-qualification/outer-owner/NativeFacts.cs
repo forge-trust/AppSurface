@@ -184,9 +184,114 @@ internal static class NativeFacts
         diagnostic.Path(path, witness.ExpectedIdentity);
         var launcherExited = witness.LauncherExited;
         diagnostic.Launcher(launcherExited);
-        return DecideCgroupSettlement(held, path, witness.ExpectedIdentity, launcherExited,
-            eventEmpty: false, noProcesses: false);
+        if (!launcherExited || !held.SameObject(witness.ExpectedIdentity) || !held.IsDirectory || !path.ErrorFree)
+            return false;
+
+        // Preserve the original removed-node rule without requiring procfs when the kernel reports zero links.
+        if (held.Links == 0)
+            return path.Missing;
+
+        // Most checks run while the node is still live; don't read procfs for that ordinary pending state.
+        if (!path.Missing)
+            return false;
+
+        var firstProcfs = witness.TryReadTrustedDescriptorPath(out var firstDescriptorPath);
+        var firstRootMatch = witness.CapturedCgroupMountMatches
+            && CurrentCgroupMountMatches(witness.ExpectedIdentity.MountId);
+        var secondProcfs = witness.TryReadTrustedDescriptorPath(out var secondDescriptorPath);
+        var finalHeld = witness.ReadCgroupIdentity();
+        var finalPath = ReadCgroupPathIdentity(witness.HostPath);
+        var finalLauncherExited = witness.LauncherExited;
+        var finalRootMatch = CurrentCgroupMountMatches(witness.ExpectedIdentity.MountId);
+        var first = new CgroupRemovalObservation(held, path, launcherExited, firstDescriptorPath,
+            firstProcfs, firstRootMatch);
+        var second = new CgroupRemovalObservation(finalHeld, finalPath, finalLauncherExited,
+            secondDescriptorPath, secondProcfs, finalRootMatch);
+        diagnostic.RemovalEvidence(firstProcfs && secondProcfs,
+            witness.InitialDescriptorPath == witness.HostPath,
+            firstDescriptorPath == witness.HostPath + " (deleted)"
+                && secondDescriptorPath == witness.HostPath + " (deleted)");
+        diagnostic.CgroupRoot(firstRootMatch && finalRootMatch);
+        return DecideRemovedCgroupSettlement(witness.ExpectedIdentity, witness.HostPath,
+            witness.InitialDescriptorPath, first, second);
     }
+
+    /// <summary>One sequential observation for the removed-dentry settlement validation candidate.</summary>
+    /// <remarks>
+    /// A pair is required because these reads are not an atomic snapshot. Each observation binds the held
+    /// directory identity and positive link count to the missing original name, exited launcher, exact deleted
+    /// descriptor path, trusted procfs, and visible original cgroup mount. This mechanism check is not native
+    /// qualification evidence; the exact-source protected Linux workflow must exercise it before acceptance.
+    /// </remarks>
+    internal readonly record struct CgroupRemovalObservation(CgroupIdentity Held, CgroupPathIdentity Path,
+        bool LauncherExited, string DescriptorPath, bool TrustedProcfs, bool OriginalCgroupMountStillVisible);
+
+    /// <summary>Evaluates the two-observation removed-dentry validation candidate for the captured cgroup.</summary>
+    /// <param name="expected">The pinned cgroup device, inode, mount ID, and directory type.</param>
+    /// <param name="hostPath">The exact generated systemd cgroup path captured when the phase started.</param>
+    /// <param name="capturedDescriptorPath">The descriptor target read at capture; it must equal <paramref name="hostPath"/>.</param>
+    /// <param name="first">The first post-dispatch proof observation.</param>
+    /// <param name="second">A separate, sequential proof observation within the original phase deadline.</param>
+    /// <returns><see langword="true"/> only when both observations satisfy the complete removed-node predicate.</returns>
+    /// <remarks>
+    /// The check preserves the original zero-link route separately. Missing paths, positive links, or a deleted
+    /// marker alone do not establish removal. The new positive-link route remains a validation candidate until
+    /// exact-source native CI validates it on the protected runner.
+    /// </remarks>
+    internal static bool DecideRemovedCgroupSettlement(CgroupIdentity expected, string hostPath,
+        string capturedDescriptorPath, CgroupRemovalObservation first, CgroupRemovalObservation second)
+    {
+        if (!IsGeneratedUnitCgroupPath(hostPath)
+            || !string.Equals(capturedDescriptorPath, hostPath, StringComparison.Ordinal)) return false;
+        return IsRemovedObservation(first, expected, hostPath)
+            && IsRemovedObservation(second, expected, hostPath);
+    }
+
+    private static bool IsRemovedObservation(CgroupRemovalObservation observation,
+        CgroupIdentity expected, string hostPath) =>
+        observation.LauncherExited
+        && observation.Held.SameObject(expected) && observation.Held.IsDirectory && observation.Held.Links > 0
+        && observation.Path.ErrorFree && observation.Path.Missing
+        && observation.TrustedProcfs && observation.OriginalCgroupMountStillVisible
+        && string.Equals(observation.DescriptorPath, hostPath + " (deleted)", StringComparison.Ordinal);
+
+    private static bool CurrentCgroupMountMatches(ulong expectedMountId)
+    {
+        var currentMountId = TryReadMountId("/sys/fs/cgroup");
+        return currentMountId is not null && currentMountId == expectedMountId
+            && HasVisibleCgroup2Mount(ReadBounded("/proc/self/mountinfo", 256 * 1024), currentMountId.Value);
+    }
+
+    private static bool IsGeneratedUnitCgroupPath(string path)
+    {
+        const string root = "/sys/fs/cgroup/system.slice/appsurface-completed-";
+        if (!path.StartsWith(root, StringComparison.Ordinal)) return false;
+        var suffix = path[root.Length..];
+        foreach (var phase in new[] { "prepare", "replay", "close", "control" })
+        {
+            var prefix = phase + "-";
+            if (!suffix.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var remainder = suffix[prefix.Length..];
+            if (!remainder.EndsWith(".service", StringComparison.Ordinal)) return false;
+            var guidText = remainder[..^".service".Length];
+            return guidText.Length == 32 && Guid.TryParseExact(guidText, "N", out var guid)
+                && string.Equals(guid.ToString("N"), guidText, StringComparison.Ordinal);
+        }
+        return false;
+    }
+
+    internal static bool HasStatxMountId(uint mask) => (mask & 0x1000) != 0;
+
+    private static ulong? TryReadMountId(string path)
+    {
+        if (Statx(-100, path, 0, 0x17ff, out var stat) != 0 || !HasStatxMountId(stat.Mask) || stat.MountId == 0)
+            return null;
+        return stat.MountId;
+    }
+
+    internal static bool HasVisibleCgroup2Mount(byte[] mountInfo, ulong visibleMountId) =>
+        visibleMountId != 0 && ParseMountInfo(mountInfo).Any(entry => entry.MountId == visibleMountId
+            && entry.MountPoint == "/sys/fs/cgroup" && entry.FileSystem == "cgroup2");
 
     internal static bool DecideCgroupSettlement(CgroupIdentity held, CgroupPathIdentity path,
         CgroupIdentity expected, bool launcherExited, bool eventEmpty, bool noProcesses)
@@ -199,8 +304,11 @@ internal static class NativeFacts
     private static CgroupPathIdentity ReadCgroupPathIdentity(string path)
     {
         if (Statx(-100, path, 0x100, 0x17ff, out var stat) == 0)
+        {
+            if (!HasStatxMountId(stat.Mask)) return new(false, false, default);
             return new(true, false, new(stat.Device, stat.Inode, stat.MountId, stat.Links,
                 (stat.Mode & 0xf000) == 0x4000));
+        }
         var error = System.Runtime.InteropServices.Marshal.GetLastPInvokeError();
         return error == 2
             ? new(true, true, default)
@@ -254,6 +362,9 @@ internal static class NativeFacts
         private readonly ulong _device;
         private readonly ulong _inode;
         private readonly ulong _mountId;
+        private readonly ulong? _capturedProcMountId;
+        internal bool CapturedCgroupMountMatches { get; }
+        internal string InitialDescriptorPath { get; }
         internal string HostPath => _hostPath;
         internal int LauncherPid { get; }
         internal SettlementDiagnostic LastSettlementDiagnostic { get; } = new();
@@ -262,7 +373,8 @@ internal static class NativeFacts
         internal CgroupIdentity ExpectedIdentity => new(_device, _inode, _mountId, 0, IsDirectory: true);
 
         internal PhaseWitness(string hostPath, int launcherPid, SafeFileHandle cgroupHandle, SafeFileHandle launcherHandle,
-            SafeFileHandle eventsHandle, SafeFileHandle procsHandle, ulong device, ulong inode, ulong mountId)
+            SafeFileHandle eventsHandle, SafeFileHandle procsHandle, ulong device, ulong inode, ulong mountId,
+            ulong? capturedProcMountId, string initialDescriptorPath, bool capturedCgroupMountMatches)
         {
             _hostPath = hostPath;
             LauncherPid = launcherPid;
@@ -273,6 +385,9 @@ internal static class NativeFacts
             _device = device;
             _inode = inode;
             _mountId = mountId;
+            _capturedProcMountId = capturedProcMountId;
+            InitialDescriptorPath = initialDescriptorPath;
+            CapturedCgroupMountMatches = capturedCgroupMountMatches;
         }
 
         internal bool CgroupIdentityMatches(SettlementDiagnostic? diagnostic = null)
@@ -291,6 +406,19 @@ internal static class NativeFacts
 
         internal byte[] ReadEvents() => ReadHandle(_eventsHandle, 4096);
         internal byte[] ReadProcesses() => ReadHandle(_procsHandle, 64 * 1024);
+
+        internal bool TryReadTrustedDescriptorPath(out string path)
+        {
+            path = string.Empty;
+            var procMountId = TryReadMountId("/proc/self/fd");
+            if (procMountId is null || procMountId != _capturedProcMountId
+                || !HasVisibleProcMount(ReadBounded("/proc/self/mountinfo", 256 * 1024), procMountId.Value))
+                return false;
+            var descriptorPath = "/proc/self/fd/" + _cgroupHandle.DangerousGetHandle().ToInt32()
+                .ToString(CultureInfo.InvariantCulture);
+            path = ReadLink(descriptorPath);
+            return true;
+        }
 
         public void Dispose()
         {
@@ -355,9 +483,37 @@ internal static class NativeFacts
         }
         var pidfd = PidfdOpen(launcherPid, 0);
         if (pidfd < 0) { handle.Dispose(); CloseFd(eventsFd); CloseFd(procsFd); throw new IsolationException("launcher-pidfd"); }
+        var procMountId = TryReadMountId("/proc/self/fd");
+        var initialDescriptorPath = string.Empty;
+        if (procMountId is not null)
+        {
+            try
+            {
+                if (HasVisibleProcMount(ReadBounded("/proc/self/mountinfo", 256 * 1024), procMountId.Value))
+                    initialDescriptorPath = ReadLink("/proc/self/fd/" + descriptor.ToString(CultureInfo.InvariantCulture));
+                else procMountId = null;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or IsolationException
+                or System.Text.DecoderFallbackException)
+            {
+                procMountId = null;
+                initialDescriptorPath = string.Empty;
+            }
+        }
+        var capturedCgroupMountMatches = false;
+        try
+        {
+            var cgroupRootMountId = TryReadMountId("/sys/fs/cgroup");
+            capturedCgroupMountMatches = cgroupRootMountId is not null && cgroupRootMountId == stat.MountId
+                && HasVisibleCgroup2Mount(ReadBounded("/proc/self/mountinfo", 256 * 1024), cgroupRootMountId.Value);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or IsolationException)
+        {
+            capturedCgroupMountMatches = false;
+        }
         var witness = new PhaseWitness(hostPath, launcherPid, handle, new SafeFileHandle((IntPtr)pidfd, ownsHandle: true),
             new SafeFileHandle((IntPtr)eventsFd, ownsHandle: true), new SafeFileHandle((IntPtr)procsFd, ownsHandle: true),
-            stat.Device, stat.Inode, stat.MountId);
+            stat.Device, stat.Inode, stat.MountId, procMountId, initialDescriptorPath, capturedCgroupMountMatches);
         try
         {
             var initialEvents = ParseCgroupEvents(witness.ReadEvents());
@@ -457,13 +613,16 @@ internal static class NativeFacts
 
     private static StatxBuffer ReadStatx(int fd)
     {
-        if (Statx(fd, "", 0x1000, 0x17ff, out var buffer) != 0) throw new IsolationException("statx-handle");
+        if (Statx(fd, "", 0x1000, 0x17ff, out var buffer) != 0 || !HasStatxMountId(buffer.Mask))
+            throw new IsolationException("statx-handle");
         return buffer;
     }
 
     private static StatxBuffer ReadStatx(int directory, string path, int flags, uint mask)
     {
-        if (Statx(directory, path, flags, mask, out var buffer) != 0) throw new IsolationException("statx-path");
+        if (Statx(directory, path, flags, mask, out var buffer) != 0
+            || ((mask & 0x1000) != 0 && !HasStatxMountId(buffer.Mask)))
+            throw new IsolationException("statx-path");
         return buffer;
     }
 

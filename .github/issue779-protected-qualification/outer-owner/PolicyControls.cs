@@ -321,6 +321,16 @@ internal static class PolicyControls
     private static int CgroupSettlementControls()
     {
 #pragma warning disable CA1416 // The decision function is pure and tests portable representations of Linux cgroup facts.
+        if (!NativeFacts.HasStatxMountId(0x17ff) || NativeFacts.HasStatxMountId(0x7ff))
+            throw new IsolationException("statx-mount-id-mask-control");
+        const string visibleCgroupMount = "41 30 0:42 / /sys/fs/cgroup rw,nosuid,nodev - cgroup2 cgroup rw\n";
+        if (!NativeFacts.HasVisibleCgroup2Mount(System.Text.Encoding.ASCII.GetBytes(visibleCgroupMount), 41)
+            || NativeFacts.HasVisibleCgroup2Mount(System.Text.Encoding.ASCII.GetBytes(visibleCgroupMount), 42)
+            || NativeFacts.HasVisibleCgroup2Mount(System.Text.Encoding.ASCII.GetBytes(
+                "41 30 0:42 / /sys/fs/cgroup rw - tmpfs tmpfs rw\n"), 41)
+            || NativeFacts.HasVisibleCgroup2Mount(System.Text.Encoding.ASCII.GetBytes(
+                "41 30 0:42 / /elsewhere rw - cgroup2 cgroup rw\n"), 41))
+            throw new IsolationException("cgroup-root-mount-controls");
         var expected = new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true);
         var linkedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false, expected);
         var removedPath = new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: true, default);
@@ -334,6 +344,52 @@ internal static class PolicyControls
                 launcherExited: true, eventEmpty: false, noProcesses: false))
             throw new IsolationException("cgroup-removed-settlement-control");
 
+        const string removedHostPath = "/sys/fs/cgroup/system.slice/appsurface-completed-replay-0123456789abcdef0123456789abcdef.service";
+        var removedObservation = Observe(expected, removedPath, removedHostPath);
+        if (!NativeFacts.DecideRemovedCgroupSettlement(expected, removedHostPath, removedHostPath,
+                removedObservation, removedObservation))
+            throw new IsolationException("cgroup-deleted-dentry-settlement-control");
+
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected, replacementPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected, badPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected with { Inode = 99 }, removedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected with { MountId = 35 }, removedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected with { IsDirectory = false }, removedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected with { Links = 0 }, removedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath, Observe(expected, linkedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath, descriptorPath: "/tmp/foreign"), removedObservation);
+        RejectDeleted(expected, removedHostPath, "/tmp/foreign-capture", removedObservation, removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath, descriptorPath: removedHostPath + " (deleted) extra"), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath, launcherExited: false), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath, trustedProcfs: false), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath, originalCgroupMountStillVisible: false), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected with { Device = 9 }, removedPath, removedHostPath), removedObservation);
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected, replacementPath, removedHostPath));
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected, badPath, removedHostPath));
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected, removedPath, removedHostPath, launcherExited: false));
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected with { Inode = 99 }, removedPath, removedHostPath));
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected, removedPath, removedHostPath, trustedProcfs: false));
+        RejectDeleted(expected, removedHostPath, removedHostPath,
+            Observe(expected, removedPath, removedHostPath), Observe(expected, removedPath, removedHostPath, originalCgroupMountStillVisible: false));
+        RejectDeleted(expected, "/sys/fs/cgroup/system.slice/foreign.service", "/sys/fs/cgroup/system.slice/foreign.service",
+            removedObservation, removedObservation);
+        const string childPath = "/sys/fs/cgroup/system.slice/appsurface-completed-replay-0123456789abcdef0123456789abcdef.service/child";
+        RejectDeleted(expected, childPath, childPath, removedObservation, removedObservation);
+        const string invalidGuidPath = "/sys/fs/cgroup/system.slice/appsurface-completed-replay-0123456789abcdef0123456789abcdeg.service";
+        RejectDeleted(expected, invalidGuidPath, invalidGuidPath,
+            Observe(expected, removedPath, invalidGuidPath), Observe(expected, removedPath, invalidGuidPath));
+
         RejectSettlement(expected, linkedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
         RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: false, noProcesses: true);
         RejectSettlement(expected, linkedPath, launcherExited: true, eventEmpty: true, noProcesses: false);
@@ -342,7 +398,7 @@ internal static class PolicyControls
         RejectSettlement(expected with { Links = 0 }, removedPath, launcherExited: false, eventEmpty: true, noProcesses: true);
         RejectSettlement(expected with { Inode = 99, Links = 0 }, removedPath, launcherExited: true, eventEmpty: true, noProcesses: true);
         RejectSettlement(expected with { Links = 0 }, badPath, launcherExited: true, eventEmpty: true, noProcesses: true);
-        return 10;
+        return 40;
 
         static void RejectSettlement(NativeFacts.CgroupIdentity held, NativeFacts.CgroupPathIdentity path,
             bool launcherExited, bool eventEmpty, bool noProcesses)
@@ -352,6 +408,19 @@ internal static class PolicyControls
                     launcherExited, eventEmpty, noProcesses))
                 throw new IsolationException("cgroup-settlement-negative-control");
         }
+
+        static NativeFacts.CgroupRemovalObservation Observe(NativeFacts.CgroupIdentity held,
+            NativeFacts.CgroupPathIdentity path, string hostPath, bool launcherExited = true,
+            bool trustedProcfs = true, bool originalCgroupMountStillVisible = true, string? descriptorPath = null) =>
+            new(held, path, launcherExited, descriptorPath ?? hostPath + " (deleted)", trustedProcfs,
+                originalCgroupMountStillVisible);
+
+        static void RejectDeleted(NativeFacts.CgroupIdentity expected, string hostPath, string capturedPath,
+            NativeFacts.CgroupRemovalObservation first, NativeFacts.CgroupRemovalObservation second)
+        {
+            if (NativeFacts.DecideRemovedCgroupSettlement(expected, hostPath, capturedPath, first, second))
+                throw new IsolationException("cgroup-deleted-dentry-negative-control");
+        }
 #pragma warning restore CA1416
     }
 
@@ -359,7 +428,8 @@ internal static class PolicyControls
     {
 #pragma warning disable CA1416 // These controls exercise pure bounded diagnostic formatting, not Linux facts.
         var expected = new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true);
-        const string unknown = "launcher=unknown;held=unknown;links=unknown;path=unknown;events=unknown;processes=unknown;error=none";
+        const string unknown = "launcher=unknown;held=unknown;links=unknown;path=unknown;events=unknown;processes=unknown;"
+            + "descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=none";
         var diagnostic = new SettlementDiagnostic();
         diagnostic.Launcher(exited: true);
         diagnostic.Held(expected, expected);
@@ -377,7 +447,8 @@ internal static class PolicyControls
         diagnostic.Events(empty: false);
         diagnostic.Processes(empty: false);
         diagnostic.Error(new IOException("private-credential-canary"));
-        if (diagnostic.Format() != "launcher=exited;held=matching;links=nonzero;path=same;events=populated;processes=present;error=io-failure"
+        if (diagnostic.Format() != "launcher=exited;held=matching;links=nonzero;path=same;events=populated;processes=present;"
+            + "descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=io-failure"
             || diagnostic.Format().Contains("private-credential-canary", StringComparison.Ordinal))
             throw new IsolationException("settlement-diagnostic-populated-control");
 
@@ -385,20 +456,31 @@ internal static class PolicyControls
         if (diagnostic.Format() != unknown)
             throw new IsolationException("settlement-diagnostic-reset-control");
 
+        diagnostic.Begin();
+        diagnostic.Launcher(exited: true);
+        diagnostic.Held(expected, expected);
+        diagnostic.Path(new NativeFacts.CgroupPathIdentity(true, true, default), expected);
+        diagnostic.RemovalEvidence(trustedProcfs: true, capturedPathExact: true, deletedPathExact: true);
+        diagnostic.CgroupRoot(matches: true);
+        if (diagnostic.Format() != "launcher=exited;held=matching;links=nonzero;path=missing;events=unknown;processes=unknown;"
+            + "descriptor=deleted-exact;procfs=trusted;cgroup-root=matching;error=none"
+            || diagnostic.Format().Contains("/sys/fs/cgroup", StringComparison.Ordinal))
+            throw new IsolationException("settlement-diagnostic-deleted-control");
+
         var mismatchRows = new[]
         {
             (Held: expected with { Inode = 99 }, Path: new NativeFacts.CgroupPathIdentity(true, false, expected),
                 Launcher: false, EventEmpty: false, ProcessesEmpty: true,
-                Expected: "launcher=live;held=mismatch;links=nonzero;path=same;events=populated;processes=empty;error=none"),
+                Expected: "launcher=live;held=mismatch;links=nonzero;path=same;events=populated;processes=empty;descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=none"),
             (Held: expected with { IsDirectory = false, Links = 0 }, Path: new NativeFacts.CgroupPathIdentity(true, true, default),
                 Launcher: true, EventEmpty: true, ProcessesEmpty: false,
-                Expected: "launcher=exited;held=mismatch;links=zero;path=missing;events=empty;processes=present;error=none"),
+                Expected: "launcher=exited;held=mismatch;links=zero;path=missing;events=empty;processes=present;descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=none"),
             (Held: expected with { Links = 0 }, Path: new NativeFacts.CgroupPathIdentity(false, false, default),
                 Launcher: false, EventEmpty: false, ProcessesEmpty: false,
-                Expected: "launcher=live;held=matching;links=zero;path=error;events=populated;processes=present;error=none"),
+                Expected: "launcher=live;held=matching;links=zero;path=error;events=populated;processes=present;descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=none"),
             (Held: expected, Path: new NativeFacts.CgroupPathIdentity(true, false, expected with { Inode = 99 }),
                 Launcher: true, EventEmpty: true, ProcessesEmpty: true,
-                Expected: "launcher=exited;held=matching;links=nonzero;path=replaced;events=empty;processes=empty;error=none"),
+                Expected: "launcher=exited;held=matching;links=nonzero;path=replaced;events=empty;processes=empty;descriptor=unknown;procfs=unknown;cgroup-root=unknown;error=none"),
         };
         foreach (var row in mismatchRows)
         {
@@ -431,7 +513,7 @@ internal static class PolicyControls
                 || formatted.Contains("private-", StringComparison.Ordinal))
                 throw new IsolationException("settlement-diagnostic-error-control");
         }
-        return 14;
+        return 15;
 #pragma warning restore CA1416
     }
 
