@@ -102,13 +102,15 @@ defines the candidate, published and deployment gates for complete runtime-set p
 of a second pair, identical reconciliation and a modeled two-pair schema-10 upgrade. The consumer installs the exact
 packed CLI and restores the matching PostgreSQL provider into isolated roots; it does not repack the product.
 The version-parameterized [consumer project template](https://github.com/forge-trust/AppSurface/blob/main/Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template)
-is not a directly restorable checkout project. The shared script copies that template and its adjacent C# source
-files into its owned temporary consumer directory, materializing `PostgreSqlPreflightConsumer.csproj` without
-copying `bin` or `obj` outputs. Restore and both run commands receive the exact package version from the verified
-bundle; there is no fallback version. This keeps automatic project/dependency discovery from attempting an
-unconfigured restore while retaining every package-hash, closure, identity, schema, guard, timeout, and receipt gate.
-The carrier's internal `--consumer-project` input names this source template; the shared script cleans up its
-materialized project with the rest of the proof's owned directory before a successful caller can promote the receipt.
+is not a directly restorable checkout project. The shared script calls the
+[consumer materializer](https://github.com/forge-trust/AppSurface/blob/main/Durable/materialize-preflight-consumer.sh)
+to copy that template, its adjacent C# source files and repository build policy into an owned temporary
+consumer directory, without copying bin/obj outputs. Restore and both run commands receive the exact
+package version from the verified bundle; there is no fallback version. This keeps automatic
+dependency-submission discovery from attempting an unconfigured restore while preserving every
+package-hash, closure, identity, schema, guard, timeout and receipt gate. The carrier's internal
+`--consumer-project-template` input names the source template; the shared script cleans up its
+materialized project with the rest of the proof's owned directory before promoting a receipt.
 The pre-upgrade schema-10 fixture proves SQL role capabilities: durable Work completion, Flow dispatch discovery,
 and a Schedule dispatch claim, plus Source dispatcher denials. It retires its unique probes through the restricted
 runtime and verifies their persisted state before upgrading. Actual registered provider Work, Flow and Schedule

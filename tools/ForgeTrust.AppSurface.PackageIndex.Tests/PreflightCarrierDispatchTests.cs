@@ -293,9 +293,9 @@ public sealed class PreflightCarrierDispatchTests : IDisposable
         Assert.Equal("true", request.Environment!["CI"]);
         Assert.Equal("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa8450", request.Environment["PREFLIGHT_STORE_ID"]);
         Assert.Equal("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb8450", request.Environment["PREFLIGHT_ACTIVE_EPOCH"]);
-        Assert.Contains("--consumer-project", request.Arguments);
+        Assert.Contains("--consumer-project-template", request.Arguments);
         Assert.Equal(Path.Combine(fixture.Request.RepositoryRoot, "Durable", "consumers", "PostgreSqlPreflightConsumer", "PostgreSqlPreflightConsumer.csproj.template"),
-            request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "--consumer-project") + 1]);
+            request.Arguments[Array.IndexOf(request.Arguments.ToArray(), "--consumer-project-template") + 1]);
         Assert.Contains("--receipt", request.Arguments);
     }
 

@@ -13,6 +13,8 @@ namespace ForgeTrust.AppSurface.Release;
 /// This is a maintainer-integrity gate for repository-owned release preparation. It is not a hostile-fork security
 /// boundary: the evaluator and witness generator run from the checked-out pull-request tree. See
 /// <c>tools/ForgeTrust.AppSurface.Release/README.md#verify-prep-diff</c> for the exact local and CI workflow.
+/// Ordinary product renames are allowed only without a versioned release manifest and when neither endpoint is
+/// release-owned. Release candidates and renames touching release-owned paths retain the strict rename refusal.
 /// </remarks>
 internal sealed class ReleasePreparationDiffVerifier
 {

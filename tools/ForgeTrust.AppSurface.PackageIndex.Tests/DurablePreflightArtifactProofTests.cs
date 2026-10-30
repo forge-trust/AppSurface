@@ -286,6 +286,59 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
             "--source-commit", SourceCommit, "--run-id", RunId, "--artifact-id", ArtifactId
         ];
 
+    [Fact]
+    public async Task ConsumerMaterializer_StagesExactAuthoredInputsAndRefusesAnOccupiedDestination()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var source = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
+        var template = Path.Combine(source, "PostgreSqlPreflightConsumer.csproj.template");
+        var destination = Path.Combine(_root, "consumer with spaces");
+        var expected = Directory.GetFiles(source, "*.cs").ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+        expected["PostgreSqlPreflightConsumer.csproj"] = File.ReadAllBytes(template);
+        expected["Directory.Build.props"] = File.ReadAllBytes(Path.Combine(repository, "Directory.Build.props"));
+        expected["Directory.Build.targets"] = File.ReadAllBytes(Path.Combine(repository, "Directory.Build.targets"));
+        var request = new ExternalCommandRequest(
+            "bash", [Path.Combine(repository, "Durable/materialize-preflight-consumer.sh"), template, repository, destination],
+            repository, "materialize exact consumer", "copy authored inputs", 15_000);
+
+        var runner = new CliWrapCommandRunner();
+        var result = await runner.RunAsync(request, CancellationToken.None);
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal(Path.Combine(destination, "PostgreSqlPreflightConsumer.csproj"), result.StandardOutput.Trim());
+        Assert.Equal(expected.Count, Directory.GetFiles(destination).Length);
+        foreach (var (name, bytes) in expected) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(destination, name)));
+        Assert.Equal(expected["PostgreSqlPreflightConsumer.csproj"], File.ReadAllBytes(template));
+
+        var occupied = await runner.RunAsync(request, CancellationToken.None);
+
+        Assert.NotEqual(0, occupied.ExitCode);
+        Assert.Contains("consumer-destination-exists", occupied.StandardError, StringComparison.Ordinal);
+        Assert.Equal(expected.Count, Directory.GetFiles(destination).Length);
+        foreach (var (name, bytes) in expected) Assert.Equal(bytes, File.ReadAllBytes(Path.Combine(destination, name)));
+    }
+
+    [Fact]
+    public void CheckedInPreflightConsumerIsOnlyATemplateForDynamicRestoreDiscovery()
+    {
+        var repository = TestPathUtils.FindRepoRoot(AppContext.BaseDirectory);
+        var consumerDirectory = TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer");
+        var projectTemplate = TestPathUtils.PathUnder(consumerDirectory, "PostgreSqlPreflightConsumer.csproj.template");
+        var script = File.ReadAllText(TestPathUtils.PathUnder(repository, "Durable/verify-preflight-artifacts.sh"));
+        var materializer = File.ReadAllText(TestPathUtils.PathUnder(repository, "Durable/materialize-preflight-consumer.sh"));
+        var template = File.ReadAllText(projectTemplate);
+
+        Assert.Empty(Directory.EnumerateFiles(consumerDirectory, "*.csproj", SearchOption.TopDirectoryOnly));
+        Assert.Contains("Version=\"$(AppSurfacePackageVersion)\"", template, StringComparison.Ordinal);
+        Assert.Contains("--consumer-project-template", script, StringComparison.Ordinal);
+        Assert.Contains("materialize-preflight-consumer.sh", script, StringComparison.Ordinal);
+        Assert.Contains("cp -- \"$consumer_template\" \"$consumer_project\"", materializer, StringComparison.Ordinal);
+        Assert.Contains("cp -- \"$repo_root/Directory.Build.props\" \"$destination_root/Directory.Build.props\"", materializer, StringComparison.Ordinal);
+        Assert.Contains("cp -- \"$repo_root/Directory.Build.targets\" \"$destination_root/Directory.Build.targets\"", materializer, StringComparison.Ordinal);
+        Assert.Contains("-p:AppSurfacePackageVersion=\"$package_version\"", script, StringComparison.Ordinal);
+    }
+
     private static List<string> ProofArgumentsFor(DurablePreflightArtifactProofRequest request, string mode = "candidate")
         => [
             "--mode", mode, "--repo-root", request.RepositoryRoot, "--artifact-dir", request.ArtifactDirectory,
@@ -314,10 +367,10 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
         var result = await new DurablePreflightArtifactProof(runner).RunCandidateAsync(fixture.Request, CancellationToken.None);
 
         Assert.Equal(1, runner.Calls);
-        Assert.Contains("--consumer-project", runner.LastRequest!.Arguments);
+        Assert.Contains("--consumer-project-template", runner.LastRequest!.Arguments);
         Assert.Equal(DurablePreflightArtifactProof.CandidateProofTimeoutMilliseconds, runner.LastRequest.TimeoutMilliseconds);
         Assert.Equal(TestPathUtils.PathUnder(fixture.Request.RepositoryRoot, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"),
-            runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--consumer-project") + 1]);
+            runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--consumer-project-template") + 1]);
         Assert.Equal(fixture.Request.SourceCommit, runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--source-commit") + 1]);
         Assert.Equal(fixture.Request.RunId, runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--run-id") + 1]);
         Assert.Equal(fixture.Request.ArtifactId, runner.LastRequest.Arguments[Array.IndexOf(runner.LastRequest.Arguments.ToArray(), "--artifact-id") + 1]);
@@ -1130,7 +1183,7 @@ public sealed class DurablePreflightArtifactProofTests : IDisposable
 
         // These files are only existence markers for FakeRunner; no shell or consumer is executed.
         await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/verify-preflight-artifacts.sh"), "test entrypoint marker");
-        await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"), "test project marker");
+        await File.WriteAllTextAsync(TestPathUtils.PathUnder(repository, "Durable/consumers/PostgreSqlPreflightConsumer/PostgreSqlPreflightConsumer.csproj.template"), "test project template marker");
         return repository;
     }
 

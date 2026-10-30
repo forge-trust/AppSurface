@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Xml.Linq;
+using ForgeTrust.AppSurface.Evidence.Coverage;
 using ForgeTrust.AppSurface.Testing;
 using Npgsql;
 
@@ -72,6 +74,13 @@ public sealed class DurableDoctorInstalledToolTests
                 packagesPath,
                 artifactsPath,
                 candidateVersion);
+
+            await AssertInstalledCoverageStorageLifecycleAsync(
+                temporaryRoot,
+                toolPath,
+                packagesPath,
+                cliHomePath,
+                testDeadline.Token);
 
             await using var fixture = await DurableDoctorFixture.CreateAsync();
             await fixture.TrapPruneFunctionBodyAsync(testDeadline.Token);
@@ -582,6 +591,208 @@ public sealed class DurableDoctorInstalledToolTests
 
         var installedCliPackage = FindCachedPackage(temporaryRoot, packagesPath, CliPackageId, candidateVersion);
         Assert.Equal(HashFile(cliPackage), HashFile(installedCliPackage));
+    }
+
+    private static async Task AssertInstalledCoverageStorageLifecycleAsync(
+        string temporaryRoot,
+        string toolPath,
+        string packagesPath,
+        string cliHomePath,
+        CancellationToken cancellationToken)
+    {
+        var executable = GetInstalledExecutable(toolPath);
+        var freshParent = TestPathUtils.PathUnder(temporaryRoot, "coverage-storage-proof");
+        var freshRoot = TestPathUtils.PathUnder(freshParent, "fresh-domain");
+        Directory.CreateDirectory(freshParent);
+        var baseEnvironment = CreateBaseProcessEnvironment(cliHomePath, packagesPath);
+        var oldDomain = TestPathUtils.PathUnder(temporaryRoot, "unproven-old-domain");
+        var repository = TestPathUtils.PathUnder(temporaryRoot, "coverage-storage-repository");
+        var output = TestPathUtils.PathUnder(repository, "coverage-output");
+        Directory.CreateDirectory(output);
+        var currentReport = TestPathUtils.PathUnder(output, "coverage.cobertura.xml");
+        var reportBytes = System.Text.Encoding.UTF8.GetBytes("<coverage line-rate=\"1\" />");
+        File.WriteAllBytes(currentReport, reportBytes);
+        var run = new CoverageArtifactCurrentRun(
+            new CoverageArtifactRunManifest
+            {
+                RunId = "89900000000040008000000000000001",
+                Outcome = "success",
+                CreatedAtUtc = DateTimeOffset.UnixEpoch,
+                Version = "installed-consumer-fixture"
+            },
+            [new("coverage.cobertura.xml", reportBytes.Length, Convert.ToHexString(SHA256.HashData(reportBytes)).ToLowerInvariant())],
+            output,
+            repository);
+        using (var store = CoverageArtifactStore.Open(oldDomain))
+        {
+            await store.RegisterAsync(run, cancellationToken);
+            await store.SnapshotAsync(run, pin: true, automatic: false, cancellationToken);
+        }
+
+        var markerPath = TestPathUtils.PathUnder(oldDomain, "store.json");
+        SetFixtureMarkerIdentityMismatch(markerPath);
+        var oldBytes = CaptureDirectoryBytes(oldDomain);
+        var currentReportBytes = File.ReadAllBytes(currentReport);
+        AssertPrivateStoreMetadata(oldDomain);
+
+        var preview = await RunInstalledStorageCommandAsync(
+            executable, toolPath, baseEnvironment, oldDomain,
+            ["coverage", "storage", "new-domain", "--output", freshRoot, "--json"], cancellationToken);
+        AssertStoragePreview(preview, freshRoot);
+        Assert.False(Directory.Exists(freshRoot));
+        AssertDirectoryBytesEqual(oldBytes, CaptureDirectoryBytes(oldDomain));
+
+        var apply = await RunInstalledStorageCommandAsync(
+            executable, toolPath, baseEnvironment, oldDomain,
+            ["coverage", "storage", "new-domain", "--output", freshRoot, "--apply", "--json"], cancellationToken);
+        AssertStorageCreated(apply, freshRoot);
+        Assert.True(Directory.Exists(freshRoot));
+        AssertDirectoryBytesEqual(oldBytes, CaptureDirectoryBytes(oldDomain));
+        using (var store = CoverageArtifactStore.OpenReadOnly(freshRoot))
+        {
+            Assert.Equal(0, store.GetStatus().RegisteredRuns);
+            Assert.Equal(0, store.GetStatus().ArchivedRuns);
+        }
+        AssertPrivateStoreMetadata(freshRoot);
+
+        var selectedEnvironment = CreateBaseProcessEnvironment(cliHomePath, packagesPath);
+        selectedEnvironment["APPSURFACE_ARTIFACT_HOME"] = freshRoot;
+        var status = await RunInstalledStorageCommandAsync(
+            executable, toolPath, selectedEnvironment, freshRoot,
+            ["coverage", "storage", "status", "--json"], cancellationToken);
+        AssertStorageStatus(status);
+        var emptyMarker = JsonDocument.Parse(File.ReadAllBytes(TestPathUtils.PathUnder(freshRoot, "store.json")));
+        Assert.Equal(1, emptyMarker.RootElement.GetProperty("SchemaVersion").GetInt32());
+        Assert.False(string.IsNullOrWhiteSpace(emptyMarker.RootElement.GetProperty("PhysicalIdentity").GetString()));
+        using (emptyMarker)
+        using (var emptyRegistry = JsonDocument.Parse(File.ReadAllBytes(TestPathUtils.PathUnder(freshRoot, "registry.json"))))
+        {
+            Assert.Equal(1, emptyRegistry.RootElement.GetProperty("SchemaVersion").GetInt32());
+            Assert.Empty(emptyRegistry.RootElement.GetProperty("Registrations").EnumerateArray());
+            Assert.Empty(emptyRegistry.RootElement.GetProperty("Reservations").EnumerateArray());
+        }
+
+        var unavailable = await RunInstalledStorageCommandAsync(
+            executable, toolPath, baseEnvironment, oldDomain,
+            ["coverage", "storage", "status", "--json"], cancellationToken);
+        AssertStorageIdentityRefusal(unavailable);
+        AssertDirectoryBytesEqual(oldBytes, CaptureDirectoryBytes(oldDomain));
+        Assert.Equal(currentReportBytes, File.ReadAllBytes(currentReport));
+        AssertPrivateStoreMetadata(oldDomain);
+        AssertPrivateStoreMetadata(freshRoot);
+    }
+
+    private static async Task<ProcessResult> RunInstalledStorageCommandAsync(
+        string executable,
+        string workingDirectory,
+        IReadOnlyDictionary<string, string> baseEnvironment,
+        string artifactHome,
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo(executable)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        foreach (var (name, value) in baseEnvironment) startInfo.Environment[name] = value;
+        startInfo.Environment["APPSURFACE_ARTIFACT_HOME"] = artifactHome;
+        AddArguments(startInfo, arguments.ToArray());
+        return await RunProcessAsync(startInfo, DoctorTimeout, cancellationToken);
+    }
+
+    private static void SetFixtureMarkerIdentityMismatch(string markerPath)
+    {
+        // This metadata alteration is limited to the private temporary installed-consumer fixture.
+        // It simulates an already-persisted schema-v1 mismatch; it is never a consumer recovery instruction.
+        var marker = JsonNode.Parse(File.ReadAllText(markerPath))!;
+        marker["PhysicalIdentity"] = "FileObjectIdentity { DeviceOrVolume = 18446744073709551614, FileId = 18446744073709551613 }";
+        TestFileSystem.WritePrivateFile(markerPath, marker.ToJsonString());
+    }
+
+    private static void AssertStoragePreview(ProcessResult run, string destination)
+    {
+        Assert.False(run.TimedOut);
+        Assert.Equal(0, run.ExitCode);
+        Assert.Empty(run.StandardError);
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var result = document.RootElement;
+        Assert.Equal("complete", result.GetProperty("status").GetString());
+        Assert.Equal("none", result.GetProperty("sideEffects").GetString());
+        Assert.Equal("new-domain", result.GetProperty("observation").GetProperty("scope").GetString());
+        Assert.False(result.GetProperty("data").GetProperty("created").GetBoolean());
+        Assert.False(result.GetProperty("data").GetProperty("historyTransferred").GetBoolean());
+        Assert.False(result.GetProperty("data").GetProperty("configurationChanged").GetBoolean());
+        Assert.DoesNotContain(destination, run.StandardOutput, StringComparison.Ordinal);
+    }
+
+    private static void AssertStorageCreated(ProcessResult run, string destination)
+    {
+        Assert.False(run.TimedOut);
+        Assert.Equal(0, run.ExitCode);
+        Assert.Empty(run.StandardError);
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var result = document.RootElement;
+        Assert.Equal("complete", result.GetProperty("status").GetString());
+        Assert.Equal("complete", result.GetProperty("sideEffects").GetString());
+        Assert.Equal("new-domain", result.GetProperty("observation").GetProperty("scope").GetString());
+        Assert.True(result.GetProperty("data").GetProperty("created").GetBoolean());
+        Assert.False(result.GetProperty("data").GetProperty("historyTransferred").GetBoolean());
+        Assert.False(result.GetProperty("data").GetProperty("configurationChanged").GetBoolean());
+        Assert.DoesNotContain(destination, run.StandardOutput, StringComparison.Ordinal);
+    }
+
+    private static void AssertStorageStatus(ProcessResult run)
+    {
+        Assert.False(run.TimedOut);
+        Assert.Equal(0, run.ExitCode);
+        Assert.Empty(run.StandardError);
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var result = document.RootElement;
+        Assert.Equal("complete", result.GetProperty("status").GetString());
+        Assert.Equal("none", result.GetProperty("sideEffects").GetString());
+        Assert.Equal(0, result.GetProperty("data").GetProperty("registeredRuns").GetInt32());
+        Assert.Equal(0, result.GetProperty("data").GetProperty("archivedRuns").GetInt32());
+    }
+
+    private static void AssertStorageIdentityRefusal(ProcessResult run)
+    {
+        Assert.False(run.TimedOut);
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("Coverage storage operation failed", run.StandardError, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(run.StandardOutput);
+        var result = document.RootElement;
+        Assert.Equal("failed", result.GetProperty("status").GetString());
+        Assert.Equal("none", result.GetProperty("sideEffects").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("data").ValueKind);
+        Assert.False(result.GetProperty("observation").GetProperty("complete").GetBoolean());
+        var diagnostic = result.GetProperty("diagnostics")[0];
+        Assert.Equal("ASCOV201", diagnostic.GetProperty("code").GetString());
+        Assert.True(diagnostic.GetProperty("reason").GetString() is "IdentityMismatch" or "VolumeIdentityMismatch");
+        Assert.DoesNotContain("18446744073709551614", run.StandardOutput, StringComparison.Ordinal);
+        Assert.DoesNotContain("18446744073709551613", run.StandardOutput, StringComparison.Ordinal);
+    }
+
+    private static Dictionary<string, byte[]> CaptureDirectoryBytes(string root)
+        => Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => Path.GetRelativePath(root, path), File.ReadAllBytes, StringComparer.Ordinal);
+
+    private static void AssertDirectoryBytesEqual(IReadOnlyDictionary<string, byte[]> expected, IReadOnlyDictionary<string, byte[]> actual)
+    {
+        Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), actual.Keys.Order(StringComparer.Ordinal));
+        foreach (var (path, bytes) in expected) Assert.Equal(bytes, actual[path]);
+    }
+
+    private static void AssertPrivateStoreMetadata(string root)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).Append(root))
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(directory) & (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute));
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file) & (UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute));
     }
 
     private static void VerifyPackageHashRoundTrip(string sourcePackage, string packagesPath, string packageId, string version)
