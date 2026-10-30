@@ -18,6 +18,13 @@ internal static class Program
                 or "sdk-host-path" or "sdk-host-directory" or "sdk-host-binary" or "sdk-version"
                 or "sdk-identity" or "sdk-path-identity" or "sdk-stage"
                 or "custody-file-shape" or "tracked-mode" or "source-file-binding" or "source-index-binding"
+                or "handoff-unexpected-node" or "stage-count" or "stage-changed" or "input-immutable"
+                or "host-canary-changed" or "tracked-file-changed" or "tracked-git-dirty"
+                or "git-metadata-changed" or "root-name-changed"
+                or "immutable-replace-source-shape" or "immutable-replace-source-size"
+                or "immutable-replace-unexpected-success" or "immutable-replace-unexpected-error"
+                or "immutable-replace-source-changed" or "immutable-replace-destination-exists"
+                or "immutable-replace-destination-stat"
                 or "source-not-clean" or "git-metadata-file" or "git-metadata-directory" or "git-config-shape"
                 or "uid-range-exhausted" or "getent-failed" or "uid-marker-open" or "utility-contract"
                 or "image-create" or "image-format" or "loop-attach" or "image-mount" or "ext4-quota"
@@ -74,6 +81,8 @@ internal static class Program
             // Child and provider text may contain secrets or target-controlled paths.
             Console.Error.WriteLine("ISOLATION_REJECTED");
             Console.Error.WriteLine("ISOLATION_FAILURE_CODE:" + SafeFailureCode(error));
+            if (OperatingSystem.IsLinux() && args.Length == 4 && args[0] == "controls")
+                Console.Error.WriteLine("ISOLATION_CONTROL_CHECKPOINT:" + OwnerCoordinator.ControlStep);
             if (OperatingSystem.IsLinux()) Console.Error.WriteLine("ISOLATION_SETUP_STAGE:" + OwnerWorkspace.SetupStage);
             return 1;
         }

@@ -145,6 +145,32 @@ phase-launch path are used for probes and completed-run execution. Synthetic
 canaries are never provider tokens. Source captures and bounded original logs are
 retained with the result. The workflow makes a fresh root-owned, no-follow source-capture copy before invocation and the owner keeps its strict current-UID input check. Empty Python standard-library package markers are retained as regular data files; executable inputs remain nonempty. Setup failures expose only a finite checkpoint name and an allowlisted category; they never expose exception messages, provider text or token bytes.
 
+The internal [`ReadOnlyRenameProbe.RequireDenied(source, destination)`](ReadOnlyRenameProbe.cs)
+immutable-replacement control uses Linux `renameat2` with
+`RENAME_NOREPLACE`. `File.Move` is unsuitable here: on a read-only bind mount it
+may attempt a copy followed by source deletion, leaving a copied sibling even
+when deletion fails. The probe first requires the destination name to be absent
+without following symlinks, then accepts only `EACCES`, `EROFS`, or `EBUSY` from
+the atomic rename. It rechecks the source inode, metadata, and bounded contents,
+and confirms the destination is still absent. An unexpected errno, successful
+rename, or residual destination fails the control and preserves the observed
+state for diagnosis; it never deletes a sibling to make the check pass. The
+portable policy controls test the errno allowlist, while only the Linux workflow
+can exercise the actual syscall against a read-only bind mount. Neither result
+establishes product admission or native qualification.
+The three fixed source files use the existing bounded custody reader with a
+16 MiB ceiling, which accommodates the preparation input; source captures keep
+their separate original 1 MiB limit. The helper cannot issue arbitrary commands
+or change mount permissions. The existing full custody check still runs after
+each settled control and rejects any unexpected handoff or stage node.
+
+For synthetic controls, [`OwnerCoordinator.ControlStep`](OwnerCoordinator.cs)
+records a finite operation checkpoint around phase execution, the host canary,
+and custody verification. Top-level failure output reports this checkpoint with
+an allowlisted category. The setup checkpoint can describe an earlier successful
+SDK validation and must not be interpreted as the failing operation by itself.
+These diagnostics expose no paths, child-authored text, or credential material.
+
 A successful controls report proves only its named host controls at the captured
 source. It does not establish a genuine protected predecessor, successful full
 completed-run replay, original gate success, support registration, native

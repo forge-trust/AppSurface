@@ -12,8 +12,16 @@ namespace EvidenceHost.CompletedIsolation;
 internal static class OwnerCoordinator
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    /// <summary>Finite synthetic-control checkpoints; these never contain paths, credentials or child text.</summary>
+    internal enum ControlCheckpoint { NotStarted, BeforePhaseCustody, Phase, Result, EscapeMarker, HostCanary, AfterPhaseCustody, MutationPhase, MutationCustody, Complete }
+
+    /// <summary>The last entered synthetic-control operation; a retained setup marker may describe an earlier phase.</summary>
+    internal static ControlCheckpoint ControlStep { get; private set; }
+
     internal static async Task<int> ControlsAsync(string repository, string sourceCapture, string evidenceRoot, CancellationToken token)
     {
+        ControlStep = ControlCheckpoint.NotStarted;
         OwnerLayout? layout = null;
         var results = new List<object>();
         var passed = false;
@@ -30,10 +38,13 @@ internal static class OwnerCoordinator
             await OwnerCustody.EnrollPreparedAsync(layout, token);
             foreach (var control in ControlProbe.Names.Where(name => name != "mutate-source"))
             {
+                ControlStep = ControlCheckpoint.BeforePhaseCustody;
                 await OwnerWorkspace.VerifyCustodyAsync(layout, token);
                 var budget = TimeSpan.FromSeconds(control == "quota" ? 180 : control is "ignore-stop" or "output-overflow" or "spawn-escape" ? 20 : 90);
+                ControlStep = ControlCheckpoint.Phase;
                 var phase = await PhaseRunner.RunAsync(layout, OwnerPhase.Control,
                     new("control", null, control, null), budget, token);
+                ControlStep = ControlCheckpoint.Result;
                 var expected = phase.Settled && (control switch
                 {
                     "ignore-stop" => phase.TimedOut,
@@ -45,24 +56,30 @@ internal static class OwnerCoordinator
                 if (!expected) throw new IsolationException("control-failed");
                 if (control == "spawn-escape")
                 {
+                    ControlStep = ControlCheckpoint.EscapeMarker;
                     var marker = await File.ReadAllTextAsync(layout.Host(OwnerPaths.Output + "/escaped-child"), token);
                     if (!uint.TryParse(marker, out var innerPid) || innerPid <= 1)
                         throw new IsolationException("escape-child-not-observed");
                     File.Delete(layout.Host(OwnerPaths.Output + "/escaped-child"));
                 }
+                ControlStep = ControlCheckpoint.HostCanary;
                 if (await File.ReadAllTextAsync(layout.HostRoot + "/credential-canary", token) != canary)
                     throw new IsolationException("host-canary-changed");
+                ControlStep = ControlCheckpoint.AfterPhaseCustody;
                 await OwnerWorkspace.VerifyCustodyAsync(layout, token);
             }
             // Writable target trees remain subject to the original post-replay source check.
+            ControlStep = ControlCheckpoint.MutationPhase;
             var mutation = await PhaseRunner.RunAsync(layout, OwnerPhase.Control,
                 new("control", null, "mutate-source", null), TimeSpan.FromSeconds(90), token);
             if (!mutation.Settled || mutation.ExitCode != 0) throw new IsolationException("mutation-probe");
             var rejected = false;
+            ControlStep = ControlCheckpoint.MutationCustody;
             try { await OwnerWorkspace.VerifyCustodyAsync(layout, token); }
             catch (Exception error) when (error is IsolationException or InvalidDataException) { rejected = true; }
             results.Add(new { control = "mutate-source", expected = rejected, result = mutation });
             if (!rejected) throw new IsolationException("custody-drift-not-rejected");
+            ControlStep = ControlCheckpoint.Complete;
             passed = true;
             return 0;
         }

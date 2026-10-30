@@ -68,6 +68,7 @@ internal static class PolicyControls
         count += CgroupSettlementControls();
         count += SettlementDiagnosticControls();
         count += ReleaseControls();
+        count += ReadOnlyRenamePolicyControls();
         count += SourceIndexControls();
         count += SdkDirectoryControls();
         foreach (var phase in new[] { OwnerPhase.Prepare, OwnerPhase.Replay, OwnerPhase.Close })
@@ -96,6 +97,13 @@ internal static class PolicyControls
         count += 5;
         foreach (var code in new[]
         {
+            "handoff-unexpected-node", "stage-count", "stage-changed", "input-immutable",
+            "host-canary-changed", "tracked-file-changed", "tracked-git-dirty",
+            "git-metadata-changed", "root-name-changed",
+            "immutable-replace-source-shape", "immutable-replace-source-size",
+            "immutable-replace-unexpected-success", "immutable-replace-unexpected-error",
+            "immutable-replace-source-changed", "immutable-replace-destination-exists",
+            "immutable-replace-destination-stat",
             "ready-pid", "unit-cgroup", "unit-process-count", "unit-process-facts", "unit-launcher-ambiguous",
             "unit-launcher-facts", "unit-launcher-security", "unit-bootstrap-security", "unit-bootstrap-argv",
             "unit-root-identity", "unit-namespace-identity", "unit-mount-namespace",
@@ -563,6 +571,21 @@ internal static class PolicyControls
 #pragma warning restore CA1416
             throw new IsolationException("release-negative-control");
         }
+    }
+
+    private static int ReadOnlyRenamePolicyControls()
+    {
+        foreach (var errno in new[] { 13, 16, 30 })
+        {
+            if (!ReadOnlyRenameProbe.IsExpectedDenial(errno))
+                throw new IsolationException("readonly-rename-denial-control");
+        }
+        foreach (var errno in new[] { 0, 1, 2, 5, 17, 18, 20, 22, 38, 95, -1 })
+        {
+            if (ReadOnlyRenameProbe.IsExpectedDenial(errno))
+                throw new IsolationException("readonly-rename-unexpected-errno-control");
+        }
+        return 14;
     }
 
     private static int SourceIndexControls()
