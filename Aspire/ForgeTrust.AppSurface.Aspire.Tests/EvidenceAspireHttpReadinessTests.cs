@@ -473,10 +473,12 @@ public sealed class EvidenceAspireHttpReadinessTests
     [InlineData("duplicate-endpoint")]
     [InlineData("non-http")]
     [InlineData("valid")]
+    [InlineData("valid-https")]
     public void NativeModelSelectionRequiresOneExactHttpEndpoint(string shape)
     {
         var web = new ExecutableResource("web", "dotnet", ".");
-        if (shape != "missing-endpoint") web.Annotations.Add(new EndpointAnnotation(System.Net.Sockets.ProtocolType.Tcp, uriScheme: shape == "non-http" ? "tcp" : "http", name: "http"));
+        if (shape != "missing-endpoint") web.Annotations.Add(new EndpointAnnotation(System.Net.Sockets.ProtocolType.Tcp,
+            uriScheme: shape == "non-http" ? "tcp" : shape == "valid-https" ? "https" : "http", name: "http"));
         if (shape == "duplicate-endpoint") web.Annotations.Add(new EndpointAnnotation(System.Net.Sockets.ProtocolType.Tcp, uriScheme: "http", name: "http"));
         IEnumerable<IResource> resources = shape switch
         {
@@ -492,7 +494,13 @@ public sealed class EvidenceAspireHttpReadinessTests
         }
 
         var model = new DistributedApplicationModel(resources);
-        if (shape == "valid") Assert.Equal("http", EvidenceAspireApplication.ResolveEndpointReference(model, "web", "http").EndpointName);
+        if (shape is "valid" or "valid-https")
+        {
+            var endpoint = EvidenceAspireApplication.ResolveEndpointReference(model, "web", "http");
+
+            Assert.Equal("http", endpoint.EndpointName);
+            Assert.Equal(shape == "valid-https", endpoint.IsHttps);
+        }
         else Assert.Equal(ReadinessFailureCategory.EndpointUnavailable,
             Assert.Throws<ReadinessException>(() => EvidenceAspireApplication.ResolveEndpointReference(model, "web", "http")).Category);
     }
@@ -508,6 +516,19 @@ public sealed class EvidenceAspireHttpReadinessTests
         var value = await EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, CancellationToken.None);
 
         Assert.Equal("http://127.0.0.1:8080", value);
+    }
+
+    [Fact]
+    public async Task NativeEndpointResolverPreservesHttpsSchemeFromAspireSnapshot()
+    {
+        var endpoint = CreateNativeEndpointReference("https");
+        endpoint.EndpointAnnotation.AllAllocatedEndpoints.AddOrUpdateAllocatedEndpoint(
+            KnownNetworkIdentifiers.LocalhostNetwork,
+            new AllocatedEndpoint(endpoint.EndpointAnnotation, "127.0.0.1", 8443, "8443"));
+
+        var value = await EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, CancellationToken.None);
+
+        Assert.Equal("https://127.0.0.1:8443", value);
     }
 
     [Fact]
