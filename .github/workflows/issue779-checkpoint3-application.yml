@@ -291,6 +291,7 @@ jobs:
           PY
 
       - name: Measure genuine root Linux retained-file controls with the pinned collector
+        id: root-file-controls
         shell: bash
         run: |
           set -euo pipefail
@@ -345,6 +346,34 @@ jobs:
           binding['coverage_sha256'] = hashlib.sha256((root / 'native-supervision.json').read_bytes()).hexdigest()
           binding_path.write_text(json.dumps(binding, sort_keys=True))
           PY_BIND
+
+      - name: Preserve bounded root-file collector diagnostics after failure
+        id: root-file-failure-diagnostics
+        if: always() && steps.root-file-controls.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 15 sudo --non-interactive /usr/bin/python3 -B - \
+            "$CHECKPOINT3_EVIDENCE" "$RUNNER_TEMP" "checkpoint3-root-file-failure" "$(id -u)" "$(id -g)" <<'PY_ROOT_FAILURE'
+          import pathlib, sys
+          sys.path.insert(0, str(pathlib.Path.cwd() / '.github/issue779-checkpoint3'))
+          from retain_root_file_failure import preserve
+          try:
+              preserve(sys.argv[1], sys.argv[2], sys.argv[3],
+                       destination_uid=int(sys.argv[4]), destination_gid=int(sys.argv[5]))
+          except (OSError, ValueError):
+              raise SystemExit('ROOT_FILE_FAILURE_RETENTION_REJECTED') from None
+          PY_ROOT_FAILURE
+
+      - name: Retain bounded root-file driver tail and raw TRX
+        if: always() && steps.root-file-failure-diagnostics.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: issue779-root-file-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checkpoint3-root-file-failure
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Measure supplementary actual root marker and retained-subtree rejection controls
         shell: bash

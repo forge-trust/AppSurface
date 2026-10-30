@@ -213,7 +213,11 @@ internal static class PhaseRunner
                 }
                 // These bytes are allowlisted diagnostics, never child text or a release-frame value.
                 await File.AppendAllTextAsync(standardErrorPath,
-                    "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n",
+                    "ISOLATION_PARENT_FAILURE_CODE:" + Program.SafeFailureCode(primaryError) + "\n"
+                    + "ISOLATION_PARENT_FAILURE_STAGE:" + failureStage + "\n"
+                    + "ISOLATION_SETTLEMENT_JOINS:client=" + (systemdRunJoined ? "joined" : "pending")
+                    + ";streams=" + (pumpsJoined ? "joined" : "pending") + "\n"
+                    + "ISOLATION_SETTLEMENT:" + (witness?.LastSettlementDiagnostic.Format() ?? "witness=missing") + "\n",
                     CancellationToken.None).ConfigureAwait(false);
             }
             witness?.Dispose();

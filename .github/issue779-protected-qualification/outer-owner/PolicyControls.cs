@@ -66,6 +66,7 @@ internal static class PolicyControls
         count += WritableMountControls();
         count += ProcessIdentityParserControls();
         count += CgroupSettlementControls();
+        count += SettlementDiagnosticControls();
         count += ReleaseControls();
         count += SourceIndexControls();
         count += SdkDirectoryControls();
@@ -88,9 +89,11 @@ internal static class PolicyControls
         count++;
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
-            || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure")
+            || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure"
+            || Program.SafeFailureCode(new IsolationException("phase-unsettled")) != "phase-unsettled"
+            || Program.SafeFailureCode(new IsolationException("phase-unsettled:private-credential-canary")) != "closed-runtime-failure")
             throw new IsolationException("diagnostic-redaction-control");
-        count += 3;
+        count += 5;
         foreach (var code in new[]
         {
             "ready-pid", "unit-cgroup", "unit-process-count", "unit-process-facts", "unit-launcher-ambiguous",
@@ -349,6 +352,86 @@ internal static class PolicyControls
                     launcherExited, eventEmpty, noProcesses))
                 throw new IsolationException("cgroup-settlement-negative-control");
         }
+#pragma warning restore CA1416
+    }
+
+    private static int SettlementDiagnosticControls()
+    {
+#pragma warning disable CA1416 // These controls exercise pure bounded diagnostic formatting, not Linux facts.
+        var expected = new NativeFacts.CgroupIdentity(8, 21, 34, 2, IsDirectory: true);
+        const string unknown = "launcher=unknown;held=unknown;links=unknown;path=unknown;events=unknown;processes=unknown;error=none";
+        var diagnostic = new SettlementDiagnostic();
+        diagnostic.Launcher(exited: true);
+        diagnostic.Held(expected, expected);
+        diagnostic.Path(new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false, expected), expected);
+        diagnostic.Events(empty: true);
+        diagnostic.Processes(empty: true);
+        diagnostic.Error(new IOException("private-credential-canary"));
+        if (diagnostic.Format() != unknown)
+            throw new IsolationException("settlement-diagnostic-inactive-control");
+
+        diagnostic.Begin();
+        diagnostic.Launcher(exited: true);
+        diagnostic.Held(expected, expected);
+        diagnostic.Path(new NativeFacts.CgroupPathIdentity(ErrorFree: true, Missing: false, expected), expected);
+        diagnostic.Events(empty: false);
+        diagnostic.Processes(empty: false);
+        diagnostic.Error(new IOException("private-credential-canary"));
+        if (diagnostic.Format() != "launcher=exited;held=matching;links=nonzero;path=same;events=populated;processes=present;error=io-failure"
+            || diagnostic.Format().Contains("private-credential-canary", StringComparison.Ordinal))
+            throw new IsolationException("settlement-diagnostic-populated-control");
+
+        diagnostic.Begin();
+        if (diagnostic.Format() != unknown)
+            throw new IsolationException("settlement-diagnostic-reset-control");
+
+        var mismatchRows = new[]
+        {
+            (Held: expected with { Inode = 99 }, Path: new NativeFacts.CgroupPathIdentity(true, false, expected),
+                Launcher: false, EventEmpty: false, ProcessesEmpty: true,
+                Expected: "launcher=live;held=mismatch;links=nonzero;path=same;events=populated;processes=empty;error=none"),
+            (Held: expected with { IsDirectory = false, Links = 0 }, Path: new NativeFacts.CgroupPathIdentity(true, true, default),
+                Launcher: true, EventEmpty: true, ProcessesEmpty: false,
+                Expected: "launcher=exited;held=mismatch;links=zero;path=missing;events=empty;processes=present;error=none"),
+            (Held: expected with { Links = 0 }, Path: new NativeFacts.CgroupPathIdentity(false, false, default),
+                Launcher: false, EventEmpty: false, ProcessesEmpty: false,
+                Expected: "launcher=live;held=matching;links=zero;path=error;events=populated;processes=present;error=none"),
+            (Held: expected, Path: new NativeFacts.CgroupPathIdentity(true, false, expected with { Inode = 99 }),
+                Launcher: true, EventEmpty: true, ProcessesEmpty: true,
+                Expected: "launcher=exited;held=matching;links=nonzero;path=replaced;events=empty;processes=empty;error=none"),
+        };
+        foreach (var row in mismatchRows)
+        {
+            diagnostic.Begin();
+            diagnostic.Launcher(row.Launcher);
+            diagnostic.Held(row.Held, expected);
+            diagnostic.Path(row.Path, expected);
+            diagnostic.Events(row.EventEmpty);
+            diagnostic.Processes(row.ProcessesEmpty);
+            if (diagnostic.Format() != row.Expected)
+                throw new IsolationException("settlement-diagnostic-state-control");
+        }
+
+        var errorRows = new (Exception Error, string Expected)[]
+        {
+            (new IOException("private-credential-canary"), "io-failure"),
+            (new UnauthorizedAccessException("private-path-canary"), "access-denied"),
+            (new System.ComponentModel.Win32Exception("private-process-canary"), "process-start-failure"),
+            (new EntryPointNotFoundException("private-entrypoint-canary"), "interop-entrypoint-missing"),
+            (new IsolationException("phase-unsettled"), "phase-unsettled"),
+            (new IsolationException("phase-unsettled:private-token-canary"), "closed-runtime-failure"),
+            (new Exception("private-exception-canary"), "runtime-failure"),
+        };
+        foreach (var row in errorRows)
+        {
+            diagnostic.Begin();
+            diagnostic.Error(row.Error);
+            var formatted = diagnostic.Format();
+            if (!formatted.EndsWith("error=" + row.Expected, StringComparison.Ordinal)
+                || formatted.Contains("private-", StringComparison.Ordinal))
+                throw new IsolationException("settlement-diagnostic-error-control");
+        }
+        return 14;
 #pragma warning restore CA1416
     }
 

@@ -36,7 +36,7 @@ class SupplementRetentionTests(unittest.TestCase):
             self.assertEqual(135, len(leaves))
             self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in leaves))
             (root / 'unexpected').write_bytes(b'')
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(SystemExit):
                 self.check(root)
 
     def test_new_slot_does_not_bypass_existing_leaf_size_or_link_guards(self):
@@ -45,12 +45,12 @@ class SupplementRetentionTests(unittest.TestCase):
             leaf = root / 'root-supplement.trx'
             with leaf.open('wb') as stream:
                 stream.truncate(8 * 1024 * 1024 + 1)
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(SystemExit):
                 self.check(root)
             leaf.unlink()
             (root / 'outside').write_bytes(b'unchanged')
             leaf.symlink_to(root / 'outside')
-            with self.assertRaises(AssertionError):
+            with self.assertRaises(SystemExit):
                 self.check(root)
             self.assertEqual(b'unchanged', (root / 'outside').read_bytes())
 

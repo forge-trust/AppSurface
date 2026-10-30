@@ -98,6 +98,8 @@ The checkpoint-four lane additionally uses the [private C3 measurement fixture](
 
 The seven-module measurement artifact uses a dedicated [retention checker](check-retention.py): JSON up to 32 MiB, XML up to 40 MiB, other files up to 8 MiB, at most 135 files/96 MiB total, with the same regular-file/single-link and private-mode checks. Three supplementary file slots retain the separate 44-case root-marker/subtree/file-copy supplement's TRX, collector log and portable retention-control log; three further slots retain the combined 29-case application-audit/report-discovery/selected-root TRX and logs, as documented in the [measurement reference](../../Evidence/ForgeTrust.AppSurface.Evidence.Supervision.Native.Tests/README.md#supplementary-root-marker-and-subtree-controls). The seventh slot retains the separate four-case peer-credential TRX. The retention regression fills all 135 slots before requiring the next leaf to reject. These are validation artifact bounds; product output quotas, runtime limits and C2 retention are unchanged. A source build or helper proof is not a successful AppSurface measurement run.
 
+The retention checker reports a fixed rejection category and a validated relative filename or short hash alias, while preserving those same file and aggregate bounds. If the original root-file collector step fails before ordinary retention, the [bounded diagnostic helper](root-file-failure-retention-README.md) retains only a streamed log suffix, optional raw TRX and source capture in a separate one-day artifact. It does not change the failed measurement or grant native, coverage, gate or acceptance credit.
+
 ### Failed application-audit diagnostics
 
 If the audit collector or its exact TRX comparison fails, the

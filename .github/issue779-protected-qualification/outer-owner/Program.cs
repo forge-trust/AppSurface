@@ -25,7 +25,7 @@ internal static class Program
                 or "root-required" or "systemd-cgroupv2-required" or "linux-x64-required"
                 or "launcher-environment" or "launcher-identity" or "launcher-capabilities" or "launcher-nnp"
                 or "launcher-descriptor"
-                or "ready-pid" or "unit-cgroup" or "unit-process-count" or "unit-process-facts" or "unit-launcher-ambiguous"
+                or "phase-unsettled" or "ready-pid" or "unit-cgroup" or "unit-process-count" or "unit-process-facts" or "unit-launcher-ambiguous"
                 or "unit-launcher-facts" or "unit-launcher-security" or "unit-bootstrap-security" or "unit-bootstrap-argv"
                 or "unit-root-identity" or "unit-namespace-identity" or "unit-mount-namespace"
                 or "unit-readonly-mount" or "unit-readwrite-mount" or "unit-git-mount" or "unit-preparation-mount"

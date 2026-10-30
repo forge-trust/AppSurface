@@ -63,6 +63,17 @@ launcher PID handle, command client and streams must still join independently. P
 advance the sequence. The existing inner deadlines, coverage thresholds,
 comparison base and admission table are unchanged.
 
+When a phase cannot settle, the owner retains a finite settlement observation
+from the same launcher, cgroup, event and process reads already used by the
+decision. It reports only closed labels for launcher exit, held-node identity,
+link count, original-path state, event population, process presence and a
+fixed failure category. It never reports PIDs, cgroup paths, raw proc/cgroup
+contents or exception messages. Diagnostic collection performs no extra
+settlement probe, and its result never participates in `IsCgroupEmpty` or
+credential sequencing. `unknown` means that the corresponding observation was
+not reached or could not be parsed; the labels describe observations, not a
+cause for failure or proof that the phase settled.
+
 ## CI controls and interpretation
 
 The [Linux isolation workflow](../../workflows/evidencehost-completed-isolation-controls.yml)
