@@ -218,6 +218,54 @@ public sealed class EvidenceRestrictedCoverageFailureTests
     }
 
     [Fact]
+    public async Task RunAsync_ShouldOmitOptionalPatchArtifactsWhenPatchAnalysisWasNotRequested()
+    {
+        using var baselineDirectory = TestDirectory.Create();
+        using var optionalDirectory = TestDirectory.Create();
+        var baselineTransport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var optionalTransport = new FakeRestrictedRun([Report(PassingCobertura)]);
+        var baselineMerger = new RecordingReportGenerator();
+        var optionalMerger = new RecordingReportGenerator();
+        var report = new EvidenceArtifactSlot(
+            "coverage-report", "coverage", "application/xml", Required: true, MaximumBytes: 1024 * 1024);
+        var baselineDeclaration = CreateDeclaration([report]);
+        var optionalDeclaration = CreateDeclaration(
+        [
+            report,
+            new EvidenceArtifactSlot("coverage-patch-targets", "patch", "application/json",
+                Required: false, MaximumBytes: 1024 * 1024),
+        ]);
+
+        var baseline = await CreateProducer(baselineTransport, baselineMerger).RunAsync(
+            baselineDeclaration,
+            TestPathUtils.PathUnder(baselineDirectory.Path, "subject.slnx"),
+            null,
+            CreateWriter(baselineDirectory.Path, baselineDeclaration),
+            CancellationToken.None);
+        var withOptionalPatchSlot = await CreateProducer(optionalTransport, optionalMerger).RunAsync(
+            optionalDeclaration,
+            TestPathUtils.PathUnder(optionalDirectory.Path, "subject.slnx"),
+            null,
+            CreateWriter(optionalDirectory.Path, optionalDeclaration),
+            CancellationToken.None);
+
+        Assert.Equal(EvidenceProducerOutcome.Passed, baseline.Outcome);
+        Assert.Equal(baseline.Outcome, withOptionalPatchSlot.Outcome);
+        Assert.Equal(baseline.Diagnostic, withOptionalPatchSlot.Diagnostic);
+        Assert.Equal(baseline.SatisfiedAssertionIds, withOptionalPatchSlot.SatisfiedAssertionIds);
+        Assert.Equal(baseline.Artifacts, withOptionalPatchSlot.Artifacts);
+        Assert.DoesNotContain(
+            withOptionalPatchSlot.Artifacts!,
+            artifact => artifact.LogicalName == "coverage-patch-targets");
+        Assert.Equal(1, baselineTransport.RunCount);
+        Assert.Equal(1, baselineTransport.CollectCount);
+        Assert.Equal(1, baselineMerger.MergeCount);
+        Assert.Equal(1, optionalTransport.RunCount);
+        Assert.Equal(1, optionalTransport.CollectCount);
+        Assert.Equal(1, optionalMerger.MergeCount);
+    }
+
+    [Fact]
     public async Task RunAsync_ShouldRejectARequiredArtifactWhoseDeclaredByteQuotaIsTooSmall()
     {
         using var directory = TestDirectory.Create();
