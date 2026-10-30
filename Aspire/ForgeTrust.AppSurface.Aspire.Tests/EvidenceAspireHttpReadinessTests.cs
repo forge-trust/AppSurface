@@ -497,6 +497,93 @@ public sealed class EvidenceAspireHttpReadinessTests
             Assert.Throws<ReadinessException>(() => EvidenceAspireApplication.ResolveEndpointReference(model, "web", "http")).Category);
     }
 
+    [Fact]
+    public async Task NativeEndpointResolverReturnsAllocatedValueFromAspireSnapshot()
+    {
+        var endpoint = CreateNativeEndpointReference("http");
+        endpoint.EndpointAnnotation.AllAllocatedEndpoints.AddOrUpdateAllocatedEndpoint(
+            KnownNetworkIdentifiers.LocalhostNetwork,
+            new AllocatedEndpoint(endpoint.EndpointAnnotation, "127.0.0.1", 8080, "8080"));
+
+        var value = await EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, CancellationToken.None);
+
+        Assert.Equal("http://127.0.0.1:8080", value);
+    }
+
+    [Fact]
+    public async Task NativeEndpointResolverMapsAspireAllocationFailureToFixedReadinessError()
+    {
+        var endpoint = CreateNativeEndpointReference("http");
+        var failedAllocation = Assert.Single(endpoint.EndpointAnnotation.AllAllocatedEndpoints).Snapshot;
+        failedAllocation.SetException(new InvalidOperationException("allocation-secret"));
+
+        var error = await Assert.ThrowsAsync<ReadinessException>(() =>
+            EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, CancellationToken.None));
+
+        Assert.Equal(ReadinessPhase.EndpointResolution, error.Phase);
+        Assert.Equal(ReadinessFailureCategory.EndpointUnavailable, error.Category);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain("allocation-secret", error.ToString());
+    }
+
+    [Fact]
+    public async Task NativeEndpointResolverPreservesCancellationBeforeAndDuringAllocationWait()
+    {
+        var endpoint = CreateNativeEndpointReference("http");
+        using var preCanceled = new CancellationTokenSource();
+        preCanceled.Cancel();
+
+        var before = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, preCanceled.Token));
+        Assert.Equal(preCanceled.Token, before.CancellationToken);
+
+        using var duringWait = new CancellationTokenSource();
+        var pending = EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, duringWait.Token);
+        Assert.False(pending.IsCompleted);
+        duringWait.Cancel();
+
+        var whileWaiting = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        Assert.Equal(duringWait.Token, whileWaiting.CancellationToken);
+    }
+
+    [Fact]
+    public async Task NativeEndpointResolverRejectsNonHttpEndpointBeforeAllocation()
+    {
+        var endpoint = CreateNativeEndpointReference("tcp");
+
+        var error = await Assert.ThrowsAsync<ReadinessException>(() =>
+            EvidenceAspireApplication.ResolveEndpointValueAsync(endpoint, CancellationToken.None));
+
+        Assert.Equal(ReadinessPhase.EndpointResolution, error.Phase);
+        Assert.Equal(ReadinessFailureCategory.EndpointUnavailable, error.Category);
+    }
+
+    [Fact]
+    public async Task NativeEndpointResolverRejectsMissingEndpointAndChecksCancellationFirst()
+    {
+        var resource = new ExecutableResource("web", "dotnet", ".");
+        var missingEndpoint = new EndpointReference(resource, "http", KnownNetworkIdentifiers.LocalhostNetwork);
+
+        var unavailable = await Assert.ThrowsAsync<ReadinessException>(() =>
+            EvidenceAspireApplication.ResolveEndpointValueAsync(missingEndpoint, CancellationToken.None));
+        Assert.Equal(ReadinessPhase.EndpointResolution, unavailable.Phase);
+        Assert.Equal(ReadinessFailureCategory.EndpointUnavailable, unavailable.Category);
+
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            EvidenceAspireApplication.ResolveEndpointValueAsync(missingEndpoint, cancellation.Token));
+        Assert.Equal(cancellation.Token, canceled.CancellationToken);
+    }
+
+    private static EndpointReference CreateNativeEndpointReference(string scheme)
+    {
+        var resource = new ExecutableResource("web", "dotnet", ".");
+        var annotation = new EndpointAnnotation(System.Net.Sockets.ProtocolType.Tcp, uriScheme: scheme, name: scheme);
+        resource.Annotations.Add(annotation);
+        return new EndpointReference(resource, annotation, KnownNetworkIdentifiers.LocalhostNetwork);
+    }
+
     private static EvidenceAspireHttpReadiness Create(
         Func<CancellationToken, Task>? health = null,
         Func<CancellationToken, Task<string?>>? endpoint = null,

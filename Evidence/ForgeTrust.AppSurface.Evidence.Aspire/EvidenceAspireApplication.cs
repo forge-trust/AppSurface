@@ -252,11 +252,13 @@ public sealed class EvidenceAspireApplication : IAsyncDisposable
     }
 
     /// <summary>Allocates the already validated exact endpoint after native resource health succeeds.</summary>
-    /// <param name="endpoint">The unique host-local endpoint reference selected from the model.</param>
+    /// <param name="endpoint">The non-null unique host-local endpoint reference selected from the application model.</param>
     /// <param name="cancellationToken">The original cooperative caller/deadline/adapter-stop token.</param>
     /// <returns>The allocated absolute endpoint value, or <see langword="null"/> when Aspire returns none.</returns>
     /// <exception cref="ReadinessException">Aspire reports that the selected endpoint cannot be allocated.</exception>
-    private static async Task<string?> ResolveEndpointValueAsync(EndpointReference endpoint, CancellationToken cancellationToken)
+    /// <exception cref="OperationCanceledException">The token is canceled. Cancellation is checked before endpoint validation and allocation.</exception>
+    /// <remarks>This internal seam allows deterministic tests to use Aspire's public endpoint allocation snapshot.</remarks>
+    internal static async Task<string?> ResolveEndpointValueAsync(EndpointReference endpoint, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (!endpoint.Exists || (!endpoint.IsHttp && !endpoint.IsHttps))
