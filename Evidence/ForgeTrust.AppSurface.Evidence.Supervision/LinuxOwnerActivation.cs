@@ -323,29 +323,29 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
         LinuxProtectedDeployment.RequirePlatform();
         LinuxOwnerFacts facts;
         Guid id;
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
         var diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.InputRecheck;
         try
         {
 #endif
         input.Recheck(token);
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.BackendRead;
 #endif
         facts = await backend.ReadOwnerAsync(token).ConfigureAwait(false);
         const string prefix = "appsurface-evidence-owner-";
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.UnitParse;
 #endif
         if (!facts.Unit.Id.StartsWith(prefix, StringComparison.Ordinal) || !facts.Unit.Id.EndsWith(".service", StringComparison.Ordinal)
             || !Guid.TryParseExact(facts.Unit.Id[prefix.Length..^8], "N", out id)) throw LinuxOwnerFacts.Invalid();
         var request = input.Request;
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.FactsRequire;
 #endif
         facts.Require(id, (uint)System.Environment.ProcessId, request.RuntimeHost, request.EntryPath, input.RequestPath,
             MonotonicMicroseconds(), input.Remaining);
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
         }
         catch
         {
@@ -358,21 +358,21 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
         LinuxOwnerGuard? guard = null;
         try
         {
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.IdentityCapture;
 #endif
             identity = LinuxProcessIdentity.CaptureOwner((uint)System.Environment.ProcessId,
                 LinuxUnitName.Create(LinuxUnitRole.Owner, id), token);
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.InputRecheck;
 #endif
             input.Recheck(token);
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.GuardConsume;
 #endif
             guard = LinuxOwnerGuard.Consume(id, token);
             var owner = new LinuxOwnerActivation(input, facts, identity, guard, id);
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             diagnosticStage = LinuxN04OwnerActivationDiagnostic.Stage.ActiveRecheck;
 #endif
             owner.RequireActive(token);
@@ -380,7 +380,7 @@ internal sealed partial class LinuxOwnerActivation : IDisposable
         }
         catch
         {
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
             try { LinuxN04OwnerActivationDiagnostic.WriteBestEffort(Console.Error, diagnosticStage); }
             catch { }
 #endif

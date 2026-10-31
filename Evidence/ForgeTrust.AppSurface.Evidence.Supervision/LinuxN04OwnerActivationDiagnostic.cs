@@ -1,8 +1,8 @@
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
 namespace ForgeTrust.AppSurface.Evidence.Supervision;
 
-/// <summary>Best-effort closed stage diagnostic for failures opening the private N04 owner.</summary>
-/// <remarks>This emits no sampled values and is absent from ordinary and non-N04 qualification images.</remarks>
+/// <summary>Best-effort closed stage diagnostic for failures opening selected private qualification owners.</summary>
+/// <remarks>This emits no sampled values and is absent from ordinary and unrelated qualification images.</remarks>
 internal static class LinuxN04OwnerActivationDiagnostic
 {
     /// <summary>Original owner activation stages; these labels do not alter or split the guarded operations.</summary>
@@ -24,7 +24,13 @@ internal static class LinuxN04OwnerActivationDiagnostic
         ActiveRecheck,
     }
 
+#if EVIDENCE_PRIVATE_N04
     private const string Schema = "issue779-n04-owner-activation-diagnostic-v1";
+#elif EVIDENCE_PRIVATE_N08
+    private const string Schema = "issue779-n08-owner-activation-diagnostic-v1";
+#else
+    private const string Schema = "issue779-n09-owner-activation-diagnostic-v1";
+#endif
 
     /// <summary>Formats exactly one bounded JSON line from the closed stage vocabulary.</summary>
     internal static string FormatLine(Stage stage)

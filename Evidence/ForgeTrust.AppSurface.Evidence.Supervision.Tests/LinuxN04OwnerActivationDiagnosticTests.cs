@@ -1,4 +1,4 @@
-#if EVIDENCE_PRIVATE_N04
+#if EVIDENCE_PRIVATE_N04 || EVIDENCE_PRIVATE_N08 || EVIDENCE_PRIVATE_N09
 using System.Text;
 using ForgeTrust.AppSurface.Evidence.Supervision;
 
@@ -6,6 +6,14 @@ namespace ForgeTrust.AppSurface.Evidence.Supervision.Tests;
 
 public sealed class LinuxN04OwnerActivationDiagnosticTests
 {
+#if EVIDENCE_PRIVATE_N04
+    private const string ExpectedSchema = "issue779-n04-owner-activation-diagnostic-v1";
+#elif EVIDENCE_PRIVATE_N08
+    private const string ExpectedSchema = "issue779-n08-owner-activation-diagnostic-v1";
+#else
+    private const string ExpectedSchema = "issue779-n09-owner-activation-diagnostic-v1";
+#endif
+
     [Fact]
     public void FormatLineContainsOnlyTheFixedSchemaStageAndNonacceptanceClaim()
     {
@@ -23,7 +31,7 @@ public sealed class LinuxN04OwnerActivationDiagnosticTests
         foreach (var (stage, name) in stages)
         {
             var line = LinuxN04OwnerActivationDiagnostic.FormatLine(stage);
-            Assert.Equal($"{{\"schema\":\"issue779-n04-owner-activation-diagnostic-v1\",\"stage\":\"{name}\",\"native_acceptance\":false}}\n", line);
+            Assert.Equal($"{{\"schema\":\"{ExpectedSchema}\",\"stage\":\"{name}\",\"native_acceptance\":false}}\n", line);
             Assert.DoesNotContain("canary", line, StringComparison.Ordinal);
             Assert.DoesNotContain("exception", line, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("/", line, StringComparison.Ordinal);

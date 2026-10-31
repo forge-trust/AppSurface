@@ -573,16 +573,20 @@ Native integrity rejection also closes cleanup; ordinary caller cancellation clo
 without inventing integrity loss. `Dispose` closes retained guard/proc handles only after
 all users and pending starts join. An owner record never grants worker admission or consumer proof.
 
-Only the private N04 image emits a best-effort `issue779-n04-owner-activation-diagnostic-v1` line to
-stderr when `OpenAsync` already fails. Its closed `stage` is one of `input-recheck`, `backend-read`,
+Only the private N04, N08, and N09 images emit a best-effort owner-activation diagnostic line to
+stderr when `OpenAsync` already fails. Each image has its own schema:
+`issue779-n04-owner-activation-diagnostic-v1`, `issue779-n08-owner-activation-diagnostic-v1`, or
+`issue779-n09-owner-activation-diagnostic-v1`. The closed `stage` is one of `input-recheck`, `backend-read`,
 `unit-parse`, `facts-require`, `identity-capture`, `guard-consume` or `active-recheck`; the only other
 field is the fixed `native_acceptance: false`. The line contains no exception, identity, path or sampled
 value. Diagnostic-write failures are swallowed so the original failure remains primary. The stage is
 set immediately before the existing operation and does not split, reorder, retry, add deadline checks,
 or change the outward `ASEVD402`/`ASEVD410` error or existing `evidence-native-observation-failure-v4`
 record. Ordinary and other qualification images compile the diagnostic code out. The formatter and
-write-failure controls are in [LinuxN04OwnerActivationDiagnosticTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04OwnerActivationDiagnosticTests.cs);
-passing them is not native N04 evidence.
+write-failure controls are in
+[LinuxN04OwnerActivationDiagnosticTests](../ForgeTrust.AppSurface.Evidence.Supervision.Tests/LinuxN04OwnerActivationDiagnosticTests.cs).
+Passing them is not native N04, N08, or N09 evidence; the line is failure diagnosis only and does not
+convert an owner activation failure into a successful cancellation observation.
 
 `LinuxProcessIdentity.Capture`/`CaptureOwner` retain actual proc descriptors on root Linux x64.
 The portable `LinuxProcessData` helpers decode bounded UID4/GID4, stat PID/start time and one unified
