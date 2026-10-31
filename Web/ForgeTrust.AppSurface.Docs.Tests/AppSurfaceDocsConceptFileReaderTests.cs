@@ -8,7 +8,10 @@ public sealed class AppSurfaceDocsConceptFileReaderTests : IDisposable
 {
     private readonly string _root = Path.Join(Path.GetTempPath(), "docs-concept-read-" + Guid.NewGuid().ToString("N"));
 
-    public AppSurfaceDocsConceptFileReaderTests() => Directory.CreateDirectory(_root);
+    public AppSurfaceDocsConceptFileReaderTests()
+    {
+        Directory.CreateDirectory(_root);
+    }
 
     [Fact]
     public void Read_RequiresCompletePinnedBytes_AndCountsUtf8Bytes()

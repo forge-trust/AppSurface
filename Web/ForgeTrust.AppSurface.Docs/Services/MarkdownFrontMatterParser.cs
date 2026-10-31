@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
-using ForgeTrust.AppSurface.ReleaseContracts;
 using ForgeTrust.AppSurface.Docs.Models;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;
