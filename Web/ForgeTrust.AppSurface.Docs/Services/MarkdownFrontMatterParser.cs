@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using ForgeTrust.AppSurface.Docs.Models;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
@@ -15,6 +16,7 @@ internal static class MarkdownFrontMatterParser
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .WithTypeConverter(new ConceptIdYamlValueConverter())
         .WithTypeConverter(new AutoRelatedPagesYamlValueConverter())
         .IgnoreUnmatchedProperties()
         .Build();
@@ -140,6 +142,10 @@ internal static class MarkdownFrontMatterParser
         var metadata = new DocMetadata
         {
             Title = Normalize(document.Title),
+            ConceptId = NormalizeConceptId(document.ConceptId, diagnostics),
+            ConceptIdIsInvalid = document.ConceptId.IsInvalid
+                                 || (!string.IsNullOrWhiteSpace(document.ConceptId.Value)
+                                     && !DocConceptSchema.TryNormalizeConceptId(document.ConceptId.Value, out _)),
             Summary = Normalize(document.Summary),
             PageType = Normalize(document.PageType),
             Audience = Normalize(document.Audience),
@@ -258,6 +264,139 @@ internal static class MarkdownFrontMatterParser
     private static string? Normalize(string? value)
     {
         return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string? NormalizeConceptId(ConceptIdYamlValue value, List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        if (!value.IsInvalid && DocConceptSchema.TryNormalizeConceptId(value.Value, out var conceptId))
+        {
+            return conceptId;
+        }
+
+        AddInvalidConceptIdDiagnostic(diagnostics);
+        return null;
+    }
+
+    private static void AddInvalidConceptIdDiagnostic(List<AppSurfaceDocsMetadataDiagnostic> diagnostics)
+    {
+        diagnostics.Add(new AppSurfaceDocsMetadataDiagnostic(
+            "invalid-concept-id",
+            "concept_id",
+            "The authored concept identifier is invalid and must be corrected before export.",
+            "Concept identifiers must use 1–128 lowercase ASCII letters, digits, dots, underscores, or hyphens and begin and end with a letter or digit.",
+            "Correct concept_id without changing its intended identity, or remove it when no cross-release identity is known."));
+    }
+
+    private readonly record struct ConceptIdYamlValue(string? Value, bool IsInvalid);
+
+    private sealed class ConceptIdYamlValueConverter : IYamlTypeConverter
+    {
+        private const string StringTag = "tag:yaml.org,2002:str";
+        private const string NullTag = "tag:yaml.org,2002:null";
+
+        public bool Accepts(Type type)
+        {
+            return type == typeof(ConceptIdYamlValue)
+                || Nullable.GetUnderlyingType(type) == typeof(ConceptIdYamlValue);
+        }
+
+        public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)
+        {
+            if (parser.Current is not Scalar scalar)
+            {
+                SkipCurrentNode(parser);
+                return new ConceptIdYamlValue(null, IsInvalid: true);
+            }
+
+            parser.MoveNext();
+
+            if (IsYamlNull(scalar))
+            {
+                return new ConceptIdYamlValue(null, IsInvalid: false);
+            }
+
+            if (!IsYamlString(scalar))
+            {
+                return new ConceptIdYamlValue(null, IsInvalid: true);
+            }
+
+            return new ConceptIdYamlValue(scalar.Value, IsInvalid: false);
+        }
+
+        public void WriteYaml(IEmitter emitter, object? value, Type type, ObjectSerializer serializer)
+        {
+            throw new NotSupportedException("This converter is only used for deserialization.");
+        }
+
+        private static bool IsYamlNull(Scalar scalar)
+        {
+            if (!scalar.Tag.IsEmpty)
+            {
+                return string.Equals(scalar.Tag.Value, NullTag, StringComparison.Ordinal);
+            }
+
+            return scalar.Style is ScalarStyle.Plain or ScalarStyle.Any
+                   && (scalar.Value is "" or "~"
+                       || string.Equals(scalar.Value, "null", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool IsYamlString(Scalar scalar)
+        {
+            if (!scalar.Tag.IsEmpty)
+            {
+                return string.Equals(scalar.Tag.Value, StringTag, StringComparison.Ordinal);
+            }
+
+            if (scalar.Style is not (ScalarStyle.Plain or ScalarStyle.Any))
+            {
+                return true;
+            }
+
+            return !IsImplicitNonStringScalar(scalar.Value);
+        }
+
+        private static bool IsImplicitNonStringScalar(string value)
+        {
+            if (bool.TryParse(value, out _)
+                || string.Equals(value, ".nan", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, ".inf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "-.inf", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "+.inf", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // YAML plain scalars that resolve as numeric or timestamp types must be quoted when used as IDs.
+            return Regex.IsMatch(value, @"^[+-]?(?:0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+)$", RegexOptions.CultureInvariant)
+                   || Regex.IsMatch(value, @"^[+-]?(?:(?:[0-9][0-9_]*)?\.[0-9_]+|[0-9][0-9_]*\.?[0-9_]*[eE][+-]?[0-9]+|\.[0-9_]+[eE][+-]?[0-9]+)$", RegexOptions.CultureInvariant)
+                   || DateTime.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+                       System.Globalization.DateTimeStyles.RoundtripKind, out _);
+        }
+
+        private static void SkipCurrentNode(IParser parser)
+        {
+            var nesting = 0;
+            do
+            {
+                switch (parser.Current)
+                {
+                    case SequenceStart:
+                    case MappingStart:
+                        nesting++;
+                        break;
+                    case SequenceEnd:
+                    case MappingEnd:
+                        nesting--;
+                        break;
+                }
+
+                if (!parser.MoveNext())
+                {
+                    break;
+                }
+            }
+            while (nesting > 0);
+        }
     }
 
     private readonly record struct AutoRelatedPagesYamlValue(bool? Value);
@@ -1119,6 +1258,8 @@ internal static class MarkdownFrontMatterParser
     private sealed class FrontMatterDocument
     {
         public string? Title { get; init; }
+
+        public ConceptIdYamlValue ConceptId { get; init; }
 
         public string? Summary { get; init; }
 

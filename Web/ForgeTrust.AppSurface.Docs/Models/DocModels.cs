@@ -140,6 +140,21 @@ public sealed record DocMetadata
     public string? CanonicalSlug { get; init; }
 
     /// <summary>
+    /// Gets the stable, cross-release identity authored with <c>concept_id</c> for this page.
+    /// </summary>
+    /// <remarks>
+    /// A missing or blank value is unspecified. Nonblank values are trimmed and must contain 1–128 lowercase ASCII
+    /// letters, digits, dots, underscores, or hyphens, with an ASCII letter or digit at both ends. Identity comparison
+    /// is ordinal and case-sensitive. See the
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#concept-identities">concept identity reference</see>.
+    /// </remarks>
+    public string? ConceptId { get; init; }
+
+    /// <summary>Whether parsing found an authored concept identifier that failed the concept ID contract.</summary>
+    /// <remarks>This internal failure evidence prevents a valid fallback source from erasing an invalid primary value.</remarks>
+    internal bool ConceptIdIsInvalid { get; init; }
+
+    /// <summary>
     /// Gets optional human-readable breadcrumb labels for the page.
     /// </summary>
     public IReadOnlyList<string>? Breadcrumbs { get; init; }
@@ -297,6 +312,11 @@ public sealed record DocMetadata
             RelatedPages = MergeLists(primary.RelatedPages, fallback.RelatedPages),
             AutoRelatedPages = primary.AutoRelatedPages ?? fallback.AutoRelatedPages,
             CanonicalSlug = DocTrustMergeHelpers.PreferNonBlank(primary.CanonicalSlug, fallback.CanonicalSlug),
+            ConceptId = primary.ConceptIdIsInvalid
+                ? null
+                : DocTrustMergeHelpers.PreferNonBlank(primary.ConceptId, fallback.ConceptId),
+            ConceptIdIsInvalid = primary.ConceptIdIsInvalid
+                || (!HasText(primary.ConceptId) && fallback.ConceptIdIsInvalid),
             Breadcrumbs = breadcrumbs,
             BreadcrumbsMatchPathTargets = breadcrumbsMatchPathTargets,
             FeaturedPageGroups = MergeLists(primary.FeaturedPageGroups, fallback.FeaturedPageGroups),
@@ -307,6 +327,8 @@ public sealed record DocMetadata
             Localization = DocLocalizationMetadata.Merge(primary.Localization, fallback.Localization)
         };
     }
+
+    private static bool HasText(string? value) => !string.IsNullOrWhiteSpace(value);
 
     internal static IReadOnlyList<T>? MergeLists<T>(
         IReadOnlyList<T>? primary,

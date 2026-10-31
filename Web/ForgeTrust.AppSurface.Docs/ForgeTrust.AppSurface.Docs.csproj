@@ -26,6 +26,8 @@
   <ItemGroup>
     <EmbeddedResource Include="wwwroot\css\site.gen.css" LogicalName="AppSurfaceDocsEmbeddedAssets/css/site.gen.css" />
     <EmbeddedResource Include="wwwroot\docs\appsurface-docs-icon.svg" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/appsurface-docs-icon.svg" />
+    <EmbeddedResource Include="wwwroot\docs\docs-version-switch.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/docs-version-switch.js" />
+    <EmbeddedResource Include="wwwroot\docs\docs-version-switch.css" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/docs-version-switch.css" />
     <EmbeddedResource Include="wwwroot\docs\minisearch.min.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/minisearch.min.js" />
     <EmbeddedResource Include="wwwroot\docs\outline-client.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/outline-client.js" />
     <EmbeddedResource Include="wwwroot\docs\rich-authoring-client.js" LogicalName="AppSurfaceDocsEmbeddedAssets/docs/rich-authoring-client.js" />
@@ -52,6 +54,9 @@
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>ForgeTrust.AppSurface.Cli</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>ForgeTrust.AppSurface.Cli.Tests</_Parameter1>
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>ForgeTrust.AppSurface.Docs.Standalone</_Parameter1>

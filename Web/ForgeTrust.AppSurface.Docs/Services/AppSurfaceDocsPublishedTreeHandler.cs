@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Web.Theming;
+using ForgeTrust.AppSurface.ReleaseContracts;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
@@ -41,6 +42,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     private readonly string? _publicOrigin;
     private readonly long _maxRewrittenFileSizeBytes;
     private readonly ILogger<AppSurfaceDocsPublishedTreeHandler> _logger;
+    private readonly AppSurfaceDocsConceptSwitching? _conceptSwitching;
     private int _oversizedRewriteWarningLogged;
 
     /// <summary>
@@ -53,6 +55,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
     /// <param name="maxRewrittenFileSizeBytes">Maximum input size, in bytes, for published-tree HTML and search-index rewrites.</param>
     /// <param name="logger">Logger used for frozen manifest diagnostics.</param>
     /// <param name="isAliasNamespaceActive">Whether the catalog reserves the alias namespace even without mounted targets.</param>
+    /// <param name="conceptSwitching">The catalog-lifetime, verified concept presentation snapshot.</param>
     internal AppSurfaceDocsPublishedTreeHandler(
         IEnumerable<AppSurfaceDocsPublishedTreeMount> mounts,
         string previewRootPath,
@@ -60,7 +63,8 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         string? publicOrigin = null,
         long maxRewrittenFileSizeBytes = AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes,
         ILogger<AppSurfaceDocsPublishedTreeHandler>? logger = null,
-        bool isAliasNamespaceActive = false)
+        bool isAliasNamespaceActive = false,
+        AppSurfaceDocsConceptSwitching? conceptSwitching = null)
     {
         ArgumentNullException.ThrowIfNull(mounts);
         ArgumentException.ThrowIfNullOrWhiteSpace(previewRootPath);
@@ -82,6 +86,7 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         _publicOrigin = DocsUrlBuilder.NormalizePublicOriginOrNull(publicOrigin);
         _maxRewrittenFileSizeBytes = maxRewrittenFileSizeBytes;
         _logger = logger ?? NullLogger<AppSurfaceDocsPublishedTreeHandler>.Instance;
+        _conceptSwitching = conceptSwitching;
     }
 
     /// <summary>
@@ -102,6 +107,12 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             && !HttpMethods.IsHead(httpContext.Request.Method))
         {
             return false;
+        }
+
+        if (_conceptSwitching is not null
+            && await _conceptSwitching.TryHandleAsync(httpContext, _logger))
+        {
+            return true;
         }
 
         var requestPath = httpContext.Request.Path.Value ?? string.Empty;
@@ -714,6 +725,11 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
                 publicOrigin,
                 mount.FrozenRouteManifest?.UsesVerifiedSnapshot == true
                 && mount.FrozenRouteManifest.GetManifest(_logger).HtmlUsesExportRootUrls);
+            if (_conceptSwitching is not null)
+            {
+                rewrittenHtml = _conceptSwitching.RewriteGuide(
+                    httpContext, mount, relativeFilePath, rewrittenHtml, _logger);
+            }
             SetSuccessHeaders(httpContext, contentType, fileInfo, relativeFilePath, rewrittenHtml);
             await WriteUtf8TextAsync(httpContext, rewrittenHtml, contentType);
             return;
@@ -863,7 +879,8 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         if (ShouldRewriteHtml(relativeFilePath))
         {
             ArgumentNullException.ThrowIfNull(html);
-            httpContext.Response.Headers["Content-Security-Policy"] = BuildHtmlContentSecurityPolicy(html);
+            httpContext.Response.Headers["Content-Security-Policy"] = BuildHtmlContentSecurityPolicy(
+                html, AppSurfaceDocsConceptSwitching.IsRuntimeAuthorized(httpContext));
         }
         else if (IsSvgPath(relativeFilePath))
         {
@@ -871,16 +888,23 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
     }
 
-    private static string BuildHtmlContentSecurityPolicy(string html)
+    private static string BuildHtmlContentSecurityPolicy(string html, bool authorizeSwitchRuntime)
     {
         var document = new HtmlParser().ParseDocument(html);
+        var switchEnabled = authorizeSwitchRuntime && document.QuerySelectorAll("script[data-docs-switch-runtime]").Any(script =>
+            string.Equals(script.GetAttribute("integrity"), DocConceptSwitchRuntime.RuntimeSubresourceIntegrity, StringComparison.Ordinal)
+            && script.HasAttribute("defer")
+            && script.GetAttribute("src") is { } source
+            && source.StartsWith('/') && !source.StartsWith("//", StringComparison.Ordinal)
+            && source.EndsWith("/versions/switch/runtime.js", StringComparison.Ordinal)
+            && !source.Contains('\\') && !source.Contains('?') && !source.Contains('#'));
         var bootstrapEnabled = document
             .QuerySelectorAll("script[data-as-theme-preference-bootstrap]")
             .Any(script => string.Equals(
                 ToCspSha256(script.TextContent),
                 AppSurfaceThemePreferenceCsp.ScriptHash,
                 StringComparison.Ordinal));
-        if (!bootstrapEnabled)
+        if (!bootstrapEnabled && !switchEnabled)
         {
             // Existing published trees may carry host-authored inline styles outside the Docs/theme markers. Preserve
             // their established CSP until a preference bootstrap opts the document into the strict, hash-complete path.
@@ -896,9 +920,10 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        var builder = new StringBuilder("sandbox allow-same-origin allow-scripts; default-src 'self'; script-src '");
-        builder.Append(AppSurfaceThemePreferenceCsp.ScriptHash);
-        builder.Append("'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self'");
+        var builder = new StringBuilder("sandbox allow-same-origin allow-scripts; default-src 'self'; script-src");
+        if (bootstrapEnabled) builder.Append(" '").Append(AppSurfaceThemePreferenceCsp.ScriptHash).Append('\'');
+        if (switchEnabled) builder.Append(" '").Append(DocConceptSwitchRuntime.RuntimeCspHashSource).Append('\'');
+        builder.Append("; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; img-src 'self' data:; font-src 'self'; style-src 'self'");
         if (styleHashes.Length > 0)
         {
             builder.Append(" 'unsafe-hashes'");

@@ -1,8 +1,10 @@
 using System.Formats.Tar;
+using System.Globalization;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using ForgeTrust.AppSurface.ReleaseContracts;
 
 namespace ForgeTrust.AppSurface.Release;
 
@@ -21,6 +23,9 @@ namespace ForgeTrust.AppSurface.Release;
 internal sealed class ReleaseDocsPublication
 {
     private const string ReleaseManifestFileName = ".appsurface-docs-release-manifest.json";
+    internal const long DefaultMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.DefaultMaximumBytes;
+    internal const long MinMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.MinimumBytes;
+    internal const long MaxMaxRewrittenFileSizeBytes = DocConceptArtifactBudget.MaximumBytes;
     private readonly ReleaseWorkspace _workspace;
 
     /// <summary>
@@ -64,6 +69,13 @@ internal sealed class ReleaseDocsPublication
                 "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
         }
 
+        if (request.ExistingPagesRoot is { } existingRoot && Directory.Exists(existingRoot + ".verification"))
+        {
+            request = request with { ExistingPagesRoot = existingRoot + ".verification" };
+        }
+
+        ValidateMaxRewrittenFileSizeBytes(request.MaxRewrittenFileSizeBytes);
+
         ValidateExactTreePath(request.ExactTreePath);
         ValidatePublicationOutputPaths(request);
         Directory.CreateDirectory(Path.GetDirectoryName(request.ArchivePath)!);
@@ -98,19 +110,23 @@ internal sealed class ReleaseDocsPublication
         var sha256Path = request.ArchivePath + ".sha256";
         await File.WriteAllTextAsync(sha256Path, $"{archiveSha256}  {Path.GetFileName(request.ArchivePath)}{Environment.NewLine}", cancellationToken);
 
-        ResetDirectory(request.PagesStagingRoot);
+        var verificationRoot = request.PagesStagingRoot + ".verification";
+        ResetDirectory(verificationRoot);
         if (!string.IsNullOrWhiteSpace(request.ExistingPagesRoot))
         {
-            CopyDirectory(request.ExistingPagesRoot, request.PagesStagingRoot);
+            CopyDirectory(request.ExistingPagesRoot, verificationRoot);
         }
 
         var exactTreePath = $"releases/{request.Version}";
         ValidateCatalogExactTreePath(exactTreePath);
-        var stagedExactTree = Path.Join(request.PagesStagingRoot, "releases", request.Version.ToString());
+        var stagedExactTree = Path.Join(verificationRoot, "releases", request.Version.ToString());
         CopyDirectory(request.ExactTreePath, stagedExactTree);
         var promotedStable = request.Version.IsStable && request.PromoteRecommended;
-        var catalogPath = Path.Join(request.PagesStagingRoot, "versions.json");
+        var catalogPath = Path.Join(verificationRoot, "versions.json");
         var recommendedVersion = await WriteCatalogAsync(request, catalogPath, exactTreePath, releaseManifestSha256, cancellationToken);
+
+        await ReleaseDocsStaticConceptPublication.GenerateAsync(verificationRoot, request.PagesStagingRoot,
+            request.Version.ToString(), "/docs", request.MaxRewrittenFileSizeBytes, cancellationToken);
 
         var summaryPath = request.SummaryPath ?? Path.Join(Path.GetDirectoryName(request.PlanPath)!, "docs-publication-summary.md");
         var plan = new DocsPublicationPlan(
@@ -137,7 +153,9 @@ internal sealed class ReleaseDocsPublication
                 exactTreePath,
                 releaseManifestSha256),
             RetryPolicy: new DocsPublicationRetryPolicy(DraftAssetReplaceAllowed: true, PublicAssetReplaceAllowed: false),
-            Recovery: new DocsPublicationRecovery(summaryPath));
+            Recovery: new DocsPublicationRecovery(summaryPath),
+            MaxRewrittenFileSizeBytes: request.MaxRewrittenFileSizeBytes,
+            VerificationRoot: verificationRoot);
 
         await File.WriteAllTextAsync(request.PlanPath, JsonSerializer.Serialize(plan, ReleaseJson.Options) + Environment.NewLine, cancellationToken);
         await WriteRecoverySummaryAsync(plan, cancellationToken);
@@ -177,10 +195,27 @@ internal sealed class ReleaseDocsPublication
         AppendOutput(builder, "sha256_path", plan.Sha256Path);
         AppendOutput(builder, "catalog_path", plan.CatalogPath);
         AppendOutput(builder, "pages_staging_root", plan.PagesStagingRoot);
+        AppendOutput(builder, "verification_root", plan.VerificationRoot ?? plan.PagesStagingRoot);
         AppendOutput(builder, "exact_tree_path", plan.ExactTreePath);
         AppendOutput(builder, "release_manifest_sha256", plan.ReleaseManifestSha256);
         AppendOutput(builder, "recovery_summary_path", plan.Recovery.SummaryPath);
+        AppendOutput(builder, "max_rewritten_file_size_bytes", plan.MaxRewrittenFileSizeBytes.ToString(CultureInfo.InvariantCulture));
         await File.AppendAllTextAsync(githubOutputPath, builder.ToString(), cancellationToken);
+    }
+
+    private static void ValidateMaxRewrittenFileSizeBytes(long maxRewrittenFileSizeBytes)
+    {
+        if (maxRewrittenFileSizeBytes is >= MinMaxRewrittenFileSizeBytes and <= MaxMaxRewrittenFileSizeBytes)
+        {
+            return;
+        }
+
+        throw new ReleaseToolException(ReleaseDiagnostic.Error(
+            "release-docs-publication-rewritten-file-size-invalid",
+            "Docs publication received an invalid rewritten artifact size limit.",
+            $"`--max-rewritten-file-size-bytes {maxRewrittenFileSizeBytes.ToString(CultureInfo.InvariantCulture)}` is outside the supported range of {MinMaxRewrittenFileSizeBytes} through {MaxMaxRewrittenFileSizeBytes} bytes.",
+            $"Pass `--max-rewritten-file-size-bytes` between {MinMaxRewrittenFileSizeBytes} and {MaxMaxRewrittenFileSizeBytes}; the default is {DefaultMaxRewrittenFileSizeBytes} bytes.",
+            "tools/ForgeTrust.AppSurface.Release/README.md#docs-publication"));
     }
 
     private static async Task CreateDeterministicTarGzAsync(string sourceDirectory, string archivePath, CancellationToken cancellationToken)
@@ -490,6 +525,15 @@ internal sealed class ReleaseDocsPublication
 
     private void ValidatePublicationOutputPaths(DocsPublicationRequest request)
     {
+        foreach (var scratch in new[] { request.PagesStagingRoot + ".verification", request.PagesStagingRoot + ".switch-staging" })
+        {
+            ValidatePagesStagingRoot(scratch, "repository root", _workspace.RepositoryRoot);
+            ValidatePagesStagingRoot(scratch, "docs exact tree", request.ExactTreePath);
+            foreach (var output in new[] { request.ArchivePath, request.ArchivePath + ".sha256", request.ArchivePath + ".tar", request.PlanPath,
+                         request.SummaryPath ?? Path.Join(Path.GetDirectoryName(request.PlanPath)!, "docs-publication-summary.md") })
+                ValidatePagesStagingRoot(scratch, "publication output", output);
+            if (request.ExistingPagesRoot is not null) ValidatePagesStagingRoot(scratch, "existing Pages root", request.ExistingPagesRoot);
+        }
         ValidatePagesStagingRoot(request.PagesStagingRoot, "repository root", _workspace.RepositoryRoot);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "docs exact tree", request.ExactTreePath);
         ValidatePagesStagingRoot(request.PagesStagingRoot, "archive output", request.ArchivePath);
@@ -704,6 +748,7 @@ internal sealed class ReleaseDocsPublication
 /// <param name="SummaryPath">Optional output path for the maintainer recovery summary.</param>
 /// <param name="ExpectedReleaseManifestSha256">Optional release evidence digest that the exact-tree manifest must match.</param>
 /// <param name="PromoteRecommended">Whether stable publication should update the public recommended docs pointer.</param>
+/// <param name="MaxRewrittenFileSizeBytes">Per-artifact UTF-8 limit shared with host rewriting, archive verification, and static switch artifacts.</param>
 internal sealed record DocsPublicationRequest(
     SemVer Version,
     string Tag,
@@ -714,7 +759,8 @@ internal sealed record DocsPublicationRequest(
     string PlanPath,
     string? SummaryPath,
     string? ExpectedReleaseManifestSha256,
-    bool PromoteRecommended);
+    bool PromoteRecommended,
+    long MaxRewrittenFileSizeBytes);
 
 /// <summary>
 /// Machine-readable release docs publication plan.
@@ -735,6 +781,8 @@ internal sealed record DocsPublicationRequest(
 /// <param name="CatalogEntry">Catalog entry generated for this release.</param>
 /// <param name="RetryPolicy">Policy for draft/public asset replacement during recovery.</param>
 /// <param name="Recovery">Recovery summary metadata.</param>
+/// <param name="MaxRewrittenFileSizeBytes">Effective per-artifact UTF-8 limit used by publication and archive verification.</param>
+/// <param name="VerificationRoot">Untouched local archive inputs used for the original pin verification, separate from derived serving files.</param>
 internal sealed record DocsPublicationPlan(
     string Schema,
     string Version,
@@ -751,7 +799,9 @@ internal sealed record DocsPublicationPlan(
     string? RecommendedVersion,
     DocsPublicationCatalogEntry CatalogEntry,
     DocsPublicationRetryPolicy RetryPolicy,
-    DocsPublicationRecovery Recovery);
+    DocsPublicationRecovery Recovery,
+    long MaxRewrittenFileSizeBytes,
+    string? VerificationRoot = null);
 
 /// <summary>
 /// Version catalog entry produced for the released docs tree.

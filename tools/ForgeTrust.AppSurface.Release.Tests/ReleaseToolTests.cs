@@ -6525,6 +6525,7 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains(docs.ReleaseManifestSha256, catalog, StringComparison.Ordinal);
         var plan = await File.ReadAllTextAsync(planPath);
         Assert.Contains("\"schema\": \"appsurface-docs-publication-plan-v1\"", plan, StringComparison.Ordinal);
+        Assert.Contains($"\"maxRewrittenFileSizeBytes\": {ReleaseDocsPublication.DefaultMaxRewrittenFileSizeBytes}", plan, StringComparison.Ordinal);
         Assert.Contains("\"supportState\": \"Current\"", plan, StringComparison.Ordinal);
         Assert.DoesNotContain("\"supportState\": \"Supported\"", plan, StringComparison.Ordinal);
         Assert.Contains("\"publicAssetReplaceAllowed\": false", plan, StringComparison.Ordinal);
@@ -6533,7 +6534,69 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("gh release edit v0.1.0 --draft=false", summary, StringComparison.Ordinal);
         var outputs = await File.ReadAllTextAsync(githubOutput);
         Assert.Contains("archive_sha256=", outputs, StringComparison.Ordinal);
+        Assert.Contains($"max_rewritten_file_size_bytes={ReleaseDocsPublication.DefaultMaxRewrittenFileSizeBytes}", outputs, StringComparison.Ordinal);
         Assert.Contains("recovery_summary_path=", outputs, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(1L)]
+    [InlineData(8_388_608L)]
+    [InlineData(33_554_432L)]
+    public async Task DocsPublicationAcceptsConfiguredRewrittenFileSizeBudget(long budget)
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var exactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var planPath = RepositoryPath("artifacts/docs-publication-plan.json");
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.1.0",
+                "--tag", "v0.1.0",
+                "--docs-exact-tree", exactTree,
+                "--archive-output", RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz"),
+                "--pages-staging-root", ExternalPath("pages"),
+                "--plan-output", planPath,
+                "--max-rewritten-file-size-bytes", budget.ToString(CultureInfo.InvariantCulture)
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(0, result.ExitCode);
+        var plan = await File.ReadAllTextAsync(planPath);
+        Assert.Contains($"\"maxRewrittenFileSizeBytes\": {budget.ToString(CultureInfo.InvariantCulture)}", plan, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(33_554_433L)]
+    public async Task DocsPublicationRejectsRewrittenFileSizeBudgetOutsideSupportedRangeBeforeWriting(long budget)
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var exactTree = TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath);
+        var archive = RepositoryPath("artifacts/appsurface-docs-v0.1.0.tar.gz");
+        var staging = ExternalPath("pages");
+        var planPath = RepositoryPath("artifacts/docs-publication-plan.json");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.1.0",
+                "--tag", "v0.1.0",
+                "--docs-exact-tree", exactTree,
+                "--archive-output", archive,
+                "--pages-staging-root", staging,
+                "--plan-output", planPath,
+                "--max-rewritten-file-size-bytes", budget.ToString(CultureInfo.InvariantCulture)
+            ],
+            new FakeCommandRunner());
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Code: release-docs-publication-rewritten-file-size-invalid", result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("--max-rewritten-file-size-bytes", result.Stderr, StringComparison.Ordinal);
+        Assert.False(File.Exists(archive));
+        Assert.False(Directory.Exists(staging));
+        Assert.False(File.Exists(planPath));
     }
 
     [Fact]

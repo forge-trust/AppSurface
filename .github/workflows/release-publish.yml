@@ -267,6 +267,10 @@ jobs:
           pages_staging="${RUNNER_TEMP}/appsurface-docs-pages"
           plan="${RUNNER_TEMP}/docs-publication-plan.json"
           summary="${RUNNER_TEMP}/docs-publication-summary.md"
+          max_rewritten_file_size_bytes=4194304
+          if [[ "${VERSION}" == "0.2.0-preview.11" ]]; then
+            max_rewritten_file_size_bytes=16777216
+          fi
           case "${PROMOTE_RECOMMENDED}" in
             true|false) ;;
             *)
@@ -292,6 +296,7 @@ jobs:
             --plan-output "${plan}" \
             --summary-output "${summary}" \
             --expected-release-manifest-sha256 "${expected_release_manifest_sha256}" \
+            --max-rewritten-file-size-bytes "${max_rewritten_file_size_bytes}" \
             --github-output "${GITHUB_OUTPUT}" \
             "${promote_arg[@]}"
 
@@ -314,19 +319,16 @@ jobs:
         env:
           VERSION: ${{ needs.validate-release.outputs.version }}
           CATALOG_PATH: ${{ steps.docs.outputs.catalog_path }}
-          PAGES_STAGING_ROOT: ${{ steps.docs.outputs.pages_staging_root }}
+          VERIFICATION_ROOT: ${{ steps.docs.outputs.verification_root }}
+          MAX_REWRITTEN_FILE_SIZE_BYTES: ${{ steps.docs.outputs.max_rewritten_file_size_bytes }}
         run: |
           set -euo pipefail
-          max_rewritten_file_size_bytes=4194304
-          if [[ "${VERSION}" == "0.2.0-preview.11" ]]; then
-            max_rewritten_file_size_bytes=16777216
-          fi
           dotnet run --project release-verifier/Cli/ForgeTrust.AppSurface.Cli/ForgeTrust.AppSurface.Cli.csproj -c Release --no-build --no-restore -- \
             docs verify-archive \
             --catalog "${CATALOG_PATH}" \
             --version "${VERSION}" \
-            --trusted-release-root "${PAGES_STAGING_ROOT}" \
-            --max-rewritten-file-size-bytes "${max_rewritten_file_size_bytes}"
+            --trusted-release-root "${VERIFICATION_ROOT}" \
+            --max-rewritten-file-size-bytes "${MAX_REWRITTEN_FILE_SIZE_BYTES}"
 
       - name: Create or reuse draft release and upload docs assets
         env:

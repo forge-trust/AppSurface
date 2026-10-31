@@ -22,6 +22,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using CliCommand = CliWrap.Cli;
 
 namespace ForgeTrust.AppSurface.Cli;
@@ -2620,9 +2621,12 @@ internal sealed class AppSurfaceDocsExportContextConfigurator : IAppSurfaceDocsE
 
         context.EnableReleaseArchiveManifest();
 
-        var routeManifest = await host.Services
-            .GetRequiredService<DocAggregator>()
-            .GetRouteManifestAsync(cancellationToken);
+        var aggregator = host.Services.GetRequiredService<DocAggregator>();
+        var routeManifest = await aggregator.GetRouteManifestAsync(cancellationToken);
+        var conceptPages = await aggregator.GetConceptExportPagesAsync(cancellationToken);
+        var maxArtifactBytes = checked((int)(host.Services.GetService<IOptions<AppSurfaceDocsOptions>>()?.Value.Versioning.MaxRewrittenFileSizeBytes
+            ?? AppSurfaceDocsVersioningOptions.DefaultMaxRewrittenFileSizeBytes));
+        AppSurfaceDocsConceptIndexExporter.Register(context, conceptPages, maxArtifactBytes);
 
         foreach (var entry in routeManifest.Entries)
         {

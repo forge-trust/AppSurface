@@ -194,6 +194,27 @@ public class DocModelsTests
     }
 
     [Fact]
+    public void Merge_ShouldPreserveConceptIdAndKeepInvalidPrimaryAsFailureEvidence()
+    {
+        var valid = DocMetadata.Merge(
+            new DocMetadata { ConceptId = "  guides.configuration.setup  " },
+            new DocMetadata { ConceptId = "fallback.concept" });
+        var invalid = DocMetadata.Merge(
+            new DocMetadata { ConceptIdIsInvalid = true },
+            new DocMetadata { ConceptId = "fallback.concept" });
+        var blankPrimary = DocMetadata.Merge(
+            new DocMetadata { ConceptId = "   " },
+            new DocMetadata { ConceptId = " fallback.concept " });
+
+        Assert.Equal("guides.configuration.setup", valid?.ConceptId);
+        Assert.False(valid?.ConceptIdIsInvalid);
+        Assert.Null(invalid?.ConceptId);
+        Assert.True(invalid?.ConceptIdIsInvalid);
+        Assert.Equal("fallback.concept", blankPrimary?.ConceptId);
+        Assert.False(blankPrimary?.ConceptIdIsInvalid);
+    }
+
+    [Fact]
     public void Merge_ShouldMergeOutlineMetadata_FieldByField()
     {
         var merged = DocMetadata.Merge(

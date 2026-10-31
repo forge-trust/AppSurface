@@ -78,6 +78,7 @@ internal sealed class DocRouteIdentityCatalog
         "rich-authoring-client.js",
         "minisearch.min.js",
         "versions",
+        "versions/switch",
         "_routes",
         "_routes.json"
     ];
@@ -1066,6 +1067,7 @@ internal sealed class DocRouteIdentityCatalog
                || routePath.StartsWith("_harvest/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("_markdown/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("_search-index/", StringComparison.OrdinalIgnoreCase)
+               || routePath.StartsWith("versions/switch/", StringComparison.OrdinalIgnoreCase)
                || routePath.StartsWith("v/", StringComparison.OrdinalIgnoreCase);
     }
 
