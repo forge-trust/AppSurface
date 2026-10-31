@@ -299,12 +299,7 @@ internal static class PhaseRunner
         start.ArgumentList.Add("--inh-caps=-all");
         start.ArgumentList.Add("--ambient-caps=-all");
         start.ArgumentList.Add("--no-new-privs");
-        start.ArgumentList.Add("/usr/bin/env");
-        start.ArgumentList.Add("-i");
-        start.ArgumentList.Add("PATH=/usr/bin:/bin");
-        start.ArgumentList.Add("HOME=/nonexistent");
-        start.ArgumentList.Add("LANG=C.UTF-8");
-        start.ArgumentList.Add("LC_ALL=C");
+        BootstrapCommand.AppendLauncherEnvironment(start);
         start.ArgumentList.Add(OwnerPaths.Dotnet);
         start.ArgumentList.Add(OwnerPaths.Assembly);
         start.ArgumentList.Add("phase");

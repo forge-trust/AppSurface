@@ -36,6 +36,24 @@ and close launchers; it is never a command argument, unit environment property,
 retained file, report, or log. Replay receives exactly PATH, HOME, LANG, and
 LC_ALL, with no token or provider context.
 
+The private managed launcher additionally requires the fixed
+[`DOTNET_EnableDiagnostics=0`](https://learn.microsoft.com/en-us/dotnet/core/runtime-config/debugging-profiling#enable-diagnostics)
+setting before the .NET runtime starts. Forced termination can leave the runtime's
+diagnostic socket and debugger FIFOs in its persistent private `/tmp`; disabling
+diagnostics prevents those runtime endpoints from being created. Disabling only
+diagnostic IPC leaves debugger FIFOs. This setting applies to the owner launcher
+in every phase, including controls. The fixed Python command independently clears
+its environment, so the replay worker still receives exactly the four variables
+above. Diagnostic tooling is unavailable for the private launcher; target execution,
+coverage collection, custody checks and deadlines keep their existing contracts.
+`BootstrapCommand.AppendLauncherEnvironment` constructs this fixed launcher prefix;
+`PhaseLauncher.BuildCommand` constructs the separate fixed Python command. Both
+are internal command-construction seams exercised by portable policy controls.
+The custody scan still rejects every special node, including runtime sockets and
+FIFOs; `filesystem-special-node` is only an allowlisted, path-free failure category.
+The setting is a mitigation candidate supported by a Linux forced-termination
+mechanism probe; only fresh source-bound Linux CI can confirm the control outcome.
+
 ## Phase ordering and lifetime
 
 1. Verify all source captures and fixed tool bytes, reserve the identity, and

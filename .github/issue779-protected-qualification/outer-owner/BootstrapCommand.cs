@@ -16,6 +16,15 @@ internal static class BootstrapCommand
         start.ArgumentList.Add("--property=AmbientCapabilities=CAP_SETUID");
     }
 
+    /// <summary>Starts only the private managed launcher without diagnostic sockets or debugger FIFOs.</summary>
+    /// <remarks>The Python child constructs its own original four-variable environment.</remarks>
+    internal static void AppendLauncherEnvironment(System.Diagnostics.ProcessStartInfo start)
+    {
+        foreach (var argument in new[] { "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/nonexistent",
+            "LANG=C.UTF-8", "LC_ALL=C", "DOTNET_EnableDiagnostics=0" })
+            start.ArgumentList.Add(argument);
+    }
+
     /// <summary>Overmounts only the phase namespace's runtime directory; failure never reaches the target.</summary>
     /// <remarks>The existing unshare mount namespace isolates this fixed mount from the host. The empty
     /// read-only filesystem hides manager paths created by systemd after the owner prepared its root.</remarks>

@@ -28,6 +28,7 @@ internal static class NativeFacts
         RequireEnv("HOME", "/nonexistent");
         RequireEnv("LANG", "C.UTF-8");
         RequireEnv("LC_ALL", "C");
+        RequireEnv("DOTNET_EnableDiagnostics", "0");
     }
 
     internal static void RequireSelfIdentity()

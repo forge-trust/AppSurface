@@ -22,7 +22,7 @@ internal static class PhaseLauncher
 
     private static readonly string[] EnvironmentKeys =
     [
-        "PATH", "HOME", "LANG", "LC_ALL"
+        "PATH", "HOME", "LANG", "LC_ALL", "DOTNET_EnableDiagnostics"
     ];
 
     private static readonly string[] ContextKeys =
@@ -87,7 +87,8 @@ internal static class PhaseLauncher
         }
     }
 
-    private static ProcessStartInfo BuildCommand(OwnerPhase phase, PhaseRelease release)
+    /// <summary>Constructs the fixed Python command with its independent, cleared child environment.</summary>
+    internal static ProcessStartInfo BuildCommand(OwnerPhase phase, PhaseRelease release)
     {
         var start = new ProcessStartInfo(Python)
         {

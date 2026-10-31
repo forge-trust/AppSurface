@@ -91,6 +91,27 @@ internal static class PolicyControls
                 "--property=AmbientCapabilities=CAP_SETUID"]))
             throw new IsolationException("bootstrap-capability-control");
         count++;
+        var launcherStart = new System.Diagnostics.ProcessStartInfo("/usr/bin/setpriv");
+        BootstrapCommand.AppendLauncherEnvironment(launcherStart);
+        if (!launcherStart.ArgumentList.SequenceEqual([
+                "/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/nonexistent", "LANG=C.UTF-8",
+                "LC_ALL=C", "DOTNET_EnableDiagnostics=0"]))
+            throw new IsolationException("launcher-environment-control");
+        count++;
+#pragma warning disable CA1416 // Command construction is pure; no Linux process is started.
+        var replayStart = PhaseLauncher.BuildCommand(OwnerPhase.Replay, new("replay", null, null, null));
+#pragma warning restore CA1416
+        var replayEnvironment = new Dictionary<string, string?>
+        {
+            ["PATH"] = "/usr/bin:/bin",
+            ["HOME"] = "/nonexistent",
+            ["LANG"] = "C.UTF-8",
+            ["LC_ALL"] = "C",
+        };
+        if (replayStart.Environment.Count != replayEnvironment.Count
+            || replayEnvironment.Any(pair => !replayStart.Environment.TryGetValue(pair.Key, out var value) || value != pair.Value))
+            throw new IsolationException("replay-environment-control");
+        count++;
         if (Program.SafeFailureCode(new IsolationException("proc-numeric-field")) != "proc-numeric-field"
             || Program.SafeFailureCode(new IsolationException("private-credential-canary")) != "closed-runtime-failure"
             || Program.SafeFailureCode(new Exception("private-credential-canary")) != "runtime-failure"
@@ -102,7 +123,7 @@ internal static class PolicyControls
         {
             "handoff-unexpected-node", "stage-count", "stage-changed", "input-immutable",
             "host-canary-changed", "tracked-file-changed", "tracked-git-dirty",
-            "git-metadata-changed", "root-name-changed",
+            "git-metadata-changed", "root-name-changed", "filesystem-special-node",
             "immutable-replace-source-shape", "immutable-replace-source-size",
             "immutable-replace-unexpected-success", "immutable-replace-unexpected-error",
             "immutable-replace-source-changed", "immutable-replace-destination-exists",

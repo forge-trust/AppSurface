@@ -20,7 +20,7 @@ internal static class Program
                 or "custody-file-shape" or "tracked-mode" or "source-file-binding" or "source-index-binding"
                 or "handoff-unexpected-node" or "stage-count" or "stage-changed" or "input-immutable"
                 or "host-canary-changed" or "tracked-file-changed" or "tracked-git-dirty"
-                or "git-metadata-changed" or "root-name-changed"
+                or "git-metadata-changed" or "root-name-changed" or "filesystem-special-node"
                 or "immutable-replace-source-shape" or "immutable-replace-source-size"
                 or "immutable-replace-unexpected-success" or "immutable-replace-unexpected-error"
                 or "immutable-replace-source-changed" or "immutable-replace-destination-exists"
