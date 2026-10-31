@@ -337,7 +337,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         });
 
         Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
-        Assert.Contains("This guide has a different location in 2.0.0.", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
+        Assert.Contains("This guide moved in 2.0.0", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
         Assert.Equal(1, await page.Locator("[data-docs-version-notice]").CountAsync());
         Assert.Equal("configure", await page.EvaluateAsync<string>("() => document.activeElement?.id || ''"));
         var describedBy = await page.Locator("#configure").GetAttributeAsync("aria-describedby");
@@ -489,7 +489,7 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
             new Uri(_versions.BuildVersionPageUrl(host.BaseUrl, "2.0.0", targetRoute)).AbsolutePath,
             new PageWaitForFunctionOptions { Timeout = 30_000 });
         Assert.Contains("Getting started with configuration", await page.Locator("main h1").First.TextContentAsync(), StringComparison.Ordinal);
-        Assert.Contains("This guide has a different location in 2.0.0.", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
+        Assert.Contains("This guide moved in 2.0.0", await page.Locator("[data-docs-version-notice]").InnerTextAsync(), StringComparison.Ordinal);
 
         _versions.AssertOriginalArchiveHashesUnchanged();
     }

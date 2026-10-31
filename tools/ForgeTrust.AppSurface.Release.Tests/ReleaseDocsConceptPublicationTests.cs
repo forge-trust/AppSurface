@@ -246,20 +246,15 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
     [Fact]
     public async Task GenerateAsync_ExcludesPinnedBridgeBytesDuplicatedInsidePublicReleaseTree()
     {
-        var fixture = await CreateFixtureAsync(includeBridgeCopyInPublicTree: true);
-        var bridgeBytes = await File.ReadAllBytesAsync(Path.Combine(fixture.VerificationRoot, "bridges", "concepts.json"));
-        var caseVariantMapPath = Path.Combine(fixture.VerificationRoot, "bridges", "CONCEPTS.JSON");
-        if (File.Exists(caseVariantMapPath))
-        {
-            await SetCatalogFieldAsync(fixture, "1.0.0", "conceptMapPath", JsonValue.Create("bridges/CONCEPTS.JSON"));
-        }
+        var fixture = await CreateFixtureAsync();
+        var bridgeBytes = await PinBridgeInsidePublicReleaseAsync(fixture);
         var sourceSnapshot = SnapshotFiles(fixture.VerificationRoot);
         var outputRoot = Path.Combine(_root, "private-bridge-copy-serving");
 
         await GenerateAsync(fixture, outputRoot, 4 * 1024 * 1024);
 
         Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.VerificationRoot));
-        Assert.False(File.Exists(Path.Combine(outputRoot, "releases", "1.0.0", "bridge-copy.txt")));
+        Assert.False(File.Exists(Path.Combine(outputRoot, "releases", "1.0.0", "bridges", "concepts.json")));
         Assert.False(File.Exists(Path.Combine(outputRoot, "docs", "concepts-copy.json")));
         foreach (var file in Directory.EnumerateFiles(outputRoot, "*", SearchOption.AllDirectories))
         {
@@ -542,7 +537,7 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
 
     private async Task<Fixture> CreateFixtureAsync(string? invalidInput = null, bool includeUnavailable = false,
         bool legacyRouteManifest = false, bool includePolicyMarkup = false, bool includeRecoveryPages = false,
-        bool noSelectedLocale = false, bool includeBridgeCopyInPublicTree = false)
+        bool noSelectedLocale = false)
     {
         var verificationRoot = Path.Combine(_root, "verification" + (invalidInput is null ? string.Empty : "-" + invalidInput));
         Directory.CreateDirectory(verificationRoot);
@@ -579,13 +574,6 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
         var mapPath = Path.Combine(verificationRoot, "bridges", "concepts.json");
         if (!noSelectedLocale) await File.WriteAllBytesAsync(mapPath, mapBytes);
         var mapPin = invalidInput == "bridge-digest" ? new string('0', 64) : Sha256(mapBytes);
-        if (includeBridgeCopyInPublicTree)
-        {
-            await File.WriteAllBytesAsync(Path.Combine(verificationRoot, releases["1.0.0"].ExactTreePath, "bridge-copy.txt"), mapBytes);
-            var rootServingCopy = Path.Combine(verificationRoot, "docs", "concepts-copy.json");
-            Directory.CreateDirectory(Path.GetDirectoryName(rootServingCopy)!);
-            await File.WriteAllBytesAsync(rootServingCopy, mapBytes);
-        }
 
         var catalog = JsonSerializer.SerializeToUtf8Bytes(new
         {
@@ -775,6 +763,80 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
             .Single(entry => entry["version"]!.GetValue<string>() == version);
         release[field] = value;
         await File.WriteAllBytesAsync(path, JsonSerializer.SerializeToUtf8Bytes(catalog, WebJson));
+    }
+
+    private static async Task<byte[]> PinBridgeInsidePublicReleaseAsync(Fixture fixture)
+    {
+        var sourceTree = Path.Combine(fixture.VerificationRoot, fixture.Releases["1.0.0"].ExactTreePath);
+        var bridgeBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            schema = "appsurface-docs-concept-map-v1",
+            concepts = new[]
+            {
+                new
+                {
+                    conceptId = "setup",
+                    memberships = new[]
+                    {
+                        new
+                        {
+                            version = "2.0.0",
+                            releaseManifestSha256 = fixture.Releases["2.0.0"].Pin,
+                            locale = "en",
+                            kind = "page",
+                            canonicalRoutePath = "guides/quick-start"
+                        }
+                    }
+                }
+            }
+        }, WebJson);
+        var inTreeBridgePath = Path.Combine(sourceTree, "bridges", "concepts.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(inTreeBridgePath)!);
+        await File.WriteAllBytesAsync(inTreeBridgePath, bridgeBytes);
+
+        var releaseManifestPath = Path.Combine(sourceTree, ReleaseManifestName);
+        var releaseManifest = JsonNode.Parse(await File.ReadAllBytesAsync(releaseManifestPath))!.AsObject();
+        var manifestFiles = releaseManifest["files"]!.AsArray();
+        manifestFiles.Add(JsonSerializer.SerializeToNode(new
+        {
+            path = "bridges/concepts.json",
+            length = bridgeBytes.LongLength,
+            contentType = "application/json",
+            hashAlgorithm = "sha256",
+            sha256 = Sha256(bridgeBytes)
+        }, WebJson));
+        var sortedFiles = new JsonArray();
+        foreach (var entry in manifestFiles.OrderBy(file => file!["path"]!.GetValue<string>(), StringComparer.Ordinal))
+        {
+            sortedFiles.Add(entry!.DeepClone());
+        }
+        releaseManifest["files"] = sortedFiles;
+        var releaseManifestBytes = JsonSerializer.SerializeToUtf8Bytes(releaseManifest, WebJson);
+        await File.WriteAllBytesAsync(releaseManifestPath, releaseManifestBytes);
+        var releasePin = Sha256(releaseManifestBytes);
+        if (fixture.Releases is Dictionary<string, ReleaseEntry> releases)
+        {
+            releases["1.0.0"] = releases["1.0.0"] with { Pin = releasePin };
+        }
+
+        var rootBridgeCopy = Path.Combine(fixture.VerificationRoot, "bridges", "concepts.json");
+        await File.WriteAllBytesAsync(rootBridgeCopy, bridgeBytes);
+        var servingCopy = Path.Combine(fixture.VerificationRoot, "docs", "concepts-copy.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(servingCopy)!);
+        await File.WriteAllBytesAsync(servingCopy, bridgeBytes);
+
+        var catalogPath = Path.Combine(fixture.VerificationRoot, "versions.json");
+        var catalog = JsonNode.Parse(await File.ReadAllBytesAsync(catalogPath))!.AsObject();
+        var sourceEntry = catalog["versions"]!.AsArray().OfType<JsonObject>()
+            .Single(entry => entry["version"]!.GetValue<string>() == "1.0.0");
+        sourceEntry["releaseManifestSha256"] = releasePin;
+        var exactMapPath = "releases/1.0.0/bridges/concepts.json";
+        var caseVariant = Path.Combine(sourceTree, "BRIDGES", "CONCEPTS.JSON");
+        if (File.Exists(caseVariant)) exactMapPath = "releases/1.0.0/BRIDGES/CONCEPTS.JSON";
+        sourceEntry["conceptMapPath"] = exactMapPath;
+        sourceEntry["conceptMapSha256"] = Sha256(bridgeBytes);
+        await File.WriteAllBytesAsync(catalogPath, JsonSerializer.SerializeToUtf8Bytes(catalog, WebJson));
+        return bridgeBytes;
     }
 
     private static DocConceptPageIdentity Identity(Fixture fixture, string version, string route)
