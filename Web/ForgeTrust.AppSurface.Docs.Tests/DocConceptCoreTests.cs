@@ -42,6 +42,38 @@ public sealed class DocConceptCoreTests
     }
 
     [Fact]
+    public void PartialSidecarPreservesUnspecifiedIdentityAndRejectsDuplicateJsonFields()
+    {
+        var routes = new[] { Route("guide/one", "en"), Route("guide/two", "en") };
+        var partial = Sidecar(
+            new Page("guide/one", "en", "one", "One", ["one"]),
+            new Page("guide/two", "en", null, "Two", ["two"]));
+        Assert.True(DocConceptIdentityIndex.TryLoadSidecar(partial, routes, Budget, out var parsed, out var issue));
+        Assert.Null(issue);
+        Assert.Equal(DocConceptIdentityState.ValidPartial, parsed!.IdentityState);
+        Assert.Null(parsed.Pages.Single(page => page.RoutePath == "guide/two").ConceptId);
+
+        var malformed = new[]
+        {
+            Encoding.UTF8.GetBytes("{"),
+            Encoding.UTF8.GetBytes("{\"schema\":\"appsurface-docs-concepts-v1\",\"schema\":\"appsurface-docs-concepts-v1\",\"identityCoverage\":\"complete\",\"pages\":[]}"),
+            Encoding.UTF8.GetBytes($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[]}}")
+        };
+        foreach (var bytes in malformed)
+        {
+            Assert.False(DocConceptIdentityIndex.TryLoadSidecar(bytes, routes, Budget, out _, out issue));
+            Assert.NotNull(issue);
+            Assert.Equal(DocConceptValidationFailure.IndexInvalid, issue.Failure);
+        }
+
+        var duplicateConcepts = Sidecar(
+            new Page("guide/one", "en", "same", "One", []),
+            new Page("guide/two", "en", "same", "Two", []));
+        Assert.False(DocConceptIdentityIndex.TryLoadSidecar(duplicateConcepts, routes, Budget, out _, out issue));
+        Assert.Equal(DocConceptValidationFailure.IdentityConflict, issue!.Failure);
+    }
+
+    [Fact]
     public void CompleteIndexesDistinguishMovesAndKnownAbsenceFromReusedRoutes()
     {
         var oldPin = Pin('a');
@@ -481,6 +513,17 @@ public sealed class DocConceptCoreTests
     [Fact]
     public void SidecarSchemaRejectsInvalidTypesCoverageAndCanonicalBindings()
     {
+        Assert.True(DocConceptSchema.IsSafeRoutePath(string.Empty));
+        Assert.True(DocConceptSchema.IsSafeRoutePath("guide/topic"));
+        foreach (var unsafeRoute in new string?[]
+        {
+            null, "/root/topic", "guide\\topic", "guide?query", "guide#anchor", "guide//topic", "guide/",
+            "./guide", "guide/.hidden", "guide\n/topic"
+        })
+        {
+            Assert.False(DocConceptSchema.IsSafeRoutePath(unsafeRoute));
+        }
+
         var routes = new[] { Route("guide/topic", "en") };
         var validPage = "\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[]";
         var cases = new (string Json, DocConceptValidationFailure Failure)[]
@@ -489,12 +532,16 @@ public sealed class DocConceptCoreTests
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[],\"unexpected\":true}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":7,\"identityCoverage\":\"complete\",\"pages\":[]}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"unknown\",\"pages\":[]}}", DocConceptValidationFailure.IndexInvalid),
+            ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":null}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[\"page\"]}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"../topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[]}}]}}", DocConceptValidationFailure.CanonicalRouteInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"fr\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[]}}]}}", DocConceptValidationFailure.CanonicalRouteInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"Upper\",\"title\":\"Topic\",\"anchorIds\":[]}}]}}", DocConceptValidationFailure.InvalidConceptId),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":false,\"anchorIds\":[]}}]}}", DocConceptValidationFailure.IndexInvalid),
+            ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"anchorIds\":[]}}]}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[3]}}]}}", DocConceptValidationFailure.IndexInvalid),
+            ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[\"bad anchor\"]}}]}}", DocConceptValidationFailure.IndexInvalid),
+            ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[\"bad#anchor\"]}}]}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[],\"sectionLanding\":\"true\"}}]}}", DocConceptValidationFailure.IndexInvalid),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{{validPage}}},{{{validPage}}}]}}", DocConceptValidationFailure.IdentityConflict),
             ($"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"partial\",\"pages\":[{{{validPage}}}]}}", DocConceptValidationFailure.IndexInvalid)
@@ -514,6 +561,19 @@ public sealed class DocConceptCoreTests
         var missingArtifact = new[] { new DocConceptCanonicalRouteFact("guide/topic", null, "en", true) };
         Assert.False(DocConceptIdentityIndex.TryLoadSidecar(Sidecar(), missingArtifact, Budget, out _, out var artifactIssue));
         Assert.Equal(DocConceptValidationFailure.CanonicalRouteInvalid, artifactIssue!.Failure);
+
+        var invalidRouteFacts = new[]
+        {
+            new DocConceptCanonicalRouteFact("guide/topic", "../topic.html", "en", true),
+            new DocConceptCanonicalRouteFact("guide/topic", "guide/topic.txt", "en", true),
+            new DocConceptCanonicalRouteFact("guide/topic", "guide/topic.html", "en ", true)
+        };
+        foreach (var routeFact in invalidRouteFacts)
+        {
+            Assert.False(DocConceptIdentityIndex.TryLoadSidecar(
+                Sidecar(new Page("guide/topic", "en", "topic", "Topic", [])), [routeFact], Budget, out _, out var routeIssue));
+            Assert.Equal(DocConceptValidationFailure.CanonicalRouteInvalid, routeIssue!.Failure);
+        }
     }
 
     [Fact]
@@ -523,10 +583,12 @@ public sealed class DocConceptCoreTests
         {
             ("null", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[],\"extra\":true}}", DocConceptValidationFailure.MapInvalid),
+            ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":null}}", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"Upper\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en\",\"kind\":\"page\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.InvalidConceptId),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[]}}]}}", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"bad\",\"locale\":\"en\",\"kind\":\"page\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en us\",\"kind\":\"page\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.MapInvalid),
+            ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en/us\",\"kind\":\"page\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en\",\"kind\":\"unknown\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.MapInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en\",\"kind\":\"page\"}}]}}]}}", DocConceptValidationFailure.CanonicalRouteInvalid),
             ($"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en\",\"kind\":\"absent\",\"canonicalRoutePath\":\"guide/topic\"}}]}}]}}", DocConceptValidationFailure.MapInvalid),
@@ -540,6 +602,14 @@ public sealed class DocConceptCoreTests
             Assert.Empty(memberships);
             Assert.Equal(expectedFailure, issue!.Failure);
         }
+
+        var duplicateConceptJson = $"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"locale\":\"en\",\"kind\":\"absent\"}}]}},{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"2\",\"releaseManifestSha256\":\"{Pin('2')}\",\"locale\":\"en\",\"kind\":\"absent\"}}]}}]}}";
+        Assert.False(DocConceptSchema.TryLoadMap(Encoding.UTF8.GetBytes(duplicateConceptJson), Budget, out _, out var duplicateConceptIssue));
+        Assert.Equal(DocConceptValidationFailure.IdentityConflict, duplicateConceptIssue!.Failure);
+        Assert.False(DocConceptSchema.TryLoadMap(Encoding.UTF8.GetBytes("{"), Budget, out _, out var malformedIssue));
+        Assert.Equal(DocConceptValidationFailure.MapInvalid, malformedIssue!.Failure);
+        Assert.False(DocConceptSchema.TryLoadMap(Encoding.UTF8.GetBytes($"{{\"schema\":\"{BridgeSchema}\",\"schema\":\"{BridgeSchema}\",\"concepts\":[]}}"), Budget, out _, out var duplicatePropertyIssue));
+        Assert.Equal(DocConceptValidationFailure.MapInvalid, duplicatePropertyIssue!.Failure);
     }
 
     [Fact]
@@ -618,6 +688,300 @@ public sealed class DocConceptCoreTests
         Assert.Equal(DocConceptResolutionReason.KnownAbsent, fallbackOnly.Reason);
         Assert.Null(fallbackOnly.TargetPage);
         Assert.Equal("new/topic", fallbackOnly.FallbackSection!.RoutePath);
+    }
+
+    [Fact]
+    public void CombinedLoaderRejectsInvalidReleasePinsAndQuarantinesUnsafeOrUnservableRouteFacts()
+    {
+        var validPin = Pin('5');
+        var valid = Release("valid", validPin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var missingVersion = new DocConceptReleaseInput(" ", Pin('6'), true, true, true, true, null, [], null);
+        var invalidPin = new DocConceptReleaseInput("bad-pin", new string('g', 64), true, true, true, true, null, [], null);
+        var duplicateSamePin = Release("valid", validPin, [new Page("other", "en", "other", "Other", [])]);
+        var duplicateVersionPin = Release("valid", Pin('7'), [new Page("other", "en", "other", "Other", [])]);
+        var unsafeRoute = new DocConceptReleaseInput("unsafe", Pin('8'), true, true, true, false, null,
+            [new DocConceptCanonicalRouteFact("../outside", "outside.html", "en", true)], null);
+        var badLocale = new DocConceptReleaseInput("bad-locale", Pin('9'), true, true, true, false, null,
+            [new DocConceptCanonicalRouteFact("guide/locale", "guide/locale.html", "en ", true)], null);
+
+        var strict = DocConceptIdentityIndex.BuildCombined(
+            [valid, missingVersion, invalidPin, duplicateSamePin, duplicateVersionPin, unsafeRoute, badLocale],
+            [], DocConceptValidationMode.Strict, Budget);
+        var startup = DocConceptIdentityIndex.BuildCombined(
+            [valid, missingVersion, invalidPin, duplicateSamePin, duplicateVersionPin, unsafeRoute, badLocale],
+            [], DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.False(strict.IsValid);
+        Assert.Contains(strict.Issues, issue => issue.Failure == DocConceptValidationFailure.ReleasePinInvalid);
+        Assert.Contains(strict.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        Assert.Contains(strict.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+        Assert.True(startup.Index.TryGetPageIdentity("valid", validPin, "guide/topic", out _));
+        Assert.DoesNotContain(startup.Index.PublicAvailableReleases, release => release.Version == "bad-pin");
+        Assert.Empty(startup.Index.PublicAvailableReleases.Single(release => release.Version == "unsafe").Pages);
+
+        var unservableInput = new DocConceptReleaseInput("unservable", Pin('a'), true, true, true, true, null,
+            [new DocConceptCanonicalRouteFact("guide/unservable", "guide/unservable.html", "en", true, IsServeable: false)],
+            Sidecar(new Page("guide/unservable", "en", "unservable", "Unservable", [])));
+        var unservable = DocConceptIdentityIndex.BuildCombined([unservableInput], [], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(unservable.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+    }
+
+    [Fact]
+    public void ConflictingRepeatedBridgeReferenceBytesPoisonLegacyCompatibility()
+    {
+        var sourcePin = Pin('b');
+        var targetPin = Pin('c');
+        var source = Legacy("1", sourcePin, "guide/topic");
+        var target = Legacy("2", targetPin, "guide/topic");
+        var validMap = Bridge(
+            new Membership("1", sourcePin, "en", "page", "guide/topic"),
+            new Membership("2", targetPin, "en", "page", "guide/topic"));
+        var conflictingBytes = Encoding.UTF8.GetBytes("{}");
+        var conflictingReference = new DocConceptMapReference(validMap.Path, validMap.Sha256, conflictingBytes);
+
+        var result = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [validMap, conflictingReference], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.MapInvalid);
+        Assert.True(result.Index.TryGetPageIdentity("1", sourcePin, "guide/topic", out var sourceIdentity));
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
+    }
+
+    [Fact]
+    public void BridgeMembershipsRequireExactAvailableReleasesAndCanonicalFallbackPages()
+    {
+        var sourcePin = Pin('d');
+        var targetPin = Pin('e');
+        var hiddenPin = Pin('f');
+        var unavailablePin = Pin('a');
+        var source = Legacy("1", sourcePin, "old/topic");
+        var target = Legacy("2", targetPin, "new/topic");
+        var hidden = new DocConceptReleaseInput("hidden", hiddenPin, false, true, true, false, null,
+            [Route("hidden/topic", null, localeKnown: false)], null);
+        var unavailable = new DocConceptReleaseInput("unavailable", unavailablePin, true, false, true, false, null,
+            [Route("unavailable/topic", null, localeKnown: false)], null);
+        var map = Bridge(
+            new Membership("1", sourcePin, "en", "page", "old/topic"),
+            new Membership("2", targetPin, "en", "absent", FallbackSectionRoute: "missing/section"),
+            new Membership("hidden", hiddenPin, "en", "page", "hidden/topic") { ConceptId = "hidden-concept" },
+            new Membership("unavailable", unavailablePin, "en", "page", "unavailable/topic") { ConceptId = "unavailable-concept" },
+            new Membership("not-in-catalog", Pin('b'), "en", "absent") { ConceptId = "stale-concept" });
+
+        var result = DocConceptIdentityIndex.BuildCombined(
+            [source, target, hidden, unavailable], [map], DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.ReleasePinInvalid);
+        Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+        Assert.True(result.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var sourceIdentity));
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
+        Assert.Null(result.Index.GetPage(new DocConceptPageIdentity("hidden", hiddenPin, "hidden/topic", "en", false)));
+        Assert.Null(result.Index.GetPage(new DocConceptPageIdentity("unavailable", unavailablePin, "unavailable/topic", "en", false)));
+
+        var wrongLocalePage = Release("5", Pin('5'), [new Page("guide/topic", "en", null, "Topic", [])], complete: false);
+        var wrongLocaleMap = Bridge(new Membership("5", Pin('5'), "fr", "page", "guide/topic"));
+        var wrongLocale = DocConceptIdentityIndex.BuildCombined(
+            [wrongLocalePage], [wrongLocaleMap], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(wrongLocale.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+
+        var missingPageMap = Bridge(new Membership("1", sourcePin, "en", "page", "not-a-canonical-page"));
+        var missingPage = DocConceptIdentityIndex.BuildCombined(
+            [source], [missingPageMap], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(missingPage.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+
+        var fallbackTarget = Release("6", Pin('6'), [new Page("fr/section", "fr", null, "Section", [], Landing: true)], complete: false);
+        var wrongLocaleFallbackMap = Bridge(
+            new Membership("1", sourcePin, "en", "page", "old/topic"),
+            new Membership("6", Pin('6'), "en", "absent", FallbackSectionRoute: "fr/section"));
+        var wrongLocaleFallback = DocConceptIdentityIndex.BuildCombined(
+            [source, fallbackTarget], [wrongLocaleFallbackMap], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(wrongLocaleFallback.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+
+        var legacyLandingMap = Bridge(new Membership("legacy-landing", Pin('7'), "en", "page", "guide/landing", SectionLanding: true));
+        var legacyLandingRelease = Legacy("legacy-landing", Pin('7'), "guide/landing");
+        var legacyLanding = DocConceptIdentityIndex.BuildCombined(
+            [legacyLandingRelease], [legacyLandingMap], DocConceptValidationMode.Quarantine, Budget);
+        Assert.True(legacyLanding.Index.TryGetPageIdentity("legacy-landing", Pin('7'), "guide/landing", out var legacyLandingIdentity));
+        Assert.True(legacyLanding.Index.GetPage(legacyLandingIdentity!)!.Landing);
+    }
+
+    [Fact]
+    public void InvalidMapReferencesAndLimitsDisableLegacyContinuityInsteadOfGuessing()
+    {
+        var sourcePin = Pin('b');
+        var targetPin = Pin('c');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", null, "Topic", [])], complete: false);
+        var target = Release("2", targetPin, [new Page("guide/topic", "en", null, "Topic", [])], complete: false);
+        var identity = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+        Assert.Equal(DocConceptResolutionReason.SamePage, Build([source, target]).Index.Resolve(identity, "2", targetPin).Reason);
+
+        var unsupportedBytes = Encoding.UTF8.GetBytes("{\"schema\":\"unsupported\",\"concepts\":[]}");
+        var unsupported = new DocConceptMapReference("unsupported.json",
+            Convert.ToHexString(SHA256.HashData(unsupportedBytes)).ToLowerInvariant(), unsupportedBytes);
+        var invalidReferences = new DocConceptMapReference[]
+        {
+            null!,
+            new("", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("/absolute/map.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("../escape.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder\\map.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder?query", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder#anchor", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder\nmap", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder//map.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("./map.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("folder/../map.json", Pin('1'), Encoding.UTF8.GetBytes("{}")),
+            new("invalid-pin.json", "not-a-digest", Encoding.UTF8.GetBytes("{}")),
+            new("digest-mismatch.json", new string('0', 64), Encoding.UTF8.GetBytes("{}")),
+            unsupported
+        };
+
+        var result = DocConceptIdentityIndex.BuildCombined(
+            [source, target], invalidReferences, DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.MapInvalid);
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Index.Resolve(identity, "2", targetPin).Reason);
+        Assert.Throws<ArgumentNullException>(() => DocConceptIdentityIndex.BuildCombined(null!, [], DocConceptValidationMode.Quarantine, Budget));
+        Assert.Throws<ArgumentNullException>(() => DocConceptIdentityIndex.BuildCombined([source], null!, DocConceptValidationMode.Quarantine, Budget));
+
+        var invalidLimit = DocConceptIdentityIndex.BuildCombined([source], [], DocConceptValidationMode.Strict, 0);
+        Assert.False(invalidLimit.IsValid);
+        Assert.Contains(invalidLimit.Issues, issue => issue.Failure == DocConceptValidationFailure.ArtifactBudgetInvalid);
+        Assert.False(DocConceptIdentityIndex.TryLoadSidecar(Sidecar(new Page("guide/topic", "en", "topic", "Topic", [])),
+            [Route("guide/topic", "en")], 0, out _, out var sidecarLimitIssue));
+        Assert.Equal(DocConceptValidationFailure.ArtifactBudgetInvalid, sidecarLimitIssue!.Failure);
+        Assert.False(DocConceptSchema.TryLoadMap(Encoding.UTF8.GetBytes("{}"), 0, out _, out var mapLimitIssue));
+        Assert.Equal(DocConceptValidationFailure.ArtifactBudgetInvalid, mapLimitIssue!.Failure);
+    }
+
+    [Fact]
+    public void CanonicalInventoryRejectsDuplicateNullAndIncompleteFactsAndBindsHomeToPages()
+    {
+        var pin = Pin('6');
+        var badInventories = new (IReadOnlyList<DocConceptCanonicalRouteFact> Routes, DocConceptValidationFailure Failure)[]
+        {
+            ([null!], DocConceptValidationFailure.CanonicalRouteInvalid),
+            ([new DocConceptCanonicalRouteFact("guide/topic", "guide/topic.html", "en", true), Route("GUIDE/TOPIC", "en")], DocConceptValidationFailure.IdentityConflict),
+            ([new DocConceptCanonicalRouteFact("guide/topic", "", "en", true)], DocConceptValidationFailure.CanonicalRouteInvalid),
+            ([new DocConceptCanonicalRouteFact("guide/topic", "guide/topic.html", "", true)], DocConceptValidationFailure.CanonicalRouteInvalid)
+        };
+
+        foreach (var (routes, failure) in badInventories)
+        {
+            var input = new DocConceptReleaseInput(Guid.NewGuid().ToString("N"), pin, true, true, true, false, null, routes, null);
+            var result = DocConceptIdentityIndex.BuildCombined([input], [], DocConceptValidationMode.Quarantine, Budget);
+            Assert.Contains(result.Issues, issue => issue.Failure == failure);
+        }
+
+        var unservable = new DocConceptReleaseInput("unservable-only", Pin('7'), true, true, true, false, "guide/topic",
+            [new DocConceptCanonicalRouteFact("guide/topic", null, "en", true, IsServeable: false)], null);
+        var invalidHome = new DocConceptReleaseInput("invalid-home", Pin('8'), true, true, true, false, "../outside",
+            [Route("guide/topic", "en")], null);
+        var index = DocConceptIdentityIndex.BuildCombined([unservable, invalidHome], [], DocConceptValidationMode.Quarantine, Budget).Index;
+        Assert.Null(index.GetPage(new DocConceptPageIdentity("unservable-only", Pin('7'), "guide/topic", "en", true)));
+        Assert.False(index.TryGetPageIdentity("unservable-only", Pin('7'), "guide/topic", out _));
+        Assert.Null(index.PublicAvailableReleases.Single(release => release.Version == "invalid-home").HomeRoutePath);
+    }
+
+    [Fact]
+    public void ResolverReportsRenamesAndRejectsAnUnverifiedSourcePage()
+    {
+        var sourcePin = Pin('6');
+        var targetPin = Pin('7');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", "topic", "Old title", [])]);
+        var target = Release("2", targetPin, [new Page("guide/topic", "en", "topic", "New title", [])]);
+        var index = Build([source, target]).Index;
+        var valid = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+        Assert.Equal(DocConceptResolutionReason.RenamedPage, index.Resolve(valid, "2", targetPin).Reason);
+        var unverified = valid with { RoutePath = "missing/page" };
+        var result = index.Resolve(unverified, "2", targetPin);
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.SourcePage);
+        Assert.Null(result.TargetPage);
+    }
+
+    [Fact]
+    public void ConflictingPageAbsenceAndPublishedLandingFactsQuarantineMemberships()
+    {
+        var sourcePin = Pin('c');
+        var targetPin = Pin('d');
+        var source = Legacy("1", sourcePin, "old/topic");
+        var target = LegacyWithRoutes("2", targetPin, "new/topic", "new/section");
+        var pageMap = Bridge(
+            new Membership("1", sourcePin, "en", "page", "old/topic"),
+            new Membership("2", targetPin, "en", "page", "new/topic"));
+        var absenceMap = Bridge(new Membership("2", targetPin, "en", "absent"));
+        var absenceConflict = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [pageMap, absenceMap], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(absenceConflict.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        Assert.True(absenceConflict.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var legacyIdentity));
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, absenceConflict.Index.Resolve(legacyIdentity!, "2", targetPin).Reason);
+
+        var indexedSource = Release("10", Pin('e'), [new Page("guide/topic", "en", "topic", "Topic", [], Landing: false)]);
+        var indexedTarget = Release("11", Pin('f'), [new Page("guides/topic", "en", "topic", "Topic", [])]);
+        var landingConflict = Bridge(new Membership("10", Pin('e'), "en", "page", "guide/topic", SectionLanding: true));
+        var conflicted = DocConceptIdentityIndex.BuildCombined(
+            [indexedSource, indexedTarget], [landingConflict], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(conflicted.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        var indexedIdentity = conflicted.Index.EnumeratePublicPages().Single(row => row.Identity.Version == "10").Identity;
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, conflicted.Index.Resolve(indexedIdentity, "11", Pin('f')).Reason);
+    }
+
+    [Fact]
+    public void PageLookupsAndIncomingIteratorRejectStaleOrMissingIdentities()
+    {
+        var sourcePin = Pin('1');
+        var targetPin = Pin('2');
+        var hiddenPin = Pin('3');
+        var unavailablePin = Pin('4');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var target = Release("2", targetPin, [new Page("guides/topic", "en", "topic", "Topic", [])]);
+        var hidden = new DocConceptReleaseInput("hidden", hiddenPin, false, true, true, false, null,
+            [Route("guide/topic", "en")], null);
+        var unavailable = new DocConceptReleaseInput("unavailable", unavailablePin, true, false, true, false, null,
+            [Route("guide/topic", "en")], null);
+        var index = Build([source, target, hidden, unavailable]).Index;
+        var candidates = index.EnumeratePublicPages().Select(row => row.Identity).ToArray();
+        Assert.True(index.TryGetPageIdentity("1", sourcePin, "GUIDE/TOPIC", out var sourceIdentity));
+        var destination = candidates.Single(identity => identity.Version == "2");
+
+        Assert.NotNull(index.GetPage(sourceIdentity!));
+        Assert.Null(index.GetPage(sourceIdentity! with { ReleaseManifestSha256 = Pin('5') }));
+        Assert.False(index.TryGetPageIdentity("missing", sourcePin, "guide/topic", out _));
+        Assert.False(index.TryGetPageIdentity("1", Pin('5'), "guide/topic", out _));
+        Assert.False(index.TryGetPageIdentity("1", sourcePin, "missing", out _));
+        Assert.False(index.TryGetPageIdentity("hidden", hiddenPin, "guide/topic", out _));
+        Assert.False(index.TryGetPageIdentity("unavailable", unavailablePin, "guide/topic", out _));
+
+        Assert.Empty(index.GetIncoming(destination with { RoutePath = "missing" }, candidates, "instance-a"));
+        var stale = sourceIdentity! with { ReleaseManifestSha256 = Pin('6') };
+        var candidatesWithStaleAndNull = candidates.Append(stale).Append(null!).ToArray();
+        var incoming = index.GetIncoming(destination, candidatesWithStaleAndNull, "instance-a").ToArray();
+        Assert.Single(incoming);
+        Assert.Equal(sourceIdentity, incoming[0].SourceIdentity);
+        Assert.Throws<ArgumentNullException>(() => index.GetIncoming(null!, candidates, "instance-a").ToArray());
+        Assert.Throws<ArgumentNullException>(() => index.GetIncoming(destination, null!, "instance-a").ToArray());
+        Assert.Throws<ArgumentException>(() => index.GetIncoming(destination, candidates, " ").ToArray());
+    }
+
+    [Fact]
+    public void OutgoingEnumerationResolvesEachExactTargetInCallerOrder()
+    {
+        var sourcePin = Pin('7');
+        var targetPin = Pin('8');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var target = Release("2", targetPin, [new Page("guides/topic", "en", "topic", "Topic", [])]);
+        var index = Build([source, target]).Index;
+        var identity = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+
+        var results = index.EnumerateOutgoing(identity,
+        [
+            ("missing", targetPin),
+            ("2", targetPin)
+        ]).ToArray();
+
+        Assert.Equal(2, results.Length);
+        Assert.Equal(DocConceptResolutionReason.TargetUnavailable, results[0].Reason);
+        Assert.Equal(DocConceptResolutionReason.MovedPage, results[1].Reason);
+        Assert.Throws<ArgumentNullException>(() => index.EnumerateOutgoing(null!, []).ToArray());
+        Assert.Throws<ArgumentNullException>(() => index.EnumerateOutgoing(identity, null!).ToArray());
     }
 
     private static DocConceptIndexBuildResult Build(IReadOnlyList<DocConceptReleaseInput> releases) =>

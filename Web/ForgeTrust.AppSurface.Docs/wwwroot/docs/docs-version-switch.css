@@ -134,6 +134,37 @@
 }
 
 @media (max-width: 47.999rem) {
+    /* Archived shells cannot run their inline navigation handlers under the exact-runtime policy.
+       Keep their existing navigation in ordinary document flow so it cannot obscure the guide. */
+    body:has([data-docs-version-switch]) {
+        overflow: auto;
+        height: auto;
+        overflow-wrap: anywhere;
+    }
+
+    body:has([data-docs-version-switch]) > div:has(> #docs-sidebar) {
+        display: block;
+        height: auto;
+        overflow: visible;
+    }
+
+    body:has([data-docs-version-switch]) #docs-sidebar {
+        position: relative;
+        width: 100%;
+        max-width: none;
+        transform: none;
+    }
+
+    body:has([data-docs-version-switch]) .docs-search-workspace-link {
+        flex-wrap: wrap;
+    }
+
+    body:has([data-docs-version-switch]) #docs-sidebar-open,
+    body:has([data-docs-version-switch]) #docs-sidebar-close,
+    body:has([data-docs-version-switch]) #docs-sidebar-overlay {
+        display: none;
+    }
+
     .docs-version-switch {
         grid-template-columns: minmax(0, 1fr);
         gap: 0.75rem;

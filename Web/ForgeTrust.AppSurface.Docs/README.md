@@ -3822,3 +3822,5 @@ If an adopter's central package policy conflicts with any of these versions, do 
 - It depends on the Tailwind package family for AppSurface Docs package build-time styling generation and on the caching package for docs aggregation performance.
 
 Archived guide stylesheets at nested export paths are served only when the exact ordinary CSS member is covered by the verified release manifest and still matches its recorded bytes. This preserves root-export layout without broadening archived script execution; the concept runtime remains authorized by its exact packaged hash and SRI. See the [exact-version tree contract](#exact-version-tree-contract).
+
+On narrow archived guide pages, the switch stylesheet keeps the existing sidebar navigation in document flow and hides its inactive script-dependent open/close controls. This keeps the guide readable while the exact-runtime CSP continues to block the archived inline navigation handler. Navigation links remain ordinary links.
