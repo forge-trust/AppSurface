@@ -68,7 +68,7 @@ internal sealed class CloudTasksSdkTransport : ICloudTasksRpcTransport, IDisposa
         }
     }
 
-    /// <summary>Constructs only the supported fixed-policy sockets handler.</summary>
+    /// <summary>Constructs the fixed-policy handler, allowing concurrent calls to exceed one connection's stream limit.</summary>
     internal static SocketsHttpHandler CreateHandler() => new()
     {
         AllowAutoRedirect = false,
@@ -77,7 +77,8 @@ internal sealed class CloudTasksSdkTransport : ICloudTasksRpcTransport, IDisposa
         UseProxy = false,
         MaxResponseHeadersLength = 16, // KiB; .NET HTTP/2 maintains one decoded header+trailer budget per stream.
         MaxResponseDrainSize = 0,
-        ConnectTimeout = TimeSpan.FromSeconds(2)
+        ConnectTimeout = TimeSpan.FromSeconds(2),
+        EnableMultipleHttp2Connections = true
     };
 
     /// <inheritdoc />

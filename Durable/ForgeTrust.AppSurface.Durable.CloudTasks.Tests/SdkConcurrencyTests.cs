@@ -20,8 +20,8 @@ using Task = System.Threading.Tasks.Task;
 
 namespace ForgeTrust.AppSurface.Durable.CloudTasks.Tests;
 
-// protects: invocation-local credentials on overlapping real SDK HTTP/2 streams.
-// fails_when: shared headers/tokens bleed between requests or token acquisition repeats.
+// protects: invocation-local credentials and second-connection admission on real SDK HTTP/2 streams.
+// fails_when: credentials bleed, token acquisition repeats, or a stream-limited reusable channel queues work until the first call completes.
 // why_new: fake transport cannot observe the authorization metadata on the wire.
 // seam: internal real SDK channel and a loopback TLS peer; no_claim: live Google credential validity.
 public sealed class SdkConcurrencyTests
@@ -82,6 +82,114 @@ public sealed class SdkConcurrencyTests
         Assert.Equal("Bearer token-1", observed[first.TaskName]);
         Assert.Equal("Bearer token-2", observed[second.TaskName]);
         await server.StopAsync();
+    }
+
+    // protects=one reusable SDK channel admits a second request on another connection while its first HTTP/2 stream remains open, with one SDK invocation per call; fails_when=stream saturation queues the second invocation or expires its submission budget; why_new=ordinary concurrency does not constrain the peer's advertised stream capacity; seam=real SDK channel and Kestrel MaxStreamsPerConnection=1; no_claim=provider-side acceptance or live Google credentials.
+    [Fact]
+    public async Task Stream_limited_server_gets_second_request_on_another_connection_before_first_completes()
+    {
+        using var key = RSA.Create(2048);
+        var certRequest = new CertificateRequest("CN=localhost", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var certificate = certRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+        var builder = WebApplication.CreateSlimBuilder();
+        builder.Logging.ClearProviders();
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.Limits.Http2.MaxStreamsPerConnection = 1;
+            options.Listen(IPAddress.Loopback, 0, listen =>
+            {
+                listen.Protocols = HttpProtocols.Http2;
+                listen.UseHttps(certificate);
+            });
+        });
+        await using var server = builder.Build();
+        var observed = new ConcurrentDictionary<string, string>();
+        var firstAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondAccepted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acceptedCount = 0;
+        server.MapPost("/google.cloud.tasks.v2.CloudTasks/CreateTask", async context =>
+        {
+            using var content = new MemoryStream();
+            await context.Request.Body.CopyToAsync(content, context.RequestAborted);
+            var bytes = content.ToArray();
+            var task = CreateTaskRequest.Parser.ParseFrom(bytes, 5, bytes.Length - 5).Task;
+            var ordinal = Interlocked.Increment(ref acceptedCount);
+            Assert.InRange(ordinal, 1, 2);
+            Assert.True(observed.TryAdd(task.Name, context.Connection.Id));
+            if (ordinal == 1)
+            {
+                firstAccepted.TrySetResult();
+                await releaseFirst.Task.WaitAsync(context.RequestAborted);
+            }
+            else
+            {
+                secondAccepted.TrySetResult();
+            }
+            context.Response.ContentType = "application/grpc";
+            context.Response.DeclareTrailer("grpc-status");
+            var response = new ProviderTask { Name = task.Name }.ToByteArray();
+            var frame = new byte[response.Length + 5];
+            BinaryPrimitives.WriteInt32BigEndian(frame.AsSpan(1), response.Length);
+            response.CopyTo(frame, 5);
+            await context.Response.Body.WriteAsync(frame, context.RequestAborted);
+            context.Response.AppendTrailer("grpc-status", "0");
+        });
+        await server.StartAsync();
+        var address = server.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single();
+        using var handler = CloudTasksSdkTransport.CreateHandler();
+        handler.SslOptions = new SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (_, peer, _, _) => peer is not null && peer.GetRawCertData().AsSpan().SequenceEqual(certificate.RawData)
+        };
+        var sdkInvocations = 0;
+        var transport = new CloudTasksSdkTransport(new Uri(address), handler, () => Interlocked.Increment(ref sdkInvocations));
+        using var fixtureCaller = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var tokens = new SequenceSource();
+        var client = new CloudTasksActivationClient(tokens, new(TimeSpan.FromSeconds(30)), transport, TimeProvider.System);
+        var target = new CloudTasksActivationTarget("project", "us-central1", "queue", new Uri("https://worker.example/activate"), "worker@example.com", "worker", TimeSpan.FromSeconds(15));
+        var first = new CloudTasksActivationRequest(target, "first-stream-limit");
+        var second = new CloudTasksActivationRequest(target, "second-stream-limit");
+        Task<CloudTasksDispatchReceipt>? firstDispatch = null;
+        Task<CloudTasksDispatchReceipt>? secondDispatch = null;
+        try
+        {
+            firstDispatch = client.DispatchAsync(first, fixtureCaller.Token);
+            await firstAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            secondDispatch = client.DispatchAsync(second, fixtureCaller.Token);
+            await secondAccepted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(first.TaskName, observed.Single(pair => pair.Key == first.TaskName).Key);
+            Assert.Equal(second.TaskName, observed.Single(pair => pair.Key == second.TaskName).Key);
+            Assert.NotEqual(observed[first.TaskName], observed[second.TaskName]);
+            Assert.Equal(2, Volatile.Read(ref acceptedCount));
+            Assert.Equal(2, Volatile.Read(ref sdkInvocations));
+
+            releaseFirst.TrySetResult();
+            var receipts = await Task.WhenAll(firstDispatch, secondDispatch).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal([first.TaskName, second.TaskName], receipts.Select(static receipt => receipt.TaskName));
+            Assert.All(receipts, receipt => Assert.Equal("ASCT001", receipt.DiagnosticCode));
+            Assert.Equal(2, tokens.Calls);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+            fixtureCaller.Cancel();
+            try
+            {
+                var started = new List<Task<CloudTasksDispatchReceipt>>(2);
+                if (firstDispatch is not null) started.Add(firstDispatch);
+                if (secondDispatch is not null) started.Add(secondDispatch);
+                if (started.Count != 0) await Task.WhenAll(started).WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (OperationCanceledException) { }
+            catch (TimeoutException) { }
+            finally
+            {
+                transport.Dispose();
+                await server.StopAsync();
+            }
+        }
     }
 
     private sealed class SequenceSource : ICloudTasksAccessTokenSource
