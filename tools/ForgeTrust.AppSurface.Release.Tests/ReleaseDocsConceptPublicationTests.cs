@@ -248,6 +248,11 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
     {
         var fixture = await CreateFixtureAsync(includeBridgeCopyInPublicTree: true);
         var bridgeBytes = await File.ReadAllBytesAsync(Path.Combine(fixture.VerificationRoot, "bridges", "concepts.json"));
+        var caseVariantMapPath = Path.Combine(fixture.VerificationRoot, "bridges", "CONCEPTS.JSON");
+        if (File.Exists(caseVariantMapPath))
+        {
+            await SetCatalogFieldAsync(fixture, "1.0.0", "conceptMapPath", JsonValue.Create("bridges/CONCEPTS.JSON"));
+        }
         var sourceSnapshot = SnapshotFiles(fixture.VerificationRoot);
         var outputRoot = Path.Combine(_root, "private-bridge-copy-serving");
 
@@ -255,6 +260,7 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
 
         Assert.Equal(sourceSnapshot, SnapshotFiles(fixture.VerificationRoot));
         Assert.False(File.Exists(Path.Combine(outputRoot, "releases", "1.0.0", "bridge-copy.txt")));
+        Assert.False(File.Exists(Path.Combine(outputRoot, "docs", "concepts-copy.json")));
         foreach (var file in Directory.EnumerateFiles(outputRoot, "*", SearchOption.AllDirectories))
         {
             Assert.False(ContainsBytes(await File.ReadAllBytesAsync(file), bridgeBytes),
@@ -575,7 +581,10 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
         var mapPin = invalidInput == "bridge-digest" ? new string('0', 64) : Sha256(mapBytes);
         if (includeBridgeCopyInPublicTree)
         {
-            await File.WriteAllBytesAsync(Path.Combine(releases["1.0.0"].ExactTreePath, "bridge-copy.txt"), mapBytes);
+            await File.WriteAllBytesAsync(Path.Combine(verificationRoot, releases["1.0.0"].ExactTreePath, "bridge-copy.txt"), mapBytes);
+            var rootServingCopy = Path.Combine(verificationRoot, "docs", "concepts-copy.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(rootServingCopy)!);
+            await File.WriteAllBytesAsync(rootServingCopy, mapBytes);
         }
 
         var catalog = JsonSerializer.SerializeToUtf8Bytes(new
