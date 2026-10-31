@@ -45,8 +45,8 @@
       "sha256": "6484c923f416f837afc6cc2f6621d98b06a08e617d623ed9433b0934f47eeadf"
     },
     "procedures/n16/adapter.py": {
-      "bytes": 28924,
-      "sha256": "ad994457a525f5b22daee522bbe18e82eea87e934368a536e603f9d4fb7a7771"
+      "bytes": 28926,
+      "sha256": "d86641f672bc3ecc63a1d029bc5285eb07dc8354ccef64f7da083e94d97576c7"
     },
     "procedures/n16/checkpoint-n16-accepted-work.sh": {
       "bytes": 79466,

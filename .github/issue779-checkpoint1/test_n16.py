@@ -122,7 +122,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
                 path.write_bytes(raw)
                 path.chmod(0o600)
             self.assertTrue(_retain(control, output, _joined_command(),
-                                                        deadline=time.monotonic() + 5))
+                                    deadline=time.monotonic() + 5))
             self.assertEqual((output / "N16-failure-fixture-stdout.log").read_bytes(), stdout)
             self.assertEqual((output / "N16-failure-fixture-stderr.log").read_bytes(), stderr)
             manifest = binding.decode((output / "N16-failure-logs.json").read_bytes())
@@ -141,7 +141,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             path.write_bytes(raw)
             path.chmod(0o600)
             self.assertTrue(_retain(control, output, _joined_command(),
-                                                        deadline=time.monotonic() + 5))
+                                    deadline=time.monotonic() + 5))
             manifest = binding.decode((output / "N16-failure-logs.json").read_bytes())
             self.assertEqual(manifest["files"]["fixture-stderr.log"], {"present": False})
             self.assertFalse((output / "N16-failure-fixture-stderr.log").exists())
@@ -150,7 +150,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             control, output = _failure_dirs(Path(temporary))
             self.assertTrue(_retain(control, output, _joined_command(),
-                                                         deadline=time.monotonic() + 5))
+                                     deadline=time.monotonic() + 5))
             manifest = binding.decode((output / "N16-failure-logs.json").read_bytes())
             self.assertEqual(manifest["files"], {name: {"present": False}
                                                  for name in adapter.FAILURE_DIAGNOSTIC_CAPS})
@@ -166,7 +166,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
                 control, output = _failure_dirs(Path(temporary))
                 with self.assertRaises(ValueError):
                     _retain(control, output, command,
-                                                deadline=time.monotonic() + 5)
+                            deadline=time.monotonic() + 5)
                 self.assertEqual(list(output.iterdir()), [])
 
     def test_public_retention_boundary_requires_root(self):
@@ -175,7 +175,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             if os.geteuid() != 0:
                 with self.assertRaises(ValueError):
                     adapter.retain_failure_logs(control, output, _joined_command(),
-                                                deadline=time.monotonic() + 5)
+                            deadline=time.monotonic() + 5)
             else:
                 self.assertTrue(adapter.retain_failure_logs(
                     control, output, _joined_command(), deadline=time.monotonic() + 5))
@@ -189,7 +189,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             file.chmod(0o600)
             with self.assertRaises(ValueError):
                 _retain(control, output, _joined_command(),
-                                            deadline=time.monotonic() - 1)
+                        deadline=time.monotonic() - 1)
             self.assertEqual(list(output.iterdir()), [])
 
     def test_deadline_expiring_during_bounded_read_never_publishes(self):
@@ -212,8 +212,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             target.chmod(0o600)
             (control / "fixture-stdout.log").symlink_to(target)
             with self.assertRaises(ValueError):
-                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5,
-                                            )
+                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             control, output = _failure_dirs(root)
@@ -222,8 +221,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             target.chmod(0o600)
             os.link(target, control / "fixture-stdout.log")
             with self.assertRaises(ValueError):
-                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5,
-                                            )
+                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
         with tempfile.TemporaryDirectory() as temporary:
             control, output = _failure_dirs(Path(temporary))
             path = control / "fixture-stdout.log"
@@ -231,8 +229,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
                 stream.truncate(adapter.FAILURE_DIAGNOSTIC_CAPS[path.name] + 1)
             path.chmod(0o600)
             with self.assertRaises(ValueError):
-                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5,
-                                            )
+                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
 
     def test_wrong_mode_and_changed_leaf_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -241,8 +238,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             path.write_bytes(b"diagnostic")
             path.chmod(0o644)
             with self.assertRaises(ValueError):
-                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5,
-                                            )
+                _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
         with tempfile.TemporaryDirectory() as temporary:
             control, output = _failure_dirs(Path(temporary))
             path = control / "fixture-stdout.log"
@@ -262,8 +258,7 @@ class N16FailureLogRetentionTests(unittest.TestCase):
 
             with mock.patch.object(adapter.os, "read", side_effect=replace_after_read):
                 with self.assertRaises(ValueError):
-                    _retain(control, output, _joined_command(), deadline=time.monotonic() + 5,
-                                                )
+                    _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
 
     def test_changed_output_directory_is_detected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -290,8 +285,10 @@ class N16FailureLogRetentionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     _retain(control, output, _joined_command(), deadline=time.monotonic() + 5)
             self.assertTrue(replaced)
-            self.assertEqual({item.name for item in moved.iterdir()},
-                             {"N16-failure-fixture-stdout.log", "N16-failure-logs.json"})
+            self.assertEqual(
+                {item.name for item in moved.iterdir()},
+                {"N16-failure-fixture-stdout.log", "N16-failure-logs.json"},
+            )
             self.assertEqual(list(output.iterdir()), [])
 
     def test_primary_runner_error_is_preserved_when_retention_fails(self):
@@ -306,8 +303,10 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             control, output = _failure_dirs(Path(temporary))
             with mock.patch.object(adapter, "retain_failure_logs", side_effect=OSError("retention failed")):
                 with self.assertRaises(RuntimeError) as caught:
-                    adapter.run_dispatch_with_failure_retention(FailingRunner(), ["fixed"], control, output,
-                                                                 deadline=time.monotonic() + 120)
+                    adapter.run_dispatch_with_failure_retention(
+                        FailingRunner(), ["fixed"], control, output,
+                        deadline=time.monotonic() + 120,
+                    )
             self.assertIs(caught.exception, primary)
 
     def test_unjoined_runner_error_is_preserved_and_does_not_read_logs(self):
@@ -324,8 +323,10 @@ class N16FailureLogRetentionTests(unittest.TestCase):
             file.write_bytes(b"unjoined")
             file.chmod(0o600)
             with self.assertRaises(RuntimeError) as caught:
-                adapter.run_dispatch_with_failure_retention(FailingRunner(), ["fixed"], control, output,
-                                                             deadline=time.monotonic() + 120)
+                adapter.run_dispatch_with_failure_retention(
+                    FailingRunner(), ["fixed"], control, output,
+                    deadline=time.monotonic() + 120,
+                )
             self.assertIs(caught.exception, primary)
             self.assertEqual(list(output.iterdir()), [])
 

@@ -327,6 +327,8 @@ def _retain_failure_logs_owned(control, output, command, *, deadline, uid, gid):
         return True
     finally:
         os.close(output_fd)
+
+
 def retain_failure_logs(control, output, command, *, deadline):
     """Root-only production boundary for fixed, joined N16 failure logs."""
     binding.require(os.geteuid() == 0 and os.getegid() == 0, "failure-retention-root-required")

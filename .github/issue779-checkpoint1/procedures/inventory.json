@@ -386,13 +386,13 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     {
-      "bytes": 28924,
+      "bytes": 28926,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/n16/adapter.py",
-      "ported_sha256": "ad994457a525f5b22daee522bbe18e82eea87e934368a536e603f9d4fb7a7771",
-      "sha256": "ad994457a525f5b22daee522bbe18e82eea87e934368a536e603f9d4fb7a7771"
+      "ported_sha256": "d86641f672bc3ecc63a1d029bc5285eb07dc8354ccef64f7da083e94d97576c7",
+      "sha256": "d86641f672bc3ecc63a1d029bc5285eb07dc8354ccef64f7da083e94d97576c7"
     },
     {
       "bytes": 5914,
@@ -427,8 +427,8 @@
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/n16/port-manifest.json",
-      "ported_sha256": "e4728f94c6d078063f845a464cd8927b368a2b5aa991d5f716f8f50891f17fa5",
-      "sha256": "e4728f94c6d078063f845a464cd8927b368a2b5aa991d5f716f8f50891f17fa5"
+      "ported_sha256": "3e69bb1f11dcc61cd9d32eaadd0632db608dbaec6f48f7c85c4902481f125b7d",
+      "sha256": "3e69bb1f11dcc61cd9d32eaadd0632db608dbaec6f48f7c85c4902481f125b7d"
     },
     {
       "bytes": 79466,
