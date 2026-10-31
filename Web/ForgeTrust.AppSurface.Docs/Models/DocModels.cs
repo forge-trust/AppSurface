@@ -146,7 +146,7 @@ public sealed record DocMetadata
     /// A missing or blank value is unspecified. Nonblank values are trimmed and must contain 1–128 lowercase ASCII
     /// letters, digits, dots, underscores, or hyphens, with an ASCII letter or digit at both ends. Identity comparison
     /// is ordinal and case-sensitive. See the
-    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#concept-identities">concept identity reference</see>.
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/guides/version-switching.md#authoring-decision-and-metadata-shape">concept identity reference</see>.
     /// </remarks>
     public string? ConceptId { get; init; }
 

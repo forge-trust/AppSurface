@@ -398,7 +398,8 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightTests : IClassFixture<A
         Assert.Contains("docsFrom=", counterpartHref, StringComparison.Ordinal);
         Assert.Contains(targetRoute.Split('#')[0], Uri.UnescapeDataString(counterpartHref), StringComparison.OrdinalIgnoreCase);
 
-        await counterpartLink.ClickAsync();
+        await counterpartLink.FocusAsync();
+        await counterpartLink.PressAsync("Enter");
         await page.WaitForFunctionAsync(
             "expectedPath => window.location.pathname === expectedPath",
             targetPath,

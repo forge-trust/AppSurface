@@ -108,11 +108,13 @@ public sealed class AppSurfaceDocsPublishedVersion
     /// Gets or sets an optional trusted-release-root-relative concept bridge path for pages without embedded identities.
     /// </summary>
     /// <remarks>
-    /// Set this together with <see cref="ConceptMapSha256"/> to provide digest-pinned legacy relationships for this
-    /// exact release. The path is confined beneath <see cref="AppSurfaceDocsVersioningOptions.TrustedReleaseRootPath"/>
+    /// Set this together with <see cref="ConceptMapSha256"/> to contribute digest-pinned legacy relationships to the
+    /// catalog-wide identity snapshot. Each membership identifies its own exact release and manifest pin; a map
+    /// referenced by either endpoint participates in both switching directions. The path is confined beneath
+    /// <see cref="AppSurfaceDocsVersioningOptions.TrustedReleaseRootPath"/>
     /// using the same relative-file rules as other version artifacts. Omit both properties when no bridge applies. The
     /// bridge does not modify or supplement the immutable release tree; see the
-    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#concept-identity-bridges">concept identity bridge reference</see>.
+    /// <see href="https://github.com/forge-trust/AppSurface/blob/main/Web/ForgeTrust.AppSurface.Docs/README.md#concept-switch-artifacts">concept identity bridge reference</see>.
     /// </remarks>
     public string? ConceptMapPath { get; set; }
 
