@@ -23,14 +23,10 @@ public sealed class AppSurfaceDocsVersionSwitchPlaywrightFixture : IAsyncLifetim
     {
         var browserState = await Task.Run(async () =>
         {
-            Console.Error.WriteLine("[VersionSwitchBrowser] create:start");
             var playwright = await Playwright.CreateAsync();
-            Console.Error.WriteLine("[VersionSwitchBrowser] create:complete");
             try
             {
-                Console.Error.WriteLine("[VersionSwitchBrowser] launch:start");
                 var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
-                Console.Error.WriteLine("[VersionSwitchBrowser] launch:complete");
                 return (Playwright: playwright, Browser: browser);
             }
             catch
