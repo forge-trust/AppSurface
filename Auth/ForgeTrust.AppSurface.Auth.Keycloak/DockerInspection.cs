@@ -52,13 +52,12 @@ internal static class DockerInspection
         var before = await ImageIdentity(image.ManifestDigest, token, run).ConfigureAwait(false);
         Verify(before, image);
         var name = "appsurface-keycloak-probe-" + Guid.NewGuid().ToString("N");
-        var created = false;
+        Exception? primary = null;
         try
         {
             // Fixed framework-owned probes only. No host paths, credentials, callback, or recipe shell.
             const string script = "test \"$(id -u)\" = 1000 && test -s /etc/ssl/certs/ca-certificates.crt && test -s /opt/java/openjdk/lib/security/cacerts && test ! -e /usr/bin/pebble && ! command -v curl && java -version && /opt/keycloak/bin/kc.sh --version && /opt/keycloak/bin/kcadm.sh --help >/dev/null";
             _ = await run(["create", "--name", name, "--platform", image.Platform, "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "3g", "--cpus", "4", "--tmpfs", "/tmp:rw,nosuid,nodev,size=128m", "--entrypoint", "/bin/sh", image.ManifestDigest, "-ec", script], token).ConfigureAwait(false);
-            created = true;
             var container = await run(["inspect", "--format", "{{.Image}}", name], token).ConfigureAwait(false);
             KeycloakSecurity.Require(container.Output.Trim() == before.EngineId, "Probe container image differs from inspected content.");
             var after = await ImageIdentity(image.ManifestDigest, token, run).ConfigureAwait(false);
@@ -68,18 +67,29 @@ internal static class DockerInspection
             KeycloakSecurity.Require(status.Output.Trim() == "0" && (observation.Output + observation.Error).Contains("Keycloak " + version, StringComparison.Ordinal), "Runtime probe failed.");
             return new(image.ManifestDigest, image.ConfigDigest, image.Platform, true, "docker-29-v1");
         }
+        catch (Exception ex)
+        {
+            primary = ex;
+            throw;
+        }
         finally
         {
-            if (created)
+            // Once create is attempted, the daemon may own the name even if its reply is lost.
+            // Cleanup gets its own bounded token so caller cancellation cannot skip removal.
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
             {
-                using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                try
-                {
-                    _ = await run(["rm", "--force", name], cleanup.Token).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is IOException or InvalidDataException or BoundedProcessException or OperationCanceledException)
-                {
-                }
+                var removed = await run(["rm", "--force", name], cleanup.Token).ConfigureAwait(false);
+                KeycloakSecurity.Require(removed.ExitCode == 0, "Probe cleanup was not confirmed.");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or BoundedProcessException or OperationCanceledException)
+            {
+                if (primary is not null)
+                    KeycloakDiagnostics.MarkUnknownEffect(primary);
+                else
+                    throw KeycloakDiagnostics.Failure(KeycloakFailureCode.ProbeFailed, KeycloakSafePhase.Inspection,
+                        "runtime:probe", KeycloakEffectState.Unknown,
+                        "Inspect the host for the owned probe container before any fresh invocation.");
             }
         }
     }

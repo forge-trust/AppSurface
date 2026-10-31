@@ -26,6 +26,8 @@ SDK operations report `KeycloakSecurityException`; the strict `KeycloakCanonical
 
 `KeycloakEffectState.None` permits correction of the declared input. `Staged` means owned temporary data may exist and should be cleaned or inspected according to host policy. `Committed` means an accepted result exists. `Unknown` requires inspection before retry. `KeycloakRetryMetadata` never authorizes automatic retry; at most one explicit unchanged transient acquisition/probe retry may be allowed by the host policy.
 
+The [runtime inspector](../README.md) attempts one bounded five-second removal by its unique probe-container name after every create attempt, including a cancelled, timed-out or lost create acknowledgement. Cleanup uses an independent token. If removal cannot be confirmed, a previously passing probe is rejected with `ProbeFailed`, effects `Unknown`, and inspection-before-retry recovery. If a primary probe/create failure already exists, its code and phase remain authoritative while the safe diagnostic records the unknown cleanup effect. No raw cleanup output, host path or container name is exposed. Inspect private host state before another invocation; a failed removal never authorizes automatic retries.
+
 The sample's wrong-identity check deliberately changes only the supplied config digest to all zeroes and expects `inspectionfailed` or an earlier safe identity rejection. It does not manufacture a passing image or claim that the production fixture was inspected.
 
 

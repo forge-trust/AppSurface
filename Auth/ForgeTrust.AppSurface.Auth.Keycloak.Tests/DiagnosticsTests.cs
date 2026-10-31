@@ -167,4 +167,20 @@ public sealed class DiagnosticsTests
         Assert.Equal(KeycloakFailureCode.Unexpected, unexpected.Code);
         Assert.Equal(KeycloakRetryMetadata.InspectBeforeRetry, unexpected.RetryMetadata);
     }
+
+    [Fact]
+    public void UnconfirmedCleanupOverridesKnownEffectWithoutChangingItsPrimaryIdentity()
+    {
+        var known = KeycloakDiagnostics.Failure(KeycloakFailureCode.Invalid, KeycloakSafePhase.Inspection,
+            "runtime:probe", KeycloakEffectState.None, "private correction");
+        KeycloakDiagnostics.MarkUnknownEffect(known);
+        var mapped = KeycloakDiagnostics.Map(known, KeycloakSafePhase.Build, "ignored", KeycloakEffectState.None);
+        Assert.Equal(known.Code, mapped.Code);
+        Assert.Equal(known.Phase, mapped.Phase);
+        Assert.Equal(known.OperationId, mapped.OperationId);
+        Assert.Equal(known.CorrelationId, mapped.CorrelationId);
+        Assert.Equal(KeycloakEffectState.Unknown, mapped.Effect);
+        Assert.Equal(KeycloakRetryMetadata.InspectBeforeRetry, mapped.RetryMetadata);
+        Assert.DoesNotContain("private", mapped.ToString(), StringComparison.Ordinal);
+    }
 }

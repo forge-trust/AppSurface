@@ -42,19 +42,19 @@ response-completion signal: pinned Turbo has one visit resolver per frame, so an
 response can fulfill a later visit's promise before that later response renders. Keep both response
 completion and the DOM assertions, with the existing deadlines.
 
-## Form-interactions readiness
+## Functional runtime readiness
 
-The functional form-interactions tests in
+The functional form-interactions and concurrent user-list revalidation tests in
 [`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) use a browser context that serves the
 sample's Google Fonts stylesheet with a local empty CSS response. The sample uses its system-font fallback;
-these tests verify conditional fields, collection form data, and validation redisplay. Use the [visual-baseline
+these tests verify conditional fields, collection form data, validation redisplay, and preservation of concurrent stream updates. Use the [visual-baseline
 suites](#release-page-visual-baselines) when verifying appearance.
 
 The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
 before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
-Keep this interception scoped to functional form tests so browser tests that exercise rendering retain their own font policy.
+Keep this interception scoped to these functional runtime tests so browser tests that exercise rendering retain their own font policy.
 
 ## AppSurface Docs standalone fixture
 

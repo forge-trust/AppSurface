@@ -74,7 +74,121 @@ public sealed class DockerInspectionTests
         }
         var error = await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ProbeAsync(image, "26.7.2", default, Run));
         Assert.Equal("primary", error.Message);
+        var mapped = KeycloakDiagnostics.Map(error, KeycloakSafePhase.Inspection, "runtime:probe", KeycloakEffectState.None);
+        Assert.Equal(KeycloakFailureCode.InspectionFailed, mapped.Code);
+        Assert.Equal(KeycloakEffectState.Unknown, mapped.Effect);
+        Assert.Equal(KeycloakRecoveryClass.InspectBeforeRetry, mapped.Recovery);
         await Assert.ThrowsAsync<InvalidDataException>(() => DockerInspection.ProbeAsync(image, "26.6", default, Run));
+    }
+
+    // protects: a lost create acknowledgement still removes the exact generated container name.
+    // fails_when: cancellation, timeout or I/O failure bypasses cleanup or reuses the cancelled token.
+    // seam: the existing internal DockerInspectionCommand; no real Docker or private reflection.
+    [Theory]
+    [InlineData("io")]
+    [InlineData("cancelled")]
+    [InlineData("deadline")]
+    public async Task Unacknowledged_create_still_removes_owned_name_and_preserves_primary(string shape)
+    {
+        using var cancellation = new CancellationTokenSource();
+        Exception primary = shape switch
+        {
+            "io" => new IOException("private create reply"),
+            "cancelled" => new OperationCanceledException(cancellation.Token),
+            _ => new BoundedProcessException(ProcessStopReason.Deadline)
+        };
+        string? attempted = null;
+        string? removed = null;
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] == "create")
+            {
+                attempted = args[2];
+                cancellation.Cancel();
+                throw primary;
+            }
+            if (args[0] == "rm")
+            {
+                Assert.True(token.CanBeCanceled);
+                Assert.False(token.IsCancellationRequested);
+                Assert.NotEqual(cancellation.Token, token);
+                removed = args[2];
+            }
+            return Task.FromResult(Reply(args, Image, Image.ManifestDigest));
+        }
+
+        var failure = await Record.ExceptionAsync(() => DockerInspection.ProbeAsync(Image, "26.7.2", cancellation.Token, Run));
+
+        Assert.Same(primary, failure);
+        Assert.StartsWith("appsurface-keycloak-probe-", attempted, StringComparison.Ordinal);
+        Assert.Equal(attempted, removed);
+        var mapped = KeycloakDiagnostics.Map(primary, KeycloakSafePhase.Inspection, "runtime:probe", KeycloakEffectState.None);
+        Assert.Equal(KeycloakEffectState.None, mapped.Effect);
+    }
+
+    // protects: failed cleanup cannot mint a passing probe observation or authorize blind retry.
+    [Theory]
+    [InlineData("io")]
+    [InlineData("denied")]
+    [InlineData("cancelled")]
+    [InlineData("deadline")]
+    [InlineData("nonzero")]
+    public async Task Passing_probe_with_unconfirmed_cleanup_is_rejected_with_unknown_effect(string shape)
+    {
+        var removals = 0;
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] != "rm") return Task.FromResult(Reply(args, Image, Image.ManifestDigest));
+            removals++;
+            if (shape == "nonzero") return Task.FromResult(new ProcessObservation(1, "private output", "private error", TimeSpan.Zero));
+            throw shape switch
+            {
+                "io" => new IOException("private cleanup"),
+                "denied" => new UnauthorizedAccessException("private cleanup"),
+                "cancelled" => new OperationCanceledException(token),
+                _ => new BoundedProcessException(ProcessStopReason.Deadline)
+            };
+        }
+
+        var failure = await Assert.ThrowsAsync<KeycloakSecurityException>(() => DockerInspection.ProbeAsync(Image, "26.7.2", default, Run));
+
+        Assert.Equal(1, removals);
+        Assert.Equal(KeycloakFailureCode.ProbeFailed, failure.Code);
+        Assert.Equal(KeycloakSafePhase.Inspection, failure.Phase);
+        Assert.Equal(KeycloakEffectState.Unknown, failure.Effect);
+        Assert.Equal(KeycloakRecoveryClass.InspectBeforeRetry, failure.Recovery);
+        Assert.True(failure.RetryMetadata.RequiresInspectionFirst);
+        Assert.DoesNotContain("private", failure.ToString(), StringComparison.Ordinal);
+    }
+
+    // protects: an uncertain create plus failed removal retains the original failure and safe recovery state.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Create_failure_and_unconfirmed_cleanup_retain_primary_with_unknown_effect(bool known)
+    {
+        Exception primary = known
+            ? KeycloakDiagnostics.Failure(KeycloakFailureCode.Cancelled, KeycloakSafePhase.Inspection,
+                "runtime:probe", KeycloakEffectState.None, "private action")
+            : new IOException("private primary");
+        Task<ProcessObservation> Run(IReadOnlyList<string> args, CancellationToken token)
+        {
+            if (args[0] == "create") throw primary;
+            if (args[0] == "rm") throw new IOException("private cleanup");
+            return Task.FromResult(Reply(args, Image, Image.ManifestDigest));
+        }
+
+        var failure = await Record.ExceptionAsync(() => DockerInspection.ProbeAsync(Image, "26.7.2", default, Run));
+
+        Assert.Same(primary, failure);
+        var mapped = KeycloakDiagnostics.Map(primary, KeycloakSafePhase.Inspection,
+            "runtime:probe", KeycloakEffectState.None, "cleanup-correlation");
+        Assert.Equal(known ? KeycloakFailureCode.Cancelled : KeycloakFailureCode.CaptureInvalid, mapped.Code);
+        Assert.Equal(KeycloakEffectState.Unknown, mapped.Effect);
+        Assert.Equal(KeycloakRecoveryClass.InspectBeforeRetry, mapped.Recovery);
+        Assert.Equal("cleanup-correlation", mapped.CorrelationId.Value);
+        Assert.Null(mapped.InnerException);
+        Assert.DoesNotContain("private", mapped.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]

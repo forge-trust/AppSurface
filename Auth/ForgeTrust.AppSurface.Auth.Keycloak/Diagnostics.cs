@@ -5,6 +5,12 @@ namespace ForgeTrust.AppSurface.Auth.Keycloak;
 internal static class KeycloakDiagnostics
 {
     internal const string Reference = "https://github.com/forge-trust/AppSurface/blob/main/Auth/ForgeTrust.AppSurface.Auth.Keycloak/docs/diagnostics.md";
+    private static readonly object UnknownEffectMarker = new();
+
+    /// <summary>Preserves a private primary failure while recording an unconfirmed owned cleanup effect.</summary>
+    /// <remarks>The marker contains no process output or host identity and is consumed only by the public diagnostic mapper.</remarks>
+    internal static void MarkUnknownEffect(Exception primary) => primary.Data[UnknownEffectMarker] = true;
+
     internal static KeycloakSecurityException Failure(KeycloakFailureCode code, KeycloakSafePhase phase, string operation, KeycloakEffectState effect, string action, Exception? cause = null, KeycloakCorrelationId? correlationId = null, KeycloakRecoveryClass? recoveryOverride = null)
     {
         var transient = cause is MaterialAcquisitionException { Transient: true } && effect == KeycloakEffectState.None;
@@ -37,8 +43,15 @@ internal static class KeycloakDiagnostics
     };
     internal static KeycloakSecurityException Map(Exception ex, KeycloakSafePhase phase, string operation, KeycloakEffectState effect, string? correlationId = null)
     {
+        var cleanupUnknown = ex.Data.Contains(UnknownEffectMarker);
+        if (cleanupUnknown)
+            effect = KeycloakEffectState.Unknown;
         if (ex is KeycloakSecurityException known)
         {
+            if (cleanupUnknown)
+                return Failure(known.Code, known.Phase, known.OperationId, KeycloakEffectState.Unknown,
+                    "Inspect the host for the owned probe container before any fresh invocation.",
+                    correlationId: new KeycloakCorrelationId(correlationId ?? known.CorrelationId.Value));
             if (correlationId is null || known.CorrelationId.Value == correlationId)
                 return known;
             var rebound = Failure(known.Code, known.Phase, known.OperationId, known.Effect, known.NextAction, correlationId: new KeycloakCorrelationId(correlationId), recoveryOverride: known.Recovery);

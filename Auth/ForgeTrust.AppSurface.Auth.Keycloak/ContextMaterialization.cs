@@ -33,7 +33,7 @@ internal static class ContextMaterialization
     {
         WriteIndented = false
     };
-    internal static async Task<ContextMaterializationResult> MaterializeAsync(ContextMaterializationInput input, string absentDestination, CancellationToken cancellationToken = default, ContextMaterializationLimits? limits = null)
+    internal static async Task<ContextMaterializationResult> MaterializeAsync(ContextMaterializationInput input, string absentDestination, CancellationToken cancellationToken = default, ContextMaterializationLimits? limits = null, Action<string, string>? publishDirectory = null, Action? metadataPrepared = null)
     {
         limits ??= new ContextMaterializationLimits();
         ValidateInput(input, limits);
@@ -126,8 +126,15 @@ internal static class ContextMaterialization
             TemporaryDiskBudget.Account(manifest.LongLength);
             await File.WriteAllBytesAsync(Path.Combine(stage, "context-manifest.json"), manifest, token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
-            Directory.Move(stage, destination);
-            return new ContextMaterializationResult(destination, HashFile(Path.Combine(destination, "context-manifest.json")), HashFile(Path.Combine(destination, "context-manifest.json")), files, verified, repaired, entrypointPath, input.Platform, FinalFiles(destination), FinalDirectories(destination));
+            var manifestDigest = HashFile(Path.Combine(stage, "context-manifest.json"));
+            var preparedResult = new ContextMaterializationResult(destination, manifestDigest, manifestDigest, files, verified, repaired, entrypointPath, input.Platform, FinalFiles(stage), FinalDirectories(stage));
+            metadataPrepared?.Invoke();
+            token.ThrowIfCancellationRequested();
+            if (publishDirectory is null)
+                Directory.Move(stage, destination);
+            else
+                publishDirectory(stage, destination);
+            return preparedResult;
         }
         finally
         {

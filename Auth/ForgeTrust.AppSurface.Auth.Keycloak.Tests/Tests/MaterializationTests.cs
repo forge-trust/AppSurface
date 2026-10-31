@@ -548,6 +548,80 @@ public sealed class MaterializationTests
         Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "invalid-shape-context.owned-*"));
     }
 
+    // testcard protects: result metadata remains the prepared staging identity across publication.
+    // fails_when: a publisher moves the context and immediately removes its manifest before return.
+    // why_new: post-publication reads can otherwise throw or describe host-mutated output.
+    // seam: internal publisher performs the real directory move and deterministic immediate mutation.
+    // no_claim: this does not prove filesystem immutability after materialization.
+    [Fact]
+    public async Task MaterializationReturnsPreparedInventoryWhenPublishedContextIsImmediatelyMutated()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "publication-input"));
+        var destination = Path.Combine(fixture.Root, "publication-context");
+        var expectedManifestDigest = string.Empty;
+        var expectedFinalFiles = ImmutableDictionary<string, string>.Empty;
+        ContextSourceDirectory[] expectedFinalDirectories = [];
+
+        var result = await ContextMaterialization.MaterializeAsync(input, destination, publishDirectory: (stage, published) =>
+        {
+            var manifestPath = Path.Combine(stage, "context-manifest.json");
+            expectedManifestDigest = HexFile(manifestPath);
+            expectedFinalFiles = Directory.EnumerateFiles(stage, "*", SearchOption.AllDirectories)
+                .ToImmutableDictionary(path => Path.GetRelativePath(stage, path).Replace('\\', '/'), HexFile, StringComparer.Ordinal);
+            expectedFinalDirectories = Directory.EnumerateDirectories(stage, "*", SearchOption.AllDirectories)
+                .Select(path => new ContextSourceDirectory(
+                    Path.GetRelativePath(stage, path).Replace('\\', '/'),
+                    OperatingSystem.IsWindows() ? UnixFileMode.UserRead | UnixFileMode.UserWrite : File.GetUnixFileMode(path)))
+                .OrderBy(directory => directory.RelativePath, StringComparer.Ordinal)
+                .ToArray();
+            Directory.Move(stage, published);
+            File.Delete(Path.Combine(published, "context-manifest.json"));
+        });
+
+        Assert.Equal(Path.GetFullPath(destination), result.ContextPath);
+        Assert.Equal(expectedManifestDigest, result.ContextDigest);
+        Assert.Equal(expectedManifestDigest, result.ManifestDigest);
+        Assert.Equal(expectedFinalFiles, result.ExpectedFinalFiles);
+        Assert.Equal(expectedFinalDirectories, result.FinalDirectories);
+        Assert.Contains("context-manifest.json", result.ExpectedFinalFiles.Keys);
+        Assert.Equal(expectedManifestDigest, result.ExpectedFinalFiles["context-manifest.json"]);
+        Assert.False(File.Exists(Path.Combine(destination, "context-manifest.json")));
+        Assert.ThrowsAny<IOException>(() => ContextMaterialization.Revalidate(result.ContextPath, result.ManifestDigest));
+    }
+
+    // protects: cancellation observed after metadata preparation prevents publication.
+    // fails_when: staged hashing is followed by publication without a fresh cancellation check.
+    // seam: the internal metadata-prepared callback cancels at the exact pre-publication boundary.
+    [Fact]
+    public async Task CancellationAfterMetadataPreparationLeavesAbsentDestination()
+    {
+        using var fixture = TinyImageFixture.Create();
+        var input = CreateRichInput(fixture, Path.Combine(fixture.Root, "late-cancellation-input"));
+        var destination = Path.Combine(fixture.Root, "late-cancellation-context");
+        using var cancellation = new CancellationTokenSource();
+        var prepared = false;
+        var published = false;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ContextMaterialization.MaterializeAsync(
+            input, destination, cancellation.Token,
+            publishDirectory: (stage, output) =>
+            {
+                published = true;
+                Directory.Move(stage, output);
+            },
+            metadataPrepared: () =>
+            {
+                prepared = true;
+                cancellation.Cancel();
+            }));
+
+        Assert.True(prepared);
+        Assert.False(published);
+        Assert.False(Path.Exists(destination));
+        Assert.Empty(Directory.EnumerateDirectories(fixture.Root, "late-cancellation-context.owned-*"));
+    }
+
     // protects: revalidation independently validates inventory declarations and actual modes.
     // fails_when: a caller supplies matching manifest bytes containing aliases/duplicates or changes a directory mode.
     // why_new: digest-tamper tests never reached these inventory and mode conditions.
