@@ -269,10 +269,10 @@ def build_package_artifacts(work_dir: Path, package_version: str, environment: d
         "--artifacts-output", str(artifacts),
         "--artifact-manifest", str(work_dir / "package-artifact-manifest.json"),
         "--report", str(work_dir / "package-artifact-report.md"),
-        "--coverage-proof-work-dir", str(work_dir / "coverage-cli-consumer-proof"),
-        "--coverage-proof-report", str(work_dir / "coverage-cli-consumer-proof.md"),
-        "--docs-proof-work-dir", str(work_dir / "docs-package-consumer-proof"),
-        "--docs-proof-report", str(work_dir / "docs-package-consumer-proof.md"),
+        "--coverage-proof-work-dir", str(artifacts / "coverage-cli-consumer-proof"),
+        "--coverage-proof-report", str(artifacts / "coverage-cli-consumer-proof.md"),
+        "--docs-proof-work-dir", str(artifacts / "docs-package-consumer-proof"),
+        "--docs-proof-report", str(artifacts / "docs-package-consumer-proof.md"),
     ]
     run_checked(command, ROOT, environment, "PackageIndex pack and artifact verification")
     return artifacts

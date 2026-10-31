@@ -177,6 +177,20 @@ class BclOnlyCoreTests(unittest.TestCase):
             run_checked.assert_called_once()
 
 
+class PackageArtifactRootTests(unittest.TestCase):
+    def test_package_proof_evidence_is_confined_to_the_artifact_output(self):
+        with tempfile.TemporaryDirectory(prefix="docs-concept-artifacts-") as directory:
+            with unittest.mock.patch.object(VERIFIER, "run_checked") as run_checked:
+                artifacts = VERIFIER.build_package_artifacts(Path(directory), "0.0.0-ci.local", {})
+
+            command = run_checked.call_args.args[0]
+            self.assertEqual(artifacts, Path(command[command.index("--artifacts-output") + 1]))
+            for option in ("--coverage-proof-work-dir", "--coverage-proof-report",
+                           "--docs-proof-work-dir", "--docs-proof-report"):
+                with self.subTest(option=option):
+                    self.assertTrue(Path(command[command.index(option) + 1]).is_relative_to(artifacts))
+
+
 class ConsumerFixtureTests(unittest.TestCase):
     def test_fixture_consumes_exact_docs_package_without_source_project_references(self):
         project = ET.parse(VERIFIER.CONSUMER_FIXTURE / "DocsConceptConsumer.csproj").getroot()
