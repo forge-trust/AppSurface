@@ -1,0 +1,251 @@
+{
+  "reviewedRecipeId": "a3a809007eba3feadf626712c75bfe89543d451d228d6c27225a07516b3fbd83",
+  "localInputs": [
+    {
+      "materialId": "source-oci",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/source-oci",
+      "sha256": "99d08a39d545a534f07a4c29bbf909c03440f96923227fe9e1dbd64c5cb6a7ea",
+      "maxBytes": 267909120
+    },
+    {
+      "materialId": "source-index",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/source-index",
+      "sha256": "831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669",
+      "maxBytes": 2364
+    },
+    {
+      "materialId": "runtime-index",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/runtime-index",
+      "sha256": "7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037",
+      "maxBytes": 5918
+    },
+    {
+      "materialId": "runtime-oci",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/runtime-oci",
+      "sha256": "81ba11dcc0cab958a9ad56a7c13a009be5e9089f2ba98ccd946afd62f4a49008",
+      "maxBytes": 114831360
+    },
+    {
+      "materialId": "frontend-index",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/frontend-index",
+      "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e",
+      "maxBytes": 9078
+    },
+    {
+      "materialId": "frontend-oci",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/frontend-oci",
+      "sha256": "b8bafb1eb03b42f2cc67ae18510e8a99d9ecce67b2a9a20d985b2290d65ca204",
+      "maxBytes": 13148160
+    },
+    {
+      "materialId": "maven-8c5623b98f32d5f7",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-8c5623b98f32d5f7",
+      "sha256": "8c5623b98f32d5f7e1287ff61ed50e08ab7b11381e991fff89327faabba42261",
+      "maxBytes": 594782
+    },
+    {
+      "materialId": "maven-1290c2795e93e8a6",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-1290c2795e93e8a6",
+      "sha256": "1290c2795e93e8a6861a6c4d9ff0d844d32f5ea178362cb2721edf5561e828b1",
+      "maxBytes": 1709095
+    },
+    {
+      "materialId": "maven-e36f5237c1267983",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-e36f5237c1267983",
+      "sha256": "e36f5237c1267983e5b88dc2169f6b9d7e50eceec6dc1ca31018e3877e14af66",
+      "maxBytes": 1547706
+    },
+    {
+      "materialId": "maven-0fac87dddd78f122",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-0fac87dddd78f122",
+      "sha256": "0fac87dddd78f1223139e8ef88e819c7f483c0a3835cdf5982ad5e4576d1d896",
+      "maxBytes": 1859003
+    },
+    {
+      "materialId": "maven-45aff76226830db2",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-45aff76226830db2",
+      "sha256": "45aff76226830db257f4bc39a5bcff83d633e572fee9dc4e45cfa12af9a0a49a",
+      "maxBytes": 51749
+    },
+    {
+      "materialId": "maven-1957ef2deaffbc1f",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-1957ef2deaffbc1f",
+      "sha256": "1957ef2deaffbc1fb98cebfd0f5b3109ecf19c994d7e5378598c20747ba8d68b",
+      "maxBytes": 910984
+    },
+    {
+      "materialId": "maven-4c0826d5e7c8522a",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-4c0826d5e7c8522a",
+      "sha256": "4c0826d5e7c8522a8e111470b4e77f77b0a10f520eb5502ddd143fdbcedb2340",
+      "maxBytes": 83925
+    },
+    {
+      "materialId": "maven-5f665369724caa8f",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-5f665369724caa8f",
+      "sha256": "5f665369724caa8ffbb3f83a492b02d1de17a1420758e4a55debcb6ee2bd5e2a",
+      "maxBytes": 45408
+    },
+    {
+      "materialId": "maven-f474b14c7734f15e",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-f474b14c7734f15e",
+      "sha256": "f474b14c7734f15e0540394cb6f39d67777b7581a42919e4ac89d253d4efd929",
+      "maxBytes": 365383
+    },
+    {
+      "materialId": "maven-9987b6a660b0a6b1",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-9987b6a660b0a6b1",
+      "sha256": "9987b6a660b0a6b1f0d791485dae33180b3d1c63687c006fe6d3fd025e9e3798",
+      "maxBytes": 360116
+    },
+    {
+      "materialId": "maven-2d9a33ce41bd9f6f",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-2d9a33ce41bd9f6f",
+      "sha256": "2d9a33ce41bd9f6f607df95039e42518a1fca16f83c9bbfe72beb57df6e2489f",
+      "maxBytes": 68663
+    },
+    {
+      "materialId": "maven-5ffa58b94c5ac48f",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-5ffa58b94c5ac48f",
+      "sha256": "5ffa58b94c5ac48fb7e41843c18acf7a268e90b5b85423987829c9291ce3a5df",
+      "maxBytes": 38542
+    },
+    {
+      "materialId": "maven-0535bb5a736472be",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-0535bb5a736472be",
+      "sha256": "0535bb5a736472bef5c948d15eb273c4ab9f796656fc7c5d6b982ad92bddbd49",
+      "maxBytes": 692573
+    },
+    {
+      "materialId": "maven-576ddcfb51b78e86",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-576ddcfb51b78e86",
+      "sha256": "576ddcfb51b78e86f145c9a52b60e500b1a1d5a257cafec8aa5416ffba044b49",
+      "maxBytes": 505543
+    },
+    {
+      "materialId": "maven-4a6190e08988c058",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-4a6190e08988c058",
+      "sha256": "4a6190e08988c058bfeef2b5965e71946439c771abf721c68f4039b4e7b023e8",
+      "maxBytes": 121963
+    },
+    {
+      "materialId": "maven-d31926b01adcc07a",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-d31926b01adcc07a",
+      "sha256": "d31926b01adcc07af86f5e27b81b6d6c115df17d366e835d1fc3f5a1924e7e52",
+      "maxBytes": 740314
+    },
+    {
+      "materialId": "maven-d0e4c6ee4779f59f",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-d0e4c6ee4779f59f",
+      "sha256": "d0e4c6ee4779f59f6ab2fb5d388e4f57147c82270164b37945764bb9bda96a44",
+      "maxBytes": 588804
+    },
+    {
+      "materialId": "maven-843de10c4cef34cb",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-843de10c4cef34cb",
+      "sha256": "843de10c4cef34cbc1a5344090f1b57db532fbebf141559862da675f6b656df4",
+      "maxBytes": 25841
+    },
+    {
+      "materialId": "maven-b4cf2aeedd9fc7c8",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-b4cf2aeedd9fc7c8",
+      "sha256": "b4cf2aeedd9fc7c8c439bbfe574f63cfe5b83392e88bbc07ca0e8424b7cff955",
+      "maxBytes": 37907
+    },
+    {
+      "materialId": "maven-898d63ca62ed68ff",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-898d63ca62ed68ff",
+      "sha256": "898d63ca62ed68ff46543c5344f969424b417f1e8d082fe2bb0181ba10144194",
+      "maxBytes": 188777
+    },
+    {
+      "materialId": "maven-6251adc2a2921572",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-6251adc2a2921572",
+      "sha256": "6251adc2a2921572382732a2db188d4f4f2251fd6ebb49c5d44bbf33d6bfb1a7",
+      "maxBytes": 521982
+    },
+    {
+      "materialId": "maven-55049554b799dc8e",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-55049554b799dc8e",
+      "sha256": "55049554b799dc8e53bf234fffa36e001f7b5b65c32994b9bd59fc6356f1c52f",
+      "maxBytes": 147751
+    },
+    {
+      "materialId": "maven-8056e7637f9948f9",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-8056e7637f9948f9",
+      "sha256": "8056e7637f9948f953314894cf995ab664711b66c73c4cd5b593ae84f0b1048c",
+      "maxBytes": 44328
+    },
+    {
+      "materialId": "maven-82fb63a2dc90c0bd",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-82fb63a2dc90c0bd",
+      "sha256": "82fb63a2dc90c0bddb81e04065a1c06fb4c5be722ad5d64b46491daf8b6f9a01",
+      "maxBytes": 42889
+    },
+    {
+      "materialId": "maven-185db6053e0e9573",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-185db6053e0e9573",
+      "sha256": "185db6053e0e9573d36fa4eb6567b26139afaa4daa7bf5a068e661568304542b",
+      "maxBytes": 41506
+    },
+    {
+      "materialId": "maven-20af26bf6060bb80",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-20af26bf6060bb80",
+      "sha256": "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7",
+      "maxBytes": 10321819
+    },
+    {
+      "materialId": "maven-c9f82b2d4e99c4bb",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-c9f82b2d4e99c4bb",
+      "sha256": "c9f82b2d4e99c4bbdfccf684e52cc06ea06a0b567bfd0d08f9c5a3f417055996",
+      "maxBytes": 1315409
+    },
+    {
+      "materialId": "maven-590f55ed5d685292",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/maven-590f55ed5d685292",
+      "sha256": "590f55ed5d68529239898a4a5c4f730b6e37f45d1cfa3fbe51f8485abe32c42d",
+      "maxBytes": 718812
+    },
+    {
+      "materialId": "signed-release",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/signed-release",
+      "sha256": "041541bfe3fd47a76c6ec9f560a0fd3905acbe8a6baa1a021fc3565077c6e9c1",
+      "maxBytes": 137401
+    },
+    {
+      "materialId": "signing-keyring",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/signing-keyring",
+      "sha256": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31",
+      "maxBytes": 3607
+    },
+    {
+      "materialId": "package-index",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/package-index",
+      "sha256": "9f665693e975f070fb8a144eecef9cec76b9df772f9d4bd81eec49008569e2d0",
+      "maxBytes": 883995
+    },
+    {
+      "materialId": "deb-libssl3t64",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/deb-libssl3t64",
+      "sha256": "3ff73e121f6cd4f19e80ab4329dfd914108b3936c9db3708200203a9b245b34d",
+      "maxBytes": 2368026
+    },
+    {
+      "materialId": "deb-openssl",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/deb-openssl",
+      "sha256": "6965aafe69e0a49ef34d2e26f8e83d09d1c6037b7e9ee37f19b292a3c6851621",
+      "maxBytes": 1242886
+    },
+    {
+      "materialId": "deb-openssl-provider-legacy",
+      "localPath": "../../../../.gstack/tmp/issue-887-neutral/amd64/deb-openssl-provider-legacy",
+      "sha256": "51cf418571059831096abd40e0bd5debaa1ae48a6f8d87d9e4e5f7f12aa4db52",
+      "maxBytes": 39682
+    },
+    {
+      "materialId": "neutral-theme",
+      "localPath": "../shared/theme.properties",
+      "sha256": "241e60d6cfbafb4529dc5c21840a544c674dc92315c4a3ad92fb145c7eb0cbde",
+      "maxBytes": 19
+    }
+  ]
+}

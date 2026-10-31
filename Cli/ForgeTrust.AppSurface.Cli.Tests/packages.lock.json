@@ -81,11 +81,6 @@
           "Microsoft.Extensions.Http": "8.0.0"
         }
       },
-      "BouncyCastle.Cryptography": {
-        "type": "Transitive",
-        "resolved": "2.7.0",
-        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
-      },
       "Docker.DotNet.Enhanced": {
         "type": "Transitive",
         "resolved": "4.3.3",
@@ -1101,6 +1096,12 @@
           "StreamJsonRpc": "2.22.23",
           "System.IO.Hashing": "10.0.8"
         }
+      },
+      "BouncyCastle.Cryptography": {
+        "type": "CentralTransitive",
+        "requested": "[2.7.0, )",
+        "resolved": "2.7.0",
+        "contentHash": "U+12df8UEWHgBi04YVf/Lgi2dy3SItlIYvHjjEVa/BngCQIzDCDRBk50DDByCfDvSbe5pRNFr3b7UrVK2kMcLw=="
       },
       "CliFx": {
         "type": "CentralTransitive",

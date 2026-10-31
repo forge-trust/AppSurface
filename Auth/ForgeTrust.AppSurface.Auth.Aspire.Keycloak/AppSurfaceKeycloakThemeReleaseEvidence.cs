@@ -30,6 +30,8 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
         set => BeforeMoveForTestingSlot.Value = value;
     }
 
+    private readonly IReadOnlyList<AppSurfaceKeycloakThemeManifestEntry> _expectedThemeFiles;
+
     private AppSurfaceKeycloakThemeReleaseEvidence(
         string themeName,
         string sourceManifestDigest,
@@ -38,7 +40,8 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
         string keycloakBaseImage,
         string finalImage,
         string platform,
-        string? templateBaselineDigest)
+        string? templateBaselineDigest,
+        IReadOnlyList<AppSurfaceKeycloakThemeManifestEntry> expectedThemeFiles)
     {
         ThemeName = themeName;
         SourceManifestDigest = sourceManifestDigest;
@@ -48,6 +51,7 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
         FinalImage = finalImage;
         Platform = platform;
         TemplateBaselineDigest = templateBaselineDigest;
+        _expectedThemeFiles = expectedThemeFiles.ToArray();
     }
 
     /// <summary>
@@ -115,7 +119,8 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
             buildContract.Registration.BaseImage,
             image.Value,
             buildContract.Registration.Platform,
-            buildContract.Registration.TemplateBaselineDigest);
+            buildContract.Registration.TemplateBaselineDigest,
+            buildContract.PackagedManifest.Files);
     }
 
     /// <summary>
@@ -137,6 +142,40 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
             || !string.Equals(TemplateBaselineDigest, expected.TemplateBaselineDigest, StringComparison.Ordinal))
         {
             throw PackagedImageInvalid("the supplied image or build contract does not match this release tuple.");
+        }
+    }
+
+    /// <summary>
+    /// Requires actual observed image evidence for this theme release tuple.
+    /// </summary>
+    /// <param name="observed">Evidence returned only by the shared exact-image inspector.</param>
+    /// <remarks>Requires image/platform binding, exact theme inventory, and an actual hash observation for every packaged member.</remarks>
+    /// <exception cref="AppSurfaceKeycloakException">The inspected image or platform differs from this release tuple.</exception>
+    public void VerifyObservedImage(ForgeTrust.AppSurface.Auth.Keycloak.VerifiedKeycloakImageEvidence observed)
+    {
+        ArgumentNullException.ThrowIfNull(observed);
+        var digest = AppSurfaceKeycloakImageReference.Parse(FinalImage).Value.Split('@')[1];
+        if (!string.Equals(digest, observed.Image.ManifestDigest, StringComparison.Ordinal)
+            || !string.Equals(Platform, observed.Image.Platform, StringComparison.Ordinal))
+        {
+            throw PackagedImageInvalid("the actual inspected image or platform does not match this release tuple.");
+        }
+
+        var prefix = $"file:opt/keycloak/themes/{ThemeName}/";
+        if (observed.Checks.Count(check => check.Id.StartsWith(prefix, StringComparison.Ordinal)) != _expectedThemeFiles.Count)
+        {
+            throw PackagedImageInvalid("the inspected theme inventory differs from the packaged manifest.");
+        }
+
+        foreach (var file in _expectedThemeFiles)
+        {
+            var path = prefix + file.RelativePath;
+            var expected = "sha256:" + file.Sha256;
+            var matches = observed.Checks.Where(check => check.Id == path).ToArray();
+            if (matches.Length != 1 || matches[0].Expected != expected || matches[0].Observed != expected)
+            {
+                throw PackagedImageInvalid("the inspected image does not prove every packaged theme member.");
+            }
         }
     }
 
@@ -175,7 +214,7 @@ public sealed class AppSurfaceKeycloakThemeReleaseEvidence
         {
             File.WriteAllText(temporary, JsonSerializer.Serialize(this, JsonOptions));
             BeforeMoveForTesting?.Invoke(destination);
-            File.Move(temporary, destination);
+            ForgeTrust.AppSurface.Auth.Keycloak.AtomicFilePublication.Publish(temporary, destination);
             return destination;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

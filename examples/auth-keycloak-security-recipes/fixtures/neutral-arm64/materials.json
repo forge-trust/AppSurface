@@ -1,0 +1,337 @@
+{
+  "schema": "issue887-neutral-material-receipt-v1",
+  "platform": "linux/arm64",
+  "canonicalRecipeSha256": "fb7e99c8334a93c57d9dd626a92c6851cf8e044af5e332355e28b8f2b2719c4f",
+  "approvalReference": "akrock-2026-10-24",
+  "materials": [
+    {
+      "id": "source-oci",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/source-oci",
+      "sha256": "8f1b01d53c1d953647866bef0ce6c141601bc9f7879c22cce7340b2de2855de7",
+      "bytes": 266352640,
+      "capturedHostInput": true,
+      "registryReference": "quay.io/keycloak/keycloak@sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669"
+    },
+    {
+      "id": "source-index",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/source-index",
+      "sha256": "831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669",
+      "bytes": 2364,
+      "capturedHostInput": true,
+      "registryReference": "quay.io/keycloak/keycloak@sha256:831330513f55695572286e521f94fcd3c7e285250ed5b848090265a33192f669"
+    },
+    {
+      "id": "runtime-index",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/runtime-index",
+      "sha256": "7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037",
+      "bytes": 5918,
+      "capturedHostInput": true,
+      "registryReference": "docker.io/library/eclipse-temurin@sha256:7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037"
+    },
+    {
+      "id": "runtime-oci",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/runtime-oci",
+      "sha256": "7c80826fcf1e4f532fb8fe741f2fecddd4503315dd6c064322e32fd4c7772655",
+      "bytes": 112936960,
+      "capturedHostInput": true,
+      "registryReference": "docker.io/library/eclipse-temurin@sha256:7a65df4b22d2de92d4e04056e884f3b9122d70b21e2847fd66084278bd0ce037"
+    },
+    {
+      "id": "frontend-index",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/frontend-index",
+      "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e",
+      "bytes": 9078,
+      "capturedHostInput": true,
+      "registryReference": "docker.io/docker/dockerfile@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+    },
+    {
+      "id": "frontend-oci",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/frontend-oci",
+      "sha256": "b8bafb1eb03b42f2cc67ae18510e8a99d9ecce67b2a9a20d985b2290d65ca204",
+      "bytes": 13148160,
+      "capturedHostInput": true,
+      "registryReference": "docker.io/docker/dockerfile@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+    },
+    {
+      "id": "maven-8c5623b98f32d5f7",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-8c5623b98f32d5f7",
+      "sha256": "8c5623b98f32d5f7e1287ff61ed50e08ab7b11381e991fff89327faabba42261",
+      "bytes": 594782,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.21.7/jackson-core-2.21.7.jar"
+    },
+    {
+      "id": "maven-1290c2795e93e8a6",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-1290c2795e93e8a6",
+      "sha256": "1290c2795e93e8a6861a6c4d9ff0d844d32f5ea178362cb2721edf5561e828b1",
+      "bytes": 1709095,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/2.21.7/jackson-databind-2.21.7.jar"
+    },
+    {
+      "id": "maven-e36f5237c1267983",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-e36f5237c1267983",
+      "sha256": "e36f5237c1267983e5b88dc2169f6b9d7e50eceec6dc1ca31018e3877e14af66",
+      "bytes": 1547706,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/com/microsoft/sqlserver/mssql-jdbc/13.4.0.jre11/mssql-jdbc-13.4.0.jre11.jar"
+    },
+    {
+      "id": "maven-0fac87dddd78f122",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-0fac87dddd78f122",
+      "sha256": "0fac87dddd78f1223139e8ef88e819c7f483c0a3835cdf5982ad5e4576d1d896",
+      "bytes": 1859003,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/org/freemarker/freemarker/2.3.35/freemarker-2.3.35.jar"
+    },
+    {
+      "id": "maven-45aff76226830db2",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-45aff76226830db2",
+      "sha256": "45aff76226830db257f4bc39a5bcff83d633e572fee9dc4e45cfa12af9a0a49a",
+      "bytes": 51749,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/micrometer/micrometer-commons/1.16.6/micrometer-commons-1.16.6.jar"
+    },
+    {
+      "id": "maven-1957ef2deaffbc1f",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-1957ef2deaffbc1f",
+      "sha256": "1957ef2deaffbc1fb98cebfd0f5b3109ecf19c994d7e5378598c20747ba8d68b",
+      "bytes": 910984,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/micrometer/micrometer-core/1.16.6/micrometer-core-1.16.6.jar"
+    },
+    {
+      "id": "maven-4c0826d5e7c8522a",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-4c0826d5e7c8522a",
+      "sha256": "4c0826d5e7c8522a8e111470b4e77f77b0a10f520eb5502ddd143fdbcedb2340",
+      "bytes": 83925,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/micrometer/micrometer-observation/1.16.6/micrometer-observation-1.16.6.jar"
+    },
+    {
+      "id": "maven-5f665369724caa8f",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-5f665369724caa8f",
+      "sha256": "5f665369724caa8ffbb3f83a492b02d1de17a1420758e4a55debcb6ee2bd5e2a",
+      "bytes": 45408,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/micrometer/micrometer-registry-prometheus-simpleclient/1.16.6/micrometer-registry-prometheus-simpleclient-1.16.6.jar"
+    },
+    {
+      "id": "maven-f474b14c7734f15e",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-f474b14c7734f15e",
+      "sha256": "f474b14c7734f15e0540394cb6f39d67777b7581a42919e4ac89d253d4efd929",
+      "bytes": 365383,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-buffer/4.1.137.Final/netty-buffer-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-9987b6a660b0a6b1",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-9987b6a660b0a6b1",
+      "sha256": "9987b6a660b0a6b1f0d791485dae33180b3d1c63687c006fe6d3fd025e9e3798",
+      "bytes": 360116,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec/4.1.137.Final/netty-codec-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-2d9a33ce41bd9f6f",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-2d9a33ce41bd9f6f",
+      "sha256": "2d9a33ce41bd9f6f607df95039e42518a1fca16f83c9bbfe72beb57df6e2489f",
+      "bytes": 68663,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec-dns/4.1.137.Final/netty-codec-dns-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-5ffa58b94c5ac48f",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-5ffa58b94c5ac48f",
+      "sha256": "5ffa58b94c5ac48fb7e41843c18acf7a268e90b5b85423987829c9291ce3a5df",
+      "bytes": 38542,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec-haproxy/4.1.137.Final/netty-codec-haproxy-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-0535bb5a736472be",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-0535bb5a736472be",
+      "sha256": "0535bb5a736472bef5c948d15eb273c4ab9f796656fc7c5d6b982ad92bddbd49",
+      "bytes": 692573,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec-http/4.1.137.Final/netty-codec-http-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-576ddcfb51b78e86",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-576ddcfb51b78e86",
+      "sha256": "576ddcfb51b78e86f145c9a52b60e500b1a1d5a257cafec8aa5416ffba044b49",
+      "bytes": 505543,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec-http2/4.1.137.Final/netty-codec-http2-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-4a6190e08988c058",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-4a6190e08988c058",
+      "sha256": "4a6190e08988c058bfeef2b5965e71946439c771abf721c68f4039b4e7b023e8",
+      "bytes": 121963,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-codec-socks/4.1.137.Final/netty-codec-socks-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-d31926b01adcc07a",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-d31926b01adcc07a",
+      "sha256": "d31926b01adcc07af86f5e27b81b6d6c115df17d366e835d1fc3f5a1924e7e52",
+      "bytes": 740314,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-common/4.1.137.Final/netty-common-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-d0e4c6ee4779f59f",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-d0e4c6ee4779f59f",
+      "sha256": "d0e4c6ee4779f59f6ab2fb5d388e4f57147c82270164b37945764bb9bda96a44",
+      "bytes": 588804,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-handler/4.1.137.Final/netty-handler-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-843de10c4cef34cb",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-843de10c4cef34cb",
+      "sha256": "843de10c4cef34cbc1a5344090f1b57db532fbebf141559862da675f6b656df4",
+      "bytes": 25841,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-handler-proxy/4.1.137.Final/netty-handler-proxy-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-b4cf2aeedd9fc7c8",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-b4cf2aeedd9fc7c8",
+      "sha256": "b4cf2aeedd9fc7c8c439bbfe574f63cfe5b83392e88bbc07ca0e8424b7cff955",
+      "bytes": 37907,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-resolver/4.1.137.Final/netty-resolver-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-898d63ca62ed68ff",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-898d63ca62ed68ff",
+      "sha256": "898d63ca62ed68ff46543c5344f969424b417f1e8d082fe2bb0181ba10144194",
+      "bytes": 188777,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-resolver-dns/4.1.137.Final/netty-resolver-dns-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-6251adc2a2921572",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-6251adc2a2921572",
+      "sha256": "6251adc2a2921572382732a2db188d4f4f2251fd6ebb49c5d44bbf33d6bfb1a7",
+      "bytes": 521982,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-transport/4.1.137.Final/netty-transport-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-55049554b799dc8e",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-55049554b799dc8e",
+      "sha256": "55049554b799dc8e53bf234fffa36e001f7b5b65c32994b9bd59fc6356f1c52f",
+      "bytes": 147751,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-transport-classes-epoll/4.1.137.Final/netty-transport-classes-epoll-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-8056e7637f9948f9",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-8056e7637f9948f9",
+      "sha256": "8056e7637f9948f953314894cf995ab664711b66c73c4cd5b593ae84f0b1048c",
+      "bytes": 44328,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-transport-native-unix-common/4.1.137.Final/netty-transport-native-unix-common-4.1.137.Final.jar"
+    },
+    {
+      "id": "maven-82fb63a2dc90c0bd",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-82fb63a2dc90c0bd",
+      "sha256": "82fb63a2dc90c0bddb81e04065a1c06fb4c5be722ad5d64b46491daf8b6f9a01",
+      "bytes": 42889,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-transport-native-epoll/4.1.137.Final/netty-transport-native-epoll-4.1.137.Final-linux-aarch_64.jar"
+    },
+    {
+      "id": "maven-185db6053e0e9573",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-185db6053e0e9573",
+      "sha256": "185db6053e0e9573d36fa4eb6567b26139afaa4daa7bf5a068e661568304542b",
+      "bytes": 41506,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/io/netty/netty-transport-native-epoll/4.1.137.Final/netty-transport-native-epoll-4.1.137.Final-linux-x86_64.jar"
+    },
+    {
+      "id": "maven-20af26bf6060bb80",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-20af26bf6060bb80",
+      "sha256": "20af26bf6060bb8005cc2389916812c1e0e998dc48d2ced7131b89461b54cff7",
+      "bytes": 10321819,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcprov-jdk18on/1.85/bcprov-jdk18on-1.85.jar"
+    },
+    {
+      "id": "maven-c9f82b2d4e99c4bb",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-c9f82b2d4e99c4bb",
+      "sha256": "c9f82b2d4e99c4bbdfccf684e52cc06ea06a0b567bfd0d08f9c5a3f417055996",
+      "bytes": 1315409,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.85/bcpkix-jdk18on-1.85.jar"
+    },
+    {
+      "id": "maven-590f55ed5d685292",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/maven-590f55ed5d685292",
+      "sha256": "590f55ed5d68529239898a4a5c4f730b6e37f45d1cfa3fbe51f8485abe32c42d",
+      "bytes": 718812,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://repo.maven.apache.org/maven2/org/bouncycastle/bcutil-jdk18on/1.85/bcutil-jdk18on-1.85.jar"
+    },
+    {
+      "id": "signed-release",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/signed-release",
+      "sha256": "041541bfe3fd47a76c6ec9f560a0fd3905acbe8a6baa1a021fc3565077c6e9c1",
+      "bytes": 137401,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://snapshot.ubuntu.com/ubuntu/20261002T000000Z/dists/resolute-updates/InRelease"
+    },
+    {
+      "id": "signing-keyring",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/signing-keyring",
+      "sha256": "80a36b0a6de2f69f49d2df75ef473ccde121e9e190b9ea01d20a4f63778d5c31",
+      "bytes": 3607,
+      "capturedHostInput": true,
+      "captureSource": "usr/share/keyrings/ubuntu-archive-keyring.gpg in the pinned runtime graph"
+    },
+    {
+      "id": "package-index",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/package-index",
+      "sha256": "4b46267e511cfe3a4d672c2f8840a55872befed0ceb27e964158f109cb640484",
+      "bytes": 908295,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://snapshot.ubuntu.com/ubuntu/20261002T000000Z/dists/resolute-updates/main/binary-arm64/Packages.gz"
+    },
+    {
+      "id": "deb-libssl3t64",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/deb-libssl3t64",
+      "sha256": "9fe87b6beec5de636a70e4fb6076517a39f5053c7e23e628c9459b94f85c75ff",
+      "bytes": 2769448,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://snapshot.ubuntu.com/ubuntu/20261002T000000Z/pool/main/o/openssl/libssl3t64_3.5.5-1ubuntu3.7_arm64.deb"
+    },
+    {
+      "id": "deb-openssl",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/deb-openssl",
+      "sha256": "623ea7ec0eb80da3f40e89e3318a4e82d4c64146d206c90cabbce6998d822fa8",
+      "bytes": 1222930,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://snapshot.ubuntu.com/ubuntu/20261002T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3.7_arm64.deb"
+    },
+    {
+      "id": "deb-openssl-provider-legacy",
+      "path": "../../../../.gstack/tmp/issue-887-neutral/arm64/deb-openssl-provider-legacy",
+      "sha256": "757ec89120fe3f418a842342b3a0c596b89b0e3fb0ba770347dda1219f219bbd",
+      "bytes": 38424,
+      "capturedHostInput": false,
+      "exactHttpsUri": "https://snapshot.ubuntu.com/ubuntu/20261002T000000Z/pool/main/o/openssl/openssl-provider-legacy_3.5.5-1ubuntu3.7_arm64.deb"
+    },
+    {
+      "id": "neutral-theme",
+      "path": "../shared/theme.properties",
+      "sha256": "241e60d6cfbafb4529dc5c21840a544c674dc92315c4a3ad92fb145c7eb0cbde",
+      "bytes": 19,
+      "capturedHostInput": true,
+      "captureSource": "checked-in UTF-8 theme.properties, no BOM"
+    }
+  ],
+  "pathBase": "directory containing bindings.json and materials.json"
+}

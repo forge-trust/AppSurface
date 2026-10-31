@@ -47,6 +47,8 @@ The section-copy manager has two deliberately separate documentation boundaries:
 
 Generated outputs stay committed because Razor Class Library static web assets, embedded fallback resources, command-line hosts, and existing consumers depend on those physical paths.
 
+The internal `swr-render-guard.ts` adapter coordinates the pinned frame controller with the existing stream-render queue. Its request/response association and synchronous commit boundary are covered by the [SWR ordering guide](swr-stream-ordering.md#internal-execution-contract). Changes to those Turbo integration methods require the controlled lifecycle and browser cases before upgrading the copied runtime.
+
 ## Public Contract
 
 The TypeScript migration preserves the public browser surface:

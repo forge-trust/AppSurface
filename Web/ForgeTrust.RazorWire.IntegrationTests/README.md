@@ -26,19 +26,35 @@ It also includes an AppSurface Docs browser regression test that runs against `W
   - sidebar search works from `/docs`,
   - navigating to `/docs/search` via Turbo keeps both advanced search and sidebar search functional.
 
-## Form-interactions readiness
+## SWR response completion
 
-The functional form-interactions tests in
+The [stream-ordering browser cases](RazorWireMvcPlaywrightTests.cs) exercise the
+[SWR rendering contract](../ForgeTrust.RazorWire/Docs/swr-stream-ordering.md) with one or eight writers,
+holding the stale response before delivery or at its selected frame render. Their local Playwright route
+marks the controlled responses with `X-RazorWire-Test-Response` and adds `data-swr-test-response` only to
+the stale incoming frame. The render pause matches that frame marker. The browser observer wraps the
+pinned Turbo response receivers and records completion after the original receiver returns, including
+an intentional stale discard; receiver exceptions remain observable failures.
+
+These markers exist only in the test context. The fresh control uses a unique query URL and must remove
+the local sentinel and retain every streamed user. Do not use a shared `reload().then(...)` flag as a
+response-completion signal: pinned Turbo has one visit resolver per frame, so an overlapping earlier
+response can fulfill a later visit's promise before that later response renders. Keep both response
+completion and the DOM assertions, with the existing deadlines.
+
+## Functional runtime readiness
+
+The functional form-interactions and concurrent user-list revalidation tests in
 [`RazorWireMvcPlaywrightTests`](./RazorWireMvcPlaywrightTests.cs) use a browser context that serves the
 sample's Google Fonts stylesheet with a local empty CSS response. The sample uses its system-font fallback;
-these tests verify conditional fields, collection form data, and validation redisplay. Use the [visual-baseline
+these tests verify conditional fields, collection form data, validation redisplay, and preservation of concurrent stream updates. Use the [visual-baseline
 suites](#release-page-visual-baselines) when verifying appearance.
 
 The [sample layout](../../examples/razorwire-mvc/Views/Shared/_Layout.cshtml) requests this decorative stylesheet
 before parser-blocking runtime scripts. A stalled font response can therefore prevent parsing and runtime initialization,
 even when every local asset has loaded. The context intercepts only `https://fonts.googleapis.com/**`;
 application scripts, styles, requests, and the form-readiness and validation assertions still run normally.
-Keep this interception scoped to functional form tests so browser tests that exercise rendering retain their own font policy.
+Keep this interception scoped to these functional runtime tests so browser tests that exercise rendering retain their own font policy.
 
 ## AppSurface Docs standalone fixture
 

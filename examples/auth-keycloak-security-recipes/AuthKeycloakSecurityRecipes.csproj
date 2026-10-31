@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/ForgeTrust.AppSurface.Auth.Keycloak.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Auth/ForgeTrust.AppSurface.Auth.Keycloak/AtomicFilePublication.cs" Link="AtomicFilePublication.cs" />
+  </ItemGroup>
+</Project>
