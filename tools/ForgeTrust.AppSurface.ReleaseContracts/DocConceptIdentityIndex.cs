@@ -42,7 +42,7 @@ internal sealed class DocConceptIdentityIndex
         _hasUntrustedMapData = hasUntrustedMapData;
     }
 
-    /// <summary>Gets the immutable public, available exact releases in the supplied catalog order.</summary>
+    /// <summary>Gets all exact releases in supplied catalog order, including hidden and unavailable descriptors.</summary>
     public IReadOnlyList<DocConceptReleaseSnapshot> Releases => _releases;
 
     /// <summary>Gets the immutable public, available exact releases in the supplied catalog order.</summary>
@@ -68,8 +68,8 @@ internal sealed class DocConceptIdentityIndex
 
     /// <summary>
     /// Builds one combined catalog snapshot from detached release facts and every distinct optional pinned bridge.
-    /// Identical map references and memberships deduplicate; incompatible facts quarantine their full connected concept
-    /// groups. In strict mode, any issue makes <see cref="DocConceptIndexBuildResult.IsValid"/> false for publication.
+    /// Identical map references and memberships deduplicate; incompatible facts quarantine all concepts assigned to
+    /// affected canonical pages. In strict mode, any issue makes <see cref="DocConceptIndexBuildResult.IsValid"/> false for publication.
     /// </summary>
     /// <param name="releases">Exact public and hidden release facts from the immutable catalog snapshot.</param>
     /// <param name="mapReferences">All optional bridge references, regardless of which descriptor referenced each one.</param>
@@ -144,11 +144,7 @@ internal sealed class DocConceptIdentityIndex
                 pages.Clear();
                 foreach (var routeFact in releaseInput.CanonicalRoutes)
                 {
-                    if (!DocConceptSchema.IsSafeRoutePath(routeFact.RoutePath))
-                    {
-                        continue;
-                    }
-
+                    // Canonical route facts are copied only after TryValidateCanonicalRouteFacts succeeds above.
                     pages.Add(new MutablePage(routeFact.RoutePath, routeFact.ArtifactPath, routeFact.Locale, routeFact.LocaleIsKnown, string.Empty, [], false, null, routeFact.IsServeable));
                 }
             }
@@ -171,24 +167,15 @@ internal sealed class DocConceptIdentityIndex
         var quarantinedPages = new HashSet<PageKey>(PageKeyComparer.Instance);
         var membershipFacts = new Dictionary<ConceptMembershipKey, MembershipFact>(ConceptMembershipKeyComparer.Instance);
         var conceptIdsByPage = new Dictionary<PageKey, HashSet<string>>(PageKeyComparer.Instance);
-        var conceptGraph = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-        var pageByKey = new Dictionary<PageKey, MutablePage>(PageKeyComparer.Instance);
 
         foreach (var release in mutableReleases.Values)
         {
             foreach (var page in release.Pages)
             {
                 var pageKey = new PageKey(release.Key, page.Locale, page.LocaleIsKnown, page.RoutePath);
-                if (!pageByKey.TryAdd(pageKey, page))
-                {
-                    strictValid = false;
-                    issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, "concept-index", "The catalog has duplicate canonical page identities."));
-                    quarantinedPages.Add(pageKey);
-                }
-
                 if (page.ConceptId is not null)
                 {
-                    AddEmbeddedMembership(pageKey, page, membershipFacts, conceptIdsByPage, conceptGraph, quarantinedConceptIds, quarantinedPages, issues, ref strictValid);
+                    AddEmbeddedMembership(pageKey, page, membershipFacts, conceptIdsByPage, quarantinedConceptIds, quarantinedPages, issues, ref strictValid);
                 }
             }
         }
@@ -246,7 +233,6 @@ internal sealed class DocConceptIdentityIndex
                     || !string.Equals(release.Key.ManifestSha256, membership.ReleaseManifestSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     strictValid = false;
-                    hasUntrustedMapData = true;
                     quarantinedConceptIds.Add(membership.ConceptId);
                     issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.ReleasePinInvalid, reference.Path, "A bridge membership does not match an exact catalog release pin."));
                     continue;
@@ -255,7 +241,6 @@ internal sealed class DocConceptIdentityIndex
                 if (!release.IsPublic || !release.IsAvailable)
                 {
                     strictValid = false;
-                    hasUntrustedMapData = true;
                     quarantinedConceptIds.Add(membership.ConceptId);
                     issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.ReleasePinInvalid, reference.Path, "A bridge membership cannot target a hidden or unavailable release."));
                     continue;
@@ -268,8 +253,7 @@ internal sealed class DocConceptIdentityIndex
                     if (!TryResolveMembershipPage(release, membership, out var mappedPage, out var membershipFailure))
                     {
                         strictValid = false;
-                        hasUntrustedMapData = true;
-                        quarantinedConceptIds.Add(membership.ConceptId);
+                        QuarantineMembershipPageConflict(release, membership, quarantinedConceptIds, quarantinedPages);
                         issues.Add(new DocConceptValidationIssue(membershipFailure, reference.Path, "A bridge page or fallback does not name a verified public canonical target in the selected locale."));
                         continue;
                     }
@@ -278,11 +262,9 @@ internal sealed class DocConceptIdentityIndex
                     if (mappedPage.ConceptId is not null && !string.Equals(mappedPage.ConceptId, membership.ConceptId, StringComparison.Ordinal))
                     {
                         strictValid = false;
-                        hasUntrustedMapData = true;
                         quarantinedConceptIds.Add(mappedPage.ConceptId);
                         quarantinedConceptIds.Add(membership.ConceptId);
                         quarantinedPages.Add(mappedPageKey.Value);
-                        LinkConcepts(mappedPage.ConceptId, membership.ConceptId, conceptGraph);
                         issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, reference.Path, "A bridge conflicts with a published concept identifier."));
                         continue;
                     }
@@ -290,7 +272,6 @@ internal sealed class DocConceptIdentityIndex
                     if (mappedPage.Landing != membership.SectionLanding && membership.SectionLanding.HasValue && release.IdentityState is DocConceptIdentityState.ValidPartial or DocConceptIdentityState.ValidComplete)
                     {
                         strictValid = false;
-                        hasUntrustedMapData = true;
                         quarantinedConceptIds.Add(membership.ConceptId);
                         quarantinedPages.Add(mappedPageKey.Value);
                         issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, reference.Path, "A bridge conflicts with published section-landing eligibility."));
@@ -313,7 +294,6 @@ internal sealed class DocConceptIdentityIndex
                     && !TryResolveMembershipFallback(release, membership, out fallbackPage))
                 {
                     strictValid = false;
-                    hasUntrustedMapData = true;
                     quarantinedConceptIds.Add(membership.ConceptId);
                     issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.CanonicalRouteInvalid, reference.Path, "A bridge fallback does not name a verified public canonical route in the selected locale."));
                     continue;
@@ -326,14 +306,9 @@ internal sealed class DocConceptIdentityIndex
                 }
 
                 var fact = new MembershipFact(membership.IsAbsent, mappedPageKey, membership.FallbackSectionRoute, membership.SectionLanding);
-                if (!AddMembershipFact(conceptKey, fact, membershipFacts, conceptIdsByPage, conceptGraph, quarantinedConceptIds, quarantinedPages, issues, reference.Path, ref strictValid))
-                {
-                    hasUntrustedMapData = true;
-                }
+                AddMembershipFact(conceptKey, fact, membershipFacts, conceptIdsByPage, quarantinedConceptIds, quarantinedPages, issues, reference.Path, ref strictValid);
             }
         }
-
-        QuarantineConnectedConceptGroups(quarantinedConceptIds, conceptGraph);
 
         var finalReleases = new Dictionary<ReleaseKey, DocConceptReleaseSnapshot>(ReleaseKeyComparer.Instance);
         var finalPages = new Dictionary<PageKey, DocConceptCanonicalPage>(PageKeyComparer.Instance);
@@ -453,9 +428,6 @@ internal sealed class DocConceptIdentityIndex
             return CreateResolution(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, null, null, false, null);
         }
 
-        var selectedLocalePages = targetRelease.Pages
-            .Where(page => page.IsServeable && page.LocaleIsKnown && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown))
-            .ToArray();
         if (!sourceIdentity.LocaleIsKnown)
         {
             return CreateRecovery(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: false);
@@ -463,8 +435,21 @@ internal sealed class DocConceptIdentityIndex
 
         var sourcePageKey = PageKey.From(sourceRelease, sourcePage.Locale, sourcePage.LocaleIsKnown, sourcePage.RoutePath);
         var sourceConceptId = sourcePage.ConceptId;
+        if (_quarantinedPages.Contains(sourcePageKey) || sourceConceptId is not null && _quarantinedConceptIds.Contains(sourceConceptId))
+        {
+            return CreateRecovery(DocConceptResolutionReason.Ambiguous, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: true);
+        }
+
+        var selectedLocalePages = targetRelease.Pages
+            .Where(page => page.IsServeable && page.LocaleIsKnown && LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown))
+            .ToArray();
         if (selectedLocalePages.Length == 0)
         {
+            if (_hasUntrustedMapData)
+            {
+                return CreateRecovery(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: false);
+            }
+
             // A pinned bridge's explicit absence is locale-scoped evidence even when a legacy release has no
             // trustworthy per-page locale facts to attach. It can establish absence, but cannot authorize any
             // target-local recovery link or search action without a verified page in that locale.
@@ -482,11 +467,6 @@ internal sealed class DocConceptIdentityIndex
                 ? DocConceptResolutionReason.Unknown
                 : DocConceptResolutionReason.NoSelectedLocaleDocs;
             return CreateResolution(reason, sourceIdentity, sourcePage, targetRelease, null, null, false, null);
-        }
-
-        if (_quarantinedPages.Contains(sourcePageKey) || sourceConceptId is not null && _quarantinedConceptIds.Contains(sourceConceptId))
-        {
-            return CreateRecovery(DocConceptResolutionReason.Ambiguous, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: true);
         }
 
         if (sourceRelease.IdentityState == DocConceptIdentityState.Quarantined || targetRelease.IdentityState == DocConceptIdentityState.Quarantined)
@@ -516,17 +496,6 @@ internal sealed class DocConceptIdentityIndex
                 }
 
                 return CreateRecovery(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, foundMembership, allowLocalActions: true);
-            }
-
-            if (selectedLocalePages.Any(page => string.Equals(page.ConceptId, sourceConceptId, StringComparison.Ordinal)))
-            {
-                var targetPage = selectedLocalePages.Single(page => string.Equals(page.ConceptId, sourceConceptId, StringComparison.Ordinal));
-                if (!targetPage.IsServeable)
-                {
-                    return CreateRecovery(DocConceptResolutionReason.Unknown, sourceIdentity, sourcePage, targetRelease, null, allowLocalActions: true);
-                }
-
-                return CreateCounterpart(sourceIdentity, sourcePage, targetRelease, targetPage);
             }
 
             var conceptExistsInOtherLocale = targetRelease.Pages.Any(page => page.LocaleIsKnown && !LocaleEquals(page.Locale, sourceIdentity.Locale, sourceIdentity.LocaleIsKnown)
@@ -833,6 +802,27 @@ internal sealed class DocConceptIdentityIndex
                 ? pages.First(page => page.IsServeable && string.Equals(page.RoutePath, routePath, StringComparison.OrdinalIgnoreCase)).RoutePath
                 : null;
 
+    /// <summary>Quarantines a parsed page membership and any prior claim on its canonical route.</summary>
+    private static void QuarantineMembershipPageConflict(
+        MutableRelease release,
+        DocConceptBridgeMembership membership,
+        ISet<string> quarantinedConceptIds,
+        ISet<PageKey> quarantinedPages)
+    {
+        quarantinedConceptIds.Add(membership.ConceptId);
+        foreach (var candidate in release.Pages.Where(page =>
+                     string.Equals(page.RoutePath, membership.CanonicalRoutePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            quarantinedPages.Add(new PageKey(release.Key, candidate.Locale, candidate.LocaleIsKnown, candidate.RoutePath));
+            if (candidate.ConceptId is not { } existingConceptId)
+            {
+                continue;
+            }
+
+            quarantinedConceptIds.Add(existingConceptId);
+        }
+    }
+
     /// <summary>Finds a bridge page and fallback in one exact verified release and locale.</summary>
     private static bool TryResolveMembershipPage(
         MutableRelease release,
@@ -842,12 +832,7 @@ internal sealed class DocConceptIdentityIndex
     {
         page = null;
         failure = DocConceptValidationFailure.CanonicalRouteInvalid;
-        if (!release.IsPublic || !release.IsAvailable)
-        {
-            failure = DocConceptValidationFailure.ReleasePinInvalid;
-            return false;
-        }
-
+        // The caller resolves exact release pins and availability before membership page selection.
         var candidates = release.Pages.Where(candidate =>
                 string.Equals(candidate.RoutePath, membership.CanonicalRoutePath, StringComparison.OrdinalIgnoreCase)
                 && candidate.IsServeable)
@@ -879,11 +864,7 @@ internal sealed class DocConceptIdentityIndex
     private static bool TryResolveMembershipFallback(MutableRelease release, DocConceptBridgeMembership membership, out MutablePage? fallback)
     {
         fallback = null;
-        if (!release.IsPublic || !release.IsAvailable || membership.FallbackSectionRoute is null)
-        {
-            return false;
-        }
-
+        // The caller resolves exact release pins and availability and invokes this only for a declared fallback route.
         var candidates = release.Pages.Where(candidate => candidate.IsServeable
             && string.Equals(candidate.RoutePath, membership.FallbackSectionRoute, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (candidates.Length != 1)
@@ -908,7 +889,6 @@ internal sealed class DocConceptIdentityIndex
         MutablePage page,
         IDictionary<ConceptMembershipKey, MembershipFact> membershipFacts,
         IDictionary<PageKey, HashSet<string>> conceptIdsByPage,
-        IDictionary<string, HashSet<string>> conceptGraph,
         ISet<string> quarantinedConceptIds,
         ISet<PageKey> quarantinedPages,
         ICollection<DocConceptValidationIssue> issues,
@@ -917,24 +897,18 @@ internal sealed class DocConceptIdentityIndex
         var conceptId = page.ConceptId!;
         var membershipKey = new ConceptMembershipKey(pageKey.Release, page.Locale, conceptId);
         var fact = new MembershipFact(false, pageKey, null, page.Landing);
-        if (!membershipFacts.TryAdd(membershipKey, fact))
-        {
-            strictValid = false;
-            quarantinedConceptIds.Add(conceptId);
-            quarantinedPages.Add(pageKey);
-            issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, "concept-index", "One concept has multiple canonical pages in the same release and locale."));
-        }
+        // A valid sidecar rejects duplicate (locale, conceptId) assignments before loader pages are created.
+        membershipFacts.Add(membershipKey, fact);
 
-        AddConceptPageAssignment(pageKey, conceptId, conceptIdsByPage, conceptGraph, quarantinedConceptIds, quarantinedPages, issues, "concept-index", ref strictValid);
+        AddConceptPageAssignment(pageKey, conceptId, conceptIdsByPage, quarantinedConceptIds, quarantinedPages, issues, "concept-index", ref strictValid);
     }
 
     /// <summary>Adds or compares one pinned bridge membership without choosing a declaration-order winner.</summary>
-    private static bool AddMembershipFact(
+    private static void AddMembershipFact(
         ConceptMembershipKey key,
         MembershipFact fact,
         IDictionary<ConceptMembershipKey, MembershipFact> membershipFacts,
         IDictionary<PageKey, HashSet<string>> conceptIdsByPage,
-        IDictionary<string, HashSet<string>> conceptGraph,
         ISet<string> quarantinedConceptIds,
         ISet<PageKey> quarantinedPages,
         ICollection<DocConceptValidationIssue> issues,
@@ -948,19 +922,17 @@ internal sealed class DocConceptIdentityIndex
                 quarantinedConceptIds.Add(key.ConceptId);
                 if (existing.Page is { } existingPage)
                 {
-                    quarantinedPages.Add(existingPage);
-                    LinkPageConcepts(key.ConceptId, existingPage, conceptIdsByPage, conceptGraph);
+                    QuarantinePageConcepts(key.ConceptId, existingPage, conceptIdsByPage, quarantinedConceptIds, quarantinedPages);
                 }
 
                 if (fact.Page is { } newPage)
                 {
-                    quarantinedPages.Add(newPage);
-                    LinkPageConcepts(key.ConceptId, newPage, conceptIdsByPage, conceptGraph);
+                    QuarantinePageConcepts(key.ConceptId, newPage, conceptIdsByPage, quarantinedConceptIds, quarantinedPages);
                 }
 
                 strictValid = false;
                 issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, artifact, "Pinned bridge maps contain contradictory facts for one concept membership."));
-                return false;
+                return;
             }
 
             membershipFacts[key] = existing.Merge(fact);
@@ -972,19 +944,20 @@ internal sealed class DocConceptIdentityIndex
 
         if (fact.Page is { } pageKey)
         {
-            AddConceptPageAssignment(pageKey, key.ConceptId, conceptIdsByPage, conceptGraph, quarantinedConceptIds, quarantinedPages, issues, artifact, ref strictValid);
+            AddConceptPageAssignment(pageKey, key.ConceptId, conceptIdsByPage, quarantinedConceptIds, quarantinedPages, issues, artifact, ref strictValid);
         }
-
-        return true;
     }
 
-    /// <summary>Connects a conflicting concept to every other identity assigned to either affected canonical page.</summary>
-    private static void LinkPageConcepts(
+    /// <summary>Quarantines every identity assigned to an affected canonical page.</summary>
+    private static void QuarantinePageConcepts(
         string conceptId,
         PageKey pageKey,
         IDictionary<PageKey, HashSet<string>> conceptIdsByPage,
-        IDictionary<string, HashSet<string>> conceptGraph)
+        ISet<string> quarantinedConceptIds,
+        ISet<PageKey> quarantinedPages)
     {
+        quarantinedPages.Add(pageKey);
+        quarantinedConceptIds.Add(conceptId);
         if (!conceptIdsByPage.TryGetValue(pageKey, out var relatedConcepts))
         {
             return;
@@ -992,10 +965,7 @@ internal sealed class DocConceptIdentityIndex
 
         foreach (var relatedConceptId in relatedConcepts)
         {
-            if (!string.Equals(conceptId, relatedConceptId, StringComparison.Ordinal))
-            {
-                LinkConcepts(conceptId, relatedConceptId, conceptGraph);
-            }
+            quarantinedConceptIds.Add(relatedConceptId);
         }
     }
 
@@ -1004,7 +974,6 @@ internal sealed class DocConceptIdentityIndex
         PageKey pageKey,
         string conceptId,
         IDictionary<PageKey, HashSet<string>> conceptIdsByPage,
-        IDictionary<string, HashSet<string>> conceptGraph,
         ISet<string> quarantinedConceptIds,
         ISet<PageKey> quarantinedPages,
         ICollection<DocConceptValidationIssue> issues,
@@ -1028,51 +997,10 @@ internal sealed class DocConceptIdentityIndex
             quarantinedConceptIds.Add(existingConceptId);
             quarantinedConceptIds.Add(conceptId);
             quarantinedPages.Add(pageKey);
-            LinkConcepts(existingConceptId, conceptId, conceptGraph);
             issues.Add(new DocConceptValidationIssue(DocConceptValidationFailure.IdentityConflict, artifact, "One canonical page is assigned to more than one concept."));
         }
 
         ids.Add(conceptId);
-    }
-
-    /// <summary>Connects concepts that share an ambiguous canonical page so quarantine reaches the full group.</summary>
-    private static void LinkConcepts(string first, string second, IDictionary<string, HashSet<string>> graph)
-    {
-        if (!graph.TryGetValue(first, out var firstLinks))
-        {
-            firstLinks = new HashSet<string>(StringComparer.Ordinal);
-            graph.Add(first, firstLinks);
-        }
-
-        if (!graph.TryGetValue(second, out var secondLinks))
-        {
-            secondLinks = new HashSet<string>(StringComparer.Ordinal);
-            graph.Add(second, secondLinks);
-        }
-
-        firstLinks.Add(second);
-        secondLinks.Add(first);
-    }
-
-    /// <summary>Expands quarantine seeds through every concept edge created by ambiguous page assignments.</summary>
-    private static void QuarantineConnectedConceptGroups(ISet<string> quarantinedConceptIds, IReadOnlyDictionary<string, HashSet<string>> graph)
-    {
-        var pending = new Queue<string>(quarantinedConceptIds);
-        while (pending.TryDequeue(out var current))
-        {
-            if (!graph.TryGetValue(current, out var related))
-            {
-                continue;
-            }
-
-            foreach (var conceptId in related)
-            {
-                if (quarantinedConceptIds.Add(conceptId))
-                {
-                    pending.Enqueue(conceptId);
-                }
-            }
-        }
     }
 
     /// <summary>Checks the map reference path remains relative and confined before it participates in deduplication.</summary>

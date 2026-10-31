@@ -6536,6 +6536,42 @@ public sealed class ReleaseToolTests : IDisposable
         Assert.Contains("archive_sha256=", outputs, StringComparison.Ordinal);
         Assert.Contains($"max_rewritten_file_size_bytes={ReleaseDocsPublication.DefaultMaxRewrittenFileSizeBytes}", outputs, StringComparison.Ordinal);
         Assert.Contains("recovery_summary_path=", outputs, StringComparison.Ordinal);
+        Assert.Contains("verification_root=" + staging + ".verification", outputs, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DocsPublicationReusesOriginalVerificationCompanionInsteadOfDerivedServingInputs()
+    {
+        await SeedRepositoryAsync();
+        var docs = await SeedDocsArchiveAsync("0.1.0");
+        var previousServing = ExternalPath("previous-serving");
+        var previousVerification = previousServing + ".verification";
+        Directory.CreateDirectory(previousServing);
+        Directory.CreateDirectory(previousVerification);
+        var derivedCatalog = Path.Join(previousServing, "versions.json");
+        await File.WriteAllTextAsync(derivedCatalog, "derived serving inputs must not be read as original verification facts");
+        await File.WriteAllTextAsync(Path.Join(previousVerification, "original-marker.txt"), "original verification input");
+        var staging = ExternalPath("next-serving");
+        var planPath = RepositoryPath("artifacts/reused-verification-plan.json");
+
+        var result = await RunAsync(
+            [
+                "docs-publication",
+                "--version", "0.1.0",
+                "--tag", "v0.1.0",
+                "--docs-exact-tree", TestPathUtils.PathUnder(docs.TrustedReleaseRootPath, docs.ExactTreePath),
+                "--existing-pages-root", previousServing,
+                "--archive-output", RepositoryPath("artifacts/reused-verification.tar.gz"),
+                "--pages-staging-root", staging,
+                "--plan-output", planPath
+            ], new FakeCommandRunner());
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Equal("original verification input", await File.ReadAllTextAsync(Path.Join(staging, "original-marker.txt")));
+        Assert.Equal("original verification input", await File.ReadAllTextAsync(TestPathUtils.PathUnder(staging + ".verification", "original-marker.txt")));
+        Assert.Equal("derived serving inputs must not be read as original verification facts", await File.ReadAllTextAsync(derivedCatalog));
+        using var plan = JsonDocument.Parse(await File.ReadAllBytesAsync(planPath));
+        Assert.Equal(staging + ".verification", plan.RootElement.GetProperty("verificationRoot").GetString());
     }
 
     [Theory]

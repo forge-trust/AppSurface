@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ForgeTrust.AppSurface.Cli;
 using ForgeTrust.AppSurface.Docs.Services;
+using ForgeTrust.AppSurface.Testing;
 using ForgeTrust.RazorWire.Cli;
 
 namespace ForgeTrust.AppSurface.Cli.Tests;
@@ -25,7 +26,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
 
         await AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, pages, 1024 * 1024, CancellationToken.None);
 
-        using var json = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        using var json = JsonDocument.Parse(await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
         var root = json.RootElement;
         Assert.Equal("appsurface-docs-concepts-v1", root.GetProperty("schema").GetString());
         Assert.Equal("partial", root.GetProperty("identityCoverage").GetString());
@@ -64,7 +65,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
             () => AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, pages, 1024 * 1024, CancellationToken.None));
 
         Assert.Contains(exception.Diagnostics, diagnostic => diagnostic.Code == "docs-concept-index-invalid");
-        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
 
         Assert.Contains(invalidException.Diagnostics, diagnostic => diagnostic.Code == "docs-concept-id-invalid");
         Assert.Contains("invalid authored concept_id", Assert.Single(invalidException.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(invalidOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(invalidOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
 
         using var unmappedOutput = new TemporaryDirectory();
         await WriteFrozenRoutesAsync(unmappedOutput.Path, ("guide.md", "guides/guide", "rendered/guide.html"));
@@ -90,7 +91,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
             () => AppSurfaceDocsConceptIndexExporter.WriteAsync(unmappedOutput.Path, [unlistedPage], 1024 * 1024, CancellationToken.None));
 
         Assert.Contains(unmappedException.Diagnostics, diagnostic => diagnostic.Code == "docs-concept-index-invalid");
-        Assert.False(File.Exists(Path.Join(unmappedOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(unmappedOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -101,13 +102,13 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
         await File.WriteAllTextAsync(Path.Join(output.Path, "guide.html"), "<h1 id=\"guide\">Guide</h1>");
         AppSurfaceDocsConceptExportPage[] pages = [new("guide", null, "guide", "Guide", false, false)];
         var overflow = await Assert.ThrowsAsync<ExportValidationException>(() => AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, pages, 30, CancellationToken.None));
-        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
         Assert.Contains("exceeds", Assert.Single(overflow.Diagnostics).Message);
         await AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, pages, 4194304, CancellationToken.None);
-        var original = await File.ReadAllBytesAsync(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName));
+        var original = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName));
         var collision = await Assert.ThrowsAsync<ExportValidationException>(() => AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, pages, 4194304, CancellationToken.None));
         Assert.Contains("reserved", Assert.Single(collision.Diagnostics).Message);
-        Assert.Equal(original, await File.ReadAllBytesAsync(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.Equal(original, await File.ReadAllBytesAsync(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -124,6 +125,23 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
     }
 
     [Fact]
+    public async Task WriteAsync_RejectsHtmlArtifactAlreadyAboveTheRewriteInputBudget()
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("guide.md", "guide", "guide.html"));
+        await File.WriteAllTextAsync(Path.Join(output.Path, "guide.html"), "<h1>This emitted HTML is larger than the limit.</h1>");
+        AppSurfaceDocsConceptExportPage page = new("guide", null, null, "Guide", false, false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 32, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Contains("exceeds the configured rewrite input budget", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("/", diagnostic.Route);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
     public async Task WriteAsync_RejectsMissingOrInvalidFinalizedRouteManifest()
     {
         using var missingOutput = new TemporaryDirectory();
@@ -136,7 +154,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
         var invalid = await Assert.ThrowsAsync<ExportValidationException>(() =>
             AppSurfaceDocsConceptIndexExporter.WriteAsync(invalidOutput.Path, [], 4194304, CancellationToken.None));
         Assert.Contains("invalid for concept-index generation", Assert.Single(invalid.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(invalidOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(invalidOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -154,7 +172,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
         var duplicate = await Assert.ThrowsAsync<ExportValidationException>(() =>
             AppSurfaceDocsConceptIndexExporter.WriteAsync(duplicateOutput.Path, [projection, projection], 4194304, CancellationToken.None));
         Assert.Contains("repeats a canonical page route", Assert.Single(duplicate.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Theory]
@@ -171,7 +189,7 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
             AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
 
         Assert.Contains(expectedMessage, Assert.Single(exception.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -191,7 +209,82 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
         var duplicate = await Assert.ThrowsAsync<ExportValidationException>(() =>
             AppSurfaceDocsConceptIndexExporter.WriteAsync(duplicateOutput.Path, [page], 4194304, CancellationToken.None));
         Assert.Contains("invalid or duplicate emitted anchor", Assert.Single(duplicate.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(duplicateOutput.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Theory]
+    [InlineData("bad id")]
+    [InlineData("bad#id")]
+    [InlineData("bad\u0001id")]
+    public async Task WriteAsync_RejectsInvalidEmittedAnchorIds(string anchorId)
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("guide.md", "guide", "guide.html"));
+        await File.WriteAllTextAsync(Path.Join(output.Path, "guide.html"), $"<h1 id=\"{anchorId}\">Guide</h1>");
+        AppSurfaceDocsConceptExportPage page = new("guide", null, null, "Guide", false, false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Contains("invalid or duplicate emitted anchor ID", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("/docs/guide", diagnostic.Route);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_UsesRootRouteContextForInvalidRootPageIdentity()
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("index.md", "", "index.html"));
+        AppSurfaceDocsConceptExportPage invalidPage = new("", null, null, "Docs home", false, ConceptIdIsInvalid: true);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [invalidPage], 4194304, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal("docs-concept-id-invalid", diagnostic.Code);
+        Assert.Equal("/", diagnostic.Route);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Fact]
+    public async Task WriteAsync_RejectsLegacyFrozenRouteManifestBeforeConceptIndexGeneration()
+    {
+        using var output = new TemporaryDirectory();
+        await WriteLegacyFrozenRoutesAsync(output.Path, ("guide.md", "guide"));
+        AppSurfaceDocsConceptExportPage page = new("guide", null, null, "Guide", false, false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal("docs-concept-index-invalid", diagnostic.Code);
+        Assert.Contains("invalid for concept-index generation", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    [Theory]
+    [InlineData("en/us", "guide", "CanonicalRouteInvalid")]
+    [InlineData(null, "invalid/id", "InvalidConceptId")]
+    public async Task WriteAsync_RejectsGeneratedSidecarRejectedByReleaseSchema(
+        string? locale,
+        string conceptId,
+        string expectedFailure)
+    {
+        using var output = new TemporaryDirectory();
+        await WriteFrozenRoutesAsync(output.Path, ("guide.md", "guide", "guide.html"));
+        await File.WriteAllTextAsync(Path.Join(output.Path, "guide.html"), "<h1>Guide</h1>");
+        AppSurfaceDocsConceptExportPage page = new("guide", locale, conceptId, "Guide", false, ConceptIdIsInvalid: false);
+
+        var exception = await Assert.ThrowsAsync<ExportValidationException>(() =>
+            AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
+
+        var diagnostic = Assert.Single(exception.Diagnostics);
+        Assert.Equal("docs-concept-index-invalid", diagnostic.Code);
+        Assert.Contains("does not satisfy the release contract", diagnostic.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(expectedFailure, diagnostic.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
     }
 
     [Fact]
@@ -205,7 +298,28 @@ public sealed class AppSurfaceDocsConceptIndexExporterTests
             AppSurfaceDocsConceptIndexExporter.WriteAsync(output.Path, [page], 4194304, CancellationToken.None));
 
         Assert.Contains("invalid for concept-index generation", Assert.Single(exception.Diagnostics).Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(Path.Join(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+        Assert.False(File.Exists(TestPathUtils.PathUnder(output.Path, AppSurfaceDocsConceptIndexExporter.FileName)));
+    }
+
+    private static async Task WriteLegacyFrozenRoutesAsync(
+        string outputPath,
+        params (string Source, string Route)[] routes)
+    {
+        var entries = routes.Select(route => new
+        {
+            sourcePath = route.Source,
+            canonicalRoutePath = route.Route,
+            recoveryAliases = Array.Empty<string>(),
+            declaredAliases = Array.Empty<string>()
+        }).ToArray();
+        var document = new
+        {
+            schema = "appsurface-docs-route-manifest-v1",
+            entries
+        };
+        await File.WriteAllTextAsync(
+            TestPathUtils.PathUnder(outputPath, ".appsurface-docs-route-manifest.json"),
+            JsonSerializer.Serialize(document));
     }
 
     private static async Task WriteFrozenRoutesAsync(string outputPath, params (string Source, string Route, string Artifact)[] routes)

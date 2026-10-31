@@ -205,6 +205,9 @@ public class DocModelsTests
         var blankPrimary = DocMetadata.Merge(
             new DocMetadata { ConceptId = "   " },
             new DocMetadata { ConceptId = " fallback.concept " });
+        var absentPrimary = DocMetadata.Merge(
+            new DocMetadata(),
+            new DocMetadata { ConceptId = " fallback.concept " });
 
         Assert.Equal("guides.configuration.setup", valid?.ConceptId);
         Assert.False(valid?.ConceptIdIsInvalid);
@@ -212,6 +215,8 @@ public class DocModelsTests
         Assert.True(invalid?.ConceptIdIsInvalid);
         Assert.Equal("fallback.concept", blankPrimary?.ConceptId);
         Assert.False(blankPrimary?.ConceptIdIsInvalid);
+        Assert.Equal("fallback.concept", absentPrimary?.ConceptId);
+        Assert.False(absentPrimary?.ConceptIdIsInvalid);
     }
 
     [Fact]

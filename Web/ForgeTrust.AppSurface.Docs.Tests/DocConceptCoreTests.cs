@@ -284,7 +284,74 @@ public sealed class DocConceptCoreTests
         Assert.True(result.IsValid);
         Assert.Empty(result.Issues);
         Assert.True(result.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var sourceIdentity));
-        Assert.Equal(DocConceptResolutionReason.MovedPage, result.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
+        var resolution = result.Index.Resolve(sourceIdentity!, "2", targetPin);
+        Assert.Equal(DocConceptResolutionReason.MovedPage, resolution.Reason);
+        Assert.Equal(sourceIdentity, resolution.SourceIdentity);
+        Assert.True(resolution.HasCounterpart);
+        Assert.True(resolution.TargetRelease!.HasDocumentation);
+    }
+
+    [Fact]
+    public void CompatiblePinnedAbsenceMembershipsMergeAuthoredFallbackAndConflictsQuarantine()
+    {
+        var sourcePin = Pin('a');
+        var targetPin = Pin('b');
+        var source = Legacy("1", sourcePin, "old/topic");
+        var target = LegacyWithRoutes("2", targetPin, "guide/one", "guide/two");
+        var sourceMembership = new Membership("1", sourcePin, "en", "page", "old/topic");
+        var absenceWithoutFallback = Bridge(
+            sourceMembership,
+            new Membership("2", targetPin, "en", "absent"));
+        var absenceWithFallback = Bridge(
+            sourceMembership,
+            new Membership("2", targetPin, "en", "absent", FallbackSectionRoute: "guide/one"));
+
+        var merged = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [absenceWithoutFallback, absenceWithFallback], DocConceptValidationMode.Strict, Budget);
+        Assert.True(merged.IsValid);
+        Assert.True(merged.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var sourceIdentity));
+        var mergedResolution = merged.Index.Resolve(sourceIdentity!, "2", targetPin);
+        Assert.Equal(DocConceptResolutionReason.KnownAbsent, mergedResolution.Reason);
+        Assert.Equal(sourceIdentity, mergedResolution.SourceIdentity);
+        Assert.False(mergedResolution.HasCounterpart);
+        Assert.True(mergedResolution.TargetRelease!.HasDocumentation);
+        Assert.Equal("guide/one", mergedResolution.FallbackSection!.RoutePath);
+
+        var conflictingAbsence = Bridge(
+            sourceMembership,
+            new Membership("2", targetPin, "en", "absent", FallbackSectionRoute: "guide/two"));
+        var conflict = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [absenceWithFallback, conflictingAbsence], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(conflict.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, conflict.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
+    }
+
+    [Fact]
+    public void CompatibleLegacyPageMembershipsMergeLandingFactsAndConflictingFactsQuarantine()
+    {
+        var sourcePin = Pin('c');
+        var targetPin = Pin('d');
+        var source = Legacy("1", sourcePin, "old/topic");
+        var target = LegacyWithRoutes("2", targetPin, "new/topic");
+        var sourceMembership = new Membership("1", sourcePin, "en", "page", "old/topic");
+        var targetWithoutLanding = new Membership("2", targetPin, "en", "page", "new/topic");
+        var targetWithLanding = targetWithoutLanding with { SectionLanding = true };
+        var first = Bridge(sourceMembership, targetWithoutLanding);
+        var second = Bridge(sourceMembership, targetWithLanding);
+
+        var merged = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [first, second], DocConceptValidationMode.Strict, Budget);
+        Assert.True(merged.IsValid);
+        Assert.True(merged.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var sourceIdentity));
+        var moved = merged.Index.Resolve(sourceIdentity!, "2", targetPin);
+        Assert.Equal(DocConceptResolutionReason.MovedPage, moved.Reason);
+        Assert.True(moved.TargetPage!.Landing);
+
+        var conflicting = Bridge(sourceMembership, targetWithoutLanding with { SectionLanding = false });
+        var quarantined = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [second, conflicting], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(quarantined.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, quarantined.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
     }
 
     [Fact]
@@ -637,6 +704,21 @@ public sealed class DocConceptCoreTests
         Assert.False(DocConceptIdentityIndex.TryLoadSidecar(Sidecar(), duplicateRouteFacts, Budget, out _, out var duplicateIssue));
         Assert.Equal(DocConceptValidationFailure.CanonicalRouteInvalid, duplicateIssue!.Failure);
 
+        var missingRequiredNullableLocale = Encoding.UTF8.GetBytes(
+            $"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"conceptId\":\"topic\",\"title\":\"Topic\",\"anchorIds\":[]}}]}}");
+        Assert.False(DocConceptIdentityIndex.TryLoadSidecar(missingRequiredNullableLocale, routes, Budget, out _, out var missingLocaleIssue));
+        Assert.Equal(DocConceptValidationFailure.IndexInvalid, missingLocaleIssue!.Failure);
+
+        var missingRequiredNullableConcept = Encoding.UTF8.GetBytes(
+            $"{{\"schema\":\"{SidecarSchema}\",\"identityCoverage\":\"complete\",\"pages\":[{{\"canonicalRoutePath\":\"guide/topic\",\"locale\":\"en\",\"title\":\"Topic\",\"anchorIds\":[]}}]}}");
+        Assert.False(DocConceptIdentityIndex.TryLoadSidecar(missingRequiredNullableConcept, routes, Budget, out _, out var missingConceptIssue));
+        Assert.Equal(DocConceptValidationFailure.IndexInvalid, missingConceptIssue!.Failure);
+
+        var missingRequiredNullableMapLocale = Encoding.UTF8.GetBytes(
+            $"{{\"schema\":\"{BridgeSchema}\",\"concepts\":[{{\"conceptId\":\"topic\",\"memberships\":[{{\"version\":\"1\",\"releaseManifestSha256\":\"{Pin('1')}\",\"kind\":\"absent\"}}]}}]}}");
+        Assert.False(DocConceptSchema.TryLoadMap(missingRequiredNullableMapLocale, Budget, out _, out var missingMapLocaleIssue));
+        Assert.Equal(DocConceptValidationFailure.MapInvalid, missingMapLocaleIssue!.Failure);
+
         var missingArtifact = new[] { new DocConceptCanonicalRouteFact("guide/topic", null, "en", true) };
         Assert.False(DocConceptIdentityIndex.TryLoadSidecar(Sidecar(), missingArtifact, Budget, out _, out var artifactIssue));
         Assert.Equal(DocConceptValidationFailure.CanonicalRouteInvalid, artifactIssue!.Failure);
@@ -851,7 +933,7 @@ public sealed class DocConceptCoreTests
         Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.ReleasePinInvalid);
         Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
         Assert.True(result.Index.TryGetPageIdentity("1", sourcePin, "old/topic", out var sourceIdentity));
-        Assert.Equal(DocConceptResolutionReason.Unknown, result.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, result.Index.Resolve(sourceIdentity!, "2", targetPin).Reason);
         Assert.Null(result.Index.GetPage(new DocConceptPageIdentity("hidden", hiddenPin, "hidden/topic", "en", false)));
         Assert.Null(result.Index.GetPage(new DocConceptPageIdentity("unavailable", unavailablePin, "unavailable/topic", "en", false)));
 
@@ -917,6 +999,15 @@ public sealed class DocConceptCoreTests
             [source, target], invalidReferences, DocConceptValidationMode.Quarantine, Budget);
         Assert.Contains(result.Issues, issue => issue.Failure == DocConceptValidationFailure.MapInvalid);
         Assert.Equal(DocConceptResolutionReason.Unknown, result.Index.Resolve(identity, "2", targetPin).Reason);
+
+        var legacyTarget = Legacy("2", targetPin, "guide/topic");
+        var absenceMap = Bridge(
+            new Membership("1", sourcePin, "en", "page", "guide/topic"),
+            new Membership("2", targetPin, "en", "absent"));
+        var absenceThenMalformed = DocConceptIdentityIndex.BuildCombined(
+            [source, legacyTarget], [absenceMap, unsupported], DocConceptValidationMode.Quarantine, Budget).Index;
+        Assert.Equal(DocConceptResolutionReason.Unknown, absenceThenMalformed.Resolve(identity, "2", targetPin).Reason);
+
         Assert.Throws<ArgumentNullException>(() => DocConceptIdentityIndex.BuildCombined(null!, [], DocConceptValidationMode.Quarantine, Budget));
         Assert.Throws<ArgumentNullException>(() => DocConceptIdentityIndex.BuildCombined([source], null!, DocConceptValidationMode.Quarantine, Budget));
 
@@ -1001,6 +1092,74 @@ public sealed class DocConceptCoreTests
         Assert.Contains(conflicted.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
         var indexedIdentity = conflicted.Index.EnumeratePublicPages().Single(row => row.Identity.Version == "10").Identity;
         Assert.Equal(DocConceptResolutionReason.Ambiguous, conflicted.Index.Resolve(indexedIdentity, "11", Pin('f')).Reason);
+    }
+
+    [Fact]
+    public void ParsedBridgeConflictDoesNotPoisonAnUnrelatedEmbeddedConcept()
+    {
+        var sourcePin = Pin('1');
+        var targetPin = Pin('2');
+        var source = Release("1", sourcePin,
+            [new Page("old/healthy", "en", "healthy", "Healthy", []), new Page("old/conflicted", "en", "conflicted", "Conflicted", []), new Page("old/stale", "en", "stale", "Stale", [])]);
+        var target = Release("2", targetPin,
+            [new Page("new/healthy", "en", "healthy", "Healthy", []), new Page("new/conflicted", "en", "conflicted", "Conflicted", []), new Page("new/stale", "en", "stale", "Stale", [])]);
+        var badMemberships = Bridge(
+            new Membership("2", targetPin, "en", "page", "new/conflicted") { ConceptId = "foreign" },
+            new Membership("missing-release", Pin('3'), "en", "absent") { ConceptId = "stale" });
+
+        var build = DocConceptIdentityIndex.BuildCombined(
+            [source, target], [badMemberships], DocConceptValidationMode.Quarantine, Budget);
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.IdentityConflict);
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.ReleasePinInvalid);
+        Assert.True(build.Index.TryGetPageIdentity("1", sourcePin, "old/healthy", out var healthyIdentity));
+        Assert.True(build.Index.TryGetPageIdentity("1", sourcePin, "old/conflicted", out var conflictedIdentity));
+        Assert.True(build.Index.TryGetPageIdentity("1", sourcePin, "old/stale", out var staleIdentity));
+
+        Assert.Equal(DocConceptResolutionReason.MovedPage, build.Index.Resolve(healthyIdentity!, "2", targetPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(conflictedIdentity!, "2", targetPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(staleIdentity!, "2", targetPin).Reason);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConflictingLegacyLocaleMembershipsQuarantineTheRouteRegardlessOfMapOrder(bool reverse)
+    {
+        const string englishConcept = "english";
+        const string frenchConcept = "french";
+        var englishPin = Pin('3');
+        var legacyPin = Pin('4');
+        var frenchPin = Pin('5');
+        var englishTargetPin = Pin('6');
+        var frenchTargetPin = Pin('7');
+        var englishSource = Release("english-source", englishPin,
+            [new Page("old/english", "en", englishConcept, "English", [])]);
+        var legacyTarget = Legacy("legacy-target", legacyPin, "shared/topic");
+        var frenchSource = Release("french-source", frenchPin,
+            [new Page("old/french", "fr", frenchConcept, "French", [])]);
+        var englishTarget = Release("english-target", englishTargetPin,
+            [new Page("new/english", "en", englishConcept, "English", [])]);
+        var frenchTarget = Release("french-target", frenchTargetPin,
+            [new Page("new/french", "fr", frenchConcept, "French", [])]);
+
+        var englishMembership = new Membership("legacy-target", legacyPin, "en", "page", "shared/topic") { ConceptId = englishConcept };
+        var frenchMembership = new Membership("legacy-target", legacyPin, "fr", "page", "shared/topic") { ConceptId = frenchConcept };
+        var map = reverse ? Bridge(frenchMembership, englishMembership) : Bridge(englishMembership, frenchMembership);
+        var build = DocConceptIdentityIndex.BuildCombined(
+            [englishSource, legacyTarget, frenchSource, englishTarget, frenchTarget],
+            [map], DocConceptValidationMode.Quarantine, Budget);
+
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.CanonicalRouteInvalid);
+        Assert.True(build.Index.TryGetPageIdentity(englishSource.Version, englishPin, "old/english", out var englishIdentity));
+        Assert.True(build.Index.TryGetPageIdentity(frenchSource.Version, frenchPin, "old/french", out var frenchIdentity));
+        var firstClaimedPage = build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", reverse ? "fr" : "en", true));
+        Assert.NotNull(firstClaimedPage);
+        Assert.Equal("shared/topic", firstClaimedPage.RoutePath);
+        Assert.Null(build.Index.GetPage(new DocConceptPageIdentity("legacy-target", legacyPin, "shared/topic", reverse ? "en" : "fr", true)));
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(englishIdentity!, "legacy-target", legacyPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(frenchIdentity!, "legacy-target", legacyPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(englishIdentity!, "english-target", englishTargetPin).Reason);
+        Assert.Equal(DocConceptResolutionReason.Ambiguous, build.Index.Resolve(frenchIdentity!, "french-target", frenchTargetPin).Reason);
     }
 
     [Fact]

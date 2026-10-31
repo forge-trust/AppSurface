@@ -16,6 +16,7 @@ internal static class MarkdownFrontMatterParser
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
+        .WithNodeTypeResolver(new ConceptIdYamlValueTypeResolver(), where => where.OnTop())
         .WithTypeConverter(new ConceptIdYamlValueConverter())
         .WithTypeConverter(new AutoRelatedPagesYamlValueConverter())
         .IgnoreUnmatchedProperties()
@@ -289,6 +290,23 @@ internal static class MarkdownFrontMatterParser
 
     private readonly record struct ConceptIdYamlValue(string? Value, bool IsInvalid);
 
+    /// <summary>
+    /// Lets explicitly tagged YAML nodes reach the concept-ID converter without changing tag resolution for other metadata.
+    /// </summary>
+    /// <remarks>
+    /// YamlDotNet's unknown-tag resolver runs before type converters and otherwise rejects tags such as <c>!!null</c> before
+    /// the converter can apply the concept-ID scalar rules. This resolver claims only the private concept-ID wrapper type;
+    /// the converter still validates the actual tag and scalar, while every other metadata field keeps default resolution.
+    /// </remarks>
+    private sealed class ConceptIdYamlValueTypeResolver : INodeTypeResolver
+    {
+        public bool Resolve(NodeEvent? nodeEvent, ref Type currentType)
+        {
+            _ = nodeEvent;
+            return currentType == typeof(ConceptIdYamlValue);
+        }
+    }
+
     private sealed class ConceptIdYamlValueConverter : IYamlTypeConverter
     {
         private const string StringTag = "tag:yaml.org,2002:str";
@@ -296,8 +314,7 @@ internal static class MarkdownFrontMatterParser
 
         public bool Accepts(Type type)
         {
-            return type == typeof(ConceptIdYamlValue)
-                || Nullable.GetUnderlyingType(type) == typeof(ConceptIdYamlValue);
+            return type == typeof(ConceptIdYamlValue);
         }
 
         public object ReadYaml(IParser parser, Type type, ObjectDeserializer rootDeserializer)

@@ -19,6 +19,11 @@ Write the guide content here.
 
 A paired `guide.md.yml` or `guide.md.yaml` may supply the same field under its existing metadata shape. A missing, null, or blank value means the page has no authored identity. Surrounding whitespace is trimmed. A nonblank ID must be 1–128 ASCII characters from lowercase `a`–`z`, digits, `.`, `_`, or `-`; the first and last characters must be alphanumeric. IDs compare ordinally and case-sensitively, so `guides.Setup` is invalid rather than a different spelling of `guides.setup`. Invalid authored values are rejected; they are not silently repaired or replaced by a fallback field.
 
+YAML scalar types matter: quote an ID such as `"true"` that YAML would otherwise read as a boolean.
+An explicit `!!str` value follows the same ID grammar, and `!!null` stays unspecified. Numeric, boolean,
+collection, and unknown tagged values are invalid identities. The concept parser's internal type resolver
+handles tags only for this field; other metadata retains its existing YAML behavior.
+
 Keep the ID when the same guide is renamed or moved. Give a different subject a different ID. A split or merge needs a deliberately authored canonical hub that keeps the old identity, or the normal unknown/recovery path; the resolver never picks one descendant as a winner. A `concept_id` is independent of release, route, title, and language. Keep [`translation_key`](../Web/ForgeTrust.AppSurface.Docs/README.md#localization-foundation) for locale relationships and [`redirect_aliases`](../Web/ForgeTrust.AppSurface.Docs/README.md#document-route-identity) for navigation within one release.
 
 There may be no more than one public canonical page per `(instance, exact release, normalized locale, concept_id)`. Locale variants may share an ID, but selection stays in the reader's selected locale. Assign IDs to all public canonical pages in a release when the exported identity index should report complete coverage; leaving any canonical page without an ID makes the index partial.
@@ -112,6 +117,13 @@ The digest values above are labels for values generated from the local fixture; 
 The host combines every distinct map referenced by the catalog into one immutable snapshot. A map referenced on either a source or target version participates in either switch direction. Identical path/digest references and identical facts are deduplicated. Membership identity comes from its exact release pin, version, and locale, not from the descriptor that points to the map. Duplicate memberships, a legacy page assigned to multiple concepts, a bridge that contradicts an embedded ID, an absence that erases an embedded page, or conflicting maps quarantine every affected concept group; declaration order never chooses a winner and route continuity cannot resurrect a quarantined match. Static publication reads the catalog and pinned maps from the trusted verification input, strips `conceptMapPath` and `conceptMapSha256` from the public `versions.json`, and keeps bridge bytes out of the Pages serving tree. The reader receives only validated page-local projections. Authored static publication rejects conflicts before it publishes the serving output.
 
 The index and bridge are optional identity data. At host startup, invalid or unreadable concept data disables the affected concept resolution and logs an operator diagnostic while valid archives remain readable under the existing archive rules. A bad release manifest pin or frozen route manifest still makes the release unavailable under the existing archive contract. The host does not watch for catalog changes: editing an index, map, or pin requires the correct re-export/repin and a restart or redeploy.
+
+A parsed bridge conflict quarantines its known concept/page group and leaves unrelated verified concepts usable.
+An unreadable, malformed, or digest-invalid bridge cannot establish which groups it affects, so the host
+conservatively disables cross-version matching across that snapshot. This distinction does not make an archive
+unreadable or turn a conflict into evidence of absence. An untrusted bridge also prevents a known-absence claim
+from a separate bridge when the target's locale facts are incomplete; recovery stays unknown and offers only
+independently verified actions.
 
 ## Resolution and reader outcomes
 

@@ -5,6 +5,7 @@ using AngleSharp.Html.Parser;
 using ForgeTrust.AppSurface.Docs.Services;
 using ForgeTrust.AppSurface.ReleaseContracts;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -62,6 +63,68 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         await fixture.Adapter.TryHandleAsync(head, NullLogger.Instance);
         Assert.Equal(expected.Length, head.Response.ContentLength);
         Assert.Empty(Body(head));
+    }
+
+    [Theory]
+    [InlineData("runtime.js")]
+    [InlineData("switch.css")]
+    [InlineData("choices")]
+    public async Task ResponseWrite_AwaitsAsynchronousTransportAndHeadNeverWrites(string resource)
+    {
+        var fixture = Create();
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
+        var path = "/docs/versions/switch/" + (resource == "choices" ? key + ".html" : resource);
+        var context = Context(path);
+        await using var transport = new YieldingWriteStream();
+        context.Response.Body = transport;
+
+        var response = fixture.Adapter.TryHandleAsync(context, NullLogger.Instance);
+        try
+        {
+            await transport.WriteStarted.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(response.IsCompleted);
+        }
+        finally
+        {
+            transport.ReleaseWrites();
+        }
+        Assert.True(await response);
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.True(transport.Writes > 0);
+        Assert.Equal(context.Response.ContentLength, transport.Length);
+        if (resource == "choices")
+        {
+            Assert.Contains("This guide moved", Body(context));
+        }
+        else
+        {
+            var expected = resource == "runtime.js" ? DocConceptSwitchRuntime.ReadRuntimeBytes()
+                : DocConceptSwitchRuntime.ReadStylesheetBytesForCaller();
+            Assert.Equal(expected, transport.ToArray());
+        }
+
+        var head = Context(path);
+        head.Request.Method = "HEAD";
+        await using var headTransport = new YieldingWriteStream();
+        head.Response.Body = headTransport;
+        Assert.True(await fixture.Adapter.TryHandleAsync(head, NullLogger.Instance));
+        Assert.Equal(context.Response.ContentLength, head.Response.ContentLength);
+        Assert.Equal(0, headTransport.Writes);
+        Assert.Equal(0, headTransport.Length);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("/docs/versions/switch/", true)]
+    [InlineData("/docs/versions/switch/missing", true)]
+    public async Task MissingRequestPathOrChoiceExtensionCannotResolveASource(string? path, bool handled)
+    {
+        var fixture = Create();
+        var context = Context(path ?? string.Empty);
+        if (path is null) context.Request.Path = default;
+        Assert.Equal(handled, await fixture.Adapter.TryHandleAsync(context, NullLogger.Instance));
+        if (handled) Assert.Equal(404, context.Response.StatusCode);
+        Assert.Empty(Body(context));
     }
 
     [Fact]
@@ -193,6 +256,74 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
         Assert.DoesNotContain("data-docs-switch-runtime", rejected);
         var unrelated = new AppSurfaceDocsPublishedTreeMount("/other/v/2", provider);
         Assert.Equal(Html, fixture.Adapter.RewriteGuide(Context("/other/v/2/export/new.html"), unrelated, "export/new.html", Html, NullLogger.Instance));
+    }
+
+    [Fact]
+    public void UnexpectedQueryFeatureFailurePreservesGuideWithoutAuthorizingTheRuntime()
+    {
+        var fixture = Create();
+        using var provider = new PhysicalFileProvider(Path.Combine(_root, "2"));
+        var mount = new AppSurfaceDocsPublishedTreeMount("/docs/v/2", provider);
+        var context = Context("/docs/v/2/export/new.html");
+        context.Features.Set<IQueryFeature>(new FailingQueryFeature());
+
+        var result = fixture.Adapter.RewriteGuide(context, mount, "export/new.html", Html, NullLogger.Instance);
+
+        Assert.Contains("Readable guide content.", result);
+        Assert.Contains("Version switching is unavailable for this guide.", result);
+        Assert.DoesNotContain("secret-query-value", result);
+        Assert.DoesNotContain("data-docs-switch-runtime", result);
+        Assert.False(AppSurfaceDocsConceptSwitching.IsRuntimeAuthorized(context));
+    }
+
+    [Fact]
+    public async Task UnexpectedChoiceProjectionFailureReturnsVerifiedGenericRecovery()
+    {
+        var fixture = Create();
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", Source());
+        var context = Context("/docs/versions/switch/" + key + ".html");
+        context.Features.Set<IHttpRequestFeature>(new FailingPathBaseFeature
+        {
+            Method = context.Request.Method,
+            Path = context.Request.Path,
+            Scheme = context.Request.Scheme,
+            QueryString = string.Empty
+        });
+
+        Assert.True(await fixture.Adapter.TryHandleAsync(context, NullLogger.Instance));
+
+        Assert.Equal(503, context.Response.StatusCode);
+        var result = Body(context);
+        Assert.Contains("Version switching is unavailable for this guide.", result);
+        Assert.Contains("/docs/versions", result);
+        Assert.Contains("/docs/v/1/export/old.html", result);
+        Assert.DoesNotContain("secret-path-base", result);
+        Assert.DoesNotContain("This guide moved", result);
+        Assert.Contains("script-src 'none'", context.Response.Headers.ContentSecurityPolicy.ToString());
+    }
+
+    [Theory]
+    [InlineData("guides/setup", "guides/setup")]
+    [InlineData("", "Documentation")]
+    public async Task LegacyCanonicalPageWithoutTitleUsesAnHonestFallbackLabel(string route, string label)
+    {
+        var fixture = Create();
+        var release = new DocConceptReleaseInput("1", SourcePin, true, true, true, false, null,
+            [new DocConceptCanonicalRouteFact(route, "export/old.html", null, true)], null);
+        var index = DocConceptIdentityIndex.BuildCombined([release], [], DocConceptValidationMode.Strict, 4194304).Index;
+        var adapter = new AppSurfaceDocsConceptSwitching(index, fixture.Versions,
+            new DocsUrlBuilder(new AppSurfaceDocsOptions { Versioning = new AppSurfaceDocsVersioningOptions { Enabled = true } }),
+            "Default", 4194304);
+        var identity = new DocConceptPageIdentity("1", SourcePin, route, null, true);
+        var key = DocConceptIdentityIndex.CreateSourceKey("Default", identity);
+        var context = Context("/docs/versions/switch/" + key + ".html");
+
+        Assert.True(await adapter.TryHandleAsync(context, NullLogger.Instance));
+
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.Contains("Choose a version of " + label, Body(context));
+        Assert.Contains("/docs/v/1/export/old.html", Body(context));
+        Assert.DoesNotContain("This guide moved", Body(context));
     }
 
     [Fact]
@@ -356,4 +487,51 @@ public sealed class AppSurfaceDocsConceptSwitchingTests : IDisposable
     }
     private static string Body(DefaultHttpContext context) => Encoding.UTF8.GetString(((MemoryStream)context.Response.Body).ToArray());
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true); }
+
+    private sealed class YieldingWriteStream : MemoryStream
+    {
+        private readonly TaskCompletionSource _writeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseWrites = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task WriteStarted => _writeStarted.Task;
+        internal int Writes { get; private set; }
+        internal void ReleaseWrites() => _releaseWrites.TrySetResult();
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _writeStarted.TrySetResult();
+            await _releaseWrites.Task.WaitAsync(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            await base.WriteAsync(buffer, cancellationToken);
+            Writes++;
+        }
+    }
+
+    private sealed class FailingQueryFeature : IQueryFeature
+    {
+        public IQueryCollection Query
+        {
+            get => throw new InvalidOperationException("secret-query-value");
+            set => throw new NotSupportedException();
+        }
+    }
+
+    private sealed class FailingPathBaseFeature : HttpRequestFeature, IHttpRequestFeature
+    {
+        private bool _failed;
+
+        string IHttpRequestFeature.PathBase
+        {
+            get
+            {
+                if (!_failed)
+                {
+                    _failed = true;
+                    throw new InvalidOperationException("secret-path-base");
+                }
+                return base.PathBase;
+            }
+            set => base.PathBase = value;
+        }
+    }
 }

@@ -120,12 +120,8 @@ internal static class AppSurfaceDocsConceptIndexExporter
                     BuildDiagnosticRoute(route.RoutePath));
             }
 
-            if (route.ArtifactPath is null)
-            {
-                throw CreateFailure(
-                    $"The finalized canonical route '{route.RoutePath}' has no verified physical HTML mapping.",
-                    BuildDiagnosticRoute(route.RoutePath));
-            }
+            var mappedArtifactPath = route.ArtifactPath;
+            ArgumentNullException.ThrowIfNull(mappedArtifactPath);
 
             if (string.IsNullOrWhiteSpace(authoredPage.Title))
             {
@@ -144,7 +140,7 @@ internal static class AppSurfaceDocsConceptIndexExporter
                     BuildDiagnosticRoute(route.RoutePath));
             }
 
-            var artifactPath = GetPhysicalArtifactPath(route.ArtifactPath);
+            var artifactPath = GetPhysicalArtifactPath(mappedArtifactPath);
             var htmlPath = Path.Join(outputPath, artifactPath.Replace('/', Path.DirectorySeparatorChar));
             ExportOutputPathGuards.ValidateArchiveEntryPath(outputPath, htmlPath, "concept-index-anchor-read");
             byte[] htmlBytes;
@@ -177,7 +173,7 @@ internal static class AppSurfaceDocsConceptIndexExporter
                 authoredPage.SectionLanding ? true : null));
             routeFacts.Add(new DocConceptCanonicalRouteFact(
                 GetLogicalRoutePath(route.RoutePath),
-                route.ArtifactPath,
+                mappedArtifactPath,
                 authoredPage.Locale,
                 LocaleIsKnown: true));
         }

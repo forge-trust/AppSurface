@@ -96,7 +96,7 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
         foreach (var file in files)
         {
             var path = file.GetProperty("path").GetString()!;
-            var bytes = await File.ReadAllBytesAsync(Path.Combine(outputRoot, path.Replace('/', Path.DirectorySeparatorChar)));
+            var bytes = await File.ReadAllBytesAsync(TestPathUtils.PathUnder(outputRoot, path.Replace('/', Path.DirectorySeparatorChar)));
             Assert.Equal(file.GetProperty("length").GetInt64(), bytes.LongLength);
             Assert.Equal(file.GetProperty("sha256").GetString(), Sha256(bytes));
         }
@@ -425,7 +425,7 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
             4 * 1024 * 1024, new DocsStaticServingConfiguration("Default"), CancellationToken.None);
 
         Assert.Equal(outputRoot, result.RootPath);
-        Assert.Equal(Path.Combine(outputRoot, ReleaseDocsStaticConceptPublication.InventoryFileName), result.InventoryPath);
+        Assert.Equal(TestPathUtils.PathUnder(outputRoot, ReleaseDocsStaticConceptPublication.InventoryFileName), result.InventoryPath);
         Assert.Equal(0, result.GeneratedFileCount);
         Assert.False(Directory.Exists(outputRoot));
     }
@@ -767,7 +767,7 @@ public sealed class ReleaseDocsConceptPublicationTests : IDisposable
 
     private static async Task<byte[]> PinBridgeInsidePublicReleaseAsync(Fixture fixture)
     {
-        var sourceTree = Path.Combine(fixture.VerificationRoot, fixture.Releases["1.0.0"].ExactTreePath);
+        var sourceTree = TestPathUtils.PathUnder(fixture.VerificationRoot, fixture.Releases["1.0.0"].ExactTreePath);
         var bridgeBytes = JsonSerializer.SerializeToUtf8Bytes(new
         {
             schema = "appsurface-docs-concept-map-v1",

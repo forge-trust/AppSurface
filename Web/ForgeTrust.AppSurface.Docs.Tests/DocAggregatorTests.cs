@@ -92,6 +92,114 @@ public class DocAggregatorTests : IDisposable
     }
 
     [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldProjectActualMarkdownAuthoringAndKeepInvalidPrimaryEvidence()
+    {
+        var repositoryRoot = TestPathUtils.PathUnder(
+            Path.GetTempPath(),
+            "AppSurfaceDocsTests_ConceptAuthoring",
+            Guid.NewGuid().ToString("N"));
+        var guidesRoot = TestPathUtils.PathUnder(repositoryRoot, "guides");
+        Directory.CreateDirectory(guidesRoot);
+        try
+        {
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "inline.md"),
+                "---\nconcept_id: guides.inline.primary\n---\n# Inline\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "inline.md.yml"),
+                "concept_id: guides.inline.sidecar\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "invalid-primary.md"),
+                "---\nconcept_id: 123\n---\n# Invalid Primary\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "invalid-primary.md.yml"),
+                "concept_id: guides.invalid.fallback\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "sidecar-only.md"),
+                "# Sidecar Only\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "sidecar-only.md.yml"),
+                "concept_id: guides.sidecar.only\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "absent.md"),
+                "# Absent\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "unsafe.md"),
+                "---\nconcept_id: '../private'\n---\n# Unsafe\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "duplicate-one.md"),
+                "---\nconcept_id: guides.shared\n---\n# Duplicate One\n");
+            await File.WriteAllTextAsync(
+                TestPathUtils.PathUnder(guidesRoot, "duplicate-two.md"),
+                "---\nconcept_id: guides.shared\n---\n# Duplicate Two\n");
+
+            var options = new AppSurfaceDocsOptions
+            {
+                Source = new AppSurfaceDocsSourceOptions { RepositoryRoot = repositoryRoot }
+            };
+            var harvester = new MarkdownHarvester(
+                NullLogger<MarkdownHarvester>.Instance,
+                File.ReadAllTextAsync,
+                options);
+            var aggregator = new DocAggregator(
+                [harvester],
+                options,
+                _envFake,
+                _memo,
+                _sanitizerFake,
+                _loggerFake);
+
+            var pages = await aggregator.GetConceptExportPagesAsync();
+
+            var inline = Assert.Single(pages, page => page.Title == "Inline");
+            Assert.Equal("guides.inline.primary", inline.ConceptId);
+            Assert.False(inline.ConceptIdIsInvalid);
+
+            var invalidPrimary = Assert.Single(pages, page => page.Title == "Invalid Primary");
+            Assert.Null(invalidPrimary.ConceptId);
+            Assert.True(invalidPrimary.ConceptIdIsInvalid);
+
+            var sidecarOnly = Assert.Single(pages, page => page.Title == "Sidecar Only");
+            Assert.Equal("guides.sidecar.only", sidecarOnly.ConceptId);
+            Assert.False(sidecarOnly.ConceptIdIsInvalid);
+
+            var absent = Assert.Single(pages, page => page.Title == "Absent");
+            Assert.Null(absent.ConceptId);
+            Assert.False(absent.ConceptIdIsInvalid);
+
+            var unsafeId = Assert.Single(pages, page => page.Title == "Unsafe");
+            Assert.Null(unsafeId.ConceptId);
+            Assert.True(unsafeId.ConceptIdIsInvalid);
+
+            var duplicateIds = pages.Where(page => page.ConceptId == "guides.shared").ToArray();
+            Assert.Equal(2, duplicateIds.Length);
+            Assert.Equal(["Duplicate One", "Duplicate Two"], duplicateIds.Select(page => page.Title).Order().ToArray());
+        }
+        finally
+        {
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GetConceptExportPagesAsync_ShouldUseNodeTitleAndRejectUnexpectedRawConceptIds()
+    {
+        var node = new DocNode(
+            "Node title fallback",
+            "guides/plugin-page.md",
+            "<p>Content</p>",
+            Metadata: new DocMetadata { ConceptId = "../private" });
+        A.CallTo(() => _harvesterFake.HarvestAsync(A<string>._, A<CancellationToken>._))
+            .Returns([node]);
+
+        var page = Assert.Single(await _aggregator.GetConceptExportPagesAsync());
+
+        Assert.Equal("Node title fallback", page.Title);
+        Assert.Null(page.ConceptId);
+        Assert.True(page.ConceptIdIsInvalid);
+    }
+
+    [Fact]
     public async Task GetMarkdownDownloadSourceAsync_ShouldReturnOnlyExactCanonicalOptedInMarkdown()
     {
         var repositoryRoot = TestPathUtils.PathUnder(
