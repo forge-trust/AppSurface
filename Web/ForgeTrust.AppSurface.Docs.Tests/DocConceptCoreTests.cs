@@ -370,6 +370,85 @@ public sealed class DocConceptCoreTests
     }
 
     [Fact]
+    public void UnknownTargetLocaleDoesNotBecomeKnownAbsenceOrEnableLocalRecovery()
+    {
+        var sourcePin = Pin('3');
+        var targetPin = Pin('4');
+        var source = Release("1", sourcePin,
+            [new Page("guide/topic", "en", "topic", "Topic", ["topic"])]);
+        var target = Legacy("2", targetPin, "guide/topic");
+        var index = Build([source, target]).Index;
+        var sourceIdentity = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+
+        var result = index.Resolve(sourceIdentity, "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.Null(result.FallbackSection);
+        Assert.False(result.SearchAvailable);
+        Assert.Null(result.HomeRoutePath);
+    }
+
+    [Fact]
+    public void QuarantinedPresentSidecarCannotProveCounterpartButKeepsVerifiedLocalRecovery()
+    {
+        var sourcePin = Pin('5');
+        var targetPin = Pin('6');
+        var source = Release("1", sourcePin,
+            [new Page("guide/topic", "en", "topic", "Topic", ["topic"])]);
+        var target = new DocConceptReleaseInput("2", targetPin, true, true, true, true, "GUIDE/HOME",
+            [Route("guide/topic", "en"), Route("guide/home", "en")], Encoding.UTF8.GetBytes("{"));
+        var build = Build([source, target]);
+        var sourceIdentity = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+
+        Assert.Contains(build.Issues, issue => issue.Failure == DocConceptValidationFailure.IndexInvalid);
+        var result = build.Index.Resolve(sourceIdentity, "2", targetPin);
+
+        Assert.Equal(DocConceptResolutionReason.Unknown, result.Reason);
+        Assert.Null(result.TargetPage);
+        Assert.True(result.SearchAvailable);
+        Assert.Equal("guide/home", result.HomeRoutePath);
+    }
+
+    [Fact]
+    public void InvalidExactPinsCannotRetrievePagesOrExposeResolutionMetadata()
+    {
+        var sourcePin = Pin('7');
+        var targetPin = Pin('8');
+        var source = Release("1", sourcePin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var target = Release("2", targetPin, [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var index = Build([source, target]).Index;
+        var validSource = new DocConceptPageIdentity("1", sourcePin, "guide/topic", "en", true);
+        var badSource = validSource with { ReleaseManifestSha256 = "not-a-pin" };
+
+        Assert.Null(index.GetPage(validSource with { ReleaseManifestSha256 = "not-a-pin" }));
+        Assert.False(index.TryGetPageIdentity("1", "not-a-pin", "guide/topic", out var invalidPinIdentity));
+        Assert.Null(invalidPinIdentity);
+
+        var missingSource = index.Resolve(badSource, "2", targetPin);
+        Assert.Equal(DocConceptResolutionReason.Unknown, missingSource.Reason);
+        Assert.Null(missingSource.SourcePage);
+        Assert.Null(missingSource.TargetPage);
+
+        var missingTarget = index.Resolve(validSource, "2", "not-a-pin");
+        Assert.Equal(DocConceptResolutionReason.TargetUnavailable, missingTarget.Reason);
+        Assert.Null(missingTarget.TargetRelease);
+        Assert.Null(missingTarget.TargetPage);
+    }
+
+    [Fact]
+    public void ReleasesIncludesUnavailableDescriptorsWhilePublicAvailableViewFiltersThem()
+    {
+        var available = Release("available", Pin('9'), [new Page("guide/topic", "en", "topic", "Topic", [])]);
+        var hidden = new DocConceptReleaseInput("hidden", Pin('a'), false, true, true, false, null, [], null);
+        var unavailable = new DocConceptReleaseInput("unavailable", Pin('b'), true, false, true, false, null, [], null);
+        var index = Build([available, hidden, unavailable]).Index;
+
+        Assert.Equal(new[] { "available", "hidden", "unavailable" }, index.Releases.Select(release => release.Version));
+        Assert.Equal(new[] { "available" }, index.PublicAvailableReleases.Select(release => release.Version));
+    }
+
+    [Fact]
     public void SidecarRejectsMalformedJsonShapesUtf8LocalesAndAnchorsAsWholeArtifacts()
     {
         var routes = new[] { Route("guide/topic", "en") };
