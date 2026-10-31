@@ -35,6 +35,20 @@ identity, terminal, twelve exact tree-output and cleanup predicates.
 that parser. No arbitrary path, executable, callback, runtime selector or native
 acceptance flag can be supplied to this bridge.
 
+If the native dispatcher fails after its command has fully joined, the adapter
+makes a separate best-effort copy of only `fixture-stdout.log` and
+`fixture-stderr.log` from the fixed private control directory. Each source must
+remain a root-owned, single-link, mode-0600 regular file and is read with the same
+8 MiB per-stream limit used by the existing evidence inventory. The
+`N16-failure-logs.json` diagnostic manifest records which of those two fixed
+files were actually present and binds copied bytes by length and SHA-256; absent
+logs are not represented as empty output. If neither stream file exists, the
+manifest records both as absent and no stream files are created. These diagnostic names are outside the
+positive `N16-evidence.json` inventory. Retention runs only after the dispatcher
+has recorded that the process was waited, its group is absent, and both root
+guards are closed/empty. A retention error never replaces the original runner
+failure, and these logs do not satisfy any N16 completion or acceptance check.
+
 `port-manifest.json` and the adjacent source delta record the historical source
 and current bridge. Source preparation has not executed N16. Detached data tests
 are metadata controls, not a native owner/worker claim; fresh Linux execution is

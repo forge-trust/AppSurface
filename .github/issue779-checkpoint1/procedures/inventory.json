@@ -386,13 +386,13 @@
       "sha256": "d82860a2c21ea1e5c80d6a0d34db1e5fecff03dbbde4bad08350ddcab9f450a2"
     },
     {
-      "bytes": 18491,
+      "bytes": 28924,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/n16/adapter.py",
-      "ported_sha256": "19f7853dd3919b83ca813610de194f5facc5d2c0d775fb20f3d26c4a10b8eec0",
-      "sha256": "19f7853dd3919b83ca813610de194f5facc5d2c0d775fb20f3d26c4a10b8eec0"
+      "ported_sha256": "ad994457a525f5b22daee522bbe18e82eea87e934368a536e603f9d4fb7a7771",
+      "sha256": "ad994457a525f5b22daee522bbe18e82eea87e934368a536e603f9d4fb7a7771"
     },
     {
       "bytes": 5914,
@@ -413,13 +413,13 @@
       "sha256": "51eea513077a0a3bc8f3f054d26fa3ad8c41b43634fbbcede3588c0745247ccc"
     },
     {
-      "bytes": 2740,
+      "bytes": 3772,
       "historical_path": null,
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/n16/README.md",
-      "ported_sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71",
-      "sha256": "4889122930608674e59054fac78271e803d22350b9aab57f9bc225b61e2acd71"
+      "ported_sha256": "6484c923f416f837afc6cc2f6621d98b06a08e617d623ed9433b0934f47eeadf",
+      "sha256": "6484c923f416f837afc6cc2f6621d98b06a08e617d623ed9433b0934f47eeadf"
     },
     {
       "bytes": 3409,
@@ -427,8 +427,8 @@
       "origin": "current-source-bridge",
       "port_status": "current-source-port-source-only",
       "ported_path": "procedures/n16/port-manifest.json",
-      "ported_sha256": "d91e283b6e121f01995b43341f0bec770a470440b50546629448b1ba744ac434",
-      "sha256": "d91e283b6e121f01995b43341f0bec770a470440b50546629448b1ba744ac434"
+      "ported_sha256": "e4728f94c6d078063f845a464cd8927b368a2b5aa991d5f716f8f50891f17fa5",
+      "sha256": "e4728f94c6d078063f845a464cd8927b368a2b5aa991d5f716f8f50891f17fa5"
     },
     {
       "bytes": 79466,

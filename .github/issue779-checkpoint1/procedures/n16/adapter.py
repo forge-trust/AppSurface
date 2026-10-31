@@ -166,6 +166,191 @@ def verify_retained_evidence(context, *, deadline):
     return validate_evidence(context, raw, capture_raw=capture_raw)
 
 
+FAILURE_DIAGNOSTIC_CAPS = {"fixture-stdout.log": LEAVES["fixture-stdout.log"],
+                           "fixture-stderr.log": LEAVES["fixture-stderr.log"]}
+
+
+def _file_identity(value):
+    return (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+
+
+def _same_directory(path, expected, uid, gid):
+    try:
+        current = path.lstat()
+    except OSError:
+        return False
+    fact = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid,
+                          value.st_gid)
+    return (stat.S_ISDIR(expected.st_mode) and expected.st_uid == uid and expected.st_gid == gid
+            and stat.S_IMODE(expected.st_mode) == 0o700 and fact(expected) == fact(current))
+
+
+def _same_open_directory(path, expected, fd, uid, gid):
+    try:
+        opened = os.fstat(fd)
+    except OSError:
+        return False
+    fact = lambda value: (value.st_dev, value.st_ino, value.st_mode, value.st_uid, value.st_gid)
+    return _same_directory(path, expected, uid, gid) and fact(expected) == fact(opened)
+
+
+def _read_failure_log(control_fd, name, uid, gid, deadline):
+    """Read one fixed N16 failure log with existing byte bounds and stable custody."""
+    try:
+        before = os.stat(name, dir_fd=control_fd, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
+    need(stat.S_ISREG(before.st_mode) and before.st_uid == uid and before.st_gid == gid
+         and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600
+         and 0 <= before.st_size <= FAILURE_DIAGNOSTIC_CAPS[name], "failure-log-custody")
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=control_fd)
+    try:
+        opened = os.fstat(fd)
+        need(_file_identity(before) == _file_identity(opened), "failure-log-open-substitution")
+        body = bytearray()
+        while len(body) <= before.st_size:
+            binding.require(time.monotonic() < deadline, "failure-log-read-deadline")
+            chunk = os.read(fd, min(65536, before.st_size + 1 - len(body)))
+            if not chunk:
+                break
+            body.extend(chunk)
+            need(len(body) <= before.st_size, "failure-log-growth")
+        after_fd = os.fstat(fd)
+        after_name = os.stat(name, dir_fd=control_fd, follow_symlinks=False)
+        need(len(body) == before.st_size and _file_identity(before) == _file_identity(after_fd)
+             == _file_identity(after_name), "failure-log-changed")
+        return bytes(body)
+    finally:
+        os.close(fd)
+
+
+def _retain_failure_logs_owned(control, output, command, *, deadline, uid, gid):
+    """Copy only settled N16's two fixed failure logs; never form positive evidence.
+
+    Missing source logs remain explicitly absent, not synthetic empty files. The
+    manifest is written last so a partial copy has no complete-retention marker.
+    """
+    require = binding.require
+    require(type(uid) is int and type(gid) is int and uid >= 0 and gid >= 0, "failure-owner")
+    require(type(command) is dict and type(command.get("ordinal")) is int and command["ordinal"] == 0
+            and command.get("phase") == "actual-csharp-n16" and type(command.get("exit")) is int
+            and command["exit"] != 0 and all(command.get(key) is True for key in
+            ("waited", "group_absent", "root_start_guard_created", "root_start_guard_closed",
+             "root_utility_cgroup_empty")), "failure-command-not-joined")
+    control, output = Path(control), Path(output)
+    require(control.is_absolute() and output.is_absolute() and control != output
+            and control not in output.parents and output not in control.parents
+            and control.resolve(strict=True) == control and output.resolve(strict=True) == output,
+            "failure-directory-path")
+    control_before, output_before = control.lstat(), output.lstat()
+    require(_same_directory(control, control_before, uid, gid)
+            and _same_directory(output, output_before, uid, gid), "failure-directory-custody")
+    output_fd = os.open(output, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        require(_file_identity(output_before) == _file_identity(os.fstat(output_fd))
+                and _same_directory(output, output_before, uid, gid), "failure-output-open-substitution")
+        control_fd = os.open(control, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            require(_file_identity(control_before) == _file_identity(os.fstat(control_fd))
+                    and _same_directory(control, control_before, uid, gid), "failure-control-open-substitution")
+            captured = {name: _read_failure_log(control_fd, name, uid, gid, deadline)
+                        for name in FAILURE_DIAGNOSTIC_CAPS}
+            require(_file_identity(control_before) == _file_identity(os.fstat(control_fd))
+                    and _same_directory(control, control_before, uid, gid), "failure-control-changed")
+        finally:
+            os.close(control_fd)
+        require(_file_identity(output_before) == _file_identity(os.fstat(output_fd))
+                and _same_directory(output, output_before, uid, gid), "failure-output-changed")
+        require(time.monotonic() < deadline, "failure-retention-deadline")
+        if not any(raw is not None for raw in captured.values()):
+            entries = {name: {"present": False} for name in FAILURE_DIAGNOSTIC_CAPS}
+        else:
+            entries = {}
+            for name, raw in captured.items():
+                entry = {"present": raw is not None}
+                if raw is not None:
+                    require(time.monotonic() < deadline, "failure-retention-deadline")
+                    destination = "N16-failure-" + name
+                    fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                 0o600, dir_fd=output_fd)
+                    try:
+                        before = os.fstat(fd)
+                        require(stat.S_ISREG(before.st_mode) and before.st_uid == uid and before.st_gid == gid
+                                and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600,
+                                "failure-output-shape")
+                        view = memoryview(raw)
+                        while view:
+                            require(time.monotonic() < deadline, "failure-output-deadline")
+                            count = os.write(fd, view)
+                            require(count > 0, "failure-output-short-write")
+                            view = view[count:]
+                        os.fsync(fd)
+                        after = os.fstat(fd)
+                        named = os.stat(destination, dir_fd=output_fd, follow_symlinks=False)
+                        require(stat.S_ISREG(after.st_mode) and after.st_uid == uid and after.st_gid == gid
+                                and after.st_nlink == 1 and stat.S_IMODE(after.st_mode) == 0o600
+                                and _file_identity(before)[:5] == _file_identity(after)[:5]
+                                and _file_identity(after) == _file_identity(named), "failure-output-changed")
+                    finally:
+                        os.close(fd)
+                    entry.update({"bytes": len(raw), "sha256": binding.digest(raw)})
+                entries[name] = entry
+        manifest = binding.canonical({"schema": "issue779-n16-failure-logs-v1", "files": entries})
+        manifest_name = "N16-failure-logs.json"
+        require(time.monotonic() < deadline, "failure-retention-deadline")
+        fd = os.open(manifest_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                     0o600, dir_fd=output_fd)
+        try:
+            before = os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid == uid and before.st_gid == gid
+                    and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600,
+                    "failure-manifest-custody")
+            view = memoryview(manifest)
+            while view:
+                require(time.monotonic() < deadline, "failure-manifest-deadline")
+                count = os.write(fd, view)
+                require(count > 0, "failure-manifest-short-write")
+                view = view[count:]
+            os.fsync(fd)
+            after = os.fstat(fd)
+            named = os.stat(manifest_name, dir_fd=output_fd, follow_symlinks=False)
+            require(stat.S_ISREG(after.st_mode) and after.st_uid == uid and after.st_gid == gid
+                    and after.st_nlink == 1 and stat.S_IMODE(after.st_mode) == 0o600
+                    and _file_identity(before)[:5] == _file_identity(after)[:5]
+                    and _file_identity(after) == _file_identity(named), "failure-manifest-changed")
+        finally:
+            os.close(fd)
+        require(_same_directory(control, control_before, uid, gid)
+                and _same_open_directory(output, output_before, output_fd, uid, gid)
+                and time.monotonic() < deadline, "failure-directory-changed")
+        return True
+    finally:
+        os.close(output_fd)
+def retain_failure_logs(control, output, command, *, deadline):
+    """Root-only production boundary for fixed, joined N16 failure logs."""
+    binding.require(os.geteuid() == 0 and os.getegid() == 0, "failure-retention-root-required")
+    return _retain_failure_logs_owned(control, output, command, deadline=deadline, uid=0, gid=0)
+
+
+def run_dispatch_with_failure_retention(runner, argv, control, output, *, deadline):
+    """Run once; bounded log retention cannot replace the original runner failure."""
+    run_deadline = min(deadline - 60, time.monotonic() + 610)
+    try:
+        return runner.run(argv, run_deadline)
+    except BaseException:
+        try:
+            if runner.records:
+                retention_deadline = min(deadline - 5, time.monotonic() + 30)
+                if retention_deadline > time.monotonic():
+                    retain_failure_logs(control, output, runner.records[-1],
+                                        deadline=retention_deadline)
+        except BaseException:
+            # Diagnostics are best-effort and cannot replace the native failure.
+            pass
+        raise
+
+
 def execute(context, *, deadline):
     """Run the actual N16 shell once, then validate its real private data and pipes."""
     binding.exact(context, CONTEXT, "n16-context")
@@ -235,7 +420,11 @@ def execute(context, *, deadline):
     need(deadline - time.monotonic() > 665, "fixture-plus-retention-budget")
     runner = process.Runner(output, deadline)
     runner.phase = "actual-csharp-n16"
-    runner.run(process.ROOT_PREFIX + ["-c", process.DISPATCH, "--", context["generation"], capture["files"][PREFIX + SHELL]["sha256"], *args], min(deadline - 60, time.monotonic() + 610))
+    run_dispatch_with_failure_retention(
+        runner,
+        process.ROOT_PREFIX + ["-c", process.DISPATCH, "--", context["generation"],
+                               capture["files"][PREFIX + SHELL]["sha256"], *args],
+        control, output, deadline=deadline)
     private_parent = Path("/run/appsurface-evidence-fixture")
     need(private_parent.resolve(strict=True) == private_parent and private_parent.stat().st_uid == private_parent.stat().st_gid == 0
          and stat.S_IMODE(private_parent.stat().st_mode) == 0o700, "actual-private-parent")
