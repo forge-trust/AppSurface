@@ -399,8 +399,10 @@ internal sealed class AppSurfaceDocsPublishedTreeHandler
         }
 
         if (IsHandlerServeableFilePath(trimmed, allowSvg: true)
-            && !relativeRequestPath.EndsWith("/", StringComparison.Ordinal))
+            || (Path.GetExtension(trimmed).Equals(".css", StringComparison.OrdinalIgnoreCase)
+                && mount.VerifiedReleaseArchive?.TryGetFile(trimmed, out _) == true))
         {
+            if (relativeRequestPath.EndsWith("/", StringComparison.Ordinal)) return false;
             var exactFile = mount.FileProvider.GetFileInfo(trimmed);
             if (exactFile.Exists && TryValidateResolvedFile(mount, trimmed, exactFile))
             {

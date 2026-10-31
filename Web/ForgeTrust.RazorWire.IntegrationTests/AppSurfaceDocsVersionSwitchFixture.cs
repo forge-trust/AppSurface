@@ -218,8 +218,7 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
         await RunDotnetAsync(
             repositoryRoot,
             [
-                "run", "--project", Path.Join(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli", "ForgeTrust.AppSurface.Cli.csproj"),
-                "--no-launch-profile", "--no-restore", "-p:UseSharedCompilation=false", "--", "docs", "export",
+                BuiltTool(repositoryRoot, "Cli", "ForgeTrust.AppSurface.Cli"), "docs", "export",
                 "--repo", sourceRoot,
                 "--output", outputRoot,
                 "--mode", "cdn",
@@ -292,8 +291,7 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
 
         var arguments = new List<string>
         {
-            "run", "--project", Path.Join(repositoryRoot, "tools", "ForgeTrust.AppSurface.Release", "ForgeTrust.AppSurface.Release.csproj"),
-            "--no-launch-profile", "--no-restore", "-p:UseSharedCompilation=false", "--", "docs-publication",
+            BuiltTool(repositoryRoot, "tools", "ForgeTrust.AppSurface.Release"), "docs-publication",
             "--version", version,
             "--tag", $"v{version}",
             "--docs-exact-tree", exactTreeRoot,
@@ -376,6 +374,12 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
                 + $"stdout:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}"
                 + $"stderr:{Environment.NewLine}{result.StandardError}");
         }
+    }
+
+    private static string BuiltTool(string root, string folder, string name)
+    {
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        return Path.Join(root, folder, name, "bin", configuration, "net10.0", name + ".dll");
     }
 
     private static IReadOnlyDictionary<string, string> CaptureArchiveHashes(IEnumerable<string> roots)
