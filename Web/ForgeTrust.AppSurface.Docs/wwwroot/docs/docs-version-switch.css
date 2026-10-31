@@ -1,3 +1,10 @@
+.docs-version-switch,
+.docs-version-switch *,
+.docs-version-notice,
+.docs-version-notice * {
+    box-sizing: border-box;
+}
+
 .docs-version-switch {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;

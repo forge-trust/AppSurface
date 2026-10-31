@@ -85,7 +85,9 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
     }
 
     /// <inheritdoc />
-    public async Task InitializeAsync()
+    public Task InitializeAsync() => Task.Run(InitializeCoreAsync);
+
+    private async Task InitializeCoreAsync()
     {
         _preserveArtifacts = string.Equals(
             Environment.GetEnvironmentVariable("APPSURFACE_DOCS_VERSION_SWITCH_KEEP_ARTIFACTS"),
@@ -131,7 +133,9 @@ public sealed class AppSurfaceDocsVersionSwitchFixture : IAsyncLifetime
     /// implementation is being integrated. The first call publishes 1.0.0, then 2.0.0 over that Pages root, matching
     /// the ordinary two-release accumulation workflow. All output remains under this fixture's temporary directory.
     /// </remarks>
-    public async Task<string> EnsureStaticPublicationAsync()
+    public Task<string> EnsureStaticPublicationAsync() => Task.Run(EnsureStaticPublicationCoreAsync);
+
+    private async Task<string> EnsureStaticPublicationCoreAsync()
     {
         await _staticPublicationLock.WaitAsync();
         try
