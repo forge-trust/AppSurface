@@ -201,11 +201,29 @@ the last setup-stage label alone does not identify the phase failure's cause.
 
 Synthetic controls also record fixed kernel UID/GID, capability, no-new-privileges
 and seccomp fields immediately before `setpriv`, plus a finite security-label
-classification. A fixed root-owned shell then execs the original command with its
-original arguments. This distinguishes a missing bootstrap capability from a host
-filter rejection; it does not change the UID transition or accept a failed probe.
-Prepare, replay and close do not add this diagnostic prefix. No environment,
-credential, arbitrary security-label text or caller-selected command is printed.
+classification. The fixed root-owned shell then performs the private runtime
+setup below and execs the original command with its original arguments. This
+distinguishes a missing bootstrap capability from a host filter rejection; it does not change the UID transition or accept a failed probe.
+Prepare, replay and close perform the same runtime setup without diagnostic
+output. No environment, credential, arbitrary security-label text or
+caller-selected command is printed.
+
+Every phase's fixed bootstrap overmounts `/run` with an empty, read-only `tmpfs`
+(`nosuid,nodev,noexec`, 4 KiB, 16 inodes) after systemd has created the unit namespace
+and before the original `setpriv` transition. Systemd namespace setup can add
+[runtime mount-propagation plumbing](https://github.com/systemd/systemd-stable/blob/v255-stable/src/core/exec-invoke.c)
+after the owner prepared its otherwise minimal root. The retained failure only
+identifies the combined manager-path predicate; it does not identify which path
+was visible or the runner's systemd version. The overmount hides any such `/run`
+setup state from the nonroot phase; the existing
+`manager-hidden` control still requires both manager paths to be absent.
+The existing [`unshare --mount-proc`](https://man7.org/linux/man-pages/man1/unshare.1.html)
+creates the private mount namespace before the shell runs, so the host runtime
+directory and underlying owned root are not changed. The fixed `mount --no-mtab`
+command writes no mount-table file. A failed mount exits 125 before `setpriv` or any
+phase launcher runs. This uses the existing bootstrap capabilities, preserves the
+four-entry target environment, and does not extend any phase or cleanup budget.
+The empty mount provides no phase scratch space; scratch remains at `/tmp`.
 
 The fixed bootstrap explicitly carries only `CAP_SETUID` in systemd's
 [ambient capability set](https://www.freedesktop.org/software/systemd/man/256/systemd.exec.html#AmbientCapabilities=)

@@ -73,12 +73,15 @@ internal static class PolicyControls
         count += SdkDirectoryControls();
         foreach (var phase in new[] { OwnerPhase.Prepare, OwnerPhase.Replay, OwnerPhase.Close })
         {
-            if (BootstrapCommand.Prefix(phase).Count != 0) throw new IsolationException("bootstrap-phase-control");
+            if (!BootstrapCommand.Prefix(phase).SequenceEqual(
+                    ["/usr/bin/bash", "-c", BootstrapCommand.RuntimeDirectoryScript, "isolation-bootstrap"]))
+                throw new IsolationException("bootstrap-phase-control");
             count++;
         }
         if (!BootstrapCommand.Prefix(OwnerPhase.Control).SequenceEqual(
                 ["/usr/bin/bash", "-c", BootstrapCommand.DiagnosticScript, "isolation-bootstrap"])
-            || !BootstrapCommand.DiagnosticScript.EndsWith("exec \"$@\"", StringComparison.Ordinal))
+            || !BootstrapCommand.DiagnosticScript.EndsWith(BootstrapCommand.RuntimeDirectoryScript, StringComparison.Ordinal)
+            || !BootstrapCommand.RuntimeDirectoryScript.EndsWith("|| exit 125; exec \"$@\"", StringComparison.Ordinal))
             throw new IsolationException("bootstrap-command-control");
         count++;
         var bootstrapStart = new System.Diagnostics.ProcessStartInfo("/usr/bin/systemd-run");

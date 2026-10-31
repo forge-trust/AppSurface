@@ -554,7 +554,7 @@ internal static class OwnerWorkspace
 
     private static async Task InstallRootFilesystemAsync(OwnerLayout layout, string sdkDirectory, CancellationToken token)
     {
-        await CopyBinaryClosureAsync(layout, ["bash", "sh", "git", "python3", "python3.12", "env", "setpriv", "unshare", "id",
+        await CopyBinaryClosureAsync(layout, ["bash", "sh", "git", "python3", "python3.12", "env", "setpriv", "unshare", "mount", "id",
             "grep", "sed", "awk", "find", "rm", "mkdir", "cp", "mv", "chmod", "chown", "cat", "head", "tail",
             "touch", "stat", "sha256sum", "timeout", "uname", "readlink", "dirname", "basename", "date", "sort",
             "cut", "tr", "wc", "tar", "gzip", "curl"], token).ConfigureAwait(false);
